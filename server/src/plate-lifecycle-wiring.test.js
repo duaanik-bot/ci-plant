@@ -38,7 +38,9 @@ test('the printing completion form returns issued plates to verification', () =>
   const section = read('client/src/pages/Section.jsx');
   assert.match(section, /Return Plates/);
   assert.match(section, /plate_dispositions:/);
-  assert.match(section, /action: 'return'/);
+  // A plate the press still holds is returned for verification; only an unticked
+  // one takes the other branch.
+  assert.match(section, /action: kept \? 'return' : 'scrap'/);
 });
 
 test('return verification locks peers the same way the queue lists them', () => {
@@ -52,10 +54,153 @@ test('return verification locks peers the same way the queue lists them', () => 
   assert.doesNotMatch(query, /plate_assets pa JOIN LATERAL/);
 });
 
-test('Plates exposes the six requested operational views', () => {
+test('the operator picks each returned plate a condition, not a fixed chip', () => {
+  const section = read('client/src/pages/Section.jsx');
+  // The dead "Return queue" chip used to sit where the control belongs.
+  assert.doesNotMatch(section, /Return queue<\/span>/);
+  assert.match(section, /PLATE_RETURN_CONDITIONS/);
+  // The row's own choice is what the payload carries, per asset.
+  assert.match(section, /choice\.condition/);
+});
+
+test('the grading is a traffic light with the state written under each colour', () => {
+  const section = read('client/src/pages/Section.jsx');
+  const sections = read('client/src/sections.js');
+  // Tone per state, and the word rendered beneath the dot — colour alone is a
+  // guess for anyone who cannot separate the hues.
+  assert.match(sections, /PLATE_CONDITION_TONES/);
+  for (const [state, hue] of [['Good', 'emerald'], ['Fair', 'amber'], ['Damaged', 'red']]) {
+    const block = sections.slice(sections.indexOf(`${state}:`), sections.indexOf(`${state}:`) + 200);
+    assert.match(block, new RegExp(hue), `${state} should read ${hue}`);
+  }
+  assert.match(section, /rounded-full \$\{tone\.dot\}/);
+  assert.match(section, /aria-pressed=\{active\}/);
+});
+
+test('unticking a plate scraps it instead of queueing it for verification', () => {
+  const section = read('client/src/pages/Section.jsx');
+  const plates = read('server/src/plates.js');
+  const lifecycle = read('server/src/plate-lifecycle.js');
+  assert.match(section, /type="checkbox" checked=\{kept\}/);
+  assert.match(section, /action: kept \? 'return' : 'scrap'/);
+  assert.match(plates, /new Set\(\['return', 'lost', 'scrap'\]\)/);
+  assert.match(lifecycle, /scrapped \? 'scrapped'/);
+  // A scrapped plate leaves the active pool rather than lingering as stock.
+  assert.match(lifecycle, /IN \('lost','scrapped'\) THEN 0/);
+});
+
+test('a Damaged plate cannot be submitted from the form without a note', () => {
+  const section = read('client/src/pages/Section.jsx');
+  // Mirrors the form's existing rule that scrap demands a reason.
+  assert.match(section, /plateDispositionsIncomplete/);
+});
+
+test('the returned condition is what gets written to the asset and its movement', () => {
+  const lifecycle = read('server/src/plate-lifecycle.js');
+  assert.doesNotMatch(lifecycle, /const condition = asset\.condition \|\| 'Good'/);
+  assert.match(lifecycle, /decision\.condition/);
+});
+
+test('the returns queue and its verification lock share one set key', () => {
+  const route = read('server/src/routes/plates.js');
+  const matches = route.match(/plateReturnSetKey/g) || [];
+  assert.ok(matches.length >= 2, `expected the shared key at both sites, saw ${matches.length}`);
+  // The peer lock narrows through the same key rather than a second SQL clause, so
+  // the card you click and the rows it acts on cannot drift apart.
+  assert.match(route, /plateReturnSetKey\(asset\)/);
+});
+
+test('the returns queue shows the warehouse what the press declared', () => {
+  // Splitting a mixed set into two cards is only useful if the cards say WHY they
+  // differ — otherwise they read as one queue listed twice.
   const page = read('client/src/components/PlatesLifecycle.jsx');
-  for (const label of ['Plate Requirements / PR','Purchase Orders','GRN','Plates Warehouse','Return from Printing','History']) {
+  const columns = page.slice(page.indexOf('const returnColumns'), page.indexOf('const historyColumns'));
+  assert.match(columns, /key: 'condition'/);
+  assert.match(columns, /operator_note/);
+});
+
+test('the press can raise a plate replacement from the running row', () => {
+  const section = read('client/src/pages/Section.jsx');
+  const sections = read('client/src/sections.js');
+  const route = read('server/src/routes/plates.js');
+  // Row-level action, beside Extra sheets, printing only.
+  assert.match(section, /label: 'Replace a plate'/);
+  assert.match(section, /openPlateReplacement\(r\)/);
+  assert.match(section, /plate-replacement`/);
+  // Reason is required and lives in one place per side.
+  assert.match(sections, /PLATE_REPLACEMENT_REASONS/);
+  assert.match(route, /validatePlateReplacementRequest\(/);
+  // The plate leaves the run rather than lingering as issued.
+  assert.match(route, /UPDATE plate_assets SET status='damaged',condition='Damaged'/);
+  assert.match(route, /status='replacement_required'/);
+});
+
+test('a plate replacement rings management, planning, the press and CTP', () => {
+  const route = read('server/src/routes/plates.js');
+  const categories = read('server/src/notify-categories.js');
+  assert.match(route, /plateReplacementRecipients\(users, req\.user\.id\)/);
+  assert.match(route, /kind: 'plate_replacement'/);
+  // Every kind must be categorised or the notifications guard fails the build.
+  assert.match(categories, /plate_replacement: 'alerts'/);
+});
+
+test('return verification decides each plate and shows its age', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const route = read('server/src/routes/plates.js');
+  // A checkbox per plate, its run count beside it, and the decisions posted as a list.
+  assert.match(page, /aria-label=\{`Keep \$\{row\.component_label\}`\}/);
+  assert.match(page, /Number\(row\.use_count\) \|\| 0/);
+  assert.match(page, /decisions: plates\.map/);
+  assert.match(route, /validateReturnVerification\(\{/);
+  // The old whole-set call must keep working for anything that still sends it.
+  assert.match(route, /: setRows\.map\(row => \(\{ asset_id: row\.id, action \}\)\)/);
+});
+
+test('rack reuse proposes the least-worn plate, not the most recently touched', () => {
+  const lifecycle = read('server/src/plate-lifecycle.js');
+  const order = lifecycle.slice(lifecycle.indexOf('async function bestPlateCandidate'));
+  const clause = order.slice(order.indexOf('ORDER BY'), order.indexOf('LIMIT 1'));
+  // Condition is the first question: a Good plate ALWAYS beats a Fair one, however
+  // many runs each has had. Wear then orders within a condition, so the least-worn
+  // Good plate is proposed. Leading with verified_at (the original) handed out
+  // whichever plate had been looked at most recently — unrelated to either.
+  assert.match(clause, /^ORDER BY CASE pa\.condition WHEN 'Good' THEN 0 ELSE 1 END/);
+  assert.doesNotMatch(clause, /^ORDER BY pa\.verified_at/);
+  assert.match(clause, /pa\.use_count ASC/);
+});
+
+test('plate age is visible wherever a plate is chosen or handled', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const section = read('client/src/pages/Section.jsx');
+  const route = read('server/src/routes/plates.js');
+  // Age travels per component, not just as the set's worst case.
+  assert.match(route, /use_count: Number\(row\.use_count\) \|\| 0/);
+  // The rack reuse decision, the warehouse list, the returns queue, and the mid-run
+  // replacement picker all state how many runs the plate has had.
+  assert.match(page, /used \{component\.proposed_use_count \|\| 0\} times/);
+  assert.match(page, /key: 'use_count', label: 'Uses'/);
+  assert.match(section, /used \{asset\.use_count \|\| 0\} times/);
+});
+
+test('accepting a return preserves what the press declared', () => {
+  const route = read('server/src/routes/plates.js');
+  assert.doesNotMatch(route, /const condition = action === 'verified_ok' \? 'Good' : 'Scrapped'/);
+});
+
+test('Plates still exposes all six operational views, grouped into four stages', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  // All six views survive — buying a plate is simply no longer three separate
+  // destinations, because raising the need, ordering it and receiving it are one
+  // job done by one person. The rack, the press returns and the archive stay apart.
+  for (const label of ['Requirement / PR','Purchase Orders','GRN','Plates Warehouse','Return from Printing','History']) {
     assert.ok(page.includes(label), `${label} is missing`);
+  }
+  assert.match(page, /const PROCUREMENT_TABS = \['requirements', 'pos', 'grns'\]/);
+  assert.match(page, /PLATE_STAGES\.map\(stage =>/);
+  // Each stage carries a tone, so the rail reads as four places rather than a row
+  // of identical pills.
+  for (const dot of ['bg-violet-500', 'bg-sky-500', 'bg-amber-500', 'bg-slate-400']) {
+    assert.ok(page.includes(dot), `${dot} stage colour is missing`);
   }
 });
 
@@ -154,7 +299,10 @@ test('Converted Plate PRs leave the open queue and move to the converted chip', 
   assert.match(page, /open: requirements\.filter\(row => !row\.plate_summary\?\.is_ready && !isConvertedPr\(row\)\)/);
   assert.match(page, /converted: requirements\.filter\(isConvertedPr\)/);
   assert.match(page, /\{key:'converted',label:'Converted',count:reqGroups\.converted\.length\}/);
-  assert.match(page, /reqView !== 'converted' && <SubTabs active=\{approvalView\}/);
+  // The approval filter is suppressed on the Converted view — a converted PR has no
+  // approval question left. Asserted as the RULE, not as the widget that renders it.
+  assert.match(page, /\{reqView !== 'converted' && \(/);
+  assert.match(page, /setApprovalView\(option\.key\)/);
 });
 
 test('Plate Warehouse separates fresh and used set-level inventory', () => {
@@ -168,8 +316,10 @@ test('Plate Warehouse separates fresh and used set-level inventory', () => {
   assert.match(route, /status='available'/);
   assert.match(page, /Fresh Plates Rack/);
   assert.match(page, /Used Plates Rack/);
-  assert.match(page, /Move to Used Rack/);
-  assert.match(page, /Move to Scrap/);
+  // Both destinations are still offered at verification — now as a per-plate tick
+  // rather than two buttons that decided the whole set at once.
+  assert.match(page, /'Used Rack' : 'Scrap'/);
+  assert.match(page, /action: keep\[row\.asset_id\] \? 'verified_ok' : 'scrap'/);
   assert.doesNotMatch(page, /Damaged \/ Hold/);
   assert.doesNotMatch(helpers, /'issued','returned_pending_verification'\)\)::int AS ready/);
   assert.match(backfill, /status='available',rack_location='Fresh Plates Rack'/);

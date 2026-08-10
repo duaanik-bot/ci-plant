@@ -8,10 +8,11 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, Textarea, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BoardBadge } from '../components/BoardStatus.jsx';
+import PlateStatus from '../components/PlateStatus.jsx';
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
@@ -20,9 +21,9 @@ import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, Acti
          colourSummary, processOf, colourFilterCounts, matchesColourFilters } from '../components/PrintColour.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
-  Plus, Trash2, Pencil, AlertTriangle, User, Undo2, Scissors, Send,
+  Plus, Trash2, Pencil, AlertTriangle, User, Undo2, Scissors, Send, Printer,
 } from 'lucide-react';
-import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
+import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS, PLATE_RETURN_CONDITIONS, PLATE_CONDITION_TONES, PLATE_REPLACEMENT_REASONS } from '../sections.js';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
@@ -473,6 +474,9 @@ export default function Section() {
   const [alarm, setAlarm] = useState(null);                // soft shade/plate 409 → { kind, shade|plates }
   const [acked, setAcked] = useState(NO_ACKS);             // which soft alarms this attempt has already answered
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
+  // Mid-run plate replacement: the row being raised against, the plates issued to
+  // it, and which of them the press says are finished.
+  const [plateSwap, setPlateSwap] = useState(null);
   const [reqForm, setReqForm] = useState({ qty: '', reason: '', note: '' });
   const [xsCompleting, setXsCompleting] = useState(null);
   const [xsForm, setXsForm] = useState({ actual_qty: '', wastage_qty: '0', note: '' });
@@ -765,20 +769,26 @@ export default function Section() {
     setQc({ qty_accepted: openingCounter({ expected: qcExp, hasRuns: partial }), qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
     const plateReq = ++plateDispositionReqRef.current;
     if (section === 'printing') {
-      setPlateDisposition({ loading: true, assets: [], choices: {} });
-      api.get(`/job-stages/${r.id}/plate-disposition`).then(assets => {
+      setPlateDisposition({ loading: true, assets: [], breakup: [], choices: {} });
+      api.get(`/job-stages/${r.id}/plate-disposition`).then(payload => {
         if (plateDispositionReqRef.current !== plateReq) return;
-        const issuedAssets = Array.isArray(assets) ? assets : [];
+        // The endpoint returns { assets, total, breakup }; older shapes were a bare
+        // array, so tolerate both rather than blanking the panel on a stale bundle.
+        const issuedAssets = Array.isArray(payload) ? payload : (payload?.assets || []);
         setPlateDisposition({
           loading: false,
           assets: issuedAssets,
-          choices: Object.fromEntries(issuedAssets.map(asset => [asset.id, { action: 'return' }])),
+          breakup: Array.isArray(payload?.breakup) ? payload.breakup : [],
+          returned: issuedAssets.length,
+          // Good is pre-selected so a clean job is still a one-click close; the
+          // operator only has to touch a row that is not.
+          choices: Object.fromEntries(issuedAssets.map(asset => [asset.id, { kept: true, condition: 'Good' }])),
         });
       }).catch(() => {
-        if (plateDispositionReqRef.current === plateReq) setPlateDisposition({ loading: false, assets: [], choices: {} });
+        if (plateDispositionReqRef.current === plateReq) setPlateDisposition({ loading: false, assets: [], breakup: [], choices: {} });
       });
     } else {
-      setPlateDisposition({ loading: false, assets: [], choices: {} });
+      setPlateDisposition({ loading: false, assets: [], breakup: [], choices: {} });
     }
     // As-planned breakup — cutting stages only. Only a card that can carry a
     // mix is worth fetching; anything else goes straight to 'loaded', where
@@ -836,11 +846,28 @@ export default function Section() {
     load();
   };
   const issuedPlateAssets = Array.isArray(plateDisposition.assets) ? plateDisposition.assets : [];
-  const plateDispositions = section === 'printing' ? issuedPlateAssets.map(asset => ({
-    asset_id: asset.id,
-    action: 'return',
-    note: plateDisposition.choices[asset.id]?.note || undefined,
-  })) : undefined;
+  const plateBreakup = Array.isArray(plateDisposition.breakup) ? plateDisposition.breakup : [];
+  // Pre-filled with everything that went out, because that is the ordinary case, but
+  // the operator owns the figure — he is the one holding the pile.
+  const returnedCount = plateDisposition.returned ?? issuedPlateAssets.length;
+  const plateDispositions = section === 'printing' ? issuedPlateAssets.map(asset => {
+    const choice = plateDisposition.choices[asset.id] || {};
+    // Unticked is not a grading — the plate is finished and goes straight to scrap.
+    const kept = choice.kept !== false;
+    return {
+      asset_id: asset.id,
+      action: kept ? 'return' : 'scrap',
+      condition: kept ? (choice.condition || 'Good') : undefined,
+      note: choice.note || undefined,
+    };
+  }) : undefined;
+  const returningPlates = (plateDispositions || []).filter(row => row.action === 'return');
+  // The picked condition is the declaration; the note is optional colour. The only
+  // thing that holds up a completion is the typed count disagreeing with the rows —
+  // two accounts of the same pile, and one of them is wrong.
+  const plateDispositionsIncomplete = section === 'printing'
+    && issuedPlateAssets.length > 0
+    && +returnedCount !== returningPlates.length;
   const complete = async () => {
     if (isQC) {
       await api.post(`/job-stages/${completing.id}/complete`, {
@@ -877,7 +904,31 @@ export default function Section() {
         ? `${completing.jc_number} — die cutting done, ${completing.gang_number} separated into individual job cards`
         : `${completing.jc_number} — ${meta.label} completed`);
     }
-    setCompleting(null); setPlateDisposition({ loading: false, assets: [], choices: {} }); load();
+    setCompleting(null); setPlateDisposition({ loading: false, assets: [], breakup: [], choices: {} }); load();
+  };
+  // Open the replacement modal on the plates this job is actually holding — asked
+  // for fresh rather than reused from the completion panel, because a plate may
+  // already have been swapped out earlier in the same run.
+  const openPlateReplacement = async row => {
+    setPlateSwap({ row, loading: true, assets: [], picked: [], reason: '', note: '' });
+    try {
+      const payload = await api.get(`/job-stages/${row.id}/plate-disposition`);
+      const assets = Array.isArray(payload) ? payload : (payload?.assets || []);
+      setPlateSwap(current => current && current.row.id === row.id
+        ? { ...current, loading: false, assets } : current);
+    } catch {
+      setPlateSwap(current => current && current.row.id === row.id
+        ? { ...current, loading: false, assets: [] } : current);
+    }
+  };
+  const submitPlateReplacement = async () => {
+    const { row, picked, reason, note } = plateSwap;
+    const result = await api.post(`/job-stages/${row.id}/plate-replacement`, {
+      asset_ids: picked, reason, note: note || undefined,
+    });
+    toast.success(`${row.jc_number} — ${result.replaced} plate(s) sent for replacement (${result.components})`);
+    setPlateSwap(null);
+    load();
   };
   const hold = async () => {
     await api.post(`/job-stages/${holding.id}/hold`, { reason: holdReason, operator: pick?.name || undefined });
@@ -1279,6 +1330,12 @@ export default function Section() {
                 {showsBoard && r.board_state && r.board_state !== 'covered' && (
                   <BoardBadge state={r.board_state} compact />
                 )}
+                {/* Unlike board, this shows even when it is GOOD. The press has to
+                    know the plates are here BEFORE it loads the job — absence of a
+                    warning is not the same as being told, and "are the plates in?"
+                    is the question the operator asks out loud. Compact circle, so
+                    the row height is untouched. */}
+                {r.plate_state && <PlateStatus state={r.plate_state} compact />}
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
@@ -1338,6 +1395,10 @@ export default function Section() {
                       <ActionMenu items={[
                         ...(r.unit === 'sheets' ? [{ key: 'xs', label: 'Extra sheets', icon: PackagePlus,
                           onClick: () => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); } }] : []),
+                        // A plate can die mid-run, and the press cannot wait for the
+                        // job to close to say so.
+                        ...(section === 'printing' ? [{ key: 'plate', label: 'Replace a plate', icon: Printer,
+                          onClick: () => openPlateReplacement(r) }] : []),
                         { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
                         { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r) },
                         { key: 'day', label: 'Day count', icon: Plus, onClick: () => setDayCounting(r) },
@@ -1428,6 +1489,8 @@ export default function Section() {
                       {showsBoard && r.board_state && r.board_state !== 'covered' && (
                         <div className="mt-0.5"><BoardBadge state={r.board_state} compact /></div>
                       )}
+                      {/* Shown in every state, including green — see the queue row. */}
+                      {r.plate_state && <div className="mt-0.5"><PlateStatus state={r.plate_state} compact /></div>}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                       {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
@@ -2166,6 +2229,64 @@ export default function Section() {
       </Modal>
 
       {/* Hold modal — reason required, straight from the CI-Production playbook */}
+      {/* Mid-run plate replacement. Raised from the press with the job still open,
+          so it names plates rather than quantities and demands a reason — the PR it
+          reopens is bought against that reason. */}
+      <Modal open={!!plateSwap} onClose={() => setPlateSwap(null)}
+        title={plateSwap ? `Replace a Plate — ${plateSwap.row.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setPlateSwap(null)}>Cancel</Button>
+          <Button variant="danger"
+            disabled={!plateSwap || plateSwap.loading || !plateSwap.picked.length || !plateSwap.reason
+              || (plateSwap.reason === 'Other' && !plateSwap.note.trim())}
+            onClick={() => submitPlateReplacement().catch(error => toast.error(error.message))}>
+            Request Replacement
+          </Button>
+        </>}>
+        {plateSwap && (plateSwap.loading
+          ? <p className="py-4 text-center text-xs font-semibold text-slate-400">Loading the plates on this press…</p>
+          : plateSwap.assets.length === 0
+            ? <p className="text-xs text-slate-500">No individually tracked plates are issued to this job.</p>
+            : <div className="space-y-4">
+              <div className="ci-summary-panel text-xs text-slate-600">
+                {plateSwap.row.product_name} · <b>{plateSwap.assets.length}</b> plates on the press.
+                A plate you tick is marked <b>Damaged</b>, leaves this run immediately, and its
+                requirement reopens for CTP.
+              </div>
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>Which plate?</span><span>Tick every plate to replace</span></div>
+                <div className="space-y-1">
+                  {plateSwap.assets.map(asset => (
+                    <label key={asset.id} className="flex cursor-pointer items-center gap-2 border-b border-slate-100 py-1.5 last:border-0">
+                      <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                        checked={plateSwap.picked.includes(asset.id)}
+                        onChange={() => setPlateSwap(current => ({ ...current,
+                          picked: current.picked.includes(asset.id)
+                            ? current.picked.filter(id => id !== asset.id)
+                            : [...current.picked, asset.id],
+                        }))} />
+                      <span className="flex-1">
+                        <b className="text-sm text-slate-800">{asset.component_label}</b>
+                        <span className="block font-mono text-[10px] text-slate-400">
+                          {asset.asset_number} · {asset.plate_size} · used {asset.use_count || 0} times
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <Field label="Reason" required>
+                <Select value={plateSwap.reason} placeholder="Why is it being replaced?"
+                  onChange={event => setPlateSwap(current => ({ ...current, reason: event.target.value }))}>
+                  {PLATE_REPLACEMENT_REASONS.map(value => <option key={value} value={value}>{value}</option>)}
+                </Select>
+              </Field>
+              <Field label={plateSwap.reason === 'Other' ? 'What happened?' : 'Note'} required={plateSwap.reason === 'Other'}>
+                <Textarea value={plateSwap.note} rows={2}
+                  onChange={event => setPlateSwap(current => ({ ...current, note: event.target.value }))} />
+              </Field>
+            </div>)}
+      </Modal>
       <Modal open={!!holding} onClose={() => setHolding(null)}
         title={holding ? `Hold ${meta.label} — ${holding.jc_number}` : ''}
         footer={<>
@@ -2202,7 +2323,7 @@ export default function Section() {
                 mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
-                (section === 'printing' && plateDisposition.loading) ||
+                (section === 'printing' && (plateDisposition.loading || plateDispositionsIncomplete)) ||
                 // Cutting's variance gate, in the server's own three shapes:
                 //   multi-board mix — per-board entries must be whole numbers
                 //   summing to output + wastage (the 400/409 pair), and any
@@ -2233,14 +2354,85 @@ export default function Section() {
         {completing && section === 'printing' && mode !== 'partial' && (
           <section className="ci-form-panel">
             <div className="ci-form-panel-title"><span>Return Plates</span><span>Required to complete printing</span></div>
+            {/* What went out, counted the way the press counts it. The rows below stay
+                one per physical plate — this line is how the operator checks the pile
+                in front of him against the job before touching any of them. */}
+            {!plateDisposition.loading && issuedPlateAssets.length > 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5 border-b border-slate-100 pb-2">
+                {plateBreakup.map(row => (
+                  <span key={row.key} className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">
+                    {row.component_label}{row.qty > 1 && <span className="ml-1 text-slate-500">× {row.qty}</span>}
+                  </span>
+                ))}
+                <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-[11px] font-bold text-slate-500">
+                  {fmt.num(issuedPlateAssets.length)} issued · returning
+                  <Input type="number" min="0" max={issuedPlateAssets.length}
+                    aria-label="Plates returning from the press"
+                    className={`!h-7 w-14 !py-0 text-center ${+returnedCount !== returningPlates.length ? '!border-amber-400 !bg-amber-50' : ''}`}
+                    value={returnedCount}
+                    onChange={event => setPlateDisposition(current => ({ ...current, returned: event.target.value === '' ? '' : +event.target.value }))} />
+                </span>
+              </div>
+            )}
+            {/* The typed figure and the rows are two accounts of the same pile. When
+                they disagree the form says so rather than silently trusting one. */}
+            {!plateDisposition.loading && issuedPlateAssets.length > 0 && +returnedCount !== returningPlates.length && (
+              <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
+                {fmt.num(returningPlates.length)} of {fmt.num(issuedPlateAssets.length)} plates are marked as coming back, but you have typed {fmt.num(+returnedCount || 0)}.
+                {' '}Untick the ones that are finished — they go to scrap — or correct the number.
+              </p>
+            )}
             {plateDisposition.loading ? <p className="py-3 text-center text-xs font-semibold text-slate-400">Loading issued plates…</p>
               : issuedPlateAssets.length === 0 ? <p className="text-xs text-slate-500">No individually tracked plates were issued for this job.</p>
-              : <div className="space-y-2">{issuedPlateAssets.map(asset => {
+              : <div>{issuedPlateAssets.map(asset => {
                 const choice = plateDisposition.choices[asset.id] || {};
-                return <div key={asset.id} className="grid items-center gap-2 border-b border-slate-100 pb-2 sm:grid-cols-[minmax(160px,1fr)_170px_minmax(160px,1fr)]">
-                  <div><b className="text-sm text-slate-800">{asset.component_label}</b><span className="block font-mono text-[10px] text-slate-400">{asset.asset_number} · {asset.plate_size}</span></div>
-                  <span className="inline-flex w-fit rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Return queue</span>
-                  <Input value={choice.note || ''} placeholder="Return note"
+                // Ticked means the plate is on the bench in front of him. Unticked
+                // means it is finished — there is no grade to give a scrapped plate.
+                const kept = choice.kept !== false;
+                const condition = choice.condition || 'Good';
+                // .ci-plate-return-row is sized against the DIALOG, not the viewport:
+                // this Modal is capped at max-w-xl however wide the screen is, so a
+                // `sm:` breakpoint would hold three fixed tracks inside a 576px box.
+                return <div key={asset.id} className="ci-plate-return-row border-b border-slate-100 last:border-0">
+                  {/* The run count rides with the plate everywhere it is handled, so
+                      the operator grading it can see it is on its ninth outing. */}
+                  <div><b className="text-sm text-slate-800">{asset.component_label}</b><span className="block font-mono text-[10px] text-slate-400">{asset.asset_number} · {asset.plate_size} · {asset.use_count || 0} runs</span></div>
+                  {/* Traffic light, not a dropdown: three tap targets the press can hit
+                      without reading, each carrying its word underneath. Unticking the
+                      row greys the whole thing out — a scrapped plate has no grade. */}
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={kept}
+                      aria-label={`${asset.component_label} came back from the press`}
+                      className="h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                      onChange={() => setPlateDisposition(current => {
+                        const choices = { ...current.choices, [asset.id]: { ...choice, kept: !kept } };
+                        // Unticking is one fact, so it moves the count with it rather
+                        // than making the operator state the same thing twice.
+                        const returning = (current.assets || []).filter(row => choices[row.id]?.kept !== false).length;
+                        return { ...current, choices, returned: returning };
+                      })} />
+                    <div className="flex flex-1 gap-1">
+                      {PLATE_RETURN_CONDITIONS.map(value => {
+                        const tone = PLATE_CONDITION_TONES[value];
+                        const active = kept && condition === value;
+                        return (
+                          <button key={value} type="button" disabled={!kept}
+                            aria-pressed={active}
+                            aria-label={`${asset.component_label} — ${value}`}
+                            onClick={() => setPlateDisposition(current => ({ ...current,
+                              choices: { ...current.choices, [asset.id]: { ...choice, kept: true, condition: value } },
+                            }))}
+                            className={`flex flex-1 flex-col items-center gap-1 rounded-lg border px-1 py-1.5 text-[10px] font-bold leading-none transition-colors
+                              ${active ? tone.on : tone.off} ${kept ? 'hover:bg-slate-50' : 'opacity-40'}`}>
+                            <span className={`h-2.5 w-2.5 rounded-full ${tone.dot} ${active ? '' : 'opacity-60'}`} />
+                            {value}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <Input value={choice.note || ''}
+                    placeholder={kept ? 'Remarks (optional)' : 'Why scrapped? (optional)'}
                     onChange={event => setPlateDisposition(current => ({ ...current,
                       choices: { ...current.choices, [asset.id]: { ...choice, note: event.target.value } },
                     }))} />

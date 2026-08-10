@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -983,6 +983,16 @@ r.get('/floor/:section', async (req, res, next) => {
       gatesOf: s => secBase.get(s.job_card_id)?.gates,
     });
     for (const s of secCardRows) if (s.board_state) secStates.set(s.job_card_id, s.board_state);
+    // The same question for plates, resolved on the same rows and keyed the same
+    // way. The press is the station that cannot start without them, and cutting is
+    // where the job is being prepared FOR the press — both want to know before the
+    // sheets are on the machine, not when Start refuses.
+    const secPlateStates = new Map();
+    await stampPlateState(secCardRows, {
+      jobCardIdOf: s => s.job_card_id,
+      gangIdOf: s => s.gang_run_id,
+    });
+    for (const s of secCardRows) secPlateStates.set(s.job_card_id, s.plate_state);
 
     let queue = [];
     for (const list of Object.values(byJc)) {
@@ -1005,6 +1015,7 @@ r.get('/floor/:section', async (req, res, next) => {
           // Keyed by job card, not by stage row: the verdict was resolved once
           // on the card's anchor line and belongs to the whole card.
           board_state: secStates.get(s.job_card_id) ?? null,
+          plate_state: secPlateStates.get(s.job_card_id) ?? null,
           // qtyReceived is receipt.received — the very figure this station is
           // SHOWN and is allowed to record against, so the dot and the number
           // beside it can never disagree.

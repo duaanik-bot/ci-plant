@@ -86,6 +86,34 @@ export const GENERAL_WASTAGE_REASONS = [
 export const HOLD_REASONS = [
   'Machine breakdown', 'Shade approval awaited', 'Material issue', 'Power cut', 'Operator unavailable', 'Other',
 ];
+// What the press may declare about a plate it is handing back at printing
+// completion. Deliberately shorter than the asset's full condition vocabulary:
+// 'Scrapped' and 'Lost' are outcomes the Plate Warehouse reaches after physical
+// inspection, and offering them here would let the floor skip that gate.
+// Mirrors PLATE_RETURN_CONDITIONS in server/src/plates.js, which enforces it.
+export const PLATE_RETURN_CONDITIONS = ['Good', 'Fair', 'Damaged'];
+// Traffic-light grading, in the order a press hand reads them. The tone is the
+// signal and the word underneath is the confirmation — neither alone, because a
+// colour with no label is a guess and a label with no colour is a list.
+export const PLATE_CONDITION_TONES = {
+  Good: { dot: 'bg-emerald-500', on: 'border-emerald-500 bg-emerald-50 text-emerald-800', off: 'border-slate-200 text-slate-500' },
+  Fair: { dot: 'bg-amber-400', on: 'border-amber-400 bg-amber-50 text-amber-800', off: 'border-slate-200 text-slate-500' },
+  Damaged: { dot: 'bg-red-500', on: 'border-red-500 bg-red-50 text-red-800', off: 'border-slate-200 text-slate-500' },
+};
+// Unticking the row is the fourth outcome: the plate was finished on the press and
+// goes straight to scrap, with no grading to give and no return to verify.
+export const PLATE_NOT_RETURNED = 'Not returned';
+// Why a plate is pulled off the press mid-run and re-bought. Press-side causes
+// only. Mirrors PLATE_REPLACEMENT_REASONS in server/src/plates.js, which enforces
+// it — 'Other' demands a written explanation there as well as here.
+export const PLATE_REPLACEMENT_REASONS = [
+  'Damaged on machine',
+  'Scratched or scored',
+  'Poor register',
+  'Image worn (dot loss)',
+  'Wrong artwork version',
+  'Other',
+];
 // Why a job is parked in Planning's Hold zone. A different list from
 // HOLD_REASONS above: that one answers "why did the PRESS stop" (machine,
 // power, operator), this one answers "why has this not been planned yet" —

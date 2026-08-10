@@ -100,7 +100,19 @@ async function bestPlateCandidate(oc, request, component, plateMasterId, exclude
       ${masterSql}
       ${excludedSql}
       AND pa.status='available' AND pa.active=1 AND pa.condition IN ('Good','Fair')
-    ORDER BY pa.verified_at DESC NULLS LAST, pa.last_used_at DESC NULLS LAST, pa.id DESC LIMIT 1`, values);
+    -- Condition first, wear second. A Good plate ALWAYS beats a Fair one, however
+    -- many runs each has had: a worn-but-sound plate is a better bet on press than a
+    -- fresh plate somebody has already graded down. Within a condition the least-worn
+    -- plate is proposed; then the one idle longest, so the rack rotates instead of
+    -- favouring one corner of it; id last, purely so the choice is deterministic.
+    --
+    -- This used to lead with verified_at DESC, which proposed whichever plate had
+    -- most recently been LOOKED AT — unrelated to either condition or life left, and
+    -- on a rack of identical plates it kept handing back the same one.
+    ORDER BY CASE pa.condition WHEN 'Good' THEN 0 ELSE 1 END,
+             pa.use_count ASC,
+             pa.last_used_at ASC NULLS FIRST,
+             pa.id LIMIT 1`, values);
 }
 
 export async function createPlateComponents(qc, oc, request, options = {}) {
@@ -249,20 +261,33 @@ export async function applyPlateDispositions(qc, oc, stageId, dispositions, user
   const assets = await issuedPlatesForStage(qc, oc, stageId, true);
   const decisions = validatePlateDispositions(assets, dispositions || []);
   for (const decision of decisions) {
-    const { asset, action } = decision;
-    const next = 'returned_pending_verification';
-    const condition = asset.condition || 'Good';
+    const { asset } = decision;
+    // A plate nobody handed back has nothing to verify and no rack to sit in, so it
+    // leaves the active pool entirely rather than joining the return queue. The
+    // component reads 'not_found' — its own vocabulary's word for the same fact.
+    const lost = decision.action === 'lost';
+    const scrapped = decision.action === 'scrap';
+    // Only a plate that came back joins the queue. One the press finished, or one
+    // nobody can find, leaves the active pool here — there is nothing to inspect.
+    const next = scrapped ? 'scrapped' : lost ? 'lost' : 'returned_pending_verification';
+    const componentStatus = scrapped ? 'scrapped' : lost ? 'not_found' : next;
+    const location = scrapped ? 'Scrap' : lost ? null : PLATE_RETURN_QUEUE;
+    // The press has just handled this plate, so its word on the condition replaces
+    // whatever the asset carried when it left the rack.
+    const condition = decision.condition;
     await qc(`UPDATE plate_assets SET status=$1,condition=$2,current_job_card_id=NULL,
-      rack_location=$3,remarks=COALESCE($4,remarks),updated_at=now() WHERE id=$5`,
-    [next, condition, PLATE_RETURN_QUEUE, decision.note || null, asset.id]);
+      rack_location=$3,active=CASE WHEN $1 IN ('lost','scrapped') THEN 0 ELSE active END,
+      remarks=COALESCE($4,remarks),updated_at=now() WHERE id=$5`,
+    [next, condition, location, decision.note || null, asset.id]);
     await qc(`UPDATE plate_request_components SET status=$1,updated_at=now() WHERE id=$2`,
-      [next, asset.request_component_id]);
+      [componentStatus, asset.request_component_id]);
     await qc(`INSERT INTO plate_asset_movements
       (plate_asset_id,request_component_id,tooling_request_id,job_card_id,machine_id,
        action,from_status,to_status,from_location,to_location,condition,note,user_name)
-      VALUES ($1,$2,$3,$4,$5,'returned','issued_to_printing',$6,'Printing',$7,$8,$9,$10)`,
+      VALUES ($1,$2,$3,$4,$5,$6,'issued_to_printing',$7,'Printing',$8,$9,$10,$11)`,
     [asset.id, asset.request_component_id, asset.tooling_request_id, asset.current_job_card_id,
-     asset.issued_machine_id || null, next, PLATE_RETURN_QUEUE, condition, decision.note || null, userName]);
+     asset.issued_machine_id || null, scrapped ? 'scrapped' : lost ? 'not_found' : 'returned',
+     next, location, condition, decision.note || null, userName]);
   }
   // 'returned_pending_verification' describes a PLATE, and is a legal state for
   // plate_assets and plate_request_components — but tooling_requests has its own

@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
+import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
@@ -1123,6 +1123,15 @@ r.get('/planning', async (_req, res, next) => {
       lineIdOf: l => l.id,
       gangIdOf: l => l.gang_run_id,
       gatesOf: l => gatesByLine.get(l.id),
+    });
+    // Plates, in the same vocabulary and the same one-query shape. A line with no
+    // job card yet gets null, not red — the requirement is raised at finalisation.
+    // The job card comes from `released`, NOT from the row — the same source the
+    // payload's own job_card_id uses below. Reading l.job_card_id here silently
+    // stamped nothing at all, because the raw row does not carry it.
+    await stampPlateState(rows, {
+      jobCardIdOf: l => released.get(l.id)?.job_card_id ?? null,
+      gangIdOf: l => l.gang_run_id,
     });
     const out = [];
     for (const l of rows) {
@@ -2487,10 +2496,10 @@ r.get('/artwork', async (_req, res, next) => {
     const runIds = [...new Set(rows.map(l => l.gang_run_id).filter(Boolean))];
     const [ownCards, runCards] = await Promise.all([
       lineIds.length
-        ? q('SELECT order_line_id, jc_number FROM job_cards WHERE order_line_id = ANY($1)', [lineIds])
+        ? q('SELECT id, order_line_id, jc_number FROM job_cards WHERE order_line_id = ANY($1)', [lineIds])
         : [],
       runIds.length
-        ? q(`SELECT gang_run_id, jc_number FROM job_cards
+        ? q(`SELECT id, gang_run_id, jc_number FROM job_cards
              WHERE gang_run_id = ANY($1) AND order_line_id IS NULL AND parent_job_card_id IS NULL`, [runIds])
         : [],
     ]);
@@ -2513,6 +2522,14 @@ r.get('/artwork', async (_req, res, next) => {
       lineIdOf: l => l.id,
       gangIdOf: l => l.gang_run_id,
       gatesOf: l => artGates.get(l.id),
+    });
+    // This queue never carried a job card ID — only the number, for display. The
+    // plate verdict is keyed by card, so the id is fetched alongside it above.
+    const cardIdByLine = new Map(ownCards.map(c => [c.order_line_id, c.id]));
+    const cardIdByRun = new Map(runCards.map(c => [c.gang_run_id, c.id]));
+    await stampPlateState(rows, {
+      jobCardIdOf: l => cardIdByLine.get(l.id) ?? cardIdByRun.get(l.gang_run_id) ?? null,
+      gangIdOf: l => l.gang_run_id,
     });
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);

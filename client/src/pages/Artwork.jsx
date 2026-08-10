@@ -9,6 +9,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
+import PlateStatus from '../components/PlateStatus.jsx';
 // Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
          colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -621,7 +622,10 @@ export default function Artwork() {
             sortValue: l => BOARD_RANK[rowBoardStateOf(l)],       // worst first
             searchValue: l => `${BOARD_FULL[rowBoardStateOf(l)]} board`,
             export: l => BOARD_FULL[rowBoardStateOf(l)],
-            render: l => <BoardBadge state={rowBoardStateOf(l)} /> },
+            render: l => <span className="inline-flex items-center gap-1">
+              <BoardBadge state={rowBoardStateOf(l)} />
+              {l.plate_state && <PlateStatus state={l.plate_state} compact />}
+            </span> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang

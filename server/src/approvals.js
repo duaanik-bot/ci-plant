@@ -27,6 +27,22 @@ export function mgtDecisionError(status, action) {
 
 // Notification fan-out targets: every active user carrying the flag, minus the
 // user who caused the event (nobody needs a bell for their own action).
+// Who hears that a plate died on the press. Four constituencies, one list:
+// management (the MD carries is_management), planning, the press floor, and CTP —
+// which is not a role but a `production` login with printing access, so the same
+// filter reaches it. Nobody gets a bell for their own action.
+export function plateReplacementRecipients(users = [], excludeId = null) {
+  return (users || [])
+    .filter(u => +(u?.active ?? 1) !== 0)
+    .filter(u => +(u?.is_management ?? 0) === 1
+      || u?.role === 'admin'
+      || u?.role === 'planner'
+      || (u?.role === 'production'
+        && (u.sections == null || (Array.isArray(u.sections) && u.sections.includes('printing')))))
+    .map(u => u.id)
+    .filter(id => Number(id) !== Number(excludeId));
+}
+
 export function notificationRecipients(users, flag, excludeId = null) {
   return (users || [])
     .filter(u => +(u?.[flag] ?? 0) === 1 && +(u?.active ?? 0) === 1 && u.id !== excludeId)

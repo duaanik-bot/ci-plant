@@ -16,6 +16,7 @@ import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckC
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
+import PlateStatus from '../components/PlateStatus.jsx';
 // Printing colour + process follows the same one-vocabulary rule — see PrintColour.jsx.
 import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, ActiveColourFilters,
          COLOUR_RANK, PROCESS_RANK, colourTypeOf, processOf, totalColoursOf, colourSummary,
@@ -300,6 +301,10 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
 
         {/* Spec + blockers — words, not colours to memorise */}
         <div className="mt-1 flex flex-wrap items-center gap-1">
+          {/* Plates ride in the chip row, not as a second band: the board band is
+              full width because it is the schedulers' first question, and a second
+              band would grow every card in the lane. */}
+          {card.plate_state && <PlateStatus state={card.plate_state} compact />}
           {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
@@ -1716,7 +1721,10 @@ export default function PrintPlanning() {
                 </span>
               </td>
               <td className={`${td} whitespace-nowrap`}>
-                <BoardBadge state={boardStateOf(card)} />
+                <div className="flex items-center gap-1">
+                  <BoardBadge state={boardStateOf(card)} />
+                  {card.plate_state && <PlateStatus state={card.plate_state} compact />}
+                </div>
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <ColourBadge row={card} compact />

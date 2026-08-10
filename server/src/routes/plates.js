@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber } from '../helpers.js';
+import { audit, nextNumber, notify } from '../helpers.js';
+import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, plateComponentKey, plateComponentsFromSpec,
-  latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateSizeOf, resolvePlateRate,
-  USED_PLATES_RACK,
+  issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf, resolvePlateRate,
+  USED_PLATES_RACK, pickAvailableRackPlates, validatePlateReplacementRequest, validateReturnVerification,
 } from '../plates.js';
 import { createPlateComponents, issuedPlatesForStage, syncPlateRequest } from '../plate-lifecycle.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
@@ -42,6 +43,12 @@ function summarizePlateSet(rows = []) {
     pantone_code: row.pantone_code || null,
     status: row.status,
     condition: row.condition,
+    // Age travels with the individual plate, never the set: the whole point of one
+    // row per physical plate is that three of a set may be fresh and the fourth
+    // nearly finished. The card's own use_count is the set's WORST case.
+    use_count: Number(row.use_count) || 0,
+    last_used_at: row.last_used_at || null,
+    plate_created_on: row.plate_created_on || null,
   }));
   return {
     ...first,
@@ -894,7 +901,11 @@ r.get('/plates/warehouse', async (_req, res, next) => {
 
 r.get('/plates/returns', async (_req, res, next) => {
   try {
+    // age_days is computed here as well as in the warehouse query — without it
+    // summarizePlateSet folds Math.max over a column that does not exist and every
+    // returned set reports an age of 0.
     const rows = await q(`SELECT pa.*,pm.plate_size,
+        (CURRENT_DATE-pa.plate_created_on)::int AS age_days,
         COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
         COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
@@ -910,15 +921,9 @@ r.get('/plates/returns', async (_req, res, next) => {
       LEFT JOIN tooling_requests tr ON tr.id=m.tooling_request_id
       LEFT JOIN job_cards jc ON jc.id=m.job_card_id
       WHERE pa.status='returned_pending_verification' ORDER BY m.at,pa.id`);
-    res.json(groupPlateSets(rows, row => [
-      row.tooling_request_id || '',
-      row.job_card_id || '',
-      row.source_grn_id || '',
-      row.product_id,
-      row.output_number || '',
-      row.artwork_version || '',
-      row.plate_master_id,
-    ].join('|')));
+    // Grouped by the same key verify-return locks on, so a job that comes back
+    // 5 Good + 1 Damaged is two cards the warehouse can decide independently.
+    res.json(groupPlateSets(rows, plateReturnSetKey));
   } catch (error) { next(error); }
 });
 
@@ -943,7 +948,12 @@ r.get('/plates/history', async (_req, res, next) => {
 r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => {
   try {
     const action = String(req.body.action || '');
-    if (!['verified_ok','scrap'].includes(action)) return res.status(400).json({ error: 'Choose Move to Used Plates Rack or Move to Scrap' });
+    const perPlate = Array.isArray(req.body.decisions) && req.body.decisions.length > 0;
+    // A per-plate body carries its verdicts inside `decisions`; only the legacy
+    // whole-set call has to name one action up front.
+    if (!perPlate && !['verified_ok', 'scrap'].includes(action)) {
+      return res.status(400).json({ error: 'Choose Move to Used Plates Rack or Move to Scrap' });
+    }
     const result = await tx(async (qc, oc) => {
       const asset = await oc(`SELECT pa.*,m.request_component_id AS component_id,
           m.tooling_request_id,m.job_card_id,m.from_location AS previous_location
@@ -953,6 +963,7 @@ r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => 
       if (!asset) throw Object.assign(new Error('Plate asset not found'), { status: 404 });
       if (asset.status !== 'returned_pending_verification') throw Object.assign(new Error('This plate is not awaiting return verification'), { status: 409 });
       const peers = await qc(`SELECT pa.*,m.request_component_id AS component_id,
+          (CURRENT_DATE-pa.plate_created_on)::int AS age_days,
           m.tooling_request_id,m.job_card_id,m.from_location AS previous_location
         -- LEFT, matching the /plates/returns listing and the single-asset fetch above.
         -- A plain JOIN drops any returned plate with no 'returned' movement row, so it
@@ -970,31 +981,157 @@ r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => 
         ORDER BY pa.id FOR UPDATE OF pa`,
       [asset.tooling_request_id || null, asset.job_card_id || null, asset.product_id,
        asset.output_number || null, asset.artwork_version || null, asset.plate_master_id]);
-      const setRows = peers.length ? peers : [asset];
-      const next = action === 'verified_ok' ? 'available' : 'scrapped';
-      const condition = action === 'verified_ok' ? 'Good' : 'Scrapped';
-      const location = action === 'verified_ok' ? USED_PLATES_RACK : 'Scrap';
-      for (const row of setRows) {
+      // The SQL above locks every plate that could belong to this set; the shared key
+      // is what decides which of them actually do. Narrowing here rather than in a
+      // second WHERE clause keeps this in lockstep with the /plates/returns grouping.
+      const key = plateReturnSetKey(asset);
+      const matched = peers.filter(row => plateReturnSetKey(row) === key);
+      const setRows = matched.length ? matched : [asset];
+      // Per-plate decisions are the real shape of this job — three of a set can be fit
+      // to run again while the fourth is finished. A body carrying only `action` is
+      // still honoured and applies that one decision to the whole set, so older
+      // callers keep working.
+      const decided = validateReturnVerification({
+        components: setRows.map(row => ({ ...row, asset_id: row.id })),
+        decisions: Array.isArray(req.body.decisions) && req.body.decisions.length
+          ? req.body.decisions
+          : setRows.map(row => ({ asset_id: row.id, action })),
+      });
+
+      const updated = [];
+      for (const { asset_id, action: rowAction } of decided) {
+        const row = setRows.find(candidate => Number(candidate.id) === Number(asset_id));
+        const ok = rowAction === 'verified_ok';
+        const next = ok ? 'available' : 'scrapped';
+        // Accepting a return confirms the plate is where the press said it was — it
+        // does not upgrade it. A Fair plate stays Fair; a Damaged one stays Damaged and
+        // is therefore never proposed for reuse (bestPlateCandidate wants Good or Fair).
+        const condition = ok ? (row.condition || 'Good') : 'Scrapped';
+        const location = ok ? USED_PLATES_RACK : 'Scrap';
         await qc(`UPDATE plate_assets SET status=$1,condition=$2,rack_location=$3,
           verified_by=$4,verified_at=now(),remarks=COALESCE($5,remarks),
           active=CASE WHEN $1='scrapped' THEN 0 ELSE active END,updated_at=now() WHERE id=$6`,
         [next, condition, location, req.user.name, req.body.note || null, row.id]);
         if (row.component_id) await qc(`UPDATE plate_request_components SET status=$1,updated_at=now() WHERE id=$2`,
-          [action === 'verified_ok' ? 'available' : 'scrapped', row.component_id]);
+          [ok ? 'available' : 'scrapped', row.component_id]);
         await qc(`INSERT INTO plate_asset_movements
           (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
            from_location,to_location,condition,note,user_name)
           VALUES ($1,$2,$3,$4,$5,'returned_pending_verification',$6,$7,$8,$9,$10,$11)`,
         [row.id, row.component_id || null, row.tooling_request_id || null, row.job_card_id || null,
-         action === 'verified_ok' ? 'verified' : 'scrapped',
+         ok ? 'verified' : 'scrapped',
          next, row.rack_location, location, condition, req.body.note || null, req.user.name]);
+        updated.push({ ...row, status: next, condition, rack_location: location });
       }
       for (const requestId of [...new Set(setRows.map(row => row.tooling_request_id).filter(Boolean))]) {
         await syncPlateRequest(qc, oc, requestId, req.user.name);
       }
-      return summarizePlateSet(setRows.map(row => ({ ...row, status: next, condition, rack_location: location })));
+      return summarizePlateSet(updated);
     });
     res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Issue rack plates straight to a job card, bypassing the PR → approval → PO → GRN
+// chain. The plant does this when plates already exist for a job nobody raised a
+// requirement for. The plate still lands on a JOB, so it returns through the normal
+// completion flow and its history stays unbroken — the only thing skipped is the
+// paperwork that would have bought a plate the rack already has.
+r.post('/plates/assets/issue', canBuy, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const ids = [...new Set((req.body.asset_ids || []).map(Number))].filter(Boolean);
+      if (!ids.length) throw Object.assign(new Error('Tick at least one plate to issue'), { status: 400 });
+      const jobCard = await oc(`SELECT jc.*, ol.id AS line_id FROM job_cards jc
+        LEFT JOIN order_lines ol ON ol.id=jc.order_line_id WHERE jc.id=$1`, [Number(req.body.job_card_id)]);
+      if (!jobCard) throw Object.assign(new Error('Choose a job card to issue these plates to'), { status: 400 });
+      if (jobCard.status === 'closed') throw Object.assign(new Error(`${jobCard.jc_number} is already closed`), { status: 409 });
+
+      const rackAssets = await qc(
+        `SELECT * FROM plate_assets WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids]);
+      // Only rack stock may be handed out, and the message names the plate rather
+      // than making somebody guess which one is busy.
+      const picked = pickAvailableRackPlates({ rackAssets, assetIds: ids });
+
+      for (const asset of picked) {
+        await qc(`UPDATE plate_assets SET status='issued_to_printing',current_job_card_id=$1,
+          last_used_at=now(),use_count=use_count+1,rack_location='Printing',updated_at=now() WHERE id=$2`,
+        [jobCard.id, asset.id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,job_card_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
+          VALUES ($1,$2,'issued',$3,'issued_to_printing',$4,'Printing',$5,$6,$7)`,
+        [asset.id, jobCard.id, asset.status, asset.rack_location, asset.condition,
+         `Issued from rack to ${jobCard.jc_number}${req.body.note ? ` — ${req.body.note}` : ''}`, req.user.name]);
+      }
+
+      // The job has its plates in hand, so the readiness light must stop asking for
+      // them. tooling_ok is the existing override the gate already reads.
+      if (jobCard.line_id) {
+        await qc('UPDATE order_lines SET tooling_ok=1 WHERE id=$1', [jobCard.line_id]);
+      }
+      await audit('job_card', jobCard.id, 'plates_issued',
+        `${picked.length} plate(s) issued from rack — ${picked.map(row => row.asset_number).join(', ')}`,
+        qc, req.user.name);
+      return {
+        issued: picked.length,
+        jc_number: jobCard.jc_number,
+        tooling_marked: !!jobCard.line_id,
+        plates: picked.map(row => row.asset_number),
+      };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Retire rack plates. The warehouse decides a plate has done enough runs; nothing
+// automatic ever reaches this — there is no use-count threshold anywhere in the
+// module, by design. Only 'available' stock qualifies.
+r.post('/plates/assets/retire', canVerify, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const ids = [...new Set((req.body.asset_ids || []).map(Number))].filter(Boolean);
+      if (!ids.length) throw Object.assign(new Error('Tick at least one plate to retire'), { status: 400 });
+      const rackAssets = await qc(
+        `SELECT * FROM plate_assets WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids]);
+      const picked = pickAvailableRackPlates({ rackAssets, assetIds: ids });
+      const reason = String(req.body.reason).trim();
+      for (const asset of picked) {
+        await qc(`UPDATE plate_assets SET status='scrapped',condition='Scrapped',
+          rack_location='Scrap',active=0,remarks=COALESCE($1,remarks),updated_at=now() WHERE id=$2`,
+        [reason, asset.id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
+          VALUES ($1,'scrapped',$2,'scrapped',$3,'Scrap','Scrapped',$4,$5)`,
+        [asset.id, asset.status, asset.rack_location,
+         `Retired after ${asset.use_count || 0} run(s) — ${reason}`, req.user.name]);
+        await audit('plate_asset', asset.id, 'retire',
+          `${asset.asset_number} retired after ${asset.use_count || 0} run(s) — ${reason}`, qc, req.user.name);
+      }
+      return { retired: picked.length, plates: picked.map(row => row.asset_number) };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Every movement for every plate in a set. The set card the warehouse clicks carries
+// `asset_ids`; asking for one plate's history under a title that says "4 plate set"
+// showed one plate's life and looked like the other three had none.
+r.get('/plates/sets/history', async (req, res, next) => {
+  try {
+    const ids = [...new Set(String(req.query.asset_ids || '').split(',').map(Number))].filter(Boolean);
+    if (!ids.length) return res.json({ plates: [], movements: [] });
+    const plates = await q(`SELECT pa.*, pm.plate_size,
+        (CURRENT_DATE-pa.plate_created_on)::int AS age_days
+      FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
+      WHERE pa.id = ANY($1::int[]) ORDER BY pa.id`, [ids]);
+    const movements = await q(`SELECT pam.*, pa.asset_number, pa.component_label,
+        jc.jc_number, m.name AS machine_name
+      FROM plate_asset_movements pam
+      JOIN plate_assets pa ON pa.id=pam.plate_asset_id
+      LEFT JOIN job_cards jc ON jc.id=pam.job_card_id
+      LEFT JOIN machines m ON m.id=pam.machine_id
+      WHERE pam.plate_asset_id = ANY($1::int[]) ORDER BY pam.id DESC`, [ids]);
+    res.json({ plates, movements });
   } catch (error) { next(error); }
 });
 
@@ -1021,8 +1158,89 @@ r.get('/plates/assets/:id/history', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// A plate died on the press. The operator says which and why; the plate leaves the
+// run immediately (so completion stops asking him to hand back something that is in
+// the bin), its requirement component reopens as a replacement so the existing PR
+// machinery picks it up, and management, planning, the press and CTP all hear.
+r.post('/job-stages/:id/plate-replacement', requireRole('production', 'planner'), async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const stage = await oc(`SELECT js.*, jc.jc_number, jc.status AS jc_status
+        FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+        WHERE js.id=$1 FOR UPDATE OF js`, [req.params.id]);
+      if (!stage) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (stage.stage !== 'printing')
+        throw Object.assign(new Error('Plates are replaced at printing, not at ' + stage.stage.replace('_', ' ')), { status: 409 });
+      if (stage.jc_status === 'closed')
+        throw Object.assign(new Error('Job is already closed'), { status: 409 });
+      if (!['in_progress', 'hold', 'partially_completed'].includes(stage.status))
+        throw Object.assign(new Error('A plate can only be replaced while the press is running or on hold'), { status: 409 });
+
+      const issuedAssets = await issuedPlatesForStage(qc, oc, stage.id, true);
+      const picked = validatePlateReplacementRequest({
+        issuedAssets,
+        assetIds: req.body.asset_ids,
+        reason: req.body.reason,
+        note: req.body.note,
+      });
+      const reason = String(req.body.reason).trim();
+      const note = (req.body.note || '').trim() || null;
+
+      for (const asset of picked) {
+        await qc(`UPDATE plate_assets SET status='damaged',condition='Damaged',
+          current_job_card_id=NULL,rack_location=NULL,
+          remarks=COALESCE($1,remarks),updated_at=now() WHERE id=$2`,
+        [note || reason, asset.id]);
+        // The component reopens rather than a new one being invented: approve/PO/GRN
+        // already treat 'replacement_required' as work to be bought.
+        await qc(`UPDATE plate_request_components
+          SET status='replacement_required',matched_asset_id=NULL,proposed_asset_id=NULL,updated_at=now()
+          WHERE id=$1`, [asset.request_component_id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,request_component_id,tooling_request_id,job_card_id,machine_id,
+           action,from_status,to_status,from_location,to_location,condition,note,user_name)
+          VALUES ($1,$2,$3,$4,$5,'damaged','issued_to_printing','damaged','Printing',NULL,'Damaged',$6,$7)`,
+        [asset.id, asset.request_component_id, asset.tooling_request_id, stage.job_card_id,
+         stage.machine_id || null, note ? `${reason} — ${note}` : reason, req.user.name]);
+      }
+
+      const requestIds = [...new Set(picked.map(asset => asset.tooling_request_id).filter(Boolean))];
+      for (const requestId of requestIds) {
+        await qc(`UPDATE tooling_requests SET status='pending',approval_status='pending',updated_at=now()
+          WHERE id=$1`, [requestId]);
+        await qc(`INSERT INTO tooling_request_events
+          (tooling_request_id,action,from_status,to_status,note,user_name)
+          VALUES ($1,'plate_replacement_requested','issued_to_floor','pending',$2,$3)`,
+        [requestId, `${picked.length} plate(s) replaced from the press — ${reason}`, req.user.name]);
+      }
+
+      const names = picked.map(asset => asset.component_label).join(', ');
+      await audit('job_card', stage.job_card_id, 'plate_replacement',
+        `${picked.length} plate(s) replaced at printing — ${names} (${reason})`, qc, req.user.name);
+
+      const users = await qc('SELECT id, active, role, sections, is_management FROM users');
+      await notify(plateReplacementRecipients(users, req.user.id), {
+        kind: 'plate_replacement',
+        title: `Plate replacement needed — ${stage.jc_number}`,
+        body: `${names} — ${reason}${note ? ` (${note})` : ''}, raised by ${req.user.name}`,
+        link: '/tooling/plates',
+        refTable: 'job_cards', refId: stage.job_card_id,
+      }, qc);
+
+      return { replaced: picked.length, components: names, requests: requestIds.length };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 r.get('/job-stages/:id/plate-disposition', async (req, res, next) => {
-  try { res.json(await issuedPlatesForStage(q, q, Number(req.params.id))); } catch (error) { next(error); }
+  try {
+    // `assets` stays one row per physical plate — the completion form declares a
+    // condition against each. `breakup`/`total` are the same set counted the way an
+    // operator reads it ("Cyan × 2"), derived here so there is one definition of it.
+    const assets = await issuedPlatesForStage(q, q, Number(req.params.id));
+    res.json({ assets, ...issuedPlateSummary(assets) });
+  } catch (error) { next(error); }
 });
 
 export default r;

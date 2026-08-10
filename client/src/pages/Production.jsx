@@ -15,6 +15,7 @@ import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import { TIMELINE_PRESETS, presetRange, inTimeline, timelineCounts, unplannedCount } from '../lib/jobCardTimeline.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
+import PlateStatus from '../components/PlateStatus.jsx';
 // Printing colour + process — the same one-vocabulary rule, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, colourDetailLines, colourSummary } from '../components/PrintColour.jsx';
 import WorkflowControls from '../components/WorkflowControls.jsx';
@@ -699,6 +700,11 @@ export default function Production() {
                   {boardStateOf(jc) !== 'covered' && (
                     <BoardBadge state={boardStateOf(jc)} compact />
                   )}
+                  {/* Plates show in EVERY state, unlike board above. A job card is
+                      the document the floor works from, and "are the plates in?" is
+                      asked on every one of them — a green tick answers it, where an
+                      absent badge would just look like nobody had checked. */}
+                  {jc.plate_state && <PlateStatus state={jc.plate_state} compact className="ml-1" />}
                   <Link to={`/production/jobcard/${jc.id}`} title="Print job card"
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
                     <Printer size={13} />

@@ -27,6 +27,7 @@ import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../compone
 import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
+import PlateStatus from '../components/PlateStatus.jsx';
 // Printing colour + process shares the same one-vocabulary rule — see PrintColour.jsx.
 import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf, processOf,
          totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -3079,6 +3080,7 @@ export default function Planning() {
                   ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
                   : <ReadinessCell readiness={l.readiness} light={l.light} />}
                 <BoardBadge state={rowBoardState(l)} compact />
+                {l.plate_state && <PlateStatus state={l.plate_state} compact className="ml-1" />}
               </div>
             ) },
           // Set-type triage — the dropdown that moves a row between the zones

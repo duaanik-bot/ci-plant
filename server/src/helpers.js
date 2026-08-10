@@ -2280,8 +2280,86 @@ export function boardStateOf({ material, prRaised }) {
   return material ? 'covered' : prRaised ? 'on_order' : 'short';
 }
 
+// The plate twin of boardStateOf. Green means the plates are PHYSICALLY IN HAND —
+// deliberately the same bar assertPlateReadyForPrinting enforces when the press
+// tries to start, so the badge on a planner's screen and the gate on the floor can
+// never tell two different stories.
+//
+// The two troubled states split on WHO HAS TO ACT, exactly as the board's do:
+// on_order means somebody has already bought them and the answer is wait; none
+// means nobody has, and the answer is act. A job with no plate requirement at all
+// is `none` on purpose — it must not look like a job whose plates are on the rack.
+const PLATE_IN_HAND = new Set(['verified_existing', 'available', 'reserved', 'issued']);
+const PLATE_ON_ORDER = new Set(['approved', 'po_created', 'ordered', 'grn_received']);
+
+export function plateStateOf(components = []) {
+  const active = (Array.isArray(components) ? components : [])
+    .filter(row => row && row.status !== 'cancelled');
+  // NOT TRACKED, not missing. The plant flow no longer raises plate requirements
+  // (9aedf20 detached the module from finalisation, printing start and completion),
+  // so an empty requirement is the ordinary case for almost every job. Calling that
+  // 'none' would put a solid red "No Plates — act" on every card in the plant for a
+  // question nobody is currently asking. A requirement that EXISTS and is unmet is
+  // still red below; that is a real shortage.
+  if (!active.length) return null;
+  if (active.every(row => PLATE_IN_HAND.has(row.status))) return 'ready';
+  // Anything not in hand and not bought means somebody still has to do something,
+  // and that outranks a component merely waiting on a delivery.
+  return active.every(row => PLATE_IN_HAND.has(row.status) || PLATE_ON_ORDER.has(row.status))
+    ? 'on_order'
+    : 'none';
+}
+
+// Stamp `plate_state` onto a page of rows in ONE query. Twin of stampBoardState:
+// per-row lookups are what turn a queue into a hundred round trips, and the floor
+// queues this feeds are the busiest reads in the app.
+export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null, qc = q }) {
+  const ids = [...new Set((rows || []).map(jobCardIdOf).filter(id => id != null))];
+  if (!ids.length) return rows;
+  const components = await qc(
+    `SELECT tr.job_card_id, prc.status
+       FROM tooling_requests tr
+       JOIN plate_request_components prc ON prc.tooling_request_id = tr.id
+      WHERE tr.family = 'plate' AND tr.job_card_id = ANY($1::int[])`, [ids]);
+  const byJob = new Map();
+  for (const row of components) {
+    const list = byJob.get(Number(row.job_card_id)) || [];
+    list.push(row);
+    byJob.set(Number(row.job_card_id), list);
+  }
+  for (const row of rows) {
+    const id = jobCardIdOf(row);
+    // No job card means the plate question has not started — requirements are raised
+    // when a card is finalised. `null` is "not asked yet" and renders nothing;
+    // stamping 'none' here would paint every unplanned line on Planning solid red.
+    row.plate_state = id == null ? null : plateStateOf(byJob.get(Number(id)) || []);
+  }
+  // A gang goes on press as ONE job: three members holding their plates and a
+  // fourth still waiting is a RUN that cannot run. Members are made to AGREE on
+  // the weakest verdict, exactly as the board collapse does.
+  const byGang = new Map();
+  for (const row of rows) {
+    const gang = gangIdOf(row);
+    if (gang == null) continue;
+    const list = byGang.get(gang) || [];
+    list.push(row);
+    byGang.set(gang, list);
+  }
+  for (const group of byGang.values()) {
+    const worst = worstPlateState(group.map(row => row.plate_state));
+    for (const row of group) row.plate_state = worst;
+  }
+  return rows;
+}
+
 // The worst state in a set — a gang goes on press as ONE job, so its weakest
 // member decides for the whole run.
+export function worstPlateState(states = []) {
+  return states.includes('none') ? 'none'
+    : states.includes('on_order') ? 'on_order'
+    : 'ready';
+}
+
 export function worstBoardState(states = []) {
   return states.includes('short') ? 'short'
     : states.includes('on_order') ? 'on_order'

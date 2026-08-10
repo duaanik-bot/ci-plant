@@ -723,6 +723,34 @@ div.ci-row-alarm-soft {
   .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* One returned plate at printing completion: what it is, the condition the press
+   declares, and why. Sized against the DIALOG, not the viewport — the completion
+   Modal is capped at max-w-xl however wide the screen is, so a `sm:` breakpoint
+   here would keep three fixed tracks inside a 576px box on any tablet. The
+   condition column is fixed because a select sized by content jumps width as the
+   word changes (Good → Damaged); the note takes the slack. */
+.ci-plate-return-row {
+  display: grid;
+  /* The condition track is fixed, and wide enough for the LONGEST option plus the
+     select's own clear and chevron affordances — "Not returned" at 172px, not the
+     128px that clipped "Damaged" to "Damag". A select sized by content would also
+     jump width as the word changes, which reads as the row twitching. */
+  grid-template-columns: minmax(120px, 1fr) 172px minmax(120px, 1.1fr);
+  align-items: center;
+  gap: 0.625rem;
+  padding-block: 0.375rem;
+}
+@container cimodal (max-width: 480px) {
+  /* Phone sheet and any narrow dialog: three tracks cannot hold their minimums,
+     and a flex/grid item never shrinks below its content — so stack instead of
+     letting the row push the dialog sideways. */
+  .ci-plate-return-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.375rem;
+    padding-block: 0.5rem;
+  }
+}
+
 @media print {
   .no-print { display: none !important; }
   body { background: white; }

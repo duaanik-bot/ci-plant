@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CheckCircle2, ClipboardCheck, Eye, FileCheck2, History,
   Minus, PackagePlus, Plus, Printer, RotateCcw, Save, Send, ShoppingBag,
-  Trash2, Truck, Warehouse,
+  Layers3 as Layers, Trash2, Truck, Warehouse,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { lineAmount, lineTaxable, poTotals } from '../lib/poTotals.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS } from '../lib/plateRack.js';
 import { resolvePlateRate } from '../lib/plateRates.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
@@ -362,24 +363,90 @@ function PlateGrnModal({ po, line, onClose, onSaved }) {
   </Modal>;
 }
 
+// Verification is per PLATE, not per set: the warehouse has the pile in front of it
+// and three of a set can be fit to run again while the fourth is finished. Ticked
+// keeps a plate — it goes to the Used Plates Rack; unticked scraps it. Each row
+// carries the plate's age, because a plate on its ninth run is the one to look at
+// hardest. The age is shown and never enforced.
 function ReturnModal({ asset, onClose, onSaved }) {
   const toast = useToast();
   const [note, setNote] = useState('');
-  const save = async action => {
-    await api.post(`/plates/assets/${asset.id}/verify-return`, { action, note: note || undefined });
-    toast.success(action === 'verified_ok' ? `${asset.asset_number} moved to ${USED_PLATES_RACK}` : `${asset.asset_number} moved to scrap`);
-    await onSaved(); onClose();
+  const [busy, setBusy] = useState(false);
+  const plates = (asset.components?.length ? asset.components : [{
+    asset_id: asset.id, asset_number: asset.asset_number, component_label: asset.component_label,
+    condition: asset.condition, use_count: asset.use_count, last_used_at: asset.last_used_at,
+  }]).map(row => ({ ...row, asset_id: Number(row.asset_id ?? row.id) }));
+  const [keep, setKeep] = useState(() => Object.fromEntries(plates.map(row => [row.asset_id, true])));
+  const kept = plates.filter(row => keep[row.asset_id]).length;
+  const scrapped = plates.length - kept;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/plates/assets/${asset.id}/verify-return`, {
+        decisions: plates.map(row => ({
+          asset_id: row.asset_id,
+          action: keep[row.asset_id] ? 'verified_ok' : 'scrap',
+        })),
+        note: note || undefined,
+      });
+      toast.success(scrapped
+        ? `${kept} plate(s) to ${USED_PLATES_RACK}, ${scrapped} scrapped`
+        : `${kept} plate(s) moved to ${USED_PLATES_RACK}`);
+      await onSaved(); onClose();
+    } finally { setBusy(false); }
   };
-  return <Modal open onClose={onClose} title="Verify Returned Plate Set"
-    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="success" onClick={() => save('verified_ok')}><CheckCircle2 size={14} /> Move to Used Rack</Button></>}>
+
+  return <Modal open onClose={onClose} title="Verify Returned Plates"
+    footer={<>
+      <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button variant="success" disabled={busy}
+        onClick={() => save().catch(error => { setBusy(false); toast.error(error.message); })}>
+        <CheckCircle2 size={14} /> {scrapped ? `Verify — ${kept} kept, ${scrapped} scrapped` : `Verify ${kept} plate(s)`}
+      </Button>
+    </>}>
     <div className="space-y-4">
-      <div className="ci-summary-panel text-sm"><b>{asset.asset_number} · {asset.qty || asset.components?.length || 1} plates</b><span className="block text-xs text-slate-500">{asset.product_name} · Output {asset.output_number || '—'} · {asset.jc_number}</span><span className="block text-xs text-slate-500">Contains: {asset.contains || asset.component_label}</span></div>
-      <div className="ci-form-grid">
-        <Field label="Reusable destination"><Input value={USED_PLATES_RACK} disabled /></Field>
-        <Field label="Scrap destination"><Input value="Scrap" disabled /></Field>
-        <div className="md:col-span-2"><Field label="Verification note"><Textarea value={note} onChange={event => setNote(event.target.value)} /></Field></div>
+      <div className="ci-summary-panel text-sm">
+        <b>{asset.product_name} · {plates.length} plates</b>
+        <span className="block text-xs text-slate-500">Output {asset.output_number || '—'} · {asset.jc_number}</span>
+        <span className="block text-xs text-slate-500">Press returned these as <b>{asset.condition || 'Good'}</b></span>
       </div>
-      <div className="flex gap-2 border-t border-slate-200 pt-3"><Button variant="danger" onClick={() => save('scrap')}>Move to Scrap</Button></div>
+      <section className="ci-form-panel">
+        <div className="ci-form-panel-title">
+          <span>Keep or scrap</span>
+          <span>Ticked → {USED_PLATES_RACK}</span>
+        </div>
+        <div>
+          {plates.map(row => {
+            const uses = Number(row.use_count) || 0;
+            const on = !!keep[row.asset_id];
+            return (
+              <label key={row.asset_id}
+                className="flex cursor-pointer items-center gap-3 border-b border-slate-100 py-2 last:border-0">
+                <input type="checkbox" checked={on}
+                  aria-label={`Keep ${row.component_label}`}
+                  className="h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                  onChange={() => setKeep(current => ({ ...current, [row.asset_id]: !on }))} />
+                <span className="min-w-0 flex-1">
+                  <b className="text-sm text-slate-800">{row.component_label}</b>
+                  <span className="block font-mono text-[10px] text-slate-400">
+                    {row.asset_number}{row.condition ? ` · ${row.condition}` : ''}
+                  </span>
+                </span>
+                {/* Age: the number of runs this individual plate has already done. */}
+                <span className="shrink-0 text-right">
+                  <span className="block text-sm font-bold tabular-nums text-slate-700">{uses}</span>
+                  <span className="block text-[10px] text-slate-400">{uses === 1 ? 'run' : 'runs'}</span>
+                </span>
+                <span className={`w-24 shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-center text-[10px] font-bold ${on ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                  {on ? 'Used Rack' : 'Scrap'}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+      <Field label="Verification note"><Textarea value={note} rows={2} onChange={event => setNote(event.target.value)} /></Field>
     </div>
   </Modal>;
 }
@@ -423,11 +490,41 @@ function ReasonActionModal({ action, onClose, onConfirm }) {
   </Modal>;
 }
 
-function AssetHistoryModal({ asset, onClose }) {
+// A warehouse row is a SET, so this shows every plate in it — each with its own age
+// and a tick box — and the movements of all of them together. It used to fetch
+// `/plates/assets/{first.id}/history`, i.e. ONE plate's record under a title reading
+// "4 plate set", which made a set of four look like a single plate with no history.
+function AssetHistoryModal({ asset, onClose, onChanged }) {
+  const toast = useToast();
+  const ids = (asset.asset_ids?.length ? asset.asset_ids : [asset.id]).filter(Boolean);
   const [detail, setDetail] = useState(null);
-  useEffect(() => { api.get(`/plates/assets/${asset.id}/history`).then(setDetail); }, [asset.id]);
+  const [picked, setPicked] = useState([]);
+  const [reason, setReason] = useState('');
+  // Free text only when the chips cannot say it — 'Other' is the escape hatch, and
+  // it is optional too.
+  const [otherReason, setOtherReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get(`/plates/sets/history?asset_ids=${ids.join(',')}`).then(setDetail);
+  useEffect(() => { load(); }, [ids.join(',')]);
+  const plates = detail?.plates || [];
+  const retirable = plates.filter(row => row.status === 'available');
+  const retire = async () => {
+    setBusy(true);
+    try {
+      const chosen = reason === 'Other' ? otherReason : reason;
+      const result = await api.post('/plates/assets/retire', {
+        asset_ids: picked,
+        reason: chosen.trim() || undefined,
+      });
+      toast.success(`${result.retired} plate(s) retired — ${result.plates.join(', ')}`);
+      setPicked([]); setReason(''); setOtherReason('');
+      await load();
+      onChanged?.();
+    } finally { setBusy(false); }
+  };
   const columns = [
     { key: 'at', label: 'When', render: row => fmt.dt(row.at) },
+    { key: 'asset_number', label: 'Plate', render: row => <span className="font-mono text-[11px]">{row.asset_number}</span> },
     { key: 'action', label: 'Movement', render: row => <StatusChip value={row.action} /> },
     { key: 'jc_number', label: 'Job Card', render: row => row.jc_number || '—' },
     { key: 'machine_name', label: 'Machine', render: row => row.machine_name || '—' },
@@ -435,16 +532,78 @@ function AssetHistoryModal({ asset, onClose }) {
     { key: 'condition', label: 'Condition', render: row => row.condition || '—' },
     { key: 'user_name', label: 'By', render: row => row.user_name || '—' },
   ];
-  return <Modal open onClose={onClose} title={`${asset.asset_number} · Plate History`} wide footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
+  return <Modal open onClose={onClose} title={`${asset.asset_number} · Plate History`} wide
+    footer={<>
+      <Button variant="secondary" onClick={onClose}>Close</Button>
+      {/* The reason is a note, never a gate — same rule as the list view. Whoever is
+          standing at the rack has already decided; a required text box only delays it. */}
+      {picked.length > 0 && <Button variant="danger" disabled={busy}
+        onClick={() => retire().catch(error => { setBusy(false); toast.error(error.message); })}>
+        <Trash2 size={14} /> Retire {picked.length} plate(s)
+      </Button>}
+    </>}>
     {!detail ? <p className="py-8 text-center text-sm text-slate-400">Loading history…</p> : <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-4">
-        {[
-          ['Product',detail.product_name],['Output',detail.output_number || '—'],['Component',detail.component_label],['Size',detail.plate_size],
-          ['Artwork',detail.artwork_version],['Created',fmt.date(detail.plate_created_on)],['Uses',detail.use_count],
-          ['Location',detail.rack_location || '—'],['Status',statusLabel(detail.status)],
-        ].map(([label,value]) => <div key={label} className="border-b border-slate-100 pb-2"><span className="text-[10px] font-bold uppercase text-slate-400">{label}</span><p className="text-sm font-semibold text-slate-700">{value}</p></div>)}
+      <section className="ci-form-panel">
+        <div className="ci-form-panel-title">
+          <span>Plates in this set</span>
+          <span>{retirable.length} of {plates.length} available · tick to retire</span>
+        </div>
+        <div>
+          {plates.map(row => {
+            const on = picked.includes(row.id);
+            const available = row.status === 'available';
+            return (
+              <label key={row.id}
+                className={`flex items-center gap-3 border-b border-slate-100 py-2 last:border-0 ${available ? 'cursor-pointer' : 'opacity-60'}`}>
+                <input type="checkbox" checked={on} disabled={!available}
+                  aria-label={`Retire ${row.component_label} ${row.asset_number}`}
+                  className="h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                  onChange={() => setPicked(current => on ? current.filter(id => id !== row.id) : [...current, row.id])} />
+                <span className="min-w-0 flex-1">
+                  <b className="text-sm text-slate-800">{row.component_label}</b>
+                  <span className="block font-mono text-[10px] text-slate-400">
+                    {row.asset_number} · {row.plate_size} · {row.rack_location || '—'}
+                  </span>
+                </span>
+                {/* The plate's own age — the figure the retire decision turns on. */}
+                <span className="shrink-0 text-right">
+                  <span className="block text-sm font-bold tabular-nums text-slate-700">{row.use_count || 0}</span>
+                  <span className="block text-[10px] text-slate-400">{(row.use_count || 0) === 1 ? 'run' : 'runs'}</span>
+                </span>
+                <span className="w-16 shrink-0 text-right text-[10px] text-slate-400">{row.age_days || 0} d old</span>
+                <StatusChip value={row.status} />
+              </label>
+            );
+          })}
+        </div>
+      </section>
+      {picked.length > 0 && (
+        <div>
+          {/* Same optional chips as the list-view retire, so the two routes into the
+              same decision look and behave alike. Tapping the live chip clears it. */}
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Reason <span className="normal-case tracking-normal text-slate-400">(optional)</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {PLATE_RETIRE_REASONS.map(option => {
+              const on = reason === option;
+              return <button key={option} type="button"
+                onClick={() => setReason(on ? '' : option)}
+                className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                {option}
+              </button>;
+            })}
+          </div>
+          {reason === 'Other' && (
+            <Input className="mt-2" value={otherReason} placeholder="What happened to it? (optional)"
+              onChange={event => setOtherReason(event.target.value)} />
+          )}
+        </div>
+      )}
+      <div>
+        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Movements — every plate in this set</div>
+        <DataTable rows={detail.movements || []} columns={columns} empty="No movements recorded" />
       </div>
-      <DataTable rows={detail.movements || []} columns={columns} empty="No movements recorded" />
     </div>}
   </Modal>;
 }
@@ -455,6 +614,18 @@ export default function PlatesLifecycle() {
   const [reqView, setReqView] = useState('open');
   const [approvalView, setApprovalView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
+  // Rack selection + the ad-hoc issue dialog: plates handed straight to a job with
+  // no PR behind them.
+  const [rackPicked, setRackPicked] = useState([]);
+  // Size filter for the rack. Defaults to 'all' rather than the main size: filtering
+  // stock away before anyone asks is how a plate that IS on the rack reads as missing.
+  const [sizeView, setSizeView] = useState('all');
+  // Retire straight from the list — { rows, reason, note }. Retiring a whole set is
+  // the common case (the artwork changed, so all four plates are dead), and making
+  // someone open each set to tick four boxes is the slow way to say that.
+  const [retiring, setRetiring] = useState(null);
+  const [issuing, setIssuing] = useState(null);
+  const [openJobs, setOpenJobs] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -485,7 +656,38 @@ export default function PlatesLifecycle() {
     setRequirements(nextRequirements); setPos(nextPos); setGrns(nextGrns); setWarehouse(nextWarehouse);
     setReturns(nextReturns); setHistory(nextHistory); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
     setSelectedIds(current => current.filter(id => nextRequirements.some(row => row.id === id)));
+    setRackPicked(current => current.filter(id => nextWarehouse.some(row => row.id === id)));
     if (detail) setDetail(nextRequirements.find(row => row.id === detail.id) || null);
+  };
+  // Job cards for the ad-hoc issue picker. Fetched separately and tolerantly: the
+  // warehouse must still open if Job Cards is unavailable to this login.
+  useEffect(() => {
+    api.get('/job-cards')
+      .then(rows => setOpenJobs(rows.filter(row => row.status !== 'closed')))
+      .catch(() => setOpenJobs([]));
+  }, []);
+  const issuePlates = async () => {
+    const result = await api.post('/plates/assets/issue', {
+      asset_ids: issuing.rows.flatMap(row => row.asset_ids?.length ? row.asset_ids : [row.id]),
+      job_card_id: Number(issuing.job_card_id),
+      note: issuing.note || undefined,
+    });
+    toast.success(`${result.issued} plate(s) issued to ${result.jc_number}`
+      + (result.tooling_marked ? ' · tooling marked OK' : ''));
+    setIssuing(null); setRackPicked([]);
+    await load();
+  };
+  // Retire every plate in the chosen sets. The reason is optional; when 'Other' is
+  // picked the free text replaces it, otherwise the chip's own words are recorded.
+  const retirePlates = async () => {
+    const reason = retiring.reason === 'Other' ? retiring.note : (retiring.reason || retiring.note);
+    const result = await api.post('/plates/assets/retire', {
+      asset_ids: retiring.rows.flatMap(row => row.asset_ids?.length ? row.asset_ids : [row.id]),
+      reason: reason || undefined,
+    });
+    toast.success(`${result.retired} plate(s) retired to scrap`);
+    setRetiring(null); setRackPicked([]);
+    await load();
   };
   useEffect(() => { load().catch(error => toast.error(error.message || 'Could not load Plates')); }, []);
   useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 650 });
@@ -516,8 +718,37 @@ export default function PlatesLifecycle() {
   const canDeleteBulk = selectedRequirements.length > 0
     && selectedRequirements.every(row => ['draft','saved','pending'].includes(row.approval_status));
   const allViewSelected = reqRows.length > 0 && reqRows.every(row => selectedIds.includes(row.id));
-  const warehouseRows = warehouse.filter(row => row.status === 'available'
+  // Buying a plate is one job in three steps; the rail above keeps them together.
+  const PROCUREMENT_TABS = ['requirements', 'pos', 'grns'];
+  const PLATE_STAGES = [
+    { key: 'buy', label: 'Requirement → PO → GRN', tabs: PROCUREMENT_TABS,
+      dot: 'bg-violet-500', on: 'border-violet-200 bg-violet-50 text-violet-800',
+      badge: 'bg-violet-200/70 text-violet-900', hover: 'hover:text-violet-700',
+      count: () => reqGroups.open.length
+        + pos.filter(row => !['received','closed','reversed'].includes(row.status)).length
+        + grns.length },
+    { key: 'warehouse', label: 'Plates Warehouse', tabs: ['warehouse'],
+      dot: 'bg-sky-500', on: 'border-sky-200 bg-sky-50 text-sky-800',
+      badge: 'bg-sky-200/70 text-sky-900', hover: 'hover:text-sky-700',
+      count: () => warehouse.filter(row => row.status === 'available'
+        && [FRESH_PLATES_RACK, USED_PLATES_RACK].includes(row.rack_location)).length },
+    { key: 'returns', label: 'Return from Printing', tabs: ['returns'],
+      dot: 'bg-amber-500', on: 'border-amber-200 bg-amber-50 text-amber-800',
+      badge: 'bg-amber-200/70 text-amber-900', hover: 'hover:text-amber-700',
+      count: () => returns.length },
+    { key: 'history', label: 'History', tabs: ['history'],
+      dot: 'bg-slate-400', on: 'border-slate-300 bg-slate-100 text-slate-800',
+      badge: 'bg-slate-300/70 text-slate-800', hover: 'hover:text-slate-700',
+      count: () => history.length },
+  ];
+  const rackRows = warehouse.filter(row => row.status === 'available'
     && (warehouseView === 'fresh' ? row.rack_location === FRESH_PLATES_RACK : row.rack_location === USED_PLATES_RACK));
+  // The size filter narrows the TABLE only. The KPI strip keeps counting the whole
+  // rack, so the size cards stay a picture of what is in stock rather than echoing
+  // whichever chip happens to be pressed.
+  const warehouseRows = sizeView === 'all' ? rackRows : rackRows.filter(row => row.plate_size === sizeView);
+  // Counted in physical plates, not sets — a row here is a set of four.
+  const rackSummary = plateRackSummary(rackRows);
 
   const openRequirement = row => { setDetail(row); setEditForm(requirementDraft(row)); setNewPantone(''); };
   const refreshDetail = async () => {
@@ -659,14 +890,28 @@ export default function PlatesLifecycle() {
   const warehouseColumns = [
     { key: 'asset_number', label: 'Plate Set', render: row => <span><b className="font-mono text-xs">{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
-    { key: 'component_label', label: 'Contains', render: row => <span className="font-semibold">{row.contains || row.component_label}<span className="block text-[11px] font-normal text-slate-400">{row.plate_size}</span></span> },
+    { key: 'component_label', label: 'Contains', render: row => <span className="font-semibold">{row.contains || row.component_label}</span> },
+    // Size earns its own sortable column: it is how the rack is physically organised
+    // and the first thing asked when a job needs plates.
+    { key: 'plate_size', label: 'Size', render: row => <span className="whitespace-nowrap font-mono text-xs font-bold text-slate-700">{row.plate_size || '—'}</span> },
     { key: 'artwork_version', label: 'Output / Artwork', render: row => <span>{row.output_number || '—'}<span className="block text-[11px] text-slate-400">{row.artwork_version}</span></span> },
     { key: 'rack_location', label: 'Storage', render: row => row.rack_location || '—' },
     { key: 'use_count', label: 'Uses', align: 'right' },
     { key: 'last_used_at', label: 'Last Used', render: row => fmt.date(row.last_used_at) },
     { key: 'age_days', label: 'Age', align: 'right', render: row => `${row.age_days || 0} d` },
     { key: 'status', label: 'Status', render: row => <StatusChip value={row.status} /> },
-    { key: 'actions', label: '', sortable: false, render: row => <Button size="sm" variant="secondary" onClick={event => { event.stopPropagation(); setAssetHistory(row); }}><History size={12} /></Button> },
+    // Retire the whole set from the LIST — the usual reason (artwork changed, set
+    // damaged) kills every plate in it, so making someone open the set to tick each
+    // plate is the slow way to say one thing.
+    { key: 'actions', label: '', sortable: false, render: row => (
+      <div className="flex items-center justify-end gap-1">
+        {canManage() && <Button size="sm" variant="ghost" title={`Retire all ${row.qty || row.components?.length || 1} plates in this set`}
+          onClick={event => { event.stopPropagation(); setRetiring({ rows: [row], reason: '', note: '' }); }}>
+          <Trash2 size={12} />
+        </Button>}
+        <Button size="sm" variant="secondary" onClick={event => { event.stopPropagation(); setAssetHistory(row); }}><History size={12} /></Button>
+      </div>
+    ) },
   ];
   const returnColumns = [
     { key: 'asset_number', label: 'Plate Set', render: row => <span><b>{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
@@ -674,6 +919,24 @@ export default function PlatesLifecycle() {
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     { key: 'component_label', label: 'Contains', render: row => <span>{row.contains || row.component_label}<span className="block text-[11px] text-slate-400">{row.plate_size}</span></span> },
     { key: 'jc_number', label: 'Job Card' },
+    // How much life this set has already had. Shown, never enforced — the decision
+    // stays with the person holding the plate.
+    { key: 'use_count', label: 'Uses', align: 'right', render: row => {
+      const uses = Number(row.use_count) || 0;
+      return <span className="tabular-nums font-bold">{uses}</span>;
+    } },
+    // The press's verdict is why a mixed job arrives here as two cards rather than
+    // one, so it has to be legible — a Damaged card carries its reason beneath it.
+    { key: 'condition', label: 'Press Says', render: row => {
+      const condition = row.condition || 'Good';
+      const tone = condition === 'Damaged' ? 'bg-red-50 text-red-700'
+        : condition === 'Fair' ? 'bg-amber-50 text-amber-700'
+        : 'bg-emerald-50 text-emerald-700';
+      return <span>
+        <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-bold ${tone}`}>{condition}</span>
+        {row.operator_note && <span className="mt-0.5 block text-[11px] text-slate-500">{row.operator_note}</span>}
+      </span>;
+    } },
     { key: 'returned_by', label: 'Returned By' },
     { key: 'return_date', label: 'Returned', render: row => fmt.dt(row.return_date) },
     { key: 'previous_location', label: 'Previous Rack', render: row => row.previous_location || row.rack_location || '—' },
@@ -698,22 +961,69 @@ export default function PlatesLifecycle() {
   return <div className="space-y-4">
     <PageHeader title="Plates" subtitle="Job Card requirement → physical verification → approval → PO → GRN → printing → return"
       actions={canManage() ? <Button variant="secondary" onClick={() => { window.location.href='/masters?tab=plates'; }}><Printer size={15} /> Plate Master</Button> : null} />
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-      <KpiCard compact label="Verify Existing" value={counts.verify} icon={FileCheck2} tone={counts.verify ? 'warn' : 'neutral'} />
-      <KpiCard compact label="Approval Required" value={counts.approval} icon={ClipboardCheck} tone={counts.approval ? 'warn' : 'neutral'} />
-      <KpiCard compact label="On Order" value={counts.ordered} icon={Truck} />
-      <KpiCard compact label="Jobs Ready" value={counts.ready} icon={CheckCircle2} tone="good" />
-      <KpiCard compact label="Returns to Verify" value={returns.length} icon={Warehouse} tone={returns.length ? 'warn' : 'neutral'} />
+    {/* The strip follows the TAB. It used to be five requirement counters that sat
+        frozen at zero while you were reading the warehouse — a band of chrome that
+        answered a question you had not asked. Each tab now states its own figures. */}
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {tab === 'warehouse' ? <>
+        <KpiCard compact label={warehouseView === 'fresh' ? 'Fresh rack' : 'Used rack'}
+          value={rackSummary.total} icon={Warehouse} tone={rackSummary.total ? 'good' : 'neutral'} />
+        {/* Wear leads, shelf age sits under it. Age alone cannot separate a plate cut
+            in March that has run eleven times from one cut in March that has never
+            run — and it is the first that gets issued by mistake. */}
+        <KpiCard compact label="Average wear"
+          value={`${rackSummary.avg_runs} ${rackSummary.avg_runs === 1 ? 'run' : 'runs'}`}
+          sub={`${rackSummary.avg_age_days} d on the shelf`} icon={History} />
+        {rackSummary.by_size.map(row => (
+          <KpiCard key={row.plate_size} compact label={row.plate_size} value={row.plates} icon={Layers} />
+        ))}
+      </> : tab === 'returns' ? <>
+        <KpiCard compact label="Sets to verify" value={returns.length} icon={Warehouse} tone={returns.length ? 'warn' : 'neutral'} />
+        <KpiCard compact label="Plates waiting" value={returns.reduce((sum, row) => sum + (row.qty || 1), 0)} icon={Layers} />
+        {/* Accumulator deliberately not named `worst`: board-state-one-name.test.js
+            greps for `reduce((worst` to stop the board collapse being re-spelled,
+            and this is a plain maximum over run counts. */}
+        <KpiCard compact label="Most runs waiting"
+          value={returns.reduce((highest, row) => Math.max(highest, Number(row.use_count) || 0), 0)} icon={History} />
+        <KpiCard compact label="Damaged returns"
+          value={returns.filter(row => row.condition === 'Damaged').length} icon={AlertTriangle}
+          tone={returns.some(row => row.condition === 'Damaged') ? 'warn' : 'neutral'} />
+      </> : <>
+        <KpiCard compact label="Verify Existing" value={counts.verify} icon={FileCheck2} tone={counts.verify ? 'warn' : 'neutral'} />
+        <KpiCard compact label="Approval Required" value={counts.approval} icon={ClipboardCheck} tone={counts.approval ? 'warn' : 'neutral'} />
+        <KpiCard compact label="On Order" value={counts.ordered} icon={Truck} />
+        <KpiCard compact label="Jobs Ready" value={counts.ready} icon={CheckCircle2} tone="good" />
+      </>}
     </div>
-    <Tabs active={tab} onChange={setTab} tabs={[
-      { key:'requirements',label:'Plate Requirements / PR',count:reqGroups.open.length },
-      { key:'pos',label:'Purchase Orders',count:pos.filter(row=>!['received','closed','reversed'].includes(row.status)).length },
-      { key:'grns',label:'GRN',count:grns.length },
-      { key:'warehouse',label:'Plates Warehouse',count:warehouse.filter(row => row.status === 'available'
-        && [FRESH_PLATES_RACK, USED_PLATES_RACK].includes(row.rack_location)).length },
-      { key:'returns',label:'Return from Printing',count:returns.length },
-      { key:'history',label:'History',count:history.length },
-    ]} />
+    {/* Four stages of a plate's life, not six screens. Buying one — raise the need,
+        order it, receive it — is a single continuous job done by a single person, so
+        PR/PO/GRN live behind one chip with their own step rail inside. The rack, the
+        press returns and the archive are genuinely separate places and stay separate.
+        Colour carries the stage: violet while it is being bought, sky once it is
+        stock, amber while the press still owes it back, slate for the archive. */}
+    <div className="flex flex-wrap items-center gap-2">
+      {PLATE_STAGES.map(stage => {
+        const on = stage.tabs.includes(tab);
+        const count = stage.count();
+        return (
+          <button key={stage.key} type="button"
+            onClick={() => setTab(stage.tabs[0])}
+            className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-bold transition-colors ${on ? stage.on : `border-transparent text-slate-500 hover:bg-slate-100 ${stage.hover}`}`}>
+            <span className={`h-2 w-2 rounded-full ${stage.dot}`} />
+            {stage.label}
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? stage.badge : 'bg-slate-200/70 text-slate-600'}`}>{count}</span>
+          </button>
+        );
+      })}
+    </div>
+    {/* The buying steps, only while you are in that stage. */}
+    {PROCUREMENT_TABS.includes(tab) && (
+      <SubTabs active={tab} onChange={setTab} views={[
+        { key:'requirements',label:'Requirement / PR',count:reqGroups.open.length },
+        { key:'pos',label:'Purchase Orders',count:pos.filter(row=>!['received','closed','reversed'].includes(row.status)).length },
+        { key:'grns',label:'GRN',count:grns.length },
+      ]}/>
+    )}
     {tab==='requirements' && <>
       {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
         <b className="mr-auto text-sm text-brand-900">{selectedIds.length} selected</b>
@@ -727,28 +1037,179 @@ export default function PlatesLifecycle() {
           description:'This permanently removes every selected editable Plate PR. The entire action is blocked if any selected PR has approval, PO, GRN or production activity.',
         })}><Trash2 size={13} /> Delete PRs</Button>
       </div>}
-      <SubTabs active={reqView} onChange={value=>{setReqView(value);setSelectedIds([]);}} views={[
-      {key:'open',label:'Open',count:reqGroups.open.length},
-      {key:'converted',label:'Converted',count:reqGroups.converted.length},
-      {key:'ready',label:'Ready',count:reqGroups.ready.length},
-      {key:'all',label:'All',count:requirements.length},
-    ]}/>
-      {reqView !== 'converted' && <SubTabs active={approvalView} onChange={value=>{setApprovalView(value);setSelectedIds([]);}} views={[
-        {key:'all',label:'All approvals',count:lifecycleRows.length},
-        {key:'approved',label:'Approved',count:lifecycleRows.filter(row=>approvedStatuses.has(row.approval_status)).length},
-        {key:'unapproved',label:'Unapproved',count:lifecycleRows.filter(row=>!approvedStatuses.has(row.approval_status)).length},
-      ]}/>}
+      {/* One line, two questions: WHICH requirements (the stage they are at) and, in
+          a lighter weight beside it, whether they are approved. Two full-width chip
+          bands stacked on top of each other read as one undifferentiated wall — and
+          the approval question only ever narrows the stage you have already chosen,
+          so it should never carry the same visual weight. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SubTabs active={reqView} onChange={value=>{setReqView(value);setSelectedIds([]);}} views={[
+          {key:'open',label:'Open',count:reqGroups.open.length},
+          {key:'converted',label:'Converted',count:reqGroups.converted.length},
+          {key:'ready',label:'Ready',count:reqGroups.ready.length},
+          {key:'all',label:'All',count:requirements.length},
+        ]}/>
+        {reqView !== 'converted' && (
+          <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+            {[
+              // "All approvals", not "All": the stage filter beside it already has an
+              // "All", and two identical chips a centimetre apart meaning different
+              // things is worse than the extra word.
+              { key: 'all', label: 'All approvals', count: lifecycleRows.length },
+              { key: 'approved', label: 'Approved', count: lifecycleRows.filter(row=>approvedStatuses.has(row.approval_status)).length },
+              { key: 'unapproved', label: 'Unapproved', count: lifecycleRows.filter(row=>!approvedStatuses.has(row.approval_status)).length },
+            ].map(option => {
+              const on = approvalView === option.key;
+              return (
+                <button key={option.key} type="button"
+                  onClick={()=>{setApprovalView(option.key);setSelectedIds([]);}}
+                  className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  {option.label}<span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{option.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <DataTable searchable selectable rows={reqRows} columns={requestColumns}
       selectedIds={selectedIds}
       onToggleRow={(row, checked) => setSelectedIds(current => checked ? [...new Set([...current,row.id])] : current.filter(id => id !== row.id))}
       onToggleAll={(rows, checked) => { const ids=rows.map(row=>row.id); setSelectedIds(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}
       onRowClick={openRequirement} empty="No plate requirements in this view" exportName="Plate Requirements" /></>}
+    {/* Retire from the list view. Whole sets, no drill-in: the reasons that kill a
+        plate usually kill the set it belongs to. The reason is OPTIONAL — offered as
+        one-tap chips so recording it is easier than skipping it, never as a gate. */}
+    {retiring && <Modal open onClose={()=>setRetiring(null)}
+      title={`Retire ${retiring.rows.reduce((sum,row)=>sum+(row.qty||row.components?.length||1),0)} plate(s)`}
+      footer={<>
+        <Button variant="secondary" onClick={()=>setRetiring(null)}>Cancel</Button>
+        <Button variant="danger" onClick={()=>retirePlates().catch(error=>toast.error(error.message))}>
+          <Trash2 size={14}/> Retire to scrap
+        </Button>
+      </>}>
+      <div className="space-y-4">
+        <div className="ci-summary-panel text-xs text-slate-600">
+          These plates leave the rack for <b>Scrap</b> and stop being offered for reuse.
+          Anything already on a press is skipped.
+        </div>
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>Going to scrap</span><span>{retiring.rows.length} set(s)</span></div>
+          <div>{retiring.rows.map(row=>(
+            <div key={row.id} className="flex items-center gap-3 border-b border-slate-100 py-1.5 last:border-0">
+              <span className="min-w-0 flex-1">
+                <b className="text-sm text-slate-800">{row.contains || row.component_label}</b>
+                <span className="block font-mono text-[10px] text-slate-400">
+                  {row.qty || row.components?.length || 1} plate set · {row.plate_size} · {row.product_name}
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-sm font-bold tabular-nums text-slate-700">{row.use_count || 0}</span>
+                <span className="block text-[10px] text-slate-400">runs</span>
+              </span>
+            </div>
+          ))}</div>
+        </section>
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Reason <span className="normal-case tracking-normal text-slate-400">(optional)</span></div>
+          <div className="flex flex-wrap gap-1.5">
+            {PLATE_RETIRE_REASONS.map(option=>{
+              const on = retiring.reason === option;
+              return <button key={option} type="button"
+                onClick={()=>setRetiring(current=>({...current, reason: on ? '' : option}))}
+                className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                {option}
+              </button>;
+            })}
+          </div>
+        </div>
+        {(retiring.reason === 'Other' || retiring.note) && (
+          <Field label="Note"><Input value={retiring.note} placeholder="Anything worth recording (optional)"
+            onChange={event=>setRetiring(current=>({...current, note:event.target.value}))} /></Field>
+        )}
+      </div>
+    </Modal>}
+    {/* Ad-hoc issue: the rack already holds the plates, so the job takes them without
+        a PR being raised to buy what exists. It still lands on a JOB, so the plate
+        returns through the normal completion flow. */}
+    {issuing && <Modal open onClose={()=>setIssuing(null)} title={`Issue ${issuing.rows.length} plate set(s) from the rack`}
+      footer={<>
+        <Button variant="secondary" onClick={()=>setIssuing(null)}>Cancel</Button>
+        <Button disabled={!issuing.job_card_id} onClick={()=>issuePlates().catch(error=>toast.error(error.message))}>
+          <Send size={14}/> Issue &amp; mark tooling
+        </Button>
+      </>}>
+      <div className="space-y-4">
+        <div className="ci-summary-panel text-xs text-slate-600">
+          {issuing.rows.reduce((sum,row)=>sum+(row.qty||row.components?.length||1),0)} plates across {issuing.rows.length} set(s).
+          Issuing marks this job's tooling gate satisfied, so the readiness light stops asking for plates it already has.
+        </div>
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>Plates going out</span><span>from the {warehouseView === 'fresh' ? 'Fresh' : 'Used'} rack</span></div>
+          <div>{issuing.rows.map(row=><div key={row.id} className="flex items-center gap-3 border-b border-slate-100 py-1.5 last:border-0">
+            <span className="min-w-0 flex-1"><b className="text-sm text-slate-800">{row.contains || row.component_label}</b>
+              <span className="block font-mono text-[10px] text-slate-400">{row.asset_number} · {row.plate_size}</span></span>
+            <span className="shrink-0 text-right"><span className="block text-sm font-bold tabular-nums text-slate-700">{row.use_count || 0}</span>
+              <span className="block text-[10px] text-slate-400">runs</span></span>
+          </div>)}</div>
+        </section>
+        <Field label="Issue to job card" required>
+          <SearchableSelect value={issuing.job_card_id}
+            onChange={event=>setIssuing(current=>({...current, job_card_id:event.target.value}))}>
+            <option value="">Choose the job these plates are for</option>
+            {openJobs.map(job=><option key={job.id} value={job.id}>{job.jc_number} · {job.product_name}</option>)}
+          </SearchableSelect>
+        </Field>
+        <Field label="Note"><Input value={issuing.note}
+          onChange={event=>setIssuing(current=>({...current, note:event.target.value}))}
+          placeholder="Why these are going out without a PR (optional)" /></Field>
+      </div>
+    </Modal>}
     {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
     {tab==='grns' && <DataTable searchable rows={grns} columns={grnColumns} empty="No Plate GRNs" exportName="Plate GRN Register" />}
-    {tab==='warehouse' && <><SubTabs active={warehouseView} onChange={setWarehouseView} views={[
-      {key:'fresh',label:FRESH_PLATES_RACK,count:warehouse.filter(row=>row.status==='available'&&row.rack_location===FRESH_PLATES_RACK).length},
-      {key:'used',label:USED_PLATES_RACK,count:warehouse.filter(row=>row.status==='available'&&row.rack_location===USED_PLATES_RACK).length},
-    ]}/><DataTable searchable rows={warehouseRows} columns={warehouseColumns} onRowClick={setAssetHistory} empty="No available plate sets in this rack" exportName="Plates Warehouse" /></>}
+    {tab==='warehouse' && <>
+      {/* Rack switch sits with the selection bar rather than on a band of its own —
+          the KPI strip above already names which rack you are in. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SubTabs active={warehouseView} onChange={value=>{setWarehouseView(value);setRackPicked([]);}} views={[
+          {key:'fresh',label:'Fresh',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===FRESH_PLATES_RACK).length},
+          {key:'used',label:'Used',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===USED_PLATES_RACK).length},
+        ]}/>
+        {/* Size sits BESIDE the rack switch, not on a rail of its own — a second full
+            band of chips is what made this page read as clutter. Lighter weight than
+            the rack tabs because it narrows a view rather than changing which view
+            you are in. 600 x 730 leads: it is the plant's main offset size. */}
+        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+          {[{ key: 'all', label: 'All sizes' }, ...PLATE_SIZES_IN_ORDER.map(size => ({ key: size, label: size }))].map(option => {
+            const on = sizeView === option.key;
+            const plates = option.key === 'all'
+              ? rackSummary.total
+              : (rackSummary.by_size.find(row => row.plate_size === option.key)?.plates || 0);
+            return (
+              <button key={option.key} type="button"
+                onClick={() => { setSizeView(option.key); setRackPicked([]); }}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                {option.label}<span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{plates}</span>
+              </button>
+            );
+          })}
+        </div>
+        {rackPicked.length > 0 && <div className="ml-auto flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5">
+          <b className="text-sm text-brand-900">{rackPicked.length} plate set(s) ticked</b>
+          <Button size="sm" variant="ghost" onClick={()=>setRackPicked([])}>Clear</Button>
+          {canManage() && <Button size="sm" onClick={()=>setIssuing({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), job_card_id:'', note:'' })}>
+            <Send size={13}/> Issue to a Job
+          </Button>}
+          {canManage() && <Button size="sm" variant="danger" onClick={()=>setRetiring({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), reason:'', note:'' })}>
+            <Trash2 size={13}/> Retire
+          </Button>}
+        </div>}
+      </div>
+      <DataTable searchable selectable rows={warehouseRows} columns={warehouseColumns}
+        selectedIds={rackPicked}
+        onToggleRow={(row,checked)=>setRackPicked(current=>checked?[...current,row.id]:current.filter(id=>id!==row.id))}
+        onToggleAll={(rows,checked)=>{ const ids=rows.map(row=>row.id); setRackPicked(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}
+        onRowClick={setAssetHistory} empty="No available plate sets in this rack" exportName="Plates Warehouse" />
+    </>}
     {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} empty="No plates awaiting return verification" exportName="Plate Returns" />}
     {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} empty="No plate movements" exportName="Plate Movement History" />}
 
@@ -803,7 +1264,10 @@ export default function PlatesLifecycle() {
         <Field label="Remarks"><Textarea value={editForm.notes} disabled={!detailEditable} onChange={event=>setEditForm(current=>({...current,notes:event.target.value}))}/></Field>
         {detail.components.some(component=>component.status==='verification_required') && <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Physical verification required</span><span>{detail.components.filter(component=>component.status==='verification_required').length} plates</span></div>
           <div className="space-y-2">{detail.components.filter(component=>component.status==='verification_required').map(component=><div key={component.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 py-2">
-            <div><b className="text-sm">{component.component_label}</b><span className="ml-2 text-xs text-slate-500">{component.proposed_asset_number} · {component.proposed_rack_location||'rack pending'}</span></div>
+            {/* This row IS the reuse decision — whether an existing rack plate is good
+                enough to print again. The API already returns both age signals; showing
+                them costs nothing and is the whole point of tracking a plate's life. */}
+            <div><b className="text-sm">{component.component_label}</b><span className="ml-2 text-xs text-slate-500">{component.proposed_asset_number} · {component.proposed_rack_location||'rack pending'} · used {component.proposed_use_count||0} times{component.proposed_last_used_at?` · last ${fmt.date(component.proposed_last_used_at)}`:''}</span></div>
             {canVerify()&&<Button size="sm" variant="secondary" onClick={()=>setVerifying(component)}><FileCheck2 size={12}/> Verify</Button>}
           </div>)}</div>
         </section>}
@@ -819,7 +1283,7 @@ export default function PlatesLifecycle() {
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
     {grnModal && <PlateGrnModal po={grnModal.po} line={grnModal.line} onClose={()=>setGrnModal(null)} onSaved={load}/>}
     {returnModal && <ReturnModal asset={returnModal} onClose={()=>setReturnModal(null)} onSaved={load}/>}
-    {assetHistory && <AssetHistoryModal asset={assetHistory} onClose={()=>setAssetHistory(null)}/>}
+    {assetHistory && <AssetHistoryModal asset={assetHistory} onClose={()=>setAssetHistory(null)} onChanged={load}/>}
     {reasonAction && <ReasonActionModal action={reasonAction} onClose={()=>setReasonAction(null)} onConfirm={performReasonAction}/>}
   </div>;
 }

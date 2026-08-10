@@ -50,6 +50,10 @@ const OF_KIND = Object.freeze({
   ready_override: 'decisions',
   xs_cutting: 'alerts',
   xs_received: 'alerts',
+  // A plate died on the press and the run is standing still. Nobody approves it —
+  // CTP simply has to make another — so it is a plant alert, not an approval, and
+  // it goes to management, planning, the press and CTP at once.
+  plate_replacement: 'alerts',
   // A stage sent back one station. It files here rather than under `approvals`
   // because the receiving station has nothing to decide — the call was already
   // made upstream and this is the answer arriving. Same shape as
