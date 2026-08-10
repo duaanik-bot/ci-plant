@@ -11,7 +11,7 @@ import {
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
-  unbankPlanningLeftover, assertBoardHoldCapacity, releasePlanLockHolds,
+  unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
@@ -951,6 +951,9 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
     // board — replaceMixPlan mirrors every mix row into board_allocations — and
     // that is precisely what this route's discard twin exists to give back.
     const draft = !!req.body.draft;
+    // Boards the run's mix planned but the shelf could not cover. Collected
+    // inside the transaction, spoken after it commits — the plan is saved.
+    const boardShortfalls = [];
     await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
@@ -1362,7 +1365,11 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         if (!runBal.sufficient) throw Object.assign(
           new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — allocate ${Math.ceil(runBal.balance)} more`),
           { status: 409 });
-        await assertBoardHoldCapacity(runRows, lines.map(l => l.id), qc);
+        // CAPPED, NEVER REFUSED — same rule as a single line's lock. Measured
+        // ONCE at run level; the map is then drawn down by each member's
+        // replaceMixPlan so the run's members share one ceiling.
+        const { caps: mixCaps, shortfalls } = await boardHoldCaps(runRows, lines.map(l => l.id), qc);
+        boardShortfalls.push(...shortfalls);
 
         // The waterfall walks COVERS whenever some merge row's cuts differ
         // from the planned ups (splitScaledMixAcrossMembers's own comment
@@ -1390,7 +1397,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
               covers: scaled ? r.covers : rowCovers({ sheets: r.sheets, ups, plannedUps }) });
           }
           if (!rows.length) continue;   // a member needing nothing carries none
-          await replaceMixPlan(share.member_id, rows, qc, req.user.name);
+          await replaceMixPlan(share.member_id, rows, qc, req.user.name, mixCaps);
         }
         await audit('gang_run', gang.id, 'board_mix',
           runRows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
@@ -1462,7 +1469,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         + adoptedChildNote,
         qc, req.user.name);
     });
-    res.json(await gangDetail(+req.params.id));
+    res.json({ ...await gangDetail(+req.params.id), board_shortfalls: boardShortfalls });
   } catch (e) { next(e); }
 });
 

@@ -1008,7 +1008,12 @@ export async function mixFor(orderLineId, phase = 'plan', qc) {
 // entry immediately after calling this. Logging here too would double the
 // timeline entry for every mix save. (clearMixPlan below DOES audit itself —
 // it is the only place that clears a mix, so there is no caller to double up.)
-export async function replaceMixPlan(orderLineId, rows, qc, user) {
+// `caps` (from boardHoldCaps) is the per-board ceiling the HOLDS must respect.
+// The mix PLAN is always written whole — job_board_mix is what coverage reads,
+// so a job planned onto board the shelf cannot yet cover still reads covered,
+// and its shortfall is reported by the warehouse rather than by refusing the
+// plan. Omit `caps` to hold exactly what is planned (the pre-cap behaviour).
+export async function replaceMixPlan(orderLineId, rows, qc, user, caps = null) {
   // Release BEFORE delete — see releaseMixHolds's comment. Deleting the old
   // job_board_mix rows first would null the job_board_mix_id link on their
   // holds (ON DELETE SET NULL) before this UPDATE ever runs, and those holds
@@ -1057,6 +1062,15 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
   }
 
   await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
+  // Drawn down per board as the rows are written, so two rows on the SAME
+  // board share one ceiling instead of each spending it in full.
+  //
+  // DELIBERATELY MUTATES the caller's map. A gang's run mix is measured once
+  // and then written member by member, so the members must spend ONE run-level
+  // ceiling between them — handing each call a private copy would let every
+  // member hold the whole free shelf and re-create the double-hold this cap
+  // exists to prevent.
+  const room = caps || null;
   for (const r of rows) {
     const [mix] = await qc(
       `INSERT INTO job_board_mix
@@ -1064,11 +1078,25 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,'plan',$8,$9) RETURNING id`,
       [orderLineId, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
        r.role, r.reason ?? null, user]);
-    await qc(
-      `INSERT INTO board_allocations
-         (material_id, order_line_id, qty, source, status, reason, created_by, job_board_mix_id)
-       VALUES ($1,$2,$3,'stock','active',$4,$5,$6)`,
-      [r.material_id, orderLineId, r.sheets, r.reason || 'board mix', user, mix.id]);
+    let hold = Number(r.sheets);
+    if (room) {
+      const mid = Number(r.material_id);
+      // A board with no entry in `caps` was never measured — hold it in full
+      // rather than silently holding nothing.
+      const left = room.has(mid) ? Math.max(0, room.get(mid)) : hold;
+      hold = Math.min(hold, left);
+      if (room.has(mid)) room.set(mid, left - hold);
+    }
+    // A row capped to nothing writes no hold at all. The mix row above still
+    // stands, so the plan and its coverage are unchanged — there is simply no
+    // board on the shelf to reserve against it yet.
+    if (hold > 0) {
+      await qc(
+        `INSERT INTO board_allocations
+           (material_id, order_line_id, qty, source, status, reason, created_by, job_board_mix_id)
+         VALUES ($1,$2,$3,'stock','active',$4,$5,$6)`,
+        [r.material_id, orderLineId, hold, r.reason || 'board mix', user, mix.id]);
+    }
   }
 }
 
@@ -1336,10 +1364,25 @@ export async function boardClaimLines(materialIds = null, excludeLineIds = [], q
 const fmtSheets = n => Math.round(Number(n) || 0).toLocaleString('en-IN');
 
 // A Board Mix save writes active stock holds. That is a reservation, so it may
-// only spend board left after OTHER jobs' live claims and active holds. If more
-// is needed, the planner must use the explicit board-move flow, which names the
-// giving job and reopens purchase responsibility there.
-export async function assertBoardHoldCapacity(rows = [], ownerLineIds = [], qc = q) {
+// only spend board left after OTHER jobs' live claims and active holds — but a
+// mix that wants more than the shelf has left is a SHORTFALL, never a refusal.
+//
+// This used to throw BOARD_NOT_FREE the moment the mix outgrew free stock, and
+// that was wrong twice over. It disagreed with the no-mix freeze in orders.js,
+// which has always CAPPED and said so in the plant's own words: "physics hard,
+// paperwork soft — the uncovered remainder is exactly what the warehouse's
+// Shortfall column reports". And BOARD_NOT_FREE sat in the client's
+// HANDLED_CODES with no caller drawing a dialog for it, so the refusal arrived
+// SILENTLY — Lock Plan simply did nothing, no toast, no error. The planner who
+// raised wastage past what the board covered read that as "I cannot set the
+// wastage above 200", because the last figure that saved was the default.
+//
+// So this now RETURNS the ceiling each board's hold must respect, plus the
+// shortfall a capped board carries so the caller can say it out loud. The mix
+// PLAN (job_board_mix) is still written in full — coverage is read from there,
+// so a capped hold never makes a planned job read short.
+export async function boardHoldCaps(rows = [], ownerLineIds = [], qc = q) {
+  const empty = { caps: new Map(), shortfalls: [] };
   const wanted = new Map();
   for (const r of rows) {
     const mid = Number(r.material_id);
@@ -1348,7 +1391,7 @@ export async function assertBoardHoldCapacity(rows = [], ownerLineIds = [], qc =
     wanted.set(mid, (wanted.get(mid) || 0) + sheets);
   }
   const materialIds = [...wanted.keys()];
-  if (!materialIds.length) return;
+  if (!materialIds.length) return empty;
 
   const [materials, allocations, claimLines] = await Promise.all([
     qc(`
@@ -1364,6 +1407,8 @@ export async function assertBoardHoldCapacity(rows = [], ownerLineIds = [], qc =
   ]);
   const mats = new Map(materials.map(m => [Number(m.id), m]));
 
+  const caps = new Map();
+  const shortfalls = [];
   for (const [materialId, sheets] of wanted) {
     const mat = mats.get(materialId);
     const budget = stockHoldBudget({
@@ -1373,21 +1418,25 @@ export async function assertBoardHoldCapacity(rows = [], ownerLineIds = [], qc =
       claimLines,
       ownerLineIds,
     });
+    caps.set(materialId, budget.free);
     if (sheets <= budget.free + 1e-6) continue;
     const held = budget.held > 0 ? ` and ${fmtSheets(budget.held)} already held by saved drafts/cover` : '';
     const claim = budget.committed > 0 ? `${fmtSheets(budget.committed)} already covered for live jobs` : 'no live job claim';
     const name = mat?.name || `material ${materialId}`;
-    throw Object.assign(
-      new Error(`${name}: only ${fmtSheets(budget.free)} sheets are free; ${claim}${held}. Use Take from another job to move board intentionally.`),
-      { status: 409, body: {
-        code: 'BOARD_NOT_FREE',
-        material_id: materialId,
-        requested: Math.round(sheets),
-        free: Math.round(budget.free),
-        committed: Math.round(budget.committed),
-        held: Math.round(budget.held),
-      } });
+    shortfalls.push({
+      material_id: materialId,
+      board_name: name,
+      requested: Math.round(sheets),
+      free: Math.round(budget.free),
+      short: Math.round(sheets - budget.free),
+      committed: Math.round(budget.committed),
+      held: Math.round(budget.held),
+      // The sentence the planner reads. Same facts the 409 used to carry, minus
+      // the refusal — the plan is saved by the time this is spoken.
+      message: `${name}: planned ${fmtSheets(sheets)} sheets but only ${fmtSheets(budget.free)} are free — ${fmtSheets(sheets - budget.free)} short (${claim}${held}). Held what was free; buy the rest or use Take from another job.`,
+    });
   }
+  return { caps, shortfalls };
 }
 
 // The order line a JOB CARD reads its spec from. A plain card has its own

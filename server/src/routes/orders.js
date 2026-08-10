@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, boardDrawnLineIds, assertBoardHoldCapacity } from '../helpers.js';
+import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
@@ -1245,6 +1245,9 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
     // committed figure and reaches no station. That is what makes this safe to
     // offer — a half-finished plan cannot quietly start competing for stock.
     const draft = !!req.body.draft;
+    // Boards the mix planned but the shelf could not cover. Collected inside the
+    // transaction, spoken after it commits: the plan is saved either way.
+    const boardShortfalls = [];
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
@@ -1671,8 +1674,14 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
             [JSON.stringify(v2Plan), line.id]);
         }
 
-        await assertBoardHoldCapacity(rows, [line.id], qc);
-        await replaceMixPlan(line.id, rows, qc, req.user.name);
+        // CAPPED, NEVER REFUSED — the same rule the no-mix freeze below applies.
+        // The mix is written whole; only its HOLDS are limited to free stock,
+        // and whatever could not be held is reported back for the planner to
+        // read. Refusing here made Lock Plan die silently the moment a raised
+        // wastage outgrew the shelf.
+        const { caps: mixCaps, shortfalls } = await boardHoldCaps(rows, [line.id], qc);
+        boardShortfalls.push(...shortfalls);
+        await replaceMixPlan(line.id, rows, qc, req.user.name, mixCaps);
         await audit('order_line', line.id, 'board_mix',
           rows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
           qc, req.user.name);
@@ -1838,7 +1847,7 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         + loNote + ')', qc, req.user.name);
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
-    res.json({ ...out, readiness: await readiness(out) });
+    res.json({ ...out, readiness: await readiness(out), board_shortfalls: boardShortfalls });
   } catch (e) { next(e); }
 });
 

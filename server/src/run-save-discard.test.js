@@ -20,7 +20,9 @@ const SRC = dirname(fileURLToPath(import.meta.url));
 const read = p => readFileSync(join(SRC, p), 'utf8');
 const gangs = read('routes/gangs.js');
 const orders = read('routes/orders.js');
+const helpers = read('helpers.js');
 const planning = read('../../client/src/pages/Planning.jsx');
+const api = read('../../client/src/api.js');
 
 // ── The draft save ──────────────────────────────────────────────────────────
 
@@ -218,10 +220,35 @@ test("the run's own members are excluded from its free figure", () => {
 });
 
 test('Board Mix save is capped by actually free stock on both line and run routes', () => {
-  assert.match(orders, /assertBoardHoldCapacity\(rows, \[line\.id\], qc\)/,
-    'a single-line Board Mix save must re-check free stock before writing holds');
-  assert.match(gangs, /assertBoardHoldCapacity\(runRows, lines\.map\(l => l\.id\), qc\)/,
+  assert.match(orders, /boardHoldCaps\(rows, \[line\.id\], qc\)/,
+    'a single-line Board Mix save must re-measure free stock before writing holds');
+  assert.match(gangs, /boardHoldCaps\(runRows, lines\.map\(l => l\.id\), qc\)/,
     'a run Board Mix save must use all member ids as its own hold scope');
+  // The cap must actually reach the writer — measuring and then ignoring it
+  // would hold the full mix against a shelf that cannot cover it.
+  assert.match(orders, /replaceMixPlan\(line\.id, rows, qc, req\.user\.name, mixCaps\)/,
+    'the line mix must be written under its measured cap');
+  assert.match(gangs, /replaceMixPlan\(share\.member_id, rows, qc, req\.user\.name, mixCaps\)/,
+    'every run member must write its share under the run’s ONE shared cap');
+});
+
+// The refusal this replaced was invisible: BOARD_NOT_FREE was listed in the
+// client's HANDLED_CODES (which suppresses the central toast) while no screen
+// drew a dialog for it, so a Board Mix that outgrew free stock made Lock Plan
+// do nothing at all. On the floor that reads as a ceiling on the wastage field
+// — the last figure that saved was the default. Capping is only half the fix;
+// the plan must also SAY what it could not hold.
+test('a capped Board Mix reports its shortfall instead of refusing in silence', () => {
+  assert.doesNotMatch(helpers, /code: 'BOARD_NOT_FREE'/,
+    'the mix cap must not throw a structured refusal any more');
+  assert.doesNotMatch(api, /'BOARD_NOT_FREE'/,
+    'BOARD_NOT_FREE must not sit in HANDLED_CODES — nothing draws a dialog for it');
+  for (const [name, src] of [['orders', orders], ['gangs', gangs]]) {
+    assert.match(src, /board_shortfalls: boardShortfalls/,
+      `${name} must return what the mix could not hold`);
+  }
+  assert.match(planning, /sayBoardShortfalls/,
+    'the engine must speak the shortfall the save came back with');
 });
 
 // ── Client parity ───────────────────────────────────────────────────────────

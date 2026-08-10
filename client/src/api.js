@@ -17,7 +17,12 @@ const HANDLED_CODES = new Set([
   'GANG_CONFLICT', 'merge_conflicts', 'gang_pr_exists', // Planning.jsx
   'PLAN_ALREADY_EXECUTED', 'PLAN_NOT_DRAFT', 'PLAN_NEVER_SAVED', 'PLAN_DISCARD_GANGED',
   'RUN_NOT_DRAFT', 'RUN_NEVER_SAVED', // Planning.jsx — discard catches toast these
-  'BOARD_NOT_FREE', 'COMMIT_EXCEEDS_FREE', 'NOTHING_COMMITTED', // BoardCommitments.jsx
+  // BOARD_NOT_FREE is gone from this list ON PURPOSE, and no longer thrown at
+  // all: the plan lock now caps a Board Mix's holds instead of refusing them.
+  // While it sat here, nothing anywhere drew a dialog for it — so a mix that
+  // outgrew free stock made Lock Plan do nothing, in total silence, which read
+  // on the floor as "the wastage will not go above 200".
+  'COMMIT_EXCEEDS_FREE', 'NOTHING_COMMITTED', // BoardCommitments.jsx
   'scanned',                       // ImportPOWizard.jsx
 ]);
 

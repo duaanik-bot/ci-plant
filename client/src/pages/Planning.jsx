@@ -1590,6 +1590,16 @@ export default function Planning() {
     return (r.material_id in mixLeftovers) ? !!mixLeftovers[r.material_id] : true;
   };
 
+  // A saved plan whose Board Mix outgrew free stock says so, once per board.
+  // The plan IS saved — the mix is written whole and only its stock HOLD was
+  // capped — so this is never an error, and it must never be silent either:
+  // the refusal it replaced carried a structured code no screen handled, which
+  // made Lock Plan look broken the moment a raised wastage outgrew the shelf.
+  // The persistent copy of this is the warehouse's Shortfall column.
+  const sayBoardShortfalls = res => {
+    for (const s of res?.board_shortfalls || []) toast.info(s.message);
+  };
+
   const savePlan = async ({ spec, update_master, master_fields = null, draft = false }) => {
     // One filtered list for both mix fields, so a zeroed-out row can never be
     // dropped from `mix` yet still send a phantom bank in `mix_leftovers`.
@@ -1652,6 +1662,7 @@ export default function Planning() {
       ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}`
       : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}`
         + (lo.push && lo.strip ? ` · leftover ${lo.strip.l}×${lo.strip.w}" → warehouse after cutting` : ''));
+    sayBoardShortfalls(updated);
     // A gang shares one board — changing it moves this job out of the gang.
     if (planLine.gang_run_id && !updated.gang_run_id) {
       toast.info(`Board changed — ${planLine.product_name} removed from gang ${planLine.gang_number}`);
@@ -2036,6 +2047,7 @@ export default function Planning() {
     try {
       const d = await api.post(`/gang-runs/${gangView.id}/plan`, gangPlanPayload());
       toast.success(`${d.gang_number} planned as one job — issuing ${fmt.num(d.total_parent_sheets)} parent sheets`);
+      sayBoardShortfalls(d);
       setGangView(null); load();
     } finally { setGangBusyLock(false); }
   };
@@ -2055,6 +2067,7 @@ export default function Planning() {
     try {
       const d = await api.post(`/gang-runs/${gangView.id}/plan`, { ...gangPlanPayload({ draft: true }), draft: true });
       toast.success(`${d.gang_number} plan saved — ${fmt.num(d.total_parent_sheets)} parent sheets held, lock still pending`);
+      sayBoardShortfalls(d);
       setGangView(d); load();
     } finally { setGangBusySave(false); }
   };
