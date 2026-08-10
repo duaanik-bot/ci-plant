@@ -951,7 +951,18 @@ export default function PlatesLifecycle() {
     { key: 'po_number', label: 'PO No', render: row => <b>{row.po_number}</b> },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'lines', label: 'Plate Sets', sortable: false, render: row => <span>{row.lines.map(line => line.product_name).join(', ')}<span className="block text-[11px] text-slate-400">{row.lines.reduce((sum,line) => sum + Number(line.qty),0)} individual plates</span></span> },
-    { key: 'outputs', label: 'Output', sortable: false, render: row => [...new Set(row.lines.map(line => line.output_number).filter(Boolean))].join(', ') || '—' },
+    // A PO can carry several plate sets, so its Output is a SET of numbers. It
+    // sorts on the first of them via sortValue rather than on the rendered join,
+    // which would order "18604, 8520" as one string. Deep search still reaches
+    // every number through row.lines[].output_number.
+    { key: 'output_number', label: 'Output',
+      sortValue: row => [...new Set(row.lines.map(line => line.output_number).filter(Boolean))].sort()[0] || '',
+      render: row => {
+      const outputs = [...new Set(row.lines.map(line => line.output_number).filter(Boolean))];
+      if (!outputs.length) return '—';
+      return <span className="font-mono text-xs font-bold">{outputs[0]}
+        {outputs.length > 1 && <span className="block text-[10px] font-semibold text-slate-400">+{outputs.length - 1} more</span>}</span>;
+    } },
     { key: 'expected_date', label: 'Expected', render: row => fmt.date(row.expected_date) },
     { key: 'total', label: 'Total', align: 'right', sortable: false, render: row => fmt.inr(poTotals(row.lines.map(line => ({
       ...line, material_id: line.inventory_item_id,
@@ -992,7 +1003,13 @@ export default function PlatesLifecycle() {
     // Size earns its own sortable column: it is how the rack is physically organised
     // and the first thing asked when a job needs plates.
     { key: 'plate_size', label: 'Size', render: row => <span className="whitespace-nowrap font-mono text-xs font-bold text-slate-700">{row.plate_size || '—'}</span> },
-    { key: 'artwork_version', label: 'Output / Artwork', render: row => <span>{row.output_number || '—'}<span className="block text-[11px] text-slate-400">{row.artwork_version}</span></span> },
+    // Output earns its own column on the rack, as it already had on every other
+    // plate screen. It was rendered inside the artwork cell — so the column
+    // SORTED and searched on artwork_version while showing the output number
+    // above it, and the number the plant actually calls a plate by could not be
+    // ordered or found at all.
+    { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
+    { key: 'artwork_version', label: 'Artwork', render: row => <span className="text-xs text-slate-500">{row.artwork_version || '—'}</span> },
     { key: 'rack_location', label: 'Storage', render: row => row.rack_location || '—' },
     { key: 'use_count', label: 'Uses', align: 'right' },
     { key: 'last_used_at', label: 'Last Used', render: row => fmt.date(row.last_used_at) },

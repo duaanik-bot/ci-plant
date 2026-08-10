@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, notify } from '../helpers.js';
+import { audit, nextNumber, notify, outputNumberSql } from '../helpers.js';
 import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
@@ -164,13 +164,37 @@ async function componentRows(where = '', values = []) {
     ${where} ORDER BY prc.tooling_request_id,prc.sequence_no`, values);
 }
 
+// What number to print on a PLATE — a physical object, not a job.
+//
+// The job-side rule (helpers.js outputNumberSql) resolves live, because a job's
+// number can still be edited. A plate cannot: `plate_assets.output_number` is
+// stamped at GRN from the requirement that bought it, and that is what is
+// physically associated with the aluminium on the rack. So the asset's own
+// number always wins, and the requirement it came from is the fallback for
+// legacy rows stamped before that column was filled.
+//
+// The master is the LAST resort and is refused to a gang, for the same reason
+// the job-side rule refuses it: several different cartons share one gang plate,
+// so one member's master number on it is a lie. An unnamed gang shows blank.
+// One spelling — every asset query below uses this const.
+const ASSET_OUTPUT_NUMBER = spec => `COALESCE(
+  NULLIF(pa.output_number,''),
+  NULLIF(${spec}.specification->>'output_number',''),
+  CASE WHEN COALESCE((${spec}.specification->>'is_gang')::boolean,false)
+       THEN NULL ELSE NULLIF(p.output_number,'') END)`;
+
 async function requirementRows(id = null) {
   const values = [];
   const idWhere = id ? (values.push(id), `AND tr.id=$${values.length}`) : '';
   const rows = await q(`SELECT tr.*,jc.jc_number,jc.machine_id,m.name AS machine_name,
       p.name AS product_name,p.code AS product_code,p.party_item_code,p.party_artwork_code,
       p.output_number AS product_output_number,
-      COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+      -- The plant's one output-number rule (helpers.js). It used to be spelled by
+      -- hand here as spec -> gang -> master, which put a MEMBER's master number on
+      -- an unnamed gang's Plate PR — a sheet carrying several cartons named after
+      -- one of them. The rule keys on the run KIND and lets a gang resolve to
+      -- nothing instead.
+      ${outputNumberSql({ override: `ol.spec_override->>'output_number'`, run: 'gr', product: 'p' })} AS output_number,
       gr.id AS gang_run_id,gr.gang_number,gr.output_number AS gang_output_number,gr.kind AS gang_kind,
       p.colors AS master_colors,p.colour_type AS master_colour_type,
       p.cmyk_colours AS master_cmyk_colours,p.pantone_colours AS master_pantone_colours,
@@ -259,7 +283,7 @@ async function platePoRows() {
   const lines = await q(`SELECT pl.*,tr.request_number,jc.jc_number,
       COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
       COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
-      COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+      ${outputNumberSql({ run: 'gr', product: 'p' })} AS output_number,
       COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
       tr.specification->'gang_members' AS gang_members,
       pm.plate_size,COALESCE(json_agg(json_build_object(
@@ -274,7 +298,7 @@ async function platePoRows() {
     LEFT JOIN plate_masters pm ON pm.id=prc.plate_master_id
     WHERE pl.purchase_order_id=ANY($1::int[])
     GROUP BY pl.id,tr.request_number,jc.jc_number,tr.specification,p.name,p.code,p.output_number,
-      gr.output_number,pm.plate_size
+      gr.output_number,gr.kind,pm.plate_size
     ORDER BY pl.id`, [orders.map(row => row.id)]);
   const byOrder = new Map();
   for (const line of lines) {
@@ -709,7 +733,7 @@ r.get('/plates/grns', async (_req, res, next) => {
     res.json(await q(`SELECT g.*,po.po_number,v.name AS vendor_name,tr.request_number,jc.jc_number,
         COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
-        COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+        ${outputNumberSql({ run: 'gr', product: 'p' })} AS output_number,
         COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
         tr.specification->'gang_members' AS gang_members,pm.plate_size,
         COALESCE(json_agg(json_build_object('asset_number',pa.asset_number,'component_label',pa.component_label,
@@ -726,7 +750,7 @@ r.get('/plates/grns', async (_req, res, next) => {
       LEFT JOIN plate_masters pm ON pm.id=pa.plate_master_id
       WHERE g.family='plate'
       GROUP BY g.id,po.po_number,v.name,tr.request_number,jc.jc_number,tr.specification,
-        p.name,p.code,p.output_number,gr.output_number,pm.plate_size
+        p.name,p.code,p.output_number,gr.output_number,gr.kind,pm.plate_size
       ORDER BY g.id DESC`));
   } catch (error) { next(error); }
 });
@@ -868,7 +892,7 @@ r.get('/plates/warehouse', async (_req, res, next) => {
         str.id AS tooling_request_id,str.request_number,str.job_card_id,
         COALESCE(NULLIF(str.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(str.specification->>'product_code',''),p.code) AS product_code,
-        COALESCE(NULLIF(pa.output_number,''),NULLIF(str.specification->>'output_number',''),p.output_number) AS output_number,
+        ${ASSET_OUTPUT_NUMBER('str')} AS output_number,
         COALESCE((str.specification->>'is_gang')::boolean,false) AS is_gang,
         str.specification->'gang_members' AS gang_members,
         p.party_item_code,p.party_artwork_code,c.name AS customer_name,v.name AS vendor_name,
@@ -910,7 +934,7 @@ r.get('/plates/returns', async (_req, res, next) => {
         (CURRENT_DATE-pa.plate_created_on)::int AS age_days,
         COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
-        COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+        ${ASSET_OUTPUT_NUMBER('tr')} AS output_number,
         COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
         tr.specification->'gang_members' AS gang_members,
         c.name AS customer_name,m.user_name AS returned_by,m.at AS return_date,
@@ -935,7 +959,7 @@ r.get('/plates/history', async (_req, res, next) => {
         pm.plate_size,
         COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
-        COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+        ${ASSET_OUTPUT_NUMBER('tr')} AS output_number,
         COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
         tr.specification->'gang_members' AS gang_members,
         jc.jc_number,m.name AS machine_name
@@ -1142,7 +1166,7 @@ r.get('/plates/assets/:id/history', async (req, res, next) => {
     const asset = await one(`SELECT pa.*,pm.plate_size,
       COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
       COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
-      COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+      ${ASSET_OUTPUT_NUMBER('tr')} AS output_number,
       COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
       tr.specification->'gang_members' AS gang_members,
       c.name AS customer_name,v.name AS vendor_name

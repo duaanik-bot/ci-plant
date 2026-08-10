@@ -297,6 +297,28 @@ test('the approval rules are one rule, asked by the route and by the button', ()
     'the client mirror and the server rule must list the same statuses');
 });
 
+test('every plate screen names the job by its output number, in its own column', () => {
+  // The output (plate / positive) number is what the plant calls a job by, and
+  // the plate module is where the number IS the subject — a rack of aluminium is
+  // sorted and searched by it. All six views carry it as a keyed column.
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const columnSets = ['requestColumns', 'poColumns', 'grnColumns', 'warehouseColumns', 'returnColumns', 'historyColumns'];
+  for (const name of columnSets) {
+    const at = page.indexOf(`const ${name} = [`);
+    assert.ok(at > 0, `${name} is missing`);
+    const block = page.slice(at, page.indexOf('\n  ];', at));
+    assert.match(block, /\{ key: 'output_number', label: 'Output'/, `${name} has no dedicated Output column`);
+  }
+  // The rack showed it INSIDE the artwork cell, so the column sorted and searched
+  // on artwork_version while displaying the output number above it — the number
+  // could not be ordered or found at all.
+  assert.doesNotMatch(page, /label: 'Output \/ Artwork'/);
+  // A PO carries several plate sets, so its column sorts on a real scalar rather
+  // than on the rendered join.
+  const po = page.slice(page.indexOf('const poColumns = ['));
+  assert.match(po.slice(0, po.indexOf('\n  ];')), /sortValue: row =>/);
+});
+
 test('Plate PR and PO forms default to the controlled size and Kansal Graphics', () => {
   const route = read('server/src/routes/plates.js');
   const page = read('client/src/components/PlatesLifecycle.jsx');

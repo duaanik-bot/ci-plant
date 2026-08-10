@@ -124,10 +124,39 @@ test('the guard finds the real call sites', () => {
   const users = sourceFiles()
     .filter(([, src]) => src.includes('outputNumberSql('))
     .map(([n]) => n).sort();
-  assert.deepEqual(users, ['extrasheets.js', 'floor.js', 'helpers.js', 'orders.js', 'production.js'],
+  assert.deepEqual(users, ['extrasheets.js', 'floor.js', 'helpers.js', 'orders.js', 'plates.js', 'production.js'],
     'the job card + press board (production.js), the station queues (floor.js) and '
     + 'the planning/artwork line views (orders.js), and Extra Sheets are every screen that names a job '
-    + 'by its plate number');
+    + 'by its plate number — and plates.js, where the number IS the subject: the Plate PR, '
+    + 'its PO and its GRN all name the plate set by it');
+});
+
+test('the plate module does not keep its own output-number rule', () => {
+  // plates.js spelled it `spec -> gang -> master`, which is the second of the two
+  // opposite errors this guard was written for: the master tail fires precisely
+  // when the gang has NOT been named, so an unnamed gang's Plate PR, PO and GRN
+  // all printed ONE member carton's number on a sheet carrying several others.
+  const src = readFileSync(new URL('./routes/plates.js', HERE), 'utf8');
+  assert.doesNotMatch(src, /NULLIF\(gr\.output_number,\s*''\),\s*p\.output_number/,
+    'this is the hand-rolled plate spelling — use outputNumberSql()');
+  assert.equal((src.match(/outputNumberSql\(/g) || []).length, 3,
+    'the requirement list, the PO register and the GRN register each name the job');
+});
+
+test('a PLATE answers to the number stamped on it, not to a live lookup', () => {
+  // The job-side rule resolves live because a job's number can still be edited.
+  // A plate cannot: plate_assets.output_number is stamped at GRN and is what is
+  // physically associated with the aluminium. Different question, so a different
+  // rule — but still ONE spelling of it, or the rack and the returns queue drift.
+  const src = readFileSync(new URL('./routes/plates.js', HERE), 'utf8');
+  assert.equal((src.match(/const ASSET_OUTPUT_NUMBER =/g) || []).length, 1);
+  assert.equal((src.match(/\$\{ASSET_OUTPUT_NUMBER\(/g) || []).length, 4,
+    'the warehouse, the returns queue, the movement history and the single-asset '
+    + 'fetch all describe the same physical plate');
+  // And it refuses the master to a gang, for the same reason the job rule does.
+  const fn = src.slice(src.indexOf('const ASSET_OUTPUT_NUMBER ='));
+  assert.match(fn.slice(0, fn.indexOf('\n\n')), /is_gang'\)::boolean,false\)\s*\n?\s*THEN NULL ELSE NULLIF\(p\.output_number/,
+    'a gang plate must resolve to blank rather than to a member master');
 });
 
 test('production.js resolves it for the live board AND the completed list', () => {
