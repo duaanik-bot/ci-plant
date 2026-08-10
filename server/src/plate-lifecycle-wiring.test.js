@@ -202,7 +202,12 @@ test('a structured refusal no caller renders still reaches the user', () => {
   // refusal invisible. Suppression must be opt-in per code, so a new server
   // code that nobody wired up degrades to a visible toast, never to silence.
   assert.doesNotMatch(api, /if \(!data\.code\) onError\(msg\)/);
-  assert.match(api, /const HANDLED_CODES = new Set\(\[/);
+  // The opt-in was a bare Set with the handler named in a trailing comment,
+  // and the comments went stale — two board codes were filed under a component
+  // that calls neither of their routes. The set is now DERIVED from HANDLED_BY,
+  // so a code cannot be silenced without a claim, and handled-codes.test.js
+  // holds every claim to a file that really says the refusal.
+  assert.match(api, /HANDLED_CODES = new Set\(Object\.keys\(HANDLED_BY\)\)/);
   // Both exits — request() and upload() — must consult the list, or half the
   // app keeps the old silent behaviour.
   assert.equal((api.match(/HANDLED_CODES\.has\(data\.code\)/g) || []).length, 2);

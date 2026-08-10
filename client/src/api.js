@@ -6,25 +6,63 @@
 // no toast, no dialog, a button that simply did not work. PLATES_NOT_READY
 // shipped exactly that way and stopped three jobs at Offset 3 in silence.
 //
-// So suppression is opt-in now, and this list is the opt-in: every entry has a
-// caller that says the refusal itself. A code that is NOT here falls through to
-// the central toast — the wrong-looking message beats no message at all, and a
-// new structured error is visible from the first minute it exists.
-const HANDLED_CODES = new Set([
-  'SHADE_CARD_NOT_ELIGIBLE',       // Section.jsx — acknowledge & start
-  'PLATES_NOT_READY',              // Section/Floor/Production — acknowledge & start
-  'PRODUCT_STRENGTH_COLLISION',    // PrintPlanning.jsx, Invoices.jsx — collision prompt
-  'GANG_CONFLICT', 'merge_conflicts', 'gang_pr_exists', // Planning.jsx
-  'PLAN_ALREADY_EXECUTED', 'PLAN_NOT_DRAFT', 'PLAN_NEVER_SAVED', 'PLAN_DISCARD_GANGED',
-  'RUN_NOT_DRAFT', 'RUN_NEVER_SAVED', // Planning.jsx — discard catches toast these
+// So suppression is opt-in now, and this map is the opt-in: every entry names
+// the caller that says the refusal itself. A code that is NOT here falls through
+// to the central toast — the wrong-looking message beats no message at all, and
+// a new structured error is visible from the first minute it exists.
+//
+// The claim used to be a trailing comment, which cannot be wrong out loud: the
+// two board codes below were filed under BoardCommitments.jsx, a component that
+// calls neither route. It is data now, and handled-codes.test.js proves every
+// line of it. `at` is the screen that speaks; `says` is a literal that screen
+// must really contain, in code and not in prose:
+//
+//   • the code itself — the caller branches on it and draws its own dialog.
+//   • an endpoint — the caller has no branch but wraps that call in a catch
+//     that toasts e.message. A generic catch is a real handler; the code simply
+//     never appears by name. The test then also demands that endpoint appear in
+//     the server file that throws, so the screen is provably on that route.
+export const HANDLED_BY = {
+  SHADE_CARD_NOT_ELIGIBLE: {
+    at: ['pages/Section.jsx', 'pages/Floor.jsx', 'pages/Production.jsx'], says: 'SHADE_CARD_NOT_ELIGIBLE' },
+  // StartAlarms.jsx draws the dialog, but the three pages are what branch on the
+  // code — and the branch is the handler, so they are what is named here.
+  PLATES_NOT_READY: {
+    at: ['pages/Section.jsx', 'pages/Floor.jsx', 'pages/Production.jsx'], says: 'PLATES_NOT_READY' },
+  PRODUCT_STRENGTH_COLLISION: { at: ['pages/PrintPlanning.jsx', 'pages/Invoices.jsx'], says: 'PRODUCT_STRENGTH_COLLISION' },
+  GANG_CONFLICT: { at: ['pages/Planning.jsx'], says: 'GANG_CONFLICT' },
+  merge_conflicts: { at: ['pages/Planning.jsx'], says: 'merge_conflicts' },
+  gang_pr_exists: { at: ['pages/Planning.jsx'], says: 'gang_pr_exists' },
+  // PLAN_ALREADY_EXECUTED is NOT here, and that is the point of the map. It
+  // read as handled because Planning.jsx names it in a comment — but savePlan()
+  // has no catch, every caller fires it from an onClick without one, and the app
+  // installs no unhandledrejection handler. Suppressing it made Lock Plan on an
+  // in_production line do nothing at all, while the server's refusal was already
+  // naming the way out ("Reverse the job card back to Planning first").
+  //
+  // The discard pair below IS handled, just not by name: one catch around
+  // /plan/discard toasts e.message whatever the code, which is why they anchor
+  // on the endpoint instead.
+  PLAN_NOT_DRAFT: { at: ['pages/Planning.jsx'], says: '/plan/discard' },
+  PLAN_NEVER_SAVED: { at: ['pages/Planning.jsx'], says: '/plan/discard' },
+  PLAN_DISCARD_GANGED: { at: ['pages/Planning.jsx'], says: '/plan/discard' },
+  RUN_NOT_DRAFT: { at: ['pages/Planning.jsx'], says: '/plan/discard' },
+  RUN_NEVER_SAVED: { at: ['pages/Planning.jsx'], says: '/plan/discard' },
   // BOARD_NOT_FREE is gone from this list ON PURPOSE, and no longer thrown at
   // all: the plan lock now caps a Board Mix's holds instead of refusing them.
   // While it sat here, nothing anywhere drew a dialog for it — so a mix that
   // outgrew free stock made Lock Plan do nothing, in total silence, which read
   // on the floor as "the wastage will not go above 200".
-  'COMMIT_EXCEEDS_FREE', 'NOTHING_COMMITTED', // BoardCommitments.jsx
-  'scanned',                       // ImportPOWizard.jsx
-]);
+  //
+  // These two are the planning engine's own commitBoard/uncommitBoard, each
+  // ending `catch (e) { toast.error(e.message) }` — NOT BoardCommitments.jsx,
+  // which only ever calls /board/move.
+  COMMIT_EXCEEDS_FREE: { at: ['pages/Planning.jsx'], says: '/board/commit' },
+  NOTHING_COMMITTED: { at: ['pages/Planning.jsx'], says: '/board/uncommit' },
+  scanned: { at: ['components/ImportPOWizard.jsx'], says: 'scanned' },
+};
+
+export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));
 
 let onError = () => {};
 let onUnauthorized = () => {};
