@@ -19,7 +19,7 @@ import {
   pickAvailableRackPlates,
   validateReturnVerification,
 } from './plates.js';
-import { applyPlateDispositions, assertPlateReadyForPrinting } from './plate-lifecycle.js';
+import { applyPlateDispositions, plateReadinessForPrinting } from './plate-lifecycle.js';
 import { TOOLING_REQUEST_STATUSES } from './tooling-requirements.js';
 
 test('CMYK becomes four individual plate components', () => {
@@ -124,12 +124,18 @@ test('readiness is green only when every active component is ready', () => {
   ]), { required: 2, ready: 1, pending: 1, is_ready: false });
 });
 
-test('printing completion requires a disposition for every issued plate', () => {
-  assert.throws(() => validatePlateDispositions([{ id: 1 }, { id: 2 }], [{ asset_id: 1, action: 'return' }]), /all 2 issued plates/);
+test('printing completion moves the plates it was told about, and only those', () => {
+  // It used to demand an account for every issued plate and refuse the completion
+  // without one. A press that has finished its run has finished it; a locked
+  // Complete button only means the COUNT goes unrecorded too. So absence is now
+  // silence, not an error.
+  const decided = validatePlateDispositions([{ id: 1 }, { id: 2 }], [{ asset_id: 1, action: 'return' }]);
+  assert.deepEqual(decided.map(row => row.asset.id), [1]);
   // Return, scrap and lost are the three accounts a press can give — scrap became a
   // valid one when unticking a plate started retiring it. Anything else is a caller
-  // bug and must not quietly leave the plate marked as still on the press.
-  assert.throws(() => validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'reissue' }]), /Account for all 1 issued plates/);
+  // bug, and it reads as no account at all rather than moving the plate somewhere
+  // nobody asked for.
+  assert.deepEqual(validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'reissue' }]), []);
   assert.equal(validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'return' }])[0].action, 'return');
 });
 
@@ -175,54 +181,37 @@ test('returning plates never writes a status the tooling request cannot hold', a
   }
 });
 
-test('printing start is blocked when only part of a tracked plate set is ready', async () => {
-  await assert.rejects(
-    assertPlateReadyForPrinting(async () => [{ status: 'available' }, { status: 'approved' }], 91),
-    /1 of 2 available/,
-  );
+// ── The plate gate was REMOVED, not loosened ───────────────────────────────
+// It used to throw a 409 (PLATES_NOT_READY) that the press could acknowledge
+// past. Board is physics; a plate's rack paperwork is not — the plates can be in
+// the operator's hand while this table still says 'po_created' — so what stood
+// here as a refusal-with-an-override is now a report. The rule that replaced it
+// lives in plates-never-block.test.js; these two hold the shape of the report.
+
+test('a partly-ready plate set is reported, and the press starts anyway', async () => {
+  const verdict = await plateReadinessForPrinting(
+    async () => [{ status: 'available' }, { status: 'approved' }], 91);
+  assert.equal(verdict.is_ready, false);
+  assert.equal(verdict.ready, 1);
+  assert.equal(verdict.required, 2);
 });
 
-test('legacy jobs without a Plate request remain startable', async () => {
-  assert.deepEqual(await assertPlateReadyForPrinting(async () => [], 91), { required: 0, ready: 0, is_ready: true });
+test('legacy jobs without a Plate request read clean rather than short', async () => {
+  const verdict = await plateReadinessForPrinting(async () => [], 91);
+  assert.equal(verdict.is_ready, true);
+  assert.equal(verdict.required, 0);
+  assert.deepEqual(verdict.missing, []);
 });
 
-// ── The plate gate must never stop the press silently, and never for ever ──
-// Board is physics; a plate's rack paperwork is not. The press operator is the
-// one person who can see whether the plates are in his hand, so the gate tells
-// him what the ERP thinks is missing and lets him overrule it on the record.
-
-test('the plate refusal names the components the press is short of', async () => {
-  await assert.rejects(
-    assertPlateReadyForPrinting(async () => [
-      { status: 'available', component_label: 'Cyan', request_number: 'CI-TR-0021' },
-      { status: 'po_created', component_label: 'Magenta', request_number: 'CI-TR-0021' },
-      { status: 'pr_required', component_label: 'Black', request_number: 'CI-TR-0021' },
-    ], 91),
-    err => {
-      assert.equal(err.status, 409);
-      assert.equal(err.body.code, 'PLATES_NOT_READY');
-      assert.deepEqual(err.body.plates.missing.map(m => m.component_label), ['Magenta', 'Black']);
-      assert.deepEqual(err.body.plates.request_numbers, ['CI-TR-0021']);
-      assert.match(err.message, /Magenta, Black/);
-      return true;
-    },
-  );
-});
-
-test('an acknowledged plate shortfall starts the run and reports the override', async () => {
-  const summary = await assertPlateReadyForPrinting(async () => [
-    { status: 'available', component_label: 'Cyan' },
-    { status: 'po_created', component_label: 'Magenta' },
-  ], 91, true);
-  assert.equal(summary.is_ready, false);
-  assert.equal(summary.overridden, true);
-  assert.deepEqual(summary.missing.map(m => m.component_label), ['Magenta']);
-});
-
-test('acknowledging changes nothing when the plates were ready anyway', async () => {
-  const summary = await assertPlateReadyForPrinting(async () => [{ status: 'available' }], 91, true);
-  assert.equal(summary.is_ready, true);
-  assert.equal(summary.overridden, false);
+test('the report names the components the press is short of', async () => {
+  // "Magenta, Black" tells an operator where to go; "1 of 3 available" does not.
+  const verdict = await plateReadinessForPrinting(async () => [
+    { status: 'available', component_label: 'Cyan', request_number: 'CI-TR-0021' },
+    { status: 'po_created', component_label: 'Magenta', request_number: 'CI-TR-0021' },
+    { status: 'pr_required', component_label: 'Black', request_number: 'CI-TR-0021' },
+  ], 91);
+  assert.deepEqual(verdict.missing.map(m => m.component_label), ['Magenta', 'Black']);
+  assert.deepEqual(verdict.request_numbers, ['CI-TR-0021']);
 });
 test('a rack summarises as plate count, average age and a size split', () => {
   const today = new Date('2026-08-10T00:00:00Z');

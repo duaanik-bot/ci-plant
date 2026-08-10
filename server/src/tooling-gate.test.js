@@ -63,12 +63,21 @@ test('gate: hard die must be ready; missing soft families never block', () => {
   assert.equal(toolingGateOk(toolingDetail(product, [mkTool({ zone: 'making' })]), 0), false);
 });
 
-test('gate: a registered soft tool that is not ready blocks', () => {
+test('gate: a registered BLOCK that is not ready still blocks', () => {
+  // Unchanged: an emboss block at the maker is a real reason to hold a line.
+  const product = { id: 10, special: 'emboss', tool_id: 1 };
+  const tools = [mkTool(), mkTool({ id: 2, family: 'block', code: 'BLK-0001', zone: 'making' })];
+  assert.equal(toolingGateOk(toolingDetail(product, tools), 0), false);
+  // …and passes once the block reaches the rack
+  tools[1].zone = 'in_rack';
+  assert.equal(toolingGateOk(toolingDetail(product, tools), 0), true);
+});
+
+test('gate: a plate at the maker does NOT block, where a block would', () => {
+  // The one family carved out. Same shape, same zone, opposite verdict — a plate
+  // set still being made is told to the floor, never enforced against it.
   const product = { id: 10, special: 'none', tool_id: 1 };
   const tools = [mkTool(), mkTool({ id: 2, family: 'plate', code: 'PLT-0001', zone: 'making' })];
-  assert.equal(toolingGateOk(toolingDetail(product, tools), 0), false);
-  // …and passes once the plate reaches the rack
-  tools[1].zone = 'in_rack';
   assert.equal(toolingGateOk(toolingDetail(product, tools), 0), true);
 });
 

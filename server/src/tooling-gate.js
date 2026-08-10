@@ -63,7 +63,24 @@ export function toolingDetail(product, tools) {
   });
 }
 
+// Plates NEVER block, at any status. Everything else keeps the rule it has run
+// on: a hard family must be ready, a soft one blocks only once it is REGISTERED
+// but not ready.
+//
+// Plates are singled out on Anik's explicit instruction — nothing about a plate
+// may stand between a press and its run. It is also the defect that forced the
+// whole module to be detached (9aedf20): `hard: false` read as "cannot block",
+// but an unready plate set turned gate.tooling false, and orders.js only lets a
+// line go planned → ready when that passes. So plates were holding lines back
+// with nothing on screen explaining it. Blocks are left exactly as they were —
+// an emboss block missing from the rack is still a real reason to hold a line,
+// and loosening that was not asked for.
+const NEVER_BLOCKS = new Set(['plate']);
+
 export function toolingGateOk(detail, toolingOkFlag) {
   if (toolingOkFlag) return true;
-  return detail.every(d => (d.hard ? d.status === 'ready' : d.status !== 'not_ready'));
+  return detail.every(d => {
+    if (NEVER_BLOCKS.has(d.family)) return true;
+    return d.hard ? d.status === 'ready' : d.status !== 'not_ready';
+  });
 }

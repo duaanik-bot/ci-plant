@@ -436,13 +436,12 @@ export function validatePlateDispositions(assets = [], dispositions = []) {
   // queueing for someone to look at. Nothing else may reach this path.
   const allowed = new Set(['return', 'lost', 'scrap']);
   const byAsset = new Map(submittedDispositions.map(row => [Number(row.asset_id), row]));
-  const missing = issuedAssets.filter(asset => !allowed.has(byAsset.get(Number(asset.id))?.action));
-  if (missing.length) {
-    const error = new Error(`Account for all ${issuedAssets.length} issued plates before completing printing`);
-    error.status = 400;
-    throw error;
-  }
-  return issuedAssets.map(asset => {
+  // SOFT on absence, strict on content. Completing a printing job must never be
+  // refused over plates — a press that has finished its run has finished it, and a
+  // locked Complete button just means the count goes unrecorded instead. So a plate
+  // the operator said nothing about is simply not moved; one he DID speak for is
+  // validated properly, because a wrong record is worse than no record.
+  return issuedAssets.filter(asset => allowed.has(byAsset.get(Number(asset.id))?.action)).map(asset => {
     const submitted = byAsset.get(Number(asset.id)) || {};
     const name = asset.component_label || asset.asset_number || `plate ${asset.id}`;
     const note = clean(submitted.note) || null;

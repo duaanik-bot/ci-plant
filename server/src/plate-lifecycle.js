@@ -222,39 +222,31 @@ export async function issuePlateAssetsForJob(qc, oc, jobCard, machineId, userNam
   return rows.length;
 }
 
-// The plate gate. Board stock is physics — issue it twice and the sheets are
-// gone — but a plate's rack paperwork is not: the plates can be in the
-// operator's hand while this table still says 'po_created', and refusing the
-// start does not make a plate. It only stops the press while someone chases
-// the record. So this reports rather than refuses, in the same shape as the
-// shade-card alarm it sits beside in the printing start: name what is missing,
-// let the supervisor overrule it, and record who did. `ack` is that decision
-// arriving back from the operator; the caller audits it.
-export async function assertPlateReadyForPrinting(qc, jobCardId, ack = false) {
+// What the press should be TOLD about its plates. Board stock is physics —
+// issue it twice and the sheets are gone — but a plate's rack paperwork is not:
+// the plates can be in the operator's hand while this table still says
+// 'po_created', and refusing the start does not make a plate. It only stops the
+// press while somebody chases the record.
+//
+// So this never throws. Plates were reconnected to the plant flow on the
+// explicit condition that they can never refuse a start; naming the shortage is
+// the whole point of the message. "Magenta, Black" tells an operator which plate
+// to go and look for; "0 of 4 available" tells him nothing. The caller audits it.
+export async function plateReadinessForPrinting(qc, jobCardId) {
   const rows = await qc(`SELECT prc.status, prc.component_label, tr.request_number
     FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
     WHERE tr.job_card_id=$1 AND tr.family='plate' AND prc.status<>'cancelled'
     ORDER BY tr.id, prc.sequence_no`, [jobCardId]);
-  if (!rows.length) return { required: 0, ready: 0, is_ready: true };
+  if (!rows.length) return { required: 0, ready: 0, pending: 0, is_ready: true, missing: [], request_numbers: [] };
   const summary = plateReadinessSummary(rows);
-  if (summary.is_ready) return { ...summary, overridden: false };
-  // Naming the components is the whole point of the message. "0 of 4 available"
-  // tells a press operator nothing he can act on; "Magenta, Black" tells him
-  // exactly which plate to go and look for.
   const missing = rows
     .filter(row => plateComponentStatus(row.status) !== 'ready')
     .map(row => ({ component_label: row.component_label, status: row.status }));
-  const detail = {
+  return {
     ...summary,
     missing,
     request_numbers: [...new Set(rows.map(row => row.request_number).filter(Boolean))],
   };
-  if (ack) return { ...detail, overridden: true };
-  throw Object.assign(
-    new Error(`Plates are not ready — ${summary.ready} of ${summary.required} available (${
-      missing.map(row => row.component_label || row.status).join(', ')})`),
-    { status: 409, body: { code: 'PLATES_NOT_READY', plates: detail } },
-  );
 }
 
 export async function applyPlateDispositions(qc, oc, stageId, dispositions, userName) {

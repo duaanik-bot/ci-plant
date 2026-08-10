@@ -15,23 +15,12 @@ test('the Plate lifecycle router is mounted and realtime-enabled', () => {
   }
 });
 
-// The plate warehouse is DETACHED from the plant flow. It is being built out
-// locally, and while it is, no half-built module may stand between a press and
-// its run: the gate refused four jobs — three of them on Offset 3 — and, worse,
-// refused them in silence. Nothing about the module is deleted; the plant flow
-// simply does not consult it. Re-attaching means deliberately failing this test
-// and writing the wiring back, which is the point of stating it this way.
-test('the plant flow does not consult the plate warehouse', () => {
+test('Job Card finalisation, printing start and printing completion share the lifecycle', () => {
   const route = read('server/src/routes/production.js');
-  for (const hook of ['auto_from_finalise', 'assertPlateReadyForPrinting',
-    'issuePlateAssetsForJob', 'applyPlateDispositions', 'createPlateComponents']) {
-    assert.doesNotMatch(route, new RegExp(`${hook}\\(`), `${hook} is wired back into the plant flow`);
-  }
-  // Detached, not deleted — the module still has to work for the local build.
-  const lifecycle = read('server/src/plate-lifecycle.js');
-  for (const fn of ['assertPlateReadyForPrinting', 'issuePlateAssetsForJob', 'applyPlateDispositions']) {
-    assert.match(lifecycle, new RegExp(`export async function ${fn}`), `${fn} was deleted, not detached`);
-  }
+  assert.match(route, /auto_from_finalise/);
+  assert.match(route, /plateReadinessForPrinting\(qc, jc\.id/);
+  assert.match(route, /issuePlateAssetsForJob\(qc, oc, jc, machineId/);
+  assert.match(route, /applyPlateDispositions\(qc, oc, st\.id, req\.body\.plate_dispositions/);
 });
 
 test('the printing completion form returns issued plates to verification', () => {
@@ -89,10 +78,18 @@ test('unticking a plate scraps it instead of queueing it for verification', () =
   assert.match(lifecycle, /IN \('lost','scrapped'\) THEN 0/);
 });
 
-test('a Damaged plate cannot be submitted from the form without a note', () => {
+test('a plate count that disagrees with the ticks warns, it does not disable Complete', () => {
   const section = read('client/src/pages/Section.jsx');
-  // Mirrors the form's existing rule that scrap demands a reason.
-  assert.match(section, /plateDispositionsIncomplete/);
+  // A disabled Complete button is a hard blocker wherever it sits, and plates may
+  // not have one: a press that has finished its run has finished it, and refusing
+  // the click only means the SHEET count goes unrecorded as well.
+  assert.match(section, /plateCountDisagrees/, 'the mismatch should still be detected');
+  assert.doesNotMatch(section, /plateDispositionsIncomplete/, 'and must not gate the button');
+  // The one legitimate wait: the issued list must have arrived, or the form would
+  // post an empty account of a job that did have plates.
+  assert.match(section, /section === 'printing' && plateDisposition\.loading/);
+  // The mismatch is still SAID, in the amber note beside the count.
+  assert.match(section, /plates are marked as coming back, but you have typed/);
 });
 
 test('the returned condition is what gets written to the asset and its movement', () => {
@@ -279,11 +276,11 @@ test('Product colours and Plate Rates flow into finalized Plate PO rows', () => 
 });
 
 test('Gang Plate demand stays unified and Output remains visible throughout the lifecycle', () => {
+  const production = read('server/src/routes/production.js');
   const tooling = read('server/src/routes/tooling.js');
   const route = read('server/src/routes/plates.js');
   const page = read('client/src/components/PlatesLifecycle.jsx');
-  // Raised by hand in Tooling now — production.js no longer auto-creates one
-  // (see 'the plant flow does not consult the plate warehouse').
+  assert.match(production, /gangPlateSpecification\(gang, uniqueTargets\)/);
   assert.match(tooling, /gangPlateSpecification\(gang, targets\)/);
   assert.match(route, /tr\.specification->>'output_number'/);
   for (const label of ['Unified gang plate','Gang members','All approvals','Approved','Unapproved','Output']) {
@@ -334,27 +331,40 @@ test('the controlled master seeds two sizes, not ten colour SKUs', () => {
   assert.doesNotMatch(migration, /560 x 670[^\n]*Cyan/i);
 });
 
-// ── The plate gate reaches the operator ───────────────────────────────────
-// It shipped as a structured 409, and api.js suppresses the central toast for
-// any error carrying a `code` because the convention is that the caller draws
-// a modal. Nothing drew one, so Start Run did nothing at all — no toast, no
-// dialog, no reason — on all three pages that start a printing stage.
+// ── Plates inform the plant flow; they never refuse it ────────────────────
+// The gate shipped as a structured 409 and reached nobody: api.js suppresses the
+// central toast for any error carrying a `code`, on the convention that the
+// caller draws a modal, and nothing drew one — so Start Run did nothing at all,
+// no toast, no dialog, no reason, on all three pages that start a printing
+// stage. The gate is gone now on Anik's explicit instruction: a plate may never
+// stand between a press and its run. What is left is a record.
 
-test('every page that starts printing answers a plate refusal', () => {
-  for (const path of ['client/src/pages/Section.jsx', 'client/src/pages/Floor.jsx', 'client/src/pages/Production.jsx']) {
-    const page = read(path);
-    assert.match(page, /PLATES_NOT_READY/, `${path} ignores the plate refusal`);
-    assert.match(page, /ack_plates/, `${path} offers no way past the plate refusal`);
-  }
+test('the server cannot refuse a printing start over plates', () => {
+  const route = read('server/src/routes/production.js');
+  const lifecycle = read('server/src/plate-lifecycle.js');
+  // The refusal and the acknowledgement that answered it are both gone.
+  assert.doesNotMatch(route, /assertPlateReadyForPrinting/);
+  assert.doesNotMatch(route, /ack_plates/);
+  assert.doesNotMatch(lifecycle, /PLATES_NOT_READY/);
+  // Nothing in the whole lifecycle throws — the module reports and writes.
+  assert.doesNotMatch(lifecycle, /throw /);
 });
 
-test('an unready plate set cannot hold an order line back from ready', () => {
-  const helpers = read('server/src/helpers.js');
-  // toolingGateOk() fails a soft family on an explicit 'not_ready', and
-  // orders.js gates planned → ready on gate.tooling — so a Plate Set folded
-  // into the tooling detail blocked the line silently. It stays out.
-  assert.doesNotMatch(helpers, /family: 'plate', label: 'Plate Set'/);
-  assert.doesNotMatch(helpers, /ctx\.plates/);
+test('a start that goes ahead short of plates says so on the record', () => {
+  // Soft does not mean silent. The audit names what was missing so the shortage
+  // is answerable afterwards, which is the whole value the refusal never delivered.
+  const route = read('server/src/routes/production.js');
+  assert.match(route, /plates_short_at_start/);
+  assert.match(route, /missing \$\{/);
+});
+
+test('the client keeps its refusal dialog so a re-added gate is never silent again', () => {
+  // Dead while the server refuses nothing — and deliberately kept. If anyone ever
+  // puts a plate gate back, the pages already answer it; deleting this is how the
+  // silent Start Run button comes back.
+  for (const path of ['client/src/pages/Section.jsx', 'client/src/pages/Floor.jsx', 'client/src/pages/Production.jsx']) {
+    assert.match(read(path), /PLATES_NOT_READY/, `${path} would swallow a plate refusal`);
+  }
 });
 
 test('a structured refusal no caller renders still reaches the user', () => {

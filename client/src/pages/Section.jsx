@@ -862,10 +862,12 @@ export default function Section() {
     };
   }) : undefined;
   const returningPlates = (plateDispositions || []).filter(row => row.action === 'return');
-  // The picked condition is the declaration; the note is optional colour. The only
-  // thing that holds up a completion is the typed count disagreeing with the rows —
-  // two accounts of the same pile, and one of them is wrong.
-  const plateDispositionsIncomplete = section === 'printing'
+  // The picked condition is the declaration; the note is optional colour. The typed
+  // count disagreeing with the rows is worth SAYING — two accounts of the same pile,
+  // and one of them is wrong — but it does not hold up the completion. Nothing about
+  // plates does: a press that has finished its run has finished it, and a disabled
+  // Complete button only means the sheet count goes unrecorded too.
+  const plateCountDisagrees = section === 'printing'
     && issuedPlateAssets.length > 0
     && +returnedCount !== returningPlates.length;
   const complete = async () => {
@@ -2323,7 +2325,11 @@ export default function Section() {
                 mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
-                (section === 'printing' && (plateDisposition.loading || plateDispositionsIncomplete)) ||
+                // Plates never hold up a completion. The only wait is for the issued
+                // list to arrive, so the form does not post an empty account of a
+                // job that had plates; a count that disagrees with the ticks WARNS
+                // (see the amber note below) and the ticked rows are the record.
+                (section === 'printing' && plateDisposition.loading) ||
                 // Cutting's variance gate, in the server's own three shapes:
                 //   multi-board mix — per-board entries must be whole numbers
                 //   summing to output + wastage (the 400/409 pair), and any
@@ -2376,7 +2382,7 @@ export default function Section() {
             )}
             {/* The typed figure and the rows are two accounts of the same pile. When
                 they disagree the form says so rather than silently trusting one. */}
-            {!plateDisposition.loading && issuedPlateAssets.length > 0 && +returnedCount !== returningPlates.length && (
+            {!plateDisposition.loading && plateCountDisagrees && (
               <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
                 {fmt.num(returningPlates.length)} of {fmt.num(issuedPlateAssets.length)} plates are marked as coming back, but you have typed {fmt.num(+returnedCount || 0)}.
                 {' '}Untick the ones that are finished — they go to scrap — or correct the number.
