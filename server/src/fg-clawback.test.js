@@ -41,3 +41,41 @@ test('never drives the pool negative', async () => {
   await clawBackFgReceipt({ id: 7, product_id: 586 }, qc, oc);
   assert.match(w[0].sql, /GREATEST\(0,/, 'a partial dispatch must not leave fg_stock below zero');
 });
+
+// ── When a correction is allowed to run AT ALL ──────────────────────────────
+// clawBackFgReceipt() un-credits the WHOLE batch, so it is only correct while
+// the pool is still whole. Once cartons are out, the pool has already been drawn
+// down: clawing the full batch back hits GREATEST(0, ...), clamps to zero, and
+// the re-close credits the batch again — overstating by exactly what shipped.
+// Sort & Paste's reverse and the completed-run adjust both gate on this, and
+// both used to carry their own copy of the predicate in SQL.
+import { dispatchedLinesBlockingReverse } from './helpers.js';
+
+test('a PARTIALLY dispatched line blocks — a status check cannot see it', () => {
+  // 3,000 of 9,600 shipped: dispatch.js only sets 'dispatched' at nd >= qty,
+  // so the line is still sitting at 'produced'. This is the case that bit.
+  const lines = [{ id: 115, po_number: 'PMP/01150', status: 'produced', dispatched_qty: 3000 }];
+  assert.equal(dispatchedLinesBlockingReverse(lines).length, 1,
+    'cartons are out of the building — the correction must refuse');
+  assert.equal(lines.filter(l => l.status === 'dispatched').length, 0,
+    'a status-only guard sees nothing here — that was precisely the hole');
+});
+
+test('a FULLY dispatched line blocks too — the status is kept as a second signal', () => {
+  assert.equal(dispatchedLinesBlockingReverse(
+    [{ id: 1, status: 'dispatched', dispatched_qty: 0, po_number: 'X' }]).length, 1);
+});
+
+test('nothing shipped — the correction proceeds', () => {
+  assert.deepEqual(dispatchedLinesBlockingReverse(
+    [{ id: 115, status: 'produced', dispatched_qty: 0 }]), []);
+});
+
+test('a gang blocks if ANY member has shipped — one physical run', () => {
+  const lines = [{ id: 1, dispatched_qty: 0 }, { id: 2, dispatched_qty: 50, po_number: 'X' }];
+  assert.equal(dispatchedLinesBlockingReverse(lines).length, 1);
+});
+
+test('an absent or null dispatched_qty is not a shipment', () => {
+  assert.deepEqual(dispatchedLinesBlockingReverse([{ id: 1, dispatched_qty: null }, { id: 2 }]), []);
+});

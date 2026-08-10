@@ -1306,6 +1306,25 @@ export async function clawBackFgReceipt(jc, qc = q, oc = one) {
   return fgIn.n;
 }
 
+// "Cartons have left the building" — the ONE spelling of the rule that stops a
+// production correction rewriting history the customer already holds. Used by
+// Sort & Paste's reverse and by the completed-run adjust; both had grown their
+// own copy of the predicate in SQL, which is how the first version of it came to
+// be wrong in one place and not the other.
+//
+// THE SIGNAL IS dispatched_qty, NOT status='dispatched'. A line only reaches
+// that status once the order is FULLY met — dispatch.js closes on
+// `if (nd >= ol.qty)` — so a PARTIAL shipment leaves it at 'produced' and a
+// status check waves the correction straight through. That matters because the
+// claw-back un-credits the WHOLE batch: against a pool a shipment has already
+// drawn down it hits GREATEST(0, ...), clamps to zero, and the re-close credits
+// the full batch again, leaving the pool overstated by exactly what shipped.
+// The status is kept as a second signal only because a fully-shipped line is the
+// same refusal; dispatched_qty alone would decide every real case.
+export function dispatchedLinesBlockingReverse(lines = []) {
+  return lines.filter(l => Number(l.dispatched_qty || 0) > 0 || l.status === 'dispatched');
+}
+
 export async function fgReceipt(productId, qty, refType, refId, qc) {
   await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
             ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [productId, qty]);

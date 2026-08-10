@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -3005,17 +3005,15 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
         // matches — and nothing matching is the ORDINARY case here, so `oc`
         // made every reverse of an undispatched job die on "Cannot read
         // properties of null (reading 'length')". A multi-row query takes qc.
-        const shipped = await qc(`
-          SELECT ol.id, o.po_number FROM order_lines ol
+        // SQL gathers this card's lines; dispatchedLinesBlockingReverse() is the
+        // one spelling of "cartons have left the building" — shared with the
+        // completed-run adjust below, and tested without a database.
+        const lines = await qc(`
+          SELECT ol.id, ol.dispatched_qty, ol.status, o.po_number FROM order_lines ol
           JOIN orders o ON o.id = ol.order_id
-          -- dispatched_qty > 0, NOT status='dispatched'. A PARTLY shipped line
-          -- never reaches that status — it stays 'produced' — so keying on the
-          -- status let a part-shipped job be reversed: the claw-back then clamps
-          -- at GREATEST(0, ...) and the re-close re-inflates the pool by exactly
-          -- what had already gone out. Either signal is enough to refuse.
-          WHERE (ol.dispatched_qty > 0 OR ol.status='dispatched')
-            AND (ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2))`,
+          WHERE ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2)`,
           [jc.order_line_id, jc.gang_run_id]);
+        const shipped = dispatchedLinesBlockingReverse(lines);
         if (shipped.length)
           throw Object.assign(new Error(
             `${jc.jc_number} has already been dispatched (PO ${shipped.map(x => x.po_number).join(', ')})`
@@ -3089,7 +3087,7 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
 // the next stage's received quantity updates in real time. Guard rails:
 // nothing downstream may already be completed, the job must still be open,
 // and every change is audited old → new with a reason.
-async function stageImpact(stageId, newOut, newScrap, oc) {
+async function stageImpact(stageId, newOut, newScrap, oc, qc) {
   const st = await oc(`
     SELECT js.*, jc.status AS jc_status, jc.children_per_parent, jc.jc_number, jc.product_id
     FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id WHERE js.id=$1`, [stageId]);
@@ -3103,14 +3101,17 @@ async function stageImpact(stageId, newOut, newScrap, oc) {
   // FG adjustment" that does not exist. Same call as the reverse gate: paperwork
   // soft, physics hard. What is physics is cartons already DISPATCHED.
   if (st.jc_status === 'closed') {
-    const shipped = await oc(`
-      SELECT o.po_number FROM order_lines ol
+    // Same rule as the reverse gate, and now the same code — see
+    // dispatchedLinesBlockingReverse(). A part-shipped line never reads
+    // 'dispatched', so a status check would let a correction rewrite output the
+    // customer already holds.
+    const lines = await qc(`
+      SELECT ol.dispatched_qty, ol.status, o.po_number FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
       JOIN job_cards jc ON jc.id = $1
-      -- Same as the reverse guard: a part-shipped line never reads 'dispatched'.
-      WHERE (ol.dispatched_qty > 0 OR ol.status='dispatched')
-        AND (ol.id = jc.order_line_id OR (jc.gang_run_id IS NOT NULL AND ol.gang_run_id = jc.gang_run_id))
-      LIMIT 1`, [st.job_card_id]);
+      WHERE ol.id = jc.order_line_id
+         OR (jc.gang_run_id IS NOT NULL AND ol.gang_run_id = jc.gang_run_id)`, [st.job_card_id]);
+    const [shipped] = dispatchedLinesBlockingReverse(lines);
     if (shipped) {
       out.blocked = `Already dispatched (PO ${shipped.po_number}) — cancel that challan before changing what was produced.`;
       return out;
@@ -3144,7 +3145,7 @@ r.get('/job-stages/:id/impact', canRun, async (req, res, next) => {
   try {
     const newOut = Math.max(0, Math.round(+req.query.qty_out || 0));
     const newScrap = Math.max(0, Math.round(+req.query.qty_scrap || 0));
-    const impact = await stageImpact(req.params.id, newOut, newScrap, one);
+    const impact = await stageImpact(req.params.id, newOut, newScrap, one, q);
     res.json({
       stage: { id: impact.stage.id, stage: impact.stage.stage, jc_number: impact.stage.jc_number, qty_in: impact.stage.qty_in, unit: impact.stage.unit },
       old: impact.old, new: impact.new, downstream: impact.downstream, blocked: impact.blocked,
@@ -3206,7 +3207,7 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
     const reason = (req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'A reason is required for adjusting a completed stage' });
     await tx(async (qc, oc) => {
-      const impact = await stageImpact(req.params.id, newOut, newScrap, oc);
+      const impact = await stageImpact(req.params.id, newOut, newScrap, oc, qc);
       if (impact.blocked) throw Object.assign(new Error(impact.blocked), { status: 409 });
       const st = impact.stage;
 
