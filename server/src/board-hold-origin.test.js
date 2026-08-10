@@ -530,3 +530,52 @@ test('A2: uncommit is gated too, or the gate is a two-click bypass', () => {
     + 'moves frozen board between jobs in two clicks and never touches planMove, so the approver '
     + 'gate never runs.');
 });
+
+// ── A4: the PR door exists, and it goes through the GATED engine ───────────
+//
+// A4 asked for a "take board from another job" door in the PR/procurement
+// module. It is BUILT — and it was recorded as missing for a while because the
+// check grepped routes/procurement.js for move references and found none.
+// That was the wrong file, and the absence is the CORRECT design:
+//
+//   Procurement PR register
+//     -> the "N in warehouse" chip on a PR row  (Procurement.jsx)
+//     -> <BoardCommitments prContext={pr}>      (targetLineId = pr.order_line_id)
+//     -> "Move to this PR"                      (BoardCommitments.jsx)
+//     -> POST /board/move                       -> planMove -> the A2 gate
+//     -> planMove's pr_down effects reduce or close the PR itself
+//
+// A2's whole premise is that Planning and the PR module are two doors onto ONE
+// act. Reusing /board/move is what makes the approver gate cover both. A second
+// board-move route inside procurement.js would be a door that does not go
+// through planMove — ungated on the day it is written, and the exact failure A2
+// exists to prevent. So the assertion below is deliberately a NEGATIVE one:
+// "A4 is missing" must never again be fixed by building a parallel route.
+const readAt = f => readFileSync(new URL(f, import.meta.url), 'utf8');
+
+test('A4: procurement opens the board panel against the PR it is buying for', () => {
+  const proc = code(readAt('../../client/src/pages/Procurement.jsx'));
+  assert.match(proc, /<BoardCommitments/, 'Procurement no longer opens the board panel — the PR door is gone');
+  assert.match(proc, /prContext=\{/,
+    'the panel must be opened WITH the PR, or it has no target line and the "Move to this PR" '
+    + 'button never renders — the door silently disappears while the panel still opens');
+});
+
+test('A4: the PR door moves board through the shared, gated route', () => {
+  const panel = code(readAt('../../client/src/components/BoardCommitments.jsx'));
+  assert.match(panel, /Move to this PR/, 'the PR-side move button is gone');
+  assert.match(panel, /api\.post\(\s*'\/board\/move'/,
+    'the PR door must POST /board/move — that route is where planMove, and therefore the A2 '
+    + 'approver gate, actually runs');
+});
+
+test('A4: procurement must NOT grow its own board-move route around the gate', () => {
+  const proc = code(src('./routes/procurement.js'));
+  assert.ok(!/planMove\(/.test(proc),
+    'routes/procurement.js calls planMove directly. If that is a new board-move door it must go '
+    + 'through POST /board/move like the PR panel does, so it inherits the approver gate and the '
+    + 'hold-release accounting rather than re-implementing either.');
+  assert.ok(!/r\.post\('\/(requisitions\/:id\/)?board-move/.test(proc),
+    'a second board-move route inside procurement is a door that bypasses planMove — A2 names '
+    + 'exactly this as the way the gate gets lost');
+});
