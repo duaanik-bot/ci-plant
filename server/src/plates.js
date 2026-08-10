@@ -43,19 +43,39 @@ export function defaultPlateSize(spec = {}, components = []) {
   return metallic ? '560 x 670' : '600 x 730';
 }
 
+// A calendar day as 'YYYY-MM-DD', from either a string or the JS Date the driver
+// hands back. db.js overrides only the NUMERIC parsers, so a `date` column
+// arrives as a Date at LOCAL midnight — and String(date) starts with the WEEKDAY
+// ("Sat Aug 08…"), which compares as text far above "2026-…". That made every
+// rate read as not-yet-effective, so no Plate PO could ever price itself.
+//
+// Local parts, never toISOString(): pg builds the Date at local midnight, so east
+// of Greenwich the ISO form is the PREVIOUS day (2026-08-08 IST → 2026-08-07T18:30Z)
+// and a rate would start applying a day early.
+function dayOf(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
+}
+
 export function resolvePlateRate(rates = [], plateMasterId, vendorId = null, onDate = new Date()) {
   const masterId = Number(plateMasterId);
   const wantedVendor = vendorId == null || vendorId === '' ? null : Number(vendorId);
-  const date = typeof onDate === 'string' ? onDate.slice(0, 10) : onDate.toISOString().slice(0, 10);
+  const date = dayOf(onDate);
   const candidates = rates.filter(row => Number(row.plate_master_id) === masterId
     && Number(row.active) === 1
-    && (!row.effective_from || String(row.effective_from).slice(0, 10) <= date)
+    && (!row.effective_from || dayOf(row.effective_from) <= date)
     && (row.vendor_id == null || Number(row.vendor_id) === wantedVendor));
   candidates.sort((a, b) => {
     const aSpecific = a.vendor_id != null && Number(a.vendor_id) === wantedVendor ? 1 : 0;
     const bSpecific = b.vendor_id != null && Number(b.vendor_id) === wantedVendor ? 1 : 0;
     if (aSpecific !== bSpecific) return bSpecific - aSpecific;
-    const byDate = String(b.effective_from || '').localeCompare(String(a.effective_from || ''));
+    // Same trap as the filter: a stringified Date sorts by WEEKDAY name, so the
+    // latest effective rate is whichever happened to fall on a Wednesday.
+    const byDate = String(dayOf(b.effective_from) || '').localeCompare(String(dayOf(a.effective_from) || ''));
     return byDate || Number(b.id) - Number(a.id);
   });
   return candidates[0] || null;

@@ -65,6 +65,39 @@ test('plate rate resolves the vendor override before the base size rate', () => 
   assert.equal(resolvePlateRate(rates, 8, 99, '2026-08-08').rate_per_plate, 200);
 });
 
+test('a rate whose effective_from arrives as a Date still resolves', () => {
+  // THE SHAPE THE DATABASE ACTUALLY RETURNS. db.js overrides only the numeric
+  // parsers, so a `date` column comes back as a JS Date at LOCAL midnight — and
+  // String(date).slice(0,10) is "Sat Aug 08", not "2026-08-08". Compared as text
+  // against "2026-08-11" that is GREATER ('S' > '2'), so every rate looked
+  // not-yet-effective and resolvePlateRate returned null for all of them.
+  //
+  // On the live app that made every Plate PO impossible: the refusal read "No
+  // active Plate Rate is available for this Plate Size and vendor. Set it in
+  // Masters -> Plates -> Plate Rates." — telling the buyer to go and set a rate
+  // that was already sitting there, correct and active. Same family as the
+  // latestTimestamp defect; the old test passed only because its fixture used
+  // strings while production used Dates.
+  const rates = [
+    { id: 1, plate_master_id: 2, vendor_id: null, rate_per_plate: '200.00',
+      effective_from: new Date(2026, 7, 8), active: 1 },
+  ];
+  const hit = resolvePlateRate(rates, 2, 23, new Date(2026, 7, 11));
+  assert.ok(hit, 'a Date effective_from must not read as not-yet-effective');
+  assert.equal(hit.rate_per_plate, '200.00');
+});
+
+test('a Date effective_from is read as its own day, not shifted by the timezone', () => {
+  // The tempting fix — toISOString().slice(0,10) — is wrong east of Greenwich:
+  // pg builds the Date at LOCAL midnight, so 2026-08-08 in IST is
+  // 2026-08-07T18:30:00Z and the day would read as the 7th. A rate effective
+  // FROM the 8th would then apply on the 7th.
+  const sameDay = [{ id: 1, plate_master_id: 2, vendor_id: null, rate_per_plate: 200,
+    effective_from: new Date(2026, 7, 8), active: 1 }];
+  assert.ok(resolvePlateRate(sameDay, 2, null, new Date(2026, 7, 8)), 'effective ON its own day');
+  assert.equal(resolvePlateRate(sameDay, 2, null, new Date(2026, 7, 7)), null, 'not the day before');
+});
+
 test('editable colour quantities expand to individually traceable physical plates', () => {
   const rows = expandPlateQuantities([
     { component_type: 'cyan', component_label: 'Anything', qty: 1 },
