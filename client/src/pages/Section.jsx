@@ -23,6 +23,7 @@ import {
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2, Scissors, Send,
 } from 'lucide-react';
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
+import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PacketsOpened from '../components/PacketsOpened.jsx';
@@ -469,7 +470,8 @@ export default function Section() {
   // the modal can be closed and reopened on a different row faster than a
   // slow GET resolves.
   const issueReqRef = useRef(0);
-  const [shadeAlarm, setShadeAlarm] = useState(null);      // soft shade-card 409 → { shade, proceed }
+  const [alarm, setAlarm] = useState(null);                // soft shade/plate 409 → { kind, shade|plates }
+  const [acked, setAcked] = useState(NO_ACKS);             // which soft alarms this attempt has already answered
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
   const [reqForm, setReqForm] = useState({ qty: '', reason: '', note: '' });
   const [xsCompleting, setXsCompleting] = useState(null);
@@ -668,13 +670,18 @@ export default function Section() {
       });
   };
 
-  const start = async (ackShade = false) => {
+  // Acknowledgements accumulate. A job can trip the shade alarm AND the plate
+  // alarm; the shade one throws first, so acking it only to send `ack_plates`
+  // alone next time would re-raise the shade alarm and bounce the operator
+  // between two dialogs for ever. Every ack given so far rides every retry.
+  const start = async (ack = acked) => {
     if (issueStatus === 'loading' || issueStatus === 'error') return; // belt and braces — Start is already disabled
     const body = {
       operator: operator || undefined,
       machine_id: machineId ? +machineId : undefined,
       line_clearance: needsClearance(section) ? clearancePayload(clearance) : undefined,
-      ack_shade: ackShade || undefined,
+      ack_shade: ack.shade || undefined,
+      ack_plates: ack.plates || undefined,
       packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined,
     };
     try {
@@ -691,14 +698,15 @@ export default function Section() {
     } catch (e) {
       // Soft shade-card alarm (internal-approval-pending) — let the operator
       // acknowledge and proceed. Hard blocks (no data.code) toast centrally.
-      if (e.data?.code === 'SHADE_CARD_NOT_ELIGIBLE') {
-        setShadeAlarm({ shade: e.data.shade });
-        return;
-      }
+      if (e.data?.code === 'SHADE_CARD_NOT_ELIGIBLE') { setAlarm({ kind: 'shade', shade: e.data.shade }); return; }
+      // Soft plate alarm — the rack says a plate is still on order. The man at
+      // the press can see whether it is in his hand; he decides, on the record.
+      if (e.data?.code === 'PLATES_NOT_READY') { setAlarm({ kind: 'plates', plates: e.data.plates }); return; }
       throw e;
     }
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
-    setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setShadeAlarm(null); setPacketsOpened({});
+    setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setPacketsOpened({});
+    setAlarm(null); setAcked(NO_ACKS);
     setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]);
     setIssuePlannedUps(0); setIssueReason('');
     load();
@@ -1314,7 +1322,8 @@ export default function Section() {
                     <Button className="w-full" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
                       onClick={() => {
                         const a = resolveAssignment(section, r, data?.machines);
-                        setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
+                        setStarting(r); setAcked(NO_ACKS); setAlarm(null);
+                        setMachineId(a.machineId); setOperator(pick?.name || a.operator);
                         setShowPickers(!a.auto); setClearance(freshClearance());
                         loadBoardIssue(r);
                       }}>
@@ -1494,7 +1503,8 @@ export default function Section() {
                               title={r.queue_state === 'incoming' ? 'Start ahead — the previous stage has not finished yet' : 'Start this run'}
                               onClick={() => {
                                 const a = resolveAssignment(section, r, data?.machines);
-                                setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
+                                setStarting(r); setAcked(NO_ACKS); setAlarm(null);
+                        setMachineId(a.machineId); setOperator(pick?.name || a.operator);
                                 setShowPickers(!a.auto); setClearance(freshClearance());
                                 loadBoardIssue(r);
                               }}>
@@ -1543,7 +1553,8 @@ export default function Section() {
                               // A man who has named himself on the rail outranks
                               // the crew fallback: he IS the one at the press,
                               // and every visible row is his press's work.
-                              setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
+                              setStarting(r); setAcked(NO_ACKS); setAlarm(null);
+                        setMachineId(a.machineId); setOperator(pick?.name || a.operator);
                               setShowPickers(!a.auto); setClearance(freshClearance());
                               loadBoardIssue(r);
                             }}>
@@ -1989,7 +2000,7 @@ export default function Section() {
       <Modal open={!!starting} onClose={() => setStarting(null)}
         title={starting ? `Start ${meta.label} — ${starting.jc_number}` : ''}
         footer={<>
-          <Button variant="secondary" onClick={() => setStarting(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => { setStarting(null); setAcked(NO_ACKS); setAlarm(null); }}>Cancel</Button>
           <Button onClick={() => start()}
             disabled={issueStatus === 'loading' || issueStatus === 'error'
               || (needsClearance(section) && !allClear(clearance))}
@@ -2087,16 +2098,10 @@ export default function Section() {
         )}
       </Modal>
 
-      {/* Soft shade-card alarm — internal approval still pending, but this
-          product/customer only requires internal sign-off, so the operator may
-          acknowledge and proceed. The ack is audited server-side. */}
-      <ConfirmDialog open={!!shadeAlarm} onClose={() => setShadeAlarm(null)} danger
-        title="Shade card approval pending"
-        message={shadeAlarm
-          ? `${shadeAlarm.shade.reason}. Proceed with printing anyway? This acknowledgement is recorded against ${shadeAlarm.shade.sc_number}.`
-          : ''}
-        confirmLabel="Acknowledge & start"
-        onConfirm={() => start(true)} />
+      {/* Soft shade-card and plate alarms — both named, both overridable by the
+          supervisor, both audited. See components/StartAlarms.jsx. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
+        onAcknowledge={kind => { const next = { ...acked, [kind]: true }; setAcked(next); start(next); }} />
 
       {/* Extra sheets — the operator's controlled path when the run needs more
           board. Approval re-fires a linked Cutting task; Printing receives

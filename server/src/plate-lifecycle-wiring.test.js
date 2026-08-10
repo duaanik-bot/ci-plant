@@ -18,7 +18,7 @@ test('the Plate lifecycle router is mounted and realtime-enabled', () => {
 test('Job Card finalisation, printing start and printing completion share the lifecycle', () => {
   const route = read('server/src/routes/production.js');
   assert.match(route, /auto_from_finalise/);
-  assert.match(route, /assertPlateReadyForPrinting\(qc, jc\.id\)/);
+  assert.match(route, /assertPlateReadyForPrinting\(qc, jc\.id/);
   assert.match(route, /issuePlateAssetsForJob\(qc, oc, jc, machineId/);
   assert.match(route, /applyPlateDispositions\(qc, oc, st\.id, req\.body\.plate_dispositions/);
 });
@@ -160,4 +160,39 @@ test('the controlled master seeds two sizes, not ten colour SKUs', () => {
   assert.match(migration, /'600 x 730'/);
   assert.match(migration, /allowed_components TEXT\[\]/);
   assert.doesNotMatch(migration, /560 x 670[^\n]*Cyan/i);
+});
+
+// ── The plate gate reaches the operator ───────────────────────────────────
+// It shipped as a structured 409, and api.js suppresses the central toast for
+// any error carrying a `code` because the convention is that the caller draws
+// a modal. Nothing drew one, so Start Run did nothing at all — no toast, no
+// dialog, no reason — on all three pages that start a printing stage.
+
+test('every page that starts printing answers a plate refusal', () => {
+  for (const path of ['client/src/pages/Section.jsx', 'client/src/pages/Floor.jsx', 'client/src/pages/Production.jsx']) {
+    const page = read(path);
+    assert.match(page, /PLATES_NOT_READY/, `${path} ignores the plate refusal`);
+    assert.match(page, /ack_plates/, `${path} offers no way past the plate refusal`);
+  }
+});
+
+test('the printing start carries the plate acknowledgement and records who gave it', () => {
+  const route = read('server/src/routes/production.js');
+  assert.match(route, /assertPlateReadyForPrinting\(qc, jc\.id, req\.body\.ack_plates\)/);
+  assert.match(route, /ack_plates_not_ready/);
+});
+
+test('a structured refusal no caller renders still reaches the user', () => {
+  const api = read('client/src/api.js');
+  // The blanket "any code means someone drew a modal" rule is what made the
+  // refusal invisible. Suppression must be opt-in per code, so a new server
+  // code that nobody wired up degrades to a visible toast, never to silence.
+  assert.doesNotMatch(api, /if \(!data\.code\) onError\(msg\)/);
+  assert.match(api, /const HANDLED_CODES = new Set\(\[/);
+  // Both exits — request() and upload() — must consult the list, or half the
+  // app keeps the old silent behaviour.
+  assert.equal((api.match(/HANDLED_CODES\.has\(data\.code\)/g) || []).length, 2);
+  // The gate that started this must be on the list AND have its dialog, which
+  // is the pairing the previous test proves for all three pages.
+  assert.match(api, /'PLATES_NOT_READY'/);
 });

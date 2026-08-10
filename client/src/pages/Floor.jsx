@@ -12,6 +12,7 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
 import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
+import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
@@ -64,6 +65,7 @@ export default function Floor() {
   const [logFor, setLogFor] = useState(null);   // machine whose log is open
   const [log, setLog] = useState(null);
   const [clearing, setClearing] = useState(null);  // job awaiting line clearance before start
+  const [alarm, setAlarm] = useState(null);       // soft shade/plate 409 → { kind, job, lc, ack }
   const [checks, setChecks] = useState([]);
   // Board issue — board is consumed only at a job's FIRST stage (cutting is
   // always first in routingFor()), and never for a gang card (order_line_id is
@@ -168,11 +170,24 @@ export default function Floor() {
       loadBoardIssue(job);
     } else doStart(job);
   };
-  const doStart = async (job, lc) => {
-    await api.post(`/job-stages/${job.stage_id}/start`, { line_clearance: lc,
-      packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined });
+  // Printing has two soft alarms — the shade card and the plate rack — and both
+  // arrive as structured 409s that api.js keeps quiet for the caller to draw.
+  // This page drew neither, so at a press the Start button simply did nothing.
+  // Every ack already given rides the retry, or the two alarms bounce the
+  // operator back and forth between them.
+  const doStart = async (job, lc, ack = NO_ACKS) => {
+    try {
+      await api.post(`/job-stages/${job.stage_id}/start`, { line_clearance: lc,
+        packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined,
+        ack_shade: ack.shade || undefined, ack_plates: ack.plates || undefined });
+    } catch (e) {
+      if (e.data?.code === 'SHADE_CARD_NOT_ELIGIBLE') { setAlarm({ kind: 'shade', shade: e.data.shade, job, lc, ack }); return; }
+      if (e.data?.code === 'PLATES_NOT_READY') { setAlarm({ kind: 'plates', plates: e.data.plates, job, lc, ack }); return; }
+      throw e;
+    }
     toast.success(`${job.jc_number} started`);
     setClearing(null);
+    setAlarm(null);
     load();
   };
   // The clearing modal's Start Run button ONLY — the one path that ever
@@ -684,6 +699,11 @@ export default function Floor() {
           </div>
         )}
       </Modal>
+
+      {/* Soft shade-card / plate alarms. Without these the press's Start button
+          answers a structured 409 with nothing at all. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
+        onAcknowledge={kind => doStart(alarm.job, alarm.lc, { ...alarm.ack, [kind]: true })} />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
+import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
 // PLANNED date. The rule and the presets live in one lib so the chip counts and
 // the filtered list can never disagree; see its header for why planned_date.
@@ -153,6 +154,7 @@ export default function Production() {
   const [breakupPhase, setBreakupPhase] = useState(null);
   const breakupReqRef = useRef(0);
   const [clearing, setClearing] = useState(null);     // {jc, st} awaiting line clearance
+  const [alarm, setAlarm] = useState(null);          // soft shade/plate 409 → { kind, jc, st, lc, ack }
   const [reversing, setReversing] = useState(null);   // {jc, st}
   const [reverseReason, setReverseReason] = useState('');
   const [checks, setChecks] = useState([]);
@@ -306,11 +308,23 @@ export default function Production() {
       loadBoardIssue(jc, st);
     } else doStart(jc, st);
   };
-  const doStart = async (jc, st, lc) => {
-    await api.post(`/job-stages/${st.id}/start`, { line_clearance: lc,
-      packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined });
+  // Printing's two soft alarms (shade card, plate rack) come back as structured
+  // 409s that api.js keeps quiet for the caller to draw. This page drew neither,
+  // so Start silently did nothing. Acks accumulate — the shade gate throws
+  // before the plate gate, and answering only one would bounce between them.
+  const doStart = async (jc, st, lc, ack = NO_ACKS) => {
+    try {
+      await api.post(`/job-stages/${st.id}/start`, { line_clearance: lc,
+        packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined,
+        ack_shade: ack.shade || undefined, ack_plates: ack.plates || undefined });
+    } catch (e) {
+      if (e.data?.code === 'SHADE_CARD_NOT_ELIGIBLE') { setAlarm({ kind: 'shade', shade: e.data.shade, jc, st, lc, ack }); return; }
+      if (e.data?.code === 'PLATES_NOT_READY') { setAlarm({ kind: 'plates', plates: e.data.plates, jc, st, lc, ack }); return; }
+      throw e;
+    }
     toast.success(`${fmt.stage(st.stage)} started on ${jc.jc_number}`);
     setClearing(null);
+    setAlarm(null);
     load();
   };
   // The clearing modal's Start Run button ONLY — the one path that ever
@@ -1297,6 +1311,10 @@ export default function Production() {
           </div>
         )}
       </Modal>
+
+      {/* Soft shade-card / plate alarms — named, overridable, audited. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
+        onAcknowledge={kind => doStart(alarm.jc, alarm.st, alarm.lc, { ...alarm.ack, [kind]: true })} />
     </div>
   );
 }

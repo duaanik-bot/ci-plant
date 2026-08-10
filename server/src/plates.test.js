@@ -135,3 +135,42 @@ test('printing start is blocked when only part of a tracked plate set is ready',
 test('legacy jobs without a Plate request remain startable', async () => {
   assert.deepEqual(await assertPlateReadyForPrinting(async () => [], 91), { required: 0, ready: 0, is_ready: true });
 });
+
+// ── The plate gate must never stop the press silently, and never for ever ──
+// Board is physics; a plate's rack paperwork is not. The press operator is the
+// one person who can see whether the plates are in his hand, so the gate tells
+// him what the ERP thinks is missing and lets him overrule it on the record.
+
+test('the plate refusal names the components the press is short of', async () => {
+  await assert.rejects(
+    assertPlateReadyForPrinting(async () => [
+      { status: 'available', component_label: 'Cyan', request_number: 'CI-TR-0021' },
+      { status: 'po_created', component_label: 'Magenta', request_number: 'CI-TR-0021' },
+      { status: 'pr_required', component_label: 'Black', request_number: 'CI-TR-0021' },
+    ], 91),
+    err => {
+      assert.equal(err.status, 409);
+      assert.equal(err.body.code, 'PLATES_NOT_READY');
+      assert.deepEqual(err.body.plates.missing.map(m => m.component_label), ['Magenta', 'Black']);
+      assert.deepEqual(err.body.plates.request_numbers, ['CI-TR-0021']);
+      assert.match(err.message, /Magenta, Black/);
+      return true;
+    },
+  );
+});
+
+test('an acknowledged plate shortfall starts the run and reports the override', async () => {
+  const summary = await assertPlateReadyForPrinting(async () => [
+    { status: 'available', component_label: 'Cyan' },
+    { status: 'po_created', component_label: 'Magenta' },
+  ], 91, true);
+  assert.equal(summary.is_ready, false);
+  assert.equal(summary.overridden, true);
+  assert.deepEqual(summary.missing.map(m => m.component_label), ['Magenta']);
+});
+
+test('acknowledging changes nothing when the plates were ready anyway', async () => {
+  const summary = await assertPlateReadyForPrinting(async () => [{ status: 'available' }], 91, true);
+  assert.equal(summary.is_ready, true);
+  assert.equal(summary.overridden, false);
+});

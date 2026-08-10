@@ -1,4 +1,26 @@
 // Tiny API client — bearer token + central error/401 handling.
+
+// Structured refusals (a `code` in the body) skip the central toast because the
+// caller draws its own dialog for them. That used to be assumed of EVERY code,
+// which meant a server refusal nobody had wired up produced nothing at all —
+// no toast, no dialog, a button that simply did not work. PLATES_NOT_READY
+// shipped exactly that way and stopped three jobs at Offset 3 in silence.
+//
+// So suppression is opt-in now, and this list is the opt-in: every entry has a
+// caller that says the refusal itself. A code that is NOT here falls through to
+// the central toast — the wrong-looking message beats no message at all, and a
+// new structured error is visible from the first minute it exists.
+const HANDLED_CODES = new Set([
+  'SHADE_CARD_NOT_ELIGIBLE',       // Section.jsx — acknowledge & start
+  'PLATES_NOT_READY',              // Section/Floor/Production — acknowledge & start
+  'PRODUCT_STRENGTH_COLLISION',    // PrintPlanning.jsx, Invoices.jsx — collision prompt
+  'GANG_CONFLICT', 'merge_conflicts', 'gang_pr_exists', // Planning.jsx
+  'PLAN_ALREADY_EXECUTED', 'PLAN_NOT_DRAFT', 'PLAN_NEVER_SAVED', 'PLAN_DISCARD_GANGED',
+  'RUN_NOT_DRAFT', 'RUN_NEVER_SAVED', // Planning.jsx — discard catches toast these
+  'BOARD_NOT_FREE', 'COMMIT_EXCEEDS_FREE', 'NOTHING_COMMITTED', // BoardCommitments.jsx
+  'scanned',                       // ImportPOWizard.jsx
+]);
+
 let onError = () => {};
 let onUnauthorized = () => {};
 export function setErrorHandler(fn) { onError = fn; }
@@ -30,9 +52,8 @@ async function request(method, url, body) {
   }
   if (!res.ok) {
     const msg = data.error || `Request failed (${res.status})`;
-    // Structured decision errors (data.code) are handled by the caller with a
-    // proper modal — no toast. Plain errors keep the central toast.
-    if (!data.code) onError(msg);
+    // Only a code with a caller-side dialog stays quiet — see HANDLED_CODES.
+    if (!HANDLED_CODES.has(data.code)) onError(msg);
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -66,7 +87,7 @@ export const api = {
     }
     if (!res.ok) {
       const msg = data.error || `Upload failed (${res.status})`;
-      if (!data.code) onError(msg);
+      if (!HANDLED_CODES.has(data.code)) onError(msg);
       const err = new Error(msg);
       err.status = res.status;
       err.data = data;

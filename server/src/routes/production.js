@@ -1234,7 +1234,18 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           qc, req.user.name);
       }
       if (st.stage === 'printing') {
-        await assertPlateReadyForPrinting(qc, jc.id);
+        // Soft, like the shade alarm above: the plate warehouse says what it
+        // knows, the man at the press says what he can see, and the override
+        // is the record of who chose. Whatever IS matched still gets issued —
+        // an overridden start does not lose the plates it did have.
+        const plates = await assertPlateReadyForPrinting(qc, jc.id, req.body.ack_plates);
+        if (plates.overridden) {
+          await audit('job_stage', st.id, 'ack_plates_not_ready',
+            `${jc.jc_number}: printing started with ${plates.ready} of ${plates.required} plates confirmed — missing ${
+              plates.missing.map(row => row.component_label || row.status).join(', ')
+            }${plates.request_numbers.length ? ` (${plates.request_numbers.join(', ')})` : ''} — acknowledged`,
+            qc, req.user.name);
+        }
         await issuePlateAssetsForJob(qc, oc, jc, machineId, req.user.name);
       }
       // Operator preference: explicit pick → the press operator already on the
