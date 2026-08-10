@@ -7,7 +7,8 @@ import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, tota
 import { stockSplit } from '../lib/replenishment.js';
 import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, ClipboardList, Truck, ShieldAlert } from 'lucide-react';
+import { HEALTH, healthOf, HealthBadge } from '../components/BoardHealth.jsx';
+import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, Truck, ShieldAlert } from 'lucide-react';
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
@@ -43,11 +44,20 @@ const pktText = p => (p == null ? '—' : (+p).toLocaleString('en-IN', { maximum
 
 // Two-line stock cell — packets in front, sheets beneath. Used by every raw
 // material list so RM stock reads the same wherever it appears.
-function StockCell({ m, sheets, short }) {
+//
+// It used to take a `short` flag and paint the packet figure red. That tint was
+// a THIRD reader of `m.short` — the same boolean behind the old SHORT badge and
+// the export's Short count — and `short` is computed from `reserved`, a demand
+// definition blind to board_allocations. So the shelf figure could turn red
+// while every column beside it read fine, and nothing on the row explained why.
+// The verdict now lives in exactly one place, the Health column, which reads
+// the columns it sits next to. A quantity is a quantity here; the judgement is
+// Health's job.
+function StockCell({ m, sheets }) {
   const p = packetsOf(m, sheets);
   return (
     <div className="leading-tight">
-      <div className={`text-[15px] font-black tabular-nums ${short ? 'text-red-600' : 'text-gray-900'}`}>
+      <div className="text-[15px] font-black tabular-nums text-gray-900">
         {pktText(p)}<span className="ml-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
       </div>
       <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-400">
@@ -60,6 +70,26 @@ function StockCell({ m, sheets, short }) {
 // Plain-text twin of StockCell for PDF/XLSX export, where a two-line cell has to
 // collapse into one string.
 const stockText = (m, sheets) => `${pktText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
+
+// Which of a stock row's four figures BoardHealth judges, spelled ONCE. Three
+// readers ask for this verdict — the Health cell, its export twin, and the
+// export summary's count — and a row mapped by hand at each of them is how one
+// of them ends up quoting `reserved` again six months from now. The module owns
+// the ladder; this owns which columns feed it.
+const healthOfRow = m => {
+  const s = stockSplit(m);
+  return healthOf({ openWriteOn: m.open_writeon_qty, frozen: s.committed, free: s.net, buyLine: m.reorder_level });
+};
+
+// "Worst first" on the Health header, in the ladder's own declared order —
+// BoardHealth says the order IS the semantics, so this reads it rather than
+// re-spelling it. It exists because the Health column still carries `key:
+// 'short'`, which is a REAL field on the row: without a sortValue the
+// comparator falls back to `a['short']` and ranks a four-state verdict by the
+// retired boolean this task exists to stop reading. That is a nastier failure
+// than the dead sort the Shortfall column documents — the rows do move, and
+// they move plausibly, so nothing on screen says the order is wrong.
+const HEALTH_RANK = Object.keys(HEALTH);
 
 // The same two-unit reading as StockCell, for the columns that sit BESIDE
 // Available and were sheets-only: a storekeeper comparing "committed" or "on
@@ -143,11 +173,18 @@ const boardSpecColumns = rates => [
 // What each RM KPI card is filtering the board list down to, said in the same
 // words the card uses.
 const RM_KPI_LABEL = {
-  committed: 'boards planning has locked stock on',
-  net: 'boards with net stock still free',
-  pr: 'boards with a PR raised and no PO yet',
-  incoming: 'boards with stock on an open PO',
-  reorder: 'boards whose net stock is below the reorder line',
+  committed: 'boards with stock frozen for a job',
+  net: 'boards with stock still free to promise',
+  // One sentence, because the two cards it replaces became one. `pr` and
+  // `incoming` are deleted rather than kept "just in case": no card can select
+  // those keys any more, and a label for a card nobody can click is the second
+  // vocabulary this rebuild exists to remove.
+  on_order: 'boards with board on a PR or a PO',
+  reorder: 'boards whose free stock is below the buy line',
+  // `over` was missing entirely, so the ONE fault card on this strip produced
+  // the nameless notice "the selected KPI". Task 2 renames the card; the key it
+  // filters on stays `over`, and it needs a sentence like every other.
+  over: 'boards short of what their jobs need',
 };
 
 // Age distribution — the "aging control" now lives inline above each stock list
@@ -463,7 +500,11 @@ export default function Inventory() {
             // is what tells a buyer where to look first.
             if (pr > 0 || inc > 0) a.overAnsweredBoards++; else a.overOpen += s.over_committed;
           }
-          if (m.reorderHit) a.reorderBoards++;
+          // `reorderHit` used to be counted here. Nothing in the tree has ever
+          // set that field — the line survived only because `reorderBoards` is
+          // recomputed from `belowReorder` a few lines below, which is the real
+          // rule (free stock, not gross). Counting a field that is always
+          // undefined is a rule nobody can find when the number looks wrong.
           return a;
         }, { gross: 0, committed: 0, net: 0, over: 0, overOpen: 0, pr: 0, incoming: 0, noWeight: 0,
              grossPkt: 0, committedPkt: 0, netPkt: 0, prPkt: 0, incomingPkt: 0, overPkt: 0,
@@ -471,8 +512,10 @@ export default function Inventory() {
              stockedBoards: 0, committedBoards: 0, netBoards: 0, prBoards: 0, prCount: 0,
              incomingBoards: 0, reorderBoards: 0, overBoards: 0, overAnsweredBoards: 0,
              cmtLines: new Set(), cmtProducts: new Set() });
-        // Below the reorder line = the classic buy trigger, judged on FREE
-        // stock rather than gross: board already locked to a job is not cover.
+        // Below the BUY LINE = the classic buy trigger, judged on FREE TO
+        // PROMISE rather than ON SHELF: board already frozen for a job is not
+        // cover. The field is still `reorder_level` — only the column's label
+        // moved, and renaming the field is a migration this screen does not need.
         const belowReorder = m => (+m.reorder_level || 0) > 0 && stockSplit(m).net < (+m.reorder_level || 0);
         pos.reorderBoards = base.filter(belowReorder).length;
 
@@ -515,19 +558,152 @@ export default function Inventory() {
         // so a number and the rows behind it can never disagree.
         //
         // An active card OVERRIDES the zero-stock toggle. That is the whole
-        // point for PR raised, Incoming and Below reorder: those three are about
-        // boards that have run out, so leaving the toggle in charge would show a
-        // number with an empty list under it.
+        // point for On order and Below reorder: both are about boards that have
+        // run out, so leaving the toggle in charge would show a number with an
+        // empty list under it.
+        //
+        // `pr` and `incoming` are gone from this map because the cards that were
+        // the only source of those keys are gone — merged into `on_order`. A
+        // predicate no card can select is dead, and a dead predicate here is how
+        // the map stops being a readable list of what the strip can do.
         const rows = rmKpi.key
           ? rmKpi.apply(base, {
             committed: m => stockSplit(m).committed > 0,
             net: m => stockSplit(m).net > 0,
-            pr: m => +m.pr_qty > 0,
-            incoming: m => +m.incoming > 0,
+            on_order: m => (+m.pr_qty || 0) > 0 || (+m.incoming || 0) > 0,
             over: m => stockSplit(m).over_committed > 0,
             reorder: belowReorder,
           })
           : (showEmpty ? base : base.filter(m => +m.available > 0));
+        // The RM stock columns, named once because they are needed twice.
+        // Hoisted out of the JSX for ONE reason: `exportColumns` REPLACES the
+        // column list wholesale (`columns: exportColumns || columns`, in
+        // DataTable), so the workbook's unmerged view has to be DERIVED from
+        // this list. Writing it out as a second hand-kept array is how a
+        // printout starts disagreeing with the screen it was printed from —
+        // and passing only the two split columns, which is the obvious
+        // reading of that prop, silently drops every other column from the
+        // PDF and the workbook, board name included.
+        const rmColumns = [
+          // Board name over its plant code — the same two-line identity the
+          // Boards master shows, so the code on the floor ("2038340GB") reads
+          // straight off the stock list. The old "Category" column is gone: it
+          // said "board" on every row, because the board master IS the raw
+          // material master.
+          { key: 'name', colClass: 'min-w-[190px] ci-cap', label: 'Board', render: m => (<div><div className="font-semibold">{m.name}</div><div className="font-mono text-[11px] text-gray-400">{m.spec}</div></div>) },
+          ...boardSpecColumns(boardRates),
+          { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'On Shelf', align: 'right',
+            render: m => <StockCell m={m} sheets={m.available} />,
+            export: m => stockText(m, m.available) },
+          // Total Weight is gone from the ROW, not from the screen: the kg
+          // summary line and the tonnage headline on every KPI card still
+          // carry it. Per row it was a multiplication of two columns sitting
+          // two apart — On Shelf and Kg / Sheet — and the width it cost is
+          // what Shortfall and On Order now use.
+          { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: m => (m.age_days != null && +m.available > 0) ? <AgeChip days={m.age_days} /> : <span className="text-xs text-slate-300">—</span> },
+          // The columns behind the KPI strip, in the order the strip reads.
+          // Zero is greyed so a row's real position carries at a glance down
+          // a long list.
+          { key: 'committed', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Frozen', align: 'right',
+            render: m => {
+              const s = stockSplit(m);
+              return (
+                <div>
+                  <UnitCell m={m} sheets={s.committed} tone="text-amber-700" />
+                  {+m.committed_lines > 0 && (
+                    <div className="text-[10px] text-slate-400">{fmt.num(+m.committed_lines)} job{+m.committed_lines === 1 ? '' : 's'}</div>
+                  )}
+                </div>
+              );
+            },
+            export: m => stockText(m, Math.round(stockSplit(m).committed)) },
+          // Free to Promise is the one-glance answer to "can I give this board
+          // to a new job?", so it renders in the same two units as every other
+          // quantity on the row. It was the only one of the three in bare
+          // sheets, sitting between two packets-over-sheets columns — a
+          // storekeeper comparing them was converting one of the pair in his
+          // head. Its export was a bare number for the same reason and moves
+          // with it.
+          { key: 'net', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Free to Promise', align: 'right',
+            render: m => <UnitCell m={m} sheets={stockSplit(m).net} tone="text-emerald-700" />,
+            export: m => stockText(m, Math.round(stockSplit(m).net)) },
+          // Shortfall sits OUTSIDE the On Shelf = Frozen + Free to Promise
+          // trio, deliberately. Those three divide up board that EXISTS.
+          // This is demand with no board behind it — the only figure on the
+          // row that may exceed the shelf, and the only one that is not stock.
+          //
+          // It replaces the red "+N over" badge that used to live inside the
+          // Frozen cell. That badge was the only thing on a row saying "this
+          // board is the bottleneck", and once over-commitment stops happening
+          // on the planning path it would read zero — leaving a board at Free
+          // to Promise 0 WITH a PR raised looking identical to one with
+          // nothing behind it. On Order sits next to it for exactly that
+          // reason: "short 7,893 · 12,240 on order" is one sentence.
+          //
+          // `key` names the KPI card this column stands behind, and unlike
+          // every sibling it is NOT a field on the row: the figure is derived
+          // by stockSplit. DataTable's comparator falls back to `a[sort.key]`
+          // when a column declares no sortValue, so without the line below
+          // every row compares as undefined — the header still draws its sort
+          // arrow and the list does not move. "Worst shortfall first" is the
+          // first thing anyone does with this column, so it is declared.
+          { key: 'over', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Shortfall', align: 'right',
+            sortValue: m => stockSplit(m).over_committed,
+            // UnitCell already greys a zero to an em-dash at its own size; a
+            // ternary here only made this column's dash smaller than the ones
+            // beside it, so the row of zeros no longer lined up.
+            render: m => <UnitCell m={m} sheets={stockSplit(m).over_committed} tone="text-red-600" />,
+            export: m => stockText(m, Math.round(stockSplit(m).over_committed)) },
+          // PO over PR in one cell. They answer one question — "is anything
+          // coming?" — and asking it in two columns cost width the row needs
+          // for Shortfall. The export keeps them SEPARATE: a workbook is
+          // filtered and pivoted, and the summary block already emits distinct
+          // PR and PO totals that a merged column would contradict.
+          //
+          // `sortValue`, not `sortKey` — same trap Shortfall documents above.
+          // `on_order` is not a field on the row, so without this the
+          // comparator reads `a['on_order']`, gets undefined on every row, and
+          // the header draws a sort arrow over a list that never moves.
+          { key: 'on_order', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'On Order', align: 'right',
+            sortValue: m => (+m.incoming || 0) + (+m.pr_qty || 0),
+            render: m => {
+              const po = +m.incoming || 0, pr = +m.pr_qty || 0;
+              if (!po && !pr) return <span className="text-xs text-slate-300">—</span>;
+              return (
+                <div>
+                  {po > 0 && <UnitCell m={m} sheets={po} tone="text-sky-700" />}
+                  {pr > 0 && <div className="text-[10px] font-semibold text-violet-700">{pktText(packetsOf(m, pr))} PKT on PR</div>}
+                </div>
+              );
+            } },
+          // Packets over sheets, because the number it is compared against —
+          // Free to Promise — is now in those units. Bare sheets beside a
+          // packets figure is the conversion this rebuild removes.
+          { key: 'reorder_level', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Buy Line', align: 'right',
+            render: m => +m.reorder_level > 0
+              ? <UnitCell m={m} sheets={+m.reorder_level} tone="text-slate-600" />
+              : <span className="text-xs text-slate-300">—</span>,
+            export: m => stockText(m, Math.round(+m.reorder_level || 0)) },
+          // Health, and nothing else on the row, says what a person should do
+          // about this board. `card: 'status'` pins it to the phone card's
+          // status slot — without it the column classifies as a plain detail
+          // and falls behind Details, where the one verdict on the row is the
+          // thing you have to tap to see.
+          { key: 'short', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Health', card: 'status',
+            sortValue: m => HEALTH_RANK.indexOf(healthOfRow(m)),
+            render: m => <HealthBadge state={healthOfRow(m)} />,
+            export: m => HEALTH[healthOfRow(m)].label },
+          threadColumn({ entity: 'material', threads, idOf: m => m.id }),
+        ];
+        // A sheet has room the row does not. On Order merges PO and PR into
+        // one cell so Shortfall fits across the screen; the export splits them
+        // back apart, because "is anything coming?" is one question at a
+        // glance and two in a pivot — and the summary block below still totals
+        // PR and PO separately, which one merged column would contradict.
+        const rmExportColumns = rmColumns.flatMap(c => (c.key !== 'on_order' ? [c] : [
+          { key: 'pr_qty', label: 'PR Raised', align: 'right', export: m => stockText(m, Math.round(+m.pr_qty || 0)) },
+          { key: 'incoming', label: 'Incoming (PO)', align: 'right', export: m => stockText(m, Math.round(+m.incoming || 0)) },
+        ]));
         return (<>
         {/* The position, read once at the top. These SCROLL AWAY with the page:
             pinning six cards held a quarter of the screen for figures nobody
@@ -536,59 +712,59 @@ export default function Inventory() {
             them — the subset you are in and the switches that change it. */}
 
         {/* The warehouse position, left to right the way the plant reasons:
-            what is on the shelf → what planning has locked → what is left to
-            promise → what has been asked for → what is on its way → what has
-            fallen under its buy line. Every card filters the list to exactly
-            what it counted; Gross clears back to the whole grade. */}
-        <KpiRow cols={7} className="mb-2">
-          <KpiCard compact icon={Layers} tone="info" label="Gross stock"
+            what is on the shelf → what planning has frozen → what is left to
+            promise → what has already been asked for → what is frozen past the
+            shelf → what has fallen under its buy line. Every card filters the
+            list to exactly what it counted; On shelf clears back to the whole
+            grade. Six cards, not seven: PR raised and Incoming on PO were one
+            question asked twice. */}
+        <KpiRow cols={6} className="mb-2">
+          <KpiCard compact icon={Layers} tone="info" label="On shelf"
             value={qtyValue(pos.grossKg, pos.gross)}
             sub={qtySub(pos.grossPkt, pos.gross,
               `on the shelf · ${pos.stockedBoards} of ${nBoards(base.length)} holding stock`)}
-            title="Physical stock in the plant right now. Committed + Net always equals this. Click to clear any card filter."
+            title="Physical stock in the plant right now. Frozen + Free to promise always equals this. Click to clear any card filter."
             onClick={() => rmKpi.clear()} active={!rmKpi.key} />
-          <KpiCard compact icon={Lock} tone="warn" label="Committed demand"
+          {/* The tooltip no longer ends with "…N sheets of that demand has no
+              stock behind it". That figure is the Shortfall column and the To
+              arrange card; a third place to read it is the duplication this
+              rebuild exists to remove. */}
+          <KpiCard compact icon={Lock} tone="warn" label="Frozen for jobs"
             value={qtyValue(pos.committedKg, pos.committed)}
             sub={qtySub(pos.committedPkt, pos.committed, (
               <>
                 {pos.cmtProducts.size} product{pos.cmtProducts.size === 1 ? '' : 's'} ·{' '}
                 {pos.cmtLines.size} order line{pos.cmtLines.size === 1 ? '' : 's'} ·{' '}
                 {pos.committedBoards} board{pos.committedBoards === 1 ? '' : 's'}
-                {pos.over > 0 && (
-                  <span className="ml-1 font-semibold text-red-500">
-                    +{fmt.num(Math.round(pos.over))} short
-                  </span>
-                )}
               </>
             ))}
-            title={`Board the Planning Engine has fixed to named jobs, covering ${pos.cmtProducts.size} products across ${pos.cmtLines.size} sales-order lines.${
-              pos.over > 0 ? ` ${fmt.num(Math.round(pos.over))} sheets of that demand has no stock behind it.` : ''}`}
+            title={`Board the Planning Engine has fixed to named jobs, covering ${pos.cmtProducts.size} products across ${pos.cmtLines.size} sales-order lines.`}
             onClick={() => rmKpi.toggle('committed')} active={rmKpi.is('committed')} />
-          <KpiCard compact icon={PackageCheck} tone="good" label="Net stock"
+          <KpiCard compact icon={PackageCheck} tone="good" label="Free to promise"
             value={qtyValue(pos.netKg, pos.net)}
             sub={qtySub(pos.netPkt, pos.net, `free on ${nBoards(pos.netBoards)} · still to promise`)}
-            title="Gross minus what planning has locked — what you can still commit."
+            title="On shelf minus what planning has frozen — what you can still promise."
             onClick={() => rmKpi.toggle('net')} active={rmKpi.is('net')} />
-          <KpiCard compact icon={ClipboardList} tone="violet" label="PR raised"
-            value={qtyValue(pos.prKg, pos.pr)}
-            sub={qtySub(pos.prPkt, pos.pr, pos.pr > 0
-              ? `${pos.prCount} PR${pos.prCount === 1 ? '' : 's'} on ${nBoards(pos.prBoards)} · awaiting PO`
-              : 'nothing waiting to be ordered')}
-            title="Requisitions raised — from the Planning Engine or direct — not yet turned into a PO. Counted on every board in the grade, including the ones that have run out."
-            onClick={() => rmKpi.toggle('pr')} active={rmKpi.is('pr')} />
-          <KpiCard compact icon={Truck} tone="info" label="Incoming on PO"
-            value={qtyValue(pos.incomingKg, pos.incoming)}
-            sub={qtySub(pos.incomingPkt, pos.incoming, pos.incoming > 0
-              ? `on ${nBoards(pos.incomingBoards)} · ordered, not received`
-              : 'nothing on the water')}
-            title="Still to arrive on open purchase orders."
-            onClick={() => rmKpi.toggle('incoming')} active={rmKpi.is('incoming')} />
-          {/* Locked beyond the shelf. It sits AFTER Incoming deliberately: the
+          {/* PR raised and Incoming on PO were two cards answering ONE question
+              — "is anything coming?" — and the pair cost the strip a column the
+              rebuild needed. They are added into one headline and split apart
+              again on the sub-line, because a buyer must never act on the total
+              without knowing which half a supplier has actually accepted. The
+              workbook keeps them as two columns for the same reason. */}
+          <KpiCard compact icon={Truck} tone="info" label="On order"
+            value={qtyValue(pos.incomingKg + pos.prKg, pos.incoming + pos.pr)}
+            sub={qtySub(pos.incomingPkt + pos.prPkt, pos.incoming + pos.pr, (pos.incoming + pos.pr) > 0
+              ? `${fmt.num(Math.round(pos.incoming))} on PO · ${fmt.num(Math.round(pos.pr))} on PR`
+              : 'nothing ordered or requisitioned')}
+            title="Board already asked for: still to arrive on open purchase orders, plus requisitions raised and not yet turned into a PO. Counted on every board in the grade, including the ones that have run out."
+            onClick={() => rmKpi.toggle('on_order')} active={rmKpi.is('on_order')} />
+          {/* Frozen beyond the shelf. It sits AFTER On order deliberately: the
               question a buyer asks of this number is "has anyone ordered it
-              yet", and the two cards that answer that are the ones beside it.
-              Never folded into Committed — it is demand with no stock behind
-              it, not stock, so Gross = Committed + Net still holds exactly. */}
-          <KpiCard compact icon={ShieldAlert} tone={pos.over > 0 ? 'bad' : 'good'} label="Over commit"
+              yet", and On order — now one card, not two — is the answer sitting
+              beside it. Never folded into Frozen for jobs — it is demand with
+              no board behind it, not stock, so On shelf = Frozen + Free to
+              promise still holds exactly. */}
+          <KpiCard compact icon={ShieldAlert} tone={pos.over > 0 ? 'bad' : 'good'} label="To arrange"
             value={qtyValue(pos.overKg, pos.over)}
             sub={qtySub(pos.overPkt, pos.over, pos.over > 0
               ? `${nBoards(pos.overBoards)} locked past stock · ${
@@ -606,7 +782,7 @@ export default function Inventory() {
                 </span>
               </>
             }
-            title="Judged on net stock, not gross — board already locked to a job is not cover."
+            title="Judged on free to promise, not on shelf — board already frozen for a job is not cover."
             onClick={() => rmKpi.toggle('reorder')} active={rmKpi.is('reorder')} />
         </KpiRow>
 
@@ -686,60 +862,11 @@ export default function Inventory() {
             const ids = visible.map(r => r.id);
             setPicked(cur => checked ? [...new Set([...cur, ...ids])] : cur.filter(id => !ids.includes(id)));
           }}
-          columns={[
-            // Board name over its plant code — the same two-line identity the
-            // Boards master shows, so the code on the floor ("2038340GB") reads
-            // straight off the stock list. The old "Category" column is gone: it
-            // said "board" on every row, because the board master IS the raw
-            // material master.
-            { key: 'name', colClass: 'min-w-[190px] ci-cap', label: 'Board', render: m => (<div><div className="font-semibold">{m.name}</div><div className="font-mono text-[11px] text-gray-400">{m.spec}</div></div>) },
-            ...boardSpecColumns(boardRates),
-            { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Available (Packets / Sheets)', align: 'right',
-              render: m => <StockCell m={m} sheets={m.available} short={m.short} />,
-              export: m => stockText(m, m.available) },
-            { key: 'weight', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
-                const w = rowWeight(m, m.available);
-                return w == null
-                  ? <span className="text-xs text-slate-300">—</span>
-                  : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
-              } },
-            { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: m => (m.age_days != null && +m.available > 0) ? <AgeChip days={m.age_days} /> : <span className="text-xs text-slate-300">—</span> },
-            // The columns behind the KPI strip, in the order the strip reads.
-            // Zero is greyed so a row's real position carries at a glance down
-            // a long list.
-            { key: 'committed', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Committed (Planned)', align: 'right',
-              render: m => {
-                const s = stockSplit(m);
-                return (
-                  <div>
-                    <UnitCell m={m} sheets={s.committed} tone="text-amber-700" />
-                    {/* Locked beyond the shelf is a fault to reconcile, not
-                        stock — shown beside the figure, never folded into it. */}
-                    {s.over_committed > 0 && (
-                      <span className="text-[11px] font-semibold text-red-500">+{fmt.num(Math.round(s.over_committed))} over</span>
-                    )}
-                  </div>
-                );
-              },
-              export: m => stockText(m, Math.round(stockSplit(m).committed)) },
-            { key: 'net', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Net Stock', align: 'right',
-              render: m => {
-                const s = stockSplit(m);
-                return <span className={`tabular-nums ${s.net > 0 ? 'font-semibold text-emerald-700' : 'text-slate-300'}`}>{fmt.num(Math.round(s.net))}</span>;
-              },
-              export: m => Math.round(stockSplit(m).net) },
-            { key: 'pr_qty', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'PR Raised', align: 'right',
-              render: m => <UnitCell m={m} sheets={m.pr_qty} tone="text-violet-700" />,
-              export: m => stockText(m, Math.round(+m.pr_qty || 0)) },
-            { key: 'incoming', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Incoming (PO)', align: 'right',
-              render: m => <UnitCell m={m} sheets={m.incoming} tone="text-sky-700" />,
-              export: m => stockText(m, Math.round(+m.incoming || 0)) },
-            { key: 'reorder_level', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Reorder Level', align: 'right', render: m => fmt.num(m.reorder_level) },
-            { key: 'short', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Health', render: m => m.short
-                ? <span className="text-xs font-bold text-red-600">SHORT</span>
-                : <span className="text-xs font-semibold text-emerald-600">OK</span> },
-            threadColumn({ entity: 'material', threads, idOf: m => m.id }),
-          ]}
+          columns={rmColumns}
+          // The workbook and the PDF get PR and PO back as two columns. See
+          // rmExportColumns above for why this cannot be written as the two
+          // columns on their own.
+          exportColumns={rmExportColumns}
           onRowClick={setViewing}
           rows={rows}
           rowClass={unreadRowClass(threads, m => m.id)}
@@ -748,13 +875,17 @@ export default function Inventory() {
           exportSubtitle="Warehouse · Raw material"
           exportSummary={rows => [
             { label: 'Boards', value: rows.length },
-            { label: 'Short', value: rows.filter(m => m.short).length },
-            { label: 'Available (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
-            { label: 'Available (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
+            // The sheet counts what the screen counts. This was `m.short`, the
+            // same boolean the Health cell stopped reading — a workbook saying
+            // "Short 14" beside fourteen rows reading RECOUNT or FROZEN OUT is
+            // the disagreement this rebuild removes.
+            { label: 'Needs attention', value: rows.filter(m => healthOfRow(m) !== 'ok').length },
+            { label: 'On shelf (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
+            { label: 'On shelf (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
             // Exported the same way the strip totals it — per board, never
             // netted across boards, so the sheet reconciles with the screen.
-            { label: 'Committed (planned & locked)', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).committed, 0))) },
-            { label: 'Net stock', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).net, 0))) },
+            { label: 'Frozen', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).committed, 0))) },
+            { label: 'Free to promise', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).net, 0))) },
             { label: 'PR raised (awaiting PO)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (+m.pr_qty || 0), 0))) },
             { label: 'Incoming on PO', value: fmt.num(Math.round(rows.reduce((s, m) => s + (+m.incoming || 0), 0))) },
             { label: 'Board weight (kg)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (rowWeight(m, m.available) || 0), 0))) },
@@ -831,15 +962,51 @@ export default function Inventory() {
               // but inherits grade/GSM/pack from the board it was cut from, which
               // is what makes an offcut weighable and valuable at all.
               ...boardSpecColumns(boardRates).filter(c => c.key !== 'sheet_size'),
-              { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Available (Packets / Sheets)', align: 'right',
+              // Same header the RM Stock list uses. The banned words live in TWO
+              // column arrays in this one file, so renaming only the stock list
+              // leaves the screen saying "On Shelf" on one sub-tab and
+              // "Available" on the other — the half-renamed screen exactly.
+              { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'On Shelf', align: 'right',
                 render: m => <StockCell m={m} sheets={m.available} />,
                 export: m => stockText(m, m.available) },
+              // A BANKED STRIP USED TO READ 100% FREE BY CONSTRUCTION. The
+              // leftovers endpoint never ran its masters through enrichStockRow,
+              // so `committed_qty` was absent, stockSplit put the whole strip in
+              // Free to Promise, and an offcut a locked plan had already frozen
+              // looked available to promise to the next job. The route now sends
+              // the same aggregates the RM Stock list gets; these three read them
+              // through the SAME helpers and the SAME BoardHealth module, so an
+              // offcut and a mother board are judged by one rule, not two.
+              //
+              // Frozen and Free to Promise sit immediately after On Shelf on both
+              // sub-tabs, because the identity that makes them legible —
+              // On Shelf = Frozen + Free to Promise — only reads at a glance when
+              // the three are adjacent and in that order.
+              { key: 'committed', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Frozen', align: 'right',
+                render: m => <UnitCell m={m} sheets={stockSplit(m).committed} tone="text-amber-700" />,
+                export: m => stockText(m, Math.round(stockSplit(m).committed)) },
+              { key: 'net', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Free to Promise', align: 'right',
+                render: m => <UnitCell m={m} sheets={stockSplit(m).net} tone="text-emerald-700" />,
+                export: m => stockText(m, Math.round(stockSplit(m).net)) },
               { key: 'weight', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
                   const w = rowWeight(m, m.available);
                   return w == null
                     ? <span className="text-xs text-slate-300">—</span>
                     : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
                 } },
+              // Health last, exactly as on the RM Stock list — one verdict per
+              // row, off `healthOfRow`, never a second copy of the ladder. It
+              // carries `key: 'short'` and `sortValue` for the same reason the
+              // stock list's does: `short` is a REAL field on the row, so a
+              // column without a sortValue would silently rank a four-state
+              // verdict by the retired boolean. On an offcut, BELOW LINE
+              // effectively never fires — nobody sets a buy line on a strip you
+              // cannot order — which is correct, not a gap: the two rungs that
+              // matter here are RECOUNT and FROZEN OUT.
+              { key: 'short', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Health', card: 'status',
+                sortValue: m => HEALTH_RANK.indexOf(healthOfRow(m)),
+                render: m => <HealthBadge state={healthOfRow(m)} />,
+                export: m => HEALTH[healthOfRow(m)].label },
             ]}
             onRowClick={setViewing}
             rows={leftovers?.masters || []} empty="No leftover stock banked yet — plan a job on an odd board and push its offcut here"

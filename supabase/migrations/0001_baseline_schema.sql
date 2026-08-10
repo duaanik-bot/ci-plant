@@ -1895,6 +1895,18 @@ ALTER TABLE board_allocations ADD CONSTRAINT board_allocations_job_board_mix_id_
 CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_job_board_mix_id
   ON board_allocations (job_board_mix_id);
 
+-- Distinguishes an engine freeze (origin='plan_lock') from a planner's
+-- hand-placed Commit (origin NULL). See the board_allocation_origin migration:
+-- replaceMixPlan's ABSORB matches source='stock' AND job_board_mix_id IS NULL,
+-- which is the hand-placed shape, and would otherwise swallow the freeze.
+ALTER TABLE board_allocations ADD COLUMN IF NOT EXISTS origin TEXT;
+ALTER TABLE board_allocations DROP CONSTRAINT IF EXISTS board_allocations_origin_check;
+ALTER TABLE board_allocations ADD CONSTRAINT board_allocations_origin_check
+  CHECK (origin IS NULL OR origin IN ('plan_lock'));
+CREATE INDEX IF NOT EXISTS idx_alloc_origin_active
+  ON board_allocations (order_line_id, material_id)
+  WHERE status = 'active' AND origin = 'plan_lock';
+
 -- In-app notifications -----------------------------------------------------
 -- One row = one message for one signed-in user, surfaced by the bell in the
 -- app shell. Producers write through notify() in helpers.js; the bell polls

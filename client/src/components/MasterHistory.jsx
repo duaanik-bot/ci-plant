@@ -58,6 +58,12 @@ const dt = s => (s ? new Date(s).toLocaleString('en-IN', { day: '2-digit', month
 const present = v => v != null && String(v).trim() !== '';
 const yn = v => (+v ? 'Yes' : 'No');
 
+// Sheet counts, printed the way the RM row prints them. Board quantities are
+// DOUBLE PRECISION and the Demand tab's Frozen and Shortfall are both derived
+// by subtraction, so they arrive carrying float noise — fmt.num alone would put
+// "3,000.0000000001" beside a row reading 3,000. A sheet is a whole thing.
+const sheets = n => fmt.num(Math.round(+n || 0));
+
 // "Where did this happen" — a shop-floor stage (+ machine) for production
 // events, otherwise the owning module/register.
 const stationText = st => {
@@ -221,7 +227,7 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   const [range, setRange] = useState({ preset: 'fy', ...presetRange('fy') });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  // Committed-demand breakdown — materials only, not windowed by date (it's
+  // Frozen-board breakdown — materials only, not windowed by date (it's
   // a live snapshot of open order lines, same as the aggregate on the RM
   // Stock table), so it gets its own fetch alongside the master-history one.
   const [demand, setDemand] = useState(null);
@@ -420,6 +426,17 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
     { key: 'party_artwork_code', label: 'Artwork', render: r0 => r0.party_artwork_code || <span className="text-gray-300">—</span> },
     { key: 'order_qty', label: 'Order Qty', align: 'right', render: r0 => <span className="font-semibold">{fmt.num(r0.order_qty)}</span> },
     { key: 'sheets_required', label: 'Sheets Required', align: 'right', render: r0 => <span className="font-bold">{fmt.num(r0.sheets_required)}</span> },
+    // Is this line's board frozen on THIS material? The list is wider than the
+    // Frozen figure above it by construction: a job the planning engine split
+    // across two boards is a live claim on both but frozen on each for only its
+    // own share, and a job that has already drawn part of its board keeps its
+    // residue frozen while dropping out of the list entirely. Without the flag
+    // a reader adds Sheets Required down the column and gets a total the strip
+    // above does not show — which is the disagreement this tab just stopped
+    // having with the row it opens from.
+    { key: 'frozen', label: 'Frozen', render: r0 => r0.frozen
+      ? <span className="inline-block whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Frozen</span>
+      : <span className="inline-block whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">Not frozen</span> },
     { key: 'planned_date', label: 'Planned Date', render: r0 => r0.planned_date
       ? <span className="text-[11px] text-[#515154]">{fmt.date(r0.planned_date)}</span>
       : <span className="text-gray-300">—</span> },
@@ -471,7 +488,12 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   ] : kind === 'materials' ? [
     { label: 'Received', value: fmt.num(s.received), accent: 'text-emerald-700' },
     { label: 'Consumed', value: fmt.num(s.consumed), accent: 'text-sky-700' },
-    { label: 'Available', value: fmt.num(s.available) },
+    // The SAME figure the Demand tab prints two inches below and the RM row
+    // prints one click away — master-history's `available` is SUM(qty) WHERE
+    // status='available', un-windowed, which is the shelf. It cannot keep the
+    // old name while they carry the new one: two words for one number inside a
+    // single drawer is the confusion this rebuild exists to end.
+    { label: 'On Shelf', value: fmt.num(s.available) },
     { label: 'Quarantine', value: fmt.num(s.quarantine), warn: +s.quarantine > 0 },
     { label: 'On order', value: fmt.num(s.on_order) },
   ] : [
@@ -507,10 +529,14 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
       rows: invoices.map(x => ({ ...x, invoice_number: `${x.invoice_number} (${fmt.date(x.invoice_date)})`, coa_number: x.coa_number ? `${x.coa_number} (${x.coa_status})` : 'No COA' })) };
     if (tab === 'coa') return { ...base, columns: coaCols.map(text),
       rows: coas.map(x => ({ ...x, invoice_number: x.invoice_number || 'Unlinked' })) };
+    // The printout says the same three words the strip on screen says, in the
+    // same order — a PDF of this tab is read next to the RM row it was opened
+    // from, and "Available" on paper beside "On Shelf" on screen is the reader
+    // asking whether they are the same figure.
     if (tab === 'demand') return { ...base,
-      meta: [...base.meta, `Committed: ${fmt.num(demand?.total_sheets)}`, `Available: ${fmt.num(demand?.available)}`, `Shortfall: ${fmt.num(demand?.shortfall)}`],
+      meta: [...base.meta, `On Shelf: ${sheets(demand?.available)}`, `Frozen: ${sheets(demand?.frozen)}`, `Shortfall: ${sheets(demand?.shortfall)}`],
       columns: demandCols.map(text),
-      rows: demandLines.map(x => ({ ...x, po_number: `${x.po_number} (${fmt.date(x.delivery_date)})`, planned_date: x.planned_date ? fmt.date(x.planned_date) : '—', status: fmt.title(x.status) })) };
+      rows: demandLines.map(x => ({ ...x, po_number: `${x.po_number} (${fmt.date(x.delivery_date)})`, planned_date: x.planned_date ? fmt.date(x.planned_date) : '—', status: fmt.title(x.status), frozen: x.frozen ? 'Frozen' : 'Not frozen' })) };
     if (tab === 'purchases') return { ...base, sections: [
       { heading: 'Purchase Orders', columns: poCols.map(text), rows: purchases.map(x => ({ ...x, po_number: `${x.po_number} (${fmt.date(x.ts)})` })) },
       { heading: 'Goods Receipts', columns: grnCols.map(text), rows: grns.map(x => ({ ...x, grn_number: `${x.grn_number} (${fmt.date(x.ts)})`, po_number: x.po_number || 'Direct' })) },
@@ -622,17 +648,29 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
                 </div>
               ) : (
                 <div>
-                  {demandLines.length > 0 && (
+                  {/* The board's position, in the RM row's own three words and
+                      its own two colours — this strip is read one click from
+                      that row, and a second vocabulary here is the confusion
+                      the rebuild removes.
+
+                      Shown whenever the figures have loaded, NOT only when the
+                      list under it has rows. The scalars are the board's
+                      position now, not a sum of this list: a job that has drawn
+                      part of its board leaves the list entirely (it has drawn,
+                      so its board question is closed) while its undrawn residue
+                      stays frozen. Gating on the list would blank a real Frozen
+                      figure on exactly those boards. */}
+                  {demand && (
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-[#1D1D1F]/[0.06] bg-white/40 px-4 py-2 text-[11px] font-medium text-[#515154]">
-                      <span>Committed <b className="tabular-nums text-[#1D1D1F]">{fmt.num(demand?.total_sheets)}</b></span>
-                      <span>Available <b className="tabular-nums text-sky-700">{fmt.num(demand?.available)}</b></span>
-                      <span>Shortfall <b className={`tabular-nums ${+demand?.shortfall > 0 ? 'font-bold text-amber-700' : 'text-emerald-700'}`}>{fmt.num(demand?.shortfall)}</b></span>
-                      {+demand?.shortfall > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Stock short</span>
+                      <span>On Shelf <b className="tabular-nums text-[#1D1D1F]">{sheets(demand.available)}</b></span>
+                      <span>Frozen <b className="tabular-nums text-amber-700">{sheets(demand.frozen)}</b></span>
+                      <span>Shortfall <b className={`tabular-nums ${+demand.shortfall > 0 ? 'font-bold text-red-600' : 'text-emerald-700'}`}>{sheets(demand.shortfall)}</b></span>
+                      {+demand.shortfall > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">Stock short</span>
                       )}
                     </div>
                   )}
-                  <Sheet cols={demandCols} rows={demandLines} empty="No committed demand against this material." />
+                  <Sheet cols={demandCols} rows={demandLines} empty="No live job claims on this material." />
                 </div>
               )
             )}

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { PLANNING_ROLES } from '../auth.js';
-import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor } from '../helpers.js';
+import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, releasePlanLockHolds, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor } from '../helpers.js';
 
 const r = Router();
 
@@ -238,6 +238,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // renders for a planned line. Clear it here, same as plan-save already
         // does when a re-lock arrives with no mix.
         await clearMixPlan(line.id, qc, req.user.name, 'plan reversed — cut plan voided');
+        await releasePlanLockHolds(line.id, qc, req.user.name, 'plan reversed');
         await qc(
           `UPDATE order_lines
              SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL,

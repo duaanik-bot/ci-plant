@@ -6,15 +6,16 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds, assertBoardHoldCapacity } from '../helpers.js';
+import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, boardDrawnLineIds, assertBoardHoldCapacity } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { linePosition, claimsByBoard } from '../board-allocation.js';
+import { linePosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { splitMasterFields } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
+import { commitBoardForLine, commitInputs } from './board.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
@@ -330,8 +331,22 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ONE transaction, and it has to be.
+//
+// setLineStatus now releases this line's board freeze alongside the status
+// flip. Run on the pool those are two independent autocommit statements, and a
+// crash between them leaves a CANCELLED line still holding board — with
+// LINE_TRANSITIONS.cancelled empty the line is terminal, so no route will ever
+// run a release for it again and the sheets are fenced off for good. That is
+// precisely the phantom the freeze exists to remove, reintroduced by its own
+// cleanup path.
+//
+// The two bulk-cancel paths already run inside tx(); this single-line route was
+// the one that did not.
 r.post('/order-lines/:id/cancel', canPlan, async (req, res, next) => {
-  try { res.json(await setLineStatus(+req.params.id, 'cancelled', q, one, req.user.name)); } catch (e) { next(e); }
+  try {
+    res.json(await tx((qc, oc) => setLineStatus(+req.params.id, 'cancelled', qc, oc, req.user.name)));
+  } catch (e) { next(e); }
 });
 
 // Station rollback / delete. mode 'rollback' returns the line to the sales
@@ -1742,22 +1757,68 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan changed');
       }
 
+      // ── FREEZE THE BOARD THIS PLAN NEEDS ────────────────────────────────
+      //
+      // Until now, locking a plan reserved nothing. "Committed" on the
+      // warehouse screen was derived demand, not a claim, so whichever job
+      // reached cutting first ate the pile and the job that was planned first
+      // failed later, far from the cause. This is the claim.
+      //
+      // RELEASE FIRST, ALWAYS — unconditional and unbranched. Four hazards
+      // collapse into that one rule: a re-lock that CHANGES the board
+      // (commitBoardForLine is per-material and would strand the old board's
+      // row forever), a re-lock that SHRINKS the requirement (it returns early
+      // on `want - alreadyHeld <= 0` and never releases the surplus), a save
+      // that ADOPTS a mix (the mix writes its own per-row holds and Phase 1
+      // deliberately stopped ABSORB from touching a freeze, so the two would
+      // stack), and plain idempotence. The released sheets return to `free`
+      // inside this same transaction, so the re-commit below is not starving
+      // itself.
+      await releasePlanLockHolds(line.id, qc, req.user.name, 'plan re-locked');
+
+      // Two exclusions, each for its own reason:
+      //   (draft is NOT excluded.) A saved draft freezes exactly as a lock
+      //   does. It was excluded in Phase 2a only until Discard existed on every
+      //   screen that can create one — POST /gang-runs/:id/plan/discard closed
+      //   that, so a draft's board can always be handed back. The route's own
+      //   header has said the same thing for longer: "the one thing a draft
+      //   DOES commit is board". This makes the engine agree with it.
+      //   stillGang— a run plans its board as one pile; per-member freezing is
+      //              Phase 2b and needs the cap struck at run level. Use
+      //              `stillGang`, NOT line.gang_run_id: the gang guard above
+      //              can null it mid-handler.
+      //   wantsMix — replaceMixPlan already wrote one hold per mix row. A
+      //              second claim here would double-hold the same sheets.
+      if (!stillGang && !wantsMix && eff.board_material_id && parentSheets > 0) {
+        // CAPPED, NEVER REFUSED. This whole handler is one transaction: a
+        // COMMIT_EXCEEDS_FREE thrown here would roll back the qty edit, the
+        // master update, the spec override, the mix and the banking — a short
+        // shelf would start killing plans the planner already decided on.
+        // Physics hard, paperwork soft. The uncovered remainder is not lost:
+        // it is exactly what the warehouse's Shortfall column reports.
+        const [avail, allLines, allocs] = await commitInputs(eff.board_material_id, qc);
+        const { free } = boardPosition({
+          available: avail, allocations: allocs, lines: allLines,
+          materialId: eff.board_material_id,
+        });
+        const held = heldFor(allocs, line.id, eff.board_material_id);
+        const want = Math.min(parentSheets, held + Math.max(0, free));
+        if (want > 0) {
+          await commitBoardForLine({
+            materialId: eff.board_material_id,
+            lineId: line.id,
+            want,
+            reason: `Frozen by the planning engine for ${eff.name || `line #${line.id}`}`,
+            origin: 'plan_lock',
+            user: req.user.name,
+          }, qc);
+        }
+      }
+
       if (line.status === 'pending' && !draft) {
         await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
-        // The designer may have got here FIRST. Artwork now opens on a saved
-        // draft (see the /artwork gate), so a job can arrive at this lock with
-        // its artwork already approved and locked — and every promotion to
-        // 'ready' in this codebase requires the line to be 'planned' when it
-        // runs. artwork/lock's own promotion checked that and found 'pending',
-        // so without this the job would land on 'planned' and stop there for
-        // good, with nothing left to nudge it: the artwork lock has already
-        // happened and will not fire again.
-        //
-        // Same three-part condition artwork/lock uses, off the same helper, so
-        // the two orders of work converge on the same state. `gate.artwork` is
-        // literally `!!line.artwork_locked`, so this cannot over-reach: a plan
-        // locked before any artwork is done still stops at 'planned', exactly
-        // as it always has.
+        // Artwork can lock against a saved draft. If it got here first,
+        // re-run readiness after planning so both work orders converge.
         const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
         const gate = await readiness(fresh, oc);
         if (gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
@@ -1877,6 +1938,7 @@ r.post('/order-lines/:id/plan/discard', canPlanWork, async (req, res, next) => {
       // (and LO-PLAN-<line>-<mat>) batches the save banked against a cut that is
       // no longer going to happen.
       await clearMixPlan(line.id, qc, req.user.name, why);
+      await releasePlanLockHolds(line.id, qc, req.user.name, 'draft plan discarded');
       await unbankPlanningLeftover(line.id, qc, oc, req.user.name, why);
       // sheets_required goes with parent_sheets_required, never without it.
       // board-allocation.js reads a line's requirement as

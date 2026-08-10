@@ -22,6 +22,7 @@ dist/
 artwork-dup-report-*.csv
 product-code-reassign-*.csv
 series-gap-close-*.csv
+board-freeze-backfill-*.txt
 # Pre-change snapshots. Named SNAPSHOT rather than BACKUP, so the *BACKUP*.json
 # rule above misses them — and they are the largest dump of all: whole product
 # rows, customer and all.

@@ -4,7 +4,7 @@ import { q, tx } from '../db.js';
 import { audit, issueWithWriteOn, BOARD_DEMAND_SQL, BOARD_DRAWN_EXISTS, EFF_BOARD_ID } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
-import { COMMITTED_DEMAND_SQL, enrichStockRow } from '../replenishment.js';
+import { COMMITTED_DEMAND_SQL, enrichStockRow, stockSplit } from '../replenishment.js';
 import { repairMissingExtraSheetReturnsQuiet } from '../extra-sheet-returns.js';
 
 const r = Router();
@@ -101,9 +101,9 @@ r.get('/inventory/stock', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Per-order-line breakdown behind the /inventory/stock committed-demand
-// number for one material — same override + parent-sheets rules as the
-// aggregate at the top of this file, so the two MUST reconcile exactly.
+// Per-order-line breakdown behind the /inventory/stock Frozen number for one
+// material — same override + parent-sheets rules as the aggregate at the top
+// of this file, so the two MUST reconcile exactly.
 r.get('/inventory/demand/:materialId', async (req, res, next) => {
   try {
     const materialId = +req.params.materialId;
@@ -124,16 +124,42 @@ r.get('/inventory/demand/:materialId', async (req, res, next) => {
       WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS}
         AND COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) = $1
       ORDER BY ol.planned_date NULLS LAST, o.delivery_date, ol.id`, [materialId]);
-    const [{ q: available }] = await q(
-      `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE status='available' AND material_id=$1`,
-      [materialId]);
-    const total_sheets = lines.reduce((s, l) => s + Number(l.sheets_required || 0), 0);
+    // THE DRAWER QUOTES THE ROW IT WAS OPENED FROM, and until now it did not.
+    //
+    // Its scalars were computed HERE and nowhere else: "committed" was the
+    // listed lines' own nominal requirement summed up, and "shortfall" was that
+    // sum minus GROSS shelf. That is a third demand definition, and it prints
+    // one click away from the RM row, where Frozen is what planning has LOCKED
+    // (capped at the shelf) and Shortfall is what it has locked BEYOND it. The
+    // two disagree in both directions — a confident "Shortfall 0" beside a row
+    // reading "Shortfall 3,000" — and the header above promises they reconcile.
+    //
+    // So the scalars now come off the SAME split the row uses, over the same
+    // two aggregates. The line list below is untouched and still answers the
+    // other question, "which jobs?" — it is the only place they are named.
+    const [[{ q: available }], locks] = await Promise.all([
+      q(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE status='available' AND material_id=$1`,
+        [materialId]),
+      // Run whole and picked out, exactly as /inventory/stock does it.
+      // COMMITTED_DEMAND_SQL is one statement carrying no parameter of its own,
+      // and a narrowed hand-copy of it here would be a SECOND definition of the
+      // frozen figure — precisely the drift this route's header forbids.
+      q(COMMITTED_DEMAND_SQL),
+    ]);
+    const lock = locks.find(l => +l.material_id === materialId);
+    const split = stockSplit({ available, committed_qty: Number(lock?.q || 0) });
+    // Which of the listed jobs actually hold board on THIS material. A line the
+    // planning engine split onto a second board, or a gang member whose run has
+    // already drawn, is still a live claim worth listing — it is simply not
+    // frozen here, and unflagged its sheets read as part of a Frozen total they
+    // are not in.
+    const frozenLines = new Set((lock?.line_ids || []).map(Number));
     res.json({
       material_id: materialId,
-      total_sheets,
       available: Number(available),
-      shortfall: Math.max(0, total_sheets - Number(available)),
-      lines,
+      frozen: split.committed,
+      shortfall: split.over_committed,
+      lines: lines.map(l => ({ ...l, frozen: frozenLines.has(+l.order_line_id) })),
     });
   } catch (e) { next(e); }
 });
@@ -396,6 +422,16 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
   try {
     const masters = await q(`
       SELECT m.*, src.name AS source_name, COALESCE(av.q,0) AS available,
+             COALESCE(inc.q,0) AS incoming,
+             -- The same open-write-on figure /inventory/stock carries. A leftover
+             -- master is an ordinary materials row, so a job that issued more
+             -- strip than the book held wrote one against it — and RECOUNT is the
+             -- TOP rung of the Health ladder this list is about to render. Left
+             -- out, the offcut list would show a Health column carrying a state
+             -- it can never reach, and the one board that most needs counting
+             -- would read OK.
+             COALESCE((SELECT SUM(qty) FROM stock_writeons
+                       WHERE material_id = m.id AND reconciled_at IS NULL), 0) AS open_writeon_qty,
              -- Offcut inherits grade/gsm/pack from its parent board but keeps its
              -- own strip size — total weight = own strip area × parent gsm. These
              -- aliases follow m.* deliberately and override the raw m.* columns.
@@ -406,6 +442,16 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
       LEFT JOIN materials src ON src.id=m.source_material_id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches
                  WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
+      -- Still-open quantity on live purchase orders, same rule and same join as
+      -- /inventory/stock. Nobody buys an offcut, so this is normally nil — it is
+      -- here because enrichStockRow attaches an incoming figure either way, and
+      -- a hard-coded zero stops being true the day somebody does.
+      LEFT JOIN (
+        SELECT pl.material_id, SUM(GREATEST(pl.qty - pl.received_qty, 0)) q
+        FROM po_lines pl JOIN purchase_orders po ON po.id = pl.purchase_order_id
+        WHERE po.status IN ('open','partially_received')
+        GROUP BY pl.material_id
+      ) inc ON inc.material_id = m.id
       WHERE m.leftover=1 ORDER BY m.name`);
     const lots = await q(`
       SELECT b.*, m.name AS material_name, m.code,
@@ -413,10 +459,40 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
       FROM stock_batches b JOIN materials m ON m.id=b.material_id
       WHERE m.leftover=1 AND b.status='available' AND b.qty > 0
       ORDER BY b.created_at`);
+    // A BANKED OFFCUT READ 100% FREE BY CONSTRUCTION until this line existed.
+    // These rows never went through enrichStockRow, so `committed_qty` was
+    // simply absent and stockSplit put every last sheet of the strip into Free
+    // to Promise — a strip a locked plan has ALREADY frozen looked available to
+    // promise to the next job. That is the double-promise the freeze exists to
+    // stop, and it was hiding on the one sub-tab nobody enriched.
+    //
+    // The same two aggregates the RM stock list at the top of this file reads,
+    // asked the same way, so the two sub-tabs of one screen can never disagree
+    // about one master. Read-only: two SELECTs, no write path.
+    //
+    // `reserved` is deliberately NOT supplied here. It feeds `short` and
+    // `suggested`, neither of which this list renders — the offcut row shows
+    // Frozen, Free to Promise and Health, and all three come off `available`,
+    // `committed_qty` and `open_writeon_qty`. Adding a third query for a figure
+    // nothing reads is cost with no reader.
+    const [locks, prs] = await Promise.all([
+      q(COMMITTED_DEMAND_SQL),
+      q(`SELECT material_id, COALESCE(SUM(qty),0) AS q, COUNT(*)::int AS n
+         FROM requisitions
+         WHERE status IN ('pending','approved') GROUP BY material_id`),
+    ]);
+    const lockMap = Object.fromEntries(locks.map(l => [l.material_id, l]));
+    const prMap = Object.fromEntries(prs.map(p => [p.material_id, p]));
     // A LO-PLAN- batch is booked at plan-lock and not yet cut ("planned");
     // once cutting completes it is renamed LO-<jc> and trued up ("confirmed").
     res.json({
-      masters,
+      masters: masters.map(m => enrichStockRow(m, {
+        incoming: m.incoming,
+        committed_qty: Number(lockMap[m.id]?.q || 0),
+        committed_lines: lockMap[m.id]?.n || 0,
+        pr_qty: Number(prMap[m.id]?.q || 0),
+        pr_count: prMap[m.id]?.n || 0,
+      })),
       lots: lots.map(l => ({
         ...l,
         bucket: bucketOf(l.age_days),

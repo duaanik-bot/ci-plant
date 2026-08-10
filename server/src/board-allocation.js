@@ -353,6 +353,27 @@ export function planMove({ materialId = null, fromLineId, toLineId, qty, availab
     text: `${to.product_name} takes ${fmt(q)} sheets from the warehouse`,
   }];
 
+  // Give back what the giver actually spends out of its OWN hold.
+  //
+  // movableFrom() is min(held + free, claim): a line may hand over board it is
+  // holding, board that is merely free, or a mix of the two. Only the held part
+  // is a row that has to be released — the free part was never anyone's. Without
+  // this the receiver gains a hold and the giver keeps one, and the same sheets
+  // are held twice.
+  //
+  // Nearly invisible until now because a locked line rarely carried a hold at
+  // all. Once the planning engine freezes board on lock, every line does, and
+  // every move would over-commit by the amount moved.
+  const givenFromHold = Math.min(q, heldFor(allocations, from.id, materialId));
+  if (givenFromHold > 0) {
+    effects.push({
+      kind: 'release',
+      order_line_id: from.id,
+      qty: givenFromHold,
+      text: `${from.product_name} gives up ${fmt(givenFromHold)} held sheets`,
+    });
+  }
+
   // Reduce the receiving job's open PRs, oldest first. holdableFor guarantees
   // the mirrored PRs total at least q, so the loop always absorbs the full
   // quantity and net purchase lands on exactly zero.

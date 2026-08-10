@@ -11,16 +11,17 @@ import {
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
-  unbankPlanningLeftover, assertBoardHoldCapacity,
+  unbankPlanningLeftover, assertBoardHoldCapacity, releasePlanLockHolds,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
-import { gangPosition, claimsByBoard } from '../board-allocation.js';
+import { gangPosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
 import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
 import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
+import { commitBoardForLine, commitInputs } from './board.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 
 const r = Router();
@@ -1116,6 +1117,114 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           + (draft ? ' (saved, lock pending)' : ''),
           qc, req.user.name);
       }
+      // Does this save carry a board mix? Asked ONCE, here, because two things
+      // below turn on the same answer: the freeze must stand down for a mixed
+      // save, and section 4 stores the mix. Two spellings of one predicate is
+      // how a freeze and a mix end up both believing they own the sheets.
+      const wantsMix = Array.isArray(req.body.mix) && req.body.mix.length > 0;
+
+      // ── FREEZE THE RUN'S BOARD, ONE HOLD PER MEMBER ─────────────────────
+      //
+      // A run draws from ONE pile, so the cap is struck ONCE and split across
+      // the members drawing on it. Freezing member by member without a shared
+      // cap would let the first members take everything free and starve the
+      // last — and because commitBoardForLine refuses past `free`, the last
+      // member's 409 would roll back this entire lock, every member's figures
+      // with it.
+      //
+      // The rows go on MEMBERS, never on the run. board_allocations.order_line_id
+      // is NOT NULL and carries no gang column, and every gang reader
+      // (gangIncoming, gangPosition, claimsByBoard) sums rows keyed on member
+      // lines — a parent-level row would be invisible to the run's own shortage
+      // figure, which is the number this exists to make honest.
+      //
+      // No branch on gang vs merge. The kind decides how each member's parent
+      // sheets were DERIVED — the child for a gang, the master for a combined
+      // run — and the persist loop above has just written that figure. `issued`
+      // IS that figure, still in hand: reading it back out of order_lines would
+      // be N round trips for a number this scope already holds.
+      //
+      // ONE CAP PER BOARD, which is what "one pile" actually means. A shared
+      // layout is forced onto a single board (the `boards.length !== 1` refusal
+      // above) and so is a merge, but a plain gang only WARNS when its members
+      // resolve to different boards. Grouping by each member's own effective
+      // board is identical to a run-level cap whenever they agree, and stops a
+      // mixed gang from freezing member 0's board against a member that never
+      // touches it — a wrong hold where before there was none.
+      //
+      // RELEASE FIRST, ALWAYS — unconditional, and outside the commit gate
+      // below. The same four hazards orders.js records: a re-plan that CHANGES
+      // the board (commitBoardForLine is per-material and would strand the old
+      // board's row), one that SHRINKS the requirement (it returns early on
+      // `want - alreadyHeld <= 0` and never releases the surplus), one that
+      // ADOPTS a mix, and plain idempotence.
+      for (const line of lines) {
+        await releasePlanLockHolds(line.id, qc, req.user.name, 'run re-planned');
+      }
+      // wantsMix — replaceMixPlan in section 4 writes one hold per mix row per
+      // member, and Phase 1 deliberately stopped its ABSORB from touching an
+      // origin='plan_lock' row. So a freeze written here would not be absorbed
+      // by the mix: the two would STACK, and the run would hold its board twice
+      // over on every single save. orders.js excludes a mixed save for exactly
+      // this reason and says so at its own freeze site. The release above still
+      // runs, so a run that GAINS a mix hands its old freeze back first rather
+      // than leaving it stranded underneath.
+      if (!wantsMix) {
+        // Members grouped by the board each one actually draws — from the
+        // effective spec already resolved for the cut plan (effectiveProduct
+        // spreads spec_override over the master, which is EFF_BOARD_ID's rule),
+        // not re-derived in SQL.
+        const byBoard = new Map();
+        for (let idx = 0; idx < plan.length; idx++) {
+          const boardId = +plan[idx].eff.board_material_id;
+          const need = Number(issued[idx] || 0);
+          if (!(boardId > 0) || !(need > 0)) continue;
+          if (!byBoard.has(boardId)) byBoard.set(boardId, []);
+          byBoard.get(boardId).push({ id: plan[idx].line.id, need });
+        }
+        // Board ids sorted, so two concurrent saves of two mixed-board runs
+        // that share boards cannot take the per-board advisory locks in
+        // opposite order and deadlock. Map insertion order here is member
+        // order, which is arbitrary.
+        for (const boardId of [...byBoard.keys()].sort((a, b) => a - b)) {
+          const members = byBoard.get(boardId);
+          const [avail, allLines, allocs] = await commitInputs(boardId, qc);
+          const { free } = boardPosition({
+            available: avail, allocations: allocs, lines: allLines, materialId: boardId,
+          });
+          // The budget is the board's FREE sheets and nothing else.
+          //
+          // Seeding it with the sum of what members already hold looks like it
+          // makes a re-save idempotent, but it pools ONE member's hold into a
+          // budget ANOTHER member can spend — and commitBoardForLine re-reads
+          // the position itself and refuses when the delta exceeds free.
+          // Member A's hold is not free for member B, so B's commit throws
+          // COMMIT_EXCEEDS_FREE and rolls back this entire lock: every member's
+          // sheets, the status flips, the die memory, the mix. That is exactly
+          // the failure the shared cap exists to prevent.
+          //
+          // Each member may draw on its OWN hold plus the shared free pool, and
+          // only the NEW consumption is charged against the pool — the same
+          // shape the single-line freeze uses in orders.js. Reachable whenever
+          // a member carries a hand-placed commit: releasePlanLockHolds above
+          // is scoped origin='plan_lock' and deliberately leaves those alone.
+          let budget = Math.max(0, free);
+          for (const m of members) {
+            const own = heldFor(allocs, m.id, boardId);
+            const want = Math.min(m.need, own + budget);
+            if (want <= 0) continue;
+            await commitBoardForLine({
+              materialId: boardId,
+              lineId: m.id,
+              want,
+              reason: `Frozen by the planning engine for ${gang.gang_number}`,
+              origin: 'plan_lock',
+              user: req.user.name,
+            }, qc);
+            budget -= Math.max(0, want - own);
+          }
+        }
+      }
       // 4) The run's board mix, if the planner built one.
       //
       // A run is planned as ONE pile, so the mix is entered once against the
@@ -1130,7 +1239,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       // issue override has just rewritten every member's parent_sheets_required
       // and that is what each member's own balance will be judged against.
       const issuedTotal = issued.reduce((s, x) => s + x, 0);
-      if (Array.isArray(req.body.mix) && req.body.mix.length) {
+      if (wantsMix) {
         const board = await oc('SELECT * FROM materials WHERE id=$1', [plan[0].eff.board_material_id]);
         // Per-member cut for a candidate board. Mirrors the /plan maths above
         // and gangMixContext's, off the same effective product.
@@ -1450,6 +1559,19 @@ r.post('/gang-runs/:id/plan/discard', canPlan, async (req, res, next) => {
       await unbankRunLeftover(gang.id, qc, oc, req.user.name, why);
       for (const line of lines) {
         await clearMixPlan(line.id, qc, req.user.name, why);
+        // THE DOOR OUT for the board this route's own Save just froze.
+        //
+        // Saving or locking a run now writes one plan_lock hold per member, so
+        // this is the primary way a run's board comes back — not an edge case.
+        // clearMixPlan above cannot do it: releaseMixHolds is scoped
+        // job_board_mix_id IS NOT NULL and a plan_lock row has neither.
+        //
+        // It also covers the older case, the same one the LO-PLAN sweep below
+        // exists for: a member planned SOLO before it joined the run carries a
+        // freeze from that solo lock. Either way, without this the member holds
+        // board for a plan that no longer exists — and a line back at 'pending'
+        // has no un-plan route left to run.
+        await releasePlanLockHolds(line.id, qc, req.user.name, why);
         // A member can hold per-line LO-PLAN batches from having been planned
         // SOLO before it joined the run. The run's own Save cleared that mix
         // (clearMixPlan in the plan loop) but never swept its bank, so those
@@ -2038,6 +2160,7 @@ r.post('/gang-runs/:id/reverse', canPlan, async (req, res, next) => {
         // survive here either — same reasoning as reverse_plan and
         // rollbackLine, per member instead of per line.
         await clearMixPlan(line.id, qc, req.user.name, `gang ${gang.gang_number} plan reversed — cut plan voided`);
+        await releasePlanLockHolds(line.id, qc, req.user.name, 'gang plan reversed');
         await qc(`UPDATE order_lines
                     SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL,
                         artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0

@@ -80,6 +80,15 @@ export async function setLineStatus(lineId, to, qc = q, oc = one, user = null) {
   if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
   assertTransition(line.status, to);
   await qc('UPDATE order_lines SET status=$1 WHERE id=$2', [to, lineId]);
+  // A cancelled line stops being demand but does NOT stop being a holder: it
+  // falls out of BOARD_DEMAND_STATUSES, so boardPosition counts its hold at
+  // face value forever and no un-plan route will ever run for it again.
+  // LINE_TRANSITIONS allows 'cancelled' from 'pending' and 'planned' —
+  // precisely the states that carry a fresh freeze. Released here rather than
+  // at the call sites because there are three today and that will not hold.
+  if (to === 'cancelled') {
+    await releasePlanLockHolds(lineId, qc, user, 'order line cancelled');
+  }
   await audit('order_line', lineId, `status:${line.status}→${to}`, null, qc, user);
   return { ...line, status: to };
 }
@@ -1022,6 +1031,13 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
   // and is left alone, and `requisition`-sourced rows are incoming PR board,
   // a different thing entirely. The mix row's own hold, written below, then
   // states this line's whole intent for that board — one number, not two.
+  //
+  // `origin IS NULL` is the third exclusion and the newest. An engine freeze
+  // placed by locking the plan (origin='plan_lock') carries the same source and
+  // the same NULL job_board_mix_id as a hand-placed hold, because it IS a stock
+  // hold on a board nothing else has mixed. Absorbing it would release the
+  // board the engine just reserved every time the planner touched the mix —
+  // the same double-hold bug this block fixes, running the other way.
   const mixMaterials = [...new Set(rows.map(r => +r.material_id))];
   if (mixMaterials.length) {
     const absorbed = await qc(
@@ -1029,7 +1045,8 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
           SET status='released', released_by=$2, released_at=now(),
               release_reason='absorbed into the board mix for this job'
         WHERE order_line_id=$1 AND status='active' AND source='stock'
-          AND job_board_mix_id IS NULL AND material_id = ANY($3::int[])
+          AND job_board_mix_id IS NULL AND origin IS NULL
+          AND material_id = ANY($3::int[])
         RETURNING material_id, qty`,
       [orderLineId, user, mixMaterials]);
     for (const a of absorbed) {
@@ -1175,6 +1192,69 @@ export async function consumeCoverHolds(orderLineIds, materialId, qc) {
       WHERE order_line_id = ANY($1) AND material_id=$2 AND status='active'
         AND source='stock' AND reason LIKE 'Covered from CI-GRN-%'`,
     [orderLineIds, materialId]);
+}
+
+// The plan-lock counterpart of releaseMixHolds — undoing a PLANNING decision.
+//
+// The engine freezes board when a plan is locked, so that a job the plant has
+// committed to cannot have its board eaten by whoever reaches cutting first.
+// When that plan stops existing — reversed, discarded, rolled back, cancelled —
+// the freeze must go with it, or the warehouse fences off sheets for a job that
+// is not going to run.
+//
+// Scoped by origin, and by order_line_id with NO material predicate. That
+// omission is deliberate and load-bearing: four separate paths move a planned
+// line's EFFECTIVE board out from under its freeze — a re-lock that picks a
+// different board, a gang board change, a master board edit, and GRN
+// substitution. A material-scoped release would miss the row sitting on the
+// board the line has just left, and that row is precisely the orphan.
+//
+// Distinct from consumePlanLockHolds below, which is the board physically
+// leaving the warehouse. Releasing there instead would return sheets to `free`
+// that are already on the floor — the same distinction releaseMixHolds and
+// consumeMixHolds draw, for the same reason.
+export async function releasePlanLockHolds(orderLineId, qc, user, why) {
+  await qc(
+    `UPDATE board_allocations
+        SET status='released', released_by=$2, released_at=now(), release_reason=$3
+      WHERE order_line_id=$1 AND status='active' AND origin='plan_lock'`,
+    [orderLineId, user, why]);
+}
+
+// The Cutting-Start counterpart of releasePlanLockHolds. The board has
+// physically left the warehouse, so the freeze has done its job and must be
+// retired as CONSUMED, never released — releasing would hand the sheets back to
+// `free` when they are already on the machine, and every later job on that
+// board would read stock that does not exist.
+//
+// The distinction is invisible to every screen: board-allocation.js's isActive
+// tests only `status === 'active'`, so consumed and released produce identical
+// numbers. What differs is the audit trail, permanently.
+//
+// Scoped by material because a line can hold more than one board — its own
+// planned board plus whatever a board-issue override substituted. Only the
+// boards actually drawn are consumed here; the caller releases the rest.
+export async function consumePlanLockHolds(orderLineIds, materialIds, qc) {
+  if (!orderLineIds?.length || !materialIds?.length) return;
+  await qc(
+    `UPDATE board_allocations SET status='consumed'
+      WHERE order_line_id = ANY($1) AND material_id = ANY($2)
+        AND status='active' AND source='stock' AND origin='plan_lock'`,
+    [orderLineIds, materialIds]);
+}
+
+// A job that drew DIFFERENT board than it froze — a board-issue override, a
+// substitution — still holds the board it never touched. Released, not
+// consumed: those sheets are on the shelf and belong to whoever needs them.
+export async function releaseUndrawnPlanLockHolds(orderLineIds, materialIds, qc, user) {
+  if (!orderLineIds?.length || !materialIds?.length) return;
+  await qc(
+    `UPDATE board_allocations
+        SET status='released', released_by=$3, released_at=now(),
+            release_reason='job cut on a different board'
+      WHERE order_line_id = ANY($1) AND material_id <> ALL($2)
+        AND status='active' AND source='stock' AND origin='plan_lock'`,
+    [orderLineIds, materialIds, user]);
 }
 
 export async function fgReceipt(productId, qty, refType, refId, qc) {
@@ -3455,7 +3535,39 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
     await audit('job_card', jc.id, 'deleted_by_rollback', jc.jc_number, qc, user);
   }
 
-  // 3. Delete a line-raised PR that never became a PO. Under force, a PR that
+  // 3. Release every hold this line still owns that clearMixPlan cannot see.
+  //
+  // clearMixPlan → releaseMixHolds is scoped `job_board_mix_id IS NOT NULL`, so
+  // it covers the mix's own mirrors and nothing else. Three kinds survive it:
+  // the PR mirror (source='requisition'), a hand-placed Commit, and an engine
+  // freeze placed by locking the plan. All three are claims on board made for a
+  // cut plan that is being erased below.
+  //
+  // The PR mirror is the sharpest case. Step 4's DELETE removes the requisition,
+  // and board_allocations.requisition_id is ON DELETE SET NULL — so without this
+  // the mirror is left ACTIVE pointing at nothing, holding board for a purchase
+  // that no longer exists, with no screen anywhere able to give it back. Under
+  // mode='delete' the line's own cascade eventually collects it; under
+  // mode='rollback' the line lives on and the board is fenced forever.
+  //
+  // Ordering against step 4 is NOT load-bearing — this matches on order_line_id,
+  // so it finds the mirror whether or not the requisition still exists. It runs
+  // first so the release is an explicit, audited act with a reason on record,
+  // rather than a row silently orphaned by a cascade.
+  const stranded = await qc(
+    `UPDATE board_allocations
+        SET status='released', released_by=$2, released_at=now(),
+            release_reason=$3
+      WHERE order_line_id=$1 AND status='active' AND job_board_mix_id IS NULL
+      RETURNING material_id, qty, source`,
+    [lineId, user, mode === 'delete' ? 'line deleted' : 'line rolled back — cut plan voided']);
+  for (const a of stranded) {
+    await audit('materials', a.material_id, 'board_hold_released',
+      `${a.qty} sheets released from order line #${lineId} — `
+      + `${a.source === 'requisition' ? 'incoming board' : 'held board'} freed when the plan was voided`,
+      qc, user);
+  }
+  // 4. Delete a line-raised PR that never became a PO. Under force, a PR that
   //    already became a PO is detached instead — the procurement paper trail
   //    (PO, GRN, stock) survives the order.
   await qc('DELETE FROM requisitions WHERE order_line_id=$1 AND purchase_order_id IS NULL', [lineId]);
@@ -3465,7 +3577,7 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
       `${prPo.n} requisition(s) detached from deleted line — purchase order kept`, qc, user);
   }
 
-  // 4. Leave any gang: clear the link and dissolve a gang left with <2 members.
+  // 5. Leave any gang: clear the link and dissolve a gang left with <2 members.
   //    Under force, any gang job cards still bound to the run (the parent, or
   //    children of lines not yet processed in this same delete) are unwound
   //    before the run row goes.
@@ -3489,7 +3601,7 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
     }
   }
 
-  // 5. Reset all planning/artwork/tooling locks on the line, and take back any
+  // 6. Reset all planning/artwork/tooling locks on the line, and take back any
   //    still-planned (LO-PLAN-) board offcut this line banked at plan-lock.
   await unbankPlanningLeftover(lineId, qc, oc, user, mode === 'delete' ? 'line deleted' : 'line rolled back');
   // The mix's ups/covers are frozen against the exact cut plan step 5 is

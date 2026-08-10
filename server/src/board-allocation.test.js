@@ -881,3 +881,76 @@ test('issuable: over-held board never reports negative free', () => {
   });
   assert.equal(r.free, 0);
 });
+
+test('planMove releases the giving line hold it actually spends', () => {
+  // Line 1 holds 800 of board 9 and needs 1,000. Line 2 needs 500 and holds
+  // nothing. Moving 300 from line 1 to line 2 must TAKE 300 off line 1's hold,
+  // not merely add 300 to line 2's — otherwise the board is held twice.
+  const plan = planMove({
+    materialId: 9,
+    fromLineId: 1,
+    toLineId: 2,
+    qty: 300,
+    available: 800,
+    lines: [
+      { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
+      { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 500 },
+    ],
+    allocations: [
+      { id: 1, order_line_id: 1, material_id: 9, qty: 800, source: 'stock', status: 'active' },
+    ],
+    openPrs: [],
+  });
+
+  assert.equal(plan.ok, true, plan.blockers.join(' | '));
+
+  const release = plan.effects.find(e => e.kind === 'release');
+  assert.ok(release, 'no release effect — the giving line keeps a hold it just gave away');
+  assert.equal(release.order_line_id, 1);
+  assert.equal(release.qty, 300);
+});
+
+test('planMove releases nothing when the giver holds nothing', () => {
+  // The giving line has no hold — its board is coming out of free stock, so
+  // there is nothing to release and the effect must be absent entirely.
+  const plan = planMove({
+    materialId: 9,
+    fromLineId: 1,
+    toLineId: 2,
+    qty: 300,
+    available: 800,
+    lines: [
+      { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
+      { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 500 },
+    ],
+    allocations: [],
+    openPrs: [],
+  });
+
+  assert.equal(plan.ok, true, plan.blockers.join(' | '));
+  assert.equal(plan.effects.some(e => e.kind === 'release'), false,
+    'a release effect was emitted for a line holding nothing');
+});
+
+test('planMove releases only what the giver holds, never more', () => {
+  // Giver holds 100 but is giving 300 — the other 200 comes from free stock.
+  // Releasing 300 would drive the hold negative.
+  const plan = planMove({
+    materialId: 9,
+    fromLineId: 1,
+    toLineId: 2,
+    qty: 300,
+    available: 800,
+    lines: [
+      { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
+      { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 500 },
+    ],
+    allocations: [
+      { id: 1, order_line_id: 1, material_id: 9, qty: 100, source: 'stock', status: 'active' },
+    ],
+    openPrs: [],
+  });
+
+  assert.equal(plan.ok, true, plan.blockers.join(' | '));
+  assert.equal(plan.effects.find(e => e.kind === 'release').qty, 100);
+});

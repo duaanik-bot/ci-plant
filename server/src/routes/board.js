@@ -360,6 +360,36 @@ r.post('/board/move', canMove, async (req, res, next) => {
                     VALUES ($1,$2,$3,'stock',$4,$5)`,
             [+material_id, e.order_line_id, e.qty, reason, req.user.name]);
         }
+        // Take back what the giving line spent out of its own hold. Rows are an
+        // immutable ledger, so a partial give releases every active stock row on
+        // the board and re-takes the remainder as one fresh row — the same shape
+        // /board/uncommit uses, and for the same reason: editing a row in place
+        // would lose what was originally taken and when.
+        //
+        // `origin` is carried onto the kept row. A line that had its board frozen
+        // by the engine and then gave some away is still engine-frozen for the
+        // rest; dropping the marker here would expose the remainder to being
+        // absorbed by the next mix save.
+        if (e.kind === 'release') {
+          const held = await qc(
+            `SELECT id, qty, origin FROM board_allocations
+              WHERE material_id=$1 AND order_line_id=$2 AND source='stock' AND status='active'
+              ORDER BY id`, [+material_id, e.order_line_id]);
+          const total = held.reduce((s, a) => s + Number(a.qty), 0);
+          const keep = total - e.qty;
+          await qc(`UPDATE board_allocations SET status='released', released_at=now(),
+                      released_by=$1, release_reason=$2
+                    WHERE id = ANY($3::int[])`,
+            [req.user.name, `Board moved to ${to.product_name} — ${reason}`, held.map(a => a.id)]);
+          if (keep > 0) {
+            await qc(`INSERT INTO board_allocations
+                        (material_id, order_line_id, qty, source, reason, created_by, origin)
+                      VALUES ($1,$2,$3,'stock',$4,$5,$6)`,
+              [+material_id, e.order_line_id, keep,
+               `Kept after moving ${e.qty} to ${to.product_name} — ${reason}`,
+               req.user.name, held.find(a => a.origin)?.origin ?? null]);
+          }
+        }
         if (e.kind === 'pr_down') {
           const [pr] = e.close
             ? await qc(`UPDATE requisitions SET qty=$1, status='closed', status_reason=$3
@@ -423,8 +453,79 @@ r.post('/board/move', canMove, async (req, res, next) => {
 // job's hold — that is what /board/move is for, and it asks its own questions
 // (a reason, a preview, a PR raised for the job being raided) that this must
 // not become a silent shortcut around.
-function commitInputs(materialId) {
-  return Promise.all([availableFor(materialId), linesFor(materialId), allocationsFor(materialId)]);
+// `qc` is not optional in practice. Every caller runs inside a transaction that
+// has already taken `SELECT ... FOR UPDATE` on the order line, and reading these
+// three on the POOL instead would defeat that lock entirely: two planners
+// committing different lines on the same board would each read the same free
+// figure, each pass the gate, and each write a hold — the board over-committed
+// by exactly the amount the gate exists to refuse. Defaulted to `q` only so a
+// read-only caller outside a transaction still works.
+function commitInputs(materialId, qc = q) {
+  return Promise.all([availableFor(materialId, qc), linesFor(materialId, qc), allocationsFor(materialId, qc)]);
+}
+
+// Hold board for one job, inside a caller's transaction.
+//
+// Extracted from the /board/commit handler so the planning engine can place the
+// same hold when a plan is locked, rather than a second implementation drifting
+// away from this one. The route below is now a thin wrapper: parse, validate the
+// material, open a transaction, call this.
+//
+// `want` is the TOTAL this line should end up holding on this board, not an
+// increment — the same contract the button has always had, so calling twice
+// leaves one hold rather than two.
+//
+// `origin` is NULL for a hand-placed commit and 'plan_lock' for an engine
+// freeze. It changes nothing about the arithmetic; it only marks the row so
+// replaceMixPlan's ABSORB can leave an engine freeze alone.
+//
+// SERIALISED PER BOARD, and that is what makes "capped at free" true.
+//
+// The caller MUST pass its own `qc` — reading the position on the pool while the
+// caller holds a transaction open is a stale read, and a stale read is an
+// over-commit.
+//
+// A `FOR UPDATE` on the order line is NOT sufficient and this function does not
+// rely on one. That was the original claim here and it was wrong: a row lock on
+// line A never conflicts with a row lock on line B, so two planners committing
+// two DIFFERENT jobs against the SAME board would each pass the free-stock gate
+// and each write a hold, jointly holding more than exists. The gate is a
+// check-then-act over an aggregate (SUM of stock_batches minus SUM of holds) and
+// no row lock can pin an aggregate.
+//
+// So take a transaction-scoped advisory lock on the BOARD instead. Same class id
+// as the GRN cover path (procurement.js), deliberately: a cover and a freeze
+// both hold free stock, so they must serialise against each other rather than
+// race. Releases itself on commit or error — nothing to unlock by hand.
+async function commitBoardForLine(
+  { materialId, lineId, want, reason, origin = null, user }, qc) {
+  await qc('SELECT pg_advisory_xact_lock(764001, $1)', [materialId]);
+  const [available, lines, allocations] = await commitInputs(materialId, qc);
+  const line = lines.find(l => l.id === lineId)
+    || await one('SELECT id, status FROM order_lines WHERE id=$1', [lineId]);
+  if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
+
+  const alreadyHeld = heldFor(allocations, lineId, materialId);
+  const qty = want - alreadyHeld;
+  if (qty <= 0) return { committed: 0, held_for_line: alreadyHeld, already: true };
+
+  const { free } = boardPosition({ available, allocations, lines, materialId });
+  if (qty > free) {
+    const mat = await one('SELECT name FROM materials WHERE id=$1', [materialId]);
+    const name = mat?.name || `board #${materialId}`;
+    throw Object.assign(
+      new Error(free > 0
+        ? `Only ${Math.round(free)} more sheets of ${name} are free — take the rest off another job to go further`
+        : `No free ${name} left to commit — every sheet is already held`),
+      { status: 409, body: { code: 'COMMIT_EXCEEDS_FREE', free: Math.round(free) } });
+  }
+
+  await qc(`INSERT INTO board_allocations
+              (material_id, order_line_id, qty, source, reason, created_by, origin)
+            VALUES ($1,$2,$3,'stock',$4,$5,$6)`,
+    [materialId, lineId, qty, reason, user, origin]);
+
+  return { committed: qty, held_for_line: alreadyHeld + qty };
 }
 
 // `qty` is the TOTAL this job wants held on this board, not an increment. The
@@ -447,31 +548,16 @@ r.post('/board/commit', canMove, async (req, res, next) => {
       // Lock the line, then read the position fresh: a screen minutes old may
       // be quoting free stock another planner has since taken.
       await qc('SELECT id FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
-      const [available, lines, allocations] = await commitInputs(materialId);
-      const line = lines.find(l => l.id === lineId)
-        || await one('SELECT id, status FROM order_lines WHERE id=$1', [lineId]);
-      if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
-
-      const alreadyHeld = heldFor(allocations, lineId, materialId);
-      const qty = want - alreadyHeld;
-      if (qty <= 0) return { committed: 0, held_for_line: alreadyHeld, already: true };
-
-      const { free } = boardPosition({ available, allocations, lines, materialId });
-      if (qty > free) throw Object.assign(
-        new Error(free > 0
-          ? `Only ${Math.round(free)} more sheets of ${mat.name} are free — take the rest off another job to go further`
-          : `No free ${mat.name} left to commit — every sheet is already held`),
-        { status: 409, body: { code: 'COMMIT_EXCEEDS_FREE', free: Math.round(free) } });
-
       const reason = String(req.body.reason || '').trim() || 'Committed from the planning engine';
-      await qc(`INSERT INTO board_allocations
-                  (material_id, order_line_id, qty, source, reason, created_by)
-                VALUES ($1,$2,$3,'stock',$4,$5)`, [materialId, lineId, qty, reason, req.user.name]);
+      const res_ = await commitBoardForLine(
+        { materialId, lineId, want, reason, origin: null, user: req.user.name }, qc);
+      if (res_.already) return res_;
+
       await audit('materials', materialId, 'board_committed',
-        `${qty} sheets committed to order line #${lineId} — ${reason}`, qc, req.user.name);
+        `${res_.committed} sheets committed to order line #${lineId} — ${reason}`, qc, req.user.name);
       await audit('order_line', lineId, 'board_committed',
-        `${qty} sheets of ${mat.name} committed — ${reason}`, qc, req.user.name);
-      return { committed: qty, held_for_line: alreadyHeld + qty };
+        `${res_.committed} sheets of ${mat.name} committed — ${reason}`, qc, req.user.name);
+      return res_;
     });
     res.json(out);
   } catch (e) { next(e); }
@@ -543,5 +629,5 @@ r.post('/board/allocations/:id/release', canMove, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-export { linesFor, allocationsFor, openPrsFor, availableFor };
+export { linesFor, allocationsFor, openPrsFor, availableFor, commitBoardForLine, commitInputs };
 export default r;

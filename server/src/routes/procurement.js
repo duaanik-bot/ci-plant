@@ -1076,8 +1076,22 @@ r.post('/grns/substitute', canBuy, async (req, res, next) => {
           // Without this the burn-down in /grns/:id/qc matches on the OLD board,
           // finds nothing, and the job is credited twice — once as stock on the
           // shelf, once as still incoming. This is why QC needs no change.
+          //
+          // Scoped to the PR mirror, exactly as alloc_release below is.
+          //
+          // What changed is what is COMING: the mill sent a different board, so
+          // the incoming-board row must follow it or QC burns down against a
+          // material nothing arrived for. What did NOT change is what is on the
+          // shelf. A source='stock' hold is frozen sheets of the ORIGINAL board,
+          // sitting where they always were, and dragging it here would claim
+          // board that is still in quarantine while freeing board the job is
+          // genuinely still holding.
+          //
+          // Harmless before the planning engine froze board on lock, because a
+          // locked line almost never carried a stock hold. Not harmless now.
           await qc(`UPDATE board_allocations SET material_id=$1
-                     WHERE order_line_id=$2 AND material_id=$3 AND status='active'`,
+                     WHERE order_line_id=$2 AND material_id=$3 AND status='active'
+                       AND source='requisition'`,
             [e.to, e.order_line_id, e.from]);
         }
         if (e.kind === 'alloc_release') {

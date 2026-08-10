@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -1159,8 +1159,14 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           // on its members (the plan rows do), so each member converts its own.
           const holdOwners = runLineIds ?? [jc.order_line_id];
           for (const id of holdOwners) await consumeMixHolds(id, qc);
-          for (const mid of [...new Set(issued.map(x => x.material_id))])
+          const drawnMaterials = [...new Set(issued.map(x => x.material_id))];
+          for (const mid of drawnMaterials)
             await consumeCoverHolds(holdOwners, mid, qc);
+          // The engine's own freeze retires with the draw, exactly as the mix's
+          // holds do above. Boards this job froze but did NOT draw go back to
+          // the shelf — a board-issue override can substitute one mid-start.
+          await consumePlanLockHolds(holdOwners, drawnMaterials, qc);
+          await releaseUndrawnPlanLockHolds(holdOwners, drawnMaterials, qc, req.user.name);
           // qty_in is the PARENT sheets that actually went on the machine, which
           // is the sum of the mix, not the planned-board figure on the card.
           qtyIn = issued.reduce((s, r) => s + Number(r.sheets || 0), 0);
@@ -1204,6 +1210,10 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
               ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1', [jc.gang_run_id])).map(x => x.id)
               : [];
           await consumeCoverHolds(holdLines, eff.board_material_id, qc);
+          // Same retirement as the mix branch above, and this is the path most
+          // jobs take: a plan-lock freeze exists on lines with NO mix at all.
+          await consumePlanLockHolds(holdLines, [eff.board_material_id], qc);
+          await releaseUndrawnPlanLockHolds(holdLines, [eff.board_material_id], qc, req.user.name);
         }
       } else if (prev.status === 'completed') {
         const ups = (await oc('SELECT ups FROM products WHERE id=$1', [jc.product_id])).ups;
