@@ -113,6 +113,20 @@ export function plateComponentsFromSpec(spec = {}) {
   return components.map((component, index) => ({ ...component, sequence_no: index + 1 }));
 }
 
+// The newest of a set of timestamps. db.js overrides only the numeric parsers, so a
+// timestamptz arrives as a JS Date — and a bare `.sort()` stringifies its arguments.
+// Date.toString() begins with the WEEKDAY, so sorting Dates that way ranks them
+// "Fri, Mon, Sat, Sun, Thu, Tue, Wed" and reports whichever plate happens to fall
+// latest in the alphabet as the most recently used.
+export function latestTimestamp(values = []) {
+  const times = (Array.isArray(values) ? values : [])
+    .filter(Boolean)
+    .map(value => (value instanceof Date ? value : new Date(value)))
+    .filter(date => !Number.isNaN(date.getTime()));
+  if (!times.length) return null;
+  return times.reduce((latest, date) => (date > latest ? date : latest));
+}
+
 export function plateComponentKey(component = {}) {
   const type = clean(component.component_type).toLowerCase();
   const identity = type === 'pantone'

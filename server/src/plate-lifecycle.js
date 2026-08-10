@@ -264,8 +264,15 @@ export async function applyPlateDispositions(qc, oc, stageId, dispositions, user
     [asset.id, asset.request_component_id, asset.tooling_request_id, asset.current_job_card_id,
      asset.issued_machine_id || null, next, PLATE_RETURN_QUEUE, condition, decision.note || null, userName]);
   }
+  // 'returned_pending_verification' describes a PLATE, and is a legal state for
+  // plate_assets and plate_request_components — but tooling_requests has its own
+  // vocabulary (TOOLING_REQUEST_STATUSES) with no such member, so writing it here
+  // failed the CHECK constraint and took down every completion carrying plates.
+  // The request's own question is "is this requirement still open work?", and once
+  // the plates are off the press the answer is no; where each plate actually sits
+  // stays on the asset and its component, which do model the return queue.
   for (const requestId of [...new Set(decisions.map(decision => decision.asset.tooling_request_id))]) {
-    await qc('UPDATE tooling_requests SET status=$1,updated_at=now() WHERE id=$2', ['returned_pending_verification', requestId]);
+    await qc('UPDATE tooling_requests SET status=$1,updated_at=now() WHERE id=$2', ['returned_to_rack', requestId]);
   }
   return decisions.length;
 }

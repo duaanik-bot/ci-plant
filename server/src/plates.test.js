@@ -7,11 +7,13 @@ import {
   plateComponentsFromSpec,
   plateQuantityBreakdown,
   plateReadinessSummary,
+  latestTimestamp,
   plateSizeOf,
   resolvePlateRate,
   validatePlateDispositions,
 } from './plates.js';
-import { assertPlateReadyForPrinting } from './plate-lifecycle.js';
+import { applyPlateDispositions, assertPlateReadyForPrinting } from './plate-lifecycle.js';
+import { TOOLING_REQUEST_STATUSES } from './tooling-requirements.js';
 
 test('CMYK becomes four individual plate components', () => {
   assert.deepEqual(
@@ -123,6 +125,44 @@ test('printing completion requires a disposition for every issued plate', () => 
 
 test('plate disposition validation treats an empty result as no issued plates', () => {
   assert.deepEqual(validatePlateDispositions(null, null), []);
+});
+
+test('the latest use across a set is the newest date, not the alphabetical one', () => {
+  // Regression: db.js overrides only the numeric parsers, so a timestamptz arrives as
+  // a JS Date. A bare .sort() stringifies its arguments, and Date.toString() begins
+  // with the WEEKDAY — so the set's "last used" ranked Fri/Mon/Sat/Sun/Thu/Tue/Wed and
+  // reported whichever plate fell latest in the alphabet.
+  const dates = [
+    new Date('2026-08-03T10:00:00Z'), // Monday
+    new Date('2026-08-07T10:00:00Z'), // Friday — the real latest
+    new Date('2026-08-05T10:00:00Z'), // Wednesday
+  ];
+  assert.equal(latestTimestamp(dates).toISOString(), '2026-08-07T10:00:00.000Z');
+  assert.equal(latestTimestamp([]), null);
+  assert.equal(latestTimestamp([null, undefined]), null);
+});
+
+test('returning plates never writes a status the tooling request cannot hold', async () => {
+  // Regression: completion wrote 'returned_pending_verification' — a plate_assets and
+  // plate_request_components state — onto tooling_requests, whose CHECK constraint has
+  // no such member. Every printing completion carrying tracked plates died on a 23514,
+  // and no test caught it because the suite never opens a database.
+  const statements = [];
+  const assets = [{ id: 1, component_label: 'Black', request_component_id: 11, tooling_request_id: 7, current_job_card_id: 3, condition: 'Good' }];
+  const qc = async (sql, params = []) => {
+    statements.push({ sql, params });
+    return /FROM job_stages/.test(sql) ? assets : [];
+  };
+  await applyPlateDispositions(qc, qc, 55, [{ asset_id: 1, action: 'return' }], 'Tester');
+
+  const written = statements
+    .filter(s => /UPDATE tooling_requests SET status/.test(s.sql))
+    .map(s => s.params[0]);
+  assert.ok(written.length, 'the request status should still be advanced');
+  for (const status of written) {
+    assert.ok(TOOLING_REQUEST_STATUSES.includes(status),
+      `"${status}" is not a tooling request status — the database will reject it`);
+  }
 });
 
 test('printing start is blocked when only part of a tracked plate set is ready', async () => {

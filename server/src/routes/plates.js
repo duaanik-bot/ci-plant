@@ -4,7 +4,7 @@ import { audit, nextNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, plateComponentKey, plateComponentsFromSpec,
-  plateQuantityBreakdown, plateReadinessSummary, plateSizeOf, resolvePlateRate,
+  latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateSizeOf, resolvePlateRate,
   USED_PLATES_RACK,
 } from '../plates.js';
 import { createPlateComponents, issuedPlatesForStage, syncPlateRequest } from '../plate-lifecycle.js';
@@ -57,7 +57,7 @@ function summarizePlateSet(rows = []) {
     rack_location: locations.length === 1 ? locations[0] : locations.length ? 'Mixed locations' : null,
     condition: conditions.length === 1 ? conditions[0] : conditions.length ? 'Mixed' : null,
     use_count: Math.max(0, ...sorted.map(row => Number(row.use_count) || 0)),
-    last_used_at: sorted.map(row => row.last_used_at).filter(Boolean).sort().at(-1) || null,
+    last_used_at: latestTimestamp(sorted.map(row => row.last_used_at)),
     age_days: Math.max(0, ...sorted.map(row => Number(row.age_days) || 0)),
   };
 }
@@ -954,7 +954,11 @@ r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => 
       if (asset.status !== 'returned_pending_verification') throw Object.assign(new Error('This plate is not awaiting return verification'), { status: 409 });
       const peers = await qc(`SELECT pa.*,m.request_component_id AS component_id,
           m.tooling_request_id,m.job_card_id,m.from_location AS previous_location
-        FROM plate_assets pa JOIN LATERAL (SELECT * FROM plate_asset_movements x
+        -- LEFT, matching the /plates/returns listing and the single-asset fetch above.
+        -- A plain JOIN drops any returned plate with no 'returned' movement row, so it
+        -- shows on the card the warehouse is looking at but is never part of the peer
+        -- group the decision acts on — it stays in the queue with no sign why.
+        FROM plate_assets pa LEFT JOIN LATERAL (SELECT * FROM plate_asset_movements x
           WHERE x.plate_asset_id=pa.id AND x.action='returned' ORDER BY x.id DESC LIMIT 1) m ON true
         WHERE pa.status='returned_pending_verification'
           AND COALESCE(m.tooling_request_id,0)=COALESCE($1,0)

@@ -41,6 +41,17 @@ test('the printing completion form returns issued plates to verification', () =>
   assert.match(section, /action: 'return'/);
 });
 
+test('return verification locks peers the same way the queue lists them', () => {
+  // Regression: the peer query used a plain JOIN LATERAL while /plates/returns and the
+  // single-asset fetch both use LEFT. A returned plate whose 'returned' movement is
+  // missing then appeared on the card but could never be acted on.
+  const route = read('server/src/routes/plates.js');
+  const peers = route.slice(route.indexOf('const peers = await qc('));
+  const query = peers.slice(0, peers.indexOf('FOR UPDATE OF pa'));
+  assert.match(query, /LEFT JOIN LATERAL/);
+  assert.doesNotMatch(query, /plate_assets pa JOIN LATERAL/);
+});
+
 test('Plates exposes the six requested operational views', () => {
   const page = read('client/src/components/PlatesLifecycle.jsx');
   for (const label of ['Plate Requirements / PR','Purchase Orders','GRN','Plates Warehouse','Return from Printing','History']) {
