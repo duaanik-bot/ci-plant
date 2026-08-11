@@ -3857,7 +3857,10 @@ export default function Planning() {
                             </p>
                           ) : stockBooking === 'fresh_pr' ? (
                             <p className="mt-1 text-[10px] text-slate-400">
-                              The board stays locked; the {fmt.num(position.free)} free sheets stay free for other
+                              {/* free_for_others, NEVER position.free — `free` is THIS job's
+                                  view and contains its own hold, so it read "9,000 free for
+                                  other products" on a shelf this job had 8,959 of. */}
+                              The board stays locked; the {fmt.num(position.free_for_others)} free sheets stay free for other
                               products, and this job buys its full {fmt.num(calc.parent)}.
                             </p>
                           ) : mixRows.length > 0 ? (

@@ -83,6 +83,56 @@ test('a fresh-PR plan reads exactly as it did, and its row also adds up', () => 
   assert.equal(p.short, 0, 'covered by its own hold — "covered · shelf left free"');
 });
 
+// "Free" has a viewer. position.free is THIS job's view — its own freeze sits
+// inside it, because a job is never committed against itself. What OTHER
+// products may promise themselves is free_for_others = free − own hold. The
+// fresh-PR caption printed position.free as "free for other products": 9,000
+// on a shelf where 8,959 was this very job's hold and the true answer was 41 —
+// four-tenths of one packet of over-delivery, presented as nine thousand
+// sheets of plenty.
+test('free_for_others: a job\'s own freeze is not on offer to the plant', () => {
+  // ACEBROBID's view of board 3: everything held is its own.
+  const p = boardPositionView({
+    available: 9000, committedOpen: 0, held: 8959, heldForMe: 8959,
+    need: 8959, fresh: true, planParent: 8959,
+  });
+  assert.equal(p.free, 9000, 'its OWN free is the whole shelf — never committed against itself');
+  assert.equal(p.free_for_others, 41,
+    'but only the over-delivery is free for anyone else: 9,000 − 8,959');
+  // And the two views agree with HB-29 reading the same shelf from outside:
+  const other = boardPositionView({ available: 9000, committedOpen: 0, held: 8959, heldForMe: 0, need: 700 });
+  assert.equal(other.free, p.free_for_others,
+    'what this job calls free-for-others IS what the next job calls free');
+});
+
+test('free_for_others never exceeds free, and both floor at zero', () => {
+  for (const w of [
+    { available: 9000, committedOpen: 0, held: 8959, heldForMe: 8959, need: 0 },
+    { available: 100, committedOpen: 900, held: 50, heldForMe: 50, need: 0 },
+    { available: 5000, committedOpen: 800, held: 1200, heldForMe: 400, need: 100 },
+    { available: 0, committedOpen: 0, held: 0, heldForMe: 0, need: 0 },
+  ]) {
+    const p = boardPositionView(w);
+    assert.ok(p.free_for_others <= p.free, JSON.stringify(w));
+    assert.ok(p.free_for_others >= 0);
+  }
+});
+
+// The caption itself is pinned: the sentence "…stay free for other products"
+// must render free_for_others. It rendered position.free for months, and no
+// arithmetic test can catch a correct number bound to the wrong sentence.
+test('the fresh-PR caption says free_for_others, never free', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../client/src/pages/Planning.jsx', import.meta.url), 'utf8');
+  const i = src.indexOf('stay free for other');
+  assert.ok(i > 0, 'the caption still exists');
+  const around = src.slice(i - 400, i);
+  assert.match(around, /position\.free_for_others/,
+    'the number in the "free for other products" sentence is free_for_others');
+  assert.doesNotMatch(around, /fmt\.num\(position\.free\)/,
+    'position.free is this job\'s own view and must not be captioned as other products\' stock');
+});
+
 test('once cutting has drawn the board nothing is outstanding', () => {
   const p = boardPositionView({ available: 41, committedOpen: 0, held: 0, heldForMe: 0, need: 0, drawn: true });
   assert.equal(p.short, 0);

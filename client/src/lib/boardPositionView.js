@@ -69,12 +69,22 @@ export function boardPositionView({
   const freeRaw = avail - committed;
   const free = Math.max(0, freeRaw);
 
+  // What OTHER products may still promise themselves off this shelf. `free` is
+  // THIS job's view — a job is never committed against itself, so its own
+  // freeze sits inside its own `free`. Any sentence of the form "…stays free
+  // for other products" must say THIS number, never `free`: the fresh-PR
+  // caption printed position.free (9,000) as "free for other products" on a
+  // shelf where 8,959 of the 9,000 was this very job's hold and the true
+  // answer was 41 — off by exactly its own freeze, on screen, beside the
+  // warehouse register saying 0.41 PKT.
+  const freeForOthers = Math.max(0, freeRaw - ownHeld);
+
   if (fresh) {
     // A fresh_pr plan refuses the shelf, so the shelf is not what it is short
     // of: its still-to-buy is the cut plan less its own PR on order and its own
     // holds. Net is the shelf it leaves alone — unchanged by this plan.
     return {
-      available: avail, committed, free, net: freeRaw,
+      available: avail, committed, free, free_for_others: freeForOthers, net: freeRaw,
       drawn: !!drawn, fresh: true, own_incoming: num(ownIncoming),
       short: drawn ? 0 : Math.max(0, num(planParent) - ownHeld - num(ownIncoming)),
     };
@@ -82,7 +92,7 @@ export function boardPositionView({
 
   const net = freeRaw - num(need);
   return {
-    available: avail, committed, free, net,
+    available: avail, committed, free, free_for_others: freeForOthers, net,
     drawn: !!drawn, fresh: false,
     short: Math.max(0, -net),
   };
