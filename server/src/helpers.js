@@ -2355,6 +2355,32 @@ export function plateStateOf(components = []) {
     : 'none';
 }
 
+// How many of a job's plates are physically on the rack, out of how many it
+// owes. The STATE answers "can it print"; this answers "how close is it", which
+// is the question whoever is chasing the plates actually has — one missing of
+// four and four missing of four are the same colour and completely different
+// problems.
+//
+// `have` uses the SAME PLATE_IN_HAND set the state does, so the count and the
+// colour can never tell different stories: the moment have === need the state is
+// green, by construction rather than by two rules that have to be kept in step.
+//
+// Cancelled components leave the denominator as well as the numerator — they are
+// not owed. Counting them would leave a fully covered job reading 2/7 for ever.
+//
+// null, not {have:0,need:0}, when there is no requirement: the twin of
+// plateStateOf returning null for the same case. Nothing has been asked, so
+// there is nothing to report, and a 0/0 would render as a shortage.
+export function plateCountsOf(components = []) {
+  const active = (Array.isArray(components) ? components : [])
+    .filter(row => row && row.status !== 'cancelled');
+  if (!active.length) return null;
+  return {
+    have: active.filter(row => PLATE_IN_HAND.has(row.status)).length,
+    need: active.length,
+  };
+}
+
 // Stamp `plate_state` onto a page of rows in ONE query. Twin of stampBoardState:
 // per-row lookups are what turn a queue into a hundred round trips, and the floor
 // queues this feeds are the busiest reads in the app.
@@ -2377,7 +2403,11 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
     // No job card means the plate question has not started — requirements are raised
     // when a card is finalised. `null` is "not asked yet" and renders nothing;
     // stamping 'none' here would paint every unplanned line on Planning solid red.
-    row.plate_state = id == null ? null : plateStateOf(byJob.get(Number(id)) || []);
+    const parts = id == null ? [] : (byJob.get(Number(id)) || []);
+    row.plate_state = id == null ? null : plateStateOf(parts);
+    // Rides with the state, from the same components, so a screen can say HOW
+    // MANY plates are on the rack without a second round trip.
+    row.plate_counts = id == null ? null : plateCountsOf(parts);
   }
   // A gang goes on press as ONE job: three members holding their plates and a
   // fourth still waiting is a RUN that cannot run. Members are made to AGREE on
@@ -2392,7 +2422,13 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
   }
   for (const group of byGang.values()) {
     const worst = worstPlateState(group.map(row => row.plate_state));
-    for (const row of group) row.plate_state = worst;
+    // The run's count is the LEAST covered member's, for the same reason the
+    // state is the weakest: three members holding every plate and a fourth
+    // holding none is a run that cannot run, and reporting the best member's
+    // 4/4 beside a red badge would read as a contradiction.
+    const counts = group.map(row => row.plate_counts).filter(Boolean)
+      .sort((a, b) => (a.have - a.need) - (b.have - b.need))[0] || null;
+    for (const row of group) { row.plate_state = worst; row.plate_counts = counts; }
   }
   return rows;
 }

@@ -51,10 +51,21 @@ export const PLATE_SHORT = { ready: 'OK', on_order: 'PR', none: '—' };
 
 // `compact` is the circle: fixed size, so dropping it into a card or a table cell
 // cannot grow the row. Without it you get the labelled pill.
-export default function PlateStatus({ state, compact = false, className = '' }) {
+// `counts` is {have, need} from the server (helpers.plateCountsOf) — how many
+// plates are physically on the rack out of how many the job owes.
+//
+// It QUALIFIES the state and never softens it. One plate missing of four and
+// four missing of four are the same colour on purpose, because a press cannot
+// run on either; what differs is how close the chase is, and that is the only
+// thing the fraction adds. Shown only while the job is short — on a green badge
+// "4/4" is noise, the tick already said it.
+export default function PlateStatus({ state, counts = null, compact = false, className = '' }) {
   const key = PLATE_TONE[state] ? state : 'none';
   const Icon = PLATE_ICON[key];
-  const title = PLATE_FULL[key] + ' — ' + PLATE_HINT[key];
+  const partial = counts && counts.need > 0 && counts.have > 0 && counts.have < counts.need;
+  const short = counts && counts.need > 0 && key !== 'ready';
+  const title = PLATE_FULL[key] + ' — ' + PLATE_HINT[key]
+    + (short ? ` · ${counts.have} of ${counts.need} plate${counts.need === 1 ? '' : 's'} on the rack` : '');
   // Sized up from h-6/12px and text-[11px]. On a dense queue the plate chip sat
   // at the same weight as the row's quiet metadata and was read as decoration;
   // it is the one thing that decides whether the job can go on the press today.
@@ -63,7 +74,9 @@ export default function PlateStatus({ state, compact = false, className = '' }) 
     return (
       <span title={title} aria-label={PLATE_FULL[key]}
         className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold leading-none ${PLATE_TONE[key]} ${className}`}>
-        <Icon size={15} />
+        {/* The circle has no room for a word, so a partial job shows the
+            fraction alone — that IS the information at this size. */}
+        {partial ? <span className="text-[9px] font-extrabold tabular-nums">{counts.have}/{counts.need}</span> : <Icon size={15} />}
       </span>
     );
   }
@@ -71,6 +84,7 @@ export default function PlateStatus({ state, compact = false, className = '' }) 
     <span title={title}
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-bold ${PLATE_TONE[key]} ${className}`}>
       <Icon size={14} /> {PLATE_LABEL[key]}
+      {short && <span className="rounded-full bg-white/25 px-1.5 text-[10px] font-extrabold tabular-nums">{counts.have}/{counts.need}</span>}
     </span>
   );
 }

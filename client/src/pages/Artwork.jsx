@@ -677,8 +677,9 @@ export default function Artwork() {
           { key: 'plate_state', label: 'Plates',
             sortValue: l => PLATE_RANK[l.plate_state || 'none'],   // worst first
             searchValue: l => `${PLATE_FULL[l.plate_state || 'none']} plates`,
-            export: l => PLATE_FULL[l.plate_state || 'none'],
-            render: l => <PlateStatus state={l.plate_state || 'none'} /> },
+            export: l => PLATE_FULL[l.plate_state || 'none']
+              + (l.plate_counts ? ` (${l.plate_counts.have}/${l.plate_counts.need} on the rack)` : ''),
+            render: l => <PlateStatus state={l.plate_state || 'none'} counts={l.plate_counts} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang
