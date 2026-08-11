@@ -9,7 +9,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
-import PlateStatus from '../components/PlateStatus.jsx';
+import PlateStatus, { PLATE_LABEL, PLATE_FULL, PLATE_HINT, PLATE_TONE, PLATE_RANK } from '../components/PlateStatus.jsx';
 // Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
          colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -123,6 +123,38 @@ function BoardFilterChips({ active, counts, onToggle, onClear }) {
               on ? BOARD_TONE[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             {BOARD_LABEL[k]}
             <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? BOARD_COUNT_TONE[k] : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// The plate twin of BoardFilterChips. Same three-way PARTITION — every job is
+// in exactly one state — so the counts always add to the tab total and a planner
+// can ask "what have I not raised plates for" in one click instead of reading
+// down a column. Deliberately the same shape, tones and vocabulary as the board
+// rail directly above it: two readiness questions asked the same way.
+function PlateFilterChips({ active, counts, onToggle, onClear }) {
+  const chips = ['none', 'on_order', 'ready'];
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Plates</span>
+      <button type="button" onClick={onClear}
+        title={`${counts.all} job${counts.all === 1 ? '' : 's'} in this tab`}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+          active.length === 0 ? 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+        All
+        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${active.length === 0 ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts.all}</span>
+      </button>
+      {chips.map(k => {
+        const on = active.includes(k);
+        return (
+          <button key={k} type="button" onClick={() => onToggle(k)} title={`${counts[k]} — ${PLATE_HINT[k]}`}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+              on ? PLATE_TONE[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+            {PLATE_LABEL[k]}
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70 text-slate-700' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
           </button>
         );
       })}
@@ -275,6 +307,7 @@ export default function Artwork() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('open');
   const [boardFilters, setBoardFilters] = useState([]); // [] = no filter, i.e. All
+  const [plateFilters, setPlateFilters] = useState([]); // [] = no filter, i.e. All
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
   const [pushLine, setPushLine] = useState(null);
@@ -320,8 +353,20 @@ export default function Artwork() {
   // gang is one job to the chips exactly as it is one row in the table.
   const boardCounts = displayRows.reduce((n, r) => { n[rowBoardStateOf(r)]++; return n; },
     { all: displayRows.length, covered: 0, on_order: 0, short: 0 });
-  const boardRows = boardFilters.length === 0 ? displayRows
+  const boardOnly = boardFilters.length === 0 ? displayRows
     : displayRows.filter(r => boardFilters.includes(rowBoardStateOf(r)));
+  // Counted on what the BOARD rail has already left, so the plate numbers
+  // describe the pile actually on screen rather than the whole tab. A row with
+  // no plate state at all reads as `none` — nothing has been raised for it,
+  // which is exactly the pile "PR Not Raised" is asking for.
+  const plateCounts = boardOnly.reduce((n, r) => { n[r.plate_state || 'none']++; return n; },
+    { all: boardOnly.length, ready: 0, on_order: 0, none: 0 });
+  const boardRows = plateFilters.length === 0 ? boardOnly
+    : boardOnly.filter(r => plateFilters.includes(r.plate_state || 'none'));
+  const togglePlateFilter = key => {
+    setPlateFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
+    clearSelection();
+  };
   const toggleBoardFilter = key => {
     setBoardFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
     clearSelection();
@@ -498,6 +543,8 @@ export default function Artwork() {
           Deliberately NOT reset when the tab changes — "show me everything
           short" is a standing question, and the counts go to 0 in a tab that
           has none, which explains itself. */}
+      <PlateFilterChips active={plateFilters} counts={plateCounts}
+        onToggle={togglePlateFilter} onClear={() => { setPlateFilters([]); clearSelection(); }} />
       <BoardFilterChips active={boardFilters} counts={boardCounts}
         onToggle={toggleBoardFilter}
         onClear={() => { setBoardFilters([]); clearSelection(); }} />
@@ -622,10 +669,16 @@ export default function Artwork() {
             sortValue: l => BOARD_RANK[rowBoardStateOf(l)],       // worst first
             searchValue: l => `${BOARD_FULL[rowBoardStateOf(l)]} board`,
             export: l => BOARD_FULL[rowBoardStateOf(l)],
-            render: l => <span className="inline-flex items-center gap-1">
-              <BoardBadge state={rowBoardStateOf(l)} />
-              {l.plate_state && <PlateStatus state={l.plate_state} compact />}
-            </span> },
+            render: l => <BoardBadge state={rowBoardStateOf(l)} /> },
+          // Plates get their OWN column rather than riding in the board cell.
+          // They are a separate question with a separate owner — the board is
+          // bought, the plates are made — and sharing one cell meant the plate
+          // state could not be sorted, exported or read as a column at all.
+          { key: 'plate_state', label: 'Plates',
+            sortValue: l => PLATE_RANK[l.plate_state || 'none'],   // worst first
+            searchValue: l => `${PLATE_FULL[l.plate_state || 'none']} plates`,
+            export: l => PLATE_FULL[l.plate_state || 'none'],
+            render: l => <PlateStatus state={l.plate_state || 'none'} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang

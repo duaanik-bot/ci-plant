@@ -10,11 +10,18 @@
 // reason the state is on screen: nothing, chase the delivery, or raise a PR.
 import { CheckCircle2, Truck, AlertTriangle } from 'lucide-react';
 
-export const PLATE_LABEL = { ready: 'Plates OK', on_order: 'PR Raised', none: 'No Plates' };
+// 'PR Not Raised', not 'No Plates': the plant thinks about this state as a
+// piece of work nobody has started, not as an absence. It also makes the state
+// and the action the same words, which is what a filter chip needs to say.
+export const PLATE_LABEL = { ready: 'Plates OK', on_order: 'PR Raised', none: 'PR Not Raised' };
+
+// Worst first, so a column sorted on plates puts the jobs needing action on top
+// — the same ordering rule BOARD_RANK gives the board column.
+export const PLATE_RANK = { none: 0, on_order: 1, ready: 2 };
 export const PLATE_FULL = {
   ready: 'Plates OK — in hand',
   on_order: 'PR Raised — plates still to arrive',
-  none: 'No Plates — nothing raised',
+  none: 'PR Not Raised — nothing raised yet',
 };
 export const PLATE_HINT = {
   ready: 'every plate for this job is on the rack, reserved or already on the press',

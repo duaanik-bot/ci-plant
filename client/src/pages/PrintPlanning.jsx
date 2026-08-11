@@ -297,14 +297,20 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
             it gets the full width rather than a 9.5px chip in the wrap row.
             Bought-and-coming is not the same trouble as nothing-ordered, and
             the press planner schedules around the difference. */}
-        <BoardBadge state={boardStateOf(card)} band />
+        {/* Board and plates are ONE readiness line, and the plate chip rides at
+            the end of the board band rather than down among the spec chips.
+            Both answer the same question — can this card go on a press today —
+            and the plate state was being read as decoration next to the gsm and
+            coating tags, which are reference material nobody schedules on.
+            Still no SECOND band: a second full-width row would grow every card
+            in the lane, which is why the chip sits inline here instead. */}
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1"><BoardBadge state={boardStateOf(card)} band /></div>
+          {card.plate_state && <PlateStatus state={card.plate_state} compact className="mt-1 shrink-0" />}
+        </div>
 
         {/* Spec + blockers — words, not colours to memorise */}
         <div className="mt-1 flex flex-wrap items-center gap-1">
-          {/* Plates ride in the chip row, not as a second band: the board band is
-              full width because it is the schedulers' first question, and a second
-              band would grow every card in the lane. */}
-          {card.plate_state && <PlateStatus state={card.plate_state} compact />}
           {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
