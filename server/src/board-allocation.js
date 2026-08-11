@@ -60,11 +60,20 @@ export function incomingFor(allocations = [], orderLineId, materialId = null) {
 // Requisition-source holds are incoming, not on the shelf, so they reserve
 // nothing here. Clamped at zero: over-holding is a data state to tolerate, not
 // a negative that would credit the drawer.
-export function issuableFor({ available = 0, allocations = [], orderLineId = null, materialId = null } = {}) {
+//
+// "Own" is a SET of lines, not one line. A gang/combined RUN draws as a single
+// pile but its holds are written per MEMBER — so asking for one order_line_id
+// made a run's own freeze read as another job's claim and refused the run its
+// own board (CI-JC-0048, 5,250 sheets of Saffire 340). `orderLineIds` is the
+// run's members; `orderLineId` stays for the plain single-line callers.
+// claimableQty in helpers.js has always scoped ownership this way — the gate
+// that refuses now agrees with the badge that promises.
+export function issuableFor({ available = 0, allocations = [], orderLineId = null, orderLineIds = null, materialId = null } = {}) {
+  const owners = new Set((orderLineIds ?? [orderLineId]).filter(id => id != null).map(Number));
   const stockHolds = byMaterial(allocations, materialId)
     .filter(a => isActive(a) && a.source === 'stock');
   const own = stockHolds
-    .filter(a => a.order_line_id === orderLineId)
+    .filter(a => owners.has(Number(a.order_line_id)))
     .reduce((s, a) => s + num(a.qty), 0);
   const total = stockHolds.reduce((s, a) => s + num(a.qty), 0);
   const heldByOthers = Math.max(0, total - own);

@@ -794,8 +794,25 @@ export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc,
 // far from the cause. A job may draw its own hold plus whatever is free; it
 // may never draw another job's. Throws the same 409 shape as consumeFifo so
 // callers need no new handling.
-export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
+//
+// `owner` is WHO IS DRAWING, and a run is not one line. Pass a plain line id
+// (or null) for an ordinary card, or {orderLineId, gangRunId} for a card that
+// may be a gang/combined RUN — those carry order_line_id NULL and keep their
+// holds on the member lines. Asking only for jc.order_line_id counted a run's
+// own freeze as somebody else's and refused it its own board: CI-JC-0048 read
+// "5,900 on the shelf but 5,863 is committed to other jobs" when 5,250 of that
+// 5,863 was its own. The members are resolved HERE rather than at the call
+// site so no future caller can forget again — the same reason the hold
+// retirement below is a backstop rather than a rule each path repeats.
+export async function assertFreeToIssue(materialId, qty, owner, qc, oc) {
   if (!materialId || !(qty > 0)) return;
+  const { orderLineId = null, gangRunId = null } =
+    (owner && typeof owner === 'object') ? owner : { orderLineId: owner ?? null };
+  const ownerIds = orderLineId != null ? [orderLineId] : [];
+  if (gangRunId != null) {
+    const mates = await qc('SELECT id FROM order_lines WHERE gang_run_id=$1', [gangRunId]);
+    for (const m of mates) ownerIds.push(m.id);
+  }
   const av = await oc(
     `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
       WHERE material_id=$1 AND status='available'`, [materialId]);
@@ -804,7 +821,7 @@ export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
       WHERE material_id=$1 AND status='active'`, [materialId]);
   const gate = issuableFor({
     available: Number(av?.q || 0), allocations: holds,
-    orderLineId: orderLineId ?? null, materialId,
+    orderLineIds: ownerIds, materialId,
   });
   if (gate.free >= qty) return;
   const name = (await oc('SELECT name FROM materials WHERE id=$1', [materialId]))?.name || `board #${materialId}`;

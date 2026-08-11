@@ -1112,7 +1112,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             // (or upstream in orders.js's plan-save) cross-validates that a
             // row's stock_batch_id actually belongs to its own material_id,
             // so this is trusted at the point of consumption, not assumed.
-            await assertFreeToIssue(r.material_id, r.sheets, jc.order_line_id, qc, oc);
+            await assertFreeToIssue(r.material_id, r.sheets,
+              { orderLineId: jc.order_line_id, gangRunId: jc.gang_run_id }, qc, oc);
             await consumeFifo(r.material_id, r.sheets, 'job_card', jc.id,
               `Issue to ${jc.jc_number} — ${r.board_name}${r.stock_batch_id ? ` (lot ${r.stock_batch_id})` : ''}`,
               qc, oc, r.stock_batch_id, { packetsOpened: packetsOpened(r.material_id) });
@@ -1168,7 +1169,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           if (plan.length) throw Object.assign(
             new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
             { status: 409 });
-          await assertFreeToIssue(eff.board_material_id, jc.sheets_issued, jc.order_line_id, qc, oc);
+          await assertFreeToIssue(eff.board_material_id, jc.sheets_issued,
+            { orderLineId: jc.order_line_id, gangRunId: jc.gang_run_id }, qc, oc);
           await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`,
             qc, oc, null, { packetsOpened: packetsOpened(eff.board_material_id) });
           // Cover holds ride along with the draw — a gang parent card carries
