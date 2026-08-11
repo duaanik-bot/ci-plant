@@ -22,6 +22,7 @@ import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
+import { boardPositionView } from '../lib/boardPositionView.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
@@ -1198,36 +1199,35 @@ export default function Planning() {
     // it were not netted, the panel would demand the full quantity again on a
     // job whose board is in the racks). Mirrors the server's stockShown
     // override; a live mix draft wins over the flag — a mix books the shelf.
-    if (stockBooking === 'fresh_pr' && !mixPos) {
-      const ownIncoming = +ctx.stock.incoming_for_me || 0;
-      const ownHeld = +ctx.stock.held_for_me || 0;
-      const heldOth = Math.max(0, (+ctx.stock.held || 0) - ownHeld);
-      return {
-        available, committed,
-        free: Math.max(0, available - committed - heldOth),
-        net: available - committed - heldOth,
-        incoming: ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0),
-        drawn: !!ctx.board_drawn,
-        fresh: true,
-        own_incoming: ownIncoming,
-        short: ctx.board_drawn ? 0 : Math.max(0, calc.parent - ownHeld - ownIncoming),
-      };
-    }
-    const need = ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent);
-    const net = available - committed - need;
-    const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
-    // What this job could actually draw today: the shelf, less sheets earmarked
-    // to somebody else, less what other jobs are still waiting on.
+    // The five tiles are ONE sentence — available − committed = free, and
+    // free − this plan = net after plan — and it is boardPositionView that
+    // holds them to it, under test, because this panel had drifted out of it
+    // in two places at once.
     //
-    // The server's stock.free answers a narrower question — available minus
-    // EARMARKED holds — and showing that raw put "Free 4,850" next to
-    // "Committed 3,650" on the same three-tile row, which is the exact
-    // contradiction this whole change exists to kill. Read as a sentence the
-    // row must now hold: available − committed = free, and free − this plan =
-    // net after plan.
-    const heldOthers = Math.max(0, (+ctx.stock.held || 0) - (+ctx.stock.held_for_me || 0));
-    const free = Math.max(0, available - committed - heldOthers);
-    return { available, committed, free, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
+    // `committed` here is other jobs' OPEN need only. A job whose board is
+    // fully frozen has nothing left to find, so its holds fell out of the tile
+    // entirely: ACEBROBID's 8,959 reserved sheets read as "Committed 0" beside
+    // "Free 41" on a 9,000 shelf. And `net` subtracted that open need but never
+    // the holds, so HB-29's 700-sheet plan scored 9,000 − 0 − 700 = 8,300 and
+    // the footer said "stock OK" while the Planning list beside it said Stock
+    // Short −659. The list was right; readiness() counts holds through
+    // claimableQty. boardPositionView adds the holds into `committed`, which
+    // makes the row add up AND makes net honest, in one move.
+    const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
+    return {
+      ...boardPositionView({
+        available,
+        committedOpen: committed,
+        held: +ctx.stock.held || 0,
+        heldForMe: +ctx.stock.held_for_me || 0,
+        need: ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent),
+        fresh: stockBooking === 'fresh_pr' && !mixPos,
+        drawn: !!ctx.board_drawn,
+        ownIncoming: +ctx.stock.incoming_for_me || 0,
+        planParent: calc.parent,
+      }),
+      incoming,
+    };
   }, [ctx, calc, mixRows, boardSel, stockBooking]);
 
   // This job's own hold on the board in front of it, and how much more it could

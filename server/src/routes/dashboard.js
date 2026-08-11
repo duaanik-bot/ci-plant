@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { q, one } from '../db.js';
 import { plantDay, plantMonth, plantDateStr, plantRange } from '../plant-calendar.js';
 import { BOARD_MIX_POSITION_BY_LINE_LATERAL, EFF_BOARD_ID } from '../helpers.js';
+import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 
 const r = Router();
 
@@ -52,14 +53,19 @@ r.get('/dashboard', async (_req, res, next) => {
       SELECT COUNT(*)::int AS n FROM (
         SELECT m.id FROM materials m
         LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-        -- Demand lands on the board the line will ACTUALLY run on. Keyed on
-        -- the product master alone, a line whose planner picked a different
-        -- board in the engine billed its sheets to the master's board and left
-        -- the real one looking idle — and 'Unspecified board' (the parking
-        -- board, id 278, which holds no stock) collected demand for boards
-        -- that do.
-        LEFT JOIN (SELECT ${EFF_BOARD_ID} mid, SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) q FROM order_lines ol
-                   JOIN products p ON p.id=ol.product_id WHERE ol.status IN ('planned','ready') GROUP BY ${EFF_BOARD_ID}) dm ON dm.mid=m.id
+        -- Committed board demand, in the plant's ONE definition — the same
+        -- COMMITTED_DEMAND_SQL the warehouse strip, the replenishment engine
+        -- and the extra-sheet gate all read. Hand-rolled here as
+        -- status IN ('planned','ready') it was wrong twice over: it dropped
+        -- 'in_production' (a job on the floor with un-drawn board is still
+        -- owed it) and it netted nothing off for board already DRAWN, which
+        -- would have billed the same sheets after they left the shelf. The
+        -- shared SQL also resolves the effective board and counts approved
+        -- extra sheets. On the live plant: 11 boards flagged before, 41 if the
+        -- status list alone were widened (double-billing drawn board), 17 by
+        -- the real definition.
+        LEFT JOIN (SELECT d.material_id mid, SUM(d.q) q
+                   FROM (${COMMITTED_DEMAND_SQL}) d GROUP BY 1) dm ON dm.mid=m.id
         WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`),
 
       one(`
