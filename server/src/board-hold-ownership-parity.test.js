@@ -213,6 +213,24 @@ test('the by-line position judges the RUN, and raises ONE alert for it', async (
     'no inline copy left in dashboard.js');
 });
 
+// Same family, one step earlier: WHICH board a line is asking about. A
+// planner's pick in the engine (spec_override) beats the product master, and
+// EFF_BOARD_ID says every query resolving a line to a board must use it "or a
+// stolen board reads as free". The plant-wide shortage alert did not: lines
+// 263 and 267 carry 'Unspecified board' (id 278, the parking board, no stock)
+// in the master while really running on FBB 280 20x38, so the alert reported
+// "Unspecified board, 0 available" for a board with 800 on the rack, and the
+// demand rollup billed those sheets to the parking board instead of the real
+// one.
+test('the dashboard asks about the board the line will actually run on', () => {
+  const src = readFileSync(new URL('./routes/dashboard.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('${EFF_BOARD_ID}'), 'board resolution goes through EFF_BOARD_ID');
+  assert.doesNotMatch(src, /p\.board_material_id/,
+    'no bare product-master board left in dashboard.js — every one of them is a '
+    + 'line reading the wrong shelf (EFF_BOARD_ID contains this expression itself, '
+    + 'so a literal occurrence here means a query skipped the helper)');
+});
+
 // The two spellings differ ONLY in the unit they are keyed on. Anything else
 // drifting apart means one of the two screens is lying about the same job.
 test('the card and line spellings stay the same arithmetic', async () => {

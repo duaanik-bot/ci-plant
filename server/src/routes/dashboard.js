@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { q, one } from '../db.js';
 import { plantDay, plantMonth, plantDateStr, plantRange } from '../plant-calendar.js';
-import { BOARD_MIX_POSITION_BY_LINE_LATERAL } from '../helpers.js';
+import { BOARD_MIX_POSITION_BY_LINE_LATERAL, EFF_BOARD_ID } from '../helpers.js';
 
 const r = Router();
 
@@ -52,8 +52,14 @@ r.get('/dashboard', async (_req, res, next) => {
       SELECT COUNT(*)::int AS n FROM (
         SELECT m.id FROM materials m
         LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-        LEFT JOIN (SELECT p.board_material_id mid, SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) q FROM order_lines ol
-                   JOIN products p ON p.id=ol.product_id WHERE ol.status IN ('planned','ready') GROUP BY p.board_material_id) dm ON dm.mid=m.id
+        -- Demand lands on the board the line will ACTUALLY run on. Keyed on
+        -- the product master alone, a line whose planner picked a different
+        -- board in the engine billed its sheets to the master's board and left
+        -- the real one looking idle — and 'Unspecified board' (the parking
+        -- board, id 278, which holds no stock) collected demand for boards
+        -- that do.
+        LEFT JOIN (SELECT ${EFF_BOARD_ID} mid, SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) q FROM order_lines ol
+                   JOIN products p ON p.id=ol.product_id WHERE ol.status IN ('planned','ready') GROUP BY ${EFF_BOARD_ID}) dm ON dm.mid=m.id
         WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`),
 
       one(`
@@ -85,9 +91,15 @@ r.get('/dashboard', async (_req, res, next) => {
         m.name AS board_name, COALESCE(av.q,0) AS available
       FROM order_lines ol
       JOIN products p ON p.id=ol.product_id
-      JOIN materials m ON m.id=p.board_material_id
+      -- The board this line will ACTUALLY run on: a warehouse pick made in the
+      -- planning engine beats the product master (EFF_BOARD_ID's own rule).
+      -- Keyed on the master alone this alert read the WRONG board's shelf —
+      -- lines 263 and 267 sit on 'Unspecified board' (id 278, no stock) in the
+      -- master while really running on FBB 280 20x38, so the plant was told
+      -- "Unspecified board, 0 available" for a board with 800 on the rack.
+      JOIN materials m ON m.id = ${EFF_BOARD_ID}
       JOIN orders o ON o.id=ol.order_id
-      LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=p.board_material_id
+      LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id = ${EFF_BOARD_ID}
       -- Multi-board: this is a THIRD independent shortfall gate, beside
       -- readiness() and production.js's JC_VIEW — none of them call each
       -- other. A job whose planned board alone is short but whose mix
