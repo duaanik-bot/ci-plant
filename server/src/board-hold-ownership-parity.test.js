@@ -190,6 +190,43 @@ test('the board-mix position has ONE spelling, and it knows about runs', async (
   }
 });
 
+// Fourth form: the same position asked from the ORDER LINE side, for the
+// plant-wide shortage alert. Keyed on ol.id alone, a member saw only its SHARE
+// of the run's mix against the WHOLE shelf — 1,500 of a 5,250 run against a
+// full pile reads comfortable — so a genuinely short run raised no alert at
+// all. The missed kind, not the false kind. Fixed by letting the run's ANCHOR
+// answer for the whole run, which also stops one run raising one alert per
+// member.
+test('the by-line position judges the RUN, and raises ONE alert for it', async () => {
+  const { BOARD_MIX_POSITION_BY_LINE_LATERAL: byLine } = await import('./helpers.js');
+  assert.match(byLine, /mol\.gang_run_id = ol\.gang_run_id/, 'a ganged line reaches its run');
+  assert.match(byLine, /MIN\(a\.id\)/,
+    'and only the anchor answers — otherwise a two-member run raises two alerts '
+    + 'and crowds the LIMIT 5 list with the same shortage twice');
+  assert.match(byLine, /GROUP BY x\.material_id/, 'summed per board before the stock comparison');
+  assert.match(byLine, /WHEN ol\.gang_run_id IS NULL THEN x\.order_line_id = ol\.id/,
+    'an unganged line keeps exactly its old predicate');
+
+  const src = readFileSync(new URL('./routes/dashboard.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('${BOARD_MIX_POSITION_BY_LINE_LATERAL}'), 'dashboard uses the shared spelling');
+  assert.doesNotMatch(src, /GREATEST\(0, x\.sheets - COALESCE\(sa\.q,0\)\)/,
+    'no inline copy left in dashboard.js');
+});
+
+// The two spellings differ ONLY in the unit they are keyed on. Anything else
+// drifting apart means one of the two screens is lying about the same job.
+test('the card and line spellings stay the same arithmetic', async () => {
+  const { BOARD_MIX_POSITION_LATERAL: byCard, BOARD_MIX_POSITION_BY_LINE_LATERAL: byLine } =
+    await import('./helpers.js');
+  for (const s of [byCard, byLine]) {
+    assert.match(s, /COUNT\(\*\)::int AS n/);
+    assert.match(s, /COALESCE\(SUM\(GREATEST\(0, g\.sheets - COALESCE\(sa\.q,0\)\)\), 0\) AS short/,
+      'both compare the PER-BOARD sum (g.sheets) against stock, never a raw row');
+    assert.match(s, /FROM stock_batches\s*\n?\s*WHERE status='available' GROUP BY material_id/);
+    assert.match(s, /\) bmp ON true/);
+  }
+});
+
 // The gate is reached from a job card, and a RUN card's order_line_id is NULL.
 // Passing that NULL as the owner is the original bug; pin the call shape so it
 // cannot silently return.

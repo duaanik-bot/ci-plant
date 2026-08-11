@@ -1575,8 +1575,7 @@ export const GANG_ANCHOR_LINE = `
 // hold two files in step; a shared constant can.
 //
 // Expects the query to alias job_cards as `jc`; produces `bmp` (.n, .short).
-// NOT for a query keyed on an order LINE — dashboard.js asks this per line,
-// where "the run's whole shortfall" would fire once per member.
+// For a query keyed on an order LINE use the BY_LINE spelling below instead.
 export const BOARD_MIX_POSITION_LATERAL = `
   LEFT JOIN LATERAL (
     SELECT COUNT(*)::int AS n,
@@ -1588,6 +1587,42 @@ export const BOARD_MIX_POSITION_LATERAL = `
                  OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
                      AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
                                              WHERE mol.gang_run_id = jc.gang_run_id)))
+          GROUP BY x.material_id) g
+    LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
+  ) bmp ON true`;
+
+// The same position asked from the ORDER LINE side (dashboard.js's plant-wide
+// shortage alert), where the unit is a line rather than a card. Same law, and
+// one extra rule the card side never needs: a ganged line's board question is
+// its RUN's, and a run must raise ONE alert, not one per member. So the run's
+// ANCHOR — lowest member id, the same anchor GANG_ANCHOR_LINE picks — answers
+// for the whole run, and the other members return no rows.
+//
+// Keyed on ol.id alone (as this was), a member saw only its own SHARE of the
+// run's mix and compared that against the WHOLE shelf: 1,500 of a 5,250 run
+// against a full pile reads comfortable, so a genuinely short run raised no
+// alert at all. A missed shortage, not a false one — the quiet kind.
+//
+// A non-anchor member falls through to n = 0 and the caller's ELSE arm, which
+// is exactly what it did before this existed. An unganged line is unaffected:
+// the CASE collapses to `x.order_line_id = ol.id` and the GROUP BY is a no-op,
+// because a line's mix never repeats a board.
+//
+// Expects the query to alias order_lines as `ol`; produces `bmp` (.n, .short).
+export const BOARD_MIX_POSITION_BY_LINE_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS n,
+           COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
+    FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
+          FROM job_board_mix x
+          WHERE x.phase='plan'
+            AND CASE WHEN ol.gang_run_id IS NULL THEN x.order_line_id = ol.id
+                     ELSE ol.id = (SELECT MIN(a.id) FROM order_lines a
+                                   WHERE a.gang_run_id = ol.gang_run_id)
+                          AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
+                                                  WHERE mol.gang_run_id = ol.gang_run_id)
+                END
           GROUP BY x.material_id) g
     LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
