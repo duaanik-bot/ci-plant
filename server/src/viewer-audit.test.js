@@ -142,3 +142,17 @@ test('the run panel has ONE spelling of "short right now"', () => {
     + 'inline copies is how the single engine\'s verdicts drifted');
   assert.match(src, /held_others \?\? 0/, 'and it carries the server\'s new held_others');
 });
+
+// The server owns the others-only figure, because only the server knows each
+// line's cap. A client that derives it by subtraction reintroduces the
+// over-hold erasure — held is CAPPED per line, held_for_me is not.
+test('held_others is emitted by the server and consumed verbatim', () => {
+  const alloc = read('./board-allocation.js');
+  assert.match(alloc, /held_others: held - Math\.min\(heldFor\(filtered, line\.id\), lineNeed\(line\)\)/,
+    'linePosition subtracts this line\'s CAPPED contribution, not its raw hold');
+  const orders = read('./routes/orders.js');
+  assert.match(orders, /held_others: stockShown\.held_others/, 'and the payload carries it');
+  const planning = read('../../client/src/pages/Planning.jsx');
+  assert.match(planning, /heldOthers: ctx\.stock\.held_others != null \? \+ctx\.stock\.held_others : null/,
+    'the client passes it through rather than deriving it');
+});

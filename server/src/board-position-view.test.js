@@ -54,6 +54,43 @@ test('free − this plan = net after plan, for any world', () => {
   }
 });
 
+// OTHERS' HOLDS ARE NOT A SUBTRACTION. `held` from the server counts each
+// line's hold CAPPED at that line's need (boardPosition); `held_for_me` is the
+// raw uncapped SUM. Deriving others' holds as held − held_for_me therefore
+// erases a rival's freeze by however much THIS line over-holds — and a line
+// over-holds on the most ordinary path there is: parent_sheets_required is NULL
+// until the first Save, so its capped contribution is 0 while Commit is already
+// offered. This shipped for a day inside the very file written to end exactly
+// this class of bug.
+test('a rival\'s hold survives this line over-holding its own need', () => {
+  // Shelf 9,000. A planned rival holds 3,000. This line is pending-unsaved
+  // (need 0 as far as the server's cap is concerned) and has committed 700.
+  const server = { available: 9000, committedOpen: 0, held: 3000, heldForMe: 700 };
+  const wrong = boardPositionView({ ...server, need: 6500 });
+  assert.equal(wrong.committed, 2300,
+    'the OLD derivation: 3,000 − 700 loses 700 of the rival\'s claim');
+
+  // The server sends its own others-only figure, capped-aware.
+  const p = boardPositionView({ ...server, heldOthers: 3000, need: 6500 });
+  assert.equal(p.committed, 3000, 'the rival holds 3,000 and still holds 3,000');
+  assert.equal(p.free, 6000, 'and this job may draw 6,000 — the server\'s own linePosition.free');
+  assert.equal(p.free_for_others, 5300,
+    'unheld = 9,000 − 3,700, which is what the warehouse picker and the commit gate both compute');
+  assert.equal(p.net, -500, 'a 6,500 plan against 6,000 free is 500 short');
+  assert.equal(p.short, 500, 'and says so, instead of "stock OK" on a short plan');
+});
+
+test('held_others is used verbatim, never re-derived, and falls back safely', () => {
+  const base = { available: 1000, committedOpen: 0, held: 400, heldForMe: 100, need: 0 };
+  // Explicit wins even when it disagrees with the subtraction.
+  assert.equal(boardPositionView({ ...base, heldOthers: 400 }).committed, 400);
+  // Absent → the old subtraction, so an untaught caller is not broken.
+  assert.equal(boardPositionView(base).committed, 300);
+  // Zero is a real answer, not "absent".
+  assert.equal(boardPositionView({ ...base, heldOthers: 0 }).committed, 0);
+  assert.equal(boardPositionView({ ...base, heldOthers: -5 }).committed, 0, 'never negative');
+});
+
 test('a job is never committed against itself', () => {
   // Its own freeze is the reason the sheets are waiting for it.
   const p = boardPositionView({ available: 9000, committedOpen: 0, held: 8959, heldForMe: 8959, need: 700 });

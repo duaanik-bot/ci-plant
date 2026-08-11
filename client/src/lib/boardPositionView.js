@@ -49,6 +49,7 @@ export function boardPositionView({
   committedOpen = 0,
   held = 0,
   heldForMe = 0,
+  heldOthers: heldOthersIn = null,
   need = 0,
   fresh = false,
   drawn = false,
@@ -57,7 +58,16 @@ export function boardPositionView({
 } = {}) {
   const avail = num(available);
   const ownHeld = Math.max(0, num(heldForMe));
-  const heldOthers = Math.max(0, num(held) - ownHeld);
+  // Others' holds come from the SERVER (linePosition.held_others), because only
+  // there are the per-line caps known. Deriving it as held − heldForMe subtracts
+  // an UNCAPPED own hold from a CAPPED total, so a line holding more than its
+  // need — every Commit before the first Save, when parent_sheets_required is
+  // still NULL — erased a rival's hold by the overage and overstated Free.
+  // The subtraction survives only as the fallback for a caller that has not
+  // been taught the field.
+  const heldOthers = heldOthersIn != null
+    ? Math.max(0, num(heldOthersIn))
+    : Math.max(0, num(held) - ownHeld);
 
   // Other jobs' FULL claim: what they still have to find, plus what they have
   // already frozen. Either half alone is a half-truth — and it was the missing

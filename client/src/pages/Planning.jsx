@@ -1236,6 +1236,8 @@ export default function Planning() {
         committedOpen: committed,
         held: +ctx.stock.held || 0,
         heldForMe: +ctx.stock.held_for_me || 0,
+        // The server's own others-only figure — never held − held_for_me here.
+        heldOthers: ctx.stock.held_others != null ? +ctx.stock.held_others : null,
         need: ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent),
         fresh: stockBooking === 'fresh_pr' && !mixPos,
         drawn: !!ctx.board_drawn,

@@ -2376,6 +2376,11 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         committed_other: stockShown.others_open_need,
         held: stockShown.held,
         held_for_me: stockShown.held_for_me,
+        // OTHER jobs' holds, sent whole rather than left to the client to
+        // derive as held − held_for_me: those two are the CAPPED total and an
+        // UNCAPPED own hold, and the subtraction erased a rival's freeze by
+        // this line's overage. See linePosition's note.
+        held_others: stockShown.held_others,
         incoming_for_me: stockShown.incoming_for_me,
         free: stockShown.free,
         net: stockShown.net,

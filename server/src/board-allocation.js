@@ -284,6 +284,18 @@ export function linePosition({ line, others = [], available, allocations = [], m
     free,
     need: lineNeed(line),
     held_for_me: heldFor(filtered, line.id),
+    // OTHER jobs' share of `held`, computed HERE because only here are the
+    // per-line caps known. `held` counts each line's hold capped at that
+    // line's need (boardPosition); `held_for_me` is the raw uncapped SUM. The
+    // client derived others' holds as held − held_for_me, and the two books
+    // do not subtract: a line holding MORE than its need — every Commit before
+    // the first Save, since parent_sheets_required is NULL until then — erased
+    // a rival's hold by the overage. Live shape: rival holds 3,000, this
+    // pending line holds 700, and the tile rendered the rival's claim as
+    // 2,300, overstating Free by 700 and offering a Commit the server 409s.
+    // Subtracting this line's own CAPPED contribution can never remove a hold
+    // the total never counted.
+    held_others: held - Math.min(heldFor(filtered, line.id), lineNeed(line)),
     incoming_for_me: incomingFor(filtered, line.id),
     my_open_need: myOpen,
     others_open_need: othersOpen,
