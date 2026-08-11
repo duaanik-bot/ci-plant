@@ -675,6 +675,169 @@ r.post('/plates/purchase-orders', canBuy, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// Correct a Plate PO in place. Before this the only way to fix a wrong vendor,
+// date or rate was to reverse the whole document and retype it, which burns a
+// PO number on a typo and leaves a permanent 'reversed' row explaining nothing.
+//
+// The HEADER is always editable while the PO is alive. The LINES are not: once
+// any plate has been received, a line's qty/rate sits underneath a GRN, and
+// editing it would leave the received quantity describing something nobody
+// ordered — fulfilment would read wrong for ever and no screen would say why.
+// So the line edit is refused the moment received_qty moves, and the header
+// stays open so the ordinary corrections (expected date, terms, freight) keep
+// working on a part-received PO.
+r.put('/plates/purchase-orders/:id', canBuy, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const po = await oc(`SELECT * FROM tooling_purchase_orders
+        WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
+      if (!po) throw Object.assign(new Error('Plate PO not found'), { status: 404 });
+      if (po.status === 'reversed') {
+        throw Object.assign(new Error(`${po.po_number} is reversed — a cancelled document cannot be edited`),
+          { status: 409 });
+      }
+      const lines = await qc('SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 FOR UPDATE', [po.id]);
+      const received = lines.some(row => Number(row.received_qty) > 0);
+
+      const has = key => Object.prototype.hasOwnProperty.call(req.body, key);
+      // Vendor is part of the commercial agreement, not a detail: once plates
+      // have arrived against this PO the vendor on it is a fact, not a field.
+      if (has('vendor_id') && received && Number(req.body.vendor_id) !== Number(po.vendor_id)) {
+        throw Object.assign(new Error('Plates have already been received on this PO — its vendor cannot change'),
+          { status: 409 });
+      }
+      const [updated] = await qc(`UPDATE tooling_purchase_orders SET
+          vendor_id      = COALESCE($1, vendor_id),
+          expected_date  = $2,
+          vendor_notes   = $3,
+          payment_terms  = $4,
+          delivery_terms = $5,
+          reference      = $6,
+          tax_kind       = COALESCE($7, tax_kind),
+          freight        = COALESCE($8, freight),
+          round_off      = COALESCE($9, round_off),
+          updated_at     = now()
+        WHERE id=$10 RETURNING *`,
+      [has('vendor_id') ? Number(req.body.vendor_id) || null : null,
+       has('expected_date') ? (req.body.expected_date || null) : po.expected_date,
+       has('vendor_notes') ? (req.body.vendor_notes || null) : po.vendor_notes,
+       has('payment_terms') ? (req.body.payment_terms || null) : po.payment_terms,
+       has('delivery_terms') ? (req.body.delivery_terms || null) : po.delivery_terms,
+       has('reference') ? (req.body.reference || null) : po.reference,
+       has('tax_kind') ? (req.body.tax_kind === 'inter' ? 'inter' : 'intra') : null,
+       has('freight') ? Number(req.body.freight) || 0 : null,
+       has('round_off') ? Number(req.body.round_off) || 0 : null,
+       po.id]);
+
+      const wanted = Array.isArray(req.body.lines) ? req.body.lines : [];
+      if (wanted.length) {
+        if (received) {
+          throw Object.assign(new Error('Plates have already been received on this PO — its lines cannot be edited. Reverse the GRN first.'),
+            { status: 409 });
+        }
+        for (const edit of wanted) {
+          const line = lines.find(row => row.id === Number(edit.id));
+          if (!line) throw Object.assign(new Error('That PO line is not on this PO'), { status: 400 });
+          // qty is NOT editable: a plate line's quantity is exactly the number
+          // of approved components pointing at it, and changing it here would
+          // leave the two disagreeing with nothing to reconcile them. Add or
+          // remove plates on the requirement instead.
+          const rate = edit.rate == null || edit.rate === '' ? Number(line.rate) : Number(edit.rate);
+          if (!(rate > 0)) throw Object.assign(new Error('A plate rate must be greater than zero'), { status: 400 });
+          await qc(`UPDATE tooling_po_lines SET rate=$1, discount_pct=$2, gst_rate=$3, hsn_code=$4
+            WHERE id=$5 AND purchase_order_id=$6`,
+          [rate, Number(edit.discount_pct) || 0,
+           edit.gst_rate == null ? Number(line.gst_rate) || 0 : Number(edit.gst_rate) || 0,
+           edit.hsn_code || line.hsn_code || null, line.id, po.id]);
+        }
+      }
+      await audit('tooling_purchase_order', po.id, 'edit',
+        `${po.po_number} edited${wanted.length ? ` · ${wanted.length} line(s)` : ''}`, qc, req.user.name);
+      return updated;
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Delete a Plate PO that never should have existed.
+//
+// NOT the same door as reverse, and the guards below are the difference.
+// Reverse is the auditable undo for a PO that has LIVED — the vendor has seen
+// it, or plates have arrived. It keeps the row, stamps it 'reversed' with a
+// reason, and hands the components back. This is for the other case: raised by
+// mistake, caught immediately, never sent, nothing received. Reversing one of
+// those leaves a permanent cancelled document explaining a typo.
+//
+// Every guard here answers "has this PO been seen by anyone outside this
+// screen?" — because once it has, the number must survive.
+r.delete('/plates/purchase-orders/:id', canBuy, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const po = await oc(`SELECT * FROM tooling_purchase_orders
+        WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
+      if (!po) throw Object.assign(new Error('Plate PO not found'), { status: 404 });
+
+      if (po.status !== 'open') {
+        throw Object.assign(new Error(
+          `${po.po_number} is ${po.status} — only an untouched PO can be deleted. Reverse it instead.`),
+        { status: 409, body: { code: 'PO_NOT_DELETABLE', po_status: po.status } });
+      }
+      if (po.sent_at) {
+        throw Object.assign(new Error(
+          `${po.po_number} has already been sent to the vendor — reverse it instead, so the cancellation is on record.`),
+        { status: 409, body: { code: 'PO_NOT_DELETABLE', sent_at: po.sent_at } });
+      }
+      // ANY grn, including a reversed one: a reversed GRN still names this PO,
+      // and deleting the PO would leave that history pointing at nothing.
+      const grn = await oc('SELECT grn_number FROM tooling_grns WHERE purchase_order_id=$1 LIMIT 1', [po.id]);
+      if (grn) {
+        throw Object.assign(new Error(
+          `${grn.grn_number} was received against ${po.po_number} — reverse the PO instead of deleting it.`),
+        { status: 409, body: { code: 'PO_NOT_DELETABLE', grn_number: grn.grn_number } });
+      }
+
+      const lines = await qc('SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 FOR UPDATE', [po.id]);
+      const lineIds = lines.map(row => row.id);
+      const components = lineIds.length ? await qc(`SELECT * FROM plate_request_components
+        WHERE po_line_id=ANY($1::int[]) FOR UPDATE`, [lineIds]) : [];
+      if (components.some(row => row.grn_id || ['issued','returned_pending_verification'].includes(row.status))) {
+        throw Object.assign(new Error('This Plate PO still has downstream plate activity'), { status: 409 });
+      }
+
+      // Hand the plates back BEFORE the lines vanish — a component still
+      // pointing at a deleted po_line_id is stranded in 'po_created', invisible
+      // to the requirements screen and impossible to buy again.
+      if (lineIds.length) {
+        await qc(`UPDATE plate_request_components SET status='approved',po_line_id=NULL,updated_at=now()
+          WHERE po_line_id=ANY($1::int[])`, [lineIds]);
+      }
+      const requestIds = [...new Set(lines.map(row => row.tooling_request_id).filter(Boolean))];
+      for (const requestId of requestIds) {
+        const otherPo = await oc(`SELECT po.po_number,po.vendor_id FROM tooling_po_lines pl
+          JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
+          WHERE pl.tooling_request_id=$1 AND po.id<>$2 AND po.status<>'reversed'
+          ORDER BY po.id DESC LIMIT 1`, [requestId, po.id]);
+        await qc(`UPDATE tooling_requests SET approval_status=$1,status='procurement',
+          po_number=$2,vendor_id=$3,updated_at=now() WHERE id=$4`,
+        [otherPo ? 'converted' : 'approved', otherPo?.po_number || null, otherPo?.vendor_id || null, requestId]);
+        await addRequestEvent(qc, requestId, 'delete_po', 'converted', otherPo ? 'converted' : 'approved',
+          `${po.po_number} deleted`, req.user.name, 'procurement', po.vendor_id);
+      }
+
+      // The audit row is written BEFORE the delete and is the only thing that
+      // survives it: with the PO row gone, this is the sole record that the
+      // number was ever issued. Without it the series just skips a number and
+      // nobody can say why.
+      await audit('tooling_purchase_order', po.id, 'delete',
+        `${po.po_number} deleted · ${lines.length} line(s) · plates returned to Approved`, qc, req.user.name);
+      await qc('DELETE FROM tooling_po_lines WHERE purchase_order_id=$1', [po.id]);
+      await qc('DELETE FROM tooling_purchase_orders WHERE id=$1', [po.id]);
+      return { deleted: true, po_number: po.po_number, plates_returned: components.length };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 r.post('/plates/purchase-orders/:id/send', canBuy, async (req, res, next) => {
   try {
     const [po] = await q(`UPDATE tooling_purchase_orders SET sent_at=COALESCE(sent_at,now()),updated_at=now()

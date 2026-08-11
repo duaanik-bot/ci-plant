@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Link2, RotateCcw, Send, Trash2, Undo2, X } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
-import { ActionMenu, Button, Checkbox, Modal, useToast } from './ui.jsx';
+import { ActionMenu, Button, Checkbox, Modal, useDockTailRoom, useToast } from './ui.jsx';
 
 function canPlan() {
   return ['admin', 'planner'].includes(auth.user?.role);
@@ -529,36 +529,12 @@ export function BulkWorkflowControls({
   const [clearArtwork, setClearArtwork] = useState(true);
   const selected = lines || [];
   const docked = canPlan() && selected.length > 0;
-  const dockRef = useRef(null);
+  const dockRef = useDockTailRoom(docked);
 
-  // The dock leaves the flow, so the foot of the table sits under it and can
-  // never be scrolled clear. A spacer rendered HERE pads above the table —
-  // the wrong end. The room has to appear at the end of the document, so the
-  // page itself carries it for exactly as long as the dock is up.
-  //
-  // MEASURED, not a constant: the dock wraps from one row to three as the
-  // screen narrows (390px puts the names, the moves and the sends on separate
-  // lines), so any hard-coded height is right on the desktop and short on a
-  // phone — which puts the last job of the queue back under the dock, the
-  // exact bug this is here to prevent.
-  useEffect(() => {
-    if (!docked) return undefined;
-    const el = dockRef.current;
-    if (!el) return undefined;
-    const apply = () => {
-      const gap = window.innerHeight - el.getBoundingClientRect().bottom;
-      document.body.style.paddingBottom = `${Math.ceil(el.offsetHeight + gap + 16)}px`;
-    };
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(el);
-    window.addEventListener('resize', apply);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', apply);
-      document.body.style.paddingBottom = '';
-    };
-  }, [docked]);
+  // Tail room — see useDockTailRoom in ui.jsx for why it is MEASURED and never
+  // a constant. It lived here until the Plates PR module needed the same dock;
+  // two hand-rolled copies is how one of them quietly goes back to a constant
+  // and puts the last row of a queue permanently under the bar.
 
   if (!docked) return null;
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CheckCircle2, ClipboardCheck, Eye, FileCheck2, History,
   Minus, PackagePlus, Plus, Printer, RotateCcw, Save, Send, ShoppingBag,
-  Layers3 as Layers, Trash2, Truck, Warehouse,
+  Layers3 as Layers, Pencil, Trash2, Truck, Warehouse,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { lineAmount, lineTaxable, poTotals } from '../lib/poTotals.js';
@@ -12,7 +12,7 @@ import { plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS } from '..
 import { resolvePlateRate } from '../lib/plateRates.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
-  KpiCard, Modal, PageHeader, SearchableSelect, Select, SubTabs, Tabs,
+  KpiCard, Modal, PageHeader, SearchableSelect, Select, SelectionDock, SubTabs, Tabs,
   Textarea, useToast,
 } from './ui.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
@@ -125,6 +125,23 @@ const approvableComponents = components =>
   (components || []).filter(row => APPROVABLE_COMPONENT_STATUSES.includes(row?.status));
 const canApproveRow = row => ['draft','saved','pending'].includes(row?.approval_status)
   && approvableComponents(row?.components).length > 0;
+// A PR is ready to become a PO when it holds plates that were approved and
+// nothing has bought them yet. The row button and the bulk dock ask this same
+// question so one can never offer what the other refuses.
+const canCreatePoRow = row => !row?.po_number
+  && (row?.components || []).some(component => component.status === 'approved');
+
+// The two PO doors, mirroring the server's own guards (PUT and DELETE in
+// routes/plates.js) so a button is never offered that the API will refuse.
+//
+// EDIT: anything not cancelled. A part-received PO can still have its expected
+// date or terms corrected; the server refuses the LINE edits on its own.
+const canEditPo = row => row?.status !== 'reversed';
+// DELETE: only a PO nobody outside this screen has seen — never sent, nothing
+// received, still open. Everything else must be REVERSED, so the number and the
+// vendor's paper trail survive.
+const canDeletePo = row => row?.status === 'open' && !row?.sent_at
+  && !(row?.lines || []).some(line => Number(line.received_qty) > 0);
 const canUnapproveRow = row => row?.approval_status === 'approved' && !row?.po_number
   && !(row?.components || []).some(c => c.po_line_id || c.grn_id
     || ['po_created','ordered','grn_received'].includes(c.status));
@@ -359,6 +376,140 @@ function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
       <PoTotalsPanel lines={commercialLines} taxKind={form.tax_kind} freight={form.freight} roundOff={form.round_off}
         onFreight={freight => patch({ freight })} onRoundOff={round_off => patch({ round_off })} />
     </div>
+  </Modal>;
+}
+
+// Correct a Plate PO in place, instead of reversing it and retyping the whole
+// document because a date or a rate was wrong.
+//
+// The header is always editable while the PO is alive. The LINES are only
+// editable until a plate arrives — after that the qty and rate sit underneath a
+// GRN, and the server refuses them. This modal says which state it is in rather
+// than presenting fields that will bounce.
+//
+// QTY IS NOT EDITABLE, deliberately and at both ends: a plate line's quantity
+// IS the number of approved components pointing at it. Changing it here would
+// leave the two disagreeing with nothing to reconcile them — add or remove
+// plates on the requirement instead.
+function PlatePoEditModal({ po, vendors, onClose, onSaved }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const received = (po.lines || []).some(line => Number(line.received_qty) > 0);
+  const [form, setForm] = useState({
+    vendor_id: po.vendor_id ? String(po.vendor_id) : '',
+    expected_date: po.expected_date ? String(po.expected_date).slice(0, 10) : '',
+    reference: po.reference || '',
+    payment_terms: po.payment_terms || '',
+    delivery_terms: po.delivery_terms || '',
+    vendor_notes: po.vendor_notes || '',
+    tax_kind: po.tax_kind || 'intra',
+    freight: po.freight ?? 0,
+    round_off: po.round_off ?? 0,
+  });
+  const [lines, setLines] = useState((po.lines || []).map(line => ({
+    id: line.id, label: line.item_name || line.plate_size || `Line ${line.id}`,
+    qty: line.qty, rate: line.rate, discount_pct: line.discount_pct ?? 0,
+    gst_rate: line.gst_rate ?? 0, hsn_code: line.hsn_code || '',
+  })));
+  const set = (key, value) => setForm(current => ({ ...current, [key]: value }));
+  const setLine = (id, key, value) => setLines(current => current.map(row => row.id === id ? { ...row, [key]: value } : row));
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put(`/plates/purchase-orders/${po.id}`, {
+        ...form,
+        vendor_id: form.vendor_id ? Number(form.vendor_id) : null,
+        // Lines are sent only when they can be taken; the server refuses them
+        // on a received PO and there is no reason to make it say so.
+        lines: received ? [] : lines.map(row => ({
+          id: row.id, rate: row.rate, discount_pct: row.discount_pct,
+          gst_rate: row.gst_rate, hsn_code: row.hsn_code,
+        })),
+      });
+      toast.success(`${po.po_number} updated`);
+      onSaved?.();
+      onClose();
+    } catch (error) {
+      toast.error(error.message || 'Could not update this Plate PO');
+    } finally { setBusy(false); }
+  };
+
+  return <Modal open onClose={onClose} wide title={`Edit ${po.po_number}`}
+    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button disabled={busy || !form.vendor_id} onClick={save}><Save size={14} /> Save PO</Button></>}>
+    {received && (
+      <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+        <AlertTriangle size={14} className="mt-px shrink-0" />
+        <span>Plates have already been received on this PO, so its vendor and line rates are fixed.
+          The delivery date, terms and notes can still be corrected. To change a rate, reverse the GRN first.</span>
+      </div>
+    )}
+    <section className="ci-form-panel">
+      <div className="ci-form-panel-title"><span>Purchase Order</span><span>{po.po_number}</span></div>
+      <div className="ci-form-grid">
+        <Field label="Vendor">
+          <SearchableSelect value={form.vendor_id} disabled={received}
+            onChange={value => set('vendor_id', value)}
+            options={(vendors || []).map(vendor => ({ value: String(vendor.id), label: vendor.name }))} />
+        </Field>
+        <Field label="Expected date">
+          <Input type="date" value={form.expected_date} onChange={e => set('expected_date', e.target.value)} />
+        </Field>
+        <Field label="Reference">
+          <Input value={form.reference} onChange={e => set('reference', e.target.value)} />
+        </Field>
+        <Field label="Tax">
+          <Select value={form.tax_kind} onChange={e => set('tax_kind', e.target.value)}
+            options={[{ value: 'intra', label: 'CGST + SGST (within state)' }, { value: 'inter', label: 'IGST (inter-state)' }]} />
+        </Field>
+        <Field label="Freight">
+          <Input type="number" value={form.freight} onChange={e => set('freight', e.target.value)} />
+        </Field>
+        <Field label="Round off">
+          <Input type="number" value={form.round_off} onChange={e => set('round_off', e.target.value)} />
+        </Field>
+        <Field label="Payment terms">
+          <Input value={form.payment_terms} onChange={e => set('payment_terms', e.target.value)} />
+        </Field>
+        <Field label="Delivery terms">
+          <Input value={form.delivery_terms} onChange={e => set('delivery_terms', e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Notes to vendor">
+        <Textarea rows={2} value={form.vendor_notes} onChange={e => set('vendor_notes', e.target.value)} />
+      </Field>
+    </section>
+    <section className="ci-form-panel">
+      <div className="ci-form-panel-title"><span>Lines</span><span>quantity follows the requirement</span></div>
+      <div className="space-y-2">
+        {lines.map(line => (
+          <div key={line.id} className="grid grid-cols-2 items-end gap-2 rounded-xl border border-slate-200 px-3 py-2 md:grid-cols-5">
+            <div className="col-span-2 md:col-span-1">
+              <div className="text-xs font-bold text-slate-700">{line.label}</div>
+              <div className="text-[11px] text-slate-400">{line.qty} plates</div>
+            </div>
+            <Field label="Rate">
+              <Input type="number" disabled={received} value={line.rate}
+                onChange={e => setLine(line.id, 'rate', e.target.value)} />
+            </Field>
+            <Field label="Disc %">
+              <Input type="number" disabled={received} value={line.discount_pct}
+                onChange={e => setLine(line.id, 'discount_pct', e.target.value)} />
+            </Field>
+            <Field label="GST %">
+              <Input type="number" disabled={received} value={line.gst_rate}
+                onChange={e => setLine(line.id, 'gst_rate', e.target.value)} />
+            </Field>
+            <Field label="HSN">
+              <Input disabled={received} value={line.hsn_code}
+                onChange={e => setLine(line.id, 'hsn_code', e.target.value)} />
+            </Field>
+          </div>
+        ))}
+        {!lines.length && <p className="py-2 text-center text-sm text-slate-400">This PO has no lines.</p>}
+      </div>
+    </section>
   </Modal>;
 }
 
@@ -675,6 +826,7 @@ export default function PlatesLifecycle() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [poModal, setPoModal] = useState(null);
   const [grnModal, setGrnModal] = useState(null);
+  const [editPo, setEditPo] = useState(null);
   const [returnModal, setReturnModal] = useState(null);
   const [assetHistory, setAssetHistory] = useState(null);
   const [reasonAction, setReasonAction] = useState(null);
@@ -907,6 +1059,9 @@ export default function PlatesLifecycle() {
     } else if (action.kind === 'reverse_po') {
       await api.post(`/plates/purchase-orders/${action.row.id}/reverse`, { reason });
       toast.success(`${action.row.po_number} reversed`);
+    } else if (action.kind === 'delete_po') {
+      const out = await api.del(`/plates/purchase-orders/${action.row.id}`);
+      toast.success(`${action.row.po_number} deleted — ${out.plates_returned ?? 0} plate(s) back to Approved`);
     } else if (action.kind === 'reverse_grn') {
       await api.post(`/plates/grns/${action.row.id}/reverse`, { reason });
       toast.success(`${action.row.grn_number} reversed`);
@@ -939,6 +1094,12 @@ export default function PlatesLifecycle() {
           kind:'unapprove',row,title:`Unapprove ${row.request_number}?`,confirmLabel:'Unapprove',icon:RotateCcw,requireReason:true,
           description:'This reopens the Plate PR as Saved and makes its size and quantities editable. A Plate PO must be reversed first.',
         })}><RotateCcw size={12} /> Unapprove</Button>}
+      {/* Raise the PO for THIS PR without ticking it first. Same modal the bulk
+          path opens — one group instead of many — so the two entry points cannot
+          become two policies. Shown only while the row actually has approved
+          plates to buy and no PO yet, which is exactly canCreatePoRow. */}
+      {canManage() && canCreatePoRow(row) && <Button size="sm"
+        onClick={() => openPlatePo([row])}><ShoppingBag size={12} /> Create PO</Button>}
       {canManage() && <ActionMenu label={`${row.request_number} actions`} items={[{
         key:'delete',label:'Delete Plate PR',icon:Trash2,danger:true,onClick:()=>setReasonAction({
           kind:'delete_pr',row,title:`Delete ${row.request_number}?`,confirmLabel:'Delete PR',icon:Trash2,danger:true,requireReason:true,
@@ -971,11 +1132,25 @@ export default function PlatesLifecycle() {
     { key: 'status', label: 'Status', render: row => <StatusChip value={row.status} /> },
     { key: 'actions', label: '', sortable: false, render: row => { const line=row.lines.find(item => Number(item.received_qty)<Number(item.qty)); return canManage() ? <div className="flex justify-end gap-1" onClick={event=>event.stopPropagation()}>
       {line && !['reversed','closed'].includes(row.status) && <Button size="sm" onClick={() => setGrnModal({ po: row, line })}><PackagePlus size={12} /> GRN</Button>}
+      {/* Open the printable PO — the same document the vendor gets. POPrint
+          already serves the plate family; the row simply never linked to it. */}
+      <Button size="sm" variant="secondary" onClick={() => window.open(`/tooling/plates/po/${row.id}`, '_blank', 'noopener')}>
+        <Eye size={12} /> View
+      </Button>
       <ActionMenu label={`${row.po_number} actions`} items={[
+        ...(canEditPo(row) ? [{key:'edit',label:'Edit PO',icon:Pencil,onClick:()=>setEditPo(row)}] : []),
         ...(!row.sent_at && !['reversed','closed','received'].includes(row.status) ? [{key:'send',label:'Mark sent to vendor',icon:Send,onClick:async()=>{await api.post(`/plates/purchase-orders/${row.id}/send`);toast.success(`${row.po_number} marked sent`);load();}}] : []),
         ...(row.status!=='reversed' ? [{key:'reverse',label:'Reverse PO',icon:RotateCcw,danger:true,onClick:()=>setReasonAction({
           kind:'reverse_po',row,title:`Reverse ${row.po_number}?`,confirmLabel:'Reverse PO',icon:RotateCcw,danger:true,requireReason:true,
           description:row.sent_at?'This PO has already been issued to the vendor. Confirm vendor cancellation before reversing it. Any active GRN must be reversed first.':'This returns its Plate components to Approved. Any active GRN must be reversed first.',
+        })}] : []),
+        // Delete is offered ONLY for a PO nobody outside this screen has seen.
+        // The moment it has been sent or received against, its number has to
+        // survive and Reverse is the only honest undo — so the entry is not
+        // greyed out, it is absent, and Reverse sits there instead.
+        ...(canDeletePo(row) ? [{key:'delete',label:'Delete PO',icon:Trash2,danger:true,onClick:()=>setReasonAction({
+          kind:'delete_po',row,title:`Delete ${row.po_number}?`,confirmLabel:'Delete PO',icon:Trash2,danger:true,
+          description:'This PO was never sent and nothing has been received against it, so it can be removed outright. Its plates go back to Approved and can be bought again. The PO number will not be reused.',
         })}] : []),
       ]}/>
     </div> : null; } },
@@ -1140,11 +1315,18 @@ export default function PlatesLifecycle() {
       ]}/>
     )}
     {tab==='requirements' && <>
-      {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
-        <b className="mr-auto text-sm text-brand-900">{selectedIds.length} selected</b>
+      {/* The bulk actions DOCK at the foot of the screen rather than sitting in
+          the flow above the table. A PR list runs to dozens of rows, so a bar
+          pinned at the top means ticking a row near the bottom and then
+          scrolling all the way back up to act on it. Same dock, same measured
+          tail room, as the Planning queue — see useDockTailRoom in ui.jsx. */}
+      <SelectionDock open={selectedIds.length > 0} count={selectedIds.length}
+        summary={selectedRequirements.slice(0, 3).map(row => row.request_number).join(' · ')
+          + (selectedRequirements.length > 3 ? ` +${selectedRequirements.length - 3} more` : '')}
+        title={selectedRequirements.map(row => row.request_number).join(', ')}
+        onClear={() => setSelectedIds([])} clearLabel="Deselect all">
         {!canApproveBulk && !canCreateBulkPo && !canDeleteBulk && <span className="text-xs font-semibold text-amber-700">Select unapproved PRs to approve, approved PRs for a PO, or editable PRs to delete</span>}
         {!allViewSelected && <Button size="sm" variant="ghost" onClick={() => setSelectedIds(current => [...new Set([...current, ...reqRows.map(row => row.id)])])}>Select all</Button>}
-        <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Deselect all</Button>
         {/* Thirteen PRs raised in one go want approving in one go. Same gesture as
             the row button, run one at a time. */}
         <Button size="sm" variant="success" disabled={!canApproveBulk || bulkApproving}
@@ -1157,7 +1339,7 @@ export default function PlatesLifecycle() {
           confirmLabel:'Delete selected PRs',icon:Trash2,danger:true,requireReason:true,
           description:'This permanently removes every selected editable Plate PR. The entire action is blocked if any selected PR has approval, PO, GRN or production activity.',
         })}><Trash2 size={13} /> Delete PRs</Button>
-      </div>}
+      </SelectionDock>
       {/* One line, two questions: WHICH requirements (the stage they are at) and, in
           a lighter weight beside it, whether they are approved. Two full-width chip
           bands stacked on top of each other read as one undifferentiated wall — and
@@ -1403,6 +1585,7 @@ export default function PlatesLifecycle() {
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
     {grnModal && <PlateGrnModal po={grnModal.po} line={grnModal.line} onClose={()=>setGrnModal(null)} onSaved={load}/>}
+    {editPo && <PlatePoEditModal po={editPo} vendors={vendors} onClose={()=>setEditPo(null)} onSaved={load}/>}
     {returnModal && <ReturnModal asset={returnModal} onClose={()=>setReturnModal(null)} onSaved={load}/>}
     {assetHistory && <AssetHistoryModal asset={assetHistory} onClose={()=>setAssetHistory(null)} onChanged={load}/>}
     {reasonAction && <ReasonActionModal action={reasonAction} onClose={()=>setReasonAction(null)} onConfirm={performReasonAction}/>}

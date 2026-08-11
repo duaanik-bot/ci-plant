@@ -2011,3 +2011,80 @@ export function ToastProvider({ children }) {
     </ToastCtx.Provider>
   );
 }
+
+// ─── Selection dock ─────────────────────────────────────────────────────────
+// The floating bar that appears at the foot of the screen once rows are ticked,
+// so the actions are under the thumb instead of at the top of a long list.
+//
+// TAIL ROOM IS MEASURED, NEVER A CONSTANT, and that is the whole reason this
+// lives in one place. The dock leaves the document flow, so the last row of the
+// table sits underneath it and can never be scrolled clear. A spacer rendered
+// beside the dock pads the WRONG end — the room has to appear at the end of the
+// document, so the page body carries it for exactly as long as the dock is up.
+//
+// And the height cannot be hard-coded: the dock wraps from one row to three as
+// the screen narrows, so any constant is right on a desktop and short on a
+// phone — which puts the last row back under the dock, the exact bug this
+// exists to prevent. Hence ResizeObserver plus a resize listener.
+//
+// Extracted from BulkWorkflowControls (Planning) when the Plates PR module
+// needed the same dock. Two hand-rolled copies of this measurement is how one
+// of them silently goes back to a constant.
+export function useDockTailRoom(active) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!active) return undefined;
+    const el = ref.current;
+    if (!el) return undefined;
+    const apply = () => {
+      const gap = window.innerHeight - el.getBoundingClientRect().bottom;
+      document.body.style.paddingBottom = `${Math.ceil(el.offsetHeight + gap + 16)}px`;
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener('resize', apply);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', apply);
+      document.body.style.paddingBottom = '';
+    };
+  }, [active]);
+  return ref;
+}
+
+// The dock's shell — same glass panel, same z-order and print behaviour
+// wherever a screen docks a selection. Callers supply what goes in it.
+//
+// `count` names the pile; `summary` is the optional line under it (which rows,
+// which PO); `children` are the actions. Renders nothing when inactive, so a
+// caller can mount it unconditionally.
+export function SelectionDock({ open, count, summary, title, onClear, clearLabel = 'Clear', children }) {
+  const ref = useDockTailRoom(open);
+  if (!open) return null;
+  return (
+    <div ref={ref} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
+      <div className="ci-select-dock-panel mx-auto flex max-w-5xl flex-col gap-2 rounded-2xl px-3 py-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="shrink-0 text-sm font-bold text-[#1D1D1F]">
+            {count} selected
+          </span>
+          {summary && (
+            <span className="min-w-0 truncate text-xs font-semibold text-[#515154]" title={title || undefined}>
+              {summary}
+            </span>
+          )}
+          {onClear && (
+            <button type="button" onClick={onClear}
+              className="ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold text-[#515154] hover:bg-[#1D1D1F]/[0.06] hover:text-[#1D1D1F]">
+              {clearLabel}
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-[#1D1D1F]/[0.08] pt-2">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
