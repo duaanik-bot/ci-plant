@@ -80,11 +80,24 @@ export function boardPositionView({
   const freeForOthers = Math.max(0, freeRaw - ownHeld);
 
   if (fresh) {
-    // A fresh_pr plan refuses the shelf, so the shelf is not what it is short
+    // A fresh_pr plan refuses the shelf, so the shelf is not what it is SHORT
     // of: its still-to-buy is the cut plan less its own PR on order and its own
-    // holds. Net is the shelf it leaves alone — unchanged by this plan.
+    // holds. That is `short`, and it is untouched here.
+    //
+    // NET AFTER PLAN is a different question — what this pile reads once this
+    // job has cut — and "the shelf it leaves alone" answered it only while the
+    // board was still ON ORDER. The moment the PR LANDS the board arrives onto
+    // THIS shelf as this job's own hold (a landed, covered PR becomes a hold),
+    // and drawing it takes the pile down with it. ACEBROBID: 9,000 on the
+    // shelf, 8,959 of it its own delivered board, cutting tomorrow — the tile
+    // said Net After Plan 9,000 for a pile that will read 41, denying a
+    // delivery that had already happened. It draws what it holds, capped at
+    // the plan; with nothing landed yet that is zero and the shelf is left
+    // alone exactly as before.
+    const fromThisShelf = num(planParent) > 0 ? Math.min(ownHeld, num(planParent)) : ownHeld;
     return {
-      available: avail, committed, free, free_for_others: freeForOthers, net: freeRaw,
+      available: avail, committed, free, free_for_others: freeForOthers,
+      net: freeRaw - fromThisShelf,
       drawn: !!drawn, fresh: true, own_incoming: num(ownIncoming),
       short: drawn ? 0 : Math.max(0, num(planParent) - ownHeld - num(ownIncoming)),
     };

@@ -70,17 +70,48 @@ test('an over-committed board keeps its sign instead of flooring at zero', () =>
 });
 
 // ACEBROBID's own view. It chose "Fresh PR — leave stock free", so the shelf is
-// not what it is short of — and its verdict must not move.
-test('a fresh-PR plan reads exactly as it did, and its row also adds up', () => {
+// not what it is SHORT of — that verdict must not move.
+test('a fresh-PR plan is not short of a shelf it refuses, and its row adds up', () => {
   const p = boardPositionView({
     available: 9000, committedOpen: 659, held: 9000, heldForMe: 8959,
     need: 8959, fresh: true, planParent: 8959, ownIncoming: 0,
   });
   assert.equal(p.committed, 700, "HB-29's 659 still to find plus the 41 it froze");
   assert.equal(p.free, 8300, 'unchanged — this is what the panel already showed');
-  assert.equal(p.net, 8300, 'unchanged');
   assert.equal(p.available - p.committed, p.free, 'and 9,000 = 700 + 8,300 now holds (it read 659 + 8,300)');
   assert.equal(p.short, 0, 'covered by its own hold — "covered · shelf left free"');
+  // Net is a DIFFERENT question from short: what this pile reads once this job
+  // has cut. It takes its own 8,959 off a shelf with 8,300 free of others'
+  // claims, so the others end up 659 short — which is exactly true: the pile
+  // will hold 41 and they are owed 700.
+  assert.equal(p.net, -659, 'net after plan is honest about what it leaves behind');
+});
+
+// THE FRESH-PR LIFECYCLE. "This plan buys its board fresh, so it leaves the
+// shelf alone" is true only while the board is ON ORDER. A landed, covered PR
+// BECOMES a hold on this very shelf, and drawing it takes the pile down.
+// ACEBROBID: 9,000 on the shelf, 8,959 of it its own delivered board — the
+// tile read Net After Plan 9,000 for a pile that will read 41.
+test('a fresh-PR plan leaves the shelf alone until its board LANDS', () => {
+  const world = extra => boardPositionView({
+    available: 9000, committedOpen: 0, fresh: true, planParent: 8959, ...extra });
+
+  // Nothing landed: the shelf is untouched by this plan, as before.
+  assert.equal(world({ held: 0, heldForMe: 0, ownIncoming: 8959 }).net, 9000);
+
+  // Landed and frozen for this job: it draws its own hold off this pile.
+  const landed = world({ held: 8959, heldForMe: 8959, ownIncoming: 0 });
+  assert.equal(landed.net, 41, 'the number the warehouse register reads: 0.41 of a packet');
+  assert.equal(landed.net, landed.free_for_others,
+    'with no rival claims, what it leaves IS what nobody holds');
+
+  // Half landed: only the part on the shelf comes off it.
+  assert.equal(boardPositionView({
+    available: 4000, committedOpen: 0, held: 4000, heldForMe: 4000,
+    fresh: true, planParent: 8959, ownIncoming: 4959 }).net, 0);
+
+  // A hold larger than the plan cannot take more than the plan will cut.
+  assert.equal(world({ held: 9000, heldForMe: 9000, ownIncoming: 0 }).net, 9000 - 8959);
 });
 
 // "Free" has a viewer. position.free is THIS job's view — its own freeze sits
