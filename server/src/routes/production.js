@@ -130,7 +130,10 @@ const JC_VIEW = `
          -- was printed beside. gmm fires only on the parent; this is the other
          -- half, so the run stays legible after the sheet is cut apart.
          rmate.mates AS gang_run_mates,
-         o.po_number, o.delivery_date,
+         -- po_date is the register's OD clock. 117 of 127 open lines carry no
+         -- delivery_date, so the PO date is the only date most job cards have —
+         -- the Delivery column beside it is blank for ~92% of the book.
+         o.po_number, o.po_date, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name,
          -- Multi-board: a job with a job_board_mix plan carries its OWN
          -- shortfall, one row per board, instead of the single planned board's
@@ -176,7 +179,9 @@ const JC_VIEW = `
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
              'party_item_code', p3.party_item_code,
-             'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
+             -- Each member's own PO date, so a gang can answer for its OLDEST
+             -- one: a run is as overdue as the longest-waiting order on it.
+             'qty', ol3.qty, 'po_number', o3.po_number, 'po_date', o3.po_date, 'customer_name', c3.name,
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required,
              -- Per-carton artwork detail: each product on the gang sheet keeps

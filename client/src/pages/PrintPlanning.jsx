@@ -11,7 +11,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, odDays, odTone, OverdueDays, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -182,6 +182,22 @@ function ReorderButtons({ onReorder, first, last, tone = 'text-slate-400 hover:t
 // colours, the board it prints on, and readiness. Status is a written pill,
 // never a colour to memorise. The status-coloured left edge still carries the
 // state at a glance: amber = printing now, red = on hold, on-press = its
+// How long the customer has been waiting, for one card and for a whole run.
+// Same rule as Planning, Artwork and the Job Card register: a run answers for
+// its OLDEST PO, because the sheet is as overdue as the longest-waiting order
+// printed on it, and `latest` is set only when the members were booked on
+// different days so a span is shown exactly when there is one.
+//
+// The PO date is the only clock most of this board has — delivery_date is null
+// on the great majority of open lines, which is why "Deliver By" so often reads
+// as a dash two columns over.
+const cardPoAge = card => ({ date: card?.po_date ?? null, latest: null, days: odDays(card?.po_date), count: card?.po_date ? 1 : 0 });
+
+const groupPoAge = g => {
+  const ds = [...new Set((g?.cards || []).map(c => c?.po_date).filter(Boolean))].sort();
+  return { date: ds[0] ?? null, latest: ds.length > 1 ? ds[ds.length - 1] : null, days: odDays(ds[0]), count: ds.length };
+};
+
 // machine's hue, grey = still in triage. Status always wins over machine hue.
 // One source of truth for how a card's state is worded and coloured — the
 // kanban card and the expanded table row both read this, so they can never
@@ -205,6 +221,9 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
   selectable, selected, onToggle, presses, onSend, onSendBack, onReorder, first, last }) {
   const { partial, running, held, edge, dot, pill, pillLabel } = statusOf(card, onPress, theme);
   const late = isOverdue(card.delivery_date);
+  // Days since the customer raised the PO — the wait the plant is answerable
+  // for, and on most of this board the only date there is.
+  const od = odDays(card.po_date);
   // Board chip: explicit board name (already "grade gsm parent"), or material
   // name; the gsm cell only when the name does not already carry it.
   const board = card.board_display || null;
@@ -279,7 +298,21 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
         {/* Labelled field grid — the whole story on the face */}
         <div className={`mt-1 grid overflow-hidden rounded-lg border border-slate-100 bg-slate-100 gap-px ${wide ? 'grid-cols-4' : 'grid-cols-2'}`}>
           <F label="Customer PO">{card.po_number || '—'}</F>
-          <F label="PO Date">{card.po_date ? fmt.date(card.po_date) : '—'}</F>
+          {/* The wait rides WITH the PO date rather than taking a cell of its
+              own. This grid is exactly 8 fields — a clean 4×2 wide and 2×4
+              narrow — and a ninth would leave a ragged half-row and make every
+              card in the lane taller, which on a tablet is the difference
+              between a lane you can scan and one you scroll. Text, not the
+              pill the table uses: every other figure on this face is plain, and
+              one filled chip among them reads as an alert rather than a number.
+              Same bands either way, from odTone. */}
+          <F label="PO Date">
+            {card.po_date ? fmt.date(card.po_date) : '—'}
+            {od != null && (
+              <span title={`${od} day${od === 1 ? '' : 's'} since the customer PO was raised`}
+                className={`ml-1 text-[10px] font-extrabold ${odTone(od) || 'text-slate-400'}`}>{od}d</span>
+            )}
+          </F>
           <F label="Deliver By" tone={late ? 'text-red-600' : undefined}>
             {card.delivery_date ? fmt.date(card.delivery_date) : '—'}
           </F>
@@ -1271,6 +1304,11 @@ export default function PrintPlanning() {
               { key: 'product_name', label: 'Product', export: productExport },
               { key: 'customer_name', label: 'Customer' },
               { key: 'po_number', label: 'Customer PO', export: c => c.po_number || '—' },
+              // A column the screen shows must leave with the sheet — same rule
+              // the comment below states for the ones after it.
+              { key: 'po_date', label: 'PO Date', export: c => (c.po_date ? fmt.date(c.po_date) : '—') },
+              { key: 'od', label: 'OD', align: 'right',
+                export: c => { const d = odDays(c.po_date); return d == null ? '—' : `${d}d`; } },
               { key: 'qty_planned', label: 'Ordered pcs', align: 'right', export: c => fmt.num(c.qty_planned) },
               { key: 'sheets_issued', label: 'Sheets', align: 'right', export: c => fmt.num(c.sheets_issued) },
               // A column the screen shows must leave with the sheet, or the
@@ -1603,8 +1641,19 @@ export default function PrintPlanning() {
             : key === 'print_process' ? (PROCESS_RANK[processOf(c)] ?? 9)
             : key === 'colors' ? totalColoursOf(c)
             : c[key]);
+          // PO date and OD read the WHOLE group, not its first card: a run is as
+          // overdue as the longest-waiting PO on the sheet, so a gang sorts by
+          // its oldest member. Every other key keeps reading cards[0].
+          const groupVal = g => {
+            if (key === 'po_date') return groupPoAge(g).date ?? '';
+            // The days themselves, not the date — sorting the date ascending
+            // would put the MOST overdue first under an "asc" arrow, which is
+            // the opposite of what the arrow says.
+            if (key === 'od') return groupPoAge(g).days;
+            return val(g.cards[0]);
+          };
           groups = [...groups].sort((a, b) => {
-            const va = val(a.cards[0]), vb = val(b.cards[0]);
+            const va = groupVal(a), vb = groupVal(b);
             if (va == null || va === '') return 1;
             if (vb == null || vb === '') return -1;
             const na = +va, nb = +vb;
@@ -1701,8 +1750,14 @@ export default function PrintPlanning() {
               <td className={`${td} max-w-[160px] truncate text-[11px] font-semibold text-slate-600`} title={card.customer_name}>{card.customer_name || '—'}</td>
               <td className={`${td} max-w-[130px] truncate text-[11px] font-semibold text-slate-500`} title={card.party_artwork_code || ''}>{card.party_artwork_code || '—'}</td>
               <td className={`${td} whitespace-nowrap`}>
+                {/* The date moved to its own sortable column beside this one. */}
                 <div className="text-[11.5px] font-bold text-slate-700">{card.po_number || '—'}</div>
-                <div className="text-[10px] font-semibold text-slate-400">{card.po_date ? fmt.date(card.po_date) : ''}</div>
+              </td>
+              <td className={`${td} whitespace-nowrap text-[11px] font-semibold tabular-nums text-slate-600`}>
+                {card.po_date ? fmt.date(card.po_date) : <span className="text-slate-300">—</span>}
+              </td>
+              <td className={`${td} whitespace-nowrap text-right`}>
+                <OverdueDays days={odDays(card.po_date)} />
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <div className={`text-[11.5px] font-bold ${late ? 'text-red-600' : 'text-slate-700'}`}>
@@ -1875,7 +1930,16 @@ export default function PrintPlanning() {
             <div data-lane {...(interactive ? laneProps(expanded) : {})}
               className={`min-h-0 flex-1 overflow-auto px-5 pb-6 pt-3 transition-shadow [scrollbar-width:thin] ${
                 dragOverLane === expanded ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+              {/* NOT overflow-hidden. This row is nineteen columns wide, and on
+                  a tablet in landscape the last few exceed the viewport — with
+                  the overflow clipped here they were unreachable rather than
+                  scrollable, because a clipped box does not hand its overflow
+                  to the scrolling parent. Dropping the clip lets the lane's own
+                  overflow-auto scroll sideways to them. Deliberately not a new
+                  .overflow-x-auto element: the drag autoscroll picks its rail
+                  by exactly that class, and a second one inside the lane would
+                  capture it. Nothing changes while the table fits. */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-card">
                 <table className="w-full border-collapse text-left">
                   <thead>
                     <tr>
@@ -1886,6 +1950,13 @@ export default function PrintPlanning() {
                       <Th k="customer_name">Customer</Th>
                       <Th>Artwork</Th>
                       <Th k="po_number">Customer PO</Th>
+                      {/* The PO's own date and the wait it has run up, beside
+                          the PO itself. Sortable, which the grey sub-line this
+                          replaces never was — and on this board the PO date is
+                          the only date most jobs have, so "Deliver By" next
+                          door is a dash far more often than not. */}
+                      <Th k="po_date">PO Date</Th>
+                      <Th k="od" right>OD</Th>
                       <Th k="delivery_date">Deliver By</Th>
                       <Th k="qty_planned" right>Ordered</Th>
                       <Th>Board &amp; Finish</Th>
@@ -1910,7 +1981,7 @@ export default function PrintPlanning() {
                       return g.cards.map((c, j) => renderRow(c, g, j === 0, seq, pos));
                     })}
                     {groups.length === 0 && (
-                      <tr><td colSpan={17} className="px-4 py-16 text-center text-sm text-slate-400">
+                      <tr><td colSpan={19} className="px-4 py-16 text-center text-sm text-slate-400">
                         {laneAll.length > 0 && (expQ || boardFilterActive)
                           ? `${emptyLaneReason(isT ? 'Triage' : press.name, expQ)}.`
                           : 'No jobs in this lane.'}

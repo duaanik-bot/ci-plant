@@ -5,6 +5,7 @@ import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
+import { odDays, odTone, OD_BANDS } from '../lib/odDays.js';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
@@ -1933,38 +1934,22 @@ export function AgeChip({ date, days }) {
 }
 
 // ─── OD — how long a job has been waiting since its customer PO ──────────────
-// The ageing the planner actually plans by. Delivery dates are missing on 117
-// of the 127 open lines (live book, 2026-08-04), so the PO date is the only
-// clock most of this queue has: OD is days elapsed since orders.po_date.
+// The ageing the planner actually plans by, on Planning, Artwork, Sort & Paste,
+// the Job Card register and Print Planning.
 //
-// Deliberately NOT the AgeChip 30/60/90 bands. Those were cut for board sitting
-// in a warehouse, where a month is nothing. On the live order book the median
-// open line is 20 days old and 87% are under 30 — a 30-day amber would have
-// painted almost the whole board and told the planner nothing. Measured against
-// that same book, the bands below colour ~13% of rows: amber past a month, red
-// past two. Everything else stays plain, so the few that light up mean it.
-const OD_AMBER = 31;
-const OD_RED = 61;
-
-// Calendar-day difference, matching the server's (now()::date - po_date::date).
-// po_date is a plain 'YYYY-MM-DD' string, so its UTC parts ARE the intended
-// date; comparing instants instead would drift a day either side of midnight.
-export function odDays(poDate) {
-  if (!poDate) return null;
-  const d = new Date(poDate);
-  if (!Number.isFinite(d.getTime())) return null;
-  const then = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const n = new Date();
-  const today = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
-  return Math.max(0, Math.round((today - then) / 86400000));
-}
+// The arithmetic and the bands moved to lib/odDays.js — a plain module, because
+// this file is JSX and `node --test` cannot import it, which left the sum behind
+// every OD on the floor untested. Re-exported here so the five pages that
+// already import it from this file keep working. Only the pill below is JSX and
+// so still lives here; it reads the same OD_BANDS the text form does.
+export { odDays, odTone };
 
 // `count` > 1 marks a gang: the row reads its OLDEST member, because a run is
 // as overdue as the longest-waiting PO in it.
 export function OverdueDays({ days, count = 1 }) {
   if (days == null) return <span className="text-gray-300">—</span>;
-  const hot = days >= OD_RED ? 'bg-red-50 text-red-700'
-    : days >= OD_AMBER ? 'bg-amber-50 text-amber-700'
+  const hot = days >= OD_BANDS.red ? 'bg-red-50 text-red-700'
+    : days >= OD_BANDS.amber ? 'bg-amber-50 text-amber-700'
     : null;
   return (
     <div title={`${days} day${days === 1 ? '' : 's'} since the customer PO was raised`
