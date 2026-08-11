@@ -206,9 +206,13 @@ const XS_VIEW = `
          -- OTHER order line. Narrower than board_committed above (which is
          -- every planned/ready/in_production line's whole open requirement,
          -- including this job's own) — this is only explicit holds, and only
-         -- another job's. jc.order_line_id is NULL for a gang/run parent card,
-         -- so IS DISTINCT FROM counts every active hold as "elsewhere" there —
-         -- correct, since a run parent owns no line of its own to net out.
+         -- another job's. A run card carries NO order_line_id, but it is not
+         -- ownerless: its holds live on its MEMBER lines, so a run is netted
+         -- out through its run, not through a line it does not have. Comparing
+         -- against jc.order_line_id alone called every hold "elsewhere" for a
+         -- run — the same reasoning that refused OMEZYME its own 5,250-sheet
+         -- freeze at cutting start. On the live plant it overstated
+         -- CI-GANG-JC-0039 by its own 963 and CI-GANG-JC-0041 by its own 650.
          COALESCE(oth.qty, 0) AS board_committed_elsewhere,
          -- The planned board's CHOSEN cuts when the job carries a mix (NULL
          -- otherwise) — see PLANNED_CUTS_LATERAL: the client's parent→child
@@ -250,7 +254,10 @@ const XS_VIEW = `
   LEFT JOIN LATERAL (
     SELECT SUM(ba.qty) AS qty FROM board_allocations ba
     WHERE ba.material_id = bm.id AND ba.status = 'active' AND ba.source = 'stock'
-      AND ba.order_line_id IS DISTINCT FROM jc.order_line_id) oth ON true
+      AND ba.order_line_id IS DISTINCT FROM jc.order_line_id
+      AND (jc.gang_run_id IS NULL
+           OR ba.order_line_id NOT IN (SELECT rol.id FROM order_lines rol
+                                       WHERE rol.gang_run_id = jc.gang_run_id))) oth ON true
   ${PLANNED_CUTS_LATERAL}`;
 
 r.get('/extra-sheets', async (_req, res, next) => {

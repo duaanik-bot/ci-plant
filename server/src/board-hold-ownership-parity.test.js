@@ -148,6 +148,24 @@ test('the holds context must carry gang_run_id or the badge goes blind', () => {
   assert.notEqual(badge, TAKEABLE);
 });
 
+// The law is not only JavaScript. Ownership is asked in SQL too, and a run
+// card's jc.order_line_id is NULL there as well — where `IS DISTINCT FROM
+// NULL` is TRUE for every row, so a bare comparison silently calls the run's
+// own freeze somebody else's. The extra-sheets view did exactly that, and its
+// comment argued the result was correct ("a run parent owns no line of its own
+// to net out"). It read CI-GANG-JC-0039's 963 and CI-GANG-JC-0041's 650 as
+// board committed elsewhere when both were the run's own.
+test('the SQL ownership predicate nets a run out through its RUN', () => {
+  const src = readFileSync(new URL('./routes/extrasheets.js', import.meta.url), 'utf8');
+  const lateral = src.slice(src.indexOf('FROM board_allocations ba'));
+  const pred = lateral.slice(0, lateral.indexOf(') oth ON true'));
+  assert.match(pred, /IS DISTINCT FROM jc\.order_line_id/, 'still nets out its own line');
+  assert.match(pred, /jc\.gang_run_id IS NULL\s*\n?\s*OR ba\.order_line_id NOT IN/,
+    'and must net out its run-mates too — a run card has no line of its own, '
+    + 'which makes it ownerless only if you forget where its holds live');
+  assert.match(pred, /rol\.gang_run_id = jc\.gang_run_id/);
+});
+
 // The gate is reached from a job card, and a RUN card's order_line_id is NULL.
 // Passing that NULL as the owner is the original bug; pin the call shape so it
 // cannot silently return.
