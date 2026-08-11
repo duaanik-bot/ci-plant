@@ -83,7 +83,11 @@ export function rankBoardMatches({ product, childSheets, currentBoard, candidate
     const parentNeeded = parentSheetsRequired(need, fit.count);
     const available = Math.max(0, +c.available || 0);
     const committed = Math.max(0, +c.committed || 0);
-    const free = Math.max(0, available - committed);
+    // `held` is stock frozen by lines OUTSIDE the claim set (the endpoint's
+    // stockHoldBudget figure) — reserved shelf the committed sum cannot see.
+    // Without it a suggestion quoted board a saved draft had already frozen.
+    const held = Math.max(0, +c.held || 0);
+    const free = Math.max(0, available - committed - held);
     const sufficient = free >= parentNeeded;
 
     // Every row is now the same grade, so the three buckets are purely about

@@ -17,7 +17,7 @@ import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '..
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
-import { gangPosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
+import { gangPosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
 import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
 import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
@@ -328,7 +328,17 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
     for (const c of candidates) {
       const claim = candClaims.get(c.id);
       c.committed = Math.round(claim?.committed || 0);
-      c.free = Math.max(0, Math.round(Number(c.available || 0) - c.committed));
+      // The save path measures its budget with stockHoldBudget, which also
+      // reserves holds owned by lines OUTSIDE the claim set (a pending
+      // draft's freeze). Quote the same figure here or the row offers more
+      // than the lock will hold.
+      const budget = stockHoldBudget({
+        materialId: c.id, available: Number(c.available || 0),
+        allocations: candAllocs, claimLines: candLines,
+        ownerLineIds: members.map(m => m.id),
+      });
+      c.held = Math.round(budget.held);
+      c.free = Math.round(budget.free);
       c.claimants = claim?.claimants || [];
     }
   }
@@ -372,7 +382,15 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
       r.available = byId.get(r.material_id) ?? 0;
       const claim = rowClaims.get(r.material_id);
       r.committed = Math.round(claim?.committed || 0);
-      r.free = Math.max(0, Math.round(Number(r.available || 0) - r.committed));
+      // Same budget as the candidates above and the save itself — outsiders'
+      // holds reserve too.
+      const budget = stockHoldBudget({
+        materialId: r.material_id, available: Number(r.available || 0),
+        allocations: rowAllocs, claimLines: rowLines,
+        ownerLineIds: members.map(m => m.id),
+      });
+      r.held = Math.round(budget.held);
+      r.free = Math.round(budget.free);
       r.claimants = claim?.claimants || [];
     }
   }
@@ -484,11 +502,26 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   }
 
   let position = null;
+  let otherBoardPositions = [];
   let openPrs = [];
   let otherPrs = [];
   if (boardId) {
-    const available = await availableQty(boardId, oc);
     const memberIds = withSheets.map(m => m.id);
+    // Members grouped by their OWN effective board. A plain gang normally
+    // shares one board, but a member carrying a spec_override to a different
+    // board is a legal pre-lock state — and charging the WHOLE run's parent
+    // sheets to member[0]'s board while the other board went unexamined
+    // overstated the lead board's demand by exactly the other members' share
+    // and never asked whether the other board was there at all. The plan lock
+    // has always grouped per board (its byBoard loop); the detail's position
+    // simply never did.
+    const boardsOf = new Map();
+    for (const m of withSheets) {
+      if (!m.board_material_id) continue;
+      if (!boardsOf.has(m.board_material_id)) boardsOf.set(m.board_material_id, []);
+      boardsOf.get(m.board_material_id).push(m);
+    }
+    const allBoardIds = [...boardsOf.keys()];
     // Committed-other comes off the SAME arithmetic as the planning engine,
     // Smart Match and the Board panel — claimsByBoard over boardClaimLines —
     // not a hand-rolled SUM. That nets drawn lines (their sheets already left
@@ -496,11 +529,46 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // Board already ON ORDER for any member is coverage for the run. Without
     // this the gang's "Short" is identical before and after a successful raise,
     // which is exactly how CI-GANG-0007 collected four full-size PRs.
-    const [allocations, otherLines] = await Promise.all([
-      qc(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [boardId]),
-      boardClaimLines([boardId], memberIds, qc),
+    const [allocations, otherLines, avRows] = await Promise.all([
+      qc(`SELECT * FROM board_allocations WHERE material_id = ANY($1::int[]) AND status='active'`, [allBoardIds]),
+      boardClaimLines(allBoardIds, memberIds, qc),
+      qc(`SELECT material_id, SUM(qty)::float AS q FROM stock_batches
+          WHERE material_id = ANY($1::int[]) AND status='available' GROUP BY material_id`, [allBoardIds]),
     ]);
-    const committedOther = claimsByBoard({ lines: otherLines, allocations }).get(boardId)?.committed || 0;
+    const availById = new Map(avRows.map(r => [Number(r.material_id), Number(r.q) || 0]));
+    const claims = claimsByBoard({ lines: otherLines, allocations });
+    const claimLineIds = new Set(otherLines.map(l => Number(l.id)));
+    const memberIdSet = new Set(memberIds.map(Number));
+    // One position per board, all off the same books. heldOthers is stock
+    // frozen by lines OUTSIDE the members and OUTSIDE the claim set — a
+    // pending line's draft freeze, an orphan. Claim lines' holds already sit
+    // inside committedOther (their FULL requirement is counted), so adding
+    // them here would bill the same sheets twice; only the outsiders are new
+    // information. Without this the run read "Stock OK" against board a saved
+    // draft had already frozen.
+    const positionFor = (mid, needed) => {
+      const heldOthers = allocations
+        .filter(a => a.status === 'active' && a.source === 'stock'
+          && Number(a.material_id) === Number(mid)
+          && !memberIdSet.has(Number(a.order_line_id))
+          && !claimLineIds.has(Number(a.order_line_id)))
+        .reduce((s, a) => s + Number(a.qty || 0), 0);
+      return gangPosition({
+        needed,
+        committedOther: claims.get(mid)?.committed || 0,
+        heldOthers,
+        available: availById.get(Number(mid)) || 0,
+        allocations, memberIds, materialId: mid,
+        stockBooking: gang.stock_booking || 'book',
+      });
+    };
+    // The LEAD board answers for its own members' sheets, not the whole
+    // run's. A shared (co-printed) layout is the exception by construction:
+    // one sheet prints every member, the lock enforces one board, so the run
+    // figure stays lead-board-scoped.
+    const leadParent = sharedRun
+      ? totalParent
+      : (boardsOf.get(boardId) || []).reduce((s, m) => s + m.parent_sheets, 0);
     // What the run actually presses on its PLANNED board. Without a mix that
     // is the whole requirement, and this reads exactly as it always did.
     //
@@ -520,14 +588,23 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // floor never takes (override down). The engine shows the override chip
     // beside the computed figure, so a stale override is loud, not silent.
     const neededOnPlanned = pressingOnPlanned({
-      required: sharedRun ? (gang.issue_parent_sheets ?? sharedRun.run_parent) : totalParent,
+      required: sharedRun ? (gang.issue_parent_sheets ?? sharedRun.run_parent) : leadParent,
       active: !!mix?.active,
       covered: mix?.covered, heldOnPlanned: mix?.held_on_planned });
-    position = gangPosition({
-      needed: neededOnPlanned, committedOther, available,
-      allocations, memberIds, materialId: boardId,
-      stockBooking: gang.stock_booking || 'book',
-    });
+    position = positionFor(boardId, neededOnPlanned);
+    // Any member running on a DIFFERENT board gets that board its own
+    // position — same books, its own members' demand — so a two-board gang
+    // stops hiding the second board's shortage inside the first's surplus.
+    // New field; existing readers of `position` are untouched.
+    otherBoardPositions = [...boardsOf.entries()]
+      .filter(([mid]) => Number(mid) !== Number(boardId))
+      .map(([mid, ms]) => ({
+        board_material_id: mid,
+        board_name: ms[0]?.board_name ?? null,
+        member_line_ids: ms.map(m => m.id),
+        needed: ms.reduce((s, m) => s + m.parent_sheets, 0),
+        position: positionFor(mid, ms.reduce((s, m) => s + m.parent_sheets, 0)),
+      }));
     openPrs = memberIds.length ? await qc(`
       SELECT DISTINCT r.id, r.pr_number, r.qty, r.status, r.needed_by, r.created_at
       FROM requisitions r JOIN board_allocations ba ON ba.requisition_id=r.id
@@ -570,7 +647,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     })));
     return {
       ...gang, members: withSheets, board_material_id: boardId,
-      total_parent_sheets: totalParent, position, open_prs: openPrs, mix,
+      total_parent_sheets: totalParent, position, other_board_positions: otherBoardPositions, open_prs: openPrs, mix,
       compat,
       shares: mergeShares(withSheets, produced),
       // Before anything is produced, "everyone is short" is noise, not news —
@@ -595,7 +672,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     const layoutRun = sharedRun;
     return {
       ...gang, members: withSheets, board_material_id: boardId,
-      total_parent_sheets: totalParent, position, open_prs: openPrs, other_prs: otherPrs, mix,
+      total_parent_sheets: totalParent, position, other_board_positions: otherBoardPositions, open_prs: openPrs, other_prs: otherPrs, mix,
       compat: gangCompat(withSheets),
       layout_pending: layout.pending, layout_reason: layout.reason || null,
       // While pending, the size the plan lock would adopt (members' effective
@@ -613,7 +690,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       } : null,
     };
   }
-  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, other_prs: otherPrs, mix, compat: gangCompat(withSheets) };
+  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, other_board_positions: otherBoardPositions, open_prs: openPrs, other_prs: otherPrs, mix, compat: gangCompat(withSheets) };
 }
 
 async function assertPlanningOnlyGangEdit(gangId, oc = one) {

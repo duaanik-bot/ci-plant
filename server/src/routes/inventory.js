@@ -322,17 +322,30 @@ r.get('/warehouse/paper', async (req, res, next) => {
                  WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
       -- Committed here must mean what it means in the Planning Engine: this
       -- picker IS the engine's Warehouse button, and two numbers under one word
-      -- a single click apart is the confusion the claim work exists to end. So
-      -- it is each job's OPEN need — its requirement less board already held or
-      -- on order for it, floored at zero — which is openNeed() written in SQL.
-      LEFT JOIN (SELECT mid, SUM(GREATEST(0, need - alloc))::int AS q FROM (
-                   SELECT ${EFF_BOARD_ID} AS mid,
-                          COALESCE(ol.parent_sheets_required, ol.sheets_required) AS need,
-                          COALESCE((SELECT SUM(ba.qty) FROM board_allocations ba
-                                     WHERE ba.order_line_id = ol.id AND ba.status='active'
-                                       AND ba.material_id = ${EFF_BOARD_ID}), 0) AS alloc
-                   FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                   WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS}) d
+      -- a single click apart is the confusion the claim work exists to end.
+      -- The engine's Committed tile is open need PLUS stock holds
+      -- (boardPositionView), so this is both arms of the same sum: what every
+      -- live job is still waiting on, and every sheet already frozen on the
+      -- shelf. Open need alone was the ACEBROBID arithmetic — a job whose
+      -- board is fully frozen has open need 0, so its 8,959-sheet hold sat
+      -- inside "Free 9,000" here while the tile one click away said Free 41,
+      -- and the picker's green "enough" offered a plan the issue gate refuses.
+      -- Not double-counted: open need is already net of the line's own holds,
+      -- so a 700-need line holding 300 contributes 400 + 300. Requisition
+      -- mirrors net open need but reserve no shelf, so only source='stock'
+      -- rides in the second arm — issuableFor's own rule.
+      LEFT JOIN (SELECT mid, SUM(reserved)::int AS q FROM (
+                   SELECT mid, GREATEST(0, need - alloc) AS reserved FROM (
+                     SELECT ${EFF_BOARD_ID} AS mid,
+                            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS need,
+                            COALESCE((SELECT SUM(ba.qty) FROM board_allocations ba
+                                       WHERE ba.order_line_id = ol.id AND ba.status='active'
+                                         AND ba.material_id = ${EFF_BOARD_ID}), 0) AS alloc
+                     FROM order_lines ol JOIN products p ON p.id=ol.product_id
+                     WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS}) d
+                   UNION ALL
+                   SELECT ba.material_id, ba.qty FROM board_allocations ba
+                   WHERE ba.status='active' AND ba.source='stock') r
                  GROUP BY 1) cm ON cm.mid=m.id
       LEFT JOIN (SELECT pl.material_id, SUM(GREATEST(0, pl.qty - pl.received_qty)) AS q
                  FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id

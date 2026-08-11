@@ -185,13 +185,17 @@ test('run mix candidates are costed — gross available is never labelled free',
     gangs.indexOf('// A line can arrive carrying a board mix'));
   assert.match(ctx, /boardClaimLines\(candIds, members\.map\(m => m\.id\)\)/,
     "candidates must be costed against every OTHER job's claim");
-  assert.match(ctx, /c\.free = Math\.max\(0, Math\.round\(Number\(c\.available \|\| 0\) - c\.committed\)\)/,
-    'free = available − committed, the same expression orders.js uses');
+  // free now comes from stockHoldBudget — the SAVE path's own arithmetic —
+  // because available − committed alone missed heldOutsideClaims: a pending
+  // draft's freeze reserved the shelf while its line sat in no claim set, so
+  // the quoted free was more than the lock would actually hold.
+  assert.match(ctx, /c\.free = Math\.round\(budget\.free\)/,
+    'candidate free is stockHoldBudget.free — the same figure the lock caps at');
   // The SAVED rows too: a reopened mix must not read its board as freer than
   // the "+ Add board" list says it is, or one board tells two stories on a screen.
   assert.match(ctx, /boardClaimLines\(rowIds, members\.map\(m => m\.id\)\)/,
     'the saved mix rows must be costed on the same rule');
-  assert.match(ctx, /r\.free = Math\.max\(0, Math\.round\(Number\(r\.available \|\| 0\) - r\.committed\)\)/);
+  assert.match(ctx, /r\.free = Math\.round\(budget\.free\)/);
 });
 
 test("the run's own members are excluded from its free figure", () => {

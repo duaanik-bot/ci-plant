@@ -223,9 +223,13 @@ r.get('/board/:materialId/position/:lineId', async (req, res, next) => {
     // before this feature existed.
     const mix = await mixFor(lineId, 'plan', q);
     const mixPos = mixAwareNeed(line, materialId, new Map([[line.id, mix]]));
+    // held_for_me stays on the board_allocations ledger — mixPos.held is
+    // job_board_mix PLAN sheets, a different book, and the saved hold is
+    // CAPPED below the row's sheets when free stock runs out. The mix figure
+    // rides alongside as mix_held (same shape as orders.js's planning ctx).
     const shown = mixPos
       ? { ...position,
-          held_for_me: mixPos.held,
+          mix_held: mixPos.held,
           my_open_need: mixPos.open_need,
           net: position.free - mixPos.open_need - position.others_open_need,
           short: Math.max(0, -(position.free - mixPos.open_need - position.others_open_need)) }

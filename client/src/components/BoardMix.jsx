@@ -572,9 +572,15 @@ export default function BoardMix({
                   )}
                   {over && (
                     <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
+                      {/* r.available is the FREE figure (both seeds put free
+                          first); r.shelf is the raw pile. A full-but-frozen
+                          board is not "empty" — saying so sent planners
+                          hunting for stock that was sitting in the racks. */}
                       {Number(r.available) > 0
                         ? `Only ${fmt.num(r.available)} sheets are free on this board — ${fmt.num(Math.round(Number(r.sheets) - Number(r.available)))} of this row is not there.`
-                        : 'This board is empty — there is no stock behind these sheets. Move them onto a board that has some, or raise a PR.'}
+                        : Number(r.shelf) > 0
+                          ? `Every sheet on this board is committed to other jobs (${fmt.num(r.shelf)} on the shelf, none free) — the hold will cap at nothing. Take from another job, or raise a PR.`
+                          : 'This board is empty — there is no stock behind these sheets. Move them onto a board that has some, or raise a PR.'}
                     </p>
                   )}
                   {/* "Separate recommendations for each board allocation" —

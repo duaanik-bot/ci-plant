@@ -190,10 +190,16 @@ r.get('/requisitions', async (_req, res, next) => {
       // This register previously counted only board HELD from stock, which is a
       // different question and answered 0 on a board whose jobs were owed
       // thousands of sheets: Saffire 340 20x38 showed "Free 4,850" while two
-      // OMEZYME jobs were waiting on 3,650 of it. A committed figure is the sum
-      // of its claimants' OPEN needs — net of what each has already had held or
-      // put on order, and nil once its sheets are drawn — never a raw hold and
-      // never a raw requirement.
+      // OMEZYME jobs were waiting on 3,650 of it. claimsByBoard's actual
+      // contract (its own header): committed is the FULL requirement of every
+      // live, undrawn claim, DELIBERATELY not netted by what is held or on
+      // order — held board is still spoken for, and on-order board has not
+      // arrived. Only a fresh_pr claim is fenced to its own incoming PR, and
+      // on_order rides alongside as the reason a shortfall is already handled,
+      // never netted in. An earlier version of this comment described it as
+      // "open needs, net of held" — the exact netting the Saffire case removed
+      // — and a comment teaching the wrong contract is how the next hand-
+      // rolled copy is born.
       const [claimLines, allocations] = await Promise.all([
         boardClaimLines(boardIds),
         q(`SELECT material_id, order_line_id, qty, source, status FROM board_allocations

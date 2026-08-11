@@ -57,13 +57,27 @@ export function StockSplit({ available, committed = 0, free, short = 0, sufficie
 // job in the way is one they are willing to take board from.
 // `figure` picks which number each row carries, and it must be the one the
 // heading above the list is totalling or the panel will not add up:
-//   open_need — still waiting on (ties to Planning's committed_other)
+//   open_need — still waiting on (was Planning's committed_other, before the
+//               Committed tile learned to count holds)
 //   need      — the whole claim on the shelf (ties to claimsByBoard committed)
+//   claim     — frozen here PLUS still to source: open_need + the hold, the
+//               hold capped at the claim so an over-held line cannot total
+//               past the tile. This is what the Board Position card's
+//               Committed tile now sums (boardPositionView: open need + other
+//               jobs' holds) — rows carrying open_need under that heading
+//               showed "Committed to ACEBROBID — 0" for the job freezing
+//               8,959 of the 9,000 shelf the tile above called Committed.
+//               Rows may still total UNDER the tile: holds owned by lines
+//               outside the claim set (a pending draft) have no row here.
 export function Claimants({ claimants = [], className = '', figure = 'open_need' }) {
   const [open, setOpen] = useState(false);
   if (!claimants.length) return null;
   const [lead] = claimants;
   const rest = claimants.length - 1;
+  const rowFigure = c => figure === 'claim'
+    ? Math.round(Number(c.open_need || 0)
+        + Math.min(Number(c.held || 0), Math.max(0, Number(c.need || 0) - Number(c.incoming || 0))))
+    : c[figure];
 
   return (
     <div className={className}>
@@ -98,13 +112,15 @@ export function Claimants({ claimants = [], className = '', figure = 'open_need'
                       : ' · buying fresh — PR pending, claim still presses')}
                 </span>
               </span>
-              <span className="shrink-0 font-bold tabular-nums text-amber-700">{fmt.num(c[figure])}</span>
+              <span className="shrink-0 font-bold tabular-nums text-amber-700">{fmt.num(rowFigure(c))}</span>
             </div>
           ))}
           <p className="pt-0.5 text-[10px] leading-snug text-slate-400">
             {figure === 'need'
               ? 'Parent sheets each job takes off this shelf. Using this board is your call — it does not release theirs.'
-              : 'Parent sheets each job is still waiting on. Using this board is your call — it does not release theirs.'}
+              : figure === 'claim'
+                ? 'Parent sheets each job has frozen here or is still to source. Using this board is your call — it does not release theirs.'
+                : 'Parent sheets each job is still waiting on. Using this board is your call — it does not release theirs.'}
           </p>
         </div>
       )}

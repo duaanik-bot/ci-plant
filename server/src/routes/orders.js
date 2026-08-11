@@ -10,7 +10,7 @@ import { q, one, tx } from '../db.js';
 import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { linePosition, claimsByBoard, boardPosition, heldFor } from '../board-allocation.js';
+import { linePosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { splitMasterFields } from '../plan-save.js';
@@ -2092,6 +2092,30 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         WHERE m.id = ANY($1)`, [[...new Set(mix.map(r => r.material_id))]]) : [];
     const mixAvailById = new Map(mixAvail.map(r => [r.id, Number(r.available)]));
     for (const r of mix) r.available = mixAvailById.get(r.material_id) ?? 0;
+    // …and FREE, on the same rule the "+ Add board" candidates and the gang's
+    // saved rows are costed with (claimsByBoard + stockHoldBudget, this line
+    // excluded). Without it a reopened row carried only the raw shelf, the
+    // client seeded that into the over-allocation check, and one board told
+    // two stories on one screen — the row read gross while the candidate list
+    // beside it read net. r.available stays the raw shelf: the emptiness
+    // check ("no stock behind these sheets") is a physical question.
+    if (mix.length) {
+      const mixIds = [...new Set(mix.map(r => r.material_id))];
+      const [mixClaimLines, mixAllocs] = await Promise.all([
+        boardClaimLines(mixIds, [line.id]),
+        q(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [mixIds]),
+      ]);
+      const mixClaims = claimsByBoard({ lines: mixClaimLines, allocations: mixAllocs });
+      for (const r of mix) {
+        const budget = stockHoldBudget({
+          materialId: r.material_id, available: Number(r.available || 0),
+          allocations: mixAllocs, claimLines: mixClaimLines, ownerLineIds: [line.id],
+        });
+        r.committed = Math.round(mixClaims.get(r.material_id)?.committed || 0);
+        r.held = Math.round(budget.held);
+        r.free = Math.round(budget.free);
+      }
+    }
 
     const plannedBoardRow = {
       id: line.board_material_id, name: line.board_name,
@@ -2185,7 +2209,17 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         for (const c of mixCandidates) {
           const claim = candClaims.get(c.id);
           c.committed = Math.round(claim?.committed || 0);
-          c.free = Math.max(0, Math.round(Number(c.available || 0) - c.committed));
+          // free comes from the SAVE path's own arithmetic (stockHoldBudget),
+          // not a hand-rolled available − committed. The difference is
+          // heldOutsideClaims: a pending draft's freeze reserves the shelf but
+          // its line is in no claim set, so the hand-rolled figure quoted more
+          // than the save would allow and the hold silently capped at lock.
+          const budget = stockHoldBudget({
+            materialId: c.id, available: Number(c.available || 0),
+            allocations: candAllocs, claimLines: candLines, ownerLineIds: [line.id],
+          });
+          c.held = Math.round(budget.held);
+          c.free = Math.round(budget.free);
           c.claimants = claim?.claimants || [];
         }
       }
@@ -2213,9 +2247,15 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     // board, because that has to agree with the role='planned' rows on disk.
     const mixPos = mixPosition({
       line, rows: mix, materialId: matId, plannedBoardId: line.board_material_id });
+    // held_for_me STAYS on the board_allocations ledger. mixPos.held is
+    // job_board_mix PLAN sheets — a different ledger, and replaceMixPlan caps
+    // the real hold below the row's sheets when free stock runs out ("a row
+    // capped to nothing writes no hold at all"). Subtracting plan-sheets from
+    // an allocations total handed the client held/held_for_me from two books,
+    // and heldOthers went negative-or-wrong the moment a mix was capped.
     const shown = mixPos
       ? { ...position,
-          held_for_me: mixPos.held,
+          mix_held: mixPos.held,
           my_open_need: mixPos.open_need,
           net: position.free - mixPos.open_need - position.others_open_need,
           short: Math.max(0, -(position.free - mixPos.open_need - position.others_open_need)) }
@@ -2427,6 +2467,14 @@ r.get('/planning/:lineId/smart-match', async (req, res, next) => {
     for (const c of candidates) {
       const claim = claims.get(c.id);
       c.committed = claim?.committed || 0;
+      // Holds owned by lines outside the claim set (a pending draft's freeze)
+      // reserve the shelf too — stockHoldBudget's heldOutsideClaims, the same
+      // figure the save path subtracts. smartmatch.js nets it off `free` so a
+      // suggestion never quotes board the lock would immediately cap away.
+      c.held = stockHoldBudget({
+        materialId: c.id, available: Number(c.available || 0),
+        allocations, claimLines, ownerLineIds: [line.id],
+      }).held;
       c.claimants = claim?.claimants || [];
     }
 
@@ -2786,7 +2834,15 @@ r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
   try {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
-    const gate = await readiness(line);
+    // With a ctx the gate's available_sheets is CLAIMABLE (shelf less other
+    // jobs' active holds, claimableQty) instead of the gross shelf. Without
+    // it, a board fully frozen for other jobs answered "No shortage for this
+    // line" — refusing the PR for the exact situation a PR exists to solve,
+    // while the list beside it showed Stock Short off the same claimable
+    // figure. fresh_pr and mix branches are unaffected; a fresh line's
+    // incoming also becomes correctly line-scoped.
+    const ctx = await readinessBatch([line]);
+    const gate = await readiness(line, one, ctx);
     // A mix that balances leaves nothing to buy, however short the PLANNED board
     // looks on its own — the rest is coming from substitute boards already held
     // for this job. gate.mix_balance is what remains genuinely unallocated.

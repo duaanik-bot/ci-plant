@@ -169,7 +169,7 @@ export default function ExtraSheets() {
               { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number} · ${productExport(r)}` },
               { key: 'stage', label: 'Stage', export: r => fmt.stage(r.stage) },
               { key: 'qty', label: 'Parent Sheets', align: 'right', export: r => fmt.num(r.qty) },
-              { key: 'board_name', label: 'Board / Stock', export: r => `${r.board_name} · ${fmt.num(r.board_free)} free` },
+              { key: 'board_name', label: 'Board / Stock', export: r => `${r.board_name} · ${fmt.num(r.board_free)} beyond booked jobs` },
               { key: 'reason', label: 'Reason', export: r => `${r.reason}${r.note ? ` — ${r.note}` : ''}` },
               { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
               { key: 'trail', label: 'Control Trail', export: r => [
@@ -227,7 +227,7 @@ export default function ExtraSheets() {
                       <div className="text-slate-600">{r.board_name}</div>
                       <div className={`tabular-nums ${short ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
                         {short && <AlertTriangle size={11} className="mr-0.5 inline" />}
-                        {fmt.num(r.board_free)} free
+                        {fmt.num(r.board_free)} beyond booked jobs
                       </div>
                     </td>
                     <td className={`${td} text-xs text-slate-500`}>{r.reason}{r.note && <div className="text-[11px] text-slate-400">{r.note}</div>}</td>
@@ -315,7 +315,7 @@ export default function ExtraSheets() {
                   </Field>
                   {selEligible && (
                     <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                      Board <b>{selEligible.board_name}</b> · {fmt.num(selEligible.board_free)} parent sheets free (of {fmt.num(selEligible.board_available)} on the shelf) ·
+                      Board <b>{selEligible.board_name}</b> · {fmt.num(selEligible.board_free)} parent sheets beyond every booked requirement — this job's own included, extras come on top of it (of {fmt.num(selEligible.board_available)} on the shelf) ·
                       issued so far {fmt.num(selEligible.sheets_issued)}
                     </p>
                   )}
@@ -368,7 +368,7 @@ export default function ExtraSheets() {
               reason: <b>{approving.req.reason}</b>{approving.req.note ? ` (${approving.req.note})` : ''}
               </span>
               <div className="mt-1 text-slate-500">
-                Board {approving.req.board_name} · {fmt.num(approving.req.board_free)} sheets free of {fmt.num(approving.req.board_available)} in stock ·
+                Board {approving.req.board_name} · {fmt.num(approving.req.board_free)} sheets beyond booked jobs (this one's own base included) of {fmt.num(approving.req.board_available)} in stock ·
                 job already issued {fmt.num(approving.req.sheets_issued)} parent sheets
               </div>
             </div>

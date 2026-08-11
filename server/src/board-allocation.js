@@ -469,7 +469,15 @@ export function gangIncoming(allocations = [], memberIds = [], materialId = null
     .reduce((s, a) => s + num(a.qty), 0);
 }
 
-export function gangPosition({ needed, committedOther = 0, available, allocations = [], memberIds = [], materialId = null, stockBooking = 'book' }) {
+// `heldOthers` is stock frozen by lines OUTSIDE both the member set and the
+// claim set — a pending line's draft freeze, a cancelled line's orphan. Claim
+// lines' holds already live inside committedOther (claimsByBoard counts their
+// FULL requirement), so only the outsiders are added here or the same sheets
+// count twice; the caller owns that exclusion (see gangDetail). stockHoldBudget
+// has carried this exact figure as heldOutsideClaims since the hold-cap work —
+// the run's shortfall just never listened to it, so a draft's freeze was
+// invisible and the run read "Stock OK" for board a saved plan had spoken for.
+export function gangPosition({ needed, committedOther = 0, heldOthers = 0, available, allocations = [], memberIds = [], materialId = null, stockBooking = 'book' }) {
   const ids = new Set(memberIds);
   const incoming = gangIncoming(allocations, memberIds, materialId);
   // Stock already HELD for the run's members. Under fresh_pr it is the other
@@ -484,10 +492,11 @@ export function gangPosition({ needed, committedOther = 0, available, allocation
   // the shelf and the other jobs' claims on it are not this run's business.
   const short = stockBooking === 'fresh_pr'
     ? Math.max(0, num(needed) - held - incoming)
-    : Math.max(0, num(needed) + num(committedOther) - num(available) - incoming);
+    : Math.max(0, num(needed) + num(committedOther) + num(heldOthers) - num(available) - incoming);
   return {
     available: num(available),
     committed_other: num(committedOther),
+    held_others: num(heldOthers),
     needed: num(needed),
     incoming,
     held,

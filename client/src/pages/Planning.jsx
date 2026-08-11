@@ -468,6 +468,8 @@ export default function Planning() {
   const [fgUse, setFgUse] = useState(null); // "Use FG Stock" popup straight from the queue
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
   const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
+  const [lockShortConfirm, setLockShortConfirm] = useState(null); // { short, free, parent } — soft gate: lock a SHORT plan out loud, never silently
+  const [gangLockShortConfirm, setGangLockShortConfirm] = useState(null); // the run-level twin — { short, free }
   // Smart Match's Use — consented seeding into the mix (board-mix wave, Task
   // 8). { match, kind: 'mix' | 'swap' } | null — 'mix' seeds a substitute row
   // behind a coverage preview, 'swap' keeps pickBoard's whole-board-swap
@@ -912,7 +914,14 @@ export default function Planning() {
         // every REOPENED plan: it is guarded by `r.available != null`, and a row
         // rebuilt without the field silently never trips it. That is how live
         // line 128 showed 'Fully covered ✓' over a board holding nothing.
-        available: r.available ?? c?.available ?? null,
+        // FREE first, gross shelf only as a fallback — the gang seed's exact
+        // spelling. The server now costs saved single-line rows too, so a
+        // reopened row reading the gross figure while the "+ Add board" list
+        // beside it read the net one had one board telling two stories.
+        available: r.free ?? r.available ?? c?.free ?? c?.available ?? null,
+        // The raw shelf rides separately so "over" can distinguish a board
+        // that is EMPTY from one that is full but fully committed.
+        shelf: r.available ?? c?.available ?? null,
       };
     }));
     // Seed the leftover toggles from what the saved plan actually banked: an
@@ -1231,15 +1240,17 @@ export default function Planning() {
   }, [ctx, calc, mixRows, boardSel, stockBooking]);
 
   // This job's own hold on the board in front of it, and how much more it could
-  // take. `takeable` is capped by BOTH what the plan still needs and what is
-  // actually free — committing past the requirement would park sheets nobody
-  // is going to press, and committing past free would be taking them off a job
-  // that is already owed them.
+  // take. `takeable` is an INCREMENT — a NEW hold on top of what is already
+  // held — so its ceiling is free_for_others (sheets nobody holds), never
+  // `free`: free is this job's own view and CONTAINS its own hold, so capping
+  // there offered "Commit 700" against four-tenths of a packet of genuinely
+  // unheld board. Also capped at what the plan still needs — committing past
+  // the requirement parks sheets nobody is going to press.
   const myCommit = useMemo(() => {
     const held = Math.max(0, +ctx?.stock?.held_for_me || 0);
-    const takeable = Math.max(0, Math.min(position?.free ?? 0, (calc?.parent ?? 0) - held));
+    const takeable = Math.max(0, Math.min(position?.free_for_others ?? 0, (calc?.parent ?? 0) - held));
     return { held, takeable };
-  }, [ctx?.stock?.held_for_me, position?.free, calc?.parent]);
+  }, [ctx?.stock?.held_for_me, position?.free_for_others, calc?.parent]);
 
   // A mix that does not balance must not lock — the server refuses it anyway,
   // and a disabled button says so before the planner has typed a reason for
@@ -1364,6 +1375,25 @@ export default function Planning() {
       .filter(r => r.material_id === gangView?.mix?.planned_board_id)
       .reduce((s, r) => s + Number(r.sheets || 0), 0);
     return held + Math.max(0, gangIssueNow - covered);
+  })();
+
+  // ONE spelling of "is the run short right now", shared by the footer verdict,
+  // the Board Position card and the lock gate — three copies of this arithmetic
+  // is how the single engine's footer said "stock OK" beside a list saying
+  // Stock Short. held_others is the server's own new figure (stock frozen by
+  // lines outside both the members and the claim set); the book branch must
+  // carry it or the client twin drifts from gangPosition's.
+  const gangShortNow = (() => {
+    if (!gangView) return null;
+    const onOrder = gangView.position?.incoming ?? 0;
+    const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
+    const heldRun = gangView.position?.held ?? 0;
+    const avail = gangView.position?.available ?? 0;
+    const other = (gangView.position?.committed_other ?? 0) + (gangView.position?.held_others ?? 0);
+    const short = freshRun
+      ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
+      : Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
+    return { short, freshRun, onOrder, free: Math.max(0, avail - other) };
   })();
 
   // Smart Match — fetched only when the selected board runs short, debounced
@@ -1516,6 +1546,16 @@ export default function Planning() {
 
   const onLock = () => {
     if (lo.push && !lo.strip) { toast.error('Pick which leftover strip to keep, or turn off the warehouse push'); return; }
+    // SOFT gate, physics hard paperwork soft: a short plan may lock — the
+    // server caps the hold at free stock and says so — but never silently.
+    // "stock OK" beside a live Lock button on a plan 659 short is how a
+    // 700-sheet plan was invited onto four-tenths of a packet. The dialog
+    // quotes position.free (THIS job's view, its own hold included) because
+    // that is exactly what the lock's hold cap measures against.
+    if (position && !position.fresh && !position.drawn && position.short > 0 && !lockShortConfirm) {
+      setLockShortConfirm({ short: position.short, free: position.free, parent: calc?.parent ?? 0 });
+      return;
+    }
     const activeMix = mixRows.filter(r => Number(r.sheets) > 0);
     if (activeMix.length > 0) { setMixConfirm({ rows: activeMix }); return; }
     const changed = changedSpec();
@@ -1834,6 +1874,9 @@ export default function Planning() {
         // figure while the "+ Add board" list beside it reads the net one had the
         // same board telling two stories on one screen.
         available: r.free ?? r.available ?? c?.free ?? c?.available ?? null,
+        // Raw shelf, separately — see the single-line seed: a full-but-frozen
+        // board must not be called "empty".
+        shelf: r.available ?? c?.available ?? null,
       };
     }));
     // Seed the leftover toggles from what the last lock actually banked — an
@@ -2063,7 +2106,14 @@ export default function Planning() {
     };
   };
 
-  const lockGangPlan = async () => {
+  const lockGangPlan = async (confirmedShort = false) => {
+    // Same soft gate as the single engine's Lock: a short run may lock — the
+    // server caps the run's holds and reports the shortfalls — but never
+    // silently. The gang lock had NO confirm of any kind before this.
+    if (!confirmedShort && gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0) {
+      setGangLockShortConfirm(gangShortNow);
+      return;
+    }
     setGangBusyLock(true);
     try {
       const d = await api.post(`/gang-runs/${gangView.id}/plan`, gangPlanPayload());
@@ -3324,7 +3374,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || lockShortConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -3384,9 +3434,20 @@ export default function Planning() {
             </Button>
           )}
           {planEditable ? (
-            <Button onClick={onLock} disabled={!calc || !mixOk}>
-              Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
-            </Button>
+            // Amber when the plan is SHORT — still enabled (paperwork soft:
+            // the lock caps the hold and the shortfall is said out loud), but
+            // a short lock must never wear the same coat as a covered one.
+            // variant="solid": .btn-brand paints over bg-* utilities.
+            position && !position.fresh && !position.drawn && position.short > 0 ? (
+              <Button variant="solid" className="!bg-amber-500 !text-white hover:!bg-amber-600"
+                onClick={onLock} disabled={!calc || !mixOk}>
+                Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent` : ''} · {fmt.num(position.short)} short
+              </Button>
+            ) : (
+              <Button onClick={onLock} disabled={!calc || !mixOk}>
+                Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
+              </Button>
+            )
           ) : (
             <span className="flex items-center gap-1.5 whitespace-nowrap rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700">
               <ShieldCheck size={14} />
@@ -3870,8 +3931,12 @@ export default function Planning() {
                       )}
                       {/* The same claim list Smart Match puts under every rival
                           board. Both panels are read side by side; a planner who
-                          switches to a suggestion must meet the identical story. */}
-                      <Claimants claimants={ctx.stock.claimants} className="mt-1.5" />
+                          switches to a suggestion must meet the identical story.
+                          figure="claim" because the Committed tile above sums
+                          open need PLUS holds — rows carrying open_need alone
+                          read "Committed to ACEBROBID — 0" under a tile saying
+                          8,959, for the job freezing the shelf. */}
+                      <Claimants claimants={ctx.stock.claimants} figure="claim" className="mt-1.5" />
                       {/* A board sitting at nil because it was WRITTEN ON (more left the
                           warehouse than the book held, so the balance was forced to nil
                           rather than going negative) is a different situation from one
@@ -4112,8 +4177,8 @@ export default function Planning() {
                                     claimsByBoard's committed — the whole claim on the
                                     shelf — and the rows have to total the figure they
                                     are explaining. The Board Position card opposite
-                                    passes open_need for the same reason: its heading
-                                    is committed_other, which is still-to-source. */}
+                                    passes figure="claim" for the same reason: its
+                                    Committed tile is open need PLUS holds now. */}
                                 <Claimants claimants={m.claimants} figure="need" className="mt-1" />
                               </div>
                             ))}
@@ -4584,11 +4649,7 @@ export default function Planning() {
             // own PR and the stock already held for the run. Twin of
             // gangPosition's rule — the Board Position card carries the same
             // branch.
-            const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
-            const heldRun = gangView.position?.held ?? 0;
-            const short = freshRun
-              ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
-              : Math.max(0, gangPressingOnPlanned + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
+            const { short, freshRun } = gangShortNow ?? { short: 0, freshRun: false };
             return (
               <span className="mr-auto self-center pl-1 text-xs text-slate-500">
                 <b className="text-slate-800">{fmt.num(effIssue)} parent</b> to issue
@@ -4630,14 +4691,21 @@ export default function Planning() {
               {gangBusySave ? 'Saving…' : 'Save'}
             </Button>
           )}
-          <Button onClick={lockGangPlan}
+          {/* () => lockGangPlan() and never a bare reference: the click event
+              would land in confirmedShort, truthy, and silently skip the
+              short-lock confirm. Amber when short — enabled (paperwork soft),
+              never dressed like a covered lock; variant="solid" because
+              .btn-brand paints over bg-* utilities. */}
+          <Button onClick={() => lockGangPlan()}
+            {...(gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0
+              ? { variant: 'solid', className: '!bg-amber-500 !text-white hover:!bg-amber-600' } : {})}
             disabled={gangBusyLock || gangBusySave || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child) || !gangMixOk}
             title={gangView?.layout_pending
               ? (gangView.layout_fallback_child
                   ? `Locks on the members' agreed ${gangView.layout_fallback_child.l}×${gangView.layout_fallback_child.w}" child sheet and saves it as the layout — the Run Sheet can still change it later`
                   : 'Layout pending — the members carry no single agreed child sheet size; enter it in the Run Sheet first')
               : undefined}>
-            {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
+            {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}{gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0 ? ` · ${fmt.num(gangShortNow.short)} short` : ''}
           </Button>
         </>}>
         {gangView && (() => {
@@ -5236,23 +5304,20 @@ export default function Planning() {
                   // Raise-PR trigger stay honest with the decision on the left.
                   const issueNow = gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets);
                   const avail = gangView.position?.available ?? 0;
-                  const other = gangView.position?.committed_other ?? 0;
+                  // Other Demand = other jobs' open claims PLUS their frozen
+                  // holds (held_others) — the same both-halves sum the single
+                  // engine's Committed tile learned. Open claims alone made a
+                  // fully-frozen rival read as zero demand.
+                  const other = (gangView.position?.committed_other ?? 0) + (gangView.position?.held_others ?? 0);
                   // Board already ON ORDER for this run is cover. Leaving it out
                   // is what made a raised PR look like it never happened — the
                   // banner read "Short N" exactly as before and got clicked again.
                   const onOrder = gangView.position?.incoming ?? 0;
                   const prs = gangView.open_prs || [];
-                  // The run's own mix is already credited — see
-                  // gangPressingOnPlanned, which both this card and the footer
-                  // read so they can never quote a different shortage. A
-                  // fresh_pr run refuses the shelf: still-to-buy = pressing
-                  // less its own PR and the stock already held for the run
-                  // (twin of gangPosition's rule).
-                  const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
-                  const heldRun = gangView.position?.held ?? 0;
-                  const short = freshRun
-                    ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
-                    : Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
+                  // ONE spelling for the whole gang panel: gangShortNow, which
+                  // this card, the footer and the lock gate all read — three
+                  // inline copies of this arithmetic is how verdicts drift.
+                  const { short, freshRun } = gangShortNow ?? { short: 0, freshRun: false };
                   // The run's own one-click seed. Same shape as seedCoverMix, over the run's
                   // figures: the planned board keeps only what it can still give — seeding a
                   // zero-sheet row balances on screen but fails plan-save's sheets > 0 check.
@@ -5415,6 +5480,35 @@ export default function Planning() {
         onSelect={setGangBoard} />
 
       {/* Reverse the whole gang's plan back to To Plan (gang kept) */}
+      {/* Lock a SHORT plan out loud. Soft by design — the server caps the
+          hold at free stock and the plan locks; this dialog only makes sure
+          the planner heard the number before the footer said "locked". The
+          figure is position.free: THIS job's view, its own hold included,
+          because that is exactly what the hold cap measures against. */}
+      <ConfirmDialog open={!!lockShortConfirm} onClose={() => setLockShortConfirm(null)}
+        onConfirm={() => onLock()}
+        title={lockShortConfirm ? `Lock a plan ${fmt.num(lockShortConfirm.short)} sheets short?` : ''}
+        confirmLabel="Lock anyway — hold caps at free stock"
+        message={lockShortConfirm
+          ? `This plan wants ${fmt.num(lockShortConfirm.parent)} parent sheets but only `
+            + `${fmt.num(lockShortConfirm.free)} are free for it. The plan still locks — the hold is `
+            + `capped at what is free, and the remaining ${fmt.num(lockShortConfirm.short)} shows in the `
+            + `warehouse Shortfall column until board arrives or you take it from another job.`
+          : ''} />
+
+      {/* The run-level twin of the short-lock confirm above. ONE PR covers
+          every member (the raise button's own wording), so the body says so. */}
+      <ConfirmDialog open={!!gangLockShortConfirm} onClose={() => setGangLockShortConfirm(null)}
+        onConfirm={() => lockGangPlan(true)}
+        title={gangLockShortConfirm ? `Lock the run ${fmt.num(gangLockShortConfirm.short)} sheets short?` : ''}
+        confirmLabel="Lock anyway — holds capped at free stock"
+        message={gangLockShortConfirm
+          ? `Only ${fmt.num(gangLockShortConfirm.free)} sheets are free for this run. The run still locks — `
+            + `every member's hold is capped at what is free, and the remaining `
+            + `${fmt.num(gangLockShortConfirm.short)} shows in the warehouse Shortfall column. `
+            + `One PR covers the whole run if you choose to raise it.`
+          : ''} />
+
       <ConfirmDialog open={gangReverseOpen} onClose={() => setGangReverseOpen(false)} onConfirm={reverseGang}
         title={`Reverse ${gangView?.gang_number || 'gang'} plan?`} confirmLabel="Reverse Plan" danger
         message={`Every product goes back to "To Plan" — cut-plan figures and artwork locks clear, and any unstarted job card is removed. The gang stays together so you can re-plan. Blocked if anything has started on the floor.`} />
@@ -5700,6 +5794,31 @@ export default function Planning() {
                 </span>
               </p>
             )}
+            {/* The ✓ above says the mix BALANCES — it never said the sheets
+                exist. A mix past free stock locks with its hold CAPPED
+                (boardHoldCaps), and this confirm wore an unqualified green
+                check over exactly that. Planned row measures against
+                position.free (own view — its own frozen sheets are still
+                takeable); a substitute row against its seeded free figure. */}
+            {(() => {
+              const capped = mixConfirm.rows.map(r => {
+                const freeFor = r.severity === 'none' ? (position?.free ?? null) : (r.available ?? null);
+                return freeFor != null && Number(r.sheets) > Number(freeFor)
+                  ? { name: r.board_name, free: Math.max(0, Math.round(freeFor)),
+                      short: Math.round(Number(r.sheets) - Math.max(0, Number(freeFor))) }
+                  : null;
+              }).filter(Boolean);
+              if (!capped.length) return null;
+              return (
+                <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                  <AlertTriangle size={13} className="mt-px shrink-0" />
+                  <span>
+                    {capped.map(c => `${c.name}: only ${fmt.num(c.free)} free — the hold caps there, ${fmt.num(c.short)} short until board arrives`).join('; ')}.
+                    {' '}Not a blocker — the plan locks and the shortfall shows in the warehouse Shortfall column.
+                  </span>
+                </p>
+              );
+            })()}
           </div>
         )}
       </Modal>
