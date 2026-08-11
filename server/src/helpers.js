@@ -2435,9 +2435,28 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
 
 // The worst state in a set — a gang goes on press as ONE job, so its weakest
 // member decides for the whole run.
+// NULL SURVIVES THE COLLAPSE, and that is the whole point of this function.
+//
+// `null` means "no plate requirement — not asked yet" and renders nothing. It is
+// deliberately NOT 'none', which is a real requirement nobody has met and paints
+// solid red. stampPlateState takes care to produce it, and this used to throw it
+// away: with no case for null the ternary fell through to 'ready', so a gang
+// whose members had NO plate requirement collapsed to "Plates OK" — the
+// strongest claim in the vocabulary, built from no information at all.
+//
+// Live: CI-GANG-0009 wore a solid green tick for plates that were never asked
+// for, let alone in the warehouse. It was a pale tint before and easy to miss;
+// the moment `ready` became a solid fill it was the loudest thing on the row.
+//
+// So unknowns are dropped, and a set with nothing left stays unknown. A member
+// that DOES know still decides for the whole run — one member short stops the
+// press for all of them — which is why the filter comes before the ranking and
+// not instead of it.
 export function worstPlateState(states = []) {
-  return states.includes('none') ? 'none'
-    : states.includes('on_order') ? 'on_order'
+  const known = (Array.isArray(states) ? states : []).filter(Boolean);
+  if (!known.length) return null;
+  return known.includes('none') ? 'none'
+    : known.includes('on_order') ? 'on_order'
     : 'ready';
 }
 

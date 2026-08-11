@@ -89,7 +89,12 @@ test('worstPlateState ranks none above on_order above ready', () => {
   assert.equal(worstPlateState(['ready', 'on_order', 'none']), 'none');
   assert.equal(worstPlateState(['ready', 'on_order']), 'on_order');
   assert.equal(worstPlateState(['ready', 'ready']), 'ready');
-  assert.equal(worstPlateState([]), 'ready');
+  // WAS 'ready', and that assertion is what kept the bug alive: an empty set is
+  // no information, and calling it ready let a gang whose members had NO plate
+  // requirement collapse to a solid green "Plates OK" (live: CI-GANG-0009).
+  // Unknown in, unknown out — see plate-gang-null-state.test.js.
+  assert.equal(worstPlateState([]), null);
+  assert.equal(worstPlateState([null, null]), null);
 });
 
 test('a job with no plate requirement is NOT TRACKED, which is not the same as missing', () => {
