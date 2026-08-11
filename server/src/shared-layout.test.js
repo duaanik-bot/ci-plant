@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sharedLayoutRun, splitProportional, agreedChildSize } from './shared-layout.js';
+import { parentSheetsRequired } from './helpers.js';
+import { sharedRunFigures } from '../../client/src/lib/gangRunMath.js';
 
 test('sharedLayoutRun', async t => {
   await t.test('Niko Standard, ratio-matched orders: MAX, not SUM', () => {
@@ -88,5 +90,54 @@ test('agreedChildSize — the soft side of Layout Pending', async t => {
   await t.test('no members → null', () => {
     assert.equal(agreedChildSize([]), null);
     assert.equal(agreedChildSize(), null);
+  });
+});
+
+// ── Client twin parity — gangRunMath.sharedRunFigures ───────────────────────
+// The Gang Engine's live figures come from the client twin; the plan lock's
+// stored figures come from sharedLayoutRun + parentSheetsRequired. These tests
+// pin the two to the same numbers — change either side and its pair together.
+test('sharedRunFigures — client twin of the co-printed run', async t => {
+  await t.test('CI-GANG-0010: the sum said 1,100 — the run needs 600 parent', () => {
+    // Rosutrack 2,000 @ 2-up · Alamin 1,000 @ 1-up · child 18×25 on 25×36
+    // (cpp 2) · 200 child wastage. Naturals 600/500 stay REFERENCE; the run is
+    // max(1000, 1000) + 200 = 1,200 child → 600 parent, wastage 200 → 100.
+    const members = [{ id: 197, net: 2000, ups: 2 }, { id: 306, net: 1000, ups: 1 }];
+    const f = sharedRunFigures(members, { wastage: 200, cpp: 2 });
+    const server = sharedLayoutRun(members, { wastage: 200 });
+    assert.equal(f.runChild, server.run_child);            // 1,200
+    assert.equal(f.needChild, server.need_child);          // 1,000
+    assert.equal(f.runChild, 1200);
+    assert.equal(f.runParent, parentSheetsRequired(server.run_child, 2));  // 600
+    assert.equal(f.needParent, parentSheetsRequired(server.need_child, 2)); // 500
+    assert.equal(f.childWastage, 200);
+    assert.equal(f.parentWastage, 100);                    // 600 − 500
+    assert.equal(f.totalUps, 3);
+    assert.deepEqual(f.per.map(p => p.yieldPieces), [2400, 1200]); // run × ups
+  });
+
+  await t.test('ratio mismatch tracks the server MAX exactly', () => {
+    const members = [{ id: 1, net: 80000, ups: 8 }, { id: 2, net: 50000, ups: 4 }];
+    const f = sharedRunFigures(members, { wastage: 0, cpp: 4 });
+    const server = sharedLayoutRun(members);
+    assert.equal(f.runChild, server.run_child);            // 12,500
+    assert.equal(f.runParent, parentSheetsRequired(server.run_child, 4)); // 3,125
+    assert.equal(f.parentWastage, 0);
+    assert.deepEqual(f.per.map(p => p.needChild), [10000, 12500]);
+  });
+
+  await t.test('a member without ups → null (client degrades softly; server throws)', () => {
+    assert.equal(sharedRunFigures([{ id: 1, net: 100, ups: 0 }], { cpp: 2 }), null);
+    assert.equal(sharedRunFigures([{ id: 1, net: 100, ups: null }], { cpp: 2 }), null);
+    assert.throws(() => sharedLayoutRun([{ id: 1, net: 100, ups: 0 }]), /needs its ups/);
+  });
+
+  await t.test('no cpp yet (layout geometry unknown) → 1 child : 1 parent, same as memberParentSheets fallback', () => {
+    const f = sharedRunFigures([{ id: 1, net: 1000, ups: 1 }], { wastage: 0 });
+    assert.equal(f.runParent, 1000);
+  });
+
+  await t.test('empty members → null', () => {
+    assert.equal(sharedRunFigures([], { cpp: 2 }), null);
   });
 });

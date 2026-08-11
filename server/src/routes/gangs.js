@@ -32,6 +32,7 @@ const canPlan = requireRole(...PLANNING_ROLES);
 const MEMBER_VIEW = `
   SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id,
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
+         ol.dispatched_qty,
          ol.wastage_sheets, ol.spec_override, ol.stock_booking,
          o.po_number, o.delivery_date, c.name AS customer_name,
          p.id AS product_id, p.name AS product_name, p.code AS product_code, p.party_item_code, p.gsm,
@@ -451,6 +452,37 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   const totalParent = withSheets.reduce((s, m) => s + m.parent_sheets, 0);
   const mix = await gangMixContext(gang, withSheets, boardId, oc, qc);
 
+  // CO-PRINTED run figures, computed up front because Board Position must
+  // quote them: one sheet prints every member, so the run needs the MAX any
+  // member requires — parent-converted with the SAME childFit chain the plan
+  // lock uses. The members' stored figures may still be a pre-lock sum (or a
+  // stale save from before a ups edit), and charging that sum against the
+  // shelf demands roughly double the board the run actually cuts.
+  // Null whenever the run is not computable (pending layout, missing ups) —
+  // every reader then falls back to the classic per-member sum, unchanged.
+  const sharedLayout = gang.kind !== 'merge' && gang.layout_mode === 'shared'
+    ? sharedLayoutState(gang, withSheets) : null;
+  let sharedRun = null;
+  if (sharedLayout && !sharedLayout.pending) {
+    try {
+      const layoutRun = sharedLayoutRun(
+        withSheets.map(m => ({ id: m.id, net: netProduceQty(m), ups: m.ups })),
+        { wastage: withSheets[0]?.wastage_sheets ?? 0 });
+      // Shared board's own sheet, not the lead's solo parent trim — the same
+      // geometry rule as the plan lock (see its comment).
+      const m0 = withSheets[0];
+      const fit = childFit(
+        { sheet_l: m0.sheet_l, sheet_w: m0.sheet_w },
+        { child_l: sharedLayout.child.l, child_w: sharedLayout.child.w });
+      sharedRun = {
+        ...layoutRun,
+        cpp: fit.count,
+        run_parent: parentSheetsRequired(layoutRun.run_child, fit.count),
+        need_parent: parentSheetsRequired(layoutRun.need_child, fit.count),
+      };
+    } catch { sharedRun = null; }
+  }
+
   let position = null;
   let openPrs = [];
   let otherPrs = [];
@@ -480,8 +512,16 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // board still reads "Short — cutting waits for stock" and offers a PR for
     // board the planner has just finished sourcing, which is the whole reason
     // they opened the mix.
+    // A co-printed run demands what the floor will actually DRAW: the
+    // planner's stored issue override when one is set (the lock distributes
+    // it across members and the job card issues that sum), else the computed
+    // run parent. Quoting the computed figure past a live override would say
+    // "Stock OK" on a run about to draw more (override up) or buy board the
+    // floor never takes (override down). The engine shows the override chip
+    // beside the computed figure, so a stale override is loud, not silent.
     const neededOnPlanned = pressingOnPlanned({
-      required: totalParent, active: !!mix?.active,
+      required: sharedRun ? (gang.issue_parent_sheets ?? sharedRun.run_parent) : totalParent,
+      active: !!mix?.active,
       covered: mix?.covered, heldOnPlanned: mix?.held_on_planned });
     position = gangPosition({
       needed: neededOnPlanned, committedOther, available,
@@ -547,16 +587,12 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   // and (once the size is in) the run preview — MAX sheets, per-member overs —
   // so the engine can show the planner exactly what the co-printed run does.
   if (gang.layout_mode === 'shared') {
-    const layout = sharedLayoutState(gang, withSheets);
+    const layout = sharedLayout;
     const die = await findDieTemplate(withSheets.map(m => m.product_id), q, oc).catch(() => null);
-    let layoutRun = null;
-    if (!layout.pending) {
-      try {
-        layoutRun = sharedLayoutRun(
-          withSheets.map(m => ({ id: m.id, net: netProduceQty(m), ups: m.ups })),
-          { wastage: withSheets[0]?.wastage_sheets ?? 0 });
-      } catch { layoutRun = null; }
-    }
+    // The hoisted run above — now carrying cpp / run_parent / need_parent so
+    // the engine's client twin and this payload can never disagree on the
+    // parent conversion.
+    const layoutRun = sharedRun;
     return {
       ...gang, members: withSheets, board_material_id: boardId,
       total_parent_sheets: totalParent, position, open_prs: openPrs, other_prs: otherPrs, mix,
@@ -852,7 +888,12 @@ r.post('/gang-runs/:id/convert-to-merge', canPlan, async (req, res, next) => {
       }
 
       const run_number = await nextRunNumber('CI-MRG-', oc);
-      await qc(`UPDATE gang_runs SET kind='merge', gang_number=$1, product_id=$2 WHERE id=$3`,
+      // layout_mode drops to 'separate': a combined run is one product, so
+      // "co-printed" is meaningless for it, and a leftover 'shared' would
+      // otherwise steer the plan lock into MAX maths on a run whose truth is
+      // the SUM of its sales orders. (The lock and reDeriveMemberSheets also
+      // guard on kind, for merges converted before this stamp existed.)
+      await qc(`UPDATE gang_runs SET kind='merge', layout_mode='separate', gang_number=$1, product_id=$2 WHERE id=$3`,
         [run_number, members[0].product_id, run.id]);
       for (const m of members) {
         await clearMixPlan(m.id, qc, req.user.name, `${run.gang_number} → ${run_number}: one board for the combined pile`);
@@ -972,7 +1013,12 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       // zero so it is never multiplied by the number of products.
       const plan = [];
       let adoptedChildNote = '';
-      if (gang.layout_mode === 'shared') {
+      // kind guard: a COMBINED RUN is one product across N sales orders — its
+      // run is the SUM of every order, so it must never take the co-printed
+      // MAX. Convert-to-merge now stamps layout_mode='separate', but a merge
+      // converted before that stamp existed still carries 'shared'; the kind
+      // is the truth, the layout_mode is a leftover.
+      if (gang.kind !== 'merge' && gang.layout_mode === 'shared') {
         // CO-PRINTED layout: every member nests on ONE child sheet, so the run
         // is the MAX any member needs (sharedLayoutRun) and each member's
         // stored figures are its proportional share of that one count. The
@@ -1019,8 +1065,14 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
           { wastage: w });
         const board = await oc('SELECT * FROM materials WHERE id=$1', [boards[0]]);
-        const parent = effectiveParent(effs[0], board);
-        const fit = childFit(parent, effs[0]);
+        // The parent conversion runs on the SHARED BOARD's own sheet — never
+        // a member's solo parent trim (effectiveParent). A trim describes how
+        // that product cuts when planned ALONE on its own parent; the
+        // co-printed layout is its own geometry: the locked child on the sheet
+        // the gang actually buys. CI-GANG-0010's lead carried a 23×36 solo
+        // trim that fits the 18×25 child once, and the lock priced the run at
+        // 1,200 parent when the shared 25×36 board cuts it twice — 600.
+        const fit = childFit(board, { child_l: child.l, child_w: child.w });
         const runParent = parentSheetsRequired(run.run_child, fit.count);
         const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
         const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
@@ -1659,7 +1711,8 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   // derivable yet; the figures land at plan time.
   if (line.gang_run_id) {
     const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [line.gang_run_id]);
-    if (gang?.layout_mode === 'shared') {
+    // Same kind guard as the plan lock: a merge's run is a SUM, never the MAX.
+    if (gang?.kind !== 'merge' && gang?.layout_mode === 'shared') {
       const lines = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
       const layout = sharedLayoutState(gang, lines);
       if (layout.pending) return;
@@ -1674,7 +1727,9 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
         lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
         { wastage: lines[0].wastage_sheets ?? 0 });
       const board = await oc('SELECT * FROM materials WHERE id=$1', [effs[0].board_material_id]);
-      const fit = childFit(effectiveParent(effs[0], board), effs[0]);
+      // Shared board's own sheet, not the lead's solo parent trim — the same
+      // geometry rule as the plan lock (see its comment).
+      const fit = childFit(board, { child_l: layout.child.l, child_w: layout.child.w });
       const runParent = parentSheetsRequired(run.run_child, fit.count);
       const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
       const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));

@@ -13,6 +13,7 @@ import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, Package
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips, chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
+import { sharedRunFigures } from '../lib/gangRunMath.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -1100,13 +1101,25 @@ export default function Planning() {
   // base child sheets, ÷ children-per-parent (its own child on the shared board)
   // gives parent sheets. The gang prints as ONE press run, so the wastage is a
   // SINGLE allowance booked to the lead member — never multiplied per product.
+  //
+  // On a CO-PRINTED (shared) layout the per-member figures above are REFERENCE
+  // only: one sheet prints every member, so the run is the MAX any member
+  // needs, not the SUM (sharedRunFigures — client twin of the server's
+  // sharedLayoutRun). The headline `parent` — the figure gangIssueNow, the
+  // Board Mix target and the Lock caption all speak — becomes that run's
+  // parent count; the sum survives as `naturalParent` for the reference row.
+  // CI-GANG-0010 read 1,100 off the sum while the run needed 600.
   const gangCalc = useMemo(() => {
     if (!gangView?.members?.length) return null;
     const w = Math.max(0, Math.round(+gangWastage || 0));
     const anchor = gangView.members[0];
     let baseChild = 0, childSheets = 0, parent = 0;
+    // Net = ordered − FG-consumed − already dispatched, the server's
+    // netProduceQty exactly (a re-planned line after a partial dispatch only
+    // owes the balance — netting fg alone re-prices the whole order).
+    const netOf = m => Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0) - (+m.dispatched_qty || 0));
     const per = gangView.members.map((m, i) => {
-      const net = Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0));
+      const net = netOf(m);
       const ups = Math.max(1, +m.ups || 1);
       const base = Math.ceil(net / ups);
       const child = base + (i === 0 ? w : 0); // wastage once, on the lead member
@@ -1116,7 +1129,26 @@ export default function Planning() {
       baseChild += base; childSheets += child; parent += p;
       return { id: m.id, base, child, cpp, parent: p };
     });
-    return { baseChild, wastageTotal: w, childSheets, parent, per, members: gangView.members.length };
+    const sum = { baseChild, wastageTotal: w, childSheets, parent, per, members: gangView.members.length };
+    if (gangView.kind === 'merge' || gangView.layout_mode !== 'shared') return sum;
+    // cpp: the server's settled-layout figure when it has one, else the same
+    // anchor fit the reference column just used — never a third geometry.
+    const anchorFit = clientFit(anchor?.sheet_l, anchor?.sheet_w, +anchor?.child_l, +anchor?.child_w);
+    const run = sharedRunFigures(
+      gangView.members.map(m => ({ id: m.id, net: netOf(m), ups: +m.ups })),
+      { wastage: w, cpp: gangView.layout_run?.cpp ?? (anchorFit?.cpp > 0 ? anchorFit.cpp : null) });
+    if (!run) return sum;   // a member without ups — degrade to the sum + the pending banner
+    return {
+      ...sum,
+      sharedMode: true,
+      parent: run.runParent,
+      childSheets: run.runChild,
+      naturalParent: sum.parent,
+      needParent: run.needParent,
+      childWastage: run.childWastage,
+      parentWastage: run.parentWastage,
+      yieldByMember: Object.fromEntries(run.per.map(p => [p.id, p.yieldPieces])),
+    };
   }, [gangView, gangWastage]);
 
   const position = useMemo(() => {
@@ -4716,9 +4748,17 @@ export default function Planning() {
                   <span className="font-bold uppercase tracking-wide text-violet-500">Co-printed run</span>
                   <span>child {gangView.layout_child?.l}×{gangView.layout_child?.w}"</span>
                   <span>{gangView.total_ups} ups total</span>
-                  <span><b className="tabular-nums">{fmt.num(gangView.layout_run.run_child)}</b> sheets
+                  <span><b className="tabular-nums">{fmt.num(gangView.layout_run.run_child)}</b> child sheets
                     {gangView.layout_run.run_child !== gangView.layout_run.need_child &&
                       <span className="text-slate-400"> (incl. wastage)</span>}
+                    {/* The parent conversion, spelled out — this banner's child
+                        count read as "sheets" is exactly how 1,200 child got
+                        typed into the parent issue box on CI-GANG-0010. */}
+                    {gangView.layout_run.run_parent != null && <>
+                      <span className="text-slate-400"> → </span>
+                      <b className="tabular-nums">{fmt.num(gangView.layout_run.run_parent)}</b> parent
+                      <span className="text-slate-400"> ({gangView.layout_run.cpp}/parent)</span>
+                    </>}
                     <span className="text-slate-400"> — the largest job sets the run; one sheet prints everyone</span>
                   </span>
                 </div>
@@ -4778,6 +4818,13 @@ export default function Planning() {
                               </button>
                               <div className="flex items-center gap-1.5 pl-4 text-[10px] text-slate-400">
                                 <span className="truncate">{m.child_l ? `${m.child_l}×${m.child_w}" child · ` : ''}{m.colors}c · {fmt.title(m.coating)}</span>
+                                {/* Co-printed: what the run YIELDS this product —
+                                    run sheets × its ups, every sheet printing it. */}
+                                {gangCalc?.sharedMode && gangCalc.yieldByMember?.[m.id] != null && (
+                                  <span className={`shrink-0 font-semibold tabular-nums ${tv('text-violet-500', 'text-teal-600')}`}
+                                    title="What the co-printed run yields this product if every sheet prints — run sheets × its ups">
+                                    → {fmt.num(gangCalc.yieldByMember[m.id])} pcs</span>
+                                )}
                                 <StatusBadge status={m.status} />
                               </div>
                               {/* Board identity — read-only. The board's grade,
@@ -4798,7 +4845,11 @@ export default function Planning() {
                             <input type="number" min="1" disabled={!editable} value={d.ups}
                               onChange={e => gangMemberDraft(m.id, { ups: e.target.value })}
                               className="h-7 w-full rounded-lg border border-slate-200 bg-white px-1.5 text-right text-xs font-semibold tabular-nums text-slate-800 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-300 disabled:bg-slate-100 disabled:text-slate-400" />
-                            <span className="text-right text-xs font-bold tabular-nums text-slate-700">{fmt.num(gangCalc?.per?.find(p => p.id === m.id)?.parent ?? m.parent_sheets)}</span>
+                            <span className="text-right text-xs font-bold tabular-nums text-slate-700"
+                              title={gangCalc?.sharedMode
+                                ? "This product's own maths — reference only. The gang co-prints on one sheet, so the run buys the gang-level parent figure below, never this sum."
+                                : undefined}>
+                              {fmt.num(gangCalc?.per?.find(p => p.id === m.id)?.parent ?? m.parent_sheets)}</span>
                             <div className="flex items-center gap-0.5 pl-1">
                               {dirty
                                 ? <button type="button" title="Save qty / ups" className="rounded-lg bg-brand-500 p-1 text-white hover:bg-brand-600" onClick={() => saveGangMember(m)}><Check size={13} /></button>
@@ -4872,9 +4923,23 @@ export default function Planning() {
                         </div>
                       );
                     })}
-                    <div className={`flex items-center justify-between border-t-2 px-3 py-1.5 text-[11px] font-bold ${tv('border-violet-300 bg-violet-100/60 text-violet-800', 'border-teal-300 bg-teal-100/60 text-teal-800')}`}>
-                      <span>{gangView.members.length} products · {fmt.num(totalQty)} pcs</span>
-                      <span className="tabular-nums">{fmt.num(gangCalc?.parent ?? gangView.total_parent_sheets)} parent sheets</span>
+                    <div className={`border-t-2 px-3 py-1.5 text-[11px] font-bold ${tv('border-violet-300 bg-violet-100/60 text-violet-800', 'border-teal-300 bg-teal-100/60 text-teal-800')}`}>
+                      <div className="flex items-center justify-between">
+                        <span>{gangView.members.length} products · {fmt.num(totalQty)} pcs</span>
+                        <span className="tabular-nums">
+                          {fmt.num(gangCalc?.parent ?? gangView.total_parent_sheets)} parent sheets
+                          {gangCalc?.sharedMode && <span className="font-semibold"> — one co-printed run</span>}
+                        </span>
+                      </div>
+                      {/* Co-printed: the SHEETS column above is each product's own
+                          maths, kept as reference — the run buys the gang-level
+                          figure, never that sum. Wastage is one allowance. */}
+                      {gangCalc?.sharedMode && (
+                        <div className={`mt-0.5 flex flex-wrap items-center justify-end gap-x-3 text-[10px] font-semibold tabular-nums ${tv('text-violet-600/80', 'text-teal-600/80')}`}>
+                          <span>products' own sum {fmt.num(gangCalc.naturalParent)} — reference</span>
+                          <span>wastage {fmt.num(gangCalc.childWastage)} child → {fmt.num(gangCalc.parentWastage)} parent</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -5072,10 +5137,23 @@ export default function Planning() {
                   </Field>
                   {gangCalc && (
                     <div className="mt-3 space-y-1.5 rounded-xl bg-slate-50 px-3 py-2.5 text-xs">
-                      <div className="flex items-center justify-between"><span className="text-slate-500">Base child sheets <span className="text-slate-400">(Σ qty ÷ ups)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.baseChild)}</span></div>
+                      {/* Co-printed: one sheet prints every member, so the base
+                          is the LARGEST job, never the sum — the members' own
+                          maths stays a reference line underneath. */}
+                      {gangCalc.sharedMode ? (
+                        <div className="flex items-center justify-between"><span className="text-slate-500">Base child sheets <span className="text-slate-400">(largest job — max qty ÷ ups)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.childSheets - gangCalc.childWastage)}</span></div>
+                      ) : (
+                        <div className="flex items-center justify-between"><span className="text-slate-500">Base child sheets <span className="text-slate-400">(Σ qty ÷ ups)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.baseChild)}</span></div>
+                      )}
                       <div className="flex items-center justify-between"><span className="text-slate-500">+ Wastage <span className="text-slate-400">(one press run)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.wastageTotal)}</span></div>
                       <div className="flex items-center justify-between border-t border-slate-200 pt-1.5"><span className="text-slate-500">= Child print sheets</span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.childSheets)}</span></div>
                       <div className="flex items-center justify-between"><span className="text-slate-500">→ Parent sheets <span className="text-slate-400">(÷ children per parent)</span></span><span className={`font-bold tabular-nums ${tv('text-violet-600', 'text-teal-600')}`}>{fmt.num(gangCalc.parent)}</span></div>
+                      {gangCalc.sharedMode && (
+                        <div className="flex items-center justify-between border-t border-slate-200 pt-1.5 text-[11px]">
+                          <span className="text-slate-400">Products' own sum — reference, not bought</span>
+                          <span className="font-semibold tabular-nums text-slate-400">{fmt.num(gangCalc.naturalParent)}</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   <div className="mt-3">
