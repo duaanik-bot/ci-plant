@@ -83,21 +83,29 @@ test('completion accepts no plate account at all', async () => {
   assert.deepEqual(validatePlateDispositions(issued, null), []);
 });
 
-test('raising the Plate PR cannot roll back the finalise that triggered it', () => {
-  // Structural, because the failure mode is invisible in behaviour until the day a
-  // spec is bad: inside the finalise transaction ONE failing plate insert aborts
-  // the whole thing, and the card refuses to finalise over paperwork nobody has
-  // even ordered yet — a hard blocker by the back door. So it runs afterwards, on
-  // its own transaction, and swallows its own failure onto the audit log.
+test('finalising a Job Card raises NO plate requirement — plates are asked for by hand', () => {
+  // Finalising a card used to fire a Plate PR by itself. Anik: raising plates is
+  // a DECISION — most cards reuse a plate set that already exists, so the
+  // automatic PR filled the plate queue with paperwork nobody had asked for and
+  // buried the handful that were real.
+  //
+  // It is raised manually now, through the door that already existed and is
+  // reached from both places the plant works from:
+  //   Artwork    -> POST /tools/push                     { families: ['plate', ...] }
+  //   Job Cards  -> POST /job-cards/:id/tooling-requirements  (ToolingForwardModal)
+  // Neither is touched by this change; only the automatic firing is gone.
+  //
+  // Asserted structurally and NEGATIVELY, because the failure mode is silent:
+  // re-adding the call breaks nothing, throws nothing, and simply refills the
+  // queue — which is exactly how it got there the first time.
   const route = readFileSync(new URL('./routes/production.js', import.meta.url), 'utf8');
-  const helper = route.slice(route.indexOf('async function raisePlateRequirement'));
-  const body = helper.slice(0, helper.indexOf("r.post('/job-cards/:id/finalise'"));
-  assert.match(body, /try \{\s*await tx\(/, 'the plate work needs its own transaction, inside a try');
-  assert.match(body, /plate_requirement_failed/, 'a failure must land on the audit log');
-  // And the finalise must call it AFTER its own tx has closed, never inside.
-  const finalise = route.slice(route.indexOf("r.post('/job-cards/:id/finalise'"));
-  const call = finalise.indexOf('raisePlateRequirement(finalised');
-  assert.ok(call > finalise.indexOf('    });'), 'raise the requirement after the transaction commits');
+
+  assert.ok(!/auto_from_finalise/.test(route),
+    "production.js writes an 'auto_from_finalise' event again — the Job Card finalise is raising "
+    + 'Plate PRs by itself. Plates are raised by hand from Artwork or the Job Card.');
+  assert.ok(!/raisePlateRequirement\s*\(/.test(route),
+    'raisePlateRequirement is being called again from production.js. The manual doors are '
+    + "POST /tools/push (Artwork) and POST /job-cards/:id/tooling-requirements (Job Cards).");
 });
 
 test('what the press DOES say is still checked', () => {

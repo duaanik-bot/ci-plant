@@ -492,74 +492,6 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// A finalised printing job announces the plates it will need. This runs on its
-// OWN transaction, after the card is already finalised, and it swallows its own
-// failures on purpose: a Plate PR is a piece of paperwork raised on the plant's
-// behalf, and the plant may never be stopped by it. If it fails, the card is
-// still finalised and Tooling raises the requirement by hand.
-async function raisePlateRequirement(jc, userName) {
-  try {
-    await tx(async (qc, oc) => {
-      const hasPrinting = await oc(`SELECT 1 FROM job_stages WHERE job_card_id=$1 AND stage='printing' LIMIT 1`, [jc.id]);
-      if (!hasPrinting) return;
-      const targets = await qc(`SELECT ol.id AS order_line_id,ol.spec_override,o.delivery_date,p.*
-        FROM order_lines ol JOIN orders o ON o.id=ol.order_id JOIN products p ON p.id=ol.product_id
-        WHERE ($1::int IS NOT NULL AND ol.id=$1)
-           OR ($1::int IS NULL AND $2::int IS NOT NULL AND ol.gang_run_id=$2)
-        ORDER BY ol.id`, [jc.order_line_id, jc.gang_run_id]);
-      const seen = new Set();
-      const uniqueTargets = targets.flatMap(raw => {
-        if (seen.has(raw.id)) return [];
-        seen.add(raw.id);
-        const override = raw.spec_override && typeof raw.spec_override === 'object' ? raw.spec_override : {};
-        return [{ ...raw, ...override, product_id: raw.id }];
-      });
-      const gang = jc.gang_run_id
-        ? await oc('SELECT id,gang_number,output_number,kind FROM gang_runs WHERE id=$1', [jc.gang_run_id])
-        : null;
-      // A gang prints as ONE job on ONE set of plates, so it raises ONE unified
-      // requirement — the same rule tooling.js follows.
-      const requestTargets = gang && uniqueTargets.length
-        ? [{
-            target: uniqueTargets[0],
-            orderLineId: null,
-            specification: gangPlateSpecification(gang, uniqueTargets),
-            neededBy: uniqueTargets.map(row => row.delivery_date).filter(Boolean).sort()[0] || null,
-          }]
-        : uniqueTargets.map(target => ({
-            target,
-            orderLineId: target.order_line_id,
-            specification: plateSpecification(target),
-            neededBy: target.delivery_date || null,
-          }));
-      for (const candidate of requestTargets) {
-        const existing = await oc(`SELECT 1 FROM tooling_requests
-          WHERE job_card_id=$1 AND family='plate'
-            AND ($2::boolean OR product_id=$3)`, [jc.id, !!gang, candidate.target.product_id]);
-        if (existing) continue;
-        const { target, specification } = candidate;
-        const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
-        const [plateRequest] = await qc(`INSERT INTO tooling_requests
-          (request_number,job_card_id,order_line_id,product_id,family,qty,needed_by,specification,created_by,approval_status)
-          VALUES ($1,$2,$3,$4,'plate',$5,$6,$7,$8,'draft') RETURNING *`,
-        [requestNumber, jc.id, candidate.orderLineId, target.product_id,
-         Math.max(plateComponentsFromSpec(specification).length, 1), candidate.neededBy,
-         specification, userName]);
-        await createPlateComponents(qc, oc, plateRequest);
-        await qc(`INSERT INTO tooling_request_events
-          (tooling_request_id,action,from_status,to_status,note,user_name)
-          VALUES ($1,'auto_from_finalise',NULL,'draft',$2,$3)`,
-        [plateRequest.id, `${jc.jc_number} finalised · ${gang ? `${gang.gang_number} unified Plate requirement` : 'Plate requirement generated'}`, userName]);
-      }
-    });
-  } catch (e) {
-    // Recorded on the card, not raised at the user: the finalise has already
-    // committed and there is nothing for them to fix from that screen.
-    await audit('job_card', jc.id, 'plate_requirement_failed',
-      `Plate requirement could not be raised automatically — ${e.message}`, q, userName)
-      .catch(() => {});
-  }
-}
 
 // Finalise — the operator confirms the inherited data is correct and commits the
 // editable fields. Requires artwork locked; the card becomes a read-only
@@ -584,12 +516,13 @@ r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
       await audit('job_card', +req.params.id, 'finalised', 'Job card finalised', qc, req.user.name);
       finalised = jc;
     });
-    // Plates are raised AFTER the card is finalised, in a transaction of their own.
-    // Inside the finalise transaction, one bad plate spec would abort the whole
-    // thing and the card would refuse to finalise over paperwork that nobody has
-    // even ordered yet — a hard blocker by the back door. Out here the worst case
-    // is a card that finalises with no Plate PR, which Tooling can raise by hand.
-    if (finalised) await raisePlateRequirement(finalised, req.user.name);
+    // Finalising raises NO Plate PR. It used to, in its own transaction after the
+    // commit — but raising plates is a DECISION, not a consequence of finalising:
+    // most cards reuse a plate set that already exists, so the automatic PR filled
+    // the plate queue with paperwork nobody had asked for and buried the few that
+    // were real. Plates are now asked for by hand, through the doors that already
+    // existed: Artwork's POST /tools/push, or the Job Card's own Forward-to-Tooling
+    // (POST /job-cards/:id/tooling-requirements). Neither changed.
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await loadStages(jc);
     res.json(jc);

@@ -17,7 +17,8 @@ test('the Plate lifecycle router is mounted and realtime-enabled', () => {
 
 test('Job Card finalisation, printing start and printing completion share the lifecycle', () => {
   const route = read('server/src/routes/production.js');
-  assert.match(route, /auto_from_finalise/);
+  // NOT auto_from_finalise — the finalise no longer raises a Plate PR at all;
+  // see plates-never-block.test.js for the negative guard that keeps it that way.
   assert.match(route, /plateReadinessForPrinting\(qc, jc\.id/);
   assert.match(route, /issuePlateAssetsForJob\(qc, oc, jc, machineId/);
   assert.match(route, /applyPlateDispositions\(qc, oc, st\.id, req\.body\.plate_dispositions/);
@@ -350,11 +351,13 @@ test('Product colours and Plate Rates flow into finalized Plate PO rows', () => 
 });
 
 test('Gang Plate demand stays unified and Output remains visible throughout the lifecycle', () => {
-  const production = read('server/src/routes/production.js');
   const tooling = read('server/src/routes/tooling.js');
   const route = read('server/src/routes/plates.js');
   const page = read('client/src/components/PlatesLifecycle.jsx');
-  assert.match(production, /gangPlateSpecification\(gang, uniqueTargets\)/);
+  // ONE gang prints from ONE plate set, so a gang's plate demand must be raised
+  // as a single unified requirement rather than one per member. The rule now
+  // lives only in the MANUAL door (tooling.js): the Job Card finalise no longer
+  // raises plates at all, so production.js has no plate request path to hold it.
   assert.match(tooling, /gangPlateSpecification\(gang, targets\)/);
   assert.match(route, /tr\.specification->>'output_number'/);
   for (const label of ['Unified gang plate','Gang members','All approvals','Approved','Unapproved','Output']) {

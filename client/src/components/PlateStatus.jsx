@@ -25,8 +25,13 @@ export const PLATE_HINT = {
 // job cannot print today, and amber would let "PR Raised" read as a third, milder
 // kind of fine. DEPTH separates them — a soft tint for plates bought and coming
 // (someone has acted; wait), a solid fill for plates nobody has raised (act).
+// `ready` is a SOLID fill, not a tint. It was a pale wash the same weight as
+// every other chip on the row, and on a queue of thirty jobs the one fact the
+// press actually needs — are the plates here — did not survive the scan. The
+// two troubled states were already solid or near it, so the good state has to
+// carry the same weight or the row reads as "nothing to see" whichever it is.
 export const PLATE_TONE = {
-  ready: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  ready: 'border-emerald-600 bg-emerald-600 text-white',
   on_order: 'border-red-200 bg-red-50 text-red-600',
   none: 'border-red-500 bg-red-500 text-white',
 };
@@ -43,18 +48,22 @@ export default function PlateStatus({ state, compact = false, className = '' }) 
   const key = PLATE_TONE[state] ? state : 'none';
   const Icon = PLATE_ICON[key];
   const title = PLATE_FULL[key] + ' — ' + PLATE_HINT[key];
+  // Sized up from h-6/12px and text-[11px]. On a dense queue the plate chip sat
+  // at the same weight as the row's quiet metadata and was read as decoration;
+  // it is the one thing that decides whether the job can go on the press today.
+  // Still a FIXED size, so dropping it into a card or a cell cannot grow the row.
   if (compact) {
     return (
       <span title={title} aria-label={PLATE_FULL[key]}
-        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold leading-none ${PLATE_TONE[key]} ${className}`}>
-        <Icon size={12} />
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold leading-none ${PLATE_TONE[key]} ${className}`}>
+        <Icon size={15} />
       </span>
     );
   }
   return (
     <span title={title}
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-[11px] font-bold ${PLATE_TONE[key]} ${className}`}>
-      <Icon size={12} /> {PLATE_LABEL[key]}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-bold ${PLATE_TONE[key]} ${className}`}>
+      <Icon size={14} /> {PLATE_LABEL[key]}
     </span>
   );
 }
