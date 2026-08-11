@@ -53,3 +53,23 @@ test('a return puts its sheets straight back on the loose pile', () => {
   // A return never opens a packet: opened derives to 0 on a negative issue.
   assert.equal(looseAfter({ looseBefore: 12, packetSize: 144, issued: -8, packetsOpened: null }), 20);
 });
+
+// An over-receipt is PHYSICS — board that arrived is on the shelf and the GRN
+// is never refused for exceeding the order. But it must not land silently:
+// nine po_lines are over-received on the live plant, one by 3,600 sheets
+// against a 50-sheet line, booked 13 ms after the previous GRN on that line —
+// the shape of a double submit nobody was told about.
+test('an over-receipt is booked and SAID, never blocked', () => {
+  const proc = readFileSync(new URL('./routes/procurement.js', import.meta.url), 'utf8');
+  const i = proc.indexOf("r.post('/grns/:id/qc'");
+  const block = proc.slice(i, i + 3000);
+  assert.match(block, /const over = Math\.max\(0, Number\(g\.qty\) - remaining\)/,
+    'the excess is measured against what is still due on the line');
+  assert.match(block, /'over_receipt'/, 'and audited against the PO');
+  // The receipt itself must still go through untouched.
+  assert.match(block, /UPDATE po_lines SET received_qty = received_qty \+ \$1/,
+    'stock that arrived is always booked');
+  const guard = block.slice(0, block.indexOf('UPDATE po_lines SET received_qty'));
+  assert.doesNotMatch(guard, /throw Object\.assign\(new Error\([^)]*over/i,
+    'never a refusal — physics hard, paperwork soft');
+});

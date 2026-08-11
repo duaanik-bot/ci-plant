@@ -1573,7 +1573,24 @@ r.post('/grns/:id/qc', canQc, async (req, res, next) => {
           [g.material_id, batch.id, g.id, note || 'QC accepted — released to stock']);
         // A direct (no-PO) receipt has no line to credit or PO status to move.
         if (g.po_line_id) {
+          // Board that ARRIVED is board on the shelf — receipt is physics and
+          // is never refused for exceeding the order (paperwork soft). But an
+          // over-receipt is said out loud instead of landing silently: nine
+          // po_lines are over-received on the live plant, one of them by 3,600
+          // sheets against a 50-sheet line, booked 13 ms after the previous
+          // GRN on the same line — the shape of a double submit nobody was
+          // told about. The audit row is the telling.
+          const pol = await oc('SELECT qty, received_qty FROM po_lines WHERE id=$1', [g.po_line_id]);
+          const remaining = Math.max(0, Number(pol?.qty || 0) - Number(pol?.received_qty || 0));
+          const over = Math.max(0, Number(g.qty) - remaining);
           await qc('UPDATE po_lines SET received_qty = received_qty + $1 WHERE id=$2', [g.qty, g.po_line_id]);
+          if (over > 0) {
+            await audit('purchase_order', g.purchase_order_id, 'over_receipt',
+              `${g.grn_number || `GRN #${g.id}`} accepted ${Math.round(Number(g.qty))} against `
+              + `${Math.round(remaining)} still due on this line — ${Math.round(over)} over. `
+              + `Stock is booked as received; check this is a real delivery and not a repeated GRN.`,
+              qc, req.user.name);
+          }
           const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
           const full = lines.every(l => l.received_qty >= l.qty);
           const some = lines.some(l => l.received_qty > 0);
