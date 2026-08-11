@@ -1,3 +1,8 @@
+// Every assertion below turns on being east of UTC — in UTC the night-shift
+// fixtures resolve the same either way and the file passes while proving
+// nothing. Pin the plant's zone before the first Date is built.
+process.env.TZ = 'Asia/Kolkata';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolvePlateRate as serverRate } from './plates.js';
@@ -49,6 +54,48 @@ test('neither side lets a rate apply the day before it starts', () => {
   const dayBefore = new Date(2026, 7, 7, 23, 30);
   assert.equal(serverRate(rows, 2, 23, dayBefore), null, 'server');
   assert.equal(clientRate(wire(rows), 2, 23, dayBefore), null, 'client');
+});
+
+test('night shift: a rate revised TODAY is not passed over for the standing base rate', () => {
+  // The case with money in it, and the one the other fixtures miss: they all put
+  // the newer row on the BASE rate or well in the past, where dropping it changes
+  // nothing. Here the row effective TODAY is the VENDOR one — legal, because the
+  // unique index is (plate_master_id, COALESCE(vendor_id, 0)), so a base row and
+  // a vendor row are two different rows and only one was repriced.
+  //
+  // Drop it at 01:55 and the lookup does not MISS, it succeeds with the stale
+  // base row. The modal pre-fills 200, POSTs 200, and plates.js takes a supplied
+  // rate over its own lookup — so 200 is written to tooling_po_lines.rate and the
+  // 225 the vendor agreed never appears. Not a display defect.
+  //
+  // Production wire shape: bare 'YYYY-MM-DD' for the client (GET /plate-rates
+  // formats it with to_char), a pg Date for the server, same day either side.
+  const clientRows = [
+    { id: 1, plate_master_id: 2, vendor_id: null, rate_per_plate: '200.00', effective_from: '2026-08-01', active: 1 },
+    { id: 2, plate_master_id: 2, vendor_id: 23, rate_per_plate: '225.00', effective_from: '2026-08-08', active: 1 },
+  ];
+  const serverRows = [
+    { id: 1, plate_master_id: 2, vendor_id: null, rate_per_plate: '200.00', effective_from: new Date(2026, 7, 1), active: 1 },
+    { id: 2, plate_master_id: 2, vendor_id: 23, rate_per_plate: '225.00', effective_from: new Date(2026, 7, 8), active: 1 },
+  ];
+  const nightShift = new Date(2026, 7, 8, 1, 55);
+  assert.equal(rateOf(clientRate(clientRows, 2, 23, nightShift)), '225.00', 'the price the buyer sees and sends');
+  assert.equal(rateOf(serverRate(serverRows, 2, 23, nightShift)), '225.00', 'the price the server would have used');
+});
+
+test('night shift: the modal call shape — no onDate argument — prices today', t => {
+  // What actually ships. PlatesLifecycle rateFor() calls
+  // resolvePlateRate(plateRates, plate_master_id, vendorId) and passes no date,
+  // so the defect lived entirely in the `onDate = new Date()` default. Every
+  // other test in this file hands the function an explicit date and would stay
+  // green even if that default were still toISOString(); only faking the clock
+  // reaches it.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 7, 8, 1, 55).getTime() });
+  const rows = [
+    { id: 1, plate_master_id: 2, vendor_id: null, rate_per_plate: '200.00', effective_from: '2026-08-01', active: 1 },
+    { id: 2, plate_master_id: 2, vendor_id: 23, rate_per_plate: '225.00', effective_from: '2026-08-08', active: 1 },
+  ];
+  assert.equal(rateOf(clientRate(rows, 2, 23)), '225.00');
 });
 
 test('the twin does not lean on the server twin being wrong', () => {

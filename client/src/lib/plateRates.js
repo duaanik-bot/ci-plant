@@ -9,29 +9,19 @@
 // is the PREVIOUS day east of Greenwich, so between midnight and 05:30 IST — the
 // night shift — "today" read as yesterday.
 //
-// It happened to come out right, which is worse than being wrong: over the wire
-// effective_from arrives as IST-midnight-in-UTC ("2026-08-07T18:30:00.000Z"), a
-// day early, and the toISOString() on the other side was a day early too, so the
-// two errors cancelled. Normalise ONE of them — which is exactly what fixing the
-// server invites — and the cancellation goes with it, leaving a blank rate and a
-// Rs 0 total in front of a buyer about to click Create PO. So neither side leans
-// on the other's error any more.
-
-// A calendar day as 'YYYY-MM-DD'. LOCAL parts, never toISOString().
-function dayOf(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const pad = n => String(n).padStart(2, '0');
-    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-  }
-  // A wire value is an ISO instant, not a local day: take the instant back to a
-  // Date so the local-parts rule above applies to it too. A bare 'YYYY-MM-DD'
-  // has no instant to shift and is already the answer.
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? text.slice(0, 10) : dayOf(parsed);
-}
+// The two errors did NOT cancel on this route, and it matters which way round it
+// was. GET /plate-rates selects `to_char(pr.effective_from,'YYYY-MM-DD') AS
+// effective_from` after `pr.*`, and node-postgres assigns row keys in column
+// order, so the alias overwrites the raw date: the browser receives a bare
+// "2026-08-11", already correct. Only the onDate side was a day behind. So
+// between midnight and 05:30 IST a rate effective TODAY was simply dropped —
+// and when an older base rate was still standing, the modal resolved THAT,
+// pre-filled it, and POSTed it. plates.js does `requestedRate ?? masterRate`,
+// so a supplied rate wins outright: the stale price is what got written to the
+// PO line. This twin is not a preview.
+//
+// dayOf itself now lives in ./dayOf.js — one spelling per side, imported here.
+import { dayOf } from './dayOf.js';
 
 export function resolvePlateRate(rates = [], plateMasterId, vendorId = null, onDate = new Date()) {
   const masterId = Number(plateMasterId);
