@@ -16,7 +16,7 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
-import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
@@ -57,6 +57,21 @@ const threadSummary = (entity, ids) => {
 // once — there is no single record to discuss, so it gets no doorbell rather
 // than a thread hung on a fake id.
 const threadLineId = r => (r._gang ? null : r.line_id);
+
+// The PO a row answers for, and how long the customer has been waiting. Same
+// rule as Planning, Artwork, the Job Card register and Print Planning: a gang
+// answers for its OLDEST member, and `latest` is set only when the members were
+// booked on different days, so the cell shows a span exactly when there is one.
+//
+// NOTE the two different senses of "late" on this screen. The Overdue KPI above
+// the table counts lines past their DELIVERY date; OD here is days since the
+// customer raised the PO, which is the figure every other planning screen shows
+// under that name and the only clock most lines have — delivery_date is null on
+// the great majority of the open book. The chip's own tooltip says which it is.
+const poAgeOf = r => {
+  const ds = [...new Set((r._gang || [r]).map(m => m.po_date).filter(Boolean))].sort();
+  return { date: ds[0] ?? null, latest: ds.length > 1 ? ds[ds.length - 1] : null, days: odDays(ds[0]), count: ds.length };
+};
 
 // Ultra-short stage tags — the whole route has to fit in one narrow cell.
 const STAGE_SHORT = {
@@ -310,7 +325,25 @@ export default function StatusSheet() {
     { key: 'po_number', label: 'Order #', render: r => r._gang
       ? (<div>{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}<div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className={`text-[10px] font-bold uppercase tracking-wide ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>{r.run_kind === 'merge' ? `${r._gang.length} orders · one pile` : `${r._gang.length} cartons · one run`}</div></div>)
       : <span className="font-semibold text-slate-800">{r.po_number}</span> },
-    { key: 'po_date', colClass: 'ci-p3', label: 'Date', render: r => fmt.date(r._gang ? [...r._gang.map(m => m.po_date)].sort()[0] : r.po_date) },
+    // Was labelled just "Date" and sorted on the rendered string, which orders
+    // by the day name. Named for what it is now, sorted on the raw date, and a
+    // gang shows its span — the same pair every other planning screen carries.
+    { key: 'po_date', colClass: 'ci-p3', label: 'PO Date', card: 'detail',
+      sortValue: r => poAgeOf(r).date || '',
+      export: r => { const a = poAgeOf(r); return a.date
+        ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
+      render: r => { const a = poAgeOf(r);
+        if (!a.date) return <span className="text-slate-300">—</span>;
+        return (
+          <div className="text-xs tabular-nums leading-4 text-slate-600">
+            <div className="whitespace-nowrap">{fmt.date(a.date)}</div>
+            {a.latest && <div className="whitespace-nowrap text-[10px] text-slate-400">→ {fmt.date(a.latest)}</div>}
+          </div>
+        ); } },
+    { key: 'od', colClass: 'ci-p3', label: 'OD', align: 'right',
+      sortValue: r => poAgeOf(r).days ?? -1,
+      export: r => { const d = poAgeOf(r).days; return d == null ? '—' : `${d}d`; },
+      render: r => { const a = poAgeOf(r); return <OverdueDays days={a.days} count={a.count} />; } },
     { key: 'customer_name', colClass: 'ci-cap-sm', label: 'Company', render: r => {
       const p1 = r._gang ? r._gang.some(m => m.is_p1) : r.is_p1;
       const name = r._gang ? [...new Set(r._gang.map(m => m.customer_name))].join(' · ') : r.customer_name;

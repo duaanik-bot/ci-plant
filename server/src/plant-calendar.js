@@ -12,6 +12,20 @@
 // offset is exact here — no zone database lookup required.
 const IST_OFFSET_MIN = 5 * 60 + 30;
 
+// The plant's today, for SQL — the counterpart of plantDateStr() on the JS side.
+//
+// `now()::date` and `CURRENT_DATE` are the database's date, and the database is
+// UTC, so between midnight and 05:30 IST they are YESTERDAY. Any figure counted
+// from them is a day short for the whole early shift: an order one day overdue
+// reads as on time, and the night shift's work lands in yesterday's numbers.
+//
+// Interpolate it, never parameterise it — it is a SQL fragment, not a value:
+//   `... WHERE d.delivery_date::date < ${PLANT_TODAY_SQL}`
+//
+// Note this wraps now(), not the column, so an index on the column is still
+// usable — unlike wrapping the column in to_char() or AT TIME ZONE.
+export const PLANT_TODAY_SQL = "(now() AT TIME ZONE 'Asia/Kolkata')::date";
+
 // The wall-clock date the plant is living in at instant `now`.
 function plantParts(now) {
   const shifted = new Date(now.getTime() + IST_OFFSET_MIN * 60_000);

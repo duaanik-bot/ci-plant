@@ -1,5 +1,6 @@
 // Procurement — PR → PO → GRN → QC → stock. Every hand-off is real.
 import { Router } from 'express';
+import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -1490,15 +1491,15 @@ r.get('/procurement/pendency', async (_req, res, next) => {
              pl.id AS po_line_id, pl.rate,
              pl.qty, pl.received_qty, (pl.qty - pl.received_qty) AS pending_qty,
              ((pl.qty - pl.received_qty) * pl.rate) AS pending_value,
-             GREATEST(0, (now()::date - po.created_at::date))::int AS age_days,
+             GREATEST(0, (${PLANT_TODAY_SQL} - po.created_at::date))::int AS age_days,
              CASE
-               WHEN GREATEST(0, (now()::date - po.created_at::date)) <= 7  THEN '0-7'
-               WHEN GREATEST(0, (now()::date - po.created_at::date)) <= 15 THEN '8-15'
-               WHEN GREATEST(0, (now()::date - po.created_at::date)) <= 30 THEN '16-30'
+               WHEN GREATEST(0, (${PLANT_TODAY_SQL} - po.created_at::date)) <= 7  THEN '0-7'
+               WHEN GREATEST(0, (${PLANT_TODAY_SQL} - po.created_at::date)) <= 15 THEN '8-15'
+               WHEN GREATEST(0, (${PLANT_TODAY_SQL} - po.created_at::date)) <= 30 THEN '16-30'
                ELSE '30+' END AS age_bucket,
              (SELECT MAX(g.received_at) FROM grns g WHERE g.po_line_id = pl.id) AS last_grn_at,
-             CASE WHEN po.expected_date IS NOT NULL AND po.expected_date::date < now()::date
-                  THEN (now()::date - po.expected_date::date)::int ELSE 0 END AS overdue_days
+             CASE WHEN po.expected_date IS NOT NULL AND po.expected_date::date < ${PLANT_TODAY_SQL}
+                  THEN (${PLANT_TODAY_SQL} - po.expected_date::date)::int ELSE 0 END AS overdue_days
       FROM po_lines pl
       JOIN purchase_orders po ON po.id=pl.purchase_order_id
       JOIN vendors v ON v.id=po.vendor_id

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { plantDateStr } from './plant-calendar.js';
+import { plantDateStr, PLANT_TODAY_SQL } from './plant-calendar.js';
 
 const ROUTES = join(dirname(fileURLToPath(import.meta.url)), 'routes');
 
@@ -39,4 +39,45 @@ test('plantDateStr is the plant day whatever zone the process runs in', () => {
   assert.equal(plantDateStr(nightShift), '2026-08-11');
   // ...whereas the expression this guard bans would call that the 10th.
   assert.equal(nightShift.toISOString().slice(0, 10), '2026-08-10');
+});
+
+// ── The SQL half of the same rule ────────────────────────────────────────────
+// `now()::date` is the DATABASE's today, and the database is UTC. Every figure
+// counted from it is a day short between midnight and 05:30 IST — an order one
+// day overdue reads as on time on the shift least able to notice.
+const DB_TODAY = /now\(\)::date/;
+
+test('no route counts a day from the database clock', () => {
+  const offenders = [];
+  for (const file of readdirSync(ROUTES).filter(f => f.endsWith('.js'))) {
+    readFileSync(join(ROUTES, file), 'utf8').split('\n').forEach((line, i) => {
+      if (DB_TODAY.test(line)) offenders.push(`${file}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `use \${PLANT_TODAY_SQL} instead:\n  ${offenders.join('\n  ')}`);
+});
+
+test('PLANT_TODAY_SQL is interpolated, never left as literal text', () => {
+  // A SQL fragment only works inside a TEMPLATE literal. Dropped into a quoted
+  // string it ships the characters "${PLANT_TODAY_SQL}" straight to Postgres and
+  // 500s the endpoint — and no unit test would catch it, because these routes
+  // need a database to run. So check statically: every use must sit inside an
+  // odd number of backticks, i.e. within an open template literal.
+  for (const file of readdirSync(ROUTES).filter(f => f.endsWith('.js'))) {
+    const src = readFileSync(join(ROUTES, file), 'utf8');
+    let idx = src.indexOf('${PLANT_TODAY_SQL}');
+    while (idx !== -1) {
+      const backticks = (src.slice(0, idx).match(/(?<!\\)`/g) || []).length;
+      assert.equal(backticks % 2, 1,
+        `${file}: \${PLANT_TODAY_SQL} at offset ${idx} is NOT inside a template literal`);
+      idx = src.indexOf('${PLANT_TODAY_SQL}', idx + 1);
+    }
+  }
+});
+
+test('the fragment shifts the clock, not the column', () => {
+  // Wrapping the COLUMN (to_char(col,…) / col AT TIME ZONE) would make an index
+  // on it unusable and force a sequential scan; wrapping now() does not.
+  assert.match(PLANT_TODAY_SQL, /now\(\)\s+AT TIME ZONE 'Asia\/Kolkata'/);
+  assert.doesNotMatch(PLANT_TODAY_SQL, /to_char/);
 });

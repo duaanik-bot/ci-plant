@@ -1,7 +1,7 @@
 // Orders + Planning + Artwork — the front half of the plant workflow.
 import { Router } from 'express';
 import { syncPrAllocation } from './procurement.js';
-import { plantDateStr } from '../plant-calendar.js';
+import { plantDateStr, PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -661,9 +661,9 @@ r.get('/sales/pendency', async (_req, res, next) => {
                ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
                ol.status, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
                COALESCE(fg.qty, 0)::int AS fg_qty,
-               GREATEST(0, (now()::date - o.po_date::date))::int AS age_days,
-               CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
-                    THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
+               GREATEST(0, (${PLANT_TODAY_SQL} - o.po_date::date))::int AS age_days,
+               CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
+                    THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
                COALESCE(SUM(ol.qty - ol.dispatched_qty) OVER (
                  PARTITION BY ol.product_id
                  ORDER BY o.delivery_date NULLS LAST, o.po_date, ol.id
@@ -778,8 +778,8 @@ r.get('/status-sheet', async (_req, res, next) => {
              p.party_item_code, p.size,
              ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
              ol.wip, ol.wip_date, ol.printed_override,
-             CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
-                  THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
+             CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
+                  THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
              EXISTS (
                SELECT 1 FROM job_cards jc
                JOIN job_stages js ON js.job_card_id = jc.id
@@ -796,8 +796,8 @@ r.get('/status-sheet', async (_req, res, next) => {
       WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
         AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
       ORDER BY ol.is_p1 DESC,
-               (CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
-                     THEN (now()::date - o.delivery_date::date)::int ELSE 0 END) DESC,
+               (CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
+                     THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END) DESC,
                o.delivery_date ASC NULLS LAST, ol.id`);
     // Manual override wins over the derived production signal (NULL = follow derived).
     // FUTURE auto-P1: when customers.priority lands, OR it into is_p1 here.
