@@ -124,13 +124,38 @@ test('free_for_others never exceeds free, and both floor at zero', () => {
 test('the fresh-PR caption says free_for_others, never free', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../../client/src/pages/Planning.jsx', import.meta.url), 'utf8');
-  const i = src.indexOf('stay free for other');
+  const i = src.indexOf('available to other products');
   assert.ok(i > 0, 'the caption still exists');
-  const around = src.slice(i - 400, i);
+  const around = src.slice(i - 500, i);
   assert.match(around, /position\.free_for_others/,
-    'the number in the "free for other products" sentence is free_for_others');
+    'the number in the other-products sentence is free_for_others');
   assert.doesNotMatch(around, /fmt\.num\(position\.free\)/,
     'position.free is this job\'s own view and must not be captioned as other products\' stock');
+});
+
+// A correct number under a borrowed word is still a wrong card. The caption was
+// fixed to 41 and then sat four lines under a tile shouting FREE 9,000 — both
+// right for their own viewer, neither saying which. One card may not print two
+// different numbers under one word.
+test('the card spends the word "free" on exactly one quantity', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../client/src/pages/Planning.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /free sheets stay free for other/,
+    'the other-products sentence must not reuse the Free tile\'s word');
+  assert.match(src, /sheets nobody holds stay\s*\n?\s*available to other products/,
+    'it says UNHELD and leaves "free" to the tile');
+  // The RENDERED literal, not any mention: the comment above it quotes the old
+  // wording on purpose, and a blunt grep would forbid explaining the bug.
+  assert.doesNotMatch(src, /'Parent sheets · this plan buys its board fresh — free stock stays with other jobs'/,
+    'the fresh-mode footnote borrowed the same word for the same wrong viewer');
+  assert.match(src, /the stock nobody holds stays with other jobs'/,
+    '…and now names the viewer like its non-fresh twin');
+  // …and the tile decomposes itself whenever the job holds any of the shelf,
+  // so the two halves are visible without reading the sentence below.
+  assert.match(src, /hint=\{\(\+ctx\.stock\.held_for_me \|\| 0\) > 0/,
+    'the Free tile carries a hint when this job holds stock');
+  assert.match(src, /yours · \$\{fmt\.num\(position\.free_for_others\)\} unheld/,
+    'and the hint splits it into yours vs unheld');
 });
 
 test('once cutting has drawn the board nothing is outstanding', () => {

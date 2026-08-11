@@ -288,11 +288,18 @@ function ReadinessCell({ readiness, light }) {
 
 // wrap: long text (customer names, board names) breaks onto extra lines
 // instead of being cut with an ellipsis.
-function Stat({ label, value, accent = 'text-slate-900', small, wrap }) {
+// `hint` is a muted sub-line for a figure whose VIEWER is not obvious from the
+// label alone — "Free 9,000" on a shelf where 8,959 is this job's own freeze is
+// true for this job and reads as an open shelf to a human. The hint decomposes
+// it in place rather than leaving the correction to a sentence further down the
+// card, which is how one card came to print two different numbers under the
+// word "free".
+function Stat({ label, value, accent = 'text-slate-900', small, wrap, hint }) {
   return (
     <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2">
       <div className="truncate text-[10px] font-semibold uppercase tracking-wider text-slate-400" title={label}>{label}</div>
       <div className={`${small ? 'text-[13px]' : 'text-sm'} ${wrap ? 'break-words leading-snug' : 'truncate'} font-extrabold tabular-nums ${accent}`} title={typeof value === 'string' ? value : undefined}>{value}</div>
+      {hint && <div className="truncate text-[9.5px] font-semibold leading-tight text-slate-400" title={hint}>{hint}</div>}
     </div>
   );
 }
@@ -3883,15 +3890,27 @@ export default function Planning() {
                             row and the strips must read as one vocabulary. */}
                         <Stat small label="In Warehouse" value={fmt.num(position.available)} />
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
+                        {/* The viewer, said in place. `free` is what THIS plan
+                            may draw and contains its own freeze, so on a shelf
+                            it has already frozen the tile reads as wide open —
+                            9,000 above a sentence saying 41. The hint splits
+                            the same number into its two halves so the card
+                            never asks the planner to reconcile it. */}
                         <Stat small label="Free" value={fmt.num(position.free)}
-                          accent={position.free > 0 ? 'text-emerald-600' : 'text-red-600'} />
+                          accent={position.free > 0 ? 'text-emerald-600' : 'text-red-600'}
+                          hint={(+ctx.stock.held_for_me || 0) > 0
+                            ? `${fmt.num(+ctx.stock.held_for_me)} yours · ${fmt.num(position.free_for_others)} unheld`
+                            : undefined} />
                         <Stat small label={position.drawn ? 'This Plan · issued' : 'This Plan'} value={fmt.num(calc.parent)}
                           accent={position.drawn ? 'text-emerald-600' : 'text-slate-900'} />
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
+                      {/* Both spellings name the viewer of every figure above
+                          them. "free stock stays with other jobs" did not —
+                          it borrowed the tile's word for a different number. */}
                       <p className="mt-1.5 text-[10px] text-slate-400">{position.fresh
-                        ? 'Parent sheets · this plan buys its board fresh — free stock stays with other jobs'
+                        ? 'Parent sheets · this plan buys its board fresh — the stock nobody holds stays with other jobs'
                         : 'Parent sheets · committed = owed to other live jobs, free = what this plan can still draw'}</p>
                       {/* Whose stock does this plan run on? One choice per plan;
                           a gang decides it once for the whole run (in the Gang
@@ -3920,9 +3939,13 @@ export default function Planning() {
                             <p className="mt-1 text-[10px] text-slate-400">
                               {/* free_for_others, NEVER position.free — `free` is THIS job's
                                   view and contains its own hold, so it read "9,000 free for
-                                  other products" on a shelf this job had 8,959 of. */}
-                              The board stays locked; the {fmt.num(position.free_for_others)} free sheets stay free for other
-                              products, and this job buys its full {fmt.num(calc.parent)}.
+                                  other products" on a shelf this job had 8,959 of.
+                                  And the word "free" is spent: the tile above uses it for
+                                  the job's own 9,000. Two numbers under one word on one card
+                                  is the same confusion in a smaller box, so this sentence
+                                  says UNHELD and leaves "free" to the tile. */}
+                              The board stays locked; the {fmt.num(position.free_for_others)} sheets nobody holds stay
+                              available to other products, and this job buys its full {fmt.num(calc.parent)}.
                             </p>
                           ) : mixRows.length > 0 ? (
                             <p className="mt-1 text-[10px] text-slate-400">A board mix books shelf stock by definition — clear the mix to buy fresh.</p>
