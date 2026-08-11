@@ -1,6 +1,8 @@
 // Client mirror of server/src/shade-flow.js presentation. The transition map is
 // duplicated deliberately: the server is the authority and refuses bad moves,
 // but the UI needs to know which button to light before asking.
+import { dayOf } from '../../lib/dayOf.js';
+
 export const STATUS_META = {
   draft:    { label: 'Draft',            cls: 'bg-slate-100 text-slate-600' },
   sent:     { label: 'Sent to Customer', cls: 'bg-violet-50 text-violet-700' },
@@ -46,4 +48,8 @@ export function nextAction(card) {
   return null;
 }
 
-export const today = () => new Date().toISOString().slice(0, 10);
+// Defaults creation_date on a new card, and the sent/approval dates on the
+// drawer — all three are stored, and creation_date is what ageDays() measures a
+// card's 365-day life from. dayOf, never toISOString(): before 05:30 IST that
+// reads yesterday, so a card made on the night shift was born a day old.
+export const today = () => dayOf(new Date());

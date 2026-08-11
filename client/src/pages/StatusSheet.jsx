@@ -15,6 +15,7 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { dayOf } from '../lib/dayOf.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
@@ -34,7 +35,10 @@ const STATUS_KPI_LABEL = {
   wip: 'lines the customer marked WIP (urgent)',
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// Every caller below writes this into order_lines.wip_date. dayOf, never
+// toISOString(): before 05:30 IST that reads yesterday, so a line marked on the
+// night shift recorded the wrong day it was marked.
+const todayISO = () => dayOf(new Date());
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable

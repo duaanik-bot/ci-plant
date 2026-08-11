@@ -8,6 +8,7 @@ import {
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { REQUEST_KPI, terminal } from '../lib/toolingQueue.js';
 import {
   Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, rowMatches,
   SearchableSelect, Select, SubTabs, Textarea, useToast,
@@ -60,7 +61,6 @@ const SOURCE = {
   vendor: ['Vendor', Truck], procurement: ['Procurement', ShoppingBag],
 };
 
-const terminal = status => ['ready','issued_to_floor','returned_to_rack','cancelled','replaced'].includes(status);
 const canManage = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
 
 function StatusChip({ status }) {
@@ -290,14 +290,6 @@ function ToolForm({ family, products, initial, onClose, onSaved }) {
     </Modal>
   );
 }
-
-const REQUEST_KPI = {
-  open: r => !terminal(r.status),
-  pending: r => r.status === 'pending',
-  making: r => ['in_house','procurement','vendor_assigned','sent_to_vendor','received_from_vendor','grn_completed'].includes(r.status),
-  ready: r => ['ready','issued_to_floor','returned_to_rack'].includes(r.status),
-  attention: r => r.status === 'lost_damaged' || (!terminal(r.status) && r.needed_by && r.needed_by < new Date().toISOString().slice(0, 10)),
-};
 
 function ToolingOperations({ family = 'shade_card' }) {
   const meta = TOOLING_FAMILY_UI[family] || TOOLING_FAMILY_UI.plate;
