@@ -2540,4 +2540,46 @@ ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
     'utf8',
   );
   await pool.query(toolingProcurementSql);
+
+  // The individual-plate lifecycle sits on top of that chain and landed as its
+  // own migrations, which were never added here. A fresh database therefore came
+  // up with no plate_masters, no plate_request_components and no plate_assets —
+  // production was fine (Supabase has them), but `npm run seed` and every
+  // throwaway database stood up to VERIFY plates work failed with
+  // `relation "plate_request_components" does not exist`. Losing that safety net
+  // is the real cost, so they are replayed here for the same reason 0035 is.
+  //
+  // IN ORDER: the tables, then their indexes, then the reversibility columns —
+  // each one builds on the last. All three are IF NOT EXISTS throughout, so this
+  // is a no-op on a database that already has them.
+  //
+  // The legacy backfill migration is deliberately absent. It repairs one
+  // historical row shape, carries no IF NOT EXISTS, and has nothing to do on an
+  // empty database: schema is replayable, a one-off data repair is not.
+  const migration = file => fs.readFileSync(
+    path.join(__dirname, '..', '..', 'supabase', 'migrations', file), 'utf8');
+
+  for (const file of [
+    '20260808054658_plate_asset_lifecycle.sql',
+    '20260808061141_plate_asset_lifecycle_indexes.sql',
+    '20260808071000_plate_workflow_reversibility.sql',
+  ]) {
+    await pool.query(migration(file));
+  }
+
+  // The plate RATES pair is guarded instead of replayed, because unlike the
+  // three above it is NOT idempotent: bare `CREATE TABLE plate_rates` and bare
+  // `CREATE INDEX`, which throw the second time. init() runs on every boot, so
+  // replaying them unconditionally would break every existing local database
+  // rather than fix the fresh one.
+  //
+  // Guarded on the table's existence rather than made idempotent in the .sql:
+  // those files are already applied on Supabase and editing a shipped migration
+  // to suit the local bootstrap is how the two histories start disagreeing.
+  const [{ has_plate_rates: hasPlateRates }] = (await pool.query(
+    `SELECT to_regclass('public.plate_rates') IS NOT NULL AS has_plate_rates`)).rows;
+  if (!hasPlateRates) {
+    await pool.query(migration('20260808085337_plate_rates_master.sql'));
+    await pool.query(migration('20260808090012_plate_rates_vendor_index.sql'));
+  }
 }
