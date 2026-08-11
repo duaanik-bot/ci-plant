@@ -77,6 +77,17 @@ const STAGE_ITEMS = {
 };
 
 function boardAvailable(gates) {
+  // FIRST, ahead of the mix arm: a job whose board is already DRAWN has no
+  // board question left. The sheets are on the machine — they left `available`
+  // when cutting issued them, so every "short by N" derived from the shelf is
+  // arithmetic about board that is physically in the operator's hands. The
+  // BADGE has had this guard since boardStateOf ("a job mid-production is not
+  // a job to chase board for"); the traffic light never got it, and because
+  // board_available is hard:true a red light with "Board short — nothing on
+  // order" sat on cards already printing. It must short-circuit before the mix
+  // branch, not after `gates.material`, because a mixed drawn job returns
+  // 'blocked' from inside that branch.
+  if (gates.board_drawn) return ['ok', null];
   if (gates.material) return ['ok', null];
   // Every qty column is DOUBLE PRECISION, so a raw difference reads as
   // "short by 0 parent sheets" on a float hair. You cannot be short by part of

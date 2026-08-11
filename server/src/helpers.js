@@ -2635,6 +2635,13 @@ export async function stampBoardState(rows, { lineIdOf, gangIdOf = () => null, g
     const gates = await gatesOf(row);
     if (!gates) continue;
     gatesByRow.set(row, gates);
+    // Stamp the fact ONTO the gates, not just into the verdict. Callers compute
+    // gates once and feed them to BOTH the badge and the traffic light "so the
+    // two can never describe different facts" — but only the badge knew about
+    // the draw, so a card whose board was on the machine wore a green Board OK
+    // chip beside a RED light reading "Board short — nothing on order", and
+    // board_available is hard:true so that light blocked the row.
+    gates.board_drawn = drawn.has(id);
     row.board_state = boardStateOf({
       material: gates.material || drawn.has(id),
       prRaised: onOrder.has(id),

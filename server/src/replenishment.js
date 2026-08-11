@@ -168,13 +168,36 @@ export const COMMITTED_DEMAND_SQL = `
     SELECT id, product_id, material_id, SUM(qty) AS qty
     FROM pair WHERE material_id IS NOT NULL
     GROUP BY 1, 2, 3
+  ),
+  -- THE fresh_pr FENCE. A line that chose "Fresh PR — leave stock free" said it
+  -- will not run on the shelf, and every other reader honours that: claimsByBoard
+  -- fences such a claim to its own incoming PR, gangPosition gives it its own
+  -- branch, boardPositionView gives it another. This one did not, so the Board
+  -- register's Frozen / Free to Promise counted a fresh_pr line's whole
+  -- requirement as shelf commitment — the register denying the promise the
+  -- planning engine had just made on the same board, on the same screen refresh.
+  -- Same shape as claimsByBoard's: the claim is capped at what its own PR has
+  -- NOT yet covered, so before the PR exists the full claim still presses (an
+  -- opt-out can never hide demand) and as the board lands the fence closes.
+  fenced AS (
+    SELECT b.id, b.product_id, b.material_id,
+           CASE WHEN ol.stock_booking = 'fresh_pr'
+                THEN GREATEST(b.qty - COALESCE(inc.qty, 0), 0)
+                ELSE b.qty END AS qty
+    FROM book b
+    JOIN order_lines ol ON ol.id = b.id
+    LEFT JOIN (SELECT ba.order_line_id, ba.material_id, SUM(ba.qty) AS qty
+                 FROM board_allocations ba
+                WHERE ba.status='active' AND ba.source='requisition'
+                GROUP BY 1, 2) inc
+           ON inc.order_line_id = b.id AND inc.material_id = b.material_id
   )
   SELECT b.material_id,
          SUM(GREATEST(b.qty - COALESCE(used.qty, 0), 0)) AS q,
          COUNT(*) FILTER (WHERE b.qty > COALESCE(used.qty, 0))::int AS n,
          ARRAY_AGG(DISTINCT b.id)         FILTER (WHERE b.qty > COALESCE(used.qty, 0)) AS line_ids,
          ARRAY_AGG(DISTINCT b.product_id) FILTER (WHERE b.qty > COALESCE(used.qty, 0)) AS product_ids
-  FROM book b
+  FROM fenced b
   LEFT JOIN LATERAL (
     -- What this line has already drawn off the shelf for THIS board. Matched
     -- through its own job card; a gang parent carrying no order_line_id

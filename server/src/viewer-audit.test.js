@@ -156,3 +156,44 @@ test('held_others is emitted by the server and consumed verbatim', () => {
   assert.match(planning, /heldOthers: ctx\.stock\.held_others != null \? \+ctx\.stock\.held_others : null/,
     'the client passes it through rather than deriving it');
 });
+
+// The traffic light and the badge are fed the SAME gates object precisely so
+// "the two can never describe different facts" — but only the badge knew about
+// the draw, so a card whose board was on the machine wore a green Board OK chip
+// beside a RED light saying "Board short — nothing on order", and
+// board_available is hard:true so that light blocked the row.
+test('the traffic light knows a drawn board is not a board question', () => {
+  const light = read('./readiness-light.js');
+  const fn = light.slice(light.indexOf('function boardAvailable'), light.indexOf('function boardAvailable') + 2600);
+  assert.match(fn, /if \(gates\.board_drawn\) return \['ok', null\]/,
+    'and it short-circuits FIRST — a mixed drawn job returns blocked from inside the mix arm');
+  assert.ok(fn.indexOf('gates.board_drawn') < fn.indexOf('gates.mix_active'),
+    'ahead of the mix branch, not after gates.material');
+  const helpers = read('./helpers.js');
+  assert.match(helpers, /gates\.board_drawn = drawn\.has\(id\)/,
+    'stampBoardState stamps the fact onto the shared gates, not just into the verdict');
+});
+
+// A fresh_pr line said it will not run on the shelf. claimsByBoard fences such a
+// claim to its own incoming PR, gangPosition gives it a branch, boardPositionView
+// gives it another — and COMMITTED_DEMAND_SQL did not, so the Board register's
+// Frozen / Free to Promise denied the promise the planning engine had just made.
+test('committed demand fences a fresh_pr claim to its own PR', async () => {
+  const { COMMITTED_DEMAND_SQL } = await import('./replenishment.js');
+  assert.match(COMMITTED_DEMAND_SQL, /fenced AS \(/, 'the fence is its own CTE');
+  assert.match(COMMITTED_DEMAND_SQL, /WHEN ol\.stock_booking = 'fresh_pr'/);
+  assert.match(COMMITTED_DEMAND_SQL, /GREATEST\(b\.qty - COALESCE\(inc\.qty, 0\), 0\)/,
+    'capped at what its own PR has NOT covered — before the PR exists the full claim still presses');
+  assert.match(COMMITTED_DEMAND_SQL, /FROM fenced b/, 'and the final SELECT reads the fenced set');
+});
+
+// smartmatch subtracts a third term; the run path never supplied it, so the two
+// Smart Match panels quoted different free stock for the same board — and the
+// run's is the one that buys on ONE combined PR.
+test('the run Smart Match supplies the held term too', () => {
+  const gangs = read('./routes/gangs.js');
+  const i = gangs.indexOf("r.get('/gang-runs/:id/smart-match'");
+  const block = gangs.slice(i, i + 4200);
+  assert.match(block, /c\.held = stockHoldBudget\(/, 'the run endpoint sets held');
+  assert.match(block, /ownerLineIds: members\.map\(m => m\.id\)/, "excluding the run's own members");
+});

@@ -2221,6 +2221,15 @@ r.get('/gang-runs/:id/smart-match', async (req, res, next) => {
     for (const c of candidates) {
       const claim = claims.get(c.id);
       c.committed = claim?.committed || 0;
+      // Holds owned by lines outside the claim set — the same third term the
+      // single-job endpoint supplies. rankBoardMatches subtracts `held` from
+      // free; leaving it unset made that term silently zero on the run path
+      // alone, so the two Smart Match panels quoted different free stock for
+      // the same board, and the run's is the one that buys on ONE combined PR.
+      c.held = stockHoldBudget({
+        materialId: c.id, available: Number(c.available || 0),
+        allocations, claimLines, ownerLineIds: members.map(m => m.id),
+      }).held;
       c.claimants = claim?.claimants || [];
     }
     const currentBoard = candidates.find(c => c.id === anchorId) || await one('SELECT * FROM materials WHERE id=$1', [anchorId]);
