@@ -166,6 +166,30 @@ test('the SQL ownership predicate nets a run out through its RUN', () => {
   assert.match(pred, /rol\.gang_run_id = jc\.gang_run_id/);
 });
 
+// Same law, third form: the board-mix position (bmp) a card shows. Three views
+// carried this body INLINE. Two were taught that a run keeps its mix on its
+// members; floor.js was not, and still said "verbatim from JC_VIEW" while
+// having drifted — so the floor board would call a run card unmixed while the
+// job card beside it read the mix in full. A comment cannot hold two files in
+// step, so there is now one constant and no inline copies.
+test('the board-mix position has ONE spelling, and it knows about runs', async () => {
+  const { BOARD_MIX_POSITION_LATERAL } = await import('./helpers.js');
+  assert.match(BOARD_MIX_POSITION_LATERAL, /mol\.gang_run_id = jc\.gang_run_id/,
+    'a run finds its mix through its members');
+  assert.match(BOARD_MIX_POSITION_LATERAL, /GROUP BY x\.material_id/,
+    'and sums per board first — a run holds one row per member per board, so '
+    + 'judging each against the full shelf counts the same stock twice');
+
+  // No view may carry its own copy. `x.sheets` un-grouped is the old body's
+  // fingerprint: the shared one compares g.sheets, the per-board sum.
+  for (const f of ['routes/production.js', 'routes/floor.js']) {
+    const src = readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
+    assert.ok(src.includes('${BOARD_MIX_POSITION_LATERAL}'), `${f} must use the shared lateral`);
+    assert.doesNotMatch(src, /GREATEST\(0, x\.sheets - COALESCE\(sa\.q,0\)\)/,
+      `${f} still has an inline board-mix position — that is how floor.js drifted`);
+  }
+});
+
 // The gate is reached from a job card, and a RUN card's order_line_id is NULL.
 // Passing that NULL as the owner is the original bug; pin the call shape so it
 // cannot silently return.

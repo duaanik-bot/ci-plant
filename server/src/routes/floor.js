@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -299,17 +299,9 @@ r.get('/floor', async (req, res, next) => {
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
-      -- bmp = board-mix position, verbatim from JC_VIEW: keyed on the card's
-      -- OWN order line (NULL for gang cards, so they fall through to the
-      -- single-board arm — gangs are excluded from mixes by design).
-      LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS n,
-               COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
-        FROM job_board_mix x
-        LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
-                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
-        WHERE x.order_line_id = jc.order_line_id AND x.phase='plan'
-      ) bmp ON true
+      -- bmp = board-mix position — the ONE spelling, shared with JC_VIEW so the
+      -- floor board and the job card can never disagree about a run's mix.
+      ${BOARD_MIX_POSITION_LATERAL}
       -- An extra-sheet request already awaiting decision on this job card. The
       -- board hides its ⊞ control when one is open, because the server allows
       -- only one at a time and would otherwise 409 the operator.

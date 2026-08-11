@@ -1556,6 +1556,43 @@ export const GANG_ANCHOR_LINE = `
 //
 // Expects the query to alias job_cards as `jc`; produces `mxi` (the line-id
 // set) and `mxc` — SELECT `mxc.rows AS mix_cuts` to carry it.
+// bmp = board-mix position: this job's job_board_mix PLAN rows, each board
+// checked against its own stock. A LINE card's rows are keyed on its own order
+// line; a RUN card (gang/merge parent — order_line_id NULL) stores its
+// run-level mix SPLIT ACROSS THE MEMBERS (gang-mix.js), so its rows are found
+// through the run's own lines instead. Rows are summed PER BOARD before the
+// stock comparison — a run holds one row per member per board, and judging
+// each against the full shelf would count the same stock several times over.
+// A line's mix never repeats a board (the panel refuses duplicates), so the
+// GROUP BY is a no-op there and the arm reads exactly as it always did.
+//
+// ONE spelling, because the copies drifted. Three views carried this body
+// inline; two were taught about runs and floor.js was not, so the floor board
+// would have read a run card as unmixed — bmp.n = 0, no shortfall — while the
+// job card beside it read the mix in full. Its comment still said "verbatim
+// from JC_VIEW" and "gangs are excluded from mixes by design", true when
+// written and false since gangs.js learned to save a run mix. A comment cannot
+// hold two files in step; a shared constant can.
+//
+// Expects the query to alias job_cards as `jc`; produces `bmp` (.n, .short).
+// NOT for a query keyed on an order LINE — dashboard.js asks this per line,
+// where "the run's whole shortfall" would fire once per member.
+export const BOARD_MIX_POSITION_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS n,
+           COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
+    FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
+          FROM job_board_mix x
+          WHERE x.phase='plan'
+            AND (x.order_line_id = jc.order_line_id
+                 OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+                     AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
+                                             WHERE mol.gang_run_id = jc.gang_run_id)))
+          GROUP BY x.material_id) g
+    LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
+  ) bmp ON true`;
+
 export const MIX_CUTS_LATERAL = `
   LEFT JOIN LATERAL (
     SELECT CASE

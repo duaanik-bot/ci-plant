@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -236,29 +236,9 @@ const JC_VIEW = `
     WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       AND sb.status='available'
   ) stk ON true
-  -- bmp = board-mix position: this job's job_board_mix plan rows, each board
-  -- checked against its own stock. A LINE card's rows are keyed on its own
-  -- order line; a RUN card (gang/merge parent — order_line_id NULL) stores
-  -- its run-level mix SPLIT ACROSS THE MEMBERS (gang-mix.js), so its rows are
-  -- found through the run's own lines instead. Rows are summed PER BOARD
-  -- before the stock comparison — a run holds one row per member per board,
-  -- and judging each against the full shelf would count the same stock
-  -- several times over. A line's mix never repeats a board (the panel refuses
-  -- duplicates), so the GROUP BY is a no-op there and the arm reads as before.
-  LEFT JOIN LATERAL (
-    SELECT COUNT(*)::int AS n,
-           COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
-    FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
-          FROM job_board_mix x
-          WHERE x.phase='plan'
-            AND (x.order_line_id = jc.order_line_id
-                 OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
-                     AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
-                                             WHERE mol.gang_run_id = jc.gang_run_id)))
-          GROUP BY x.material_id) g
-    LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
-               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
-  ) bmp ON true
+  -- bmp = board-mix position — the ONE spelling (helpers.js), shared with the
+  -- stage view below and the floor board so none of them can drift apart.
+  ${BOARD_MIX_POSITION_LATERAL}
   ${MIX_CUTS_LATERAL}`;
 
 // Artwork source: every active Tooling Hub record linked to the job's product,
@@ -1460,24 +1440,9 @@ r.get('/print-planning', async (_req, res, next) => {
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
-      -- bmp = board-mix position, verbatim from JC_VIEW: a line card's rows
-      -- by its own order line, a RUN card's through the run's members
-      -- (gang-mix.js splits a run's mix across them), summed per board before
-      -- the stock comparison so shared stock is never counted twice.
-      LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS n,
-               COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
-        FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
-              FROM job_board_mix x
-              WHERE x.phase='plan'
-                AND (x.order_line_id = jc.order_line_id
-                     OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
-                         AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
-                                                 WHERE mol.gang_run_id = jc.gang_run_id)))
-              GROUP BY x.material_id) g
-        LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
-                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
-      ) bmp ON true
+      -- bmp = board-mix position — the ONE spelling (helpers.js), the same
+      -- constant JC_VIEW and the floor board use.
+      ${BOARD_MIX_POSITION_LATERAL}
       ${MIX_CUTS_LATERAL}
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
