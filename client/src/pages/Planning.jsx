@@ -147,18 +147,6 @@ function ColourScheme({ line }) {
 // seam by hand only makes that seam the odd one out.
 const PLAN_CELL = 'px-2.5';
 
-function PoAge({ line }) {
-  const a = poAgeOf(line);
-  if (!a.date) return null;
-  return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] leading-4 tabular-nums text-slate-500">
-      <span className="whitespace-nowrap">{fmt.date(a.date)}</span>
-      {a.latest && <span className="whitespace-nowrap text-slate-400">→ {fmt.date(a.latest)}</span>}
-      <OverdueDays days={a.days} count={a.count} />
-    </div>
-  );
-}
-
 // The searchable text behind those columns — every member's raw value, so a
 // search for a coating or a board still finds the gang that contains it even
 // when the cell itself reads "mixed".
@@ -2825,10 +2813,11 @@ export default function Planning() {
           // the heading's own menu, because merging cells must never cost a
           // sort.
           { key: 'po_number', label: 'Order', width: 'w-[132px]', colClass: PLAN_CELL,
+            // Just the PO number now — PO date and Days overdue became columns
+            // of their own beside this one, and a sort menu that repeats what
+            // the next two headers already do is two ways to say one thing.
             sortKeys: [
               { key: 'po_number', label: 'PO number' },
-              { key: 'po_date', label: 'PO date', sortValue: l => poAgeOf(l).date || '' },
-              { key: 'od', label: 'Days overdue', sortValue: l => poAgeOf(l).days ?? -1 },
             ],
             export: l => (l._gang
               ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} ${m.po_date ? `(${fmt.date(m.po_date)})` : ''} — ${m.customer_name}`))].join(' | ')}`
@@ -2867,7 +2856,6 @@ export default function Planning() {
                       <div className="mt-0.5"><OutputChip number={l.run_output_number || l.output_number} /></div>
                     )}
                     {l._gang.some(m => m.wip) && <div className="mt-0.5"><WipChip on /></div>}
-                    <PoAge line={l} />
                   </div>
                 );
               })()
@@ -2878,8 +2866,30 @@ export default function Planning() {
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
-                <PoAge line={l} />
               </div>) },
+          // PO Date and OD as columns of their own — the same pair Artwork and
+          // the Job Card register carry, so the one clock most of this book has
+          // reads identically wherever a planner meets it. They used to be a
+          // sub-line inside Order, which could be sorted but not scanned down.
+          //
+          // A gang answers for its OLDEST member and shows the run's span, so
+          // the range the Order cell used to print lives here now, not lost.
+          { key: 'po_date', label: 'PO Date', width: 'w-[96px]', colClass: PLAN_CELL, card: 'detail',
+            sortValue: l => poAgeOf(l).date || '',
+            export: l => { const a = poAgeOf(l); return a.date
+              ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
+            render: l => { const a = poAgeOf(l);
+              if (!a.date) return <span className="text-gray-300">—</span>;
+              return (
+                <div className="text-xs tabular-nums leading-4 text-gray-600">
+                  <div className="whitespace-nowrap">{fmt.date(a.date)}</div>
+                  {a.latest && <div className="whitespace-nowrap text-[10px] text-gray-400">→ {fmt.date(a.latest)}</div>}
+                </div>
+              ); } },
+          { key: 'od', label: 'OD', width: 'w-[56px]', align: 'right', colClass: PLAN_CELL,
+            sortValue: l => poAgeOf(l).days ?? -1,
+            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
+            render: l => { const a = poAgeOf(l); return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product', width: 'w-[176px]', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [

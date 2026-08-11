@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
@@ -109,6 +109,49 @@ function BoardBand({ board }) {
   );
 }
 
+// The PO a card answers for, and how long that customer has been waiting.
+// Mirrors Planning and Artwork, except the members live on `gang_members` here
+// rather than `_gang`: a gang answers for its OLDEST PO, because the run is as
+// overdue as the longest-waiting order printed on the sheet. `latest` is set
+// only when the members were booked on different days, so the cell shows a span
+// exactly when there is one.
+//
+// This is the card's only real clock. delivery_date is null on ~92% of the open
+// book, which is why the Delivery line beside it is so often blank.
+const poAgeOf = jc => {
+  const ds = [...new Set([jc, ...(jc?.gang_members || [])].map(m => m?.po_date).filter(Boolean))].sort();
+  return { date: ds[0] ?? null, latest: ds.length > 1 ? ds[ds.length - 1] : null, days: odDays(ds[0]), count: ds.length };
+};
+
+// PO date and OD on the card face. Deliberately its own line rather than more
+// text crammed into ProductIdentity's `meta`: OD is a colour-coded chip, and a
+// chip cannot live inside a joined string. Reads "27 May 2026 → 05 Jul 2026 41d"
+// for a gang, "27 May 2026 41d" for a single card, and renders nothing at all
+// when the order carries no PO date — an empty caption is worse than silence.
+function PoAgeLine({ jc }) {
+  const a = poAgeOf(jc);
+  if (!a.date) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] leading-4 tabular-nums text-gray-500">
+      <span className="whitespace-nowrap">{fmt.date(a.date)}</span>
+      {a.latest && <span className="whitespace-nowrap text-gray-400">→ {fmt.date(a.latest)}</span>}
+      <OverdueDays days={a.days} count={a.count} />
+    </div>
+  );
+}
+
+// How the register is ordered. 'newest' is what the server already returns
+// (newest job card first) and stays the default, so nobody's usual view changes
+// until they ask for it.
+//
+// There is deliberately no separate "overdue" option: OD is a pure function of
+// the PO date, so sorting by one IS sorting by the other. Offering both would
+// be two buttons that do the same thing.
+const JC_SORTS = [
+  { key: 'newest', label: 'Newest' },
+  { key: 'po_date', label: 'Oldest PO' },
+];
+
 // The rungs of the ladder, named once so the tab strip and the export header
 // cannot drift apart.
 const TAB_LABELS = {
@@ -130,6 +173,7 @@ export default function Production() {
   // 'all': the tab a planner lands on is his whole queue, and a date filter he
   // did not ask for would hide work on the first paint.
   const [timeline, setTimeline] = useState('all');
+  const [sort, setSort] = useState('newest');
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   // Ticked cards, by id. Deliberately NOT pruned when the tab or the timeline
   // changes: gathering Monday's cards and Tuesday's into one print run is the
@@ -230,8 +274,20 @@ export default function Production() {
   // Deep row search, so a job is findable by any value on it — JC, product,
   // customer, PO, board size ("2038"), stage — and a gang parent by any of its
   // member products.
-  const shown = inWindow
+  // Ordering is the LAST step, after tab → timeline → search, so it only ever
+  // rearranges what those three already decided to show — no count moves.
+  // A card with no PO date sorts to the back of either PO ordering rather than
+  // to the top: an undated card is not the oldest thing on the board.
+  const listed = inWindow
     .filter(j => rowMatches(j, q, (j.gang_members || []).map(productSearchText).join(' ')));
+  const shown = sort === 'newest' ? listed : [...listed].sort((a, b) => {
+    const x = poAgeOf(a), y = poAgeOf(b);
+    if (!x.date && !y.date) return 0;
+    if (!x.date) return 1;
+    if (!y.date) return -1;
+    // Oldest PO first — which IS most-overdue first, the same ordering.
+    return x.date < y.date ? -1 : x.date > y.date ? 1 : 0;
+  });
 
   // ── Selection ─────────────────────────────────────────────────────────────
   // Ticking a card is pure client state: nothing is written, nothing is locked,
@@ -563,6 +619,11 @@ export default function Production() {
             { key: 'customer_name', label: 'Customer / PO', export: j => j.gang_parent && j.gang_members?.length
               ? [...new Set(j.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
               : `${j.customer_name} · PO ${j.po_number}` },
+            { key: 'po_date', label: 'PO Date',
+              export: j => { const a = poAgeOf(j); return a.date
+                ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; } },
+            { key: 'od', label: 'OD', align: 'right',
+              export: j => { const d = poAgeOf(j).days; return d == null ? '—' : `${d}d`; } },
             { key: 'delivery_date', label: 'Delivery', export: j => fmt.date(j.delivery_date) },
             { key: 'qty_planned', label: 'Ordered', align: 'right', export: j => fmt.num(j.qty_planned) },
             { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => fmt.num(j.sheets_issued) },
@@ -614,6 +675,20 @@ export default function Production() {
               onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))} /></Field>
           </div>
         )}
+        {/* Order, not filter. The timeline above answers "which days"; this
+            answers "which end first" — and it is the only way to put the
+            longest-waiting customer at the top, since the register's own
+            date is the PLANNED date and most cards carry no delivery date. */}
+        <div className="flex items-center gap-1 rounded-full bg-white/50 p-1 ring-1 ring-white/70">
+          {JC_SORTS.map(s => (
+            <button key={s.key} type="button" onClick={() => setSort(s.key)}
+              title={s.key === 'po_date' ? 'Longest-waiting customer PO first' : 'Most recently raised job card first'}
+              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]
+                ${sort === s.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
         {/* An unplanned card has no date to file under, so no preset can show
             it. Say the number — an undated job in the queue is exactly what a
             planner wants to notice, not something to hide behind a filter. */}
@@ -739,6 +814,9 @@ export default function Production() {
                     <GangOriginLine className="mt-0.5" number={jc.gang_number} mates={jc.gang_run_mates} />
                   </div>
                 )}
+                {/* One line for every shape of card — gang, merge or single —
+                    because all three branches above land here. */}
+                <PoAgeLine jc={jc} />
               </div>
               <div className="flex gap-5 text-right text-xs text-gray-500">
                 <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>{jc.gang_parent ? 'print sheets' : 'ordered'}</div>
