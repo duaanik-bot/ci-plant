@@ -1,5 +1,5 @@
 import { tx } from './db.js';
-import { adjustBoardStock, audit } from './helpers.js';
+import { adjustBoardStock, audit, moveBatchLevel } from './helpers.js';
 
 const RETURN_NOTE = 'returned to warehouse uncommitted';
 
@@ -38,10 +38,11 @@ export async function returnIssuedExtraToStock({ qc, oc, x, jc, materialId, pare
     if (owed <= 0) break;
     const back = Math.min(owed, Math.abs(Math.round(Number(row.qty || 0))));
     if (back <= 0) continue;
-    const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [row.batch_id]);
-    const newQty = Number(b?.qty || 0) + back;
-    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-      [newQty, newQty <= 0 ? 'exhausted' : 'available', row.batch_id]);
+    // moveBatchLevel: a returned sheet is LOOSE. Writing qty raw left
+    // loose_sheets behind — batch 127 read 0 loose on a 3,050-sheet pile that
+    // must hold 50, and an explicit 0 is a COUNT to packet-plan.js, so the
+    // planner was told those 50 sheets were unreachable.
+    await moveBatchLevel(row.batch_id, row.material_id, back, qc, oc);
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
               VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
       [row.material_id, row.batch_id, back, jc.id,

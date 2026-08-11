@@ -729,6 +729,35 @@ async function applyLoose(batch, packetSize, issued, packetsOpened, qtyAfter, qc
   return { loose: capped, clamped: capped !== raw };
 }
 
+// Move a batch's LEVEL and its LOOSE count together — the one spelling of
+// "a returned sheet is loose". `delta` > 0 hands sheets back, < 0 takes them.
+//
+// Five return paths wrote `UPDATE stock_batches SET qty=...` raw and left
+// loose_sheets untouched, so every reversal and every extra-sheet return broke
+// the definitional rule loose ≡ qty (mod P). Live proof: batch 167 read 12
+// loose on a 20-sheet pile (12 asserts 8 sheets sit inside a sealed 144-packet,
+// which cannot exist), and batch 127 read 0 loose on 3,050 where 50 must be
+// loose — and an explicit 0 is a COUNT to packet-plan.js, not an absence, so
+// the planner was told 50 sheets were unreachable and `suspect` fired on every
+// packet suggestion for that board.
+//
+// packetsOpened is left to derive (null): for a return the issue is negative,
+// so nothing opens and the sheets land straight back on the loose pile; for a
+// take it derives the packets the draw must have opened, exactly as consumeFifo
+// does. The batch row is re-read here with loose_sheets, because applyLoose
+// reads a missing field as "never counted" and would re-derive the figure
+// instead of moving the counted one.
+export async function moveBatchLevel(batchId, materialId, delta, qc, oc = one) {
+  const b = await oc('SELECT id, qty, loose_sheets FROM stock_batches WHERE id=$1 FOR UPDATE', [batchId]);
+  if (!b) return null;
+  const newQty = Number(b.qty || 0) + Number(delta || 0);
+  await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+    [newQty, newQty <= 0 ? 'exhausted' : 'available', batchId]);
+  const P = await packetSizeOf(materialId, oc);
+  await applyLoose(b, P, -Number(delta || 0), null, newQty, qc);
+  return newQty;
+}
+
 export async function availableQty(materialId, oc = one) {
   const r = await oc(
     `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`,
@@ -3486,10 +3515,9 @@ export async function sendStageBack(stageId, reason, qc = q, oc = one, user = nu
       const taken = -Number(rr.net);
       if (taken <= 0) continue;
       const back = Math.min(taken, owed);
-      const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [rr.batch_id]);
-      const newQty = Number(b?.qty || 0) + back;
-      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-        [newQty, newQty <= 0 ? 'exhausted' : 'available', rr.batch_id]);
+      // moveBatchLevel, not a raw UPDATE: a returned sheet is LOOSE, and five
+      // copies of this write left loose_sheets behind.
+      await moveBatchLevel(rr.batch_id, rr.material_id, back, qc, oc);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
         [rr.material_id, rr.batch_id, back, st.job_card_id,
@@ -3512,10 +3540,7 @@ export async function sendStageBack(stageId, reason, qc = q, oc = one, user = nu
       GROUP BY material_id, batch_id HAVING SUM(qty) <> 0`, [st.id]);
     for (const rr of stageRows) {
       const back = -Number(rr.net);
-      const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [rr.batch_id]);
-      const newQty = Number(b?.qty || 0) + back;
-      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-        [newQty, newQty <= 0 ? 'exhausted' : 'available', rr.batch_id]);
+      await moveBatchLevel(rr.batch_id, rr.material_id, back, qc, oc);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'adjustment',$3,'job_stage',$4,$5)`,
         [rr.material_id, rr.batch_id, back, st.id, `Variance reversed — ${st.jc_number} — ${reason}`]);
@@ -3526,9 +3551,7 @@ export async function sendStageBack(stageId, reason, qc = q, oc = one, user = nu
     for (const lo of banked) {
       const take = Math.min(Number(lo.batch_qty || 0), Number(lo.qty));
       if (take <= 1e-6) continue;
-      const newQty = Number(lo.batch_qty) - take;
-      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-        [newQty, newQty <= 0 ? 'exhausted' : 'available', lo.batch_id]);
+      await moveBatchLevel(lo.batch_id, lo.material_id, -take, qc, oc);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'adjustment',$3,'job_stage',$4,$5)`,
         [lo.material_id, lo.batch_id, -take, st.id, `Leftover unbanked — ${st.jc_number} — ${reason}`]);
@@ -3783,10 +3806,7 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
   let sheetsReturned = 0;
   for (const n of nets) {
     const back = -Number(n.net);                       // consumed nets are negative
-    const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [n.batch_id]);
-    const newQty = Number(b?.qty || 0) + back;
-    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-      [newQty, newQty === 0 ? 'exhausted' : 'available', n.batch_id]);
+    await moveBatchLevel(n.batch_id, n.material_id, back, qc, oc);
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
               VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
       [n.material_id, n.batch_id, back, jc.id, `Returned — ${jc.jc_number} ${why}`]);
@@ -3811,9 +3831,8 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
     const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [lo.batch_id]);
     const take = Math.min(Number(b?.qty || 0), Number(lo.qty));
     if (take <= 0) continue;
-    const newQty = Number(b.qty) - take;
-    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
-      [newQty, newQty === 0 ? 'exhausted' : 'available', lo.batch_id]);
+    // The twin of sendStageBack's unbank — same one spelling.
+    await moveBatchLevel(lo.batch_id, lo.material_id, -take, qc, oc);
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
               VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
       [lo.material_id, lo.batch_id, -take, jc.id, `Leftover unbanked — ${jc.jc_number} ${why}`]);
