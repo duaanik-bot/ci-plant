@@ -88,6 +88,24 @@ export async function setLineStatus(lineId, to, qc = q, oc = one, user = null) {
   // at the call sites because there are three today and that will not hold.
   if (to === 'cancelled') {
     await releasePlanLockHolds(lineId, qc, user, 'order line cancelled');
+    // …and then EVERY other stock hold on the line, whatever wrote it. The
+    // comment above is true of all of them, but releasePlanLockHolds is scoped
+    // `origin='plan_lock'`, so a board-mix mirror, a GRN cover hold or a
+    // planner's hand-placed Commit survived on a line that is no longer demand
+    // — frozen forever, invisible to every "still to buy" figure (a cancelled
+    // line is outside BOARD_DEMAND_STATUSES), and with no un-plan route left to
+    // reach it. The backstop is deliberately origin-AGNOSTIC for the same
+    // reason consumeDrawnHolds is: a hold written by a path not yet invented
+    // must still die with its line.
+    const stranded = await qc(
+      `UPDATE board_allocations
+          SET status='released', released_by=$2, released_at=now(), release_reason=$3
+        WHERE order_line_id=$1 AND status='active' AND source='stock'
+        RETURNING material_id, qty`,
+      [lineId, user, 'order line cancelled']);
+    for (const a of stranded)
+      await audit('materials', a.material_id, 'board_hold_released',
+        `${Math.round(Number(a.qty))} sheets released — order line #${lineId} cancelled`, qc, user);
   }
   await audit('order_line', lineId, `status:${line.status}→${to}`, null, qc, user);
   return { ...line, status: to };
@@ -2716,13 +2734,29 @@ export async function openPrLineIds(lineIds = [], qc = q) {
 // of by a list of line ids. One rule, one string — a second hand-written copy of
 // this predicate is how "drawn" starts meaning two different things. Expects the
 // query to alias order_lines as `ol`.
+// NET, not EXISTS. "Drawn" asks whether the sheets are OFF the shelf right now,
+// and a reversal puts them back: sendStageBack returns the board to its own
+// batches and writes the return as an 'adjustment' against the SAME
+// ref_type='job_card' the draw used, because "the original consumption rows
+// always STAY and a return is a new 'adjustment' row". An EXISTS on the
+// consumption therefore stayed true forever — a reversed job read as drawn
+// while its board sat back in the racks, so claimsByBoard netted its claim off
+// (a drawn job is a closed board question) and the returned sheets read 100%
+// free to everyone. Board could be promised twice: once to the job that still
+// needs it, once to whoever the register offered it to.
+//
+// Summing consumption + adjustment on the card is the same pair stageFacts
+// already sums, so this is an existing spelling rather than a new one. Cutting
+// variance true-ups ride on ref_type='job_stage' and are deliberately outside
+// this: they resize a draw, they do not undo one.
 export const BOARD_DRAWN_EXISTS = `EXISTS (
         SELECT 1 FROM stock_movements sm
         JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
-        WHERE sm.type='consumption'
+        WHERE sm.type IN ('consumption','adjustment')
           AND (jc.order_line_id = ol.id
                OR (ol.gang_run_id IS NOT NULL AND jc.order_line_id IS NULL
                    AND jc.gang_run_id = ol.gang_run_id))
+        HAVING SUM(sm.qty) < 0
       )`;
 
 export async function boardDrawnLineIds(lineIds = [], qc = q) {
