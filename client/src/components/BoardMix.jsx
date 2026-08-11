@@ -321,6 +321,12 @@ export default function BoardMix({
       // `free`, not the gross shelf: what this job may take (see the costing in
       // orders.js's planning context). mixUnstockedRows warns off this figure.
       available: first.free ?? first.available,
+      // …and the RAW shelf beside it, so the over-allocation warning can tell a
+      // board that is EMPTY from one that is full but wholly committed. Written
+      // on every constructor, not just the reopen seeds: a row added in-session
+      // carried no shelf at all, so the "every sheet is committed" arm was dead
+      // on exactly the rows a planner is looking at while they type.
+      shelf: first.available ?? null,
     }]);
   };
   const set = (i, patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -346,9 +352,13 @@ export default function BoardMix({
     const reason = c.severity === 'none'
       ? ''
       : (rows[i]?.reason?.trim() || others.find(r => r.reason?.trim())?.reason || DEFAULT_MIX_REASON);
+    // `shelf` is written EXPLICITLY, never merely omitted: set() spreads
+    // { ...r, ...patch }, so a missing key would leave the PREVIOUS board's
+    // shelf sitting on the row after a pick.
     set(i, { material_id: c.id, board_name: c.name, ups: c.ups, stock_batch_id: null, reason,
              severity: c.severity, gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-             size_differs: c.size_differs, available: c.free ?? c.available });
+             size_differs: c.size_differs, available: c.free ?? c.available,
+             shelf: c.available ?? null });
   };
 
   // One reason for the whole mix, not one per row — the owner never wanted to

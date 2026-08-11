@@ -23,6 +23,7 @@ import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
 import { boardPositionView } from '../lib/boardPositionView.js';
+import { boardShortOf } from '../lib/boardShort.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
@@ -235,9 +236,7 @@ function ReadinessCell({ readiness, light }) {
   // asking parent_needed - available_sheets there reported the planned board's
   // own gap while the real hole sat on an emptied substitute. mix_short is the
   // summed truth; the single-board subtraction stays for jobs without a mix.
-  const short = readiness.material ? 0
-    : readiness.mix_active ? Math.max(0, Math.round(readiness.mix_short || 0))
-    : Math.max(0, readiness.parent_needed - readiness.available_sheets);
+  const short = boardShortOf(readiness);
   const pending = !!readiness.material_pending;
   const gates = [
     { key: 'artwork', label: 'Artwork', icon: Palette, ok: readiness.artwork, hint: readiness.artwork ? 'ready' : 'pending' },
@@ -740,10 +739,12 @@ export default function Planning() {
   const kpiPlan = (() => {
     const rows = shown;
     const lit = k => rows.filter(l => l.light?.light === k).length;
-    // Same arithmetic as ReadinessCell, so the queue's red "−725" on a row and
-    // the strip's total are the same number counted the same way.
-    const shortOf = l => (l.readiness && !l.readiness.material
-      ? Math.max(0, (+l.readiness.parent_needed || 0) - (+l.readiness.available_sheets || 0)) : 0);
+    // Same arithmetic as ReadinessCell — now literally, via boardShortOf. It
+    // said this before and was not: the row had three branches and this had two,
+    // so a MIXED line fell through to the single-board subtraction and the strip
+    // counted the planned board's own gap while the real hole sat on a
+    // substitute. A covered mix still added a phantom shortage to the total.
+    const shortOf = l => boardShortOf(l.readiness);
     // Every unresolved job (short + on order) — the sheet gap procurement is
     // still carrying, whether or not a PR has been written for it yet.
     const shortRows = groupedRows.filter(boardShort);
@@ -1399,10 +1400,37 @@ export default function Planning() {
     const heldRun = gangView.position?.held ?? 0;
     const avail = gangView.position?.available ?? 0;
     const other = (gangView.position?.committed_other ?? 0) + (gangView.position?.held_others ?? 0);
+    // The LEAD board answers for its OWN members' sheets, not the whole run's —
+    // the server scopes position.needed that way ("the lead board answers for
+    // its own members") and gives every other board its own entry in
+    // other_board_positions. Charging the run total to the lead board here made
+    // the client twin read short against a board that was never asked for those
+    // sheets. A shared (co-printed) layout is the exception by construction:
+    // one sheet prints every member, so the run figure IS the lead board's.
+    // Keyed on gangCalc.sharedMode, not layout_mode — the server's sharedRun is
+    // also null for a merge run and for a pending layout, and gangCalc already
+    // carries exactly that state.
+    const leadShare = gangCalc?.sharedMode
+      ? gangPressingOnPlanned
+      : (gangView.position?.needed ?? gangPressingOnPlanned);
     const short = freshRun
-      ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
-      : Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
-    return { short, freshRun, onOrder, free: Math.max(0, avail - other) };
+      ? Math.max(0, leadShare - heldRun - onOrder)
+      : Math.max(0, leadShare + other - avail - onOrder);
+    // Boards the other members run on, each with its own shortfall — a
+    // two-board gang stopped hiding the second board's gap inside the first's
+    // surplus the moment the server started answering per board.
+    const otherBoards = (gangView.other_board_positions || [])
+      .map(b => ({
+        board_material_id: b.board_material_id,
+        board_name: b.board_name,
+        short: Math.max(0, Number(b.position?.short || 0)),
+      }))
+      .filter(b => b.short > 0);
+    return {
+      short, freshRun, onOrder, otherBoards,
+      totalShort: short + otherBoards.reduce((s, b) => s + b.short, 0),
+      free: Math.max(0, avail - other),
+    };
   })();
 
   // Smart Match — fetched only when the selected board runs short, debounced
@@ -2119,7 +2147,7 @@ export default function Planning() {
     // Same soft gate as the single engine's Lock: a short run may lock — the
     // server caps the run's holds and reports the shortfalls — but never
     // silently. The gang lock had NO confirm of any kind before this.
-    if (!confirmedShort && gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0) {
+    if (!confirmedShort && gangShortNow && !gangShortNow.freshRun && gangShortNow.totalShort > 0) {
       setGangLockShortConfirm(gangShortNow);
       return;
     }
@@ -2398,7 +2426,9 @@ export default function Planning() {
       { material_id: c.id, board_name: c.name, ups: c.ups, sheets: position.short,
         stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
         gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-        size_differs: c.size_differs, available: c.free ?? c.available },
+        size_differs: c.size_differs, available: c.free ?? c.available,
+                        // raw shelf beside free — see BoardMix's over-allocation arm
+                        shelf: c.available ?? null },
     ]);
   };
 
@@ -4722,7 +4752,7 @@ export default function Planning() {
               never dressed like a covered lock; variant="solid" because
               .btn-brand paints over bg-* utilities. */}
           <Button onClick={() => lockGangPlan()}
-            {...(gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0
+            {...(gangShortNow && !gangShortNow.freshRun && gangShortNow.totalShort > 0
               ? { variant: 'solid', className: '!bg-amber-500 !text-white hover:!bg-amber-600' } : {})}
             disabled={gangBusyLock || gangBusySave || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child) || !gangMixOk}
             title={gangView?.layout_pending
@@ -4730,7 +4760,7 @@ export default function Planning() {
                   ? `Locks on the members' agreed ${gangView.layout_fallback_child.l}×${gangView.layout_fallback_child.w}" child sheet and saves it as the layout — the Run Sheet can still change it later`
                   : 'Layout pending — the members carry no single agreed child sheet size; enter it in the Run Sheet first')
               : undefined}>
-            {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}{gangShortNow && !gangShortNow.freshRun && gangShortNow.short > 0 ? ` · ${fmt.num(gangShortNow.short)} short` : ''}
+            {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}{gangShortNow && !gangShortNow.freshRun && gangShortNow.totalShort > 0 ? ` · ${fmt.num(gangShortNow.totalShort)} short` : ''}
           </Button>
         </>}>
         {gangView && (() => {
@@ -5361,7 +5391,9 @@ export default function Planning() {
                       { material_id: c.id, board_name: c.name, ups: c.ups, sheets: short,
                         stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
                         gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-                        size_differs: c.size_differs, available: c.free ?? c.available },
+                        size_differs: c.size_differs, available: c.free ?? c.available,
+                        // raw shelf beside free — see BoardMix's over-allocation arm
+                        shelf: c.available ?? null },
                     ]);
                   };
                   return (
@@ -5525,12 +5557,15 @@ export default function Planning() {
           every member (the raise button's own wording), so the body says so. */}
       <ConfirmDialog open={!!gangLockShortConfirm} onClose={() => setGangLockShortConfirm(null)}
         onConfirm={() => lockGangPlan(true)}
-        title={gangLockShortConfirm ? `Lock the run ${fmt.num(gangLockShortConfirm.short)} sheets short?` : ''}
+        title={gangLockShortConfirm ? `Lock the run ${fmt.num(gangLockShortConfirm.totalShort)} sheets short?` : ''}
         confirmLabel="Lock anyway — holds capped at free stock"
         message={gangLockShortConfirm
           ? `Only ${fmt.num(gangLockShortConfirm.free)} sheets are free for this run. The run still locks — `
             + `every member's hold is capped at what is free, and the remaining `
-            + `${fmt.num(gangLockShortConfirm.short)} shows in the warehouse Shortfall column. `
+            + `${fmt.num(gangLockShortConfirm.totalShort)} shows in the warehouse Shortfall column. `
+            + (gangLockShortConfirm.otherBoards?.length
+                ? `That includes ${gangLockShortConfirm.otherBoards.map(b => `${fmt.num(b.short)} on ${b.board_name}`).join(' and ')} — members running on another board. `
+                : '')
             + `One PR covers the whole run if you choose to raise it.`
           : ''} />
 

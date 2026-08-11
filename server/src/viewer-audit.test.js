@@ -136,11 +136,22 @@ test('reopened mix rows read free first, and a frozen board is not "empty"', () 
 
 test('the run panel has ONE spelling of "short right now"', () => {
   const src = read('../../client/src/pages/Planning.jsx');
-  const inline = [...src.matchAll(/gangPressingOnPlanned \+ /g)];
+  const inline = [...src.matchAll(/leadShare \+ other - avail - onOrder/g)];
   assert.equal(inline.length, 1,
     'the book-branch shortfall arithmetic lives ONLY in gangShortNow — three '
     + 'inline copies is how the single engine\'s verdicts drifted');
   assert.match(src, /held_others \?\? 0/, 'and it carries the server\'s new held_others');
+  // The LEAD board answers for its own members' sheets — the server scopes
+  // position.needed that way and gives every other board its own entry. The
+  // client charged the whole run to the lead board and read short against a
+  // board never asked for those sheets.
+  assert.match(src, /gangCalc\?\.sharedMode\s*\n?\s*\? gangPressingOnPlanned\s*\n?\s*: \(gangView\.position\?\.needed \?\? gangPressingOnPlanned\)/,
+    'scoped on gangCalc.sharedMode — the server\'s sharedRun is also null for a '
+    + 'merge run and a pending layout, which layout_mode alone cannot tell');
+  assert.match(src, /other_board_positions \|\| \[\]/,
+    'and the other boards\' shortfalls are read, not left invisible');
+  assert.match(src, /totalShort: short \+ otherBoards\.reduce/,
+    'the lock gate and the button quote the WHOLE run — the lock caps holds on every board');
 });
 
 // The server owns the others-only figure, because only the server knows each
