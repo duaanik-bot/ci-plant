@@ -3249,30 +3249,83 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
       // board by the delta vs what the stage currently reflects (st.qty_in was
       // set to the last actual parents at completion / prior adjust).
       if (st.stage === 'cutting') {
-        const jcv = await oc('SELECT children_per_parent, sheets_issued FROM job_cards WHERE id=$1', [st.job_card_id]);
-        const v = cuttingVariance({ qty_out: newOut, qty_scrap: newScrap, children_per_parent: jcv.children_per_parent, sheets_issued: jcv.sheets_issued });
+        const jcv = await oc('SELECT children_per_parent, sheets_issued, order_line_id, gang_run_id FROM job_cards WHERE id=$1', [st.job_card_id]);
+        // WHICH BOARD was actually cut. Completion settled this and adjust
+        // never learned it — its own comment: "the mix row names the board
+        // that was physically cut, and for a substitute-only mix that is NOT
+        // eff.board_material_id — the legacy write block would true up the
+        // PLANNED board's stock for a pile that was never touched." Adjust
+        // did exactly that on JC-0098: the whole job cut on material 89, the
+        // adjust refunded 4,500 to material 104 (the master's board, of which
+        // not one sheet has ever been issued), and adjustBoardStock minted a
+        // CUT-RETURN batch of 4,500 phantom sheets on a board with no stock.
+        // A mix row's `ups` is also that board's own cuts, so cpp comes from
+        // the row too, not the card's aggregate figure.
+        const runLineIds = !jcv.order_line_id && jcv.gang_run_id
+          ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jcv.gang_run_id])).map(x => x.id)
+          : null;
+        const mixOf = async phase => {
+          if (jcv.order_line_id) return await mixFor(jcv.order_line_id, phase, qc);
+          if (!runLineIds) return [];
+          const flat = [];
+          for (const id of runLineIds) flat.push(...await mixFor(id, phase, qc));
+          return runMixFromMembers(flat);
+        };
+        const mixRows = (await mixOf('issued')).length ? await mixOf('issued') : await mixOf('plan');
+
+        const eff = await oc(`
+          SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                          p.board_material_id) AS board_material_id
+          FROM job_cards jc
+          JOIN products p ON p.id = jc.product_id
+          LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+          ${GANG_ANCHOR_LINE}
+          WHERE jc.id=$1`, [st.job_card_id]);
+        // One board, whether that is the no-mix case or a single-row mix: the
+        // mix row's board and cuts win, exactly as completion's one-board
+        // branch does. Multi-board: the adjust dialog collects ONE total, so
+        // per-board truth is not available here the way completion's per-board
+        // entry supplies it — the delta is apportioned by each board's issued
+        // share, largest row absorbing the rounding, and every board that is
+        // trued up gets its own register row. No board that was not cut is
+        // ever touched.
+        const single = mixRows.length === 1 ? mixRows[0] : null;
+        const v = cuttingVariance({
+          qty_out: newOut, qty_scrap: newScrap,
+          children_per_parent: single ? single.ups : jcv.children_per_parent,
+          sheets_issued: single ? Number(single.sheets) : jcv.sheets_issued,
+        });
         const boardDelta = v.actualParents - (st.qty_in || 0);
         if (boardDelta !== 0) {
-          const eff = await oc(`
-            SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
-                            p.board_material_id) AS board_material_id
-            FROM job_cards jc
-            JOIN products p ON p.id = jc.product_id
-            LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-            ${GANG_ANCHOR_LINE}
-            WHERE jc.id=$1`, [st.job_card_id]);
-          const avail = await oc(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
-          await adjustBoardStock(eff?.board_material_id, boardDelta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc, { reason: 'Adjust', user: req.user.name });
+          const targets = mixRows.length > 1
+            ? (() => {
+                const total = mixRows.reduce((s, m) => s + Number(m.sheets || 0), 0) || 1;
+                const parts = mixRows.map(m => ({
+                  material_id: m.material_id,
+                  delta: Math.trunc(boardDelta * (Number(m.sheets || 0) / total)),
+                }));
+                const drift = boardDelta - parts.reduce((s, p) => s + p.delta, 0);
+                const biggest = mixRows.reduce((a, b, i) =>
+                  Number(b.sheets || 0) > Number(mixRows[a].sheets || 0) ? i : a, 0);
+                parts[biggest].delta += drift;
+                return parts.filter(p => p.delta !== 0);
+              })()
+            : [{ material_id: single ? single.material_id : eff?.board_material_id, delta: boardDelta }];
+
+          for (const t of targets) {
+            const avail = await oc(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`, [t.material_id]);
+            await adjustBoardStock(t.material_id, t.delta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc, { reason: 'Adjust', user: req.user.name });
+            await qc(`INSERT INTO cutting_discrepancies
+                      (job_card_id, job_stage_id, cpp, planned_parents, actual_parents, parent_delta,
+                       planned_children, actual_children, board_material_id, board_available_before,
+                       reason_code, note, created_by)
+                      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+              [st.job_card_id, st.id, v.cpp, v.plannedParents, v.actualParents, t.delta,
+               v.plannedChildren, v.actualChildren, t.material_id, Number(avail?.q || 0),
+               'Adjust', reason, req.user.name]);
+          }
           await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [v.actualParents, st.id]);
           await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [v.actualParents, st.job_card_id]);
-          await qc(`INSERT INTO cutting_discrepancies
-                    (job_card_id, job_stage_id, cpp, planned_parents, actual_parents, parent_delta,
-                     planned_children, actual_children, board_material_id, board_available_before,
-                     reason_code, note, created_by)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-            [st.job_card_id, st.id, v.cpp, v.plannedParents, v.actualParents, v.parentDelta,
-             v.plannedChildren, v.actualChildren, eff?.board_material_id, Number(avail?.q || 0),
-             'Adjust', reason, req.user.name]);
         }
       }
       // Wastage delta hits the movement ledger so warehouse figures stay true.
