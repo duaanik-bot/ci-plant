@@ -5,6 +5,7 @@
 // the artwork endpoint).
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { readiness, setLineStatus, nextNumber, nextNumberFrom } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { TOOL_FAMILIES, TOOL_ZONES, toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -501,7 +502,7 @@ r.post('/tooling/requirements/:id/actions', canMove, async (req, res, next) => {
         [number, `${product.name} shade card`, product.id, line.customer_id, line.id,
          product.print_process || null, spec.colour_type || product.colour_type || null,
          spec.colors || product.colors || null, spec.party_artwork_code || product.party_artwork_code || null,
-         spec.output_number || product.output_number || null, new Date().toISOString().slice(0, 10),
+         spec.output_number || product.output_number || null, plantDateStr(),
          `Created from ${current.request_number}${note ? ` · ${note}` : ''}`, req.user.name]);
         await qc(`INSERT INTO shade_card_events (shade_card_id,action,to_status,note,user_name)
                   VALUES ($1,'created','draft',$2,$3)`, [card.id, `from ${current.request_number}`, req.user.name]);

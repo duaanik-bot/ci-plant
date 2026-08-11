@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { one, q } from '../db.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { requireRole } from '../auth.js';
 import { audit } from '../helpers.js';
 
@@ -29,7 +30,7 @@ r.post('/plate-rates', canEdit, async (req, res, next) => {
       (plate_master_id,vendor_id,rate_per_plate,effective_from,active)
       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
     [plateMasterId, req.body.vendor_id || null, rate,
-     req.body.effective_from || new Date().toISOString().slice(0, 10), req.body.active === 0 ? 0 : 1]);
+     req.body.effective_from || plantDateStr(), req.body.active === 0 ? 0 : 1]);
     await audit('plate_rate', row.id, 'create',
       `${master.plate_size} @ Rs ${row.rate_per_plate}/plate${row.vendor_id ? ` (vendor ${row.vendor_id})` : ' (base)'}`,
       q, req.user.name);
@@ -51,7 +52,7 @@ r.put('/plate-rates/:id', canEdit, async (req, res, next) => {
     const sets = [];
     const values = [];
     if ('rate_per_plate' in req.body) { values.push(Number(req.body.rate_per_plate)); sets.push(`rate_per_plate=$${values.length}`); }
-    if ('effective_from' in req.body) { values.push(req.body.effective_from || new Date().toISOString().slice(0, 10)); sets.push(`effective_from=$${values.length}`); }
+    if ('effective_from' in req.body) { values.push(req.body.effective_from || plantDateStr()); sets.push(`effective_from=$${values.length}`); }
     if ('active' in req.body) { values.push(req.body.active ? 1 : 0); sets.push(`active=$${values.length}`); }
     if (!sets.length) return res.json(before);
     values.push(req.params.id);

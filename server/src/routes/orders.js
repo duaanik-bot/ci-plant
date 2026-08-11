@@ -1,6 +1,7 @@
 // Orders + Planning + Artwork — the front half of the plant workflow.
 import { Router } from 'express';
 import { syncPrAllocation } from './procurement.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -231,7 +232,7 @@ r.post('/orders', canPlan, async (req, res, next) => {
       const [o] = await qc(
         `INSERT INTO orders (po_number, customer_id, po_date, delivery_date, notes)
          VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [po_number, customer_id, po_date || new Date().toISOString().slice(0, 10), delivery_date || null, notes || null]);
+        [po_number, customer_id, po_date || plantDateStr(), delivery_date || null, notes || null]);
       // Tolerance snapshot: the customer's dispatch tolerance at order entry is
       // frozen on each line, so later master edits never alter old orders.
       const cust = await oc('SELECT tolerance_pct FROM customers WHERE id=$1', [customer_id]);
@@ -271,7 +272,7 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
         `UPDATE orders
          SET po_number=$1, customer_id=$2, po_date=$3, delivery_date=$4, notes=$5
          WHERE id=$6`,
-        [po_number, customer_id, po_date || new Date().toISOString().slice(0, 10), delivery_date || null, notes || null, orderId]);
+        [po_number, customer_id, po_date || plantDateStr(), delivery_date || null, notes || null, orderId]);
 
       const existing = await qc('SELECT * FROM order_lines WHERE order_id=$1 ORDER BY id', [orderId]);
       const keepIds = [];
@@ -843,7 +844,7 @@ r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
     // date with no flag is a stale claim.
     if ('wip_date' in req.body) { vals.push(req.body.wip_date || null); sets.push(`wip_date=$${vals.length}`); }
     else if ('wip' in req.body) {
-      vals.push(req.body.wip ? new Date().toISOString().slice(0, 10) : null);
+      vals.push(req.body.wip ? plantDateStr() : null);
       sets.push(`wip_date=$${vals.length}`);
     }
     if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
@@ -1010,7 +1011,7 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
       .map(x => ({ line_id: +x.line_id, wip_date: x.wip_date || null }))
       .filter(x => x.line_id);
     if (!items.length) return res.status(400).json({ error: 'Nothing selected' });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = plantDateStr();
     const out = await tx(async (qc) => {
       const done = [];
       for (const it of items) {

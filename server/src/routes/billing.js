@@ -3,6 +3,7 @@
 // supply, payments knock invoices off, and the ledger shows who owes what.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { audit, nextNumber, shadeCardsFor, fgReceipt, fgMove, setLineStatus, forceLineStatus, boxLeftoverFromFg } from '../helpers.js';
 import { clashes, familyKey } from '../product-family.js';
 import { requireRole } from '../auth.js';
@@ -187,7 +188,7 @@ r.post('/invoices', canBill, async (req, res, next) => {
       const [inv] = await qc(`
         INSERT INTO invoices (invoice_number, customer_id, invoice_date, subtotal, cgst, sgst, igst, round_off, total, notes)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [invoice_number, customer.id, invoice_date || new Date().toISOString().slice(0, 10),
+        [invoice_number, customer.id, invoice_date || plantDateStr(),
          subtotal, cgst, sgst, igst, round_off, total, notes || null]);
       for (const l of lines) {
         await qc('INSERT INTO invoice_lines (invoice_id, dispatch_line_id, product_id, qty, rate, amount, gst_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)',

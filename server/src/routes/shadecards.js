@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one, tx } from '../db.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { audit, effectiveProduct, nextNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
@@ -290,7 +291,7 @@ r.get('/shade-cards/alerts', async (_req, res, next) => {
   try {
     const rows = (await q(`${CARD_VIEW} WHERE sc.active = 1`)).map(decorate);
     const alerts = [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = plantDateStr();
     for (const sc of rows) {
       const ref = { id: sc.id, sc_number: sc.sc_number, title: sc.title, customer_name: sc.customer_name };
       if (sc.status === 'draft')
@@ -364,7 +365,7 @@ r.get('/shade-cards/alerts', async (_req, res, next) => {
 r.get('/shade-cards/reports', async (_req, res, next) => {
   try {
     const rows = (await q(`${CARD_VIEW} WHERE sc.active = 1`)).map(decorate);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = plantDateStr();
     const pendingCustomer = rows.filter(x => x.status === 'sent');
     const overdue = pendingCustomer.filter(x => x.expected_approval_date && x.expected_approval_date < today);
     const approved = rows.filter(x => x.status === 'approved' && !x.expired_by_age);
@@ -460,7 +461,7 @@ r.post('/shade-cards', canManage, async (req, res, next) => {
          p?.output_number || null,           // inherited, never typed
          req.body.print_reference || null, req.body.colour_details || null,
          req.body.expected_approval_date || null,
-         req.body.creation_date || new Date().toISOString().slice(0, 10),
+         req.body.creation_date || plantDateStr(),
          req.body.location || null, req.body.remarks || null, req.user.name]);
       // The originating order also joins the reuse list, so a card that later
       // serves repeat orders reads consistently from one place.
@@ -509,7 +510,7 @@ r.post('/shade-cards/:id(\\d+)/status', canManage, async (req, res, next) => {
       const blk = transitionBlocker(card, to);
       if (blk) throw Object.assign(new Error(blk), { status: card ? 409 : 404 });
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = plantDateStr();
       const sets = ['status=$1', 'updated_at=now()'];
       const vals = [to];
       const set = (col, val) => { vals.push(val); sets.push(`${col}=$${vals.length}`); };
