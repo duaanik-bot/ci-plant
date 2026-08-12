@@ -12,7 +12,7 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, odDays, odTone, OverdueDays, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Layers } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
@@ -23,7 +23,7 @@ import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, Acti
          colourFilterCounts, matchesColourFilters } from '../components/PrintColour.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
-import { SET_TYPE_META, SetTypeChip } from '../components/SetType.jsx';
+import { SET_TYPE_META, SetTypeChip, cardSetType, isMergeRun } from '../components/SetType.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { plannedChildSheets } from '../lib/received.js';
 
@@ -34,7 +34,10 @@ const TRIAGE = 'triage';
 // already plated, so intent has become physical truth. Hold is the press hold
 // this page has always had (the stage hold with its reason picklist) — NOT a
 // second parking flag; one job can never be "held" two different ways.
-const cardSetType = c => (c.printing_status === 'hold' ? 'hold' : c.gang_run_id ? 'gang' : 'single');
+// cardSetType now comes from lib/setType.js via SetType.jsx — this page used
+// to hand-roll it, and its copy tested gang_run_id, so a COMBINED run (one
+// product, several sales orders, never splits) read as a Gang on the press
+// board while the planning queue was being taught to call it a Single.
 const canPlan = () => ['admin', 'planner'].includes(auth.user?.role);
 
 // Per-machine colour identity. Each press lane gets its own hue so the board
@@ -570,6 +573,7 @@ export default function PrintPlanning() {
   // table). Pure client state, so a fallback repaint can never reset it.
   const [boardStatus, setBoardStatus] = useState('all'); // 'all' | 'ready' | 'pending'
   const [zone, setZone] = useState('all'); // set-type zone: 'all'|'single'|'gang'|'hold' — All by default; a press board schedules gangs as first-class work
+  const [mergeOnly, setMergeOnly] = useState(false); // second axis: combined runs only, composes with the zone
   // Customer-WIP filter — on = only jobs the customer is chasing. A second
   // axis beside the board chips; both narrow at once, like the searches do.
   const [wipOnly, setWipOnly] = useState(false);
@@ -589,7 +593,7 @@ export default function PrintPlanning() {
   // would write positions computed from the rows still visible, silently
   // reordering the jobs it is hiding. It was spelled out five separate times,
   // which is how a new filter axis ends up wired into four of them.
-  const boardFilterActive = boardStatus !== 'all' || wipOnly || zone !== 'all' || anyColourFilter;
+  const boardFilterActive = boardStatus !== 'all' || wipOnly || zone !== 'all' || mergeOnly || anyColourFilter;
   // Why a lane that HAS jobs is showing none. It named the board-status filter
   // unconditionally, so any OTHER axis doing the hiding printed the literal
   // `is "undefined"` — already true of Customer WIP, and the colour axes would
@@ -601,6 +605,7 @@ export default function PrintPlanning() {
       ...(bandSel.size ? [`${[...bandSel].join(' / ')} colours`] : [])];
     if (ink.length) return `Nothing in ${laneName} is ${ink.join(' or ')}`;
     if (zone !== 'all') return `Nothing in ${laneName} is ${SET_TYPE_META[zone]?.label || zone}`;
+    if (mergeOnly) return `Nothing in ${laneName} is a combined run`;
     if (wipOnly) return `Nothing in ${laneName} is marked Customer WIP`;
     return `Nothing in ${laneName} matches the filters`;
   };
@@ -673,24 +678,28 @@ export default function PrintPlanning() {
   // stack the eye can still find WHICH member the press stopped on.
   const heldRuns = useMemo(() => new Set(
     cards.filter(c => c.gang_run_id && c.printing_status === 'hold').map(c => c.gang_run_id)), [cards]);
-  const zoneOf = c => ((c.printing_status === 'hold' || heldRuns.has(c.gang_run_id)) ? 'hold'
-    : c.gang_run_id ? 'gang' : 'single');
+  // Run-level, then the shared card rule. `heldRuns` stays keyed on
+  // gang_run_id — a held member parks the whole stack whichever KIND of run it
+  // is — but what makes a card Gang is the kind, so a combined run lands in
+  // Single here exactly as it does on the planning queue.
+  const zoneOf = c => (heldRuns.has(c.gang_run_id) ? 'hold' : cardSetType(c));
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
-    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all' && !anyColourFilter) return fullLanes;
+    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all' && !mergeOnly && !anyColourFilter) return fullLanes;
     const byLane = {};
     for (const k of Object.keys(fullLanes)) {
       let list = fullLanes[k];
       if (wipOnly) list = list.filter(c => c.wip);
       if (boardStatus !== 'all') list = list.filter(statusPass);
       if (zone !== 'all') list = list.filter(c => zoneOf(c) === zone);
+      if (mergeOnly) list = list.filter(isMergeRun);
       if (anyColourFilter) list = list.filter(c => matchesColourFilters(c, colourFilters));
       if (q) list = list.filter(c => rowMatches(c, q, productSearchText(c)));
       if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k], productSearchText(c)));
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, heldRuns, colourSel, processSel, bandSel]);
+  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, mergeOnly, heldRuns, colourSel, processSel, bandSel]);
   // Zone counts run over the unfiltered board and count JOBS the way the eye
   // does — a gang run's stack is one job, however many cards it carries.
   const zoneCounts = useMemo(() => {
@@ -705,6 +714,23 @@ export default function PrintPlanning() {
     }
     return n;
   }, [cards, heldRuns]);
+  // Combined runs in the OPEN zone — the same second axis Planning carries,
+  // counted the way the eye counts: a run's stack is one job, however many
+  // cards it holds. Hidden at zero, so the press rail never grows on a board
+  // with no combined work on it.
+  const mergeCount = useMemo(() => {
+    const seen = new Set();
+    let n = 0;
+    for (const c of cards) {
+      if (!isMergeRun(c)) continue;
+      if (zone !== 'all' && zoneOf(c) !== zone) continue;
+      const key = `g${c.gang_run_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      n++;
+    }
+    return n;
+  }, [cards, zone, heldRuns]);
   // Chip counts come from the unfiltered board so they never restate the filter.
   const countStates = list => {
     const n = { all: list.length, covered: 0, on_order: 0, short: 0 };
@@ -1290,7 +1316,9 @@ export default function PrintPlanning() {
                   { key: 'printed_sheets', label: 'Sheets Printed', align: 'right', export: c => fmt.num(c.printed_sheets ?? c.sheets_issued) },
                   { key: 'printing_operator', label: 'Operator', export: c => c.printing_operator || '—' },
                   { key: 'completed_at', label: 'Completed', export: c => fmt.dt(c.completed_at) },
-                  { key: 'set_type', label: 'Set Type', export: c => (c.gang_run_id ? 'Gang' : 'Single') },
+                  // Same verdict as the cell beside it (cardSetType): a
+                  // COMBINED run shared nothing, so it exports as Single.
+                  { key: 'set_type', label: 'Set Type', export: c => SET_TYPE_META[cardSetType(c)].label },
                 ],
                 rows,
               };
@@ -1405,6 +1433,25 @@ export default function PrintPlanning() {
                 </span>
               </button>
             ))}
+            {/* Combined — a second AXIS, not a fifth zone: it narrows whichever
+                zone is open. Teal because violet here means "splits after die
+                cutting", the one thing a combined run never does. Hidden at
+                zero so the rail does not grow on a board without one. */}
+            {mergeCount > 0 && <>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
+              <button type="button" onClick={() => { setMergeOnly(v => !v); clearSel(); }}
+                title="Combined runs only — one product on several sales orders, printed as one pile"
+                aria-pressed={mergeOnly}
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  mergeOnly
+                    ? 'bg-teal-100 text-teal-800 ring-1 ring-teal-200'
+                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+                <Layers size={11} /> Combined
+                <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${mergeOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+                  {mergeCount}
+                </span>
+              </button>
+            </>}
           </div>
         )}
         {tab === 'board' && (
@@ -1588,9 +1635,11 @@ export default function PrintPlanning() {
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
                     <span className="text-xs font-semibold text-slate-400">
                       {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardFilterActive)
-                        ? laneQ[p.id]
-                          ? `Nothing on ${shortPress(p.name)} matches "${laneQ[p.id]}"`
-                          : `Nothing on ${shortPress(p.name)} is "${BOARD_LABEL[boardStatus]}"`
+                        // One spelling: this copy named the board-status filter
+                        // unconditionally, so any OTHER axis emptying the lane
+                        // (Customer WIP, colour, Combined) printed `is
+                        // "undefined"`. The helper names whichever axis did it.
+                        ? emptyLaneReason(shortPress(p.name), laneQ[p.id])
                         : `Drag jobs here — or tick them in Triage and press "${shortPress(p.name)}"`}
                     </span>
                     <span className="text-[10px]">They queue top-to-bottom</span>
@@ -1626,6 +1675,7 @@ export default function PrintPlanning() {
           (!wipOnly || g.cards.some(c => c.wip)) &&
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
           (zone === 'all' || zoneOf(g.cards[0]) === zone) &&
+          (!mergeOnly || isMergeRun(g.cards[0])) &&
           (!anyColourFilter || matchesColourFilters(g.cards[0], colourFilters)) &&
           (!expQ || g.cards.some(c => rowMatches(c, expQ, productSearchText(c)))));
         if (expSort) {
@@ -2045,8 +2095,13 @@ export default function PrintPlanning() {
                         <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(c.printed_sheets ?? c.sheets_issued)}</td>
                         <td className={`${td} text-xs text-slate-500`}>{c.printing_operator || '—'}</td>
                         <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.dt(c.completed_at)}</td>
-                        {/* A printed run cannot be on hold — this column only says whether the sheet was shared. */}
-                        <td className={td}><SetTypeChip type={c.gang_run_id ? 'gang' : 'single'} /></td>
+                        {/* A printed run cannot be on hold, so this column only
+                            says whether the sheet was SHARED — which is the
+                            run's kind, not the mere presence of a run: a
+                            combined run is one product on one plate and shared
+                            nothing. cardSetType answers exactly that, and the
+                            press-hold branch is dead here by construction. */}
+                        <td className={td}><SetTypeChip type={cardSetType(c)} /></td>
                         <td className={td}>
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                             <CheckCircle2 size={11} /> Printed

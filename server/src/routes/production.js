@@ -1370,6 +1370,13 @@ r.get('/print-planning', async (_req, res, next) => {
                   ELSE COALESCE(ol.wip, false) END AS wip,
              CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
              CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
+             -- The run's KIND, not merely whether there is a run: the board's
+             -- set-type chip and zones classify a shared sheet (gang) apart
+             -- from a one-product pile (merge), and gang_run_id cannot tell
+             -- them apart because a combined run reuses it. The CASEs above
+             -- already read gg.kind; the column itself was simply never
+             -- selected, so every card arrived with run_kind undefined.
+             gg.kind AS run_kind,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,

@@ -1045,7 +1045,12 @@ r.patch('/planning/:id/set-type', canPlanWork, async (req, res, next) => {
   try {
     const set_type = String(req.body.set_type || '');
     const reason = String(req.body.hold_reason || '').trim();
-    const line = await one('SELECT id, status, gang_run_id FROM order_lines WHERE id=$1', [+req.params.id]);
+    // gr.kind decides which tags this line may wear (set-type.js) — a gang and
+    // a combined run share gang_run_id, so the column alone cannot tell them
+    // apart. LEFT JOIN: an uncombined line is the common case and must survive.
+    const line = await one(`SELECT ol.id, ol.status, ol.gang_run_id, gr.kind AS run_kind
+      FROM order_lines ol LEFT JOIN gang_runs gr ON gr.id = ol.gang_run_id
+      WHERE ol.id=$1`, [+req.params.id]);
     if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
     const members = line.gang_run_id
       ? await q('SELECT id, status FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id])

@@ -4,12 +4,20 @@
 //
 // The stored tag is INTENT; two facts outrank it wherever the tag is read
 // (mirrors server/src/set-type.js — change one, change both):
-//   hold        — any member on hold parks the whole row; the run moves as one
-//   gang_run_id — the line physically shares a sheet, so it can never be Single
+//   hold                — any member on hold parks the whole row; the run
+//                         moves as one
+//   run_kind === 'gang' — the line shares its sheet with OTHER PRODUCTS and
+//                         splits after die cutting, so it can never be Single
 //
-// Print Planning maps the same three words onto card-level FACTS instead
-// (press hold + gang membership) — see cardSetType there; the vocabulary and
-// the chip stay identical either way.
+// A COMBINED RUN (run_kind 'merge') is deliberately NOT in that list. It
+// reuses gang_run_id so every "which card is this line riding?" lateral keeps
+// working, but it is one product on one plate across several sales orders —
+// physically a Single, and the one run that never splits. Classifying by
+// gang_run_id rather than by KIND is what made the queue file it under Gang.
+//
+// Print Planning maps the same four words onto card-level FACTS instead
+// (press hold + run kind) — see cardSetType in lib/setType.js; the vocabulary
+// and the chip stay identical either way.
 import { Link2, PauseCircle, Square, Stamp, ChevronDown } from 'lucide-react';
 
 // New Output = this job needs a fresh plate set made; it cannot simply run on
@@ -24,9 +32,11 @@ export const SET_TYPE_META = {
   hold:       { label: 'Hold',       icon: PauseCircle, chip: 'border-amber-200 bg-amber-50 text-amber-700' },
 };
 
-export const rowSetType = r => ((r._gang || [r]).some(m => m.set_type === 'hold') ? 'hold'
-  : r.gang_run_id ? 'gang' : (r.set_type || 'single'));
-export const holdReasonOf = r => (r._gang || [r]).map(m => m.hold_reason).find(Boolean) || '';
+// The pure rules live in lib/setType.js so a node test can execute them — this
+// file holds JSX and cannot be imported by one, so the rule that decides what
+// the plant sees had only ever been grepped. Re-exported here so every
+// existing `from '../components/SetType.jsx'` import keeps working unchanged.
+export { rowSetType, holdReasonOf, cardSetType, isGangRun, isMergeRun } from '../lib/setType.js';
 
 // The chip a row or card wears. Editable rows get a ⌄ and open whatever menu
 // the page wires through `toggle`; without `editable` the same chip renders

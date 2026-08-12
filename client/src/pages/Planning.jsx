@@ -26,7 +26,7 @@ import { boardPositionView } from '../lib/boardPositionView.js';
 import { boardShortOf } from '../lib/boardShort.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
-import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
+import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf, isGangRun, isMergeRun } from '../components/SetType.jsx';
 import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
@@ -499,6 +499,12 @@ export default function Planning() {
   // Gang, never both), while a saved plan cuts across all of them. Folding it
   // into subTab would have destroyed that exclusivity.
   const [draftOnly, setDraftOnly] = useState(false);
+  // "Combined" — the same kind of second axis as Plan saved, and for the same
+  // reason: a combined run IS a Single (one product, one plate, several sales
+  // orders), so it must not become a sixth zone that pulls it back out of the
+  // Single chip. It is a pure FACT (`run_kind`), orthogonal to the zone, so it
+  // composes with Plan saved instead of competing with it.
+  const [mergeOnly, setMergeOnly] = useState(false);
   const [holdAsk, setHoldAsk] = useState(null);   // { rows, pick, reason } — "Why is this on hold?" prompt; pick is the dropdown, reason the free text 'Other' collects
   const [holdBusy, setHoldBusy] = useState(false);
   const [boardFilters, setBoardFilters] = useState([]);   // subset of 'covered'|'on_order'|'short'; empty = all
@@ -638,13 +644,22 @@ export default function Planning() {
   // count is 0 by construction (plan_draft needs status 'pending'), which is
   // what hides the chip there.
   const draftCount = zoneRows.filter(rowDraft).length;
+  // Counted on the ZONE like draftCount, so each chip says how many of the rows
+  // in front of the planner it would keep — never how many the other chip left.
+  const mergeCount = zoneRows.filter(isMergeRun).length;
   // Narrowed HERE, where the zone is applied, so the KPI strip, the board
   // counts, the suggestions and the table all keep describing one and the same
-  // set — the invariant the comment above depends on. `&& draftCount` means a
-  // filter left on cannot outlive the rows it filtered: when the last draft in
-  // view is locked the chip disappears and the queue comes back, instead of
-  // stranding the planner on an empty table with no visible control to clear.
-  const groupedRows = draftOnly && draftCount ? zoneRows.filter(rowDraft) : zoneRows;
+  // set — the invariant the comment above depends on. Both axes compose, and
+  // each is guarded by its own count so a filter left on cannot outlive the
+  // rows it filtered: when the last one in view is gone the chip disappears and
+  // the queue comes back, instead of stranding the planner on an empty table
+  // with no visible control to clear.
+  const groupedRows = (() => {
+    let rows = zoneRows;
+    if (mergeOnly && mergeCount) rows = rows.filter(isMergeRun);
+    if (draftOnly && draftCount) rows = rows.filter(rowDraft);
+    return rows;
+  })();
   // The zone's LINES (gang rows unfolded) — feeds the KPI strip and the
   // suggestion filter, exactly what `shown` meant before zones existed.
   const shown = groupedRows.flatMap(r => (r._gang ? r._gang : [r]));
@@ -802,8 +817,14 @@ export default function Planning() {
   };
   const setTypeMenuItems = row => {
     const cur = rowSetType(row);
-    // A ganged row never offers Single — it physically shares a sheet.
-    const opts = (row.gang_run_id ? ['gang', 'hold'] : ['single', 'gang', 'new_output', 'hold']).filter(k => k !== cur);
+    // What the run's own KIND allows — the same rule set-type.js enforces, so
+    // a planner never meets a refusal the menu could have prevented. A gang
+    // shares a sheet, so it can never be Single or New Output. A combined run
+    // is one product on one plate, so it can never be Gang: that tag would be
+    // masked by its own kind the moment it was written.
+    const opts = (isGangRun(row) ? ['gang', 'hold']
+      : isMergeRun(row) ? ['single', 'new_output', 'hold']
+      : ['single', 'gang', 'new_output', 'hold']).filter(k => k !== cur);
     return opts.map(k => ({
       key: k, label: `Move to ${SET_TYPE_META[k].label}`, icon: SET_TYPE_META[k].icon,
       onClick: () => (k === 'hold' ? setHoldAsk({ rows: [row], pick: PLANNING_HOLD_DEFAULT, reason: '' }) : saveSetTypes([row], k)),
@@ -2673,14 +2694,39 @@ export default function Planning() {
             </span>
           </button>
         ))}
-        {/* Plan saved — a second AXIS, not a sixth zone. It rides the same strip
-            so the planner reaches it with the zone chips, but behind a hairline
-            divider and in the badge's own blue, because it does not partition
-            the tab the way the set-types do: it narrows whichever zone is open.
-            Hidden at zero — only To Plan can hold a saved-but-unlocked plan, so
-            everywhere else the chip would be a control with nothing to do. */}
+        {/* The second AXIS — chips that narrow whichever zone is open rather
+            than partitioning the tab the way the set-types do. They ride the
+            same strip so the planner reaches them with the zone chips, but
+            behind a hairline divider and in their own colours. ONE divider
+            serves both, so adding Combined costs no separator, and each hides
+            at zero — on a day with neither the strip is exactly as wide as it
+            was before either existed. */}
+        {(mergeCount > 0 || draftCount > 0)
+          && <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />}
+        {/* Combined — one product, several sales orders, printed as one pile.
+            Teal because across this ERP violet means "splits after die
+            cutting", which is the one thing a combined run never does; Layers
+            because that is the icon on the Combine Orders button that makes
+            them. It is a FACT chip, so unlike the zones it needs no server
+            round-trip and cannot disagree with the row's own teal chip. */}
+        {mergeCount > 0 && (
+          <button type="button" onClick={() => { setMergeOnly(v => !v); clearSelection(); }}
+            title="Combined runs only — one product on several sales orders, printed as one pile"
+            aria-pressed={mergeOnly}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+              mergeOnly
+                ? 'bg-teal-100 text-teal-800 ring-1 ring-teal-200'
+                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+            <Layers size={11} /> Combined
+            <span className={`rounded-full px-1.5 text-[10px] ${mergeOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+              {fmt.num(mergeCount)}
+            </span>
+          </button>
+        )}
+        {/* Plan saved — hidden at zero for the same reason: only To Plan can
+            hold a saved-but-unlocked plan, so everywhere else the chip would be
+            a control with nothing to do. */}
         {draftCount > 0 && <>
-          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
           <button type="button" onClick={() => { setDraftOnly(v => !v); clearSelection(); }}
             title="Show only jobs whose plan is saved and still waiting to be locked"
             aria-pressed={draftOnly}
@@ -2842,14 +2888,17 @@ export default function Planning() {
           if (!allPending) return null;
           // Every zone is reachable in bulk, including back to Single — a
           // mis-tagged pile has to be undoable the same way it was made.
-          // Single and New Output are hidden when the selection holds a ganged
-          // job: the server refuses those two on a run, so offering them would
-          // promise a move that cannot happen.
-          const anyGanged = selectedLines.some(l => l.gang_run_id);
+          // Zones hide by RUN KIND, matching the server's refusals in both
+          // directions: Single and New Output cannot land on a gang (the sheet
+          // is shared with other products), and Gang cannot land on a combined
+          // run (one product, one plate). Offering either would promise a move
+          // that 400s.
+          const anyGang = selectedLines.some(isGangRun);
+          const anyMerge = selectedLines.some(isMergeRun);
           const BULK = [
-            { key: 'single', solo: true },
-            { key: 'gang' },
-            { key: 'new_output', solo: true },
+            { key: 'single', hideOn: 'gang' },
+            { key: 'gang', hideOn: 'merge' },
+            { key: 'new_output', hideOn: 'gang' },
             { key: 'hold' },
           ];
           // Tonal, not solid — and in SET_TYPE_META's own colours, so the chip
@@ -2857,7 +2906,8 @@ export default function Planning() {
           // colour for the same zone. That single source is also why the four
           // never carry a hand-written bg-*: those were the ones the brand
           // gradient swallowed.
-          const chips = BULK.filter(b => !(b.solo && anyGanged)).map(b => {
+          const chips = BULK.filter(b =>
+            !(b.hideOn === 'gang' && anyGang) && !(b.hideOn === 'merge' && anyMerge)).map(b => {
             const m = SET_TYPE_META[b.key];
             const Icon = m.icon;
             return (
