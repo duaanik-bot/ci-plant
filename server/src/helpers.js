@@ -2198,16 +2198,32 @@ export function fgAvailableFromCtx(line, ctx) {
   return ctx.fg.get(line.product_id) ?? 0;
 }
 
+// Whose hold is this? Its own line's, or a gang sibling's — a run buys and cuts
+// as one pile, and its holds are written per MEMBER because the run card itself
+// carries no order line. ONE spelling of ownership: claimableQty subtracts every
+// hold this rejects and ownHoldQty adds every hold it accepts, so the two split
+// a single set and cannot draw the boundary differently.
+export const ownsHold = line => h => h.order_line_id === line?.id
+  || (line?.gang_run_id != null && h.gang_run_id === line.gang_run_id);
+
 // What of a board's stock this job may actually claim: everything on the shelf
 // except what is earmarked for OTHER jobs. A hold belonging to this line — or
 // to a sibling of its gang, since a run buys and cuts as one — is its own and
 // never subtracts. Pure, and the reason one delivery can no longer mark every
 // job on that board as covered.
 export function claimableQty({ available, holds = [], line }) {
-  const mine = h => h.order_line_id === line?.id
-    || (line?.gang_run_id != null && h.gang_run_id === line.gang_run_id);
+  const mine = ownsHold(line);
   const others = holds.filter(h => !mine(h)).reduce((s, h) => s + Number(h.qty || 0), 0);
   return Math.max(0, Number(available || 0) - others);
+}
+
+// The other side of that partition: the parent sheets FROZEN for this job. Pass
+// the holds of every board it sits on and a mixed job reports its whole freeze
+// rather than one board's share. Uncapped by design — this reports what the
+// freeze reserves, not what the job could use, so it stays readable as a plain
+// fact next to the requirement it is meant to be compared against.
+export function ownHoldQty({ holds = [], line } = {}) {
+  return holds.filter(ownsHold(line)).reduce((s, h) => s + Number(h.qty || 0), 0);
 }
 
 export async function readiness(line, oc = one, ctx = null) {

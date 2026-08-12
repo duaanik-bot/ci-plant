@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, ownHoldQty, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -986,6 +986,24 @@ r.get('/floor/:section', async (req, res, next) => {
     });
     for (const s of secCardRows) secPlateStates.set(s.job_card_id, s.plate_state);
 
+    // Board FROZEN for each card — its own side of the very partition
+    // claimableQty splits, through the one ownsHold() predicate, so the queue's
+    // Frozen column and the free-stock figures elsewhere can never disagree
+    // about whose sheets these are. readinessBatch has already loaded every
+    // active stock hold on these boards, so this costs no extra query.
+    //
+    // Summed across ALL boards, not just the card's own material: a job the
+    // engine split over two boards is frozen on each for only its share, and
+    // the floor is asking what is set aside for the JOB. Holds belonging to
+    // other lines contribute nothing whatever board they sit on, so widening
+    // the input cannot widen the answer.
+    const allStockHolds = [...secRctx.holds.values()].flat();
+    const frozenByJc = new Map();
+    for (const s of secCardRows) {
+      const line = secAnchorById.get(s.anchor_line_id);
+      if (line) frozenByJc.set(s.job_card_id, Math.round(ownHoldQty({ holds: allStockHolds, line })));
+    }
+
     let queue = [];
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
@@ -1008,6 +1026,9 @@ r.get('/floor/:section', async (req, res, next) => {
           // on the card's anchor line and belongs to the whole card.
           board_state: secStates.get(s.job_card_id) ?? null,
           plate_state: secPlateStates.get(s.job_card_id) ?? null,
+          // Parent sheets frozen for this card. Card-level like the two above —
+          // the freeze is on the order line, not on any one stage row.
+          frozen_sheets: frozenByJc.get(s.job_card_id) ?? null,
           // qtyReceived is receipt.received — the very figure this station is
           // SHOWN and is allowed to record against, so the dot and the number
           // beside it can never disagree.

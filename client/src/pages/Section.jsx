@@ -40,7 +40,7 @@ import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
-import { receivedQty, expectedOutputQty, openingCounter } from '../lib/received.js';
+import { receivedQty, expectedOutputQty, plannedOutputQty, openingCounter } from '../lib/received.js';
 import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk, cutChildrenVariance } from '../components/CutChildrenEntry.jsx';
 import { isCardTier, useTier } from '../lib/tier.js';
 
@@ -210,6 +210,27 @@ const QUEUE_FILTERS = [
 // compute exactly what they always did.
 const expectedOutput = (row, section) => expectedOutputQty(row, section, row?.children_per_parent, row?.mix_cuts);
 
+// The same figure for a QUEUE row, which may not have started: the receipt once
+// the stage has been fed, the plan before that, and null where neither is known
+// in this stage's own unit. See plannedOutputQty — the completion form keeps
+// reading expectedOutput above, unchanged, because a form measures a stage
+// against what it actually holds.
+const queueExpected = (row, section) => plannedOutputQty(row, section, row?.children_per_parent, row?.mix_cuts);
+
+// The three plan-vs-actual figures share one presentation: right-aligned,
+// tabular, and an em dash rather than a zero when the number is not yet a fact.
+// A confident 0 under Expected next to a cut plan promising 800 is a lie the
+// operator has to work out for himself.
+function Figure({ value, tone = 'text-slate-800', sub = null, title = null }) {
+  if (value == null) return <span className="text-slate-300">—</span>;
+  return (
+    <span className="inline-block" title={title || undefined}>
+      <span className={`font-semibold tabular-nums ${tone}`}>{fmt.num(value)}</span>
+      {sub}
+    </span>
+  );
+}
+
 // The planned board's CHOSEN cuts when this job carries a mix, else the legacy
 // children_per_parent — the conversion the extra-sheets flow needs, because
 // extra sheets are issued against the PLANNED board (see extrasheets.js).
@@ -301,16 +322,21 @@ const PROCESS_COLUMN = {
         </div>
         {/* Mixed job: the sheet maths is per board — one legacy cpp would name
             the wrong yield — so the line reads "mixed · N boards" and the
-            tooltip carries each pile's own issued × cuts breakdown. */}
+            tooltip carries each pile's own issued × cuts breakdown.
+            The yield itself is NOT printed here any more: it is the Expected
+            column three cells to the right, and the same number twice on one
+            row is two numbers to keep in step. The tooltips still carry the
+            full derivation, which is where anyone checking the arithmetic
+            actually looks. */}
         {Array.isArray(r.mix_cuts) && r.mix_cuts.length > 1 ? (
           <div className="truncate text-[11px] text-slate-400"
             title={r.mix_cuts.map(m => `${m.board_name}: ${fmt.num(m.issued)} × ${m.cuts} = ${fmt.num((m.issued || 0) * (m.cuts || 1))}`).join(' · ')}>
-            {fmt.num(r.mix_cuts.reduce((s, m) => s + (+m.issued || 0), 0))} parent · mixed · {r.mix_cuts.length} boards → {fmt.num(r.mix_cuts.reduce((s, m) => s + (+m.issued || 0) * Math.max(1, +m.cuts || 1), 0))}
+            {fmt.num(r.mix_cuts.reduce((s, m) => s + (+m.issued || 0), 0))} parent · mixed · {r.mix_cuts.length} boards
           </div>
         ) : (
         <div className="truncate text-[11px] text-slate-400"
           title={`${fmt.num(r.sheets_issued)} parent sheets${r.children_per_parent > 1 ? ` · ${r.children_per_parent} per parent → ${fmt.num(r.sheets_issued * r.children_per_parent)} print sheets` : ''}`}>
-          {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent → ${fmt.num(r.sheets_issued * r.children_per_parent)}` : ''}
+          {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent` : ''}
         </div>
         )}
       </div>
@@ -1228,7 +1254,17 @@ export default function Section() {
                 ] : [
                   { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
                 ]),
+                // The sheet has to say what the screen says, or the two become
+                // separate opinions the moment anyone prints one.
+                ...(showsBoard ? [
+                  { key: 'frozen_sheets', label: 'Frozen', align: 'right',
+                    export: r => (r.frozen_sheets == null ? '—' : fmt.num(r.frozen_sheets)) },
+                ] : []),
                 { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
+                { key: 'expected_out', label: 'Expected', align: 'right',
+                  export: r => (queueExpected(r, section) == null ? '—' : fmt.num(queueExpected(r, section))) },
+                { key: 'qty_out', label: 'Actual', align: 'right',
+                  export: r => (r.qty_out > 0 ? `${fmt.num(r.qty_out)}${r.qty_scrap > 0 ? ` · ${fmt.num(r.qty_scrap)} waste` : ''}` : '—') },
                 ...(showsMachineColumn(section) ? [
                   { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine',
                     export: r => (ownMachineName(r, section) ? `${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}` : '—') },
@@ -1365,15 +1401,36 @@ export default function Section() {
                   <div className="truncate text-[13px] font-semibold text-slate-800">{shownOperator(r, section) || '—'}</div>
                 </div>
               </div>
+              {/* The same three figures the wide table now carries in columns —
+                  frozen board, what the run should yield, what it has counted. */}
+              <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
+                {showsBoard && (
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Frozen</div>
+                    <div className="text-[13px] font-bold tabular-nums text-amber-700">
+                      {r.frozen_sheets == null ? <span className="text-slate-300">—</span> : fmt.num(r.frozen_sheets)}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Expected</div>
+                  <div className="text-[13px] font-bold tabular-nums text-slate-800">
+                    {queueExpected(r, section) == null ? <span className="text-slate-300">—</span> : fmt.num(queueExpected(r, section))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Actual</div>
+                  <div className="text-[13px] font-bold tabular-nums text-emerald-700">
+                    {r.qty_out > 0 ? fmt.num(r.qty_out) : <span className="text-slate-300">—</span>}
+                  </div>
+                  {r.qty_scrap > 0 && (
+                    <div className="text-[10px] font-medium tabular-nums text-red-500">{fmt.num(r.qty_scrap)} waste</div>
+                  )}
+                </div>
+              </div>
               <div className="mt-1 text-xs text-slate-500">{PROCESS_COLUMN[section]?.render(r)}</div>
               {r.queue_state === 'hold' && r.hold_reason && (
                 <div className="mt-1 text-[12px] font-semibold text-red-500">{r.hold_reason}</div>
-              )}
-              {r.queue_state === 'partial' && (
-                <div className="mt-1 text-[12px] font-bold tabular-nums text-cyan-700">
-                  {fmt.num(r.qty_out || 0)} / {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} counted
-                  {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
-                </div>
               )}
               {canOperate() && (
                 <div className="mt-2.5 space-y-1.5">
@@ -1432,9 +1489,17 @@ export default function Section() {
                 <th className={`${th} ${pin}`}>Product</th>
                 <th className={`${th} ${share}`}>Customer / PO</th>
                 <th className={`${th} ${share} ci-p3`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
+                {/* Board set aside for this job, before it draws any. Cutting
+                    only — it is the one station that takes board off the shelf,
+                    and downstream the sheets are already cut. */}
+                {showsBoard && <th className={`${th} ${pin} text-right`}>Frozen</th>}
                 {/* The unit alone — "Qty (sheets)" forced a 104px column for a
                     figure that is usually four characters. */}
                 <th className={`${th} ${pin} text-right`}>{queue[0]?.unit || 'Units'}</th>
+                {/* Plan against actual, in their own columns rather than buried
+                    in a badge that only appeared once a run went partial. */}
+                <th className={`${th} ${pin} text-right`}>Expected</th>
+                <th className={`${th} ${pin} text-right`}>Actual</th>
                 {/* Die cutting picks its machine at Start — see showsMachineColumn.
                     The OPERATOR column stays: once a man self-assigns, his name
                     against the job is exactly what the floor needs. */}
@@ -1446,7 +1511,7 @@ export default function Section() {
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={showsMachineColumn(section) ? 10 : 9} className="px-4 py-12 text-center text-sm text-slate-400">
+                  <tr><td colSpan={(showsMachineColumn(section) ? 10 : 9) + (showsBoard ? 1 : 0) + 2} className="px-4 py-12 text-center text-sm text-slate-400">
                     {!pick ? <>Nothing in this view — the section is clear.</>
                       : pick.machineName
                         ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
@@ -1509,7 +1574,24 @@ export default function Section() {
                     <td className={`${td} pr-1`}><ProductCell r={r} /></td>
                     <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} ci-p3 text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
+                    {showsBoard && (
+                      <td className={`${td} text-right`}>
+                        <Figure value={r.frozen_sheets} tone="text-amber-700"
+                          title="Parent sheets frozen for this job — its own freeze, across every board it sits on. Nobody else can draw these." />
+                      </td>
+                    )}
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
+                    <td className={`${td} text-right`}>
+                      <Figure value={queueExpected(r, section)}
+                        title={`Good ${r.unit || 'units'} this run should yield${receivedQty(r) > 0 ? '' : ' — from the plan, nothing issued yet'}`} />
+                    </td>
+                    <td className={`${td} text-right`}>
+                      <Figure value={r.qty_out > 0 ? r.qty_out : null} tone="text-emerald-700"
+                        title={`Counted so far${r.qty_scrap > 0 ? ` · ${fmt.num(r.qty_scrap)} waste` : ''}`}
+                        sub={r.qty_scrap > 0
+                          ? <span className="block text-[10px] font-medium tabular-nums text-red-500">{fmt.num(r.qty_scrap)} waste</span>
+                          : null} />
+                    </td>
                     {/* At printing these mirror the Print Planning board live — drag a
                         job to another press and both flip here. Everywhere else they
                         show only what THIS stage really has: a job nobody has started
@@ -1542,13 +1624,11 @@ export default function Section() {
                       {r.queue_state === 'hold' && r.hold_reason && (
                         <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-red-500" title={r.hold_reason}>{r.hold_reason}</div>
                       )}
-                      {r.queue_state === 'partial' && (
-                        <div className="mt-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-cyan-700"
-                          title={`${fmt.num(r.qty_out || 0)} of ${fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} counted so far${r.qty_scrap > 0 ? ` · ${fmt.num(r.qty_scrap)} waste` : ''}`}>
-                          {fmt.num(r.qty_out || 0)} / {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)}
-                          {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
-                        </div>
-                      )}
+                      {/* The counted-so-far badge that used to sit here is gone:
+                          its two numbers ARE the Expected and Actual columns
+                          now, and its waste note sits under Actual. It also
+                          only ever appeared on a partial row, so the same two
+                          facts were invisible on every running one. */}
                       {/* Where the feed stands — cutting started / counting / done. */}
                       {r.upstream && (
                         <div className="mt-0.5">

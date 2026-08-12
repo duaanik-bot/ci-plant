@@ -59,6 +59,30 @@ export function plannedChildSheets(row, mixCuts = row?.mix_cuts) {
   return (+row?.sheets_issued || 0) * Math.max(1, +row?.children_per_parent || 1);
 }
 
+// The same question asked of a row that may not have STARTED — what the
+// station queue's Expected column shows. Once a stage has been fed this IS
+// expectedOutputQty; before that it falls back to the plan, and only where the
+// row carries a plan in this stage's own output unit.
+//
+// That restriction is the point. Cutting knows its plan up front — the very
+// arithmetic plannedChildSheets already spells, and the same figure the Cut
+// Plan cell prints two columns to the left — so a queued cutting row shows 800
+// rather than a 0 that reads as "this run produces nothing". Downstream, the
+// plan is held in CARTONS (`qty_planned`) while the stage counts SHEETS, so
+// there is no honest figure until cutting has counted: those rows return null
+// and the column shows an em dash. A number in the wrong unit is worse than no
+// number at all.
+//
+// Both arms are the existing readers, so a mixed job is mix-aware here for
+// free and this can never become a third opinion about expected output.
+export function plannedOutputQty(row, stage = row?.stage, cpp = row?.children_per_parent, mixCuts = row?.mix_cuts) {
+  const fromReceipt = expectedOutputQty(row, stage, cpp, mixCuts);
+  if (fromReceipt > 0) return fromReceipt;
+  if (stage !== 'cutting') return null;
+  const planned = plannedChildSheets(row, mixCuts);
+  return planned > 0 ? planned : null;
+}
+
 // What the counter box reads when a completion form opens. Three situations,
 // and the middle one is the whole reason this is a function and not a ternary:
 //
