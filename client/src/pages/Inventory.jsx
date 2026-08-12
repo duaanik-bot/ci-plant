@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
+import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
+import { packetsOf, packetText } from '../lib/packets.js';
 import { stockSplit } from '../lib/replenishment.js';
 import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
@@ -31,16 +32,11 @@ const threadSummary = (entity, ids) => {
 // an empty row reads a real 0.0 kg instead of a dash that looks like a data gap.
 const rowWeight = (m, sheets) => (+sheets === 0 ? 0 : totalWeight(m, sheets));
 
-// The plant counts, buys and stores board in PACKETS; the ledger transacts in
-// SHEETS, because cutting and planning are sheet-denominated. Every stock figure
-// therefore leads with packets — the warehouse's own unit — and carries its
-// sheet equivalent underneath, so nobody has to convert in their head and the
-// number production consumes stays visible.
-const packetsOf = (m, sheets) => (+sheets === 0 ? 0 : packets(m, sheets));
-
-// Packets are display-only and stay fractional: 250 sheets of a 100-sheet pack
-// is 2.5 packets, not 3. Rounding here would silently invent stock.
-const pktText = p => (p == null ? '—' : (+p).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+// packetsOf / packetText moved to lib/packets.js when the station queue began
+// showing packets under its sheet figures. Same arithmetic on both screens by
+// construction — a second copy is how 2.5 packets becomes 3 on one of them.
+// Every stock figure here still leads with packets, the warehouse's own unit,
+// and carries its sheet equivalent underneath.
 
 // Two-line stock cell — packets in front, sheets beneath. Used by every raw
 // material list so RM stock reads the same wherever it appears.
@@ -58,7 +54,7 @@ function StockCell({ m, sheets }) {
   return (
     <div className="leading-tight">
       <div className="text-[15px] font-black tabular-nums text-gray-900">
-        {pktText(p)}<span className="ml-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
+        {packetText(p)}<span className="ml-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
       </div>
       <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-400">
         {fmt.num(sheets)} sheets
@@ -69,7 +65,7 @@ function StockCell({ m, sheets }) {
 
 // Plain-text twin of StockCell for PDF/XLSX export, where a two-line cell has to
 // collapse into one string.
-const stockText = (m, sheets) => `${pktText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
+const stockText = (m, sheets) => `${packetText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
 
 // Which of a stock row's four figures BoardHealth judges, spelled ONCE. Three
 // readers ask for this verdict — the Health cell, its export twin, and the
@@ -101,7 +97,7 @@ function UnitCell({ m, sheets, tone }) {
   return (
     <div className="leading-tight">
       <div className={`tabular-nums font-semibold ${tone}`}>
-        {pktText(packetsOf(m, n))}<span className="ml-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
+        {packetText(packetsOf(m, n))}<span className="ml-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
       </div>
       <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-400">{fmt.num(n)} sheets</div>
     </div>
@@ -530,7 +526,7 @@ export default function Inventory() {
         const qtyValue = (kg, sheets) => (kg > 0 ? `${(kg / 1000).toFixed(2)} t` : fmt.num(Math.round(sheets)));
         const qtySub = (pkt, sheets, note) => (
           <>
-            <span className="block tabular-nums">{pktText(pkt)} pkt · {fmt.num(Math.round(sheets))} sheets</span>
+            <span className="block tabular-nums">{packetText(pkt)} pkt · {fmt.num(Math.round(sheets))} sheets</span>
             <span className="block text-[#86868B]">{note}</span>
           </>
         );
@@ -672,7 +668,7 @@ export default function Inventory() {
               return (
                 <div>
                   {po > 0 && <UnitCell m={m} sheets={po} tone="text-sky-700" />}
-                  {pr > 0 && <div className="text-[10px] font-semibold text-violet-700">{pktText(packetsOf(m, pr))} PKT on PR</div>}
+                  {pr > 0 && <div className="text-[10px] font-semibold text-violet-700">{packetText(packetsOf(m, pr))} PKT on PR</div>}
                 </div>
               );
             } },
@@ -880,7 +876,7 @@ export default function Inventory() {
             // "Short 14" beside fourteen rows reading RECOUNT or FROZEN OUT is
             // the disagreement this rebuild removes.
             { label: 'Needs attention', value: rows.filter(m => healthOfRow(m) !== 'ok').length },
-            { label: 'On shelf (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
+            { label: 'On shelf (packets)', value: packetText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
             { label: 'On shelf (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
             // Exported the same way the strip totals it — per board, never
             // netted across boards, so the sheet reconciles with the screen.

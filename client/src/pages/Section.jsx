@@ -41,6 +41,7 @@ import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty, plannedOutputQty, openingCounter } from '../lib/received.js';
+import { packetsOf, packetText } from '../lib/packets.js';
 import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk, cutChildrenVariance } from '../components/CutChildrenEntry.jsx';
 import { isCardTier, useTier } from '../lib/tier.js';
 
@@ -221,6 +222,43 @@ const queueExpected = (row, section) => plannedOutputQty(row, section, row?.chil
 // tabular, and an em dash rather than a zero when the number is not yet a fact.
 // A confident 0 under Expected next to a cut plan promising 800 is a lie the
 // operator has to work out for himself.
+// Board leaves the warehouse in PACKETS and is counted in sheets, so every
+// parent-sheet figure carries its packet equivalent underneath and nobody has to
+// divide in their head at the guillotine. Same arithmetic as the RM stock
+// screens — packetsOf/packetText are shared, not copied.
+//
+// CUTTING ONLY, and that is a unit rule rather than a layout preference: only
+// cutting's sheets are PARENT sheets off a packet. Downstream "sheets" are the
+// child print sheets cutting produced, which never came off a packet, and a
+// packet line under them would be a straight lie about what is on the floor.
+// A board with no sheets_per_packet on its master (leftovers, one-offs) prints
+// nothing rather than a zero.
+// Zero prints nothing. `packetsOf` honestly returns 0 packets for 0 sheets — RM
+// stock wants that, because packets are its LEAD figure and an empty board must
+// still say so. Here the sheet count is the lead and the packet line is a
+// conversion of it, and there is nothing to convert about zero: on a queue where
+// most jobs have drawn nothing, "0 pkt" under "0" is a second line of noise on
+// forty rows.
+function PacketLine({ row, sheets }) {
+  const p = !(+sheets > 0) ? null : packetsOf(row, sheets);
+  if (p == null) return null;
+  // nowrap: the column is sized to the sheet count, so "89.59 pkt" broke after
+  // the number and stacked a bare "pkt" on its own line.
+  return (
+    <span className="block whitespace-nowrap text-[10px] font-semibold tabular-nums text-slate-400">
+      {packetText(p)} pkt
+    </span>
+  );
+}
+
+// Plain-text twin of PacketLine, for the PDF/XLSX export where a two-line cell
+// collapses into one string. Same helpers, so the sheet cannot round a packet
+// count the screen keeps fractional.
+const withPkt = (row, sheets) => {
+  const p = sheets == null ? null : packetsOf(row, sheets);
+  return p == null ? fmt.num(sheets) : `${fmt.num(sheets)} (${packetText(p)} pkt)`;
+};
+
 function Figure({ value, tone = 'text-slate-800', sub = null, title = null }) {
   if (value == null) return <span className="text-slate-300">—</span>;
   return (
@@ -1256,11 +1294,15 @@ export default function Section() {
                 ]),
                 // The sheet has to say what the screen says, or the two become
                 // separate opinions the moment anyone prints one.
+                // A two-line cell has to collapse into one string on a sheet, so
+                // the packet figure rides after the sheet count rather than
+                // dropping out of the export the moment anyone prints one.
                 ...(showsBoard ? [
                   { key: 'frozen_sheets', label: 'Frozen', align: 'right',
-                    export: r => (r.frozen_sheets == null ? '—' : fmt.num(r.frozen_sheets)) },
+                    export: r => (r.frozen_sheets == null ? '—' : withPkt(r, r.frozen_sheets)) },
                 ] : []),
-                { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
+                { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right',
+                  export: r => (showsBoard ? withPkt(r, receivedQty(r)) : fmt.num(receivedQty(r))) },
                 { key: 'expected_out', label: 'Expected', align: 'right',
                   export: r => (queueExpected(r, section) == null ? '—' : fmt.num(queueExpected(r, section))) },
                 { key: 'qty_out', label: 'Actual', align: 'right',
@@ -1387,6 +1429,7 @@ export default function Section() {
                 <div>
                   <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{r.unit || 'Units'}</div>
                   <div className="text-[13px] font-bold tabular-nums text-slate-800">{fmt.num(receivedQty(r))}</div>
+                  {showsBoard && <PacketLine row={r} sheets={receivedQty(r)} />}
                 </div>
                 {showsMachineColumn(section) && (
                   <div className="min-w-0">
@@ -1410,6 +1453,7 @@ export default function Section() {
                     <div className="text-[13px] font-bold tabular-nums text-amber-700">
                       {r.frozen_sheets == null ? <span className="text-slate-300">—</span> : fmt.num(r.frozen_sheets)}
                     </div>
+                    <PacketLine row={r} sheets={r.frozen_sheets} />
                   </div>
                 )}
                 <div>
@@ -1577,10 +1621,14 @@ export default function Section() {
                     {showsBoard && (
                       <td className={`${td} text-right`}>
                         <Figure value={r.frozen_sheets} tone="text-amber-700"
-                          title="Parent sheets frozen for this job — its own freeze, across every board it sits on. Nobody else can draw these." />
+                          title="Parent sheets frozen for this job — its own freeze, across every board it sits on. Nobody else can draw these."
+                          sub={<PacketLine row={r} sheets={r.frozen_sheets} />} />
                       </td>
                     )}
-                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
+                    <td className={`${td} text-right`}>
+                      <span className="font-semibold tabular-nums text-slate-800">{fmt.num(receivedQty(r))}</span>
+                      {showsBoard && <PacketLine row={r} sheets={receivedQty(r)} />}
+                    </td>
                     <td className={`${td} text-right`}>
                       <Figure value={queueExpected(r, section)}
                         title={`Good ${r.unit || 'units'} this run should yield${receivedQty(r) > 0 ? '' : ' — from the plan, nothing issued yet'}`} />
