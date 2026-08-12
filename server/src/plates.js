@@ -28,6 +28,55 @@ export function artworkVersionOf(spec = {}) {
     || 'Unversioned';
 }
 
+// ── When are two spellings the same artwork? ──────────────────────────────
+// Live plant data, 2026-08-12: of the ten open Plate PRs whose product HAS plates
+// on the rack, eight read as having none. Not because the artwork differs — the
+// requirement carries the plant's short revision ("R1") while the plate was
+// labelled with its full artwork code and revision ("PCS-W026/R1"), or one side
+// writes "PC402001" where the other writes "PC-402001". Compared character for
+// character the Requirement page printed 8 reusable plates where the true figure
+// was 41, and the plant kept buying plates it already owned.
+//
+// The comparison is deliberately NARROW, because putting a superseded artwork on
+// a press is a customer reject:
+//   • it only ever runs within one product_id, one colour and one Pantone —
+//     product identity is an exact key and is never fuzzy-matched here;
+//   • punctuation and case are ignored, and nothing else is;
+//   • a bare revision token (R0, R1, R2…) may match the TRAILING revision of a
+//     fuller label, and only that. R1 never accepts an R2 plate, and a code that
+//     is not a revision token never matches a segment of another code.
+export function plateArtworkKey(version) {
+  return clean(version).replace(/[^A-Za-z0-9/]/g, '').toUpperCase();
+}
+
+// The last '/'-separated piece of a rack label: "PCS-W026/R1" -> "R1".
+export function plateArtworkTrailingKey(version) {
+  return plateArtworkKey(version).replace(/^.*\//, '');
+}
+
+// R0, R1, R2… and nothing else. 'Unversioned' — artworkVersionOf's fallback when
+// a requirement names no artwork at all — is deliberately NOT one, or a job with
+// no artwork recorded would claim every plate its product has ever had.
+export function isBareArtworkRevision(version) {
+  return /^R\d+$/.test(plateArtworkKey(version));
+}
+
+// The same two functions as SQL, so a comparison can be made inside a query
+// against a column instead of only in JS against a value.
+export const plateArtworkKeySql = expr => `upper(regexp_replace(${expr},'[^A-Za-z0-9/]','','g'))`;
+export const plateArtworkIsRevisionSql = expr => `(${plateArtworkKeySql(expr)} ~ '^R[0-9]+$')`;
+
+// ONE spelling of the comparison. Every side that asks it — bestPlateCandidate,
+// which hands the plate out; the availability count, which promises it; and the
+// older-artwork warning, which is its exact complement — builds its clause from
+// this, so the column can never offer what the button refuses, nor a banner call
+// "superseded" a plate the button is about to spend.
+export function plateArtworkMatchSql(column, key, isRevision) {
+  const canon = plateArtworkKeySql(column);
+  return `(${canon}=${key}
+    OR (${isRevision} AND regexp_replace(${canon},'^.*/','')=${key}))`;
+}
+
 export function plateSizeOf(spec = {}) {
   const raw = clean(spec.plate_size || spec.sheet_size).replace(/[×X]/g, 'x');
   const match = raw.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
@@ -276,6 +325,61 @@ export function approvablePlateComponents(components = []) {
     .filter(row => APPROVABLE_COMPONENT_STATUSES.includes(row?.status));
 }
 
+// What a plate on the rack may be claimed FOR. The three approvable statuses —
+// a line with no plate behind it — plus 'verification_required', which is the
+// backlog this exists to clear: a plate the rack offered when the PR was raised
+// that nobody ever walked over and confirmed. Everything else either already HAS
+// its plate (verified_existing, issued) or is on its way to a vendor (approved,
+// po_created); offering the rack to those would hand out the same plate twice.
+export const RACK_CLAIMABLE_COMPONENT_STATUSES = [...APPROVABLE_COMPONENT_STATUSES, 'verification_required'];
+
+// "How many of this Plate PR's plates are already on the rack?" — the live answer,
+// recomputed on every read of the Requirement page.
+//
+// The link between a requirement and the warehouse used to be made ONCE, when the
+// components were created: whatever the rack held at that instant was proposed and
+// nothing ever looked again. A plate returned from the press an hour later stayed
+// invisible, so the plant bought plates it already owned.
+//
+// The one law here is PARITY: `total` is what the Use-from-Rack button will
+// actually take, not what the rack happens to hold. Five Cyan plates against one
+// Cyan line is an offer of ONE. A figure that promises four and delivers two is
+// worse than no figure at all, so the headline is built by summing the same
+// per-colour lines the form prints — the two can never disagree.
+export function rackReusePlan({ components = [], available = [] } = {}) {
+  const free = new Map();
+  for (const row of Array.isArray(available) ? available : []) {
+    const key = plateComponentKey(row);
+    free.set(key, (free.get(key) || 0) + Math.max(0, Number(row.available) || 0));
+  }
+  const lines = new Map();
+  for (const component of Array.isArray(components) ? components : []) {
+    if (!RACK_CLAIMABLE_COMPONENT_STATUSES.includes(component?.status)) continue;
+    const key = plateComponentKey(component);
+    const line = lines.get(key) || {
+      key,
+      component_type: component.component_type,
+      component_label: component.component_label,
+      pantone_code: component.pantone_code || null,
+      needed: 0,
+      // The rack figure is reported as it stands, so the form can say "1 of 5 on
+      // rack" rather than silently hiding the four this PR has no use for.
+      available: free.get(key) || 0,
+      usable: 0,
+      component_ids: [],
+    };
+    line.needed += 1;
+    line.component_ids.push(component.id);
+    lines.set(key, line);
+  }
+  const rows = [...lines.values()].map(line => ({ ...line, usable: Math.min(line.needed, line.available) }));
+  return {
+    needed: rows.reduce((sum, line) => sum + line.needed, 0),
+    total: rows.reduce((sum, line) => sum + line.usable, 0),
+    lines: rows,
+  };
+}
+
 // 'draft' is here although the route insists on 'saved': the caller saves first
 // (a draft has no size stamped on it yet), and the button must offer the action
 // the WHOLE gesture can complete, not the one its second step starts from.
@@ -295,8 +399,15 @@ export function canUnapprovePlateRequest(request = {}) {
     || ['po_created', 'ordered', 'grn_received'].includes(row.status));
 }
 
+// The component states that mean a physical plate is in THIS line's hands. Two
+// questions share the list: "is this line ready?" (below) and "is that rack plate
+// already spoken for?" (plate-lifecycle.js builds its SQL from this array). One
+// spelling, because a plate counted as free while another requirement holds it is
+// a plate handed out twice.
+export const PLATE_HELD_COMPONENT_STATUSES = ['verified_existing', 'available', 'reserved', 'issued'];
+
 export function plateComponentStatus(status) {
-  if (['verified_existing', 'available', 'reserved', 'issued'].includes(status)) return 'ready';
+  if (PLATE_HELD_COMPONENT_STATUSES.includes(status)) return 'ready';
   if (['damaged', 'scrapped', 'not_found', 'replacement_required'].includes(status)) return 'attention';
   return 'pending';
 }

@@ -164,6 +164,15 @@ async function approvePlateRequest({ request, plateMasterId, keys = null, save }
   return eligible.length;
 }
 
+// ── The rack, read straight off the requirement ───────────────────────────
+// The server computes both figures (rackReusePlan in server/src/plates.js) and
+// ships them on the row, so the screen does no arithmetic of its own. That is
+// deliberate: the number printed here has to be the number the button spends,
+// and the only way two sides cannot drift is for one of them not to count.
+const rackTotal = row => Number(row?.rack_reuse?.total) || 0;
+const rackNeeded = row => Number(row?.rack_reuse?.needed) || 0;
+const rackLineFor = (row, key) => (row?.rack_reuse?.lines || []).find(line => line.key === key);
+
 function ComponentStrip({ components = [], compact = false }) {
   return <div className={`flex flex-wrap ${compact ? 'gap-1' : 'gap-1.5'}`}>
     {groupedComponents(components).map(component => <span key={component.key} title={statusLabel(component.status)}
@@ -907,6 +916,11 @@ export default function PlatesLifecycle() {
   // one shared document, so a partial run would be a wrong document.
   const approvableSelection = selectedRequirements.filter(row => canApproveRow(row)
     && requirementDraft(row).plate_master_id);
+  // Same narrowing rule as bulk approve: the rows the rack can help are acted on
+  // and the rest are simply left alone, rather than greying the button out and
+  // making somebody work out which selection spoiled it.
+  const rackSelection = selectedRequirements.filter(row => rackTotal(row) > 0);
+  const rackSelectionTotal = rackSelection.reduce((sum, row) => sum + rackTotal(row), 0);
   const canApproveBulk = canManage() && approvableSelection.length > 0;
   const allViewSelected = reqRows.length > 0 && reqRows.every(row => selectedIds.includes(row.id));
   // Buying a plate is one job in three steps; the rail above keeps them together.
@@ -994,6 +1008,30 @@ export default function PlatesLifecycle() {
     setDetail(fresh); setEditForm(requirementDraft(fresh));
     return fresh;
   };
+  // One spelling of "take what the rack already holds". The row button, the form
+  // button and the bulk dock differ only in WHICH requirements they name and, in
+  // the form's case, which colour — never in what the action means.
+  //
+  // Sequential for the same reason approveSelected is: a pooled serverless
+  // backend runs one client, so a dozen concurrent claims deadlock. Each PR is
+  // reported on its own so one that lost its plate to somebody else in the
+  // meantime does not discard the rest.
+  const useFromRack = async (rows, componentIds = null) => {
+    setBulkApproving(rows.length > 1);
+    if (rows.length === 1) setBusyRow(rows[0].id);
+    let reused = 0; const failed = [];
+    for (const row of rows) {
+      try {
+        const out = await api.post(`/plates/requirements/${row.id}/use-from-rack`,
+          componentIds ? { component_ids: componentIds } : {});
+        reused += out.reused;
+      } catch (error) { failed.push(`${row.request_number}: ${error.message}`); }
+    }
+    setBulkApproving(false); setBusyRow(null);
+    if (reused) toast.success(`${reused} plate${reused === 1 ? '' : 's'} taken from the rack — no need to buy ${reused === 1 ? 'it' : 'them'}`);
+    if (failed.length) toast.error(failed[0]);
+    if (detail) await refreshDetail(); else await load();
+  };
   const fetchProductMasterColours = async () => {
     if (!detail) return;
     const fresh = await api.get(`/plates/requirements/${detail.id}`);
@@ -1075,11 +1113,33 @@ export default function PlatesLifecycle() {
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     { key: 'components', label: 'Plate Set', sortable: false, render: row => <div><ComponentStrip components={row.components} compact /><span className="mt-1 block text-[10px] font-semibold text-slate-400">{row.plate_summary.ready}/{row.plate_summary.required} ready</span></div> },
+    // The warehouse, answered on the requirement itself. Before this column the
+    // rack was consulted once — when the PR was raised — and never again, so a
+    // plate that came back from the press an hour later was invisible and the
+    // plant bought one it already owned. The figure is what the button takes,
+    // never what the rack happens to hold.
+    { key: 'rack_reuse', label: 'On Rack', align: 'right', sortValue: row => rackTotal(row),
+      render: row => {
+        const needed = rackNeeded(row);
+        if (!needed) return <span className="text-xs text-slate-300">—</span>;
+        const total = rackTotal(row);
+        return <div className="text-right">
+          <b className={`text-sm tabular-nums ${total ? 'text-emerald-700' : 'text-slate-400'}`}>{total}</b>
+          <span className="block text-[10px] font-semibold text-slate-400">of {needed} to find</span>
+        </div>;
+      } },
     { key: 'delivery_date', label: 'Needed by', render: row => fmt.date(row.needed_by || row.delivery_date) },
     { key: 'approval_status', label: 'PR Status', render: row => <StatusChip value={row.approval_status} /> },
     { key: 'po_number', label: 'PO', render: row => row.po_number || '—' },
     { key: 'actions', label: '', sortable: false, render: row => <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
       <Button size="sm" variant="secondary" onClick={() => openRequirement(row)}><Eye size={12} /> Open</Button>
+      {/* Offered BEFORE Approve, because approving is what puts a plate onto a
+          purchase order — and a plate the plant already owns should never get
+          there. One click; the count on the button is the count in the column. */}
+      {canVerify() && rackTotal(row) > 0 && <Button size="sm" variant="success"
+        disabled={busyRow === row.id}
+        title={`Reserve ${rackTotal(row)} matching plate(s) from the rack for ${row.request_number}`}
+        onClick={() => useFromRack([row])}><Warehouse size={12} /> Use {rackTotal(row)} from Rack</Button>}
       {/* Approve without opening the PR. It takes the size the screen already
           suggests, which is the same value the modal opens pre-filled with — so
           this is the modal's default action with the modal skipped, not a second
@@ -1325,8 +1385,15 @@ export default function PlatesLifecycle() {
           + (selectedRequirements.length > 3 ? ` +${selectedRequirements.length - 3} more` : '')}
         title={selectedRequirements.map(row => row.request_number).join(', ')}
         onClear={() => setSelectedIds([])} clearLabel="Deselect all">
-        {!canApproveBulk && !canCreateBulkPo && !canDeleteBulk && <span className="text-xs font-semibold text-amber-700">Select unapproved PRs to approve, approved PRs for a PO, or editable PRs to delete</span>}
+        {!canApproveBulk && !canCreateBulkPo && !canDeleteBulk && !rackSelectionTotal && <span className="text-xs font-semibold text-amber-700">Select PRs with plates on the rack to reuse, unapproved PRs to approve, approved PRs for a PO, or editable PRs to delete</span>}
         {!allViewSelected && <Button size="sm" variant="ghost" onClick={() => setSelectedIds(current => [...new Set([...current, ...reqRows.map(row => row.id)])])}>Select all</Button>}
+        {/* The rack first, for the same reason it sits left of Approve on the row:
+            every plate taken here is a plate that never reaches a purchase order.
+            The count is the sum of the selected rows' own On Rack figures. */}
+        {canVerify() && rackSelectionTotal > 0 && <Button size="sm" variant="success" disabled={bulkApproving}
+          onClick={() => useFromRack(rackSelection)}>
+          <Warehouse size={13} /> Use {rackSelectionTotal} from Rack
+        </Button>}
         {/* Thirteen PRs raised in one go want approving in one go. Same gesture as
             the row button, run one at a time. */}
         <Button size="sm" variant="success" disabled={!canApproveBulk || bulkApproving}
@@ -1550,12 +1617,25 @@ export default function PlatesLifecycle() {
               options={[{value:'',label:'No preference'},...vendors.map(row=>({value:String(row.id),label:row.name}))]}/></Field>
           </div>
         </section>
-        <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate colour and quantity</span><div className="flex flex-wrap items-center justify-end gap-2"><span>0 removes a colour · Product Master: {detail.product_master_colour_count ?? '—'} colours</span>{detailEditable && <Button size="sm" variant="secondary" onClick={() => fetchProductMasterColours().catch(error => toast.error(error.message))}><RotateCcw size={12}/> Fetch Master Colours</Button>}</div></div>
+        <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate colour and quantity</span><div className="flex flex-wrap items-center justify-end gap-2"><span>0 removes a colour · Product Master: {detail.product_master_colour_count ?? '—'} colours</span>{canVerify() && rackTotal(detail) > 0 && <Button size="sm" variant="success" disabled={busyRow===detail.id}
+            onClick={()=>useFromRack([detail])}><Warehouse size={12}/> Use {rackTotal(detail)} from Rack</Button>}{detailEditable && <Button size="sm" variant="secondary" onClick={() => fetchProductMasterColours().catch(error => toast.error(error.message))}><RotateCcw size={12}/> Fetch Master Colours</Button>}</div></div>
           <div className="divide-y divide-slate-100">{editForm.components.map(row=>{
             const lifecycle=detailGroups.find(group=>group.key===componentKey(row));
-            return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(180px,1fr)_150px_132px]">
+            // The same warehouse answer the list column prints, per colour. Both
+            // come off row.rack_reuse, so the four lines here always add up to the
+            // one number on the row — see rackReusePlan in server/src/plates.js.
+            const rack=rackLineFor(detail,componentKey(row));
+            return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(170px,1fr)_140px_150px_132px]">
               <div><b className="text-sm">{row.component_label}</b>{row.component_type==='pantone'&&<span className="block text-[11px] text-slate-400">Pantone identity retained on every physical plate</span>}</div>
               <div>{lifecycle ? <StatusChip value={lifecycle.status}/> : <span className="text-xs text-slate-400">Not required</span>}</div>
+              <div>{rack ? <div className="flex items-center gap-1.5">
+                <span title={`${rack.available} matching plate${rack.available===1?'':'s'} free on the rack`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${rack.usable ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                  <Warehouse size={11}/>{rack.usable} of {rack.needed} on rack
+                </span>
+                {canVerify() && rack.usable > 0 && <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
+                  onClick={()=>useFromRack([detail],rack.component_ids)}>Use</Button>}
+              </div> : <span className="text-xs text-slate-300">—</span>}</div>
               <QuantityControl row={row} disabled={!detailEditable} onChange={qty=>updateDraftQty(componentKey(row),qty)}/>
             </div>;
           })}</div>

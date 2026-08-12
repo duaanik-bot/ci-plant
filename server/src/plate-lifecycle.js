@@ -1,6 +1,10 @@
 import {
   artworkVersionOf,
+  isBareArtworkRevision,
+  PLATE_HELD_COMPONENT_STATUSES,
   PLATE_RETURN_QUEUE,
+  plateArtworkKey,
+  plateArtworkMatchSql,
   plateComponentKey,
   plateComponentsFromSpec,
   plateComponentStatus,
@@ -8,6 +12,20 @@ import {
   plateSizeOf,
   validatePlateDispositions,
 } from './plates.js';
+
+// ONE spelling of "that rack plate is already spoken for", aliased `pa`.
+//
+// `status='available'` is not the whole answer. A plate matched to a requirement
+// through the verification path stayed 'available' on the asset — nothing in the
+// module ever wrote 'reserved', although the release path had always looked for
+// it — so the same plate could be proposed to a second requirement, verified
+// twice, and issued to whichever job reached the press first. Both the picker and
+// the availability count ask this, so a plate can never be offered while another
+// line is holding it.
+export const PLATE_ALREADY_CLAIMED_SQL = `EXISTS (
+  SELECT 1 FROM plate_request_components claimed
+  WHERE claimed.matched_asset_id=pa.id
+    AND claimed.status IN (${PLATE_HELD_COMPONENT_STATUSES.map(status => `'${status}'`).join(',')}))`;
 
 export function plateSpecification(target = {}) {
   const spec = {
@@ -85,21 +103,24 @@ export async function plateMasterForSize(oc, size) {
   return oc('SELECT * FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [normalized]);
 }
 
-async function bestPlateCandidate(oc, request, component, plateMasterId, excludedAssetIds = []) {
+export async function bestPlateCandidate(oc, request, component, plateMasterId, excludedAssetIds = []) {
   const spec = request.specification || {};
-  const values = [request.product_id, artworkVersionOf(spec), component.component_type, component.pantone_code || null];
+  const version = artworkVersionOf(spec);
+  const values = [request.product_id, plateArtworkKey(version), component.component_type,
+    component.pantone_code || null, isBareArtworkRevision(version)];
   const masterSql = plateMasterId ? (values.push(plateMasterId), `AND pa.plate_master_id=$${values.length}`) : '';
   const excludedSql = excludedAssetIds.length
     ? (values.push(excludedAssetIds), `AND NOT (pa.id=ANY($${values.length}::int[]))`)
     : '';
   return oc(`SELECT pa.*, pm.plate_size
     FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
-    WHERE pa.product_id=$1 AND lower(pa.artwork_version)=lower($2)
+    WHERE pa.product_id=$1 AND ${plateArtworkMatchSql('pa.artwork_version', '$2', '$5')}
       AND pa.component_type=$3
       AND lower(COALESCE(pa.pantone_code,''))=lower(COALESCE($4,''))
       ${masterSql}
       ${excludedSql}
       AND pa.status='available' AND pa.active=1 AND pa.condition IN ('Good','Fair')
+      AND NOT ${PLATE_ALREADY_CLAIMED_SQL}
     -- Condition first, wear second. A Good plate ALWAYS beats a Fair one, however
     -- many runs each has had: a worn-but-sound plate is a better bet on press than a
     -- fresh plate somebody has already graded down. Within a condition the least-worn

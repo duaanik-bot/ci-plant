@@ -4,12 +4,18 @@ import { audit, nextNumber, notify, outputNumberSql } from '../helpers.js';
 import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
-  APPROVABLE_COMPONENT_STATUSES, canUnapprovePlateRequest,
-  defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, plateComponentKey, plateComponentsFromSpec,
-  issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf, resolvePlateRate,
+  APPROVABLE_COMPONENT_STATUSES, artworkVersionOf, canUnapprovePlateRequest,
+  defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, isBareArtworkRevision,
+  plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
+  plateComponentKey, plateComponentsFromSpec,
+  issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
+  RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, resolvePlateRate,
   USED_PLATES_RACK, pickAvailableRackPlates, validatePlateReplacementRequest, validateReturnVerification,
 } from '../plates.js';
-import { createPlateComponents, issuedPlatesForStage, syncPlateRequest } from '../plate-lifecycle.js';
+import {
+  bestPlateCandidate, createPlateComponents, issuedPlatesForStage,
+  PLATE_ALREADY_CLAIMED_SQL, syncPlateRequest,
+} from '../plate-lifecycle.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
 
 const r = Router();
@@ -144,6 +150,16 @@ async function deletePlateRequirements(qc, oc, requestIds, reason, userName) {
   return { ok: true, deleted: deleted.length, request_numbers: deleted.map(row => row.request_number) };
 }
 
+// artworkVersionOf (plates.js) as SQL, for the one query that has to resolve a
+// requirement's artwork version inside the database rather than in JS. NULLIF +
+// btrim because the JS side runs each candidate through clean(): without them a
+// specification carrying an empty-string artwork_version would beat a real
+// party_artwork_code here and nowhere else.
+const ARTWORK_VERSION_SQL = `COALESCE(
+  NULLIF(btrim(tr.specification->>'artwork_version'),''),
+  NULLIF(btrim(tr.specification->>'party_artwork_code'),''),
+  NULLIF(btrim(tr.specification->>'output_number'),''),'Unversioned')`;
+
 async function componentRows(where = '', values = []) {
   return q(`SELECT prc.*, pm.plate_size,pm.hsn_code AS plate_hsn_code,pm.gst_rate AS plate_gst_rate,
       pa.asset_number AS proposed_asset_number, pa.rack_location AS proposed_rack_location,
@@ -153,8 +169,12 @@ async function componentRows(where = '', values = []) {
       (SELECT COUNT(*)::int FROM plate_assets old
        WHERE old.product_id=tr.product_id AND old.component_type=prc.component_type
          AND lower(COALESCE(old.pantone_code,''))=lower(COALESCE(prc.pantone_code,''))
-         AND lower(old.artwork_version)<>lower(COALESCE(tr.specification->>'artwork_version',
-           tr.specification->>'party_artwork_code',tr.specification->>'output_number','Unversioned'))
+         -- The exact COMPLEMENT of the reuse match, built from the same helper.
+         -- Spelled as its own inequality it called plates "superseded artwork"
+         -- while the Use-from-Rack button was offering to spend them, because the
+         -- two comparisons disagreed about "PCS-W026/R1" versus "R1".
+         AND NOT ${plateArtworkMatchSql('old.artwork_version',
+    plateArtworkKeySql(ARTWORK_VERSION_SQL), plateArtworkIsRevisionSql(ARTWORK_VERSION_SQL))}
          AND old.status='available' AND old.active=1) AS older_artwork_count
     FROM plate_request_components prc
     JOIN tooling_requests tr ON tr.id=prc.tooling_request_id
@@ -162,6 +182,48 @@ async function componentRows(where = '', values = []) {
     LEFT JOIN plate_assets pa ON pa.id=prc.proposed_asset_id
     LEFT JOIN plate_assets ma ON ma.id=prc.matched_asset_id
     ${where} ORDER BY prc.tooling_request_id,prc.sequence_no`, values);
+}
+
+// The size a Plate PR is actually working to. The components carry it once the PR
+// has been saved; a draft carries nothing, and `suggested_plate_master_id` is
+// deliberately NOT used as a stand-in — it is the form's default, not a fact about
+// the PR, and filtering the rack by a size nobody has chosen yet would hide plates
+// that ARE on the rack. No size means no size filter, which is exactly what
+// bestPlateCandidate does with the same value.
+const requestPlateMasterId = (components = []) =>
+  components.find(row => row.plate_master_id)?.plate_master_id || null;
+
+// What the rack can give each open Plate PR, asked live on every read.
+//
+// The artwork version is resolved here in JS by artworkVersionOf — the very
+// function bestPlateCandidate uses — and carried into the query, rather than
+// re-spelled as a COALESCE over the specification. Two spellings of an artwork
+// version would be two definitions of "the same plate", and only one of them
+// would be the one the reuse button acts on.
+async function rackAvailabilityByRequest(requests = []) {
+  const wanted = requests.filter(row => row.product_id);
+  if (!wanted.length) return new Map();
+  const versions = wanted.map(row => artworkVersionOf(row.specification || {}));
+  const rows = await q(`SELECT want.request_id, pa.component_type,
+      COALESCE(pa.pantone_code,'') AS pantone_code, COUNT(*)::int AS available
+    FROM unnest($1::int[],$2::int[],$3::text[],$4::bool[],$5::int[])
+      AS want(request_id,product_id,artwork_key,artwork_is_revision,plate_master_id)
+    JOIN plate_assets pa ON pa.product_id=want.product_id
+      AND ${plateArtworkMatchSql('pa.artwork_version', 'want.artwork_key', 'want.artwork_is_revision')}
+      AND (want.plate_master_id IS NULL OR pa.plate_master_id=want.plate_master_id)
+      AND pa.status='available' AND pa.active=1 AND pa.condition IN ('Good','Fair')
+      AND NOT ${PLATE_ALREADY_CLAIMED_SQL}
+    GROUP BY 1,2,3`,
+  [wanted.map(row => Number(row.id)), wanted.map(row => Number(row.product_id)),
+   versions.map(plateArtworkKey), versions.map(isBareArtworkRevision),
+   wanted.map(row => requestPlateMasterId(row.components) || null)]);
+  const byRequest = new Map();
+  for (const row of rows) {
+    const list = byRequest.get(row.request_id) || [];
+    list.push({ component_type: row.component_type, pantone_code: row.pantone_code || null, available: row.available });
+    byRequest.set(row.request_id, list);
+  }
+  return byRequest;
 }
 
 // What number to print on a PLATE — a physical object, not a job.
@@ -228,6 +290,8 @@ async function requirementRows(id = null) {
   }
   if (missing.length) components = await componentRows('WHERE prc.tooling_request_id=ANY($1::int[])', [rows.map(row => row.id)]);
   const grouped = componentsByRequest(components);
+  const rackFree = await rackAvailabilityByRequest(
+    rows.map(row => ({ ...row, components: grouped.get(row.id) || [] })));
   const defaults = await one(`SELECT
     (SELECT id FROM plate_masters WHERE active=1 AND lower(plate_size)='560 x 670' ORDER BY id LIMIT 1) AS metallic_master_id,
     (SELECT id FROM plate_masters WHERE active=1 AND lower(plate_size)='600 x 730' ORDER BY id LIMIT 1) AS offset_master_id,
@@ -259,6 +323,11 @@ async function requirementRows(id = null) {
       components: requestComponents,
       component_breakdown: plateQuantityBreakdown(requestComponents),
       plate_summary: plateReadinessSummary(requestComponents),
+      // The live warehouse answer, per colour and as one headline. The screen
+      // prints it and the Use-from-Rack button spends exactly it.
+      rack_reuse: rackReusePlan({
+        components: requestComponents, available: rackFree.get(row.id) || [],
+      }),
       product_master_components: productMasterComponents,
       product_master_colour_count: productMasterComponents.length,
       suggested_plate_size: suggestedSize,
@@ -569,6 +638,81 @@ r.post('/plates/components/:id/verify-existing', canVerify, async (req, res, nex
          component.rack_location, condition, req.body.note || null, req.user.name]);
       }
       return syncPlateRequest(qc, oc, component.tooling_request_id, req.user.name);
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Take what the plant already owns — one click, from the row or from the form.
+//
+// The careful door is still there and is still right for a plate somebody has
+// physical doubts about: VerificationModal ticks found / condition / artwork /
+// colour / size one at a time, and its other outcomes — not found, damaged,
+// scrap — remain the ONLY way to say a rack plate is unusable. This is the yes.
+// Whoever clicks it can see, on the same screen, which rack the plate sits on,
+// its condition grade, how many runs it has had and how long it has been there;
+// the click is that decision, it is signed, and it leaves a movement row, so an
+// empty rack slot is answerable to a name afterwards.
+//
+// The plate is RESERVED, not merely matched. Nothing in this module had ever
+// written 'reserved' although releaseDraftPlateAssets had always looked for it,
+// so a reused plate stayed 'available' and could be handed to a second job.
+// Reserving is what makes the availability figure on the list true a second
+// later, and editing or deleting the PR releases it again.
+r.post('/plates/requirements/:id/use-from-rack', canVerify, async (req, res, next) => {
+  try {
+    const wanted = [...new Set((req.body.component_ids || []).map(Number).filter(Boolean))];
+    const result = await tx(async (qc, oc) => {
+      const request = await oc(`SELECT * FROM tooling_requests
+        WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
+      if (!request) throw Object.assign(new Error('Plate requirement not found'), { status: 404 });
+      const idFilter = wanted.length ? 'AND id=ANY($2::int[])' : '';
+      const components = await qc(`SELECT * FROM plate_request_components
+        WHERE tooling_request_id=$1 ${idFilter} AND status=ANY($${wanted.length ? 3 : 2}::text[])
+        ORDER BY sequence_no FOR UPDATE`,
+      wanted.length ? [request.id, wanted, RACK_CLAIMABLE_COMPONENT_STATUSES]
+        : [request.id, RACK_CLAIMABLE_COMPONENT_STATUSES]);
+      if (!components.length) {
+        throw Object.assign(new Error('No plate on this requirement is waiting for a rack plate'), { status: 409 });
+      }
+      // Picked one at a time, each pick excluding the ones already taken in this
+      // same click — two Cyan lines on one PR must draw two different plates.
+      const taken = [];
+      const claimed = [];
+      for (const component of components) {
+        const asset = await bestPlateCandidate(oc, request, component, component.plate_master_id, taken);
+        // A colour the rack cannot cover is SKIPPED, never fatal: three of four is
+        // three plates the plant no longer has to buy, and the fourth stays on the
+        // PR exactly as it was, still approvable onto a PO.
+        if (!asset) continue;
+        taken.push(asset.id);
+        claimed.push(component);
+        await qc(`UPDATE plate_assets SET status='reserved',current_job_card_id=$1,
+          verified_by=$2,verified_at=now(),updated_at=now() WHERE id=$3`,
+        [request.job_card_id, req.user.name, asset.id]);
+        await qc(`UPDATE plate_request_components SET status='verified_existing',
+          proposed_asset_id=$1,matched_asset_id=$1,
+          verified_found=1,verified_condition_ok=1,verified_artwork_ok=1,verified_colour_ok=1,verified_size_ok=1,
+          verified_by=$2,verified_at=now(),updated_at=now() WHERE id=$3`,
+        [asset.id, req.user.name, component.id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
+           from_location,to_location,condition,note,user_name)
+          VALUES ($1,$2,$3,$4,'reserved','available','reserved',$5,$5,$6,$7,$8)`,
+        [asset.id, component.id, request.id, request.job_card_id, asset.rack_location, asset.condition,
+         `Reused from rack for ${request.request_number}`, req.user.name]);
+      }
+      if (!taken.length) {
+        throw Object.assign(new Error('No matching plate is free on the rack any more'), { status: 409 });
+      }
+      const breakdown = plateBreakdownText(claimed);
+      await syncPlateRequest(qc, oc, request.id, req.user.name);
+      await addRequestEvent(qc, request.id, 'rack_reuse', request.status, 'rack_reserved',
+        `${taken.length} plate${taken.length === 1 ? '' : 's'} taken from the rack · ${breakdown}`,
+        req.user.name, 'warehouse');
+      await audit('tooling_requirement', request.id, 'use_from_rack',
+        `${taken.length} of ${components.length} · ${breakdown}`, qc, req.user.name);
+      return { request_id: request.id, reused: taken.length, short: components.length - taken.length };
     });
     res.json(result);
   } catch (error) { next(error); }
