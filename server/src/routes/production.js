@@ -3215,6 +3215,32 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
       if (impact.blocked) throw Object.assign(new Error(impact.blocked), { status: 409 });
       const st = impact.stage;
 
+      // ADJUSTING A COMPLETED CUTTING STAGE MOVES BOARD. It re-derives the
+      // parents actually cut and trues the warehouse up by the delta — so a
+      // keystroke here consumes or refunds real sheets long after the operator
+      // has left the machine. On 11 Aug one such adjust restated 5,000 parents
+      // as 500 with the reason "Fgh", and its 4,500-sheet refund minted a batch
+      // on a board that had never had a sheet issued.
+      //
+      // Same gate as a stock-returning reverse, and for the same reason: the
+      // act rewrites physical history. Gated on the users.reverse_approver FLAG
+      // — never on a role and never on req.user.is_management, which is always
+      // undefined (the JWT carries id/name/role only) and would lock out even
+      // the MD. Fail-closed: no flag, no adjust.
+      //
+      // Deliberately narrow. Only CUTTING moves board, and only a COMPLETED
+      // stage has a draw to true up — correcting a stage still in progress, or
+      // any other station's count, is ordinary floor paperwork and stays open
+      // to whoever can run the stage.
+      if (st.stage === 'cutting' && st.status === 'completed') {
+        const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
+        if (!u?.reverse_approver) {
+          throw Object.assign(new Error(
+            'Adjusting a completed cutting stage moves board in the warehouse — only the plant head can approve it'),
+          { status: 403, body: { code: 'ADJUST_NEEDS_APPROVER', stage: st.stage } });
+        }
+      }
+
       await qc(`UPDATE job_stages SET qty_out=$1, qty_scrap=$2 WHERE id=$3`, [newOut, newScrap, st.id]);
 
       // TRUE UP FINISHED GOODS. Adjust never touched fg_stock, which was
