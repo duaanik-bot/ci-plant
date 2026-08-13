@@ -36,6 +36,7 @@ import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf, proces
          totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
+import { customerHue } from '../lib/customerColour.js';
 import { canPlan } from '../modules.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
@@ -85,6 +86,22 @@ function MgtChip({ a }) {
       <ShieldQuestion size={10} /> {label}
     </span>
   );
+}
+
+// The customer's identity colour, riding just ahead of the initials it belongs
+// to. The SAME dot appears in the filter chip and on every row, so the rail and
+// the queue speak one language — and, more to the point, so an UNFILTERED queue
+// is scannable. That is where this earns its keep: the queue runs 112 lines of
+// Swiss Garnier Life Sciences against 26 of Swiss Garniers Biotech, which as
+// text are nearly the same string and as SGLS/SGB are two letters apart.
+//
+// Decorative only — the initials beside it already carry the name, and the full
+// name is on the cell's title — so it is aria-hidden and never the sole carrier
+// of the fact.
+function CustomerDot({ id }) {
+  const hue = customerHue(id);
+  if (!hue) return null;
+  return <span aria-hidden className={`mr-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${hue.dot}`} />;
 }
 
 
@@ -505,6 +522,11 @@ export default function Planning() {
   // Single chip. It is a pure FACT (`run_kind`), orthogonal to the zone, so it
   // composes with Plan saved instead of competing with it.
   const [mergeOnly, setMergeOnly] = useState(false);
+  // Customer — a THIRD axis of the same kind, and multi-select because "SGLS
+  // and SGB, nothing else" is a real question the planner asks and a single
+  // pick cannot answer. Holds customer_ids, never names: the id is what the
+  // colour is keyed on and what survives a spelling correction.
+  const [customerFilters, setCustomerFilters] = useState([]);   // customer_ids; empty = all
   const [holdAsk, setHoldAsk] = useState(null);   // { rows, pick, reason } — "Why is this on hold?" prompt; pick is the dropdown, reason the free text 'Other' collects
   const [holdBusy, setHoldBusy] = useState(false);
   const [boardFilters, setBoardFilters] = useState([]);   // subset of 'covered'|'on_order'|'short'; empty = all
@@ -647,6 +669,29 @@ export default function Planning() {
   // Counted on the ZONE like draftCount, so each chip says how many of the rows
   // in front of the planner it would keep — never how many the other chip left.
   const mergeCount = zoneRows.filter(isMergeRun).length;
+  // Every customer a row speaks for. A gang can span companies — it is one row
+  // but it belongs to all of them, so it answers to each of their chips.
+  const rowCustomerIds = r => [...new Set((r._gang || [r]).map(m => m.customer_id).filter(v => v != null))];
+  // The customers present in the ZONE, counted like every other chip on this
+  // rail: before the customer filter narrows anything, so a chip says how many
+  // rows it would keep and never how many the other chips left. A run counts
+  // ONCE per customer however many of its members that customer owns — the
+  // chip counts rows, which is what the table shows. Busiest first, because
+  // that is the order the planner already holds the queue in.
+  const customerChips = (() => {
+    const seen = new Map();
+    for (const r of zoneRows) {
+      for (const m of (r._gang || [r])) {
+        if (m.customer_id == null) continue;
+        if (!seen.has(m.customer_id)) seen.set(m.customer_id, { id: m.customer_id, name: m.customer_name, rows: new Set() });
+        seen.get(m.customer_id).rows.add(r);
+      }
+    }
+    return [...seen.values()]
+      .map(c => ({ id: c.id, name: c.name, count: c.rows.size }))
+      .sort((a, b) => b.count - a.count
+        || customerInitials(a.name).localeCompare(customerInitials(b.name)));
+  })();
   // Narrowed HERE, where the zone is applied, so the KPI strip, the board
   // counts, the suggestions and the table all keep describing one and the same
   // set — the invariant the comment above depends on. Both axes compose, and
@@ -658,6 +703,15 @@ export default function Planning() {
     let rows = zoneRows;
     if (mergeOnly && mergeCount) rows = rows.filter(isMergeRun);
     if (draftOnly && draftCount) rows = rows.filter(rowDraft);
+    // Guarded the same way, per selected customer: an id whose last row has
+    // left the zone drops out of the test, and once none of the selection
+    // survives the filter releases entirely instead of stranding the planner on
+    // an empty table whose chips are all gone.
+    const liveCustomers = customerFilters.filter(id => customerChips.some(c => c.id === id));
+    if (liveCustomers.length) {
+      const keep = new Set(liveCustomers);
+      rows = rows.filter(r => rowCustomerIds(r).some(id => keep.has(id)));
+    }
     return rows;
   })();
   // The zone's LINES (gang rows unfolded) — feeds the KPI strip and the
@@ -2740,6 +2794,45 @@ export default function Planning() {
             </span>
           </button>
         </>}
+        {/* Customer — a third axis, and the only one on this rail that is about
+            WHOSE work rather than how it prints. Multi-select, so "SGLS and SGB,
+            nothing else" is two clicks rather than an impossible question.
+
+            The pill stays neutral, lit exactly the way the zone chips light, and
+            the company's colour lives in the dot alone. That is deliberate: on
+            this page violet already means gang, teal combined, amber hold,
+            emerald covered and red short, so a chip tinted in a company's colour
+            would be read as a status. A dot is small enough to identify without
+            asserting anything.
+
+            Hidden below two customers — a filter offering one choice narrows
+            nothing, and the strip should not grow to say so. */}
+        {customerChips.length > 1 && <>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
+          {customerChips.map(c => {
+            const on = customerFilters.includes(c.id);
+            const hue = customerHue(c.id);
+            return (
+              <button key={c.id} type="button"
+                onClick={() => {
+                  setCustomerFilters(f => (f.includes(c.id) ? f.filter(x => x !== c.id) : [...f, c.id]));
+                  clearSelection();
+                }}
+                title={`${c.name || 'Unnamed customer'} — ${fmt.count(c.count, 'row')} in this zone. Composes with the zone, the board cards and the searches; click again to clear.`}
+                aria-pressed={on}
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  on
+                    ? 'bg-[#1D1D1F]/[0.85] text-white'
+                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+                {hue && <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${hue.dot}`} />}
+                {customerInitials(c.name) || '—'}
+                <span className={`rounded-full px-1.5 text-[10px] ${on ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+                  {fmt.num(c.count)}
+                </span>
+              </button>
+            );
+          })}
+        </>}
       </div>
 
       {/* ONE strip, one control. Every filter this page offers is a card here —
@@ -3002,7 +3095,19 @@ export default function Planning() {
             render: l => l._gang
             ? (() => {
                 const pos = [...new Set(l._gang.map(m => m.po_number))];
-                const custs = [...new Set(l._gang.map(m => m.customer_name).filter(Boolean))];
+                // Kept as MEMBERS, not names, so each initial can carry its own
+                // company's dot — a gang spanning two customers has to show
+                // both. Deduped on the id where there is one so a run with four
+                // SGLS lines still reads "SGLS" once.
+                const custs = (() => {
+                  const seen = new Map();
+                  for (const m of l._gang) {
+                    if (!m.customer_name) continue;
+                    const key = m.customer_id ?? m.customer_name;
+                    if (!seen.has(key)) seen.set(key, m);
+                  }
+                  return [...seen.values()];
+                })();
                 const merged = l.run_kind === 'merge';
                 return (
                   <div onClick={e => e.stopPropagation()}>
@@ -3012,8 +3117,13 @@ export default function Planning() {
                     <div className="mt-1 font-semibold text-gray-900">{pos.join(' · ')}</div>
                     {/* The dates moved out to the sortable PO Date column beside
                         this one, which carries the run's spread in full. */}
-                    <div className="text-xs text-gray-500" title={custs.join(' · ')}>
-                      {custs.map(customerInitials).join(' · ')}
+                    <div className="text-xs text-gray-500" title={custs.map(m => m.customer_name).join(' · ')}>
+                      {custs.map((m, i) => (
+                        <span key={m.customer_id ?? m.customer_name}>
+                          {i > 0 && <span className="text-gray-300"> · </span>}
+                          <CustomerDot id={m.customer_id} />{customerInitials(m.customer_name)}
+                        </span>
+                      ))}
                     </div>
                     <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${merged ? 'text-teal-600' : 'text-violet-500'}`}>
                       {merged ? `${l._gang.length} orders · one pile` : `${l._gang.length} jobs · one run`}
@@ -3033,7 +3143,9 @@ export default function Planning() {
             : (<div>
                 <div className="font-semibold text-gray-900">{l.po_number}</div>
                 <div className="text-xs font-semibold text-gray-500" title={l.customer_name}>
-                  {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
+                  {customerInitials(l.customer_name)
+                    ? <><CustomerDot id={l.customer_id} />{customerInitials(l.customer_name)}</>
+                    : <span className="text-gray-300">—</span>}
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
@@ -3451,7 +3563,14 @@ export default function Planning() {
           // The export names every narrowing the page applied, for the same
           // reason the KPI strip follows the zone: a sheet handed round the
           // plant has to say which set it is.
-          ...(draftOnly && draftCount ? ['Filter: plan saved, lock pending'] : [])]}
+          ...(draftOnly && draftCount ? ['Filter: plan saved, lock pending'] : []),
+          // Named in FULL, not initials: a sheet leaves the plant and "SGLS"
+          // means nothing to whoever opens it. Only the customers still holding
+          // rows are listed, matching what the rail can actually have lit.
+          ...(() => {
+            const on = customerChips.filter(c => customerFilters.includes(c.id));
+            return on.length ? [`Customer: ${on.map(c => c.name).join(', ')}`] : [];
+          })()]}
         exportSummary={rows => {
           const flat = rows.flatMap(l => (l._gang ? l._gang : [l]));
           return [
