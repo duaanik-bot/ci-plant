@@ -21,8 +21,8 @@ import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
-import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
-import { eddPlan, eddForRow, eddConflicts } from '../wip-edd.js';
+import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, LINE_EDD_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
+import { eddPlan, eddForRow } from '../wip-edd.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
@@ -776,7 +776,13 @@ r.get('/status-sheet', async (_req, res, next) => {
   try {
     const overdueSql = overdueDaysSql(PLANT_TODAY_SQL);
     const rows = await q(`
-      SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
+      SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date,
+             -- The EDD this line answers for: its own when it has one,
+             -- otherwise the PO's. Both halves ride along so the cell can
+             -- show whether the date is the line's or inherited.
+             ${LINE_EDD_SQL} AS delivery_date,
+             ol.delivery_date AS line_delivery_date,
+             o.delivery_date  AS order_delivery_date,
              ol.is_p1,
              ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              c.id AS customer_id, c.name AS customer_name,
@@ -803,7 +809,7 @@ r.get('/status-sheet', async (_req, res, next) => {
       WHERE ${STATUS_SHEET_SCOPE_SQL}
       ORDER BY ol.is_p1 DESC,
                ${overdueSql} DESC,
-               o.delivery_date ASC NULLS LAST, ol.id`);
+               ${LINE_EDD_SQL} ASC NULLS LAST, ol.id`);
     // Manual override wins over the derived production signal (NULL = follow derived).
     // FUTURE auto-P1: when customers.priority lands, OR it into is_p1 here.
     for (const l of rows) {
@@ -870,11 +876,18 @@ r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
       vals.push(String(req.body.remarks ?? '').trim() || null);
       sets.push(`remarks=$${vals.length}`);
     }
+    // EDD for THIS product. An override: null hands the line back to the PO's
+    // own delivery date rather than blanking it, which is why the sheet's date
+    // input clearing to empty is a "follow the order" and not a "no date".
+    if ('delivery_date' in req.body) {
+      vals.push(req.body.delivery_date || null);
+      sets.push(`delivery_date=$${vals.length}`);
+    }
     if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
     const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, wip, wip_date, printed_override, is_p1, remarks`, vals);
+                           RETURNING id, wip, wip_date, printed_override, is_p1, remarks, delivery_date`, vals);
     if (!out) return res.status(404).json({ error: 'line not found' });
     await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
@@ -1070,7 +1083,7 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
     const plan = eddPlan(parsedRows);
     const lines = await q(`
       SELECT ol.id AS line_id, ol.order_id, ol.wip, ol.wip_date, o.po_number,
-             o.delivery_date,
+             ${LINE_EDD_SQL} AS delivery_date,
              c.name AS customer_name, ${LINE_STATUS_SQL} AS line_status,
              p.id AS product_id, p.name, p.code, p.party_item_code
       FROM order_lines ol
@@ -1133,48 +1146,34 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
     const today = plantDateStr();
     const out = await tx(async (qc) => {
       const done = [];
+      let eddApplied = 0;
       for (const it of items) {
+        // WIP mark and EDD land in ONE statement against the ORDER LINE.
+        //
+        // The EDD is per PRODUCT, which is the only shape that can hold what a
+        // customer sends: 79% of the lines on this sheet share a PO with other
+        // products (one PO carries 26), and their list names a date per item.
+        // Writing it to the order made two products of one PO fight over a
+        // single column; against the line there is nothing to fight about.
+        //
+        // COALESCE, not an overwrite: a row the file gave no date for keeps
+        // whatever it had. Marking something WIP must never blank its EDD.
         const row = await qc(
-          `UPDATE order_lines SET wip=true, wip_date=$2 WHERE id=$1
-           RETURNING id, wip, wip_date, order_id`, [it.line_id, it.wip_date || today]);
+          `UPDATE order_lines
+              SET wip=true, wip_date=$2, delivery_date=COALESCE($3, delivery_date)
+            WHERE id=$1
+           RETURNING id, wip, wip_date, delivery_date, order_id`,
+          [it.line_id, it.wip_date || today, it.edd || null]);
         if (!row[0]) continue;
         await audit('order_line', it.line_id, 'status-sheet-wip-import',
-          `marked Customer WIP (${row[0].wip_date}) from an uploaded WIP list`, qc, req.user?.name);
+          `marked Customer WIP (${row[0].wip_date}) from an uploaded WIP list`
+          + (it.edd ? `; EDD set to ${it.edd}` : ''), qc, req.user?.name);
+        if (it.edd) eddApplied++;
         done.push(row[0]);
       }
-
-      // ── EDD ───────────────────────────────────────────────────────────────
-      // delivery_date lives on the ORDER, so one date covers every product on
-      // that PO. Two products of one order asking for different dates is a
-      // question the schema cannot answer, and whichever row happened to be
-      // last would silently win. Those orders are REFUSED and named back to the
-      // planner instead — a delivery date the plant schedules against must not
-      // be decided by row order. Everything else in this transaction still
-      // lands; the WIP marks are not held hostage to an ambiguous date.
-      const withEdd = items
-        .map(it => {
-          const applied = done.find(d => d.id === it.line_id);
-          return applied && it.edd ? { order_id: applied.order_id, edd: it.edd } : null;
-        })
-        .filter(Boolean);
-      const conflicts = eddConflicts(withEdd);
-      const blocked = new Set(conflicts.map(c => c.order_id));
-      const seen = new Set();
-      const eddApplied = [];
-      for (const w of withEdd) {
-        if (blocked.has(w.order_id) || seen.has(w.order_id)) continue;
-        seen.add(w.order_id);
-        const o = await qc(
-          `UPDATE orders SET delivery_date=$2 WHERE id=$1 RETURNING id, delivery_date`,
-          [w.order_id, w.edd]);
-        if (!o[0]) continue;
-        await audit('order', w.order_id, 'status-sheet-wip-import',
-          `EDD set to ${w.edd} from an uploaded WIP list`, qc, req.user?.name);
-        eddApplied.push(o[0]);
-      }
-      return { done, eddApplied, conflicts };
+      return { done, eddApplied };
     });
-    res.json({ applied: out.done, edd_applied: out.eddApplied, edd_conflicts: out.conflicts });
+    res.json({ applied: out.done, edd_applied: out.eddApplied });
   } catch (e) { next(e); }
 });
 

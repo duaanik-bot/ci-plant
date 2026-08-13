@@ -4,7 +4,7 @@
 // onto orders.delivery_date, which is what the plant schedules against.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findEddColumn, eddPlan, eddForRow, datesIn, eddConflicts, EDD_HEADER_RE, WIP_HEADER_RE } from './wip-edd.js';
+import { findEddColumn, eddPlan, eddForRow, datesIn, EDD_HEADER_RE, WIP_HEADER_RE } from './wip-edd.js';
 
 const row = (cells, text) => ({ cells, text: text ?? cells.filter(Boolean).join(' ') });
 
@@ -128,32 +128,3 @@ test('datesIn returns every date, in order, as ISO', () => {
   assert.deepEqual(datesIn('01/02/26'), ['2026-02-01']);
 });
 
-// ── The order-level conflict ─────────────────────────────────────────────────
-
-test('two products of one order asking for different EDDs is a conflict', () => {
-  // delivery_date is per ORDER, so this is unanswerable and the last write
-  // would silently win. It must be refused, not resolved.
-  const c = eddConflicts([
-    { order_id: 7, edd: '2026-08-20' },
-    { order_id: 7, edd: '2026-08-25' },
-    { order_id: 8, edd: '2026-08-21' },
-  ]);
-  assert.equal(c.length, 1);
-  assert.equal(c[0].order_id, 7);
-  assert.deepEqual(c[0].dates, ['2026-08-20', '2026-08-25']);
-});
-
-test('the same date twice on one order is not a conflict', () => {
-  assert.deepEqual(eddConflicts([
-    { order_id: 7, edd: '2026-08-20' },
-    { order_id: 7, edd: '2026-08-20' },
-  ]), []);
-});
-
-test('rows without an EDD never create a conflict', () => {
-  assert.deepEqual(eddConflicts([
-    { order_id: 7, edd: null },
-    { order_id: 7, edd: '2026-08-20' },
-    { order_id: 7 },
-  ]), []);
-});

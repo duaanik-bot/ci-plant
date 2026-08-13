@@ -4,7 +4,9 @@
 //   • Stages       — tiny live chips of the line's real production route
 //   • Print Status — READ-ONLY, synced live from the printing stage itself
 //                    (not started / queued / running / partial / hold / done)
-//   • EDD          — the order's delivery date, edited inline, no overdue block
+//   • EDD          — this PRODUCT's delivery date, edited inline. A LINE-level
+//                    override of the PO's own date (79% of these lines share a PO
+//                    with other products), imported from the customer's WIP list
 //   • WIP          — the CUSTOMER's urgency, a TRI-STATE (WIP / Non-WIP / not on
 //                    their list) with the date it was said, settable by hand, in
 //                    bulk, or by uploading the customer's own WIP list
@@ -164,10 +166,17 @@ export default function StatusSheet() {
     if ((draft || '') === (m.remarks || '')) return;
     patchLine(m, { remarks: draft.trim() || null });
   };
-  // Order-level edits (EDD) touch every line of that order in the view.
-  const patchOrder = (line, body) => {
-    setRows(rs => rs.map(r => (r.order_id === line.order_id ? { ...r, ...body } : r)));
-    api.patch(`/status-sheet/order/${line.order_id}`, body).catch(load);
+  // EDD is a line-level OVERRIDE, so what is SENT and what is SHOWN differ and
+  // cannot go through patchLine's plain merge. The request carries the override
+  // alone; the row shows the resolved date, which falls back to the PO's the
+  // moment the override is cleared. Merging the resolved value into the request
+  // would write the PO's own date back as this line's override — the line would
+  // look unchanged and then stop following the order forever after.
+  const setEddOverride = (line, value) => {
+    setRows(rs => rs.map(r => (r.line_id === line.line_id
+      ? { ...r, line_delivery_date: value, delivery_date: value ?? r.order_delivery_date ?? null }
+      : r)));
+    api.patch(`/status-sheet/line/${line.line_id}`, { delivery_date: value }).catch(load);
   };
 
   // ── Customer WIP import — parse → review → confirm ────────────────────────
@@ -230,15 +239,9 @@ export default function StatusSheet() {
         edd: wipEdds[id] || null,
       }));
       const res = await api.post('/status-sheet/wip-apply', { items });
-      const eddN = res.edd_applied?.length || 0;
+      const eddN = res.edd_applied || 0;
       toast.success(`${res.applied.length} line${res.applied.length === 1 ? '' : 's'} marked Customer WIP`
-        + (eddN ? ` · EDD set on ${eddN} order${eddN === 1 ? '' : 's'}` : ''));
-      // A refused EDD is never silent. delivery_date is per ORDER, so two
-      // products of one PO asking for different dates is unanswerable — the
-      // server applies neither and names the order here.
-      if (res.edd_conflicts?.length) {
-        toast.error(`${res.edd_conflicts.length} order${res.edd_conflicts.length === 1 ? '' : 's'} had two different EDDs in the file — EDD left unchanged there, set it by hand`);
-      }
+        + (eddN ? ` · EDD set on ${eddN} line${eddN === 1 ? '' : 's'}` : ''));
       closeWip(); load();
     } catch (e) { toast.error(e.message || 'Could not mark the lines'); }
     finally { setWipBusy(false); }
@@ -417,12 +420,27 @@ export default function StatusSheet() {
       </span>
     );
   };
-  const EddCell = m => (
-    <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
-      onChange={e => patchOrder(m, { delivery_date: e.target.value || null })}
-      className={`${selCls} ${m.overdue_days > 0 ? 'bg-red-50 text-red-700 border-red-300' : ''}`}
-      title={m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : ''} />
-  );
+  // EDD — this PRODUCT's delivery date, edited against the ORDER LINE.
+  //
+  // It used to write the order, which moved every product on that PO at once.
+  // 79% of the lines here share a PO with other products (one carries 26) and
+  // the customer's list names a date per item, so the order-level column could
+  // never hold what they send. A line's own date OVERRIDES the PO's; clearing
+  // the box removes the override and the line goes back to following the order,
+  // which is why an empty input is "follow the PO" and not "no date".
+  const EddCell = m => {
+    const own = !!m.line_delivery_date;
+    return (
+      <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
+        onChange={e => setEddOverride(m, e.target.value || null)}
+        className={`${selCls} ${m.overdue_days > 0 ? 'border-red-300 bg-red-50 text-red-700'
+          : own ? 'border-blue-200 bg-blue-50/40' : ''}`}
+        title={[
+          m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : '',
+          own ? 'This product’s own EDD' : (m.delivery_date ? `Following PO ${m.po_number}` : 'No delivery date yet'),
+        ].filter(Boolean).join(' · ')} />
+    );
+  };
   // WIP — the customer's urgency, always hand-editable, and a TRI-STATE:
   //   WIP         they are waiting on it
   //   Non-WIP     they have told us it is NOT in progress — a deliberate
@@ -530,10 +548,6 @@ export default function StatusSheet() {
         : (s.status === 'in_progress' || s.status === 'partially_completed') ? '…' : ''}`).join(' ');
   };
 
-  // EDD is ORDER-level. A gang usually shares one order → one control; a gang
-  // spanning several orders partitions them so each order stays editable.
-  // (P1 is per-LINE, so a gang always gets one star per member.)
-  const oneOrder = g => new Set(g.map(m => m.order_id)).size === 1;
   const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
   const perMember = (r, f, sep = ' · ') => (r._gang ? r._gang.map(f).join(sep) : f(r));
 
@@ -605,7 +619,10 @@ export default function StatusSheet() {
       render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
     { key: 'delivery_date', label: 'EDD',
       export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
-      render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
+      // Per LINE now, so a gang always shows one control per member — the
+      // old single-control shortcut for a one-order gang would have edited
+      // the first member and silently left the others behind.
+      render: r => r._gang ? <GangCellParts members={r._gang} render={EddCell} /> : EddCell(r) },
     { key: 'wip', colClass: 'ci-p3', label: 'WIP', sortable: false,
       // Three states, spelled out. "No" would have collapsed Non-WIP and
       // never-mentioned back into one word in the very report that exists to
@@ -867,7 +884,7 @@ export default function StatusSheet() {
                   : wipRes.edd?.mode === 'positional'
                     ? <>This sheet names no delivery column — the <span className="font-bold">second date on each row</span> is offered as the EDD. Check them before confirming.</>
                     : <>No delivery date found in this file — EDD is left as it is. You can still type one per line.</>}
-                {' '}EDD applies to the whole PO, not the single product.
+                {' '}EDD is set on the product line, so two items of one PO can want different days.
               </span>
             </div>
             <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
@@ -923,8 +940,8 @@ export default function StatusSheet() {
                             ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
                             : 'border-slate-200 text-slate-600'}`}
                         title={l.current_edd
-                          ? `PO ${l.po_number} currently says ${l.current_edd} — this replaces it for every product on that PO`
-                          : `PO ${l.po_number} has no delivery date yet — this sets it for every product on that PO`} />
+                          ? `This product on PO ${l.po_number} currently says ${l.current_edd}`
+                          : `This product on PO ${l.po_number} has no delivery date yet`} />
                     </label>
                   ))}
                 </div>

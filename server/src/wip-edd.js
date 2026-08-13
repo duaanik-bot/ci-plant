@@ -101,21 +101,3 @@ export function eddForRow(row, plan) {
   return ds.length >= 2 ? ds[1] : null;
 }
 
-// EDD lives on the ORDER, not the line — one delivery date covers every product
-// on that PO. So a file that asks for two different dates on one order is asking
-// for something the schema cannot hold, and the last write would silently win.
-//
-// Returns one entry per order that is being pulled two ways. The caller refuses
-// those rather than picking for the planner: a delivery date the plant schedules
-// against must never be decided by row order.
-export function eddConflicts(items = []) {
-  const byOrder = new Map();
-  for (const it of items) {
-    if (!it || it.edd == null || it.order_id == null) continue;
-    if (!byOrder.has(it.order_id)) byOrder.set(it.order_id, new Set());
-    byOrder.get(it.order_id).add(it.edd);
-  }
-  return [...byOrder.entries()]
-    .filter(([, dates]) => dates.size > 1)
-    .map(([order_id, dates]) => ({ order_id, dates: [...dates].sort() }));
-}

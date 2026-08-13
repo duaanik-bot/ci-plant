@@ -49,18 +49,32 @@ export const LINE_STATUS_SQL = `CASE
   ELSE 'pending'
 END`;
 
+// The EDD a LINE actually answers for.
+//
+// orders.delivery_date is one date for the whole PO, but 79% of the lines on
+// this sheet share a PO with other products (one PO carries 26), and the
+// customer's WIP list names a date per ITEM. So a line may carry its own, and
+// the order's date is the fallback — an OVERRIDE, exactly like printed_override.
+//
+// ONE spelling, because three things have to agree about it: the column the
+// sheet shows, the ORDER BY that sorts on it, and the overdue clamp below. A
+// line resolving its EDD one way and sorting by another is a sheet that cannot
+// be read.
+export const LINE_EDD_SQL = `COALESCE(ol.delivery_date, o.delivery_date)`;
+
 // Days past the delivery date — but only while the line is still owed.
 //
 // Widening the sheet to finished lines would otherwise walk straight into the
 // Overdue KPI: a line dispatched three weeks after its EDD is not overdue, it
 // is DONE, and counting it would report a worse plant than the one that exists.
 // The clamp lives here rather than in the route so it cannot be widened without
-// the scope that made it necessary.
+// the scope that made it necessary. Reads the RESOLVED edd, so a line that has
+// been given its own date is judged against that one and not the PO's.
 export const overdueDaysSql = plantToday => `CASE
-  WHEN o.delivery_date IS NOT NULL
-   AND o.delivery_date::date < ${plantToday}
+  WHEN ${LINE_EDD_SQL} IS NOT NULL
+   AND ${LINE_EDD_SQL}::date < ${plantToday}
    AND ${LINE_STATUS_SQL} = 'pending'
-  THEN (${plantToday} - o.delivery_date::date)::int
+  THEN (${plantToday} - ${LINE_EDD_SQL}::date)::int
   ELSE 0
 END`;
 
