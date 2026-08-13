@@ -21,6 +21,7 @@ import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
+import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
@@ -760,14 +761,19 @@ r.get('/sales/pendency', async (_req, res, next) => {
 });
 
 // ── Status Sheet ──────────────────────────────────────────────────────────────
-// A live, editable coordination sheet — one row per pending order-line still owed
-// to a customer (same demand filter as pendency). Printed is DERIVED from our
-// printing stage with a manual override; WIP is a manual flag describing the
-// CUSTOMER's work-in-progress (not our floor); EDD (orders.delivery_date) is
-// edited inline with no overdue block; P1 is a manual PER-LINE priority flag —
-// starring one product must never light up the sibling products on the same PO.
+// A live, editable coordination sheet — one row per order-line still owed to a
+// customer, PLUS every line carrying a customer-WIP record (see wip-scope.js:
+// the customer chases a product until they receive it, so a line they are still
+// asking about must not vanish the day we dispatch it — that is what makes an
+// imported WIP list cumulative). Printed is DERIVED from our printing stage
+// with a manual override; WIP is a manual TRI-STATE describing the CUSTOMER's
+// work-in-progress (not our floor); EDD (orders.delivery_date) is edited inline
+// with no overdue block; Remarks is the planner's own note; P1 is a manual
+// PER-LINE priority flag — starring one product must never light up the sibling
+// products on the same PO.
 r.get('/status-sheet', async (_req, res, next) => {
   try {
+    const overdueSql = overdueDaysSql(PLANT_TODAY_SQL);
     const rows = await q(`
       SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
              ol.is_p1,
@@ -776,10 +782,10 @@ r.get('/status-sheet', async (_req, res, next) => {
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
              p.party_item_code, p.size,
-             ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
-             ol.wip, ol.wip_date, ol.printed_override,
-             CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
-                  THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
+             ol.qty, ol.dispatched_qty, GREATEST(0, ol.qty - ol.dispatched_qty) AS pending_qty,
+             ol.wip, ol.wip_date, ol.printed_override, ol.remarks,
+             ${LINE_STATUS_SQL} AS line_status,
+             ${overdueSql} AS overdue_days,
              EXISTS (
                SELECT 1 FROM job_cards jc
                JOIN job_stages js ON js.job_card_id = jc.id
@@ -793,11 +799,9 @@ r.get('/status-sheet', async (_req, res, next) => {
       JOIN customers c ON c.id = o.customer_id
       JOIN products p ON p.id = ol.product_id
       LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
-      WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
-        AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
+      WHERE ${STATUS_SHEET_SCOPE_SQL}
       ORDER BY ol.is_p1 DESC,
-               (CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
-                     THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END) DESC,
+               ${overdueSql} DESC,
                o.delivery_date ASC NULLS LAST, ol.id`);
     // Manual override wins over the derived production signal (NULL = follow derived).
     // FUTURE auto-P1: when customers.priority lands, OR it into is_p1 here.
@@ -832,29 +836,87 @@ r.get('/status-sheet', async (_req, res, next) => {
 });
 
 // Line-level edits: Printed override (true/false/null=Auto), the customer WIP
-// flag, and the per-product P1 star (priority stays on the starred line only).
+// record, the planner's Remarks, and the per-product P1 star (priority stays on
+// the starred line only).
 r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
   try {
     const id = +req.params.id;
     const sets = [], vals = [];
     if ('printed_override' in req.body) { vals.push(req.body.printed_override); sets.push(`printed_override=$${vals.length}`); }
-    if ('wip' in req.body) { vals.push(req.body.wip); sets.push(`wip=$${vals.length}`); }
-    // The date rides the flag: explicit when given (the uploaded sheet's own
-    // date), today when a line is flagged bare, cleared with the flag — a
-    // date with no flag is a stale claim.
+    // WIP is a TRI-STATE: true (waiting), false (told us it is NOT in
+    // progress), null (not on their list). A body that sends anything else —
+    // 'yes', 0, '' — is refused rather than coerced: `Boolean('false')` is
+    // true, and silently writing the opposite of what a caller meant is the
+    // one failure a flag like this must never have.
+    if ('wip' in req.body) {
+      if (!isWipState(req.body.wip)) {
+        return res.status(400).json({ error: 'wip must be true, false or null' });
+      }
+      vals.push(req.body.wip); sets.push(`wip=$${vals.length}`);
+    }
+    // The date rides the RECORD: explicit when given (the uploaded sheet's own
+    // date), today when a record is made bare, cleared only when the record is
+    // REMOVED — a date with no record is a stale claim. Non-WIP keeps its date
+    // because "they said it is not in progress" happened on a day too.
     if ('wip_date' in req.body) { vals.push(req.body.wip_date || null); sets.push(`wip_date=$${vals.length}`); }
     else if ('wip' in req.body) {
-      vals.push(req.body.wip ? plantDateStr() : null);
+      vals.push(wipDateFor(req.body.wip, null, plantDateStr()));
       sets.push(`wip_date=$${vals.length}`);
+    }
+    // Trimmed, and blank stores as NULL — an empty remark is the absence of
+    // one, so it must not export as a stray space or defeat a NULL check.
+    if ('remarks' in req.body) {
+      vals.push(String(req.body.remarks ?? '').trim() || null);
+      sets.push(`remarks=$${vals.length}`);
     }
     if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
     const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, wip, wip_date, printed_override, is_p1`, vals);
+                           RETURNING id, wip, wip_date, printed_override, is_p1, remarks`, vals);
     if (!out) return res.status(404).json({ error: 'line not found' });
     await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Bulk WIP — one verdict applied to many lines at once, which is the only
+// humane way to answer a customer's 60-line sheet. Three actions, one endpoint,
+// because they differ ONLY in the state they write:
+//   wip=true   Mark as WIP
+//   wip=false  Mark as Non-WIP   (on the list, not in progress)
+//   wip=null   Remove from WIP   (off the list entirely)
+//
+// One transaction so a half-applied bulk can never exist, and one audit row per
+// line so the trail reads the same as if each had been ticked by hand.
+r.post('/status-sheet/lines/bulk', canPlan, async (req, res, next) => {
+  try {
+    const wip = req.body.wip === undefined ? true : req.body.wip;
+    if (!isWipState(wip)) {
+      return res.status(400).json({ error: 'wip must be true, false or null' });
+    }
+    // De-duplicated: a collapsed gang row expands to its member lines on the
+    // client, and two selected rows of one run would otherwise send the same
+    // line twice and audit it twice for a single decision.
+    const ids = [...new Set((Array.isArray(req.body.line_ids) ? req.body.line_ids : [])
+      .map(Number).filter(Number.isInteger))];
+    if (!ids.length) return res.status(400).json({ error: 'Nothing selected' });
+    const date = wipDateFor(wip, req.body.wip_date || null, plantDateStr());
+    const verb = wip === true ? 'Customer WIP' : wip === false ? 'Non-WIP' : 'removed from the WIP list';
+    // EVERY statement runs on the transaction's own client. On prod the pool is
+    // max:1, so a bare q() in here waits for a connection the transaction is
+    // already holding and the request hangs until it times out.
+    const out = await tx(async (qc) => {
+      const rows = await qc(
+        `UPDATE order_lines SET wip=$2, wip_date=$3 WHERE id = ANY($1::int[])
+         RETURNING id, wip, wip_date`, [ids, wip, date]);
+      for (const row of rows) {
+        await audit('order_line', row.id, 'status-sheet-wip-bulk',
+          `marked ${verb}${date ? ` (${date})` : ''} in a bulk action`, qc, req.user?.name);
+      }
+      return rows;
+    });
+    res.json({ applied: out, wip, wip_date: date });
   } catch (e) { next(e); }
 });
 
@@ -957,11 +1019,18 @@ r.post('/status-sheet/wip-parse', canPlan, wipUploadOne, async (req, res, next) 
   } catch (e) { next(e); }
 });
 
-// Match row texts against the products currently PENDING on the Status Sheet.
-// Candidates are only those products — matching against the whole master file
-// would happily map items the plant is not making, and the sheet is the scope
-// the planner is looking at. A matched product fans out to EVERY pending line
-// of that product: the customer chases the product, not our order split.
+// Match row texts against the products ON the Status Sheet — the SAME scope the
+// sheet itself paints (wip-scope.js), never a narrower one. Candidates are only
+// those products: matching against the whole master file would happily map items
+// the plant is not making, and the sheet is the scope the planner is looking at.
+// A matched product fans out to EVERY line of that product on the sheet: the
+// customer chases the product, not our order split.
+//
+// The scope matters most on the SECOND import. A customer's list repeats what
+// they are still waiting on, including things we finished last week; while the
+// candidates were pending-only, those rows came back "unrecognised" purely
+// because we had dispatched them — the list looked replaced rather than added
+// to. Sharing the sheet's scope is what makes a re-import cumulative.
 r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
   try {
     const texts = (Array.isArray(req.body.rows) ? req.body.rows : [])
@@ -969,14 +1038,13 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
     if (!texts.length) return res.status(400).json({ error: 'No rows to match' });
     const lines = await q(`
       SELECT ol.id AS line_id, ol.order_id, ol.wip, ol.wip_date, o.po_number,
-             c.name AS customer_name,
+             c.name AS customer_name, ${LINE_STATUS_SQL} AS line_status,
              p.id AS product_id, p.name, p.code, p.party_item_code
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
       JOIN products p ON p.id = ol.product_id
-      WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
-        AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL`);
+      WHERE ${STATUS_SHEET_SCOPE_SQL}`);
     const byProduct = new Map();
     for (const l of lines) {
       if (!byProduct.has(l.product_id)) byProduct.set(l.product_id, []);
@@ -992,7 +1060,15 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
       ...v,
       lines: (byProduct.get(v.product_id) || []).map(l => ({
         line_id: l.line_id, po_number: l.po_number, customer_name: l.customer_name,
-        already_wip: !!l.wip,
+        // `already_wip` is the TRUE state only. A line sitting at Non-WIP is
+        // not "already done" — the customer has changed their mind, and the
+        // import must be able to move it back, so it stays tickable.
+        already_wip: l.wip === true,
+        wip: l.wip,
+        // What the planner is about to mark. A line the plant has already
+        // dispatched is exactly the row that used to go missing here, so the
+        // review says so instead of presenting it as ordinary pending work.
+        line_status: l.line_status,
       })),
     })).filter(v => v.lines.length);
     res.json({

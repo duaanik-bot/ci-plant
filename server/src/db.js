@@ -734,7 +734,21 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS printed_override BOOLEAN;
 -- When the customer's list said so: the date a line was marked Customer-WIP,
 -- taken from the uploaded WIP sheet when it carries one (today otherwise).
 -- Cleared when the flag is taken off — a date with no flag is a stale claim.
+--
+-- The wip column is deliberately NULLABLE and reads as THREE states, not two:
+--   true  = on the customer's list, they are waiting on it
+--   false = on the list, and the customer has said it is NOT in progress
+--   NULL  = not on their list at all (what "Remove from WIP" writes)
+-- The Status Sheet keeps any line with a record (wip IS NOT NULL) visible long
+-- after it stops being pending, which is what makes an imported list cumulative.
+-- wip_date rides the RECORD: stamped for true and false alike, cleared only on
+-- removal.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip_date TEXT;
+-- The planner's own note against a line, typed on the Status Sheet and carried
+-- into its export. Distinct from order_lines.notes, which the production and
+-- short-close paths write — a coordination remark must not be overwritten by a
+-- machine.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS remarks TEXT;
 -- P1 moved from the order to the product LINE (2026-07-27): the star marks one
 -- product, not the whole PO. The DO block backfills the old order-level flag
 -- onto its lines exactly once (only when the column is first created), so a

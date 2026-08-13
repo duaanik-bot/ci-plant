@@ -5,10 +5,18 @@
 //   • Print Status — READ-ONLY, synced live from the printing stage itself
 //                    (not started / queued / running / partial / hold / done)
 //   • EDD          — the order's delivery date, edited inline, no overdue block
-//   • WIP          — the CUSTOMER's urgency flag (not our floor): Yes/No dropdown
-//                    with the date it was marked, settable by hand or by
-//                    uploading the customer's own WIP list (Excel/CSV/PDF)
+//   • WIP          — the CUSTOMER's urgency, a TRI-STATE (WIP / Non-WIP / not on
+//                    their list) with the date it was said, settable by hand, in
+//                    bulk, or by uploading the customer's own WIP list
+//   • Remarks      — the planner's own note against the line, edited inline
 //   • P1           — a manual, PER-PRODUCT priority flag
+//
+// SCOPE: every line still owed to a customer, PLUS every line carrying a WIP
+// record even after it completes or dispatches (see server/src/wip-scope.js).
+// A customer chases a product until they receive it, so an imported list stays
+// cumulative instead of losing rows the week we finish them. The Status chips
+// are how the finished ones are filtered back out of view.
+//
 // Edits post to /status-sheet/* and update optimistically; realtime/fallback refresh reconciles.
 import { useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
@@ -16,9 +24,10 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
-import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, ResetFilters, rowMatches, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
+import { Button, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
+import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -27,13 +36,46 @@ import { SECTION_META } from '../sections.js';
 const STATUS_KPI_ROWS = {
   overdue: r => +r.overdue_days > 0,
   p1: r => !!r.is_p1,
-  wip: r => !!r.wip,
+  wip: r => r.wip === true,
 };
 const STATUS_KPI_LABEL = {
   overdue: 'lines past their delivery date',
   p1: 'lines on a P1 product',
   wip: 'lines the customer marked WIP (urgent)',
 };
+
+// The three states a line can be at, in the order the plant moves through them.
+// `line_status` is derived server-side (wip-scope.js) as a cascade, so exactly
+// one of these is true for any line and a chip can never double-count a row.
+const LINE_STATUSES = [
+  { key: 'pending', label: 'Pending', cls: 'bg-slate-700 text-white' },
+  { key: 'completed', label: 'Completed', cls: 'bg-emerald-600 text-white' },
+  { key: 'dispatched', label: 'Dispatched', cls: 'bg-blue-600 text-white' },
+];
+const STATUS_LABEL = Object.fromEntries(LINE_STATUSES.map(s => [s.key, s.label]));
+const STATUS_PILL = {
+  pending: 'bg-slate-100 text-slate-600',
+  completed: 'bg-emerald-50 text-emerald-700',
+  dispatched: 'bg-blue-50 text-blue-700',
+};
+
+// WIP is a TRI-STATE and the select has to say so. '' is the DOM's only honest
+// spelling of "no value" — mapped to null on the way out, because null and
+// false mean different things here and a coerced false would tell the plant the
+// customer said something they never said.
+const WIP_OPTIONS = [
+  { value: '', label: 'Not on list' },
+  { value: 'yes', label: 'WIP' },
+  { value: 'no', label: 'Non-WIP' },
+];
+const wipValue = w => (w === true ? 'yes' : w === false ? 'no' : '');
+const wipFromValue = v => (v === 'yes' ? true : v === 'no' ? false : null);
+
+// Every row a display row stands for, as real order lines. A collapsed gang row
+// is ONE row on screen and several lines in the database — every bulk action,
+// every count and every export decision has to go through this, or a planner
+// ticking one gang would silently write to a single member of it.
+const linesOf = r => r._gang || [r];
 
 // Every caller below writes this into order_lines.wip_date. dayOf, never
 // toISOString(): before 05:30 IST that reads yesterday, so a line marked on the
@@ -104,10 +146,23 @@ export default function StatusSheet() {
   useFallbackRefresh(load, { intervalMs: 60000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
-  // Optimistic line edit (Printed override / WIP / P1) — patch one line, reconcile on error.
+  // Optimistic line edit (Printed override / WIP / Remarks / P1) — patch one
+  // line, reconcile on error.
   const patchLine = (line, body) => {
     setRows(rs => rs.map(r => (r.line_id === line.line_id ? { ...r, ...body } : r)));
     api.patch(`/status-sheet/line/${line.line_id}`, body).catch(load);
+  };
+  // Remarks is free text, so it saves on BLUR rather than per keystroke — a
+  // PATCH per character would race its own responses and lose the tail of a
+  // sentence. The typed value lives in local state until then, keyed by line,
+  // so a background refresh cannot yank the caret out of a half-typed note.
+  const [remarkDraft, setRemarkDraft] = useState({});
+  const commitRemark = m => {
+    const draft = remarkDraft[m.line_id];
+    if (draft === undefined) return;
+    setRemarkDraft(d => { const n = { ...d }; delete n[m.line_id]; return n; });
+    if ((draft || '') === (m.remarks || '')) return;
+    patchLine(m, { remarks: draft.trim() || null });
   };
   // Order-level edits (EDD) touch every line of that order in the view.
   const patchOrder = (line, body) => {
@@ -171,22 +226,56 @@ export default function StatusSheet() {
     pendingQty: rows.reduce((s, r) => s + (r.pending_qty || 0), 0),
     overdue: rows.filter(r => r.overdue_days > 0).length,
     p1: rows.filter(r => r.is_p1).length,
-    wip: rows.filter(r => r.wip).length,
+    wip: rows.filter(r => r.wip === true).length,
   }), [rows]);
+
+  // ── Chip filters — status and customer, both multi-select ─────────────────
+  // Empty means "everything", not "nothing": a filter that starts by hiding the
+  // whole sheet reads as a page that failed to load. Both narrow the same
+  // searched set the KPI cards count, so every figure on screen agrees.
+  const [statusKeys, setStatusKeys] = useState([]);
+  const [custKeys, setCustKeys] = useState([]);
+  const toggleIn = (set, key) => set(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
+
+  const statusCounts = useMemo(() => {
+    const c = { pending: 0, completed: 0, dispatched: 0 };
+    for (const r of rows) if (c[r.line_status] != null) c[r.line_status]++;
+    return c;
+  }, [rows]);
+  // Customers present on the sheet, most lines first so the busiest chip is
+  // reachable without reading an alphabet, then alphabetical for a stable rail.
+  const customers = useMemo(() => {
+    const c = new Map();
+    for (const r of rows) if (r.customer_name) c.set(r.customer_name, (c.get(r.customer_name) || 0) + 1);
+    return [...c.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, n]) => ({ name, n }));
+  }, [rows]);
 
   const kpi = useKpiFilter('status-sheet');
   // wipSel is deliberately absent: those are the lines the user has ticked to
   // mark WIP, a checklist they are building to submit, not a way of narrowing
   // the sheet. Clearing it here would throw away their work.
+  // Every filter on this page, so "Reset filters" means the whole page and not
+  // whichever ones were wired first — the two chip rails narrow the sheet just
+  // as hard as the search box, and a reset that left them lit would be the bug
+  // this mechanism exists to prevent. Clearing the view also drops the row
+  // selection: those ticks name rows, and rows the planner can no longer see
+  // must not stay armed under a bulk button.
   const filters = useFilterReset([
     [q, setQ, '', 'search'],
     [kpi.keys, kpi.clear, [], 'KPI card'],
-  ]);
+    [statusKeys, setStatusKeys, [], 'status'],
+    [custKeys, setCustKeys, [], 'customer'],
+  ], () => setSelIds([]));
   const searched = useMemo(() => (q
     ? rows.filter(r => rowMatches(r, q, (r._gang || [r]).map(productSearchText).join(' ')))
     : rows), [rows, q]);
   // Applied to LINES, before gangs collapse, because the cards count lines too.
-  const filtered = kpi.apply(searched, STATUS_KPI_ROWS);
+  const chipped = useMemo(() => searched.filter(r =>
+    (!statusKeys.length || statusKeys.includes(r.line_status))
+    && (!custKeys.length || custKeys.includes(r.customer_name))), [searched, statusKeys, custKeys]);
+  const filtered = kpi.apply(chipped, STATUS_KPI_ROWS);
   // A gang is ONE physical unit until die cutting — so it reads as ONE row here
   // too. Collapse every pending member line sharing a gang_run_id into a single
   // synthetic row carrying `_gang` (members in view order); everything else is a
@@ -203,6 +292,46 @@ export default function StatusSheet() {
     }
     return out;
   }, [filtered]);
+
+  // ── Selection and bulk WIP ────────────────────────────────────────────────
+  // Selection is held as DISPLAY row ids (a gang's synthetic `gang-<run>`
+  // included) because that is what the checkbox column ticks. It is expanded to
+  // real order-line ids only at the moment of writing — a gang row stands for
+  // several lines, and marking one member of a run the customer is chasing
+  // would be a silent half-answer.
+  const [selIds, setSelIds] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Narrowing the view must not leave an invisible selection armed: a planner
+  // who filters to one customer and hits "Mark as WIP" is talking about what is
+  // in front of them. Ids that fell out of view are dropped from the count and
+  // from the write.
+  const selectedRows = useMemo(() => {
+    const want = new Set(selIds.map(String));
+    return displayRows.filter(r => want.has(String(r.line_id)));
+  }, [displayRows, selIds]);
+  const selectedLines = useMemo(() => selectedRows.flatMap(linesOf), [selectedRows]);
+
+  const clearSel = () => setSelIds([]);
+  const applyBulk = async (wip, verb) => {
+    const line_ids = [...new Set(selectedLines.map(l => l.line_id))];
+    if (!line_ids.length) return;
+    setBulkBusy(true);
+    // Optimistic, exactly like the single-line edit beside it — the sheet
+    // repaints at once and `load()` reconciles if the server disagrees.
+    const stamp = wip == null ? null : todayISO();
+    setRows(rs => rs.map(r => (line_ids.includes(r.line_id)
+      ? { ...r, wip, wip_date: wip == null ? null : (r.wip_date || stamp) } : r)));
+    try {
+      const res = await api.post('/status-sheet/lines/bulk', { wip, line_ids });
+      const n = res.applied.length;
+      toast.success(`${n} line${n === 1 ? '' : 's'} ${verb}`);
+      clearSel();
+      load();
+    } catch (e) {
+      toast.error(e.message || 'Could not update those lines');
+      load();
+    } finally { setBulkBusy(false); }
+  };
 
   // Cell renderers pulled out so a gang row can reuse them PER MEMBER inside
   // GangCellParts, while a plain line renders them once. Editable controls always
@@ -239,27 +368,52 @@ export default function StatusSheet() {
       className={`${selCls} ${m.overdue_days > 0 ? 'bg-red-50 text-red-700 border-red-300' : ''}`}
       title={m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : ''} />
   );
-  // WIP — the customer's urgency, always hand-editable. Toggling Yes stamps
-  // today unless a date is already there (the upload flow writes the sheet's
-  // own date); the date stays editable while the flag is on and leaves with it.
+  // WIP — the customer's urgency, always hand-editable, and a TRI-STATE:
+  //   WIP         they are waiting on it
+  //   Non-WIP     they have told us it is NOT in progress — a deliberate
+  //               negative, which is why it is not the same as blank
+  //   Not on list no record at all; this is what "Remove from WIP" writes
+  // Choosing either record stamps today unless a date is already there (the
+  // upload flow writes the customer's own date). The date stays editable while
+  // a record exists and leaves with it — a date with no record is a stale claim.
   const WipCell = m => (
     <div className="flex flex-col gap-1">
-      <select className={`${selCls} ${m.wip ? 'bg-blue-50 text-blue-700 border-blue-300' : ''}`}
-        value={m.wip ? 'yes' : 'no'}
+      <select className={`${selCls} ${
+        m.wip === true ? 'border-blue-300 bg-blue-50 text-blue-700'
+          : m.wip === false ? 'border-slate-300 bg-slate-100 text-slate-500' : ''}`}
+        value={wipValue(m.wip)}
         onChange={e => {
-          const on = e.target.value === 'yes';
-          patchLine(m, { wip: on, wip_date: on ? (m.wip_date || todayISO()) : null });
+          const next = wipFromValue(e.target.value);
+          patchLine(m, { wip: next, wip_date: next == null ? null : (m.wip_date || todayISO()) });
         }}>
-        <option value="no">No</option>
-        <option value="yes">Yes</option>
+        {WIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
-      {m.wip && (
+      {m.wip != null && (
         <input type="date" value={m.wip_date ? String(m.wip_date).slice(0, 10) : ''}
-          onChange={e => patchLine(m, { wip: true, wip_date: e.target.value || todayISO() })}
-          className="h-7 rounded-md border border-blue-200 bg-blue-50/60 px-1.5 text-[11px] font-medium text-blue-700 focus:outline-none"
-          title="When the customer's list marked it WIP" />
+          onChange={e => patchLine(m, { wip: m.wip, wip_date: e.target.value || todayISO() })}
+          className={`h-7 rounded-md border px-1.5 text-[11px] font-medium focus:outline-none ${
+            m.wip ? 'border-blue-200 bg-blue-50/60 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}
+          title={m.wip ? "When the customer's list marked it WIP" : 'When the customer said it is not in progress'} />
       )}
     </div>
+  );
+  // Remarks — the planner's own note. Saved on blur, not per keystroke (see
+  // commitRemark): a PATCH per character races its own responses and loses the
+  // end of a sentence.
+  const RemarksCell = m => (
+    <Input value={remarkDraft[m.line_id] ?? m.remarks ?? ''}
+      onChange={e => setRemarkDraft(d => ({ ...d, [m.line_id]: e.target.value }))}
+      onBlur={() => commitRemark(m)}
+      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      placeholder="—"
+      className="h-8 min-w-[8rem] text-xs"
+      title="A note against this line — carried into the export" />
+  );
+  const StatusCell = m => (
+    <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+      STATUS_PILL[m.line_status] || STATUS_PILL.pending}`}>
+      {STATUS_LABEL[m.line_status] || m.line_status}
+    </span>
   );
   const P1Cell = m => (
     <button onClick={() => patchLine(m, { is_p1: m.is_p1 ? 0 : 1 })}
@@ -383,8 +537,22 @@ export default function StatusSheet() {
       export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
       render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
     { key: 'wip', colClass: 'ci-p3', label: 'WIP', sortable: false,
-      export: r => perMember(r, m => (m.wip ? `Yes${m.wip_date ? ` (${String(m.wip_date).slice(0, 10)})` : ''}` : 'No')),
+      // Three states, spelled out. "No" would have collapsed Non-WIP and
+      // never-mentioned back into one word in the very report that exists to
+      // tell them apart.
+      export: r => perMember(r, m => (m.wip == null ? '—'
+        : `${m.wip ? 'WIP' : 'Non-WIP'}${m.wip_date ? ` (${String(m.wip_date).slice(0, 10)})` : ''}`)),
       render: r => r._gang ? <GangCellParts members={r._gang} render={WipCell} /> : WipCell(r) },
+    // The status the chips filter on. Visible, and deliberately absent from the
+    // export — wipExport.js drops it by key, so renaming the label cannot put
+    // it back in a customer's workbook.
+    { key: 'line_status', label: 'Status', sortable: true,
+      sortValue: r => r.line_status || '',
+      render: r => r._gang ? <GangCellParts members={r._gang} render={StatusCell} /> : StatusCell(r) },
+    { key: 'remarks', label: 'Remarks', sortable: false, width: 'w-[11rem]',
+      searchValue: r => linesOf(r).map(m => m.remarks || '').join(' '),
+      export: r => perMember(r, m => m.remarks || '—'),
+      render: r => r._gang ? <GangCellParts members={r._gang} render={RemarksCell} /> : RemarksCell(r) },
     { key: 'is_p1', label: 'P1', align: 'right',
       export: r => perMember(r, m => (m.is_p1 ? 'P1' : '—')),
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" render={P1Cell} /> : P1Cell(r) },
@@ -411,7 +579,53 @@ export default function StatusSheet() {
           onClick={() => kpi.toggle('wip')} active={kpi.is('wip')} />
       </div>
       <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}
-        shown={filtered.length} total={searched.length} className="mt-3" />
+        shown={filtered.length} total={chipped.length} className="mt-3" />
+
+      {/* Two chip rails, one question each: WHERE the line is, and WHOSE it is.
+          Both multi-select, both narrowing the same set — so "Completed" beside
+          two customers reads as the sentence it looks like. The status rail
+          carries the weight (it is the one that decides whether finished work
+          is on screen at all); the customer rail sits in a lighter, scrolling
+          band because a busy plant has more customers than fit on one line.
+          Neither carries its own reset: both are registered with useFilterReset
+          below, so "Show everything" is the ONE control that clears the page. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+          {LINE_STATUSES.map(s => {
+            const on = statusKeys.includes(s.key);
+            return (
+              <button key={s.key} type="button"
+                onClick={() => { toggleIn(setStatusKeys, s.key); clearSel(); }}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  on ? s.cls : 'text-slate-500 hover:bg-slate-100'}`}>
+                {s.label}
+                <span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>
+                  {statusCounts[s.key]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {customers.length > 1 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Customer</span>
+          {customers.map(c => {
+            const on = custKeys.includes(c.name);
+            return (
+              <button key={c.name} type="button"
+                onClick={() => { toggleIn(setCustKeys, c.name); clearSel(); }}
+                title={`${c.n} line${c.n === 1 ? '' : 's'}`}
+                className={`max-w-[13rem] truncate rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  on ? 'border-brand-500 bg-brand-500 text-white'
+                    : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-slate-100'}`}>
+                {c.name}
+                <span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{c.n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {filters.dirty && (
         <div className="mt-3 flex justify-end">
           <ResetFilters filters={filters} shown={filtered.length} total={rows.length} />
@@ -430,8 +644,23 @@ export default function StatusSheet() {
         columns={columns}
         rows={displayRows}
         searchValue={q} onSearchChange={setQ}
-        searchPlaceholder="Search order, company, product…"
+        // Universal: rowMatches walks every raw field of the line plus each
+        // column's own searchValue, so the product's codes and the planner's
+        // remark are as findable as the PO number. No whitelist to fall behind.
+        searchPlaceholder="Search anything — order, company, product, code, remark…"
         getRowId={r => r.line_id}
+        selectable
+        selectedIds={selIds}
+        onToggleRow={(row, checked) => setSelIds(cur => (checked
+          ? [...new Set([...cur, row.line_id])]
+          : cur.filter(id => String(id) !== String(row.line_id))))}
+        onToggleAll={(rs, checked) => {
+          const ids = rs.map(r => r.line_id);
+          const want = new Set(ids.map(String));
+          setSelIds(cur => (checked
+            ? [...new Set([...cur, ...ids])]
+            : cur.filter(id => !want.has(String(id)))));
+        }}
         rowClass={r => {
           // A WIP row is tinted at ROW level — urgency is visible from across
           // the room, not only in one cell. The unread-thread tint still wins
@@ -446,15 +675,60 @@ export default function StatusSheet() {
         defaultSort={{ key: 'delivery_date', dir: 'asc' }}
         exportName="Status Sheet"
         exportSubtitle="Pending order status"
-        empty={loadError ? 'Server unreachable — nothing to show until it reconnects.' : 'No pending orders — everything is dispatched or closed.'}
+        // The workbook's SHAPE is a decision here, not just its rows: with two
+        // or more customers in view it becomes one worksheet per customer. See
+        // wipExport.js — it also drops the Status column and splits a run
+        // shared by two companies so neither sheet carries the other's carton.
+        exportSpec={(sortedRows, cols) => buildWipExportSpec({
+          rows: sortedRows,
+          columns: cols,
+          excluded: EXPORT_EXCLUDED_KEYS,
+          name: 'Status Sheet',
+          subtitle: 'Pending order status',
+          meta: [
+            q ? `Search: "${q}"` : null,
+            statusKeys.length ? `Status: ${statusKeys.map(k => STATUS_LABEL[k]).join(', ')}` : null,
+            custKeys.length ? `Customers: ${custKeys.join(', ')}` : null,
+            `${sortedRows.length} of ${rows.length} records`,
+          ],
+        })}
+        empty={loadError ? 'Server unreachable — nothing to show until it reconnects.'
+          : (statusKeys.length || custKeys.length) ? 'Nothing matches these filters — clear one to widen the view.'
+          : 'No pending orders — everything is dispatched or closed.'}
       />
       </div>
+
+      {/* Bulk WIP. Three actions because there are three states, and the two
+          negatives are genuinely different: Non-WIP records that the customer
+          said it is not in progress; Remove takes the line off their list
+          entirely. The count names LINES, not rows — a ticked gang is several. */}
+      <SelectionDock open={selectedRows.length > 0} count={selectedLines.length}
+        summary={`${selectedLines.length} line${selectedLines.length === 1 ? '' : 's'}`
+          + (selectedRows.length !== selectedLines.length ? ` across ${selectedRows.length} rows` : '')
+          + ' · ' + [...new Set(selectedLines.map(l => l.customer_name))].slice(0, 3).join(' · ')}
+        title={[...new Set(selectedLines.map(l => l.customer_name))].join(', ')}
+        onClear={clearSel}>
+        <Button size="sm" disabled={bulkBusy} onClick={() => applyBulk(true, 'marked Customer WIP')}>
+          <Zap size={13} /> Mark as WIP
+        </Button>
+        <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => applyBulk(false, 'marked Non-WIP')}>
+          <ZapOff size={13} /> Mark as Non-WIP
+        </Button>
+        <Button size="sm" variant="secondary" disabled={bulkBusy} onClick={() => applyBulk(null, 'removed from the WIP list')}>
+          <X size={13} /> Remove from WIP
+        </Button>
+      </SelectionDock>
 
       {/* ── Import the customer's WIP list ──────────────────────────────────
           Two phases in one modal: drop the file, then review what matched.
           Nothing is written until "Mark … as WIP" — confident matches arrive
           ticked (so Yes-to-All is one click), fuzzy suggestions arrive
-          unticked for the planner's eye, and every date stays editable. */}
+          unticked for the planner's eye, and every date stays editable.
+
+          The import ADDS. It only ever writes a WIP record onto the lines that
+          are ticked, so last week's list survives this week's — the cumulative
+          list Anik asked for. Nothing here can clear a record: taking a product
+          off the list is the deliberate "Remove from WIP" in the dock. */}
       <Modal open={wipOpen} onClose={closeWip} wide title="Import Customer WIP List"
         footer={wipRes ? <>
           <Button variant="secondary" onClick={closeWip}>Cancel</Button>
@@ -473,6 +747,8 @@ export default function StatusSheet() {
             <div className="text-xs text-slate-400">
               Excel (.xlsx), CSV, or a text PDF — each row an item they are waiting on.
               Matched products are shown for confirmation before anything is marked.
+              This <span className="font-semibold text-slate-500">adds to</span> the existing WIP list;
+              products only leave it when you remove them.
             </div>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,application/pdf" className="hidden"
               onChange={e => { handleWipFile(e.target.files?.[0]); e.target.value = ''; }} />
@@ -515,6 +791,17 @@ export default function StatusSheet() {
                       <span className="min-w-0 flex-1 text-xs text-slate-600">
                         PO <span className="font-semibold text-slate-800">{l.po_number}</span> · {l.customer_name}
                         {l.already_wip && <span className="ml-1.5 text-[10px] font-bold text-blue-500">already WIP</span>}
+                        {/* A line sitting at Non-WIP is tickable — the customer
+                            has changed their mind, and that is the whole point
+                            of a second list. */}
+                        {l.wip === false && <span className="ml-1.5 text-[10px] font-bold text-slate-400">was Non-WIP</span>}
+                        {/* The row that used to go missing. Before the matcher
+                            shared the sheet's scope, a product we had already
+                            finished simply came back "unrecognised". */}
+                        {l.line_status && l.line_status !== 'pending' && (
+                          <span className={`ml-1.5 rounded-full px-1.5 py-px text-[9.5px] font-bold uppercase ${
+                            STATUS_PILL[l.line_status]}`}>{STATUS_LABEL[l.line_status]}</span>
+                        )}
                       </span>
                       <input type="date" value={wipDates[l.line_id] || ''} disabled={l.already_wip}
                         onChange={e => setWipDates(d => ({ ...d, [l.line_id]: e.target.value }))}

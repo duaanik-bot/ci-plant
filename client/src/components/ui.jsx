@@ -1245,6 +1245,12 @@ export function DataTable({
   exportSubtitle,
   exportMeta,
   exportSummary,
+  // Replace the built-in spec entirely: `exportSpec(sortedRows, columns)` is
+  // called at click time and its return value goes straight to the exporter.
+  // For a report whose SHAPE is a decision — one worksheet per customer, say —
+  // rather than one table with different rows in it. It still receives the
+  // searched-and-sorted rows, so "export what you are looking at" holds.
+  exportSpec,
   dense = false,
   defaultSort,
   // Group rail tone. A grouped run is violet when it is a GANG (different
@@ -1373,7 +1379,7 @@ export function DataTable({
     dir: current?.key === key && current.dir === 'asc' ? 'desc' : 'asc',
   }));
   // Export exactly what the user is looking at — current search filter + sort.
-  const buildExport = () => ({
+  const buildExport = () => (exportSpec ? exportSpec(sorted, columns) : {
     name: exportName,
     title: exportName || 'Report',
     subtitle: exportSubtitle,
