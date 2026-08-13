@@ -936,18 +936,43 @@ r.post('/status-sheet/lines/bulk', canPlan, async (req, res, next) => {
 
 // Order-level edits: EDD (delivery_date, no overdue block). P1 is line-level
 // now (see the PATCH above) — the old order-wide flag is no longer written here.
+// Apply one EDD to the WHOLE PO.
+//
+// The per-line override is the right default — the customer dates their list by
+// item — but a PO with 26 products on it needs one move that covers all of them,
+// and the plant often does agree a single date with the customer.
+//
+// This writes the ORDER's own delivery_date and CLEARS every line override on
+// it. The clear is the whole point, not tidying: a line carrying its own date
+// would go on showing that date, and the button would look broken on exactly
+// the rows the planner was trying to correct. Afterwards the PO has one date,
+// every line follows it, and — because Planning, Dispatch and the Job Card
+// register all read orders.delivery_date — every other screen agrees with this
+// one again, which a fan-out of per-line overrides could never achieve.
+//
+// One transaction: a PO left with its new date but its old overrides still
+// standing is the broken half-state this exists to avoid.
 r.patch('/status-sheet/order/:id', canPlan, async (req, res, next) => {
   try {
     const id = +req.params.id;
-    const sets = [], vals = [];
-    if ('delivery_date' in req.body) { vals.push(req.body.delivery_date || null); sets.push(`delivery_date=$${vals.length}`); }
-    if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
-    vals.push(id);
-    const out = await one(`UPDATE orders SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, delivery_date`, vals);
+    if (!('delivery_date' in req.body)) return res.status(400).json({ error: 'nothing to update' });
+    const date = req.body.delivery_date || null;
+    const out = await tx(async (qc) => {
+      const o = await qc(`UPDATE orders SET delivery_date=$2 WHERE id=$1
+                          RETURNING id, delivery_date`, [id, date]);
+      if (!o[0]) return null;
+      const cleared = await qc(
+        `UPDATE order_lines SET delivery_date=NULL
+          WHERE order_id=$1 AND delivery_date IS NOT NULL
+         RETURNING id`, [id]);
+      await audit('order', id, 'status-sheet-edd-whole-po',
+        `EDD set to ${date ?? 'none'} for the whole PO`
+        + (cleared.length ? `; ${cleared.length} per-product EDD${cleared.length === 1 ? '' : 's'} cleared` : ''),
+        qc, req.user?.name);
+      return { order: o[0], cleared: cleared.length };
+    });
     if (!out) return res.status(404).json({ error: 'order not found' });
-    await audit('order', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
-    res.json(out);
+    res.json({ ...out.order, overrides_cleared: out.cleared });
   } catch (e) { next(e); }
 });
 

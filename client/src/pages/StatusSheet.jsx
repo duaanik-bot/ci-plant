@@ -29,7 +29,7 @@ import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
 import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays } from 'lucide-react';
+import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays, CalendarCheck } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -172,6 +172,25 @@ export default function StatusSheet() {
   // moment the override is cleared. Merging the resolved value into the request
   // would write the PO's own date back as this line's override — the line would
   // look unchanged and then stop following the order forever after.
+  // Apply one date to the WHOLE PO — the counterpart to the per-product
+  // override. Writes the order's own date and drops every line override on it,
+  // so the PO ends with one date that every line follows and every OTHER screen
+  // (Planning, Dispatch, the Job Card register all read orders.delivery_date)
+  // agrees with. Confirmed first: on this book a PO can carry 26 products.
+  const [poEdd, setPoEdd] = useState(null);   // { line, count }
+  const applyEddToPo = async ({ line }) => {
+    const date = line.delivery_date ? String(line.delivery_date).slice(0, 10) : null;
+    setRows(rs => rs.map(r => (r.order_id === line.order_id
+      ? { ...r, delivery_date: date, line_delivery_date: null, order_delivery_date: date }
+      : r)));
+    try {
+      const res = await api.patch(`/status-sheet/order/${line.order_id}`, { delivery_date: date });
+      toast.success(`PO ${line.po_number} — every product now due ${fmt.date(date)}`
+        + (res.overrides_cleared ? ` · ${res.overrides_cleared} per-product date${res.overrides_cleared === 1 ? '' : 's'} replaced` : ''));
+      load();
+    } catch (e) { toast.error(e.message || 'Could not set the PO’s delivery date'); load(); }
+  };
+
   const setEddOverride = (line, value) => {
     setRows(rs => rs.map(r => (r.line_id === line.line_id
       ? { ...r, line_delivery_date: value, delivery_date: value ?? r.order_delivery_date ?? null }
@@ -276,6 +295,16 @@ export default function StatusSheet() {
     return [...c.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, n]) => ({ name, n }));
+  }, [rows]);
+
+  // How many products each PO carries ON THIS SHEET. Counted over every row,
+  // never the filtered view: "apply to the whole PO" reaches all of them, so a
+  // count taken after a customer chip or a search would understate what the
+  // button is about to change.
+  const poSize = useMemo(() => {
+    const c = {};
+    for (const r of rows) c[r.order_id] = (c[r.order_id] || 0) + 1;
+    return c;
   }, [rows]);
 
   const kpi = useKpiFilter('status-sheet');
@@ -430,15 +459,28 @@ export default function StatusSheet() {
   // which is why an empty input is "follow the PO" and not "no date".
   const EddCell = m => {
     const own = !!m.line_delivery_date;
+    const siblings = poSize[m.order_id] || 1;
     return (
-      <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
-        onChange={e => setEddOverride(m, e.target.value || null)}
-        className={`${selCls} ${m.overdue_days > 0 ? 'border-red-300 bg-red-50 text-red-700'
-          : own ? 'border-blue-200 bg-blue-50/40' : ''}`}
-        title={[
-          m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : '',
-          own ? 'This product’s own EDD' : (m.delivery_date ? `Following PO ${m.po_number}` : 'No delivery date yet'),
-        ].filter(Boolean).join(' · ')} />
+      <div className="flex flex-col gap-1">
+        <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
+          onChange={e => setEddOverride(m, e.target.value || null)}
+          className={`${selCls} ${m.overdue_days > 0 ? 'border-red-300 bg-red-50 text-red-700'
+            : own ? 'border-blue-200 bg-blue-50/40' : ''}`}
+          title={[
+            m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : '',
+            own ? 'This product’s own EDD' : (m.delivery_date ? `Following PO ${m.po_number}` : 'No delivery date yet'),
+          ].filter(Boolean).join(' · ')} />
+        {/* Offered only where it would actually do something: a PO with one
+            product on the sheet is already "the whole PO", and a row with no
+            date has nothing to apply. */}
+        {siblings > 1 && m.delivery_date && (
+          <button type="button" onClick={() => setPoEdd({ line: m, count: siblings })}
+            title={`Give all ${siblings} products on PO ${m.po_number} this delivery date`}
+            className="inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:bg-slate-100 hover:text-brand-600">
+            <CalendarCheck size={11} /> Apply to PO ({siblings})
+          </button>
+        )}
+      </div>
     );
   };
   // WIP — the customer's urgency, always hand-editable, and a TRI-STATE:
@@ -797,6 +839,14 @@ export default function StatusSheet() {
           negatives are genuinely different: Non-WIP records that the customer
           said it is not in progress; Remove takes the line off their list
           entirely. The count names LINES, not rows — a ticked gang is several. */}
+      {/* Applying a date to a whole PO replaces whatever its other products
+          were individually given, so it says how many and which PO. */}
+      <ConfirmDialog open={!!poEdd} onClose={() => setPoEdd(null)}
+        onConfirm={() => applyEddToPo(poEdd)}
+        confirmLabel={`Set all ${poEdd?.count ?? 0}`}
+        title={`Give the whole PO this date?`}
+        message={poEdd ? `All ${poEdd.count} products on PO ${poEdd.line.po_number} will be due ${fmt.date(poEdd.line.delivery_date)}. Any product on that PO carrying its own EDD loses it and follows the PO again — which is also what makes Planning and Dispatch show this date, since they read the PO's.` : ''} />
+
       {/* Wiping a customer's WIP list is not a bulk edit of a few ticked rows —
           it acts on everything in view — so it asks first, and the question
           names the count and whose list it is rather than "are you sure?". */}
