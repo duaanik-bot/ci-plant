@@ -43,7 +43,10 @@ const STATUS_KPI_ROWS = {
 const STATUS_KPI_LABEL = {
   overdue: 'lines past their delivery date',
   p1: 'lines on a P1 product',
-  wip: 'lines the customer marked WIP (urgent)',
+  // Says LINES, and says the scope, because Planning's card counts the same
+  // customer list a different way and the two numbers have to be readable side
+  // by side — see the KPI card below.
+  wip: 'lines the customer marked WIP — including ones already produced or dispatched',
 };
 
 // The three states a line can be at, in the order the plant moves through them.
@@ -712,7 +715,17 @@ export default function StatusSheet() {
           onClick={() => kpi.toggle('overdue')} active={kpi.is('overdue')} />
         <KpiCard icon={Star} label="P1 products" value={fmt.num(kpis.p1)} accent="text-amber-600"
           onClick={() => kpi.toggle('p1')} active={kpi.is('p1')} />
-        <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600"
+        {/* WIP LINES, and the sub says so. Planning's strip carries a card off
+            the same customer list that will legitimately read LOWER, because it
+            counts queue ROWS: a gang is one job there however many WIP members
+            it carries, and a line we have already dispatched has left the queue
+            while it is still on this sheet (wip-scope.js — the sheet is
+            cumulative on purpose). Two true numbers, so each card names its own
+            unit and its own scope rather than leaving the planner to guess
+            which one is broken. */}
+        <KpiCard icon={Hammer} label="WIP Lines" value={fmt.num(kpis.wip)} accent="text-blue-600"
+          sub="customer's list · incl. dispatched"
+          title="Order LINES the customer marked WIP. This sheet is cumulative — a line stays on it after it is produced or dispatched, until someone takes it off the WIP list — so this runs higher than Planning's WIP Jobs card. Click to show only these."
           onClick={() => kpi.toggle('wip')} active={kpi.is('wip')} />
       </div>
       <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}

@@ -57,7 +57,9 @@ const PLAN_KPI_ROWS = {
 };
 const PLAN_KPI_LABEL = {
   ready: 'jobs with every gate green',
-  wip: 'jobs the customer marked WIP (urgent)',
+  // Says JOBS and says the collapse, because the Status Sheet counts the same
+  // customer list as LINES over a wider scope — see the KPI card below.
+  wip: 'jobs with a WIP line (a gang counts once)',
 };
 // What each board card is showing, in the words the filter notice uses.
 const BOARD_FILTER_LABEL = {
@@ -2906,10 +2908,20 @@ export default function Planning() {
           value={fmt.num(kpiPlan.shortSheets)}
           sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy · no PR` : 'every job covered'}
           onClick={() => toggleBoardFilter('short')} active={boardFilters.includes('short')} />
-        <KpiCard compact icon={Zap} label="Customer WIP"
+        {/* WIP JOBS — this queue's rows, not the customer's whole list. It will
+            read LOWER than the Status Sheet's WIP Lines card and both are
+            right: a gang collapses to one row here however many WIP members it
+            carries, and /planning only loads pending/planned/ready/
+            in_production, so a line we have already dispatched has left this
+            queue while the sheet still carries it (wip-scope.js keeps it there
+            on purpose — the customer chases a carton until they receive it).
+            The unit and the scope live in the label and the sub so the two
+            numbers can be read side by side instead of arbitrated. */}
+        <KpiCard compact icon={Zap} label="WIP Jobs"
           tone={kpiPlan.wip ? 'warn' : 'neutral'}
           value={fmt.num(kpiPlan.wip)}
-          sub={kpiPlan.wip ? 'customer is chasing these' : 'none marked urgent'}
+          sub={kpiPlan.wip ? "customer's list · gang = 1 job" : 'none marked urgent'}
+          title="Jobs in THIS queue carrying a Customer WIP line. Counts queue rows, so a gang run counts once however many WIP members it holds, and work already dispatched is not in the queue at all — the Status Sheet's WIP Lines card counts the customer's full list and runs higher. Click to show only these."
           onClick={() => planKpi.toggle('wip')} active={planKpi.is('wip')} />
       </KpiRow>
       {/* One notice for the whole strip — it names every active card and clears
