@@ -16,6 +16,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
+import { consolidate, mergeSummary } from '../lib/poConsolidate.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
@@ -372,7 +373,13 @@ export default function Procurement() {
   // material's HSN / GST / last rate; the buyer edits before creating the order.
   const openConvert = async pr => {
     const map = await loadBoardRates(null); // no vendor yet → base rates
-    const lines = (pr.lines?.length ? pr.lines : [{ material_id: pr.material_id, qty: pr.qty, unit: pr.unit }]).map(l => {
+    // The board's base ₹/sheet, or std → last for anything else. Used both as a
+    // line's opening rate and as the tie-break when a board repeats on the PR.
+    const baseRate = materialId => {
+      const b = map.get(String(materialId));
+      return b ? b.rate : matRate(materials.find(m => String(m.id) === String(materialId)));
+    };
+    const built = (pr.lines?.length ? pr.lines : [{ material_id: pr.material_id, qty: pr.qty, unit: pr.unit }]).map(l => {
       const mat = materials.find(m => String(m.id) === String(l.material_id));
       const b = map.get(String(l.material_id));
       // Board → base ₹/sheet; else PR estimate, then std/last.
@@ -383,18 +390,32 @@ export default function Procurement() {
         rate_source: b ? b.source : (mat?.std_rate != null ? 'std' : mat?.last_rate != null ? 'last' : 'none'),
         rate_per_kg: b ? b.rate_per_kg : null, discount_pct: '' };
     });
-    setConvertPr({ pr, vendor_id: '', expected_date: '', tax_kind: 'intra', freight: '', round_off: '', lines, ...PO_META });
+    // A requisition can name the same board on two lines. The form opens with one
+    // row for it, quantities added up — the vendor is asked for it once. A board
+    // that actually merged takes the rate master's number, because two estimates
+    // that disagree cannot both be right; a board named once keeps its estimate.
+    const rows = consolidate(built, {
+      mergedRate: sources => {
+        const d = baseRate(sources[0].material_id);
+        return d != null ? d : null;
+      },
+    });
+    const lines = rows.map(r => ({ ...r, qty: String(r.qty),
+      rate: r.rate === '' || r.rate == null ? '' : String(r.rate) }));
+    setConvertPr({ pr, vendor_id: '', expected_date: '', tax_kind: 'intra', freight: '', round_off: '', lines,
+      merges: mergeSummary(rows, id => materials.find(m => String(m.id) === String(id))?.name || `#${id}`),
+      ...PO_META });
   };
 
   const openBulkPo = async () => {
     const map = await loadBoardRates(null); // no vendor yet → base rates
-    const mats = {};
-    for (const p of selectedPrs) for (const l of (p.lines || [])) {
-      (mats[l.material_id] ||= { material_id: l.material_id, material_name: l.material_name, unit: l.unit, qty: 0, prs: new Set() });
-      mats[l.material_id].qty += +l.qty;
-      mats[l.material_id].prs.add(p.pr_number);
-    }
-    const materialsArr = Object.values(mats).map(m => ({ ...m, prs: [...m.prs] }));
+    // Same rule, same order as the server writes them — see poConsolidate.js.
+    const flat = [];
+    for (const p of selectedPrs) for (const l of (p.lines || [])) flat.push({ ...l, pr_number: p.pr_number });
+    const materialsArr = consolidate(flat).map(r => ({
+      material_id: r.material_id, material_name: r.material_name, unit: r.unit, qty: r.qty,
+      prs: [...new Set(r.sources.map(s => s.pr_number))],
+    }));
     // Boards land on their resolved ₹/sheet; non-boards on std → last rate.
     const rates = {};
     for (const m of materialsArr) {
@@ -424,6 +445,54 @@ export default function Procurement() {
     material_id: m.material_id, qty: m.qty, rate: bulkPo.rates[m.material_id] || 0,
     gst_rate: materials.find(x => String(x.id) === String(m.material_id))?.gst_rate || 0, discount_pct: 0,
   }));
+
+  const postDirectPo = async lines => {
+    try {
+      const po = await api.post('/purchase-orders', {
+        vendor_id: +directPo.vendor_id, expected_date: directPo.expected_date || undefined, lines,
+        tax_kind: directPo.tax_kind, freight: directPo.freight || 0, round_off: directPo.round_off === '' ? undefined : directPo.round_off,
+        vendor_notes: directPo.vendor_notes || undefined, payment_terms: directPo.payment_terms || undefined,
+        delivery_terms: directPo.delivery_terms || undefined, reference: directPo.reference || undefined,
+      });
+      toast.success(`${po.po_number} created`); setDirectPo(null); load(); setTab('pos');
+    } catch (e) { toast.error(e.message || 'Could not create PO'); }
+  };
+
+  // A buyer can type the same board on two rows. The order carries it once — but
+  // the merge is shown and confirmed first. Collapsing rows while they type would
+  // pull one out from under the cursor mid-entry, so it happens on the way out.
+  const createDirectPo = () => {
+    const typed = directPo.lines.filter(l => l.material_id && +l.qty > 0)
+      .map(l => ({ material_id: +l.material_id, qty: +l.qty, rate: +l.rate || 0, hsn_code: l.hsn_code || null,
+        unit: l.unit || null, discount_pct: +l.discount_pct || 0, gst_rate: +l.gst_rate || 0 }));
+    const rows = consolidate(typed);
+    const lines = rows.map(l => ({ material_id: l.material_id, qty: l.qty, rate: l.rate, hsn_code: l.hsn_code,
+      unit: l.unit, discount_pct: l.discount_pct, gst_rate: l.gst_rate }));
+    const merges = mergeSummary(rows, id => materials.find(m => String(m.id) === String(id))?.name || `#${id}`);
+    if (!merges.length) return postDirectPo(lines);
+    // A board line is stored in ₹/sheet but keyed and read in ₹/kg. Quote it the
+    // way the editor above shows it, or the dialog names a number the buyer never
+    // typed and cannot find on screen.
+    const showRate = (materialId, rate) => {
+      const rpk = ratePerKgFromSheet(materials.find(m => String(m.id) === String(materialId)), rate);
+      return rpk == null ? `₹${(+rate || 0).toFixed(2)}` : `₹${rpk.toFixed(2)}/kg`;
+    };
+    setConfirm({
+      title: 'One line per board?',
+      message: (<>
+        {merges.map(m => (
+          <span key={m.material_id} className="block">
+            <b>{m.name}</b> — lines {m.positions.join(' and ')} become one:{' '}
+            {fmt.num(m.qty)} {m.unit || ''} at {showRate(m.material_id, m.rate)}
+            {/* A merge that quietly picks one of two rates has to say which lost. */}
+            {m.dropped.length > 0 && ` — ${m.dropped.map(d => `line ${d.position} had ${showRate(m.material_id, d.rate)}`).join(', ')}`}
+          </span>
+        ))}
+      </>),
+      confirmLabel: 'Create PO',
+      onConfirm: () => postDirectPo(lines),
+    });
+  };
 
   // Edit an existing PO — lines that already received stock stay locked. Board
   // rates are resolved for the PO's vendor so the chip / "Overridden" state
@@ -1003,7 +1072,17 @@ export default function Procurement() {
                     const pRate = rpk == null ? null : packetRate(mat, rpk);
                     return (
                     <tr key={l.id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-3 py-2">{l.material_name}</td>
+                      <td className="px-3 py-2">
+                        {l.material_name}
+                        {/* A consolidated line names what fed it, and how much each
+                            requisition put in — one line on the order, but the
+                            trail back to every PR stays readable. */}
+                        {l.source_prs?.length > 0 && (
+                          <div className="text-[10px] text-slate-400">
+                            {l.source_prs.map(s => `${s.pr_number} ${fmt.num(s.qty)}`).join(' · ')}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         <div>{fmt.num(l.qty)} {l.unit}</div>
                         {pk != null && <div className="text-[10px] text-slate-400">{pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt</div>}
@@ -1521,6 +1600,27 @@ export default function Procurement() {
               {convertPr.pr.remarks ? <span className="block text-slate-400">PR remarks: {convertPr.pr.remarks}</span> : null}
             </div>
           )}
+          {/* The requisition asked for a board more than once. Say so plainly —
+              a buyer who counted the PR's rows should not have to wonder where
+              one went. */}
+          {convertPr.merges?.length > 0 && (
+            <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-xs text-slate-600">
+              {convertPr.merges.map(m => (
+                <div key={m.material_id}>
+                  <span className="font-semibold text-slate-700">{m.name}</span> — {m.lineCount} requisition lines
+                  combined into one: <span className="font-semibold tabular-nums">{fmt.num(m.qty)} {m.unit}</span>
+                  {/* No rate is quoted here on purpose: choosing a vendor reprices
+                      the line below, so any number named at open time would go
+                      stale. Point at the differing estimates and let the editor
+                      show the live figure. */}
+                  {m.estimates.length > 1 && (
+                    <span className="text-slate-400"> · the estimates differed
+                      ({m.estimates.map(e => `₹${e.toFixed(2)}`).join(', ')}) — check the rate below</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Vendor" required>
               {/* keyed on vendor_id so the label resyncs on cancel-restore — see changePoVendor */}
@@ -1614,20 +1714,7 @@ export default function Procurement() {
         footer={<>
           <Button variant="secondary" onClick={() => setDirectPo(null)}>Cancel</Button>
           <Button disabled={!directPo?.vendor_id || !directPo?.lines.some(l => l.material_id && +l.qty > 0)}
-            onClick={async () => {
-              try {
-                const lines = directPo.lines.filter(l => l.material_id && +l.qty > 0)
-                  .map(l => ({ material_id: +l.material_id, qty: +l.qty, rate: +l.rate || 0, hsn_code: l.hsn_code || null,
-                    unit: l.unit || null, discount_pct: +l.discount_pct || 0, gst_rate: +l.gst_rate || 0 }));
-                const po = await api.post('/purchase-orders', {
-                  vendor_id: +directPo.vendor_id, expected_date: directPo.expected_date || undefined, lines,
-                  tax_kind: directPo.tax_kind, freight: directPo.freight || 0, round_off: directPo.round_off === '' ? undefined : directPo.round_off,
-                  vendor_notes: directPo.vendor_notes || undefined, payment_terms: directPo.payment_terms || undefined,
-                  delivery_terms: directPo.delivery_terms || undefined, reference: directPo.reference || undefined,
-                });
-                toast.success(`${po.po_number} created`); setDirectPo(null); load(); setTab('pos');
-              } catch (e) { toast.error(e.message || 'Could not create PO'); }
-            }}>Create PO</Button>
+            onClick={createDirectPo}>Create PO</Button>
         </>}>
         {directPo && <div className="space-y-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
