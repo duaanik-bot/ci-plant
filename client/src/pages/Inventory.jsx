@@ -6,7 +6,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
 import { packetsOf, packetText } from '../lib/packets.js';
 import { stockSplit } from '../lib/replenishment.js';
-import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { HEALTH, healthOf, HealthBadge } from '../components/BoardHealth.jsx';
 import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, Truck, ShieldAlert } from 'lucide-react';
@@ -279,6 +279,11 @@ export default function Inventory() {
   // RM stock KPI strip: which card is filtering the board list beneath it.
   // Scoped to the sub-view so leaving "In Stock" never leaves a hidden filter on.
   const rmKpi = useKpiFilter(`${tab}:${rmSub}`);
+  // `viewing` is the 360 drawer, not a filter, so it stays open across a reset.
+  const filters = useFilterReset([
+    [showEmpty, setShowEmpty, false, 'zero stock'],
+    [rmKpi.keys, rmKpi.clear, [], 'KPI card'],
+  ]);
   // Grade rail — FBB / Duplex / Saffire …. The KPI totals are computed AFTER
   // this filter, so picking a grade re-states the whole warehouse position for
   // that grade rather than just hiding rows under unchanged totals.
@@ -823,6 +828,11 @@ export default function Inventory() {
               </label>
             </div>
           </div>
+          {filters.dirty && (
+            <div className="mt-1.5 flex justify-end">
+              <ResetFilters filters={filters} shown={rows.length} total={base.length} />
+            </div>
+          )}
           <KpiFilterNotice filter={rmKpi} label={RM_KPI_LABEL[rmKpi.key]}
             shown={rows.length} total={base.length} className="mt-1.5" />
         </div>

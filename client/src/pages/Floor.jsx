@@ -10,7 +10,7 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, Select, useFilterReset, useToast } from '../components/ui.jsx';
 import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
@@ -43,6 +43,8 @@ export default function Floor() {
   const nav = useNavigate();
   const [sections, setSections] = useState(null);
   const [q, setQ] = useState('');
+  // breakupStatus / issueStatus are request phases, not filters — untouched.
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
   const [completing, setCompleting] = useState(null);
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
   // Per-board children entry — cutting completion on a job whose mix cut MORE
@@ -408,6 +410,7 @@ export default function Floor() {
         subtitle={`${totalRunning} running · ${totalQueued} waiting in queues — refreshes every 10s`}
         actions={<>
         <SearchInput value={q} onChange={setQ} placeholder="JC, product, board, machine…" />
+        <ResetFilters filters={filters} />
         <ExportMenu build={() => ({
           name: 'Live Floor Snapshot',
           title: 'Live Floor Snapshot',

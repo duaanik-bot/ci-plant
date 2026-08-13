@@ -10,8 +10,8 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { REQUEST_KPI, terminal } from '../lib/toolingQueue.js';
 import {
-  Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, rowMatches,
-  SearchableSelect, Select, SubTabs, Textarea, useToast,
+  Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, ResetFilters, rowMatches,
+  SearchableSelect, Select, SubTabs, Textarea, useFilterReset, useToast,
 } from '../components/ui.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
 import ToolingProcurement from '../components/ToolingProcurement.jsx';
@@ -303,6 +303,12 @@ function ToolingOperations({ family = 'shade_card' }) {
   const [view, setView] = useState('queue');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('open');
+  // `view` picks which register is on screen — navigation. The queue's own
+  // search and its open/all status are the narrowing.
+  const filters = useFilterReset([
+    [query, setQuery, '', 'search'],
+    [status, setStatus, 'open', 'status'],
+  ], () => setSelected(new Set()));
   const [source, setSource] = useState('all');
   const [kpi, setKpi] = useState(null);
   const [selected, setSelected] = useState(new Set());
@@ -432,6 +438,9 @@ function ToolingOperations({ family = 'shade_card' }) {
         </div>
       )}
 
+      {view === 'queue' && filters.dirty && (
+        <div className="mb-2 flex justify-end"><ResetFilters filters={filters} shown={filtered.length} /></div>
+      )}
       {view === 'queue' && <DataTable dense selectable rows={filtered} columns={requestColumns}
         selectedIds={[...selected]} onToggleRow={toggleRow} onToggleAll={toggleAll}
         searchValue={query} onSearchChange={setQuery} searchPlaceholder={`Search ${meta.plural.toLowerCase()}, Job Card, product, PO or code…`}

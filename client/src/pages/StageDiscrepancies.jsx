@@ -13,7 +13,7 @@
 import { useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
-import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
+import { DataTable, KpiCard, KpiFilterNotice, PageHeader, ResetFilters, rowMatches, useFilterReset, useKpiFilter } from '../components/ui.jsx';
 import { repeatSources } from '../lib/discrepancyGroups.js';
 import { AlertTriangle, Combine, Scale, TrendingUp, User } from 'lucide-react';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -92,6 +92,10 @@ export default function StageDiscrepancies() {
 
   const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q, productSearchText(r))) : rows), [rows, q]);
   const kpi = useKpiFilter('discrepancies');
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [kpi.keys, kpi.clear, [], 'KPI card'],
+  ]);
   const filtered = kpi.apply(searched, KPI_ROWS);
 
   // Grouped on the FILTERED rows, so narrowing to one kind re-answers "who" for
@@ -113,6 +117,11 @@ export default function StageDiscrepancies() {
       </div>
       <KpiFilterNotice filter={kpi} label={KPI_LABEL[kpi.key]}
         shown={filtered.length} total={searched.length} />
+      {filters.dirty && (
+        <div className="mt-3 flex justify-end">
+          <ResetFilters filters={filters} shown={filtered.length} total={rows.length} />
+        </div>
+      )}
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />

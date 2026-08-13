@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -452,6 +452,13 @@ export default function Orders() {
   const pdCustomerOptions = [...new Map(allPdLines.map(l => [l.customer_id, l.customer_name])).entries()]
     .map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const pdKpi = useKpiFilter(tab);
+  // Two lists on one page: the order tabs and the pendency view. Each gets
+  // its own reset so a click never touches the list you are not looking at.
+  const orderFilters = useFilterReset([[orderKpi.keys, orderKpi.clear, [], 'KPI card']]);
+  const pendencyFilters = useFilterReset([
+    [pendencyFilter, setPendencyFilter, { search: '', customer: '', product: '', status: '' }, 'pendency controls'],
+    [pdKpi.keys, pdKpi.clear, [], 'KPI card'],
+  ]);
   const pdUnfiltered = allPdLines.filter(l => {
     const status = pendencyStage(l).key;
     const searchOk = rowMatches(l, pendencyFilter.search, `${status} ${pendencyStage(l).label}`);
@@ -534,9 +541,15 @@ export default function Orders() {
         <KpiFilterNotice filter={orderKpi} label={ORDER_KPI_LABEL[orderKpi.key]}
           shown={orderRows.length} total={(ordersForTab[tab] || []).length} />
       )}
+      {tab !== 'pendency' && orderFilters.dirty && (
+        <div className="mb-3 flex justify-end">
+          <ResetFilters filters={orderFilters}
+            shown={orderRows.length} total={(ordersForTab[tab] || []).length} />
+        </div>
+      )}
 
       {tab !== 'pendency' && (
-        <DataTable searchable
+        <DataTable searchable resetSignal={orderFilters.token}
           // Latest PO entered sits at the top. The API already hands them over
           // newest-first, but the table re-sorted by its first column (PO number,
           // ascending) and buried the order just booked. `id` is not a column —
@@ -661,7 +674,10 @@ export default function Orders() {
               <div className="ci-form-panel">
                 <div className="ci-form-panel-title">
                   <span>Pendency controls</span>
-                  <span>{fmt.num(pdLines.length)} of {fmt.num(allPdLines.length)} lines visible</span>
+                  <span className="flex items-center gap-2">
+                    <ResetFilters filters={pendencyFilters} />
+                    {fmt.num(pdLines.length)} of {fmt.num(allPdLines.length)} lines visible
+                  </span>
                 </div>
                 <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_minmax(180px,220px)_minmax(180px,220px)_minmax(180px,220px)]">
                   <SearchInput className="w-full" value={pendencyFilter.search}

@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
-import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
+import { DataTable, KpiCard, KpiFilterNotice, PageHeader, ResetFilters, rowMatches, useFilterReset, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
@@ -49,6 +49,12 @@ export default function CuttingVariances() {
   // still fully covered by stock, or under-cut with no board impact at all.
   // Stacks on top of search + the KPI card rather than replacing either.
   const filtered = onlyWritten ? kpiFiltered.filter(r => +r.written_on > 0) : kpiFiltered;
+  // Search is controlled here, so it is one of this page's own axes.
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [onlyWritten, setOnlyWritten, false, 'written on only'],
+    [kpi.keys, kpi.clear, [], 'KPI card'],
+  ]);
 
   return (
     <div>
@@ -86,6 +92,7 @@ export default function CuttingVariances() {
             {fmt.num(kpis.writtenOn)}
           </span>
         </button>
+        <ResetFilters filters={filters} />
       </div>
       <DataTable
         exportName="cutting-variances"

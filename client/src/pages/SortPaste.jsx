@@ -17,7 +17,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, ResetFilters, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useFilterReset, useToast } from '../components/ui.jsx';
 import { GangOriginLine } from '../components/Gang.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { customerInitials } from '../lib/customerCode.js';
@@ -180,6 +180,9 @@ export default function SortPaste() {
   // 'final' closes both stages; 'partial' puts the same grid on the day log and
   // leaves the job here. One form, one set of quantity boxes.
   const [procMode, setProcMode] = useState('final');
+  // procMode chooses HOW a run is processed, not which rows show, so it is
+  // not part of the reset.
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
   // Guards the balance seeder below: armed on every open, spent once the day
   // log has been read. Declared with the state it belongs to rather than beside
   // the effect, so openProcess can arm it without reading ahead of itself.
@@ -729,6 +732,7 @@ export default function SortPaste() {
             </div>
           )}
           {tab !== 'audit' && <SearchInput value={q} onChange={setQ} placeholder="JC, product, PO, operator…" />}
+          <ResetFilters filters={filters} />
           <ExportMenu build={() => {
             if (tab === 'completed') return {
               name: 'Sort & Paste Completed Runs', title: 'Sort & Paste — Completed Runs', subtitle: 'Live Floor · Unified station output',

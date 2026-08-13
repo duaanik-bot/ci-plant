@@ -4,7 +4,7 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
+import { ExportMenu, KpiCard, PageHeader, ResetFilters, rowMatches, SearchInput, StatusBadge, useFilterReset } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -13,6 +13,7 @@ export default function Dashboard() {
   const nav = useNavigate();
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
   const refresh = () => api.get('/dashboard').then(setD);
   useFallbackRefresh(refresh, { intervalMs: 60000 });
   useRealtimeRefresh(refresh, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
@@ -43,6 +44,7 @@ export default function Dashboard() {
       <PageHeader title="Command Centre" subtitle="Live view of the plant — updates automatically"
         actions={<>
         <SearchInput className="w-80" value={q} onChange={setQ} placeholder="JC, product, customer, machine…" />
+        <ResetFilters filters={filters} />
         <ExportMenu build={() => ({
           name: 'Plant Command Centre',
           title: 'Plant Command Centre',

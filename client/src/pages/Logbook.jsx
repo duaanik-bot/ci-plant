@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
-import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, searchText, Select, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, ResetFilters, searchText, Select, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { NotebookPen, Timer, Layers, AlertTriangle, Wrench, Plus, Trash2, Users } from 'lucide-react';
 
 const TYPE_BADGE = {
@@ -102,6 +102,8 @@ export default function Logbook() {
   const machine = book?.machine;
   const entries = book?.entries || [];
   const kpi = useKpiFilter(book?.machine?.id);
+  // `selected` is which machine's book is open — navigation, not narrowing.
+  const filters = useFilterReset([[kpi.keys, kpi.clear, [], 'KPI card']]);
   const shownEntries = kpi.apply(entries, LOG_KPI_ROWS);
 
   const kpis = useMemo(() => ({
@@ -303,11 +305,16 @@ export default function Logbook() {
               </div>
               <KpiFilterNotice filter={kpi} label={LOG_KPI_LABEL[kpi.key]}
                 shown={shownEntries.length} total={entries.length} />
+              {filters.dirty && (
+                <div className="mb-2 flex justify-end">
+                  <ResetFilters filters={filters} shown={shownEntries.length} total={entries.length} />
+                </div>
+              )}
 
               <DataTable
                 columns={columns}
                 rows={shownEntries}
-                searchable
+                searchable resetSignal={filters.token}
                 empty="No entries in this period — the register is blank."
                 exportName={`Machine Logbook — ${machine.name}`}
                 exportSubtitle={`${fmt.date(range.from)} to ${fmt.date(range.to)}`}

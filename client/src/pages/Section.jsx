@@ -8,7 +8,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, Textarea, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, Textarea, UpstreamChip, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BoardBadge } from '../components/BoardStatus.jsx';
@@ -659,6 +659,14 @@ export default function Section() {
   const colourFilters = { colour: colourSel, process: processSel, band: bandSel };
   const anyColourFilter = colourSel.size > 0 || processSel.size > 0 || bandSel.size > 0;
   const clearColourFilters = () => { setColourSel(new Set()); setProcessSel(new Set()); setBandSel(new Set()); };
+  // The station search plus the three ink axes. breakupStatus / issueStatus
+  // are request phases, not filters, so they are left alone.
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [colourSel, setColourSel, new Set(), 'ink'],
+    [processSel, setProcessSel, new Set(), 'process'],
+    [bandSel, setBandSel, new Set(), 'band'],
+  ]);
   const colourCounts = useMemo(() => colourFilterCounts(pressQueue), [pressQueue]);
 
   const queue = useMemo(() => {
@@ -1246,6 +1254,7 @@ export default function Section() {
             </div>
           )}
           {tab !== 'audit' && <SearchInput value={q} onChange={setQ} placeholder="JC, product, PO, operator…" />}
+          <ResetFilters filters={filters} />
           {tab === 'queue' && section === 'printing' && (
             <PrintColourFilterRail
               colour={colourSel} setColour={setColourSel}

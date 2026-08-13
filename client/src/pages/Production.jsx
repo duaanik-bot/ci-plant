@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
@@ -169,6 +169,8 @@ export default function Production() {
   // Opens on the planner's queue — the cards still owing a finalise.
   const [tab, setTab] = useState('pending');
   const [q, setQ] = useState('');
+  // `sort` re-orders and never hides, so it is not part of the reset.
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
   // Timeline — which days of the register to show, by planned date. Opens on
   // 'all': the tab a planner lands on is his whole queue, and a date filter he
   // did not ask for would hide work on the first paint.
@@ -597,6 +599,7 @@ export default function Production() {
           </Button>
         </Link>
         <SearchInput className="w-80" value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
+        <ResetFilters filters={filters} />
         <ExportMenu build={() => ({
           name: `Job Cards ${TAB_LABELS[tab]}`,
           title: `Job Cards — ${TAB_LABELS[tab]}`,

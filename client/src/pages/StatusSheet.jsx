@@ -16,7 +16,7 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
-import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, ResetFilters, rowMatches, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
@@ -175,6 +175,13 @@ export default function StatusSheet() {
   }), [rows]);
 
   const kpi = useKpiFilter('status-sheet');
+  // wipSel is deliberately absent: those are the lines the user has ticked to
+  // mark WIP, a checklist they are building to submit, not a way of narrowing
+  // the sheet. Clearing it here would throw away their work.
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [kpi.keys, kpi.clear, [], 'KPI card'],
+  ]);
   const searched = useMemo(() => (q
     ? rows.filter(r => rowMatches(r, q, (r._gang || [r]).map(productSearchText).join(' ')))
     : rows), [rows, q]);
@@ -405,6 +412,11 @@ export default function StatusSheet() {
       </div>
       <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}
         shown={filtered.length} total={searched.length} className="mt-3" />
+      {filters.dirty && (
+        <div className="mt-3 flex justify-end">
+          <ResetFilters filters={filters} shown={filtered.length} total={rows.length} />
+        </div>
+      )}
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />

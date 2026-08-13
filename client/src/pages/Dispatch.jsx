@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
@@ -311,6 +311,14 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
   // Dispatch-register KPIs — the challan book, plus the money that has shipped
   // but not yet been billed.
   const registerKpi = useKpiFilter(embedded ? view : tab);
+  // Two independent views on this page, so two lists: Ready carries the
+  // customer chip and the shortage chip, the register only its own KPI.
+  const readyFilters = useFilterReset([
+    [customer, setCustomer, null, 'customer'],
+    [shortOnly, setShortOnly, false, 'shortage'],
+    [readyKpi.keys, readyKpi.clear, [], 'KPI card'],
+  ]);
+  const registerFilters = useFilterReset([[registerKpi.keys, registerKpi.clear, [], 'KPI card']]);
   const kpiRegister = (() => {
     const now = new Date();
     const thisMonth = d => {
@@ -382,6 +390,11 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
         </KpiRow>
         <KpiFilterNotice filter={readyKpi} label={READY_KPI_LABEL[readyKpi.key]}
           shown={readyRows.length} total={ready.length} />
+        {readyFilters.dirty && (
+          <div className="mb-3 flex justify-end">
+            <ResetFilters filters={readyFilters} shown={readyRows.length} total={ready.length} />
+          </div>
+        )}
 
         {/* Customer chips — the plant dispatches customer by customer, so this
             is the cut that actually gets used before picking lines. */}
@@ -434,7 +447,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
           </div>
         )}
 
-        <DataTable searchable selectable
+        <DataTable searchable resetSignal={readyFilters.token} selectable
           selectedIds={selected}
           onToggleRow={(row, checked) => setSelectedIds(ids => checked
             ? [...new Set([...ids, row.order_line_id])]
@@ -635,7 +648,12 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
         </KpiRow>
         <KpiFilterNotice filter={registerKpi} label={REGISTER_KPI_LABEL[registerKpi.key]}
           shown={registerRows.length} total={register.length} />
-        <DataTable searchable
+        {registerFilters.dirty && (
+          <div className="mb-3 flex justify-end">
+            <ResetFilters filters={registerFilters} shown={registerRows.length} total={register.length} />
+          </div>
+        )}
+        <DataTable searchable resetSignal={registerFilters.token}
           columns={[
             { key: 'challan_number', label: 'Challan', render: d => <span className="font-semibold">{d.challan_number}</span> },
             { key: 'dispatched_at', label: 'Date', render: d => fmt.dt(d.dispatched_at) },

@@ -11,7 +11,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, odDays, odTone, OverdueDays, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, odDays, odTone, OverdueDays, PageHeader, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Layers } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -781,6 +781,22 @@ export default function PrintPlanning() {
   });
   const selectAllTriage = () => setSel(new Set(triageGroups.map(g => g.key)));
   const clearSel = () => setSel(new Set());
+  // Every way this board narrows itself. The TAB (board vs completed) is not
+  // here — those are two different lists, and moving between them is
+  // navigation. Everything else defaults to "show everything" and so resets:
+  // the whole-board search, each lane's own box, the board-status cards, the
+  // zone, Combined, Customer WIP and the three ink axes.
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [laneQ, setLaneQ, {}, 'lane searches'],
+    [boardStatus, setBoardStatus, 'all', 'board status'],
+    [zone, setZone, 'all', 'zone'],
+    [mergeOnly, setMergeOnly, false, 'Combined'],
+    [wipOnly, setWipOnly, false, 'Customer WIP'],
+    [colourSel, setColourSel, new Set(), 'ink'],
+    [processSel, setProcessSel, new Set(), 'process'],
+    [bandSel, setBandSel, new Set(), 'band'],
+  ], clearSel);
 
   // ---- Undo -----------------------------------------------------------------
   // Every move records how to put things back: one assign call per moved group,
@@ -1476,6 +1492,9 @@ export default function PrintPlanning() {
             band={bandSel} setBand={s => { setBandSel(s); clearSel(); }}
             counts={colourCounts} scope="across the board" />
         )}
+        {/* Nine axes narrow this board and every one of them is a small chip.
+            One control puts them all back; hidden while none is lit. */}
+        {tab === 'board' && <ResetFilters filters={filters} />}
         {tab === 'board' && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
             <span className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">

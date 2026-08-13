@@ -1,8 +1,9 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
 import { Children, Fragment, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, Zap } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, FilterX, Zap } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
+import { filtersDirty, dirtyFilterLabels, applyFilterReset } from '../lib/filterReset.js';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
 import { odDays, odTone, OD_BANDS } from '../lib/odDays.js';
@@ -881,6 +882,78 @@ export function KpiFilterNotice({ filter, label, shown, total, className = '' })
 }
 const fmtNum = n => (n ?? 0).toLocaleString('en-IN');
 
+// ─── Reset filters ──────────────────────────────────────────────────────────
+// One control that puts a page back to showing everything.
+//
+// These screens stack narrowing: a zone chip, board-status cards, a KPI card,
+// ink chips, a customer chip, a search box, per-lane searches. Any one is easy
+// to leave lit, and two or three together make a page showing four rows of two
+// hundred look identical to a page that has lost its data. The way out must be
+// ONE control, not a hunt for whichever chip is still dark.
+//
+// Declare the axes as [value, setter, default, label] and hand the result to
+// <ResetFilters>. The label is optional and only feeds the "Cleared: …"
+// sentence; the first three are what make the reset work.
+//
+//   const filters = useFilterReset([
+//     [q,            setQ,            '',    'search'],
+//     [boardFilters, setBoardFilters, [],    'board'],
+//     [zone,         setZone,         'all', 'zone'],
+//     [kpi.keys,     kpi.clear,       [],    'KPI card'],
+//   ], clearSelection);
+//
+// useKpiFilter's `clear` drops straight in as a setter — it ignores the
+// argument it is called with.
+//
+// `onReset` is for the side effects that are not themselves filters: clearing
+// the row selection, mostly. Every page here already clears its selection when
+// a single filter changes (a selection outliving a filter is how a bulk action
+// ends up carrying rows nobody can see), so the reset owes the same.
+//
+// `token` counts resets. Hand it to DataTable's `resetSignal` and the search
+// box the TABLE owns clears with everything else — without it the page would
+// say "cleared" while its own search bar still held a word.
+export function useFilterReset(entries, onReset) {
+  const [token, setToken] = useState(0);
+  const dirty = filtersDirty(entries);
+  return {
+    dirty,
+    token,
+    labels: dirtyFilterLabels(entries),
+    reset: () => {
+      applyFilterReset(entries);
+      if (typeof onReset === 'function') onReset();
+      setToken(t => t + 1);
+    },
+  };
+}
+
+// The button itself. Hidden — not disabled — while the page is already showing
+// everything: a dead control on a busy rail is one more thing to read past, and
+// its absence is itself the message that nothing is filtered.
+//
+// `shown`/`total` are optional: given both, the button also carries how much is
+// being hidden, which is the part a lit chip alone never says. Pass them only
+// where the page can see the WHOLE picture — on a page whose search box belongs
+// to the table, the page's own count would overstate what is visible.
+export function ResetFilters({ filters, shown, total, className = '', label = 'Reset filters' }) {
+  if (!filters?.dirty) return null;
+  const hiding = Number.isFinite(shown) && Number.isFinite(total) && total > shown;
+  const said = filters.labels?.length ? filters.labels.join(' · ') : null;
+  return (
+    <button type="button" onClick={filters.reset}
+      title={said ? `Clear ${said} — back to everything` : 'Clear every filter on this page'}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#0A84FF]/25 bg-[#E1EFFF]/70 px-3 py-1 text-[11px] font-bold text-[#0064D2] backdrop-blur-xl transition-all duration-200 ease-apple hover:bg-[#E1EFFF] active:scale-[0.97] touch:min-h-[38px] touch:px-3.5 ${className}`}>
+      <FilterX size={12} /> {label}
+      {hiding && (
+        <span className="rounded-full bg-white/70 px-1.5 text-[10px] tabular-nums">
+          {fmtNum(shown)}/{fmtNum(total)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // Signed whole-day distance to a due date: POSITIVE means that many days
 // overdue, negative means that many days still to run, null when undated.
 // Date-only strings are read as local calendar days on purpose — Date.parse
@@ -1145,6 +1218,12 @@ export function DataTable({
   searchValue,
   onSearchChange,
   searchPlaceholder,
+  // Bumped by useFilterReset when the page's "Reset filters" is pressed. The
+  // UNCONTROLLED search below is the table's own state, so without this a page
+  // could clear every chip it owns and still sit behind a word typed in here —
+  // the reset would be a lie. Ignored in controlled mode: there the page holds
+  // the query and resets it as one of its own axes.
+  resetSignal,
   selectable = false,
   selectedIds = [],
   onToggleRow,
@@ -1196,6 +1275,16 @@ export function DataTable({
   // open card survives a re-sort; a stale id after a data refresh is inert.
   const [openCards, setOpenCards] = useState(() => new Set());
   const [q, setQ] = useState('');
+  // React's documented "adjust state when a prop changes" shape — the same one
+  // useKpiFilter uses for `scope`, and state rather than a ref for the same
+  // reason: a ref written during render is not rolled back when React throws a
+  // render away, so under StrictMode's double invoke the signal would look
+  // already-seen and the stale query would survive the reset.
+  const [seenReset, setSeenReset] = useState(resetSignal);
+  if (seenReset !== resetSignal) {
+    setSeenReset(resetSignal);
+    if (q) setQ('');
+  }
   // The input keeps the typed value so the caret never stalls; the expensive
   // filter runs against the deferred copy, which React is free to interrupt.
   const deferredQ = useDeferredValue(q);

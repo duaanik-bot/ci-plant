@@ -12,7 +12,7 @@ import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import {
   Button, DataTable, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, KpiRow,
-  Modal, PageHeader, rowMatches, SearchInput, Select, Tabs, Textarea, useKpiFilter, useToast,
+  Modal, PageHeader, ResetFilters, rowMatches, SearchInput, Select, Tabs, Textarea, useFilterReset, useKpiFilter, useToast,
 } from '../components/ui.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_HINT, BOARD_LABEL, BOARD_RANK, BOARD_TONE, BOARD_COUNT_TONE, BoardBadge } from '../components/BoardStatus.jsx';
@@ -202,6 +202,15 @@ export default function BoardStockVerification() {
   const [verifying, setVerifying] = useState(null);   // { board, status, qty, remarks }
   const [history, setHistory] = useState(null);       // { board, rows|null }
   const kpi = useKpiFilter('bsv');
+  // sortKey is deliberately absent — a sort re-orders the list, it never
+  // hides a row, so it is not something a 'show me everything' owes.
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [stockFilter, setStockFilter, [], 'stock'],
+    [verifFilter, setVerifFilter, [], 'verification'],
+    [cutFilter, setCutFilter, [], 'cutting'],
+    [kpi.keys, kpi.clear, [], 'KPI card'],
+  ]);
 
   const canVerify = ['admin', 'planner', 'production'].includes(auth.user?.role);
 
@@ -397,6 +406,7 @@ export default function BoardStockVerification() {
         actions={<>
           <SearchInput className="w-80" value={q} onChange={setQ}
             placeholder="Client, product, JC, SO, artwork, board, GSM, size…" />
+          <ResetFilters filters={filters} />
           <ExportMenu build={buildExport} />
         </>} />
 

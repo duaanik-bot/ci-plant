@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, PlanSavedBadge, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -308,6 +308,11 @@ export default function Artwork() {
   const [tab, setTab] = useState('open');
   const [boardFilters, setBoardFilters] = useState([]); // [] = no filter, i.e. All
   const [plateFilters, setPlateFilters] = useState([]); // [] = no filter, i.e. All
+  // Both chip rails plus the table's own search box. The tab stays put.
+  const filters = useFilterReset([
+    [boardFilters, setBoardFilters, [], 'board'],
+    [plateFilters, setPlateFilters, [], 'plate'],
+  ], () => setSelectedIds([]));
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
   const [pushLine, setPushLine] = useState(null);
@@ -548,8 +553,11 @@ export default function Artwork() {
       <BoardFilterChips active={boardFilters} counts={boardCounts}
         onToggle={toggleBoardFilter}
         onClear={() => { setBoardFilters([]); clearSelection(); }} />
+      {filters.dirty && (
+        <div className="mb-2 flex justify-end"><ResetFilters filters={filters} /></div>
+      )}
       <BulkWorkflowControls lines={selectedLines} context="artwork" onDone={load} onClear={clearSelection} />
-      <DataTable searchable
+      <DataTable searchable resetSignal={filters.token}
         selectable
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}

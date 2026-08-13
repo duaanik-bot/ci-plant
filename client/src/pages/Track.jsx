@@ -2,7 +2,7 @@
 // SO → planning → artwork → every production stage → FG → challans.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { ExportMenu, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs } from '../components/ui.jsx';
+import { ExportMenu, PageHeader, ResetFilters, rowMatches, SearchInput, StatusBadge, Tabs, useFilterReset } from '../components/ui.jsx';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck, Link2, Layers, Scissors, Truck } from 'lucide-react';
 import { GangChip } from '../components/Gang.jsx';
@@ -29,6 +29,7 @@ export default function Track() {
   const [selected, setSelected] = useState(null);
   const [journey, setJourney] = useState(null);
   const [q, setQ] = useState('');
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
   const [tab, setTab] = useState('all');
 
   useEffect(() => { api.get('/track').then(r => { setRows(r); if (r.length && !selected) setSelected(r[0].id); }); }, []);
@@ -95,6 +96,7 @@ export default function Track() {
         <div className="overflow-hidden rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card">
           <div className="border-b border-slate-100 p-3">
             <SearchInput value={q} onChange={setQ} placeholder="PO, product, customer, JC…" />
+            {filters.dirty && <div className="mt-2"><ResetFilters filters={filters} /></div>}
           </div>
           <div className="max-h-[70vh] divide-y divide-slate-50 overflow-y-auto">
             {filtered.map(r => (

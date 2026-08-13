@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
-import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, rowMatches, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, ResetFilters, rowMatches, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
 import { AlertTriangle, Boxes, Layers, PackageCheck } from 'lucide-react';
 
 export default function StockWriteOns() {
@@ -48,6 +48,7 @@ export default function StockWriteOns() {
 
   const base = tab === 'open' ? openRows : reconciledRows;
   const shown = q ? base.filter(r => rowMatches(r, q)) : base;
+  const filters = useFilterReset([[q, setQ, '', 'search']]);
 
   const openCount = r => { setCounting(r); setCount(String(r.book_now ?? 0)); setNote(''); };
   const closeCount = () => { setCounting(null); setCount(''); setNote(''); };
@@ -115,6 +116,11 @@ export default function StockWriteOns() {
 
       {/* Search rides in the table toolbar, same as every other list — no
           floating band above the table just to hold a search box. */}
+      {filters.dirty && (
+        <div className="mb-2 flex justify-end">
+          <ResetFilters filters={filters} shown={shown.length} total={base.length} />
+        </div>
+      )}
       <DataTable
         exportName={tab === 'open' ? 'stock-writeons-open' : 'stock-writeons-reconciled'}
         exportSubtitle={tab === 'open' ? 'Warehouse · Open write-ons awaiting recount' : 'Warehouse · Reconciled write-ons'}

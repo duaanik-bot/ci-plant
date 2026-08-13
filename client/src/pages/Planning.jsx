@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -835,6 +835,20 @@ export default function Planning() {
 
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   const clearSelection = () => setSelectedIds([]);
+  // Every way this page narrows itself, in one list. The zone chip belongs here
+  // and the TAB does not: 'all' is a zone that means "everything", while To
+  // Plan / Planned / Completed are different lists and moving between them is
+  // navigation, not a reset. `token` goes to the DataTable below because the
+  // queue's search box is the table's own state — without it the reset would
+  // clear six chips and leave a typed word still hiding rows.
+  const filters = useFilterReset([
+    [subTab, setSubTab, 'all', 'zone'],
+    [boardFilters, setBoardFilters, [], 'board'],
+    [customerFilters, setCustomerFilters, [], 'customer'],
+    [mergeOnly, setMergeOnly, false, 'Combined'],
+    [draftOnly, setDraftOnly, false, 'Plan saved'],
+    [planKpi.keys, planKpi.clear, [], 'KPI card'],
+  ], clearSelection);
   // Selecting a gang row selects every member line (they act as one job).
   const rowIds = row => (row._gang ? [row.id, ...row._gang.map(m => m.id)] : [row.id]);
   const toggleSelected = (row, checked) => setSelectedIds(ids => checked
@@ -2833,6 +2847,9 @@ export default function Planning() {
             );
           })}
         </>}
+        {/* The way back to the whole queue. Hidden while nothing is lit, so on an
+            unfiltered board the rail is exactly as wide as it was. */}
+        <ResetFilters filters={filters} className="ml-auto" />
       </div>
 
       {/* ONE strip, one control. Every filter this page offers is a card here —
@@ -3016,6 +3033,7 @@ export default function Planning() {
           return chips.length ? <>{chips}</> : null;
         })()} />
       <DataTable searchable cardClass="ci-card-edge"
+        resetSignal={filters.token}
         selectable
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}

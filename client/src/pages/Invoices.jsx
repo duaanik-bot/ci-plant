@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
@@ -74,6 +74,8 @@ export default function Invoices({ embedded = false }) {
   // Scoped to the tab, so switching tabs drops a selection that was chosen
   // against the other list.
   const billingKpi = useKpiFilter(tab);
+  // The search lives inside the table, so its token clears that box too.
+  const filters = useFilterReset([[billingKpi.keys, billingKpi.clear, [], 'KPI card']]);
   const tabInvoices = tab === 'open' ? openInvoices : settledInvoices;
   const invoiceRows = billingKpi.apply(tabInvoices, BILLING_KPI_ROWS);
 
@@ -265,10 +267,13 @@ export default function Invoices({ embedded = false }) {
           { key: 'open', label: 'Outstanding', count: openInvoices.length },
           { key: 'settled', label: 'Settled', count: settledInvoices.length },
         ]} />
-        {embedded && <div className="flex gap-2">{actions}</div>}
+        <div className="flex gap-2">
+          <ResetFilters filters={filters} />
+          {embedded && actions}
+        </div>
       </div>
 
-      <DataTable searchable rows={invoiceRows}
+      <DataTable searchable resetSignal={filters.token} rows={invoiceRows}
         rowClass={unreadRowClass(threads, i => i.id)}
         getRowId={i => i.id}
         empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}

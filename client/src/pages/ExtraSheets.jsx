@@ -6,7 +6,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle, Scissors, Undo2 } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
@@ -94,6 +94,10 @@ export default function ExtraSheets() {
   }), [rows]);
 
   const kpi = useKpiFilter(tab);
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [kpi.keys, kpi.clear, [], 'KPI card'],
+  ]);
   const searched = useMemo(() => {
     let out = rows;
     if (tab === 'open') out = out.filter(r => OPEN_STATUSES.includes(r.status));
@@ -152,6 +156,7 @@ export default function ExtraSheets() {
         ]} />
         <div className="mb-4 flex items-center gap-2">
           <SearchInput className="w-80" value={q} onChange={setQ} placeholder="XS, JC, product, board, operator…" />
+          <ResetFilters filters={filters} />
           <ExportMenu build={() => ({
             name: `Extra Sheets ${fmt.title(tab)}`,
             title: 'Extra Sheet Requests',
