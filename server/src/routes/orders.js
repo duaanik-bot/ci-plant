@@ -22,6 +22,7 @@ import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
 import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
+import { eddPlan, eddForRow, eddConflicts } from '../wip-edd.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
@@ -982,7 +983,10 @@ r.post('/status-sheet/wip-parse', canPlan, wipUploadOne, async (req, res, next) 
       if (texts.join('').replace(/\s/g, '').length < 40) {
         return res.status(422).json({ code: 'scanned', error: 'This PDF is a scan — it has no selectable text. Ask for the original file or an Excel export.' });
       }
-      return res.json({ rows: texts });
+      // No grid: a PDF's "columns" are only ever whitespace, and splitting on it
+      // invents boundaries that move from page to page. EDD falls to the
+      // positional rule for PDFs, which the review dialog says out loud.
+      return res.json({ rows: texts, grid: texts.map(() => []) });
     }
 
     if (head.startsWith('PK')) {
@@ -990,32 +994,54 @@ r.post('/status-sheet/wip-parse', canPlan, wipUploadOne, async (req, res, next) 
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(buf);
       const texts = [];
+      const grid = [];
       // Every worksheet — customers hide the real list behind a title sheet
       // often enough that reading only the first would return headings.
       wb.eachSheet(ws => {
         ws.eachRow(row => {
-          const cells = (Array.isArray(row.values) ? row.values : []).map(v => {
+          // row.values is 1-INDEXED (slot 0 is always empty), so drop it before
+          // anything reads a column number off this array.
+          const raw = Array.isArray(row.values) ? row.values.slice(1) : [];
+          const cells = raw.map(v => {
             if (v == null) return '';
             if (v instanceof Date) {
-              // dd/mm/yyyy — the shape rowDate()'s DATE_RE reads, day first
-              // like every Indian customer sheet.
+              // dd/mm/yyyy — the shape DATE_RE reads, day first like every
+              // Indian customer sheet.
               const d = String(v.getUTCDate()).padStart(2, '0');
               const m = String(v.getUTCMonth() + 1).padStart(2, '0');
               return `${d}/${m}/${v.getUTCFullYear()}`;
             }
             if (typeof v === 'object') return String(v.text ?? v.result ?? '');
             return String(v);
-          }).filter(Boolean);
-          if (cells.length) texts.push(cells.join(' '));
+          });
+          // POSITIONS ARE THE POINT. Blank cells are kept, because dropping them
+          // slides every later cell left and the EDD column index then reads
+          // whatever happens to be sitting there — a quantity, or the next
+          // product's name. Only the trailing run is trimmed, which cannot move
+          // anything. `text` keeps the old joined-and-compacted shape so the
+          // matcher is unaffected.
+          let end = cells.length;
+          while (end > 0 && cells[end - 1] === '') end--;
+          const kept = cells.slice(0, end);
+          const text = kept.filter(Boolean).join(' ');
+          if (text) { texts.push(text); grid.push(kept); }
         });
       });
-      return res.json({ rows: texts });
+      return res.json({ rows: texts, grid });
     }
 
-    // CSV / plain text
-    const texts = buf.toString('utf8').split(/\r?\n/).map(l =>
-      l.split(',').map(c => c.replace(/^\s*"|"\s*$/g, '').trim()).filter(Boolean).join(' '));
-    return res.json({ rows: texts });
+    // CSV / plain text — same rule: keep the empties, they are the columns.
+    const lines = buf.toString('utf8').split(/\r?\n/);
+    const texts = [], grid = [];
+    for (const l of lines) {
+      const cells = l.split(',').map(c => c.replace(/^\s*"|"\s*$/g, '').trim());
+      let end = cells.length;
+      while (end > 0 && cells[end - 1] === '') end--;
+      const kept = cells.slice(0, end);
+      const text = kept.filter(Boolean).join(' ');
+      texts.push(text); grid.push(kept);
+    }
+    return res.json({ rows: texts, grid });
   } catch (e) { next(e); }
 });
 
@@ -1036,8 +1062,15 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
     const texts = (Array.isArray(req.body.rows) ? req.body.rows : [])
       .map(t => String(t ?? '')).slice(0, 2000);
     if (!texts.length) return res.status(400).json({ error: 'No rows to match' });
+    // The cell grid rides alongside the row texts so the EDD can be read by its
+    // COLUMN rather than guessed at from a joined string. Absent (an older
+    // client, or a PDF) simply means the positional rule decides.
+    const grid = Array.isArray(req.body.grid) ? req.body.grid : [];
+    const parsedRows = texts.map((text, i) => ({ text, cells: grid[i] || [] }));
+    const plan = eddPlan(parsedRows);
     const lines = await q(`
       SELECT ol.id AS line_id, ol.order_id, ol.wip, ol.wip_date, o.po_number,
+             o.delivery_date,
              c.name AS customer_name, ${LINE_STATUS_SQL} AS line_status,
              p.id AS product_id, p.name, p.code, p.party_item_code
       FROM order_lines ol
@@ -1058,8 +1091,15 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
     const verdicts = matchWipRows(texts, products, aliases);
     const items = verdicts.filter(v => v.status !== 'none').map(v => ({
       ...v,
+      // The customer's own delivery date for this row, read by its column where
+      // the sheet names one. Null leaves the order's existing EDD alone.
+      edd: eddForRow(parsedRows[v.row], plan),
       lines: (byProduct.get(v.product_id) || []).map(l => ({
-        line_id: l.line_id, po_number: l.po_number, customer_name: l.customer_name,
+        line_id: l.line_id, order_id: l.order_id,
+        po_number: l.po_number, customer_name: l.customer_name,
+        // What this line's order already carries, so the review can show the
+        // customer's date landing ON something rather than into a void.
+        current_edd: l.delivery_date ? String(l.delivery_date).slice(0, 10) : null,
         // `already_wip` is the TRUE state only. A line sitting at Non-WIP is
         // not "already done" — the customer has changed their mind, and the
         // import must be able to move it back, so it stays tickable.
@@ -1075,6 +1115,9 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
       items,
       unmatched: verdicts.filter(v => v.status === 'none').length,
       scanned_rows: texts.length,
+      // How the EDD was read, so the dialog can say it rather than leaving the
+      // planner to wonder which of two dates it took.
+      edd: { mode: plan.mode, column: plan.label ?? null },
     });
   } catch (e) { next(e); }
 });
@@ -1084,7 +1127,7 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
 r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
   try {
     const items = (Array.isArray(req.body.items) ? req.body.items : [])
-      .map(x => ({ line_id: +x.line_id, wip_date: x.wip_date || null }))
+      .map(x => ({ line_id: +x.line_id, wip_date: x.wip_date || null, edd: x.edd || null }))
       .filter(x => x.line_id);
     if (!items.length) return res.status(400).json({ error: 'Nothing selected' });
     const today = plantDateStr();
@@ -1093,15 +1136,45 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
       for (const it of items) {
         const row = await qc(
           `UPDATE order_lines SET wip=true, wip_date=$2 WHERE id=$1
-           RETURNING id, wip, wip_date`, [it.line_id, it.wip_date || today]);
+           RETURNING id, wip, wip_date, order_id`, [it.line_id, it.wip_date || today]);
         if (!row[0]) continue;
         await audit('order_line', it.line_id, 'status-sheet-wip-import',
           `marked Customer WIP (${row[0].wip_date}) from an uploaded WIP list`, qc, req.user?.name);
         done.push(row[0]);
       }
-      return done;
+
+      // ── EDD ───────────────────────────────────────────────────────────────
+      // delivery_date lives on the ORDER, so one date covers every product on
+      // that PO. Two products of one order asking for different dates is a
+      // question the schema cannot answer, and whichever row happened to be
+      // last would silently win. Those orders are REFUSED and named back to the
+      // planner instead — a delivery date the plant schedules against must not
+      // be decided by row order. Everything else in this transaction still
+      // lands; the WIP marks are not held hostage to an ambiguous date.
+      const withEdd = items
+        .map(it => {
+          const applied = done.find(d => d.id === it.line_id);
+          return applied && it.edd ? { order_id: applied.order_id, edd: it.edd } : null;
+        })
+        .filter(Boolean);
+      const conflicts = eddConflicts(withEdd);
+      const blocked = new Set(conflicts.map(c => c.order_id));
+      const seen = new Set();
+      const eddApplied = [];
+      for (const w of withEdd) {
+        if (blocked.has(w.order_id) || seen.has(w.order_id)) continue;
+        seen.add(w.order_id);
+        const o = await qc(
+          `UPDATE orders SET delivery_date=$2 WHERE id=$1 RETURNING id, delivery_date`,
+          [w.order_id, w.edd]);
+        if (!o[0]) continue;
+        await audit('order', w.order_id, 'status-sheet-wip-import',
+          `EDD set to ${w.edd} from an uploaded WIP list`, qc, req.user?.name);
+        eddApplied.push(o[0]);
+      }
+      return { done, eddApplied, conflicts };
     });
-    res.json({ applied: out });
+    res.json({ applied: out.done, edd_applied: out.eddApplied, edd_conflicts: out.conflicts });
   } catch (e) { next(e); }
 });
 

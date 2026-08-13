@@ -27,7 +27,7 @@ import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
 import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser } from 'lucide-react';
+import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -178,7 +178,8 @@ export default function StatusSheet() {
   const [wipRes, setWipRes] = useState(null);          // /wip-match response
   const [wipSel, setWipSel] = useState(() => new Set()); // checked line ids
   const [wipDates, setWipDates] = useState({});          // line_id → date
-  const closeWip = () => { setWipOpen(false); setWipRes(null); setWipSel(new Set()); setWipDates({}); };
+  const [wipEdds, setWipEdds] = useState({});            // line_id → EDD from the file
+  const closeWip = () => { setWipOpen(false); setWipRes(null); setWipSel(new Set()); setWipDates({}); setWipEdds({}); };
   const handleWipFile = async file => {
     if (!file) return;
     setWipBusy(true);
@@ -192,20 +193,28 @@ export default function StatusSheet() {
       // read in the browser — its load() hangs under the browser bundle — so
       // spreadsheets go up as files exactly like PDFs, inside the 4 MB cap.
       const parsed = await api.upload('/status-sheet/wip-parse', file);
-      const res = await api.post('/status-sheet/wip-match', { rows: parsed.rows });
+      // `grid` carries the sheet's CELLS, not just the joined row text, so the
+      // server can find the EDD by its column heading instead of guessing which
+      // of two dates on a row is the delivery date.
+      const res = await api.post('/status-sheet/wip-match', { rows: parsed.rows, grid: parsed.grid });
       setWipRes(res);
       // Confident matches arrive ticked ("Yes to All" is then one click);
       // fuzzy suggestions arrive unticked for the planner's eye. Lines already
       // WIP arrive unticked too — nothing to do for them.
       const sel = new Set();
       const dates = {};
+      const edds = {};
       for (const it of res.items) {
         for (const l of it.lines) {
+          // The file's EDD for this row, offered per line and editable. Left
+          // blank when the sheet named none — an absent EDD must leave the
+          // order's existing date alone rather than blanking it.
+          if (it.edd) edds[l.line_id] = it.edd;
           dates[l.line_id] = it.date || todayISO();
           if (it.status === 'matched' && !l.already_wip) sel.add(l.line_id);
         }
       }
-      setWipSel(sel); setWipDates(dates);
+      setWipSel(sel); setWipDates(dates); setWipEdds(edds);
     } catch (e) {
       toast.error(e.message || 'Could not read that file');
     } finally { setWipBusy(false); }
@@ -213,9 +222,23 @@ export default function StatusSheet() {
   const applyWip = async () => {
     setWipBusy(true);
     try {
-      const items = [...wipSel].map(id => ({ line_id: id, wip_date: wipDates[id] || todayISO() }));
+      const items = [...wipSel].map(id => ({
+        line_id: id,
+        wip_date: wipDates[id] || todayISO(),
+        // Only send an EDD the file actually gave (or the planner typed) —
+        // an empty one must leave the order's existing delivery date alone.
+        edd: wipEdds[id] || null,
+      }));
       const res = await api.post('/status-sheet/wip-apply', { items });
-      toast.success(`${res.applied.length} line${res.applied.length === 1 ? '' : 's'} marked Customer WIP`);
+      const eddN = res.edd_applied?.length || 0;
+      toast.success(`${res.applied.length} line${res.applied.length === 1 ? '' : 's'} marked Customer WIP`
+        + (eddN ? ` · EDD set on ${eddN} order${eddN === 1 ? '' : 's'}` : ''));
+      // A refused EDD is never silent. delivery_date is per ORDER, so two
+      // products of one PO asking for different dates is unanswerable — the
+      // server applies neither and names the order here.
+      if (res.edd_conflicts?.length) {
+        toast.error(`${res.edd_conflicts.length} order${res.edd_conflicts.length === 1 ? '' : 's'} had two different EDDs in the file — EDD left unchanged there, set it by hand`);
+      }
       closeWip(); load();
     } catch (e) { toast.error(e.message || 'Could not mark the lines'); }
     finally { setWipBusy(false); }
@@ -830,6 +853,23 @@ export default function StatusSheet() {
                 Yes to all
               </button>
             </div>
+            {/* Say HOW the EDD was read. "Second date on each row" is a guess
+                the planner must be able to check, and a file that named its
+                column deserves to be trusted out loud. */}
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl px-3 py-2 text-xs font-semibold ${
+              wipRes.edd?.mode === 'header' ? 'bg-emerald-50/70 text-emerald-800'
+                : wipRes.edd?.mode === 'positional' ? 'bg-amber-50/70 text-amber-800'
+                : 'bg-slate-50 text-slate-500'}`}>
+              <CalendarDays size={13} className="shrink-0" />
+              <span>
+                {wipRes.edd?.mode === 'header'
+                  ? <>EDD read from the sheet’s own <span className="font-bold">“{wipRes.edd.column}”</span> column.</>
+                  : wipRes.edd?.mode === 'positional'
+                    ? <>This sheet names no delivery column — the <span className="font-bold">second date on each row</span> is offered as the EDD. Check them before confirming.</>
+                    : <>No delivery date found in this file — EDD is left as it is. You can still type one per line.</>}
+                {' '}EDD applies to the whole PO, not the single product.
+              </span>
+            </div>
             <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
               {wipRes.items.map(it => (
                 <div key={it.row} className={`rounded-xl border p-2.5 ${it.status === 'matched' ? 'border-blue-100 bg-white' : 'border-amber-200 bg-amber-50/40'}`}>
@@ -866,10 +906,25 @@ export default function StatusSheet() {
                             STATUS_PILL[l.line_status]}`}>{STATUS_LABEL[l.line_status]}</span>
                         )}
                       </span>
+                      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-slate-400">WIP</span>
                       <input type="date" value={wipDates[l.line_id] || ''} disabled={l.already_wip}
                         onChange={e => setWipDates(d => ({ ...d, [l.line_id]: e.target.value }))}
                         className="h-7 shrink-0 rounded-md border border-slate-200 px-1.5 text-[11px] text-slate-600"
                         title="The WIP date recorded against this line" />
+                      {/* EDD writes to the ORDER, so it is shown against the PO
+                          it will move and left blank when the file named none —
+                          blank means "leave the existing date alone", never
+                          "clear it". */}
+                      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-slate-400">EDD</span>
+                      <input type="date" value={wipEdds[l.line_id] || ''} disabled={l.already_wip}
+                        onChange={e => setWipEdds(d => ({ ...d, [l.line_id]: e.target.value }))}
+                        className={`h-7 shrink-0 rounded-md border px-1.5 text-[11px] ${
+                          wipEdds[l.line_id] && wipEdds[l.line_id] !== l.current_edd
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-200 text-slate-600'}`}
+                        title={l.current_edd
+                          ? `PO ${l.po_number} currently says ${l.current_edd} — this replaces it for every product on that PO`
+                          : `PO ${l.po_number} has no delivery date yet — this sets it for every product on that PO`} />
                     </label>
                   ))}
                 </div>
