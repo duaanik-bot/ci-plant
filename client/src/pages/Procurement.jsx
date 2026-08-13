@@ -16,7 +16,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
-import { consolidate, mergeSummary } from '../lib/poConsolidate.js';
+import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
@@ -446,6 +446,29 @@ export default function Procurement() {
     gst_rate: materials.find(x => String(x.id) === String(m.material_id))?.gst_rate || 0, discount_pct: 0,
   }));
 
+  // One spelling of the merge confirmation, shared by the direct-PO and edit
+  // forms. A board line is keyed and read in ₹/kg but STORED in ₹/sheet, so the
+  // stored number is translated back — quoting it raw names a figure the buyer
+  // never typed and cannot find on the screen behind the dialog.
+  const mergesOf = rows => mergeSummary(rows, id => materials.find(m => String(m.id) === String(id))?.name || `#${id}`);
+  const andList = xs => (xs.length < 2 ? String(xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const mergeConfirmMessage = merges => {
+    const showRate = (materialId, rate) => {
+      const rpk = ratePerKgFromSheet(materials.find(m => String(m.id) === String(materialId)), rate);
+      return rpk == null ? `₹${(+rate || 0).toFixed(2)}` : `₹${rpk.toFixed(2)}/kg`;
+    };
+    return (<>
+      {merges.map(m => (
+        <span key={m.material_id} className="block">
+          <b>{m.name}</b> — lines {andList(m.positions)} become one:{' '}
+          {fmt.num(m.qty)} {m.unit || ''} at {showRate(m.material_id, m.rate)}
+          {/* A merge that quietly picks one of two rates has to say which lost. */}
+          {m.dropped.length > 0 && ` — ${m.dropped.map(d => `line ${d.position} had ${showRate(m.material_id, d.rate)}`).join(', ')}`}
+        </span>
+      ))}
+    </>);
+  };
+
   const postDirectPo = async lines => {
     try {
       const po = await api.post('/purchase-orders', {
@@ -468,30 +491,10 @@ export default function Procurement() {
     const rows = consolidate(typed);
     const lines = rows.map(l => ({ material_id: l.material_id, qty: l.qty, rate: l.rate, hsn_code: l.hsn_code,
       unit: l.unit, discount_pct: l.discount_pct, gst_rate: l.gst_rate }));
-    const merges = mergeSummary(rows, id => materials.find(m => String(m.id) === String(id))?.name || `#${id}`);
+    const merges = mergesOf(rows);
     if (!merges.length) return postDirectPo(lines);
-    // A board line is stored in ₹/sheet but keyed and read in ₹/kg. Quote it the
-    // way the editor above shows it, or the dialog names a number the buyer never
-    // typed and cannot find on screen.
-    const showRate = (materialId, rate) => {
-      const rpk = ratePerKgFromSheet(materials.find(m => String(m.id) === String(materialId)), rate);
-      return rpk == null ? `₹${(+rate || 0).toFixed(2)}` : `₹${rpk.toFixed(2)}/kg`;
-    };
-    setConfirm({
-      title: 'One line per board?',
-      message: (<>
-        {merges.map(m => (
-          <span key={m.material_id} className="block">
-            <b>{m.name}</b> — lines {m.positions.join(' and ')} become one:{' '}
-            {fmt.num(m.qty)} {m.unit || ''} at {showRate(m.material_id, m.rate)}
-            {/* A merge that quietly picks one of two rates has to say which lost. */}
-            {m.dropped.length > 0 && ` — ${m.dropped.map(d => `line ${d.position} had ${showRate(m.material_id, d.rate)}`).join(', ')}`}
-          </span>
-        ))}
-      </>),
-      confirmLabel: 'Create PO',
-      onConfirm: () => postDirectPo(lines),
-    });
+    setConfirm({ title: 'One line per board?', message: mergeConfirmMessage(merges),
+      confirmLabel: 'Create PO', onConfirm: () => postDirectPo(lines) });
   };
 
   // Edit an existing PO — lines that already received stock stay locked. Board
@@ -516,12 +519,24 @@ export default function Procurement() {
     });
   };
 
+  // Duplicate boards collapse here too, but a line with goods already received
+  // keeps its own row: its id is what every GRN points at. So a board that is
+  // half-received and re-ordered stays on two lines — one settled, one open —
+  // which is what actually happened to it.
   const saveEditPo = async () => {
-    const lines = editPo.lines.filter(l => l.material_id && +l.qty > 0)
-      .map(l => ({ id: l.id, material_id: +l.material_id, qty: +l.qty, rate: +l.rate || 0,
-        hsn_code: l.hsn_code || null, unit: l.unit || null,
-        discount_pct: +l.discount_pct || 0, gst_rate: +l.gst_rate || 0 }));
-    if (!lines.length) return toast.error('A PO needs at least one line');
+    const rows = editPo.lines.filter(l => l.material_id && +l.qty > 0);
+    if (!rows.length) return toast.error('A PO needs at least one line');
+    const { rows: merged } = consolidateEdit(rows, l => +l.committed_qty > 0);
+    const lines = merged.map(l => ({ id: l.id, material_id: +l.material_id, qty: +l.qty, rate: +l.rate || 0,
+      hsn_code: l.hsn_code || null, unit: l.unit || null,
+      discount_pct: +l.discount_pct || 0, gst_rate: +l.gst_rate || 0 }));
+    const merges = mergesOf(merged);
+    if (!merges.length) return putEditPo(lines);
+    setConfirm({ title: 'One line per board?', message: mergeConfirmMessage(merges),
+      confirmLabel: 'Save changes', onConfirm: () => putEditPo(lines) });
+  };
+
+  const putEditPo = async lines => {
     try {
       await api.put(`/purchase-orders/${editPo.id}`, {
         vendor_id: +editPo.vendor_id, expected_date: editPo.expected_date || null, lines,

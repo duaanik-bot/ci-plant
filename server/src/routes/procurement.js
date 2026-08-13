@@ -13,7 +13,7 @@ import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
 import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-substitution.js';
-import { consolidate } from '../po-consolidate.js';
+import { consolidate, consolidateEdit } from '../po-consolidate.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -193,6 +193,61 @@ async function consolidateForPo(oc, lines, vendorId, boardRates) {
   return consolidate(lines, {
     mergedRate: sources => resolved.get(String(sources[0].material_id)) ?? null,
   });
+}
+
+// Write an edited PO's lines: collapse duplicate materials among the lines with
+// nothing received, drop what the user removed and what a merge folded away,
+// then update the survivors and insert anything new.
+//
+// Exported and given its `qc` so the guarantee that matters can be tested
+// without a database: a line with goods against it is NEVER deleted, because
+// every GRN row points at that po_line id and deleting it strands the receipt.
+// See po-edit-lines.test.js.
+export async function applyPoLineEdit(qc, poId, lines, existing, committedQty) {
+  const byId = Object.fromEntries(existing.map(l => [l.id, l]));
+  const keptIds = new Set(lines.filter(l => l.id).map(l => +l.id));
+  for (const l of lines) {
+    if (!l.material_id || !(+l.qty > 0))
+      throw Object.assign(new Error('Each line needs a material and a positive quantity'), { status: 400 });
+  }
+  // Duplicate materials collapse to one line here too — but ONLY among lines
+  // with nothing received. See consolidateEdit: a settled line keeps its own row
+  // and id because a GRN points at that id.
+  const { rows: finalLines, mergedAway: mergedAwayIds } =
+    consolidateEdit(lines, l => (l.id && byId[l.id] ? committedQty(byId[l.id]) > 0 : false));
+  const mergedAway = new Set(mergedAwayIds);
+
+  // Remove lines the user dropped, and the ones a merge folded away — but never
+  // one with any receipt (accepted or quarantined), which would also strand its
+  // GRN records. Merged-away lines are zero-receipt by construction, so the
+  // guard below only ever fires on a genuine drop.
+  for (const l of existing) {
+    if (!keptIds.has(l.id) || mergedAway.has(l.id)) {
+      if (committedQty(l) > 0) throw Object.assign(new Error('A line that has goods received against it cannot be removed — short-close the PO instead'), { status: 409 });
+      await qc('DELETE FROM po_lines WHERE id=$1', [l.id]);
+    }
+  }
+  // Update kept lines and insert new ones.
+  for (const l of finalLines) {
+    if (l.id && byId[l.id]) {
+      const prev = byId[l.id];
+      const committed = committedQty(prev);
+      if (committed > 0) {
+        if (+l.material_id !== prev.material_id) throw Object.assign(new Error('Cannot change the material on a line that has goods received against it'), { status: 409 });
+        if (+l.qty < committed) throw Object.assign(new Error(`Ordered qty cannot be below the ${committed} already received/in-QC`), { status: 409 });
+      }
+      await qc(`UPDATE po_lines SET material_id=$1, qty=$2, rate=$3,
+                       hsn_code=$4, unit=$5, discount_pct=$6, gst_rate=$7 WHERE id=$8`,
+        [+l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
+         +l.discount_pct || 0, +l.gst_rate || 0, l.id]);
+    } else {
+      await qc(`INSERT INTO po_lines (purchase_order_id, material_id, qty, rate, hsn_code, unit, discount_pct, gst_rate)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [poId, +l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
+         +l.discount_pct || 0, +l.gst_rate || 0]);
+    }
+    if (+l.rate > 0) await qc('UPDATE materials SET last_rate=$1 WHERE id=$2', [+l.rate, +l.material_id]);
+  }
 }
 
 async function insertPoLines(qc, poId, lines) {
@@ -803,6 +858,8 @@ r.post('/purchase-orders/:id/close', canBuy, async (req, res, next) => {
 // Edit a PO — vendor, expected date, and lines. Lines already (partly) received
 // are locked: their material can't change and quantity can't drop below what has
 // arrived. Omitted existing lines are removed (only if nothing was received).
+// Duplicate materials collapse to one line, but only among lines with nothing
+// received — a settled line keeps its own row and id, since a GRN points at it.
 r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
   try {
     const { vendor_id, expected_date, lines, vendor_notes, payment_terms, delivery_terms, reference,
@@ -826,36 +883,7 @@ r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
       const grnByLine = Object.fromEntries(grnRows.map(g => [g.po_line_id, +g.grn_qty]));
       const committedQty = l => Math.max(+l.received_qty, grnByLine[l.id] || 0);
 
-      // Remove lines the user dropped — but never one with any receipt (accepted
-      // or quarantined), which would also strand its GRN records.
-      for (const l of existing) {
-        if (!keptIds.has(l.id)) {
-          if (committedQty(l) > 0) throw Object.assign(new Error('A line that has goods received against it cannot be removed — short-close the PO instead'), { status: 409 });
-          await qc('DELETE FROM po_lines WHERE id=$1', [l.id]);
-        }
-      }
-      // Update kept lines and insert new ones.
-      for (const l of lines) {
-        if (!l.material_id || !(+l.qty > 0)) throw Object.assign(new Error('Each line needs a material and a positive quantity'), { status: 400 });
-        if (l.id && byId[l.id]) {
-          const prev = byId[l.id];
-          const committed = committedQty(prev);
-          if (committed > 0) {
-            if (+l.material_id !== prev.material_id) throw Object.assign(new Error('Cannot change the material on a line that has goods received against it'), { status: 409 });
-            if (+l.qty < committed) throw Object.assign(new Error(`Ordered qty cannot be below the ${committed} already received/in-QC`), { status: 409 });
-          }
-          await qc(`UPDATE po_lines SET material_id=$1, qty=$2, rate=$3,
-                           hsn_code=$4, unit=$5, discount_pct=$6, gst_rate=$7 WHERE id=$8`,
-            [+l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
-             +l.discount_pct || 0, +l.gst_rate || 0, l.id]);
-        } else {
-          await qc(`INSERT INTO po_lines (purchase_order_id, material_id, qty, rate, hsn_code, unit, discount_pct, gst_rate)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [po.id, +l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
-             +l.discount_pct || 0, +l.gst_rate || 0]);
-        }
-        if (+l.rate > 0) await qc('UPDATE materials SET last_rate=$1 WHERE id=$2', [+l.rate, +l.material_id]);
-      }
+      await applyPoLineEdit(qc, po.id, lines, existing, committedQty);
       // Re-derive status from the (possibly changed) lines.
       const fresh = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [po.id]);
       const full = fresh.length > 0 && fresh.every(l => l.received_qty >= l.qty);

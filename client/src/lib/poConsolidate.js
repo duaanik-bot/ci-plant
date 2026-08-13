@@ -47,8 +47,42 @@ export function consolidate(lines, { mergedRate } = {}) {
   return out;
 }
 
-// What the confirmation says before a direct PO goes through. One sentence per
-// material that actually merged; nothing to say when nothing merged.
+// Editing a PO collapses duplicates too, but only among lines with nothing
+// received. A settled line — anything accepted into stock or still sitting in a
+// quarantine GRN — keeps its own row AND its own id, because that id is what
+// every GRN points at; folding it into a neighbour would strand real receipts.
+//
+// So a board half-received and then re-ordered ends up on two lines, one settled
+// and one open. That is not a failure to consolidate: it is what happened to the
+// board, and the settled half has receipts to prove it.
+//
+// Returns the rows to write plus `mergedAway` — ids a merge folded into another
+// row, which the caller deletes. They are zero-receipt by construction.
+export function consolidateEdit(lines, isSettled = () => false) {
+  const settled = [], open = [];
+  // Position is the row number the user sees, kept across the partition so a
+  // confirmation can say "lines 2 and 5" about the original form, not about the
+  // filtered subset.
+  (lines || []).forEach((l, i) => {
+    const tagged = { ...l, position: i + 1 };
+    (isSettled(l) ? settled : open).push(tagged);
+  });
+  // Each settled line goes through alone: same row shape as the rest, and no
+  // chance of grouping with anything.
+  const rows = [...settled.flatMap(l => consolidate([l])), ...consolidate(open)];
+  const mergedAway = [];
+  for (const row of rows) {
+    // Keep the first contributing line that already exists, so the surviving row
+    // holds a real id instead of being deleted and re-inserted.
+    const survivor = row.sources.find(s => s.id);
+    if (survivor) row.id = survivor.id;
+    for (const s of row.sources) if (s.id && +s.id !== +row.id) mergedAway.push(+s.id);
+  }
+  return { rows, mergedAway };
+}
+
+// What the confirmation says before a PO goes through. One sentence per material
+// that actually merged; nothing to say when nothing merged.
 export function mergeSummary(rows, nameOf) {
   return rows.filter(r => r.merged).map(r => ({
     material_id: r.material_id,
@@ -59,7 +93,9 @@ export function mergeSummary(rows, nameOf) {
     rate: r.rate,
     // Positions the buyer can see on screen, 1-based, and the rates that lost —
     // a merge that quietly picks one of two different numbers has to say so.
-    positions: r.sources.map(s => s.index + 1),
+    // `position` wins when present: a PO edit partitions settled lines out before
+    // grouping, so the index within the group is no longer the row on screen.
+    positions: r.sources.map(s => s.position ?? s.index + 1),
     dropped: r.sources
       .filter(s => s.rate !== '' && s.rate != null && +s.rate !== +r.rate)
       .map(s => ({ position: s.index + 1, rate: +s.rate })),

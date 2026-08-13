@@ -80,6 +80,23 @@ mid-entry.
 **Bulk (multi-PR).** Behaviour unchanged; refactored onto the shared helper so all
 three paths read one rule instead of three spellings of it.
 
+**Edit PO** (added after the first release, on request). Same rule, restricted to lines
+with nothing received. `consolidateEdit` partitions the incoming lines into settled and
+open: a settled line — anything accepted into stock or still sitting in a quarantine GRN —
+keeps its own row **and its own id**, because every GRN row carries a `po_line_id` and
+deleting that line strands a real receipt: goods physically in the building with nothing on
+the order pointing at them.
+
+The consequence is deliberate. A board half-received and then re-ordered ends up on two
+lines, one settled and one open. That is not a failure to consolidate; it is what happened
+to the board, and the settled half has receipts to prove it.
+
+A merged row keeps the first contributing line that already exists, so the survivor is
+updated in place rather than deleted and re-inserted. Ids folded away come back as
+`mergedAway` and are deleted alongside the rows the user actually dropped — they are
+zero-receipt by construction, so the existing "cannot remove a received line" guard only
+ever fires on a genuine drop.
+
 ## Traceability
 
 Derived, not stored. `GET /purchase-orders/:id` returns `source_prs` per line: join
@@ -98,9 +115,7 @@ honest answer.
 ## Non-goals
 
 - PR generation, approval, and the `requisitions` / `requisition_lines` tables.
-- `PUT /purchase-orders/:id` (Edit PO). A line that has goods received against it is
-  locked and has GRNs pointing at its `po_line_id`; merging under those is how you
-  strand receipt records.
+- Merging a line that has goods received against it — see Edit PO above.
 - Merging across materials that are "the same board" under two `material_id`s. That
   is a master-data problem and is not fixed here.
 
@@ -114,7 +129,21 @@ honest answer.
 - `sources` quantities sum back to the merged `qty`
 - an empty list, and a single line, both pass through untouched
 
+- the edit partition: a settled line neither absorbs nor is absorbed; open lines still
+  merge around it; a brand-new row joins the existing line rather than replacing it
+
 `server/src/po-consolidate-parity.test.js`
 
 - identical fixtures through `server/src/po-consolidate.js` and
-  `client/src/lib/poConsolidate.js` produce identical output
+  `client/src/lib/poConsolidate.js` produce identical output, for both `consolidate`
+  and `consolidateEdit` — drift there would delete a line on the server that the
+  screen said was staying
+
+`server/src/po-edit-lines.test.js`
+
+- drives the real `applyPoLineEdit` with a stub `qc`, so no pool is connected and an
+  escape to the module-level `q`/`one` throws rather than passing quietly
+- **the guarantee**: no `po_line` a GRN points at is ever deleted — including a line
+  whose goods are still in quarantine, where `received_qty` is still 0
+- ordinary removal, the "cannot remove a received line" refusal, and the
+  "qty below what already arrived" refusal all still hold

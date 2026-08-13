@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { consolidate } from './po-consolidate.js';
+import { consolidate, consolidateEdit } from './po-consolidate.js';
 
 // The requirement, in one fixture: three requisition lines, two of them the same
 // board, become two PO lines with the quantities added up.
@@ -140,4 +140,100 @@ test('an empty list stays empty', () => {
 
 test('a missing list is not a crash', () => {
   assert.deepEqual(consolidate(undefined), []);
+});
+
+// ── Editing a PO: merge only what has nothing received ──────────────────────
+const settledIds = (...ids) => l => ids.includes(l.id);
+
+test('two untouched lines for one board merge, and the survivor keeps a real id', () => {
+  const { rows, mergedAway } = consolidateEdit([
+    { id: 11, material_id: 7, qty: 20 },
+    { id: 12, material_id: 7, qty: 10 },
+  ], settledIds());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].qty, 30);
+  assert.equal(rows[0].id, 11, 'updated in place rather than deleted and re-inserted');
+  assert.deepEqual(mergedAway, [12], 'the folded-away line is handed back for deletion');
+});
+
+test('a line with goods received keeps its own row and its own id', () => {
+  // 11 has receipts against it; a GRN points at that id. It must survive intact
+  // even though line 12 names the same board.
+  const { rows, mergedAway } = consolidateEdit([
+    { id: 11, material_id: 7, qty: 20 },
+    { id: 12, material_id: 7, qty: 10 },
+  ], settledIds(11));
+  assert.equal(rows.length, 2, 'the settled line does not absorb, and is not absorbed');
+  assert.equal(rows.find(r => r.id === 11).qty, 20, 'the received line is untouched');
+  assert.equal(rows.find(r => r.id === 12).qty, 10);
+  assert.deepEqual(mergedAway, [], 'nothing to delete');
+});
+
+test('open lines still merge around a settled line for the same board', () => {
+  const { rows, mergedAway } = consolidateEdit([
+    { id: 11, material_id: 7, qty: 5 },
+    { id: 12, material_id: 7, qty: 20 },
+    { id: 13, material_id: 7, qty: 10 },
+  ], settledIds(11));
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find(r => r.id === 11).qty, 5, 'settled, untouched');
+  assert.equal(rows.find(r => r.id === 12).qty, 30, 'the two open lines added up');
+  assert.deepEqual(mergedAway, [13]);
+});
+
+test('every line settled means nothing merges at all', () => {
+  const { rows, mergedAway } = consolidateEdit([
+    { id: 11, material_id: 7, qty: 20 },
+    { id: 12, material_id: 7, qty: 10 },
+  ], settledIds(11, 12));
+  assert.equal(rows.length, 2);
+  assert.deepEqual(mergedAway, []);
+});
+
+test('a brand-new line merges into the existing one, not the other way round', () => {
+  // The new row has no id yet. The existing line must be the survivor, or the
+  // edit would delete a real row and insert a replacement for no reason.
+  const { rows, mergedAway } = consolidateEdit([
+    { material_id: 7, qty: 10 },
+    { id: 11, material_id: 7, qty: 20 },
+  ], settledIds());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].qty, 30);
+  assert.equal(rows[0].id, 11);
+  assert.deepEqual(mergedAway, [], 'the id-less line was never a row to delete');
+});
+
+test('two brand-new lines for one board merge into a single insert', () => {
+  const { rows, mergedAway } = consolidateEdit([
+    { material_id: 7, qty: 20 },
+    { material_id: 7, qty: 10 },
+  ], settledIds());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].qty, 30);
+  assert.equal(rows[0].id, undefined, 'nothing to update — this is an insert');
+  assert.deepEqual(mergedAway, []);
+});
+
+test('positions survive the settled/open split, so a confirmation can name real rows', () => {
+  const { rows } = consolidateEdit([
+    { id: 11, material_id: 9, qty: 5 },
+    { id: 12, material_id: 7, qty: 20 },
+    { id: 13, material_id: 9, qty: 5 },
+    { id: 14, material_id: 7, qty: 10 },
+  ], settledIds(11));
+  const board7 = rows.find(r => r.material_id === 7 && r.sources.length > 1);
+  assert.deepEqual(board7.sources.map(s => s.position), [2, 4], 'rows 2 and 4 of the form the user sees');
+});
+
+test('different boards never merge, settled or not', () => {
+  const { rows } = consolidateEdit([
+    { id: 11, material_id: 7, qty: 20 },
+    { id: 12, material_id: 9, qty: 10 },
+  ], settledIds());
+  assert.equal(rows.length, 2);
+});
+
+test('an empty edit is not a crash', () => {
+  assert.deepEqual(consolidateEdit([]), { rows: [], mergedAway: [] });
+  assert.deepEqual(consolidateEdit(undefined), { rows: [], mergedAway: [] });
 });

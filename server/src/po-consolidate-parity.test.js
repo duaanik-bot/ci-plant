@@ -3,8 +3,8 @@
 // fixtures go through both and must come out identical.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { consolidate as server } from './po-consolidate.js';
-import { consolidate as client, mergeSummary } from '../../client/src/lib/poConsolidate.js';
+import { consolidate as server, consolidateEdit as serverEdit } from './po-consolidate.js';
+import { consolidate as client, consolidateEdit as clientEdit, mergeSummary } from '../../client/src/lib/poConsolidate.js';
 
 const FIXTURES = [
   ['the requirement: A 20, B 10, A 10', [
@@ -48,8 +48,30 @@ for (const [name, lines] of FIXTURES) {
   });
 }
 
-// mergeSummary is what the buyer reads before a direct PO goes through, so the
-// numbers in it have to be the ones actually being written.
+// The edit form previews the same partition the route writes. Drift here would
+// delete a line on the server that the screen said was staying.
+const EDIT_FIXTURES = [
+  ['nothing settled', [{ id: 11, material_id: 7, qty: 20 }, { id: 12, material_id: 7, qty: 10 }], []],
+  ['the first line is settled', [{ id: 11, material_id: 7, qty: 20 }, { id: 12, material_id: 7, qty: 10 }], [11]],
+  ['settled plus two open for one board',
+    [{ id: 11, material_id: 7, qty: 5 }, { id: 12, material_id: 7, qty: 20 }, { id: 13, material_id: 7, qty: 10 }], [11]],
+  ['a new line joins an existing one', [{ material_id: 7, qty: 10 }, { id: 11, material_id: 7, qty: 20 }], []],
+  ['two boards, one settled each',
+    [{ id: 11, material_id: 7, qty: 5 }, { id: 12, material_id: 9, qty: 5 },
+     { id: 13, material_id: 7, qty: 10 }, { id: 14, material_id: 9, qty: 10 }], [11, 12]],
+  ['everything settled', [{ id: 11, material_id: 7, qty: 20 }, { id: 12, material_id: 7, qty: 10 }], [11, 12]],
+  ['empty', [], []],
+];
+
+for (const [name, lines, settled] of EDIT_FIXTURES) {
+  test(`server and client agree on the edit partition — ${name}`, () => {
+    const isSettled = l => settled.includes(l.id);
+    assert.deepEqual(clientEdit(lines, isSettled), serverEdit(lines, isSettled));
+  });
+}
+
+// mergeSummary is what the buyer reads before a PO goes through, so the numbers
+// in it have to be the ones actually being written.
 test('the summary names only what merged, and what it is being merged to', () => {
   const rows = client([
     { material_id: 7, qty: 20, rate: 45, unit: 'packets' },
