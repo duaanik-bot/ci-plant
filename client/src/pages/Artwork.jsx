@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -608,7 +608,7 @@ export default function Artwork() {
               ); } },
           { key: 'od', label: 'OD', align: 'right',
             sortValue: l => poAgeOf(l).days ?? -1,
-            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
+            export: l => { return odExport(poAgeOf(l).days); },
             render: l => { const a = poAgeOf(l);
               return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product',

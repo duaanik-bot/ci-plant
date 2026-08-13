@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -3189,7 +3189,7 @@ export default function Planning() {
               ); } },
           { key: 'od', label: 'OD', width: 'w-[56px]', align: 'right', colClass: PLAN_CELL,
             sortValue: l => poAgeOf(l).days ?? -1,
-            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
+            export: l => { return odExport(poAgeOf(l).days); },
             render: l => { const a = poAgeOf(l); return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product', width: 'w-[176px]', colClass: PLAN_CELL,
             sortable: false,
@@ -3531,7 +3531,7 @@ export default function Planning() {
           { key: 'po_date', label: 'PO Date',
             export: l => { const a = poAgeOf(l); return a.date ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; } },
           { key: 'od', label: 'OD', align: 'right',
-            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; } },
+            export: l => { return odExport(poAgeOf(l).days); } },
           { key: 'product_name', label: 'Product',
             export: l => (l._gang ? l._gang.map(productExport).join(' + ') : productExport(l)) },
           { key: 'coating', label: 'Coating', export: l => specCell(l, coatingOf, fmt.title).text || '—' },

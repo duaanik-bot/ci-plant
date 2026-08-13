@@ -6,7 +6,7 @@ import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { filtersDirty, dirtyFilterLabels, applyFilterReset } from '../lib/filterReset.js';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
-import { odDays, odTone, OD_BANDS } from '../lib/odDays.js';
+import { odDays, odExport, odTone, OD_BANDS } from '../lib/odDays.js';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
@@ -2037,7 +2037,7 @@ export function AgeChip({ date, days }) {
 // every OD on the floor untested. Re-exported here so the five pages that
 // already import it from this file keep working. Only the pill below is JSX and
 // so still lives here; it reads the same OD_BANDS the text form does.
-export { odDays, odTone };
+export { odDays, odExport, odTone };
 
 // `count` > 1 marks a gang: the row reads its OLDEST member, because a run is
 // as overdue as the longest-waiting PO in it.

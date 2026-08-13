@@ -25,9 +25,9 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
-import { Button, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X } from 'lucide-react';
+import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -312,6 +312,38 @@ export default function StatusSheet() {
   const selectedLines = useMemo(() => selectedRows.flatMap(linesOf), [selectedRows]);
 
   const clearSel = () => setSelIds([]);
+
+  // ── Start the WIP list over ───────────────────────────────────────────────
+  // Importing a customer's list ADDS to what is already there, which is the
+  // point — but it means there has to be a way back to a blank sheet, or a
+  // wrong list can only be undone one row at a time.
+  //
+  // Scoped to WHAT IS IN VIEW, not the whole book. The flow this exists for is
+  // "pick the party, wipe their list, import the new one", so a customer chip
+  // must narrow it; clearing every other customer's WIP because one was being
+  // re-done would be the worst possible reading of this button. `filtered` is
+  // the line-level set after search, chips and KPI cards, before gangs collapse.
+  const [clearOpen, setClearOpen] = useState(false);
+  const clearable = useMemo(() => filtered.filter(r => r.wip != null), [filtered]);
+  // Named so the confirm can say WHOSE list is about to go.
+  const clearScope = useMemo(() => {
+    const names = [...new Set(clearable.map(r => r.customer_name).filter(Boolean))];
+    return names.length === 1 ? names[0] : `${names.length} customers`;
+  }, [clearable]);
+  const clearAllWip = async () => {
+    const line_ids = clearable.map(r => r.line_id);
+    if (!line_ids.length) return;
+    setBulkBusy(true);
+    setRows(rs => rs.map(r => (line_ids.includes(r.line_id) ? { ...r, wip: null, wip_date: null } : r)));
+    try {
+      const res = await api.post('/status-sheet/lines/bulk', { wip: null, line_ids });
+      toast.success(`WIP list cleared — ${res.applied.length} line${res.applied.length === 1 ? '' : 's'} taken off`);
+      clearSel(); load();
+    } catch (e) {
+      toast.error(e.message || 'Could not clear the WIP list');
+      load();
+    } finally { setBulkBusy(false); }
+  };
   const applyBulk = async (wip, verb) => {
     const line_ids = [...new Set(selectedLines.map(l => l.line_id))];
     if (!line_ids.length) return;
@@ -503,7 +535,7 @@ export default function StatusSheet() {
         ); } },
     { key: 'od', colClass: 'ci-p3', label: 'OD', align: 'right',
       sortValue: r => poAgeOf(r).days ?? -1,
-      export: r => { const d = poAgeOf(r).days; return d == null ? '—' : `${d}d`; },
+      export: r => { return odExport(poAgeOf(r).days); },
       render: r => { const a = poAgeOf(r); return <OverdueDays days={a.days} count={a.count} />; } },
     { key: 'customer_name', colClass: 'ci-cap-sm', label: 'Company', render: r => {
       const p1 = r._gang ? r._gang.some(m => m.is_p1) : r.is_p1;
@@ -519,11 +551,26 @@ export default function StatusSheet() {
             {r.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
           render={m => <ProductIdentity row={m} compact className="min-w-[9rem]" />} />
       : <ProductIdentity row={r} compact className="min-w-[9rem]" /> },
+    // Every quantity column carries its own `export`, and MUST.
+    //
+    // A gang row renders <GangCellParts>, which builds its content from props
+    // inside the component and so has no `children`. The exporter reads a cell
+    // by walking `props.children` (it never renders a component), so a gang row
+    // in a column without an `export` came out BLANK — Order Qty, Supplied and
+    // Pending were all empty on exactly the rows a customer most wants to read.
+    // The figure exported is the run's TOTAL, which is what a collapsed row
+    // means; the members are already named one per line in the Product column.
+    // fmt.num keeps the thousands separators for the PDF, and the exporter's
+    // xlNumber strips them back to a real number for Excel, so the column stays
+    // sortable and summable.
     { key: 'qty', label: 'Order Qty', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'qty') : r.qty,
+      export: r => fmt.num(r._gang ? sum(r._gang, 'qty') : r.qty),
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
     { key: 'dispatched_qty', colClass: 'ci-p3', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
+      export: r => fmt.num(r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty),
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'dispatched_qty'))} render={m => fmt.num(m.dispatched_qty)} /> : fmt.num(r.dispatched_qty) },
     { key: 'pending_qty', label: 'Pending', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'pending_qty') : r.pending_qty,
+      export: r => fmt.num(r._gang ? sum(r._gang, 'pending_qty') : r.pending_qty),
       render: r => r._gang
         ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
         : <span className="font-semibold text-slate-900">{fmt.num(r.pending_qty)}</span> },
@@ -563,11 +610,19 @@ export default function StatusSheet() {
     <div>
       <PageHeader title="Status Sheet"
         subtitle="Live pending-order status — supply progress, delivery dates, customer WIP and priority in one editable sheet"
-        actions={
+        actions={<>
+          {/* Only offered when there is something to clear — a dead button on a
+              header is one more thing to read past, and its absence says the
+              list is already empty for whoever is in view. */}
+          {clearable.length > 0 && (
+            <Button variant="secondary" disabled={bulkBusy} onClick={() => setClearOpen(true)}>
+              <Eraser size={15} /> Clear WIP ({clearable.length})
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => { setWipOpen(true); }}>
             <FileUp size={15} /> Import WIP List
           </Button>
-        } />
+        </>} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <KpiCard icon={ClipboardList} label="Pending lines" value={fmt.num(kpis.lines)} />
         <KpiCard label="Pending qty" value={fmt.num(kpis.pendingQty)} />
@@ -702,6 +757,14 @@ export default function StatusSheet() {
           negatives are genuinely different: Non-WIP records that the customer
           said it is not in progress; Remove takes the line off their list
           entirely. The count names LINES, not rows — a ticked gang is several. */}
+      {/* Wiping a customer's WIP list is not a bulk edit of a few ticked rows —
+          it acts on everything in view — so it asks first, and the question
+          names the count and whose list it is rather than "are you sure?". */}
+      <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={clearAllWip}
+        danger confirmLabel={`Clear ${clearable.length} line${clearable.length === 1 ? '' : 's'}`}
+        title="Start the WIP list over?"
+        message={`This takes ${clearable.length} line${clearable.length === 1 ? '' : 's'} off the WIP list for ${clearScope} — every WIP and Non-WIP mark currently in view, and the dates with them. Nothing else about the orders changes, and you can import a fresh list straight after. Lines outside the current filters are untouched.`} />
+
       <SelectionDock open={selectedRows.length > 0} count={selectedLines.length}
         summary={`${selectedLines.length} line${selectedLines.length === 1 ? '' : 's'}`
           + (selectedRows.length !== selectedLines.length ? ` across ${selectedRows.length} rows` : '')

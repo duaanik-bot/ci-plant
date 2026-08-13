@@ -50,3 +50,20 @@ export function odTone(days) {
 
 // Exported for the pill in ui.jsx, so the chip and the text form share them.
 export const OD_BANDS = { amber: OD_AMBER, red: OD_RED };
+
+// OD as a REPORT carries it: a bare number, never "47d".
+//
+// The screen keeps the "d" because a pill has no column heading to say what the
+// figure is. A spreadsheet does, and there the suffix is not shorthand but
+// damage: "47d" is text, so Excel will not sort it (47d sorts beside 4d and
+// before 5d), will not filter it by range, will not sum or average it. Six
+// screens print this column, so it is defined once here rather than six times
+// as a template string that only five of them would ever get fixed.
+//
+// A number is returned as a NUMBER, not a formatted string — the exporter's
+// xlNumber passes it straight through to a real numeric cell. Nothing to
+// measure means an em dash, which is the same "no value" every other column
+// prints.
+export function odExport(days) {
+  return days == null ? '—' : days;
+}

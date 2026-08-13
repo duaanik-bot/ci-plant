@@ -11,7 +11,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, odDays, odTone, OverdueDays, PageHeader, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, odDays, odExport, odTone, OverdueDays, PageHeader, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Layers } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -1352,7 +1352,7 @@ export default function PrintPlanning() {
               // the comment below states for the ones after it.
               { key: 'po_date', label: 'PO Date', export: c => (c.po_date ? fmt.date(c.po_date) : '—') },
               { key: 'od', label: 'OD', align: 'right',
-                export: c => { const d = odDays(c.po_date); return d == null ? '—' : `${d}d`; } },
+                export: c => { return odExport(odDays(c.po_date)); } },
               { key: 'qty_planned', label: 'Ordered pcs', align: 'right', export: c => fmt.num(c.qty_planned) },
               { key: 'sheets_issued', label: 'Sheets', align: 'right', export: c => fmt.num(c.sheets_issued) },
               // A column the screen shows must leave with the sheet, or the

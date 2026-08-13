@@ -146,3 +146,25 @@ test('caller meta survives, and the multi-customer note is added', () => {
   assert.ok(!spec.meta.includes(null), 'blank meta entries are dropped');
   assert.ok(spec.meta.some(m => /2 customers/.test(m)));
 });
+
+// ── Why every gang column MUST carry its own `export` ────────────────────────
+// The exporter reads a cell by walking the rendered node's `children`; it never
+// runs a component. <GangCellParts members render total /> builds its content
+// from PROPS, so it has no children — and a column that relied on nodeText
+// exported an empty string for every gang row. That is how Order Qty, Supplied
+// and Pending came out blank on exactly the rows a customer most wants to read.
+test('nodeText cannot see inside a props-driven component', async () => {
+  const { nodeText } = await import('../../client/src/lib/exporter.js');
+  const gangCell = { props: { members: [{ qty: 5000 }, { qty: 2000 }], total: '7,000' } };
+  assert.equal(nodeText(gangCell), '', 'no children -> nothing to read');
+  // A plain element with children reads fine, which is why single-line rows
+  // always exported and only the gang rows were empty.
+  assert.equal(nodeText({ props: { children: '7,000' } }), '7,000');
+});
+
+test('an explicit export is what rescues the gang row', () => {
+  const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
+  const col = { key: 'qty', export: r => (r._gang ? sum(r._gang, 'qty') : r.qty).toLocaleString('en-IN') };
+  assert.equal(col.export({ _gang: [{ qty: 5000 }, { qty: 2000 }] }), '7,000');
+  assert.equal(col.export({ qty: 9000 }), '9,000');
+});

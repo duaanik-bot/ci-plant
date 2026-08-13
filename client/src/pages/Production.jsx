@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
@@ -626,7 +626,7 @@ export default function Production() {
               export: j => { const a = poAgeOf(j); return a.date
                 ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; } },
             { key: 'od', label: 'OD', align: 'right',
-              export: j => { const d = poAgeOf(j).days; return d == null ? '—' : `${d}d`; } },
+              export: j => { return odExport(poAgeOf(j).days); } },
             { key: 'delivery_date', label: 'Delivery', export: j => fmt.date(j.delivery_date) },
             { key: 'qty_planned', label: 'Ordered', align: 'right', export: j => fmt.num(j.qty_planned) },
             { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => fmt.num(j.sheets_issued) },
