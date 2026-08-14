@@ -1,6 +1,7 @@
 import {
   artworkVersionOf,
   isBareArtworkRevision,
+  nextPlateRequestStatus,
   PLATE_HELD_COMPONENT_STATUSES,
   PLATE_RETURN_QUEUE,
   plateArtworkKey,
@@ -103,7 +104,13 @@ export async function plateMasterForSize(oc, size) {
   return oc('SELECT * FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [normalized]);
 }
 
-export async function bestPlateCandidate(oc, request, component, plateMasterId, excludedAssetIds = []) {
+// Every plate the rack can offer this component, best first.
+//
+// ONE spelling of the candidate set. bestPlateCandidate is its head, the picker
+// lists it, and rackReusePlan counts against the same rules — so the column can
+// never promise a plate the button refuses, nor the picker offer one it cannot
+// take. Same law as plateArtworkMatchSql, one level up.
+export async function plateCandidates(rows, request, component, plateMasterId, excludedAssetIds = [], limit = null) {
   const spec = request.specification || {};
   const version = artworkVersionOf(spec);
   const values = [request.product_id, plateArtworkKey(version), component.component_type,
@@ -112,7 +119,9 @@ export async function bestPlateCandidate(oc, request, component, plateMasterId, 
   const excludedSql = excludedAssetIds.length
     ? (values.push(excludedAssetIds), `AND NOT (pa.id=ANY($${values.length}::int[]))`)
     : '';
-  return oc(`SELECT pa.*, pm.plate_size
+  const limitSql = limit ? (values.push(limit), `LIMIT $${values.length}`) : '';
+  return rows(`SELECT pa.*, pm.plate_size,
+      (CURRENT_DATE-pa.plate_created_on)::int AS age_days
     FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
     WHERE pa.product_id=$1 AND ${plateArtworkMatchSql('pa.artwork_version', '$2', '$5')}
       AND pa.component_type=$3
@@ -133,7 +142,14 @@ export async function bestPlateCandidate(oc, request, component, plateMasterId, 
     ORDER BY CASE pa.condition WHEN 'Good' THEN 0 ELSE 1 END,
              pa.use_count ASC,
              pa.last_used_at ASC NULLS FIRST,
-             pa.id LIMIT 1`, values);
+             pa.id ${limitSql}`, values);
+}
+
+// Takes a ROWS helper, not the one-row `oc` this used to be called with — see
+// the call-site change below.
+export async function bestPlateCandidate(rows, request, component, plateMasterId, excludedAssetIds = []) {
+  const [first] = await plateCandidates(rows, request, component, plateMasterId, excludedAssetIds, 1);
+  return first || null;
 }
 
 export async function createPlateComponents(qc, oc, request, options = {}) {
@@ -145,7 +161,7 @@ export async function createPlateComponents(qc, oc, request, options = {}) {
   const created = [];
   const proposedAssetIds = [];
   for (const component of components) {
-    const candidate = await bestPlateCandidate(oc, request, component, master?.id, proposedAssetIds);
+    const candidate = await bestPlateCandidate(qc, request, component, master?.id, proposedAssetIds);
     if (candidate) proposedAssetIds.push(candidate.id);
     const [row] = await qc(`INSERT INTO plate_request_components
       (tooling_request_id,sequence_no,component_type,component_label,pantone_code,
@@ -173,11 +189,7 @@ export async function syncPlateRequest(qc, oc, requestId, userName = 'System') {
   const summary = plateReadinessSummary(rows);
   const current = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [requestId]);
   if (!current) return summary;
-  let nextStatus = current.status;
-  if (summary.is_ready) nextStatus = 'ready';
-  else if (rows.some(row => ['approved','po_created','ordered','grn_received'].includes(row.status))) nextStatus = 'procurement';
-  else if (rows.some(row => row.status === 'verified_existing')) nextStatus = 'rack_reserved';
-  else if (nextStatus === 'ready') nextStatus = 'pending';
+  const nextStatus = nextPlateRequestStatus({ current: current.status, rows, summary });
   if (nextStatus !== current.status) {
     await qc(`UPDATE tooling_requests SET status=$1,
       ready_at=CASE WHEN $1='ready' THEN now() ELSE NULL END,

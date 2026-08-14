@@ -58,3 +58,38 @@ export function plateRackSummary(sets = [], today = new Date()) {
     by_size: [...bySize.entries()].map(([plate_size, plates]) => ({ plate_size, plates })),
   };
 }
+
+// What the picker opens with: the plate the line already holds if it holds one,
+// otherwise the best candidate — which is the plate the one-click button would
+// have taken. Opening on anything else would make Confirm mean something
+// different from the button it replaced.
+export function defaultPickSelection(lines = []) {
+  const out = {};
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const candidates = line.candidates || [];
+    out[line.component_id] = candidates.find(row => row.current)?.id ?? candidates[0]?.id ?? null;
+  }
+  return out;
+}
+
+// Two lines of the same colour list the same plates, so picking one plate twice
+// is an easy slip. The server refuses it either way; catching it here means the
+// planner is told before a round trip that half-succeeds.
+export function duplicatePickAssets(selection = {}) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const assetId of Object.values(selection || {})) {
+    if (!assetId) continue;
+    if (seen.has(assetId)) duplicates.add(assetId);
+    else seen.add(assetId);
+  }
+  return [...duplicates];
+}
+
+// An unticked line is a colour the planner has chosen to buy rather than reuse.
+// It is left out of the payload, not sent as a null the server has to interpret.
+export function pickPayload(selection = {}) {
+  return Object.entries(selection || {})
+    .filter(([, assetId]) => Boolean(assetId))
+    .map(([componentId, assetId]) => ({ component_id: Number(componentId), asset_id: Number(assetId) }));
+}

@@ -16,6 +16,7 @@ import {
   Textarea, useToast,
 } from './ui.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
+import RackPickerModal from './RackPickerModal.jsx';
 import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 
 const TONE = {
@@ -1032,6 +1033,58 @@ export default function PlatesLifecycle() {
     if (failed.length) toast.error(failed[0]);
     if (detail) await refreshDetail(); else await load();
   };
+  // WHICH plate, asked before anything is spent. useFromRack above takes whatever
+  // the server's ordering proposes and is still the right door for the bulk dock;
+  // every single-PR door now goes through here instead, because the ordering is a
+  // guess about a physical object the planner can see and the query cannot.
+  //
+  // `picker` holds the fetched lines in STATE and hands the same array identity to
+  // the modal for as long as it is open. RackPickerModal re-seeds its selection in
+  // an effect keyed on `lines`, so an array rebuilt inline on each render would
+  // throw the planner's picks away as fast as they were made.
+  const [picker, setPicker] = useState(null);
+  const openPicker = async (row, componentIds = null) => {
+    setBusyRow(row.id);
+    try {
+      const out = await api.get(`/plates/requirements/${row.id}/rack-candidates`);
+      const lines = componentIds
+        ? out.lines.filter(line => componentIds.includes(line.component_id))
+        : out.lines;
+      if (!lines.length) return toast.error('No plate on this requirement is waiting for a rack plate');
+      setPicker({ row, lines });
+    } catch (error) { toast.error(error.message); }
+    finally { setBusyRow(null); }
+  };
+  const confirmPicks = async picks => {
+    const row = picker.row;
+    setPicker(null); setBusyRow(row.id);
+    try {
+      const out = await api.post(`/plates/requirements/${row.id}/use-from-rack`, { picks });
+      const took = out.reused + out.swapped;
+      if (took) toast.success(`${took} plate${took === 1 ? '' : 's'} taken from the rack — no need to buy ${took === 1 ? 'it' : 'them'}`);
+      // Never silent: a plate the planner chose and did not get must be named.
+      for (const miss of out.skipped || []) {
+        toast.error(`${miss.component_label}: that plate was not taken (${String(miss.reason).replace(/_/g, ' ')})`);
+      }
+    } catch (error) { toast.error(error.message); }
+    finally { setBusyRow(null); if (detail) await refreshDetail(); else await load(); }
+  };
+  // Undo, which reaches exactly as far as the rack: a plate still reserved goes
+  // back on the shelf, a plate already issued to printing has physically gone and
+  // its way back is a RETURN. The server refuses per line and names the plate; so
+  // does this.
+  const releaseRack = async (row, componentIds = null) => {
+    setBusyRow(row.id);
+    try {
+      const out = await api.post(`/plates/requirements/${row.id}/release-rack`,
+        componentIds ? { component_ids: componentIds } : {});
+      toast.success(`${out.released} plate${out.released === 1 ? '' : 's'} returned to the rack`);
+      for (const miss of out.skipped || []) {
+        toast.error(`${miss.component_label}: ${miss.asset_number || 'that plate'} is ${String(miss.status).replace(/_/g, ' ')}`);
+      }
+    } catch (error) { toast.error(error.message); }
+    finally { setBusyRow(null); if (detail) await refreshDetail(); else await load(); }
+  };
   const fetchProductMasterColours = async () => {
     if (!detail) return;
     const fresh = await api.get(`/plates/requirements/${detail.id}`);
@@ -1138,8 +1191,8 @@ export default function PlatesLifecycle() {
           there. One click; the count on the button is the count in the column. */}
       {canVerify() && rackTotal(row) > 0 && <Button size="sm" variant="success"
         disabled={busyRow === row.id}
-        title={`Reserve ${rackTotal(row)} matching plate(s) from the rack for ${row.request_number}`}
-        onClick={() => useFromRack([row])}><Warehouse size={12} /> Use {rackTotal(row)} from Rack</Button>}
+        title={`Choose ${rackTotal(row)} matching plate(s) from the rack for ${row.request_number}`}
+        onClick={() => openPicker(row)}><Warehouse size={12} /> Use {rackTotal(row)} from Rack</Button>}
       {/* Approve without opening the PR. It takes the size the screen already
           suggests, which is the same value the modal opens pre-filled with — so
           this is the modal's default action with the modal skipped, not a second
@@ -1618,24 +1671,42 @@ export default function PlatesLifecycle() {
           </div>
         </section>
         <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate colour and quantity</span><div className="flex flex-wrap items-center justify-end gap-2"><span>0 removes a colour · Product Master: {detail.product_master_colour_count ?? '—'} colours</span>{canVerify() && rackTotal(detail) > 0 && <Button size="sm" variant="success" disabled={busyRow===detail.id}
-            onClick={()=>useFromRack([detail])}><Warehouse size={12}/> Use {rackTotal(detail)} from Rack</Button>}{detailEditable && <Button size="sm" variant="secondary" onClick={() => fetchProductMasterColours().catch(error => toast.error(error.message))}><RotateCcw size={12}/> Fetch Master Colours</Button>}</div></div>
+            onClick={()=>openPicker(detail)}><Warehouse size={12}/> Use {rackTotal(detail)} from Rack</Button>}{detailEditable && <Button size="sm" variant="secondary" onClick={() => fetchProductMasterColours().catch(error => toast.error(error.message))}><RotateCcw size={12}/> Fetch Master Colours</Button>}</div></div>
           <div className="divide-y divide-slate-100">{editForm.components.map(row=>{
             const lifecycle=detailGroups.find(group=>group.key===componentKey(row));
             // The same warehouse answer the list column prints, per colour. Both
             // come off row.rack_reuse, so the four lines here always add up to the
             // one number on the row — see rackReusePlan in server/src/plates.js.
             const rack=rackLineFor(detail,componentKey(row));
+            // A line that already HOLDS a rack plate is not a claimable line, so
+            // rackReusePlan never emits a rack_reuse row for it — verified_existing
+            // is in PLATE_HELD_COMPONENT_STATUSES, not RACK_CLAIMABLE_COMPONENT_STATUSES.
+            // Change and Undo therefore cannot live inside the `rack` branch below:
+            // nested there they would be controls that never once render.
+            const rackHeld=canVerify() && lifecycle?.status==='verified_existing';
             return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(170px,1fr)_140px_150px_132px]">
               <div><b className="text-sm">{row.component_label}</b>{row.component_type==='pantone'&&<span className="block text-[11px] text-slate-400">Pantone identity retained on every physical plate</span>}</div>
               <div>{lifecycle ? <StatusChip value={lifecycle.status}/> : <span className="text-xs text-slate-400">Not required</span>}</div>
-              <div>{rack ? <div className="flex items-center gap-1.5">
-                <span title={`${rack.available} matching plate${rack.available===1?'':'s'} free on the rack`}
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${rack.usable ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                  <Warehouse size={11}/>{rack.usable} of {rack.needed} on rack
-                </span>
-                {canVerify() && rack.usable > 0 && <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
-                  onClick={()=>useFromRack([detail],rack.component_ids)}>Use</Button>}
-              </div> : <span className="text-xs text-slate-300">—</span>}</div>
+              {/* One cell, three states: a line the rack can still fill offers Use, a
+                  line already holding a rack plate offers Change and Undo, and a line
+                  that is neither shows the dash. */}
+              <div className="flex items-center gap-1.5">
+                {rack && <>
+                  <span title={`${rack.available} matching plate${rack.available===1?'':'s'} free on the rack`}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${rack.usable ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                    <Warehouse size={11}/>{rack.usable} of {rack.needed} on rack
+                  </span>
+                  {canVerify() && rack.usable > 0 && <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
+                    onClick={()=>openPicker(detail,rack.component_ids)}>Use</Button>}
+                </>}
+                {rackHeld && <>
+                  <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
+                    onClick={()=>openPicker(detail,lifecycle.component_ids)}>Change</Button>
+                  <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
+                    onClick={()=>releaseRack(detail,lifecycle.component_ids)}>Undo</Button>
+                </>}
+                {!rack && !rackHeld && <span className="text-xs text-slate-300">—</span>}
+              </div>
               <QuantityControl row={row} disabled={!detailEditable} onChange={qty=>updateDraftQty(componentKey(row),qty)}/>
             </div>;
           })}</div>
@@ -1661,6 +1732,11 @@ export default function PlatesLifecycle() {
         </div>)}</div></section>}
       </div>
     </Modal>}
+    {/* `lines` comes straight off state and keeps one identity for as long as the
+        picker is open — the modal re-seeds its selection on that identity. */}
+    <RackPickerModal open={Boolean(picker)} requestNumber={picker?.row?.request_number}
+      lines={picker?.lines || []} busy={busyRow === picker?.row?.id}
+      onCancel={() => setPicker(null)} onConfirm={confirmPicks} />
     {verifying && <VerificationModal component={verifying} onClose={()=>setVerifying(null)} onSaved={refreshDetail}/>}
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}

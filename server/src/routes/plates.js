@@ -9,12 +9,13 @@ import {
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
   issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
-  RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, resolvePlateRate,
+  RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, releasableRackComponents,
+  resolvePlateRate, resolveRackPicks,
   USED_PLATES_RACK, pickAvailableRackPlates, validatePlateReplacementRequest, validateReturnVerification,
 } from '../plates.js';
 import {
   bestPlateCandidate, createPlateComponents, issuedPlatesForStage,
-  PLATE_ALREADY_CLAIMED_SQL, syncPlateRequest,
+  PLATE_ALREADY_CLAIMED_SQL, plateCandidates, syncPlateRequest,
 } from '../plate-lifecycle.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
 
@@ -34,6 +35,31 @@ function componentsByRequest(rows) {
 
 const plateBreakdownText = rows => plateQuantityBreakdown(rows)
   .map(row => `${row.component_label} x${row.qty}`).join(', ');
+
+// One rack plate as the picker needs to see it: enough to tell two
+// identical-looking plates apart — where it sits, what condition it is in, how
+// many runs it has had and how long it has been on the shelf.
+//
+// Which plate is the CURRENT one is the caller's fact, not this row's, so it is
+// passed in by name rather than derived here.
+//
+// age_days arrives from SQL as (CURRENT_DATE-pa.plate_created_on)::int, the same
+// spelling the warehouse list, the returns queue and the set history all use, so
+// one plate cannot read a day older here than it does there. Computing it from
+// the Node clock instead did exactly that: Math.round on a millisecond gap ticks
+// over at midday, while SQL's date subtraction is whole days.
+const shapeCandidate = (row, { current = false } = {}) => ({
+  id: row.id,
+  asset_number: row.asset_number,
+  rack_location: row.rack_location,
+  condition: row.condition,
+  use_count: row.use_count,
+  last_used_at: row.last_used_at,
+  age_days: row.age_days == null ? null : Math.max(0, Number(row.age_days)),
+  artwork_version: row.artwork_version,
+  plate_size: row.plate_size,
+  current: Boolean(current),
+});
 
 function summarizePlateSet(rows = []) {
   const sorted = [...rows].sort((a, b) => Number(a.sequence_no || a.id) - Number(b.sequence_no || b.id));
@@ -94,13 +120,32 @@ async function addRequestEvent(qc, requestId, action, fromStatus, toStatus, note
   [requestId, action, fromStatus || null, toStatus || null, source, vendorId, note || null, userName]);
 }
 
+// Give reserved plates back to the rack.
+//
+// Returns what it did. Delete may ignore a plate that has moved on — the request
+// is going anyway — but an explicit undo has to tell the planner which plate it
+// did not get back, so the outcome is reported rather than swallowed. Existing
+// callers ignore the return.
 async function releaseDraftPlateAssets(qc, request, components, userName, note) {
   const reserved = components.filter(row => row.matched_asset_id);
+  const released = [];
+  const skipped = [];
   for (const component of reserved) {
     const [asset] = await qc(`UPDATE plate_assets SET status='available',current_job_card_id=NULL,updated_at=now()
       WHERE id=$1 AND status='reserved' AND current_job_card_id=$2 RETURNING *`,
     [component.matched_asset_id, request.job_card_id]);
-    if (!asset) continue;
+    if (!asset) {
+      const [gone] = await qc('SELECT asset_number,status FROM plate_assets WHERE id=$1',
+        [component.matched_asset_id]);
+      skipped.push({
+        component_id: component.id,
+        component_label: component.component_label,
+        asset_number: gone?.asset_number || null,
+        status: gone?.status || 'unknown',
+      });
+      continue;
+    }
+    released.push({ component_id: component.id, asset_id: asset.id, asset_number: asset.asset_number });
     await qc(`INSERT INTO plate_asset_movements
       (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,
        from_status,to_status,from_location,to_location,condition,note,user_name)
@@ -108,6 +153,7 @@ async function releaseDraftPlateAssets(qc, request, components, userName, note) 
     [asset.id, component.id, request.id, request.job_card_id, asset.rack_location,
      asset.condition, note, userName]);
   }
+  return { released, skipped };
 }
 
 async function deletePlateRequirements(qc, oc, requestIds, reason, userName) {
@@ -643,6 +689,62 @@ r.post('/plates/components/:id/verify-existing', canVerify, async (req, res, nex
   } catch (error) { next(error); }
 });
 
+// What the rack could give each line of this Plate PR, so the planner picks
+// rather than accepts. Best first — the same order the button would have taken
+// them in, because it is the same query.
+//
+// Read-only, so no tx(): the module-level q/one are right here. Production's
+// pool runs max:1, where an unnecessary transaction is a deadlock waiting to
+// happen and buys nothing a GET needs.
+//
+// Candidates are NOT cross-filtered between lines: two Cyan lines list the same
+// plates on purpose, because the planner may want a particular plate on the
+// second. One plate filling two lines is caught at confirm time, against the
+// database rather than against a list that may already be stale.
+r.get('/plates/requirements/:id/rack-candidates', canVerify, async (req, res, next) => {
+  try {
+    const request = await one(`SELECT * FROM tooling_requests
+      WHERE id=$1 AND family='plate'`, [req.params.id]);
+    if (!request) return res.status(404).json({ error: 'Plate requirement not found' });
+    const components = await q(`SELECT * FROM plate_request_components
+      WHERE tooling_request_id=$1 ORDER BY sequence_no`, [request.id]);
+    const offerable = components.filter(row =>
+      RACK_CLAIMABLE_COMPONENT_STATUSES.includes(row.status) || row.status === 'verified_existing');
+    const lines = [];
+    for (const component of offerable) {
+      const heldId = Number(component.matched_asset_id) || null;
+      // The component's OWN master, exactly as use-from-rack passes it — not the
+      // request-level one. Approve stamps plate_master_id only on the components
+      // it approved, so a partly-approved PR holds approved lines with a size and
+      // claimable lines with NULL. Filtering those by the request's first non-null
+      // master would show the planner fewer plates than the button would take,
+      // which is the one thing the picker may never do.
+      const rows = await plateCandidates(q, request, component, component.plate_master_id);
+      const candidates = rows.map(row => shapeCandidate(row, { current: row.id === heldId }));
+      // A plate this line already holds is 'reserved', so plateCandidates — which
+      // filters status='available' — cannot return it. Fetch it by id and lead
+      // with it, so Change opens on the truth rather than on a fresh proposal.
+      if (heldId && !candidates.some(row => row.id === heldId)) {
+        const own = await one(`SELECT pa.*, pm.plate_size,
+            (CURRENT_DATE-pa.plate_created_on)::int AS age_days
+          FROM plate_assets pa
+          JOIN plate_masters pm ON pm.id=pa.plate_master_id WHERE pa.id=$1`, [heldId]);
+        if (own) candidates.unshift(shapeCandidate(own, { current: true }));
+      }
+      lines.push({
+        component_id: component.id,
+        component_label: component.component_label,
+        component_type: component.component_type,
+        pantone_code: component.pantone_code || null,
+        status: component.status,
+        matched_asset_id: heldId,
+        candidates,
+      });
+    }
+    res.json({ request_id: request.id, lines });
+  } catch (error) { next(error); }
+});
+
 // Take what the plant already owns — one click, from the row or from the form.
 //
 // The careful door is still there and is still right for a plate somebody has
@@ -662,30 +764,66 @@ r.post('/plates/components/:id/verify-existing', canVerify, async (req, res, nex
 r.post('/plates/requirements/:id/use-from-rack', canVerify, async (req, res, next) => {
   try {
     const wanted = [...new Set((req.body.component_ids || []).map(Number).filter(Boolean))];
+    const picks = Array.isArray(req.body.picks) ? req.body.picks : [];
+    const pickedComponentIds = new Set(picks.map(row => Number(row?.component_id)).filter(Boolean));
     const result = await tx(async (qc, oc) => {
       const request = await oc(`SELECT * FROM tooling_requests
         WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
       if (!request) throw Object.assign(new Error('Plate requirement not found'), { status: 404 });
-      const idFilter = wanted.length ? 'AND id=ANY($2::int[])' : '';
-      const components = await qc(`SELECT * FROM plate_request_components
-        WHERE tooling_request_id=$1 ${idFilter} AND status=ANY($${wanted.length ? 3 : 2}::text[])
-        ORDER BY sequence_no FOR UPDATE`,
-      wanted.length ? [request.id, wanted, RACK_CLAIMABLE_COMPONENT_STATUSES]
-        : [request.id, RACK_CLAIMABLE_COMPONENT_STATUSES]);
-      if (!components.length) {
+      const all = await qc(`SELECT * FROM plate_request_components
+        WHERE tooling_request_id=$1 ORDER BY sequence_no FOR UPDATE`, [request.id]);
+      // A satisfied line is reopened ONLY by a pick that names a different plate.
+      // Without that second clause the bulk dock would re-pick lines that are
+      // already done every time it ran.
+      const eligible = all.filter(row => {
+        if (wanted.length && !wanted.includes(row.id) && !pickedComponentIds.has(row.id)) return false;
+        // Once the caller has sent picks, a line it did NOT pick is a deliberate
+        // "buy this one" — the planner unticked it in the picker so the colour
+        // goes on the purchase order instead. Falling back to bestPlateCandidate
+        // there reserved a plate they had just refused, and told them so in a
+        // toast counting one more plate than the button had offered to take.
+        // The blind callers — the bulk dock — send no picks at all and are
+        // unaffected.
+        if (picks.length && !pickedComponentIds.has(row.id)) return false;
+        if (RACK_CLAIMABLE_COMPONENT_STATUSES.includes(row.status)) return true;
+        if (row.status !== 'verified_existing') return false;
+        const pick = picks.find(entry => Number(entry?.component_id) === row.id);
+        return Boolean(pick) && Number(pick.asset_id) !== Number(row.matched_asset_id);
+      });
+      if (!eligible.length) {
         throw Object.assign(new Error('No plate on this requirement is waiting for a rack plate'), { status: 409 });
       }
-      // Picked one at a time, each pick excluding the ones already taken in this
-      // same click — two Cyan lines on one PR must draw two different plates.
-      const taken = [];
+      // Validate every pick against the candidate list the SERVER produces, using
+      // the COMPONENT's own master — the same value the fallback passes below and
+      // the same one GET /rack-candidates lists by.
+      const candidates = {};
+      for (const component of eligible.filter(row => pickedComponentIds.has(row.id))) {
+        candidates[component.id] = await plateCandidates(qc, request, component, component.plate_master_id);
+      }
+      const { assignments, skipped } = resolveRackPicks({ components: eligible, picks, candidates });
+      const byComponent = new Map(assignments.map(row => [row.component_id, row]));
+
+      const taken = assignments.map(row => row.asset_id);
       const claimed = [];
-      for (const component of components) {
-        const asset = await bestPlateCandidate(oc, request, component, component.plate_master_id, taken);
+      let swapped = 0;
+      for (const component of eligible) {
+        const assigned = byComponent.get(component.id);
+        // A swap gives the old plate back first, in this same transaction, so a
+        // line can never be seen holding two plates or none.
+        if (assigned?.swap) {
+          await releaseDraftPlateAssets(qc, request, [component], req.user.name,
+            `Swapped out on ${request.request_number}`);
+          swapped += 1;
+        }
+        const asset = assigned
+          ? await oc(`SELECT pa.*, pm.plate_size FROM plate_assets pa
+              JOIN plate_masters pm ON pm.id=pa.plate_master_id WHERE pa.id=$1`, [assigned.asset_id])
+          : await bestPlateCandidate(qc, request, component, component.plate_master_id, taken);
         // A colour the rack cannot cover is SKIPPED, never fatal: three of four is
         // three plates the plant no longer has to buy, and the fourth stays on the
         // PR exactly as it was, still approvable onto a PO.
         if (!asset) continue;
-        taken.push(asset.id);
+        if (!assigned) taken.push(asset.id);
         claimed.push(component);
         await qc(`UPDATE plate_assets SET status='reserved',current_job_card_id=$1,
           verified_by=$2,verified_at=now(),updated_at=now() WHERE id=$3`,
@@ -702,17 +840,73 @@ r.post('/plates/requirements/:id/use-from-rack', canVerify, async (req, res, nex
         [asset.id, component.id, request.id, request.job_card_id, asset.rack_location, asset.condition,
          `Reused from rack for ${request.request_number}`, req.user.name]);
       }
-      if (!taken.length) {
+      if (!claimed.length) {
         throw Object.assign(new Error('No matching plate is free on the rack any more'), { status: 409 });
       }
       const breakdown = plateBreakdownText(claimed);
       await syncPlateRequest(qc, oc, request.id, req.user.name);
       await addRequestEvent(qc, request.id, 'rack_reuse', request.status, 'rack_reserved',
-        `${taken.length} plate${taken.length === 1 ? '' : 's'} taken from the rack · ${breakdown}`,
+        `${claimed.length} plate${claimed.length === 1 ? '' : 's'} taken from the rack · ${breakdown}`,
         req.user.name, 'warehouse');
       await audit('tooling_requirement', request.id, 'use_from_rack',
-        `${taken.length} of ${components.length} · ${breakdown}`, qc, req.user.name);
-      return { request_id: request.id, reused: taken.length, short: components.length - taken.length };
+        `${claimed.length} of ${eligible.length} · ${breakdown}`, qc, req.user.name);
+      return {
+        request_id: request.id,
+        reused: claimed.length - swapped,
+        swapped,
+        short: eligible.length - claimed.length,
+        skipped,
+      };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Give a rack plate back. The exact inverse of the click that spent it.
+//
+// Undo reaches exactly as far as the rack: a plate still reserved here can go
+// back on the shelf, a plate already issued to printing has physically gone and
+// coming back is a RETURN, which the verification flow owns. Either way the
+// planner is told which plate, by number.
+r.post('/plates/requirements/:id/release-rack', canVerify, async (req, res, next) => {
+  try {
+    const wanted = [...new Set((req.body.component_ids || []).map(Number).filter(Boolean))];
+    const result = await tx(async (qc, oc) => {
+      const request = await oc(`SELECT * FROM tooling_requests
+        WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
+      if (!request) throw Object.assign(new Error('Plate requirement not found'), { status: 404 });
+      const all = await qc(`SELECT * FROM plate_request_components
+        WHERE tooling_request_id=$1 ORDER BY sequence_no FOR UPDATE`, [request.id]);
+      const { releasable } = releasableRackComponents({
+        components: all, componentIds: wanted.length ? wanted : null,
+      });
+      const { released, skipped } = await releaseDraftPlateAssets(qc, request, releasable,
+        req.user.name, `Released from ${request.request_number}`);
+      if (!released.length) {
+        const first = skipped[0];
+        // The code goes under `body` and ONLY there: app.js writes
+        // { error: err.message, ...(err.body || {}) }, so a code on the error
+        // itself is dropped and the page keying on it becomes a dead button.
+        throw Object.assign(
+          new Error(`${first?.asset_number || 'That plate'} is no longer on the rack — it is ${String(first?.status || 'unavailable').replace(/_/g, ' ')}`),
+          { status: 409, skipped, body: { code: 'RACK_PLATE_GONE' } });
+      }
+      const freed = released.map(row => row.component_id);
+      // Back to needing a plate — and to being approvable onto a PO, which is
+      // exactly what refusing the rack's offer means.
+      await qc(`UPDATE plate_request_components SET status='pr_required',
+        matched_asset_id=NULL,proposed_asset_id=NULL,
+        verified_found=NULL,verified_condition_ok=NULL,verified_artwork_ok=NULL,
+        verified_colour_ok=NULL,verified_size_ok=NULL,
+        verified_by=NULL,verified_at=NULL,updated_at=now()
+        WHERE id=ANY($1::int[])`, [freed]);
+      await syncPlateRequest(qc, oc, request.id, req.user.name);
+      await addRequestEvent(qc, request.id, 'rack_release', request.status, null,
+        `${released.length} plate${released.length === 1 ? '' : 's'} returned to the rack · ${released.map(row => row.asset_number).join(', ')}`,
+        req.user.name, 'warehouse');
+      await audit('tooling_requirement', request.id, 'release_rack',
+        `${released.length} released${skipped.length ? `, ${skipped.length} refused` : ''}`, qc, req.user.name);
+      return { request_id: request.id, released: released.length, skipped };
     });
     res.json(result);
   } catch (error) { next(error); }

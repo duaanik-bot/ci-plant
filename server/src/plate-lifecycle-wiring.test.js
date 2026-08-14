@@ -156,8 +156,10 @@ test('return verification decides each plate and shows its age', () => {
 
 test('rack reuse proposes the least-worn plate, not the most recently touched', () => {
   const lifecycle = read('server/src/plate-lifecycle.js');
-  const order = lifecycle.slice(lifecycle.indexOf('async function bestPlateCandidate'));
-  const clause = order.slice(order.indexOf('ORDER BY'), order.indexOf('LIMIT 1'));
+  // The ordering lives in plateCandidates now — bestPlateCandidate is only its
+  // head, and the LIMIT is interpolated so the picker can ask for the whole list.
+  const order = lifecycle.slice(lifecycle.indexOf('async function plateCandidates'));
+  const clause = order.slice(order.indexOf('ORDER BY'), order.indexOf('${limitSql}'));
   // Condition is the first question: a Good plate ALWAYS beats a Fair one, however
   // many runs each has had. Wear then orders within a condition, so the least-worn
   // Good plate is proposed. Leading with verified_at (the original) handed out

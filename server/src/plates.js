@@ -406,6 +406,12 @@ export function canUnapprovePlateRequest(request = {}) {
 // a plate handed out twice.
 export const PLATE_HELD_COMPONENT_STATUSES = ['verified_existing', 'available', 'reserved', 'issued'];
 
+// The component states that mean a plate has been bought or is on its way from a
+// vendor. Same reason as the list above gets one spelling: a request whose status
+// is computed from one copy and whose readiness is judged by another will
+// disagree with itself the day someone adds a state to only one of them.
+export const PLATE_ON_ORDER_COMPONENT_STATUSES = ['approved', 'po_created', 'ordered', 'grn_received'];
+
 export function plateComponentStatus(status) {
   if (PLATE_HELD_COMPONENT_STATUSES.includes(status)) return 'ready';
   if (['damaged', 'scrapped', 'not_found', 'replacement_required'].includes(status)) return 'attention';
@@ -421,6 +427,23 @@ export function plateReadinessSummary(components = []) {
     pending: active.length - ready,
     is_ready: active.length > 0 && ready === active.length,
   };
+}
+
+// What a Plate PR's status should be, given its components. Pure, so the one
+// branch that had never fired can be tested.
+//
+// The fallback used to read `else if (nextStatus === 'ready')`. Release the LAST
+// verified_existing line of a rack_reserved request and nothing matched, so the
+// request kept saying "Rack reserved" while holding no reserved plate. It never
+// bit because the only two callers of releaseDraftPlateAssets are delete (which
+// removes the request) and edit (whose next statement hard-sets 'pending').
+// Undo is the first caller that empties the set and relies on this.
+export function nextPlateRequestStatus({ current, rows = [], summary } = {}) {
+  if (summary?.is_ready) return 'ready';
+  if (rows.some(row => PLATE_ON_ORDER_COMPONENT_STATUSES.includes(row?.status))) return 'procurement';
+  if (rows.some(row => row?.status === 'verified_existing')) return 'rack_reserved';
+  if (['ready', 'rack_reserved'].includes(current)) return 'pending';
+  return current;
 }
 
 // What the press may say about a plate it is handing back. Scrapped and Lost are
@@ -499,6 +522,98 @@ export function pickAvailableRackPlates({ rackAssets = [], assetIds = [] } = {})
   return wanted.map(id => byId.get(id));
 }
 
+// Turn "the planner ticked these plates" into "assign these, skip those".
+//
+// The asset ids arrive from a browser, so every one is checked back against the
+// candidate list the server itself produced. A pick is a choice among what was
+// offered — never a plate id taken on trust.
+export function resolveRackPicks({ components = [], picks = [], candidates = {} } = {}) {
+  const byId = new Map((Array.isArray(components) ? components : []).map(row => [Number(row.id), row]));
+  const offers = candidates && typeof candidates === 'object' ? candidates : {};
+  const consumed = new Set();
+  const filled = new Set();
+  const assignments = [];
+  const skipped = [];
+  for (const pick of Array.isArray(picks) ? picks : []) {
+    const componentId = Number(pick?.component_id);
+    const assetId = Number(pick?.asset_id);
+    const component = byId.get(componentId);
+    if (!component || !assetId) continue;
+    // Already holding exactly this plate: a confirm that changes nothing. Checked
+    // BEFORE the offer test, and deliberately: a held plate is excluded from every
+    // candidate list by PLATE_ALREADY_CLAIMED_SQL — including its own line's — so
+    // testing offers first would 409 the planner for pressing Confirm on a line
+    // they never touched. Comparing the browser's id to a value read from the
+    // database assigns nothing, so this cannot weaken the validation below.
+    if (Number(component.matched_asset_id) === assetId) continue;
+    const offered = (Array.isArray(offers[componentId]) ? offers[componentId] : []).map(row => Number(row?.id));
+    if (!offered.includes(assetId)) {
+      // No `code` here on purpose: nothing reads one off this error yet, and the
+      // guard in structured-errors.test.js watches six named keys — so adding one
+      // would mean putting it under `body`. Matching pickAvailableRackPlates just
+      // above, it stays a plain 409.
+      throw Object.assign(
+        new Error(`Plate ${assetId} is not on offer for ${component.component_label}`),
+        { status: 409 });
+    }
+    // One line takes one plate. The asset axis is guarded below; without this the
+    // component axis is guarded nowhere, and two picks naming the same line would
+    // both be assigned — reserving two plates and writing matched_asset_id twice,
+    // leaving a plate reserved with no component pointing at it.
+    if (filled.has(componentId)) {
+      skipped.push({ component_id: componentId, component_label: component.component_label,
+        asset_id: assetId, reason: 'line_already_picked' });
+      continue;
+    }
+    if (consumed.has(assetId)) {
+      skipped.push({ component_id: componentId, component_label: component.component_label,
+        asset_id: assetId, reason: 'duplicate' });
+      continue;
+    }
+    consumed.add(assetId);
+    filled.add(componentId);
+    assignments.push({
+      component_id: componentId,
+      asset_id: assetId,
+      swap: Boolean(component.matched_asset_id),
+      previous_asset_id: component.matched_asset_id || null,
+    });
+  }
+  return { assignments, skipped, consumed: [...consumed] };
+}
+
+// Which lines undo may hand back. A line qualifies only while its plate is still
+// ON the rack: reserved against this request and not yet issued.
+//
+// Refusals are returned, never swallowed. releaseDraftPlateAssets `continue`s
+// past a plate that has moved on, which is right for delete — the request is
+// going anyway — and wrong for an explicit undo, where the planner has to be
+// told which plate they did not get back.
+export function releasableRackComponents({ components = [], componentIds = null } = {}) {
+  const wanted = Array.isArray(componentIds) && componentIds.length
+    ? new Set(componentIds.map(Number))
+    : null;
+  const scoped = (Array.isArray(components) ? components : [])
+    .filter(row => !wanted || wanted.has(Number(row.id)));
+  const releasable = scoped.filter(row => row.matched_asset_id && row.status === 'verified_existing');
+  const keep = new Set(releasable.map(row => row.id));
+  const refused = scoped.filter(row => !keep.has(row.id)).map(row => ({
+    component_id: row.id,
+    component_label: row.component_label,
+    reason: row.matched_asset_id ? row.status : 'no_plate',
+  }));
+  if (!releasable.length) {
+    // The code goes under `body` and ONLY there: app.js's handler writes
+    // `{ error: err.message, ...(err.body || {}) }`, so a code hung directly on
+    // the error is dropped before the client sees it — a structured 409 no page
+    // can handle, which is how a dead button gets shipped. structured-errors.test.js
+    // guards the convention. `refused` stays on the error: it is data for the
+    // caller in THIS process, like the return value on the success path below.
+    throw Object.assign(new Error('No plate on this requirement is holding a rack plate'),
+      { status: 409, refused, body: { code: 'NO_RACK_PLATE_HELD' } });
+  }
+  return { releasable, refused };
+}
 
 // What the warehouse may do with a plate handed back from the press. Two outcomes,
 // decided per PLATE rather than per set: three plates of a set can be fit to run
