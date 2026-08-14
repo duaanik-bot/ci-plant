@@ -4,7 +4,9 @@
 //   • Stages       — tiny live chips of the line's real production route
 //   • Print Status — READ-ONLY, synced live from the printing stage itself
 //                    (not started / queued / running / partial / hold / done)
-//   • EDD          — the order's delivery date, edited inline, no overdue block
+//   • EDD          — this PRODUCT's delivery date, edited inline. A LINE-level
+//                    override of the PO's own date (79% of these lines share a PO
+//                    with other products), imported from the customer's WIP list
 //   • WIP          — the CUSTOMER's urgency, a TRI-STATE (WIP / Non-WIP / not on
 //                    their list) with the date it was said, settable by hand, in
 //                    bulk, or by uploading the customer's own WIP list
@@ -27,7 +29,7 @@ import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
 import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser } from 'lucide-react';
+import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays, CalendarCheck } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -41,7 +43,10 @@ const STATUS_KPI_ROWS = {
 const STATUS_KPI_LABEL = {
   overdue: 'lines past their delivery date',
   p1: 'lines on a P1 product',
-  wip: 'lines the customer marked WIP (urgent)',
+  // Says LINES, and says the scope, because Planning's card counts the same
+  // customer list a different way and the two numbers have to be readable side
+  // by side — see the KPI card below.
+  wip: 'lines the customer marked WIP — including ones already produced or dispatched',
 };
 
 // The three states a line can be at, in the order the plant moves through them.
@@ -164,10 +169,36 @@ export default function StatusSheet() {
     if ((draft || '') === (m.remarks || '')) return;
     patchLine(m, { remarks: draft.trim() || null });
   };
-  // Order-level edits (EDD) touch every line of that order in the view.
-  const patchOrder = (line, body) => {
-    setRows(rs => rs.map(r => (r.order_id === line.order_id ? { ...r, ...body } : r)));
-    api.patch(`/status-sheet/order/${line.order_id}`, body).catch(load);
+  // EDD is a line-level OVERRIDE, so what is SENT and what is SHOWN differ and
+  // cannot go through patchLine's plain merge. The request carries the override
+  // alone; the row shows the resolved date, which falls back to the PO's the
+  // moment the override is cleared. Merging the resolved value into the request
+  // would write the PO's own date back as this line's override — the line would
+  // look unchanged and then stop following the order forever after.
+  // Apply one date to the WHOLE PO — the counterpart to the per-product
+  // override. Writes the order's own date and drops every line override on it,
+  // so the PO ends with one date that every line follows and every OTHER screen
+  // (Planning, Dispatch, the Job Card register all read orders.delivery_date)
+  // agrees with. Confirmed first: on this book a PO can carry 26 products.
+  const [poEdd, setPoEdd] = useState(null);   // { line, count }
+  const applyEddToPo = async ({ line }) => {
+    const date = line.delivery_date ? String(line.delivery_date).slice(0, 10) : null;
+    setRows(rs => rs.map(r => (r.order_id === line.order_id
+      ? { ...r, delivery_date: date, line_delivery_date: null, order_delivery_date: date }
+      : r)));
+    try {
+      const res = await api.patch(`/status-sheet/order/${line.order_id}`, { delivery_date: date });
+      toast.success(`PO ${line.po_number} — every product now due ${fmt.date(date)}`
+        + (res.overrides_cleared ? ` · ${res.overrides_cleared} per-product date${res.overrides_cleared === 1 ? '' : 's'} replaced` : ''));
+      load();
+    } catch (e) { toast.error(e.message || 'Could not set the PO’s delivery date'); load(); }
+  };
+
+  const setEddOverride = (line, value) => {
+    setRows(rs => rs.map(r => (r.line_id === line.line_id
+      ? { ...r, line_delivery_date: value, delivery_date: value ?? r.order_delivery_date ?? null }
+      : r)));
+    api.patch(`/status-sheet/line/${line.line_id}`, { delivery_date: value }).catch(load);
   };
 
   // ── Customer WIP import — parse → review → confirm ────────────────────────
@@ -178,7 +209,8 @@ export default function StatusSheet() {
   const [wipRes, setWipRes] = useState(null);          // /wip-match response
   const [wipSel, setWipSel] = useState(() => new Set()); // checked line ids
   const [wipDates, setWipDates] = useState({});          // line_id → date
-  const closeWip = () => { setWipOpen(false); setWipRes(null); setWipSel(new Set()); setWipDates({}); };
+  const [wipEdds, setWipEdds] = useState({});            // line_id → EDD from the file
+  const closeWip = () => { setWipOpen(false); setWipRes(null); setWipSel(new Set()); setWipDates({}); setWipEdds({}); };
   const handleWipFile = async file => {
     if (!file) return;
     setWipBusy(true);
@@ -192,20 +224,28 @@ export default function StatusSheet() {
       // read in the browser — its load() hangs under the browser bundle — so
       // spreadsheets go up as files exactly like PDFs, inside the 4 MB cap.
       const parsed = await api.upload('/status-sheet/wip-parse', file);
-      const res = await api.post('/status-sheet/wip-match', { rows: parsed.rows });
+      // `grid` carries the sheet's CELLS, not just the joined row text, so the
+      // server can find the EDD by its column heading instead of guessing which
+      // of two dates on a row is the delivery date.
+      const res = await api.post('/status-sheet/wip-match', { rows: parsed.rows, grid: parsed.grid });
       setWipRes(res);
       // Confident matches arrive ticked ("Yes to All" is then one click);
       // fuzzy suggestions arrive unticked for the planner's eye. Lines already
       // WIP arrive unticked too — nothing to do for them.
       const sel = new Set();
       const dates = {};
+      const edds = {};
       for (const it of res.items) {
         for (const l of it.lines) {
+          // The file's EDD for this row, offered per line and editable. Left
+          // blank when the sheet named none — an absent EDD must leave the
+          // order's existing date alone rather than blanking it.
+          if (it.edd) edds[l.line_id] = it.edd;
           dates[l.line_id] = it.date || todayISO();
           if (it.status === 'matched' && !l.already_wip) sel.add(l.line_id);
         }
       }
-      setWipSel(sel); setWipDates(dates);
+      setWipSel(sel); setWipDates(dates); setWipEdds(edds);
     } catch (e) {
       toast.error(e.message || 'Could not read that file');
     } finally { setWipBusy(false); }
@@ -213,9 +253,17 @@ export default function StatusSheet() {
   const applyWip = async () => {
     setWipBusy(true);
     try {
-      const items = [...wipSel].map(id => ({ line_id: id, wip_date: wipDates[id] || todayISO() }));
+      const items = [...wipSel].map(id => ({
+        line_id: id,
+        wip_date: wipDates[id] || todayISO(),
+        // Only send an EDD the file actually gave (or the planner typed) —
+        // an empty one must leave the order's existing delivery date alone.
+        edd: wipEdds[id] || null,
+      }));
       const res = await api.post('/status-sheet/wip-apply', { items });
-      toast.success(`${res.applied.length} line${res.applied.length === 1 ? '' : 's'} marked Customer WIP`);
+      const eddN = res.edd_applied || 0;
+      toast.success(`${res.applied.length} line${res.applied.length === 1 ? '' : 's'} marked Customer WIP`
+        + (eddN ? ` · EDD set on ${eddN} line${eddN === 1 ? '' : 's'}` : ''));
       closeWip(); load();
     } catch (e) { toast.error(e.message || 'Could not mark the lines'); }
     finally { setWipBusy(false); }
@@ -250,6 +298,16 @@ export default function StatusSheet() {
     return [...c.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, n]) => ({ name, n }));
+  }, [rows]);
+
+  // How many products each PO carries ON THIS SHEET. Counted over every row,
+  // never the filtered view: "apply to the whole PO" reaches all of them, so a
+  // count taken after a customer chip or a search would understate what the
+  // button is about to change.
+  const poSize = useMemo(() => {
+    const c = {};
+    for (const r of rows) c[r.order_id] = (c[r.order_id] || 0) + 1;
+    return c;
   }, [rows]);
 
   const kpi = useKpiFilter('status-sheet');
@@ -394,12 +452,40 @@ export default function StatusSheet() {
       </span>
     );
   };
-  const EddCell = m => (
-    <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
-      onChange={e => patchOrder(m, { delivery_date: e.target.value || null })}
-      className={`${selCls} ${m.overdue_days > 0 ? 'bg-red-50 text-red-700 border-red-300' : ''}`}
-      title={m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : ''} />
-  );
+  // EDD — this PRODUCT's delivery date, edited against the ORDER LINE.
+  //
+  // It used to write the order, which moved every product on that PO at once.
+  // 79% of the lines here share a PO with other products (one carries 26) and
+  // the customer's list names a date per item, so the order-level column could
+  // never hold what they send. A line's own date OVERRIDES the PO's; clearing
+  // the box removes the override and the line goes back to following the order,
+  // which is why an empty input is "follow the PO" and not "no date".
+  const EddCell = m => {
+    const own = !!m.line_delivery_date;
+    const siblings = poSize[m.order_id] || 1;
+    return (
+      <div className="flex flex-col gap-1">
+        <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
+          onChange={e => setEddOverride(m, e.target.value || null)}
+          className={`${selCls} ${m.overdue_days > 0 ? 'border-red-300 bg-red-50 text-red-700'
+            : own ? 'border-blue-200 bg-blue-50/40' : ''}`}
+          title={[
+            m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : '',
+            own ? 'This product’s own EDD' : (m.delivery_date ? `Following PO ${m.po_number}` : 'No delivery date yet'),
+          ].filter(Boolean).join(' · ')} />
+        {/* Offered only where it would actually do something: a PO with one
+            product on the sheet is already "the whole PO", and a row with no
+            date has nothing to apply. */}
+        {siblings > 1 && m.delivery_date && (
+          <button type="button" onClick={() => setPoEdd({ line: m, count: siblings })}
+            title={`Give all ${siblings} products on PO ${m.po_number} this delivery date`}
+            className="inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:bg-slate-100 hover:text-brand-600">
+            <CalendarCheck size={11} /> Apply to PO ({siblings})
+          </button>
+        )}
+      </div>
+    );
+  };
   // WIP — the customer's urgency, always hand-editable, and a TRI-STATE:
   //   WIP         they are waiting on it
   //   Non-WIP     they have told us it is NOT in progress — a deliberate
@@ -507,10 +593,6 @@ export default function StatusSheet() {
         : (s.status === 'in_progress' || s.status === 'partially_completed') ? '…' : ''}`).join(' ');
   };
 
-  // EDD is ORDER-level. A gang usually shares one order → one control; a gang
-  // spanning several orders partitions them so each order stays editable.
-  // (P1 is per-LINE, so a gang always gets one star per member.)
-  const oneOrder = g => new Set(g.map(m => m.order_id)).size === 1;
   const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
   const perMember = (r, f, sep = ' · ') => (r._gang ? r._gang.map(f).join(sep) : f(r));
 
@@ -582,7 +664,10 @@ export default function StatusSheet() {
       render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
     { key: 'delivery_date', label: 'EDD',
       export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
-      render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
+      // Per LINE now, so a gang always shows one control per member — the
+      // old single-control shortcut for a one-order gang would have edited
+      // the first member and silently left the others behind.
+      render: r => r._gang ? <GangCellParts members={r._gang} render={EddCell} /> : EddCell(r) },
     { key: 'wip', colClass: 'ci-p3', label: 'WIP', sortable: false,
       // Three states, spelled out. "No" would have collapsed Non-WIP and
       // never-mentioned back into one word in the very report that exists to
@@ -630,7 +715,17 @@ export default function StatusSheet() {
           onClick={() => kpi.toggle('overdue')} active={kpi.is('overdue')} />
         <KpiCard icon={Star} label="P1 products" value={fmt.num(kpis.p1)} accent="text-amber-600"
           onClick={() => kpi.toggle('p1')} active={kpi.is('p1')} />
-        <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600"
+        {/* WIP LINES, and the sub says so. Planning's strip carries a card off
+            the same customer list that will legitimately read LOWER, because it
+            counts queue ROWS: a gang is one job there however many WIP members
+            it carries, and a line we have already dispatched has left the queue
+            while it is still on this sheet (wip-scope.js — the sheet is
+            cumulative on purpose). Two true numbers, so each card names its own
+            unit and its own scope rather than leaving the planner to guess
+            which one is broken. */}
+        <KpiCard icon={Hammer} label="WIP Lines" value={fmt.num(kpis.wip)} accent="text-blue-600"
+          sub="customer's list · incl. dispatched"
+          title="Order LINES the customer marked WIP. This sheet is cumulative — a line stays on it after it is produced or dispatched, until someone takes it off the WIP list — so this runs higher than Planning's WIP Jobs card. Click to show only these."
           onClick={() => kpi.toggle('wip')} active={kpi.is('wip')} />
       </div>
       <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}
@@ -757,6 +852,14 @@ export default function StatusSheet() {
           negatives are genuinely different: Non-WIP records that the customer
           said it is not in progress; Remove takes the line off their list
           entirely. The count names LINES, not rows — a ticked gang is several. */}
+      {/* Applying a date to a whole PO replaces whatever its other products
+          were individually given, so it says how many and which PO. */}
+      <ConfirmDialog open={!!poEdd} onClose={() => setPoEdd(null)}
+        onConfirm={() => applyEddToPo(poEdd)}
+        confirmLabel={`Set all ${poEdd?.count ?? 0}`}
+        title={`Give the whole PO this date?`}
+        message={poEdd ? `All ${poEdd.count} products on PO ${poEdd.line.po_number} will be due ${fmt.date(poEdd.line.delivery_date)}. Any product on that PO carrying its own EDD loses it and follows the PO again — which is also what makes Planning and Dispatch show this date, since they read the PO's.` : ''} />
+
       {/* Wiping a customer's WIP list is not a bulk edit of a few ticked rows —
           it acts on everything in view — so it asks first, and the question
           names the count and whose list it is rather than "are you sure?". */}
@@ -830,6 +933,23 @@ export default function StatusSheet() {
                 Yes to all
               </button>
             </div>
+            {/* Say HOW the EDD was read. "Second date on each row" is a guess
+                the planner must be able to check, and a file that named its
+                column deserves to be trusted out loud. */}
+            <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl px-3 py-2 text-xs font-semibold ${
+              wipRes.edd?.mode === 'header' ? 'bg-emerald-50/70 text-emerald-800'
+                : wipRes.edd?.mode === 'positional' ? 'bg-amber-50/70 text-amber-800'
+                : 'bg-slate-50 text-slate-500'}`}>
+              <CalendarDays size={13} className="shrink-0" />
+              <span>
+                {wipRes.edd?.mode === 'header'
+                  ? <>EDD read from the sheet’s own <span className="font-bold">“{wipRes.edd.column}”</span> column.</>
+                  : wipRes.edd?.mode === 'positional'
+                    ? <>This sheet names no delivery column — the <span className="font-bold">second date on each row</span> is offered as the EDD. Check them before confirming.</>
+                    : <>No delivery date found in this file — EDD is left as it is. You can still type one per line.</>}
+                {' '}EDD is set on the product line, so two items of one PO can want different days.
+              </span>
+            </div>
             <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
               {wipRes.items.map(it => (
                 <div key={it.row} className={`rounded-xl border p-2.5 ${it.status === 'matched' ? 'border-blue-100 bg-white' : 'border-amber-200 bg-amber-50/40'}`}>
@@ -866,10 +986,25 @@ export default function StatusSheet() {
                             STATUS_PILL[l.line_status]}`}>{STATUS_LABEL[l.line_status]}</span>
                         )}
                       </span>
+                      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-slate-400">WIP</span>
                       <input type="date" value={wipDates[l.line_id] || ''} disabled={l.already_wip}
                         onChange={e => setWipDates(d => ({ ...d, [l.line_id]: e.target.value }))}
                         className="h-7 shrink-0 rounded-md border border-slate-200 px-1.5 text-[11px] text-slate-600"
                         title="The WIP date recorded against this line" />
+                      {/* EDD writes to the ORDER, so it is shown against the PO
+                          it will move and left blank when the file named none —
+                          blank means "leave the existing date alone", never
+                          "clear it". */}
+                      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-slate-400">EDD</span>
+                      <input type="date" value={wipEdds[l.line_id] || ''} disabled={l.already_wip}
+                        onChange={e => setWipEdds(d => ({ ...d, [l.line_id]: e.target.value }))}
+                        className={`h-7 shrink-0 rounded-md border px-1.5 text-[11px] ${
+                          wipEdds[l.line_id] && wipEdds[l.line_id] !== l.current_edd
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-200 text-slate-600'}`}
+                        title={l.current_edd
+                          ? `This product on PO ${l.po_number} currently says ${l.current_edd}`
+                          : `This product on PO ${l.po_number} has no delivery date yet`} />
                     </label>
                   ))}
                 </div>

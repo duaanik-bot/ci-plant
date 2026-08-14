@@ -617,6 +617,20 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip_date TEXT;
 -- short-close paths write — a coordination remark must not be overwritten by a
 -- machine.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS remarks TEXT;
+-- EDD per PRODUCT, as an override of the order's own delivery date.
+--
+-- orders.delivery_date is one date for the whole PO, and 79% of the lines on
+-- the Status Sheet sit on a PO carrying several products (one carries 26). The
+-- customer's WIP list gives a date per ITEM, so the order-level column simply
+-- cannot hold what they send: two products of one PO wanting different days is
+-- unanswerable there.
+--
+-- An OVERRIDE, not a move: NULL means "follow the order", so every existing row
+-- reads exactly as it did and Planning, Dispatch and the Overdue KPI keep using
+-- orders.delivery_date untouched. The Status Sheet resolves
+-- COALESCE(ol.delivery_date, o.delivery_date). TEXT like every other date in
+-- this schema — a pg DATE JSON-serialises with a timezone day-shift.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS delivery_date TEXT;
 -- P1 moved from the order to the product LINE (2026-07-27): the star marks one
 -- product, not the whole PO. The DO block backfills the old order-level flag
 -- onto its lines exactly once (only when the column is first created), so a

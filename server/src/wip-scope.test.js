@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  STATUS_SHEET_SCOPE_SQL, PENDING_SQL, HAS_WIP_RECORD_SQL, LINE_STATUS_SQL,
+  STATUS_SHEET_SCOPE_SQL, PENDING_SQL, HAS_WIP_RECORD_SQL, LINE_STATUS_SQL, LINE_EDD_SQL,
   overdueDaysSql, isWipState, wipDateFor,
 } from './wip-scope.js';
 
@@ -100,4 +100,30 @@ test('removing the record clears the date, even one explicitly passed', () => {
   // A date with no record is a stale claim.
   assert.equal(wipDateFor(null, null, '2026-08-12'), null);
   assert.equal(wipDateFor(null, '2026-08-01', '2026-08-12'), null);
+});
+
+// ── EDD is a LINE-level override ─────────────────────────────────────────────
+// orders.delivery_date is one date for a whole PO, and 79% of the lines on this
+// sheet share a PO with other products (one carries 26). The customer's list
+// names a date per ITEM, so the line may carry its own and the order's is the
+// fallback.
+
+test('the resolved EDD prefers the line and falls back to the order', () => {
+  assert.equal(LINE_EDD_SQL, 'COALESCE(ol.delivery_date, o.delivery_date)');
+  // The ORDER matters: reversed, a line could never override its PO and the
+  // whole feature would be inert.
+  assert.ok(LINE_EDD_SQL.indexOf('ol.delivery_date') < LINE_EDD_SQL.indexOf('o.delivery_date'));
+});
+
+test('overdue is judged against the RESOLVED EDD, not the PO’s', () => {
+  const sql = overdueDaysSql('CURRENT_DATE');
+  assert.ok(sql.includes(LINE_EDD_SQL), 'a line with its own EDD must be judged on that one');
+  // The bare order column must not survive anywhere in the clamp, or a line
+  // that overrode its date would still be called late on the PO's.
+  assert.ok(!/(?<!ol\.delivery_date, )\bo\.delivery_date\b(?!\))/.test(
+    sql.split(LINE_EDD_SQL).join('')), 'no stray o.delivery_date outside the COALESCE');
+});
+
+test('overdue still only counts a pending line', () => {
+  assert.ok(overdueDaysSql('CURRENT_DATE').includes(`${LINE_STATUS_SQL} = 'pending'`));
 });

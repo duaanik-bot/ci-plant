@@ -13,6 +13,7 @@ import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
 import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-substitution.js';
+import { consolidate, consolidateEdit } from '../po-consolidate.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -145,6 +146,110 @@ async function attachReqLines(prs) {
 }
 
 // Insert PO lines with full GST detail and remember each material's last rate.
+// A consolidated PO line has to be able to name what fed it. Derived, never
+// stored: both conversion paths stamp requisitions.purchase_order_id, so the
+// answer comes from rows the PR module already owns — nothing to migrate,
+// nothing to drift, and orders raised before consolidation answer too. A direct
+// PO has no requisitions behind it and honestly returns nothing.
+// Keyed "<po id>:<material id>" → [{ pr_number, qty }].
+async function poLineSourcePrs(poId = null) {
+  const rows = await q(`
+    SELECT pr.purchase_order_id, rl.material_id, pr.pr_number, SUM(rl.qty)::float AS qty
+    FROM requisitions pr JOIN requisition_lines rl ON rl.requisition_id=pr.id
+    WHERE pr.purchase_order_id IS NOT NULL
+      AND ($1::int IS NULL OR pr.purchase_order_id=$1::int)
+    GROUP BY pr.purchase_order_id, rl.material_id, pr.pr_number
+    ORDER BY pr.pr_number`, [poId]);
+  const by = new Map();
+  for (const r of rows) {
+    const k = `${r.purchase_order_id}:${r.material_id}`;
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push({ pr_number: r.pr_number, qty: +r.qty });
+  }
+  return by;
+}
+
+// One PO line per material, quantities summed — see po-consolidate.js. A line
+// that actually merged is repriced off the rate master for this vendor, because
+// two requisition estimates that disagree cannot both be right and the master is
+// the tie-break the plant already trusts. A material named once is left exactly
+// as the caller resolved it: nothing reprices just by passing through here.
+async function consolidateForPo(oc, lines, vendorId, boardRates) {
+  const seen = new Set(), repeated = new Set();
+  for (const l of lines || []) {
+    if (!l.material_id) continue;
+    const k = String(l.material_id);
+    if (seen.has(k)) repeated.add(k); else seen.add(k);
+  }
+  // No duplicates is the ordinary case, and it costs no extra query.
+  if (!repeated.size) return consolidate(lines);
+  const resolved = new Map();
+  for (const k of repeated) {
+    const m = await oc(`SELECT category, grade, gsm, sheet_l, sheet_w, sheets_per_packet,
+                               unit, hsn_code, gst_rate, std_rate, last_rate
+                        FROM materials WHERE id=$1`, [+k]);
+    resolved.set(k, resolvePoRate(m, vendorId, boardRates)?.rate ?? null);
+  }
+  return consolidate(lines, {
+    mergedRate: sources => resolved.get(String(sources[0].material_id)) ?? null,
+  });
+}
+
+// Write an edited PO's lines: collapse duplicate materials among the lines with
+// nothing received, drop what the user removed and what a merge folded away,
+// then update the survivors and insert anything new.
+//
+// Exported and given its `qc` so the guarantee that matters can be tested
+// without a database: a line with goods against it is NEVER deleted, because
+// every GRN row points at that po_line id and deleting it strands the receipt.
+// See po-edit-lines.test.js.
+export async function applyPoLineEdit(qc, poId, lines, existing, committedQty) {
+  const byId = Object.fromEntries(existing.map(l => [l.id, l]));
+  const keptIds = new Set(lines.filter(l => l.id).map(l => +l.id));
+  for (const l of lines) {
+    if (!l.material_id || !(+l.qty > 0))
+      throw Object.assign(new Error('Each line needs a material and a positive quantity'), { status: 400 });
+  }
+  // Duplicate materials collapse to one line here too — but ONLY among lines
+  // with nothing received. See consolidateEdit: a settled line keeps its own row
+  // and id because a GRN points at that id.
+  const { rows: finalLines, mergedAway: mergedAwayIds } =
+    consolidateEdit(lines, l => (l.id && byId[l.id] ? committedQty(byId[l.id]) > 0 : false));
+  const mergedAway = new Set(mergedAwayIds);
+
+  // Remove lines the user dropped, and the ones a merge folded away — but never
+  // one with any receipt (accepted or quarantined), which would also strand its
+  // GRN records. Merged-away lines are zero-receipt by construction, so the
+  // guard below only ever fires on a genuine drop.
+  for (const l of existing) {
+    if (!keptIds.has(l.id) || mergedAway.has(l.id)) {
+      if (committedQty(l) > 0) throw Object.assign(new Error('A line that has goods received against it cannot be removed — short-close the PO instead'), { status: 409 });
+      await qc('DELETE FROM po_lines WHERE id=$1', [l.id]);
+    }
+  }
+  // Update kept lines and insert new ones.
+  for (const l of finalLines) {
+    if (l.id && byId[l.id]) {
+      const prev = byId[l.id];
+      const committed = committedQty(prev);
+      if (committed > 0) {
+        if (+l.material_id !== prev.material_id) throw Object.assign(new Error('Cannot change the material on a line that has goods received against it'), { status: 409 });
+        if (+l.qty < committed) throw Object.assign(new Error(`Ordered qty cannot be below the ${committed} already received/in-QC`), { status: 409 });
+      }
+      await qc(`UPDATE po_lines SET material_id=$1, qty=$2, rate=$3,
+                       hsn_code=$4, unit=$5, discount_pct=$6, gst_rate=$7 WHERE id=$8`,
+        [+l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
+         +l.discount_pct || 0, +l.gst_rate || 0, l.id]);
+    } else {
+      await qc(`INSERT INTO po_lines (purchase_order_id, material_id, qty, rate, hsn_code, unit, discount_pct, gst_rate)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [poId, +l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
+         +l.discount_pct || 0, +l.gst_rate || 0]);
+    }
+    if (+l.rate > 0) await qc('UPDATE materials SET last_rate=$1 WHERE id=$2', [+l.rate, +l.material_id]);
+  }
+}
+
 async function insertPoLines(qc, poId, lines) {
   for (const l of lines) {
     if (!l.material_id || !(+l.qty > 0))
@@ -564,12 +669,12 @@ r.post('/requisitions/:id/convert', canBuy, async (req, res, next) => {
       if (pr.status !== 'approved')
         throw Object.assign(new Error('Requisition must be approved before conversion'), { status: 409 });
       let lines = bodyLines;
+      const boardRates = await qc('SELECT * FROM board_rates WHERE active=1');
       if (!Array.isArray(lines) || !lines.length) {
         const rls = await qc(`SELECT rl.*, m.category, m.grade, m.gsm, m.sheet_l, m.sheet_w,
                                      m.sheets_per_packet, m.unit, m.hsn_code, m.gst_rate, m.std_rate, m.last_rate
                               FROM requisition_lines rl JOIN materials m ON m.id=rl.material_id
                               WHERE rl.requisition_id=$1 ORDER BY rl.id`, [pr.id]);
-        const boardRates = await qc('SELECT * FROM board_rates WHERE active=1');
         lines = rls.map(l => {
           // The requisition's estimated rate still wins — the buyer put it there
           // on purpose; otherwise derive the board's ₹/sheet from the rate master.
@@ -581,6 +686,9 @@ r.post('/requisitions/:id/convert', canBuy, async (req, res, next) => {
         });
       }
       if (!lines.length) throw Object.assign(new Error('This requisition has no lines to convert'), { status: 400 });
+      // A requisition can name the same board on two lines. The vendor is asked
+      // for it once, with the quantities added up.
+      lines = await consolidateForPo(oc, lines, vendor_id, boardRates);
       const po_number = await nextNumber('CI-VPO-', 'purchase_orders', 'po_number', oc);
       const [po] = await qc(
         `INSERT INTO purchase_orders (po_number, vendor_id, requisition_id, expected_date,
@@ -631,20 +739,21 @@ r.post('/purchase-orders/from-requisitions', canBuy, async (req, res, next) => {
          vendor_notes || null, payment_terms || null, delivery_terms || null, reference || null,
          tax_kind || 'intra', +freight || 0, +round_off || 0, req.user.name]);
       // Every requisition line across the selection, grouped by material — one PO
-      // line per material, quantities summed, HSN/GST from the material master.
-      const byMaterial = {};
+      // line per material, quantities summed by the same rule the convert and
+      // direct-PO forms use, HSN/GST from the material master.
+      const prLines = [];
       for (const pr of prs) {
-        const rls = await qc('SELECT * FROM requisition_lines WHERE requisition_id=$1', [pr.id]);
-        for (const l of rls) (byMaterial[l.material_id] ||= { qty: 0 }).qty += +l.qty;
+        const rls = await qc('SELECT * FROM requisition_lines WHERE requisition_id=$1 ORDER BY id', [pr.id]);
+        for (const l of rls) prLines.push({ material_id: l.material_id, qty: +l.qty });
       }
       const boardRates = await qc('SELECT * FROM board_rates WHERE active=1');
-      for (const [materialId, agg] of Object.entries(byMaterial)) {
-        const m = await oc('SELECT category, grade, gsm, sheet_l, sheet_w, sheets_per_packet, unit, hsn_code, gst_rate, std_rate, last_rate FROM materials WHERE id=$1', [materialId]);
+      for (const row of consolidate(prLines)) {
+        const m = await oc('SELECT category, grade, gsm, sheet_l, sheet_w, sheets_per_packet, unit, hsn_code, gst_rate, std_rate, last_rate FROM materials WHERE id=$1', [row.material_id]);
         // Client-supplied per-line rate wins (incl. a deliberate 0 = free line);
         // else derive from the rate master.
         const resolved = resolvePoRate(m, vendor_id, boardRates);
-        await insertPoLines(qc, po.id, [{ material_id: +materialId, qty: agg.qty,
-          rate: pickPoRate(rates[materialId], resolved),
+        await insertPoLines(qc, po.id, [{ material_id: +row.material_id, qty: row.qty,
+          rate: pickPoRate(rates[row.material_id], resolved),
           unit: m?.unit, hsn_code: m?.hsn_code, gst_rate: m?.gst_rate, discount_pct: 0 }]);
       }
       for (const pr of prs) {
@@ -676,6 +785,8 @@ r.get('/purchase-orders', async (_req, res, next) => {
       FROM po_lines pl JOIN materials m ON m.id=pl.material_id`);
     const byPo = {};
     for (const l of lines) (byPo[l.purchase_order_id] ||= []).push(l);
+    const sourcePrs = await poLineSourcePrs();
+    for (const l of lines) l.source_prs = sourcePrs.get(`${l.purchase_order_id}:${l.material_id}`) || [];
     res.json(pos.map(po => ({ ...po, lines: byPo[po.id] || [] })));
   } catch (e) { next(e); }
 });
@@ -696,6 +807,8 @@ r.get('/purchase-orders/:id', async (req, res, next) => {
              COALESCE(pl.hsn_code, m.hsn_code) AS hsn_code,
              m.grade, m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet
       FROM po_lines pl JOIN materials m ON m.id=pl.material_id WHERE pl.purchase_order_id=$1 ORDER BY pl.id`, [po.id]);
+    const sourcePrs = await poLineSourcePrs(po.id);
+    for (const l of po.lines) l.source_prs = sourcePrs.get(`${po.id}:${l.material_id}`) || [];
     po.company = await one('SELECT * FROM company_profile ORDER BY id LIMIT 1') || {};
     res.json(po);
   } catch (e) { next(e); }
@@ -716,7 +829,10 @@ r.post('/purchase-orders', canBuy, async (req, res, next) => {
         [po_number, vendor_id, expected_date || null,
          vendor_notes || null, payment_terms || null, delivery_terms || null, reference || null,
          tax_kind || 'intra', +freight || 0, +round_off || 0, req.user.name]);
-      await insertPoLines(qc, po.id, lines);
+      // The buyer can type the same board on two rows, and other callers reach
+      // this route directly. The order carries each material once, at the rate of
+      // its top-most row — exactly what the form confirmed before sending.
+      await insertPoLines(qc, po.id, consolidate(lines));
       await audit('purchase_order', po.id, 'create', po_number, qc, req.user.name);
       return po.id;
     });
@@ -742,6 +858,8 @@ r.post('/purchase-orders/:id/close', canBuy, async (req, res, next) => {
 // Edit a PO — vendor, expected date, and lines. Lines already (partly) received
 // are locked: their material can't change and quantity can't drop below what has
 // arrived. Omitted existing lines are removed (only if nothing was received).
+// Duplicate materials collapse to one line, but only among lines with nothing
+// received — a settled line keeps its own row and id, since a GRN points at it.
 r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
   try {
     const { vendor_id, expected_date, lines, vendor_notes, payment_terms, delivery_terms, reference,
@@ -765,36 +883,7 @@ r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
       const grnByLine = Object.fromEntries(grnRows.map(g => [g.po_line_id, +g.grn_qty]));
       const committedQty = l => Math.max(+l.received_qty, grnByLine[l.id] || 0);
 
-      // Remove lines the user dropped — but never one with any receipt (accepted
-      // or quarantined), which would also strand its GRN records.
-      for (const l of existing) {
-        if (!keptIds.has(l.id)) {
-          if (committedQty(l) > 0) throw Object.assign(new Error('A line that has goods received against it cannot be removed — short-close the PO instead'), { status: 409 });
-          await qc('DELETE FROM po_lines WHERE id=$1', [l.id]);
-        }
-      }
-      // Update kept lines and insert new ones.
-      for (const l of lines) {
-        if (!l.material_id || !(+l.qty > 0)) throw Object.assign(new Error('Each line needs a material and a positive quantity'), { status: 400 });
-        if (l.id && byId[l.id]) {
-          const prev = byId[l.id];
-          const committed = committedQty(prev);
-          if (committed > 0) {
-            if (+l.material_id !== prev.material_id) throw Object.assign(new Error('Cannot change the material on a line that has goods received against it'), { status: 409 });
-            if (+l.qty < committed) throw Object.assign(new Error(`Ordered qty cannot be below the ${committed} already received/in-QC`), { status: 409 });
-          }
-          await qc(`UPDATE po_lines SET material_id=$1, qty=$2, rate=$3,
-                           hsn_code=$4, unit=$5, discount_pct=$6, gst_rate=$7 WHERE id=$8`,
-            [+l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
-             +l.discount_pct || 0, +l.gst_rate || 0, l.id]);
-        } else {
-          await qc(`INSERT INTO po_lines (purchase_order_id, material_id, qty, rate, hsn_code, unit, discount_pct, gst_rate)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-            [po.id, +l.material_id, +l.qty, +l.rate || 0, l.hsn_code || null, l.unit || null,
-             +l.discount_pct || 0, +l.gst_rate || 0]);
-        }
-        if (+l.rate > 0) await qc('UPDATE materials SET last_rate=$1 WHERE id=$2', [+l.rate, +l.material_id]);
-      }
+      await applyPoLineEdit(qc, po.id, lines, existing, committedQty);
       // Re-derive status from the (possibly changed) lines.
       const fresh = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [po.id]);
       const full = fresh.length > 0 && fresh.every(l => l.received_qty >= l.qty);

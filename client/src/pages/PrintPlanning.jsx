@@ -1472,7 +1472,7 @@ export default function PrintPlanning() {
         )}
         {tab === 'board' && (
           <button type="button" onClick={() => { setWipOnly(w => !w); clearSel(); }}
-            title="Only jobs the customer marked WIP (urgent) — composes with the board chips and searches"
+            title="Only job CARDS carrying a Customer WIP line — composes with the board chips and searches. A third unit again: the Status Sheet counts WIP lines (its whole cumulative list), Planning counts WIP jobs in the planning queue, and this counts the cards already on the board, so all three numbers legitimately differ."
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
               wipOnly ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white shadow-sm' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             <Zap size={12} fill={wipOnly ? 'currentColor' : 'none'} /> Customer WIP
