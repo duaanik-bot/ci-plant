@@ -8,10 +8,11 @@ import {
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, isBareArtworkRevision,
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
-  issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
+  invertMovement, issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
   RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, releasableRackComponents,
   resolvePlateRate, resolveRackPicks,
-  USED_PLATES_RACK, pickAvailableRackPlates, validatePlateReplacementRequest, validateReturnVerification,
+  USED_PLATES_RACK, pickAvailableRackPlates, validateMakeAvailable, validatePlateReplacementRequest,
+  validateReturnVerification, validateSetAside,
 } from '../plates.js';
 import {
   bestPlateCandidate, createPlateComponents, issuedPlatesForStage,
@@ -680,7 +681,15 @@ r.post('/plates/components/:id/verify-existing', canVerify, async (req, res, nex
            from_location,to_location,condition,note,user_name)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11)`,
         [component.proposed_asset_id, component.id, component.tooling_request_id, component.job_card_id,
-         outcome === 'replacement' ? 'replacement_required' : outcome, component.asset_status, assetStatus,
+         // The movement vocabulary is not the outcome vocabulary. 'scrap' is a
+         // valid outcome but NOT a valid plate_asset_movements.action — the
+         // column's CHECK spells it 'scrapped' — so writing the outcome through
+         // verbatim violated the constraint, 500'd, and rolled the whole
+         // verification back, leaving the plate in limbo. assetStatus above
+         // already maps it correctly; this is the same translation, applied to
+         // the action.
+         outcome === 'replacement' ? 'replacement_required'
+           : outcome === 'scrap' ? 'scrapped' : outcome, component.asset_status, assetStatus,
          component.rack_location, condition, req.body.note || null, req.user.name]);
       }
       return syncPlateRequest(qc, oc, component.tooling_request_id, req.user.name);
@@ -1635,6 +1644,92 @@ r.post('/plates/assets/retire', canVerify, async (req, res, next) => {
           `${asset.asset_number} retired after ${asset.use_count || 0} run(s) — ${reason}`, qc, req.user.name);
       }
       return { retired: picked.length, plates: picked.map(row => row.asset_number) };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Take a plate off the rack for now — damaged, missing, or wanting a look —
+// without scrapping it. STATUS ONLY: grading a plate is what inspection does,
+// and leaving the grade alone is also what lets Undo be exact.
+r.post('/plates/assets/set-aside', canVerify, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc) => {
+      const ids = [...new Set((req.body.asset_ids || []).map(Number))].filter(Boolean);
+      const rackAssets = await qc('SELECT * FROM plate_assets WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
+      const { picked, rule } = validateSetAside({ rackAssets, assetIds: ids, reason: req.body.reason });
+      const note = String(req.body.note || '').trim() || rule.label;
+      const movement_ids = [];
+      for (const asset of picked) {
+        await qc('UPDATE plate_assets SET status=$1,updated_at=now() WHERE id=$2', [rule.status, asset.id]);
+        const [row] = await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
+          VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8) RETURNING id`,
+        [asset.id, rule.action, asset.status, rule.status, asset.rack_location,
+         asset.condition, `Set aside — ${note}`, req.user.name]);
+        movement_ids.push(row.id);
+        await audit('plate_asset', asset.id, 'set_aside',
+          `${asset.asset_number} set aside — ${note}`, qc, req.user.name);
+      }
+      return { set_aside: picked.length, plates: picked.map(row => row.asset_number), movement_ids };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Put a plate back on the rack — including one that was retired. The condition
+// is stated by the planner, never defaulted: see validateMakeAvailable.
+r.post('/plates/assets/make-available', canVerify, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc) => {
+      const ids = [...new Set((req.body.asset_ids || []).map(Number))].filter(Boolean);
+      const rackAssets = await qc('SELECT * FROM plate_assets WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE', [ids]);
+      const picked = validateMakeAvailable({ rackAssets, assetIds: ids, condition: req.body.condition });
+      const note = String(req.body.reason || '').trim();
+      if (!note) throw Object.assign(new Error('Say why this plate is going back on the rack'), { status: 400 });
+      for (const asset of picked) {
+        // A retired plate carries active=0 and rack 'Scrap'. Both must be undone
+        // or it reads 'available' while staying invisible to every rack query.
+        // It returns to the USED rack: recovered stock is not fresh stock.
+        const location = asset.status === 'scrapped' ? USED_PLATES_RACK : asset.rack_location;
+        await qc(`UPDATE plate_assets SET status='available',condition=$1,rack_location=$2,
+          active=1,updated_at=now() WHERE id=$3`, [req.body.condition, location, asset.id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
+          VALUES ($1,'adjustment',$2,'available',$3,$4,$5,$6,$7)`,
+        [asset.id, asset.status, asset.rack_location, location, req.body.condition,
+         `${asset.status === 'scrapped' ? 'Returned to rack' : 'Made available'} — ${note}`, req.user.name]);
+        await audit('plate_asset', asset.id, 'make_available',
+          `${asset.asset_number} back on the rack as ${req.body.condition} — ${note}`, qc, req.user.name);
+      }
+      return { restored: picked.length, plates: picked.map(row => row.asset_number) };
+    });
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
+// Undo a set-aside: replay its movement backwards. The undo is itself a movement
+// row — the ledger gains an event, it never loses one.
+r.post('/plates/assets/undo-movement', canVerify, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const movementId = Number(req.body.movement_id);
+      if (!movementId) throw Object.assign(new Error('Which change should be undone?'), { status: 400 });
+      const movement = await oc('SELECT * FROM plate_asset_movements WHERE id=$1', [movementId]);
+      const asset = movement
+        ? await oc('SELECT * FROM plate_assets WHERE id=$1 FOR UPDATE', [movement.plate_asset_id])
+        : null;
+      const restore = invertMovement({ movement, asset });
+      await qc(`UPDATE plate_assets SET status=$1,rack_location=$2,active=$3,updated_at=now()
+        WHERE id=$4`, [restore.status, restore.rack_location, restore.active, asset.id]);
+      await qc(`INSERT INTO plate_asset_movements
+        (plate_asset_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
+        VALUES ($1,'adjustment',$2,$3,$4,$5,$6,$7,$8)`,
+      [asset.id, asset.status, restore.status, asset.rack_location, restore.rack_location,
+       asset.condition, `Undid: ${movement.note || movement.action}`, req.user.name]);
+      await audit('plate_asset', asset.id, 'undo_movement',
+        `${asset.asset_number} — undid ${movement.action}`, qc, req.user.name);
+      return { plate: asset.asset_number, status: restore.status };
     });
     res.json(result);
   } catch (error) { next(error); }

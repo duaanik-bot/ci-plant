@@ -8,7 +8,12 @@ import { api, auth, fmt } from '../api.js';
 import { lineAmount, lineTaxable, poTotals } from '../lib/poTotals.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS } from '../lib/plateRack.js';
+import { plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS, PLATE_SET_ASIDE_REASONS } from '../lib/plateRack.js';
+
+// The movement actions a set-aside writes, and therefore the only ones Undo may
+// offer. Derived from the same table the picker offers and the server keys on,
+// so a fourth reason can never appear in one place and not the other.
+const UNDOABLE_SET_ASIDE_ACTIONS = PLATE_SET_ASIDE_REASONS.map(row => row.action);
 import { resolvePlateRate } from '../lib/plateRates.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
@@ -722,7 +727,30 @@ function AssetHistoryModal({ asset, onClose, onChanged }) {
     { key: 'to_location', label: 'Location', render: row => row.to_location || row.from_location || '—' },
     { key: 'condition', label: 'Condition', render: row => row.condition || '—' },
     { key: 'user_name', label: 'By', render: row => row.user_name || '—' },
+    // Undo lives on the movement it reverses, because this is the only screen
+    // that has a movement id at all — /plates/warehouse returns plates, not
+    // movements, and groups them into sets besides.
+    //
+    // Offered only for the three set-aside actions, and only when no job card or
+    // requirement is attached. That mirrors invertMovement exactly: the server
+    // refuses everything else, and a button whose only outcome is a 409 is worse
+    // than no button.
+    { key: 'undo', label: '', sortable: false, render: row => (
+      UNDOABLE_SET_ASIDE_ACTIONS.includes(row.action) && !row.job_card_id && !row.tooling_request_id
+        ? <Button size="sm" variant="ghost" disabled={busy}
+            onClick={() => undoMovement(row.id).catch(error => toast.error(error.message))}>Undo</Button>
+        : null
+    ) },
   ];
+  const undoMovement = async movementId => {
+    setBusy(true);
+    try {
+      const out = await api.post('/plates/assets/undo-movement', { movement_id: movementId });
+      toast.success(`${out.plate} put back — it is ${String(out.status).replace(/_/g, ' ')} again`);
+      await load();
+      onChanged?.();
+    } finally { setBusy(false); }
+  };
   return <Modal open onClose={onClose} title={`${asset.asset_number} · Plate History`} wide
     footer={<>
       <Button variant="secondary" onClick={onClose}>Close</Button>
@@ -815,6 +843,8 @@ export default function PlatesLifecycle() {
   // the common case (the artwork changed, so all four plates are dead), and making
   // someone open each set to tick four boxes is the slow way to say that.
   const [retiring, setRetiring] = useState(null);
+  // The other direction: a set that is off the rack and is going back on it.
+  const [restoring, setRestoring] = useState(null);
   const [issuing, setIssuing] = useState(null);
   const [openJobs, setOpenJobs] = useState([]);
   const [requirements, setRequirements] = useState([]);
@@ -947,8 +977,15 @@ export default function PlatesLifecycle() {
       badge: 'bg-slate-300/70 text-slate-800', hover: 'hover:text-slate-700',
       count: () => history.length },
   ];
-  const rackRows = warehouse.filter(row => row.status === 'available'
-    && (warehouseView === 'fresh' ? row.rack_location === FRESH_PLATES_RACK : row.rack_location === USED_PLATES_RACK));
+  // Everything that is off the rack but not in a job's hands. Fresh and Used are
+  // both keyed on status === 'available', so without this list a set-aside plate
+  // renders nowhere at all and can never be brought back.
+  const ASIDE_STATUSES = ['damaged', 'lost', 'awaiting_verification', 'scrapped'];
+  const asideRows = warehouse.filter(row => ASIDE_STATUSES.includes(row.status));
+  const rackRows = warehouseView === 'aside'
+    ? asideRows
+    : warehouse.filter(row => row.status === 'available'
+      && (warehouseView === 'fresh' ? row.rack_location === FRESH_PLATES_RACK : row.rack_location === USED_PLATES_RACK));
   // The size filter narrows the TABLE only. The KPI strip keeps counting the whole
   // rack, so the size cards stay a picture of what is in stock rather than echoing
   // whichever chip happens to be pressed.
@@ -1084,6 +1121,31 @@ export default function PlatesLifecycle() {
       }
     } catch (error) { toast.error(error.message); }
     finally { setBusyRow(null); if (detail) await refreshDetail(); else await load(); }
+  };
+  // Take a plate off the rack from inside the picker. One plate, one reason: the
+  // picker lists individual plate assets, not sets.
+  const setAsidePlate = async (assetId, reason) => {
+    try {
+      const out = await api.post('/plates/assets/set-aside', { asset_ids: [assetId], reason });
+      // No Undo in this toast: ui.jsx's toast is push(type, msg) — a message and
+      // nothing else — and it clears after 3800ms. Undo lives on the Set aside
+      // tab, where the plate now is and where somebody would go looking for it.
+      toast.success(`${out.plates.join(', ')} taken off the rack — undo it on the Set aside tab`);
+    } catch (error) { toast.error(error.message); }
+    finally { if (detail) await refreshDetail(); else await load(); }
+  };
+  // Put plates back. Takes the whole SET, not one plate: a warehouse row is a
+  // grouped set — summarizePlateSet gives it `asset_ids` and `row.id` is only the
+  // first plate in it — and Retire scraps every plate in a set at once. Sending
+  // `row.id` alone would answer "Back on the rack" on a retired set of four by
+  // restoring one and leaving three scrapped, invisible, and unmentioned.
+  const makeAvailable = async (assetIds, condition, reason) => {
+    try {
+      const out = await api.post('/plates/assets/make-available',
+        { asset_ids: assetIds, condition, reason });
+      toast.success(`${out.plates.join(', ')} back on the rack as ${condition}`);
+    } catch (error) { toast.error(error.message); }
+    finally { await load(); }
   };
   const fetchProductMasterColours = async () => {
     if (!detail) return;
@@ -1306,12 +1368,21 @@ export default function PlatesLifecycle() {
     // Retire the whole set from the LIST — the usual reason (artwork changed, set
     // damaged) kills every plate in it, so making someone open the set to tick each
     // plate is the slow way to say one thing.
+    //
+    // On the Set aside tab the plate has already left the rack, so Retire is not the
+    // question being asked there — putting it back is. Fresh and Used are untouched.
     { key: 'actions', label: '', sortable: false, render: row => (
       <div className="flex items-center justify-end gap-1">
-        {canManage() && <Button size="sm" variant="ghost" title={`Retire all ${row.qty || row.components?.length || 1} plates in this set`}
-          onClick={event => { event.stopPropagation(); setRetiring({ rows: [row], reason: '', note: '' }); }}>
-          <Trash2 size={12} />
-        </Button>}
+        {warehouseView === 'aside'
+          ? canVerify() && <Button size="sm" variant="secondary"
+            title={`Put all ${row.qty || row.components?.length || 1} plates in this set back on the rack`}
+            onClick={event => { event.stopPropagation(); setRestoring({ rows: [row], condition: '', reason: '' }); }}>
+            <RotateCcw size={12} /> Back on the rack
+          </Button>
+          : canManage() && <Button size="sm" variant="ghost" title={`Retire all ${row.qty || row.components?.length || 1} plates in this set`}
+            onClick={event => { event.stopPropagation(); setRetiring({ rows: [row], reason: '', note: '' }); }}>
+            <Trash2 size={12} />
+          </Button>}
         <Button size="sm" variant="secondary" onClick={event => { event.stopPropagation(); setAssetHistory(row); }}><History size={12} /></Button>
       </div>
     ) },
@@ -1369,8 +1440,10 @@ export default function PlatesLifecycle() {
         answered a question you had not asked. Each tab now states its own figures. */}
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {tab === 'warehouse' ? <>
-        <KpiCard compact label={warehouseView === 'fresh' ? 'Fresh rack' : 'Used rack'}
-          value={rackSummary.total} icon={Warehouse} tone={rackSummary.total ? 'good' : 'neutral'} />
+        <KpiCard compact label={warehouseView === 'fresh' ? 'Fresh rack' : warehouseView === 'used' ? 'Used rack' : 'Set aside'}
+          value={rackSummary.total}
+          icon={Warehouse}
+          tone={warehouseView === 'aside' ? (rackSummary.total ? 'warn' : 'neutral') : (rackSummary.total ? 'good' : 'neutral')} />
         {/* Wear leads, shelf age sits under it. Age alone cannot separate a plate cut
             in March that has run eleven times from one cut in March that has never
             run — and it is the first that gets issued by mistake. */}
@@ -1551,6 +1624,69 @@ export default function PlatesLifecycle() {
         )}
       </div>
     </Modal>}
+    {/* Back on the rack — the way out of Set aside, and the only way back for a
+        plate that was retired.
+
+        The condition is asked, never assumed: the server refuses without it
+        because a plate the floor prints from must not carry a grade nobody chose.
+        The reason is required for the same kind of reason — a plate reappearing on
+        the rack with no account of why is a plate somebody will distrust. Both are
+        checked here as well as there, so a considered click is answered by the
+        screen rather than by a 400. */}
+    {restoring && <Modal open onClose={()=>setRestoring(null)}
+      title={`Put ${restoring.rows.reduce((sum,row)=>sum+(row.qty||row.components?.length||1),0)} plate(s) back on the rack`}
+      footer={<>
+        <Button variant="secondary" onClick={()=>setRestoring(null)}>Cancel</Button>
+        <Button variant="success"
+          disabled={!restoring.condition || !restoring.reason.trim()}
+          onClick={async()=>{
+            const rows = restoring.rows, { condition, reason } = restoring;
+            setRestoring(null);
+            await makeAvailable(rows.flatMap(row=>row.asset_ids?.length?row.asset_ids:[row.id]), condition, reason.trim());
+          }}>
+          <RotateCcw size={14}/> Back on the rack
+        </Button>
+      </>}>
+      <div className="space-y-4">
+        <div className="ci-summary-panel text-xs text-slate-600">
+          These plates go back to being offered for reuse. A plate that was <b>retired</b> comes
+          back to the <b>{USED_PLATES_RACK}</b> — recovered stock is not fresh stock.
+        </div>
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>Coming back</span><span>{restoring.rows.length} set(s)</span></div>
+          <div>{restoring.rows.map(row=>(
+            <div key={row.id} className="flex items-center gap-3 border-b border-slate-100 py-1.5 last:border-0">
+              <span className="min-w-0 flex-1">
+                <b className="text-sm text-slate-800">{row.contains || row.component_label}</b>
+                <span className="block font-mono text-[10px] text-slate-400">
+                  {row.qty || row.components?.length || 1} plate set · {row.plate_size} · {row.product_name}
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                <StatusChip value={row.status} />
+              </span>
+            </div>
+          ))}</div>
+        </section>
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Condition <span className="normal-case tracking-normal text-red-500">required</span></div>
+          <div className="flex flex-wrap gap-1.5">
+            {['Good','Fair'].map(option=>{
+              const on = restoring.condition === option;
+              return <button key={option} type="button"
+                onClick={()=>setRestoring(current=>({...current, condition: on ? '' : option}))}
+                className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                {option}
+              </button>;
+            })}
+          </div>
+        </div>
+        <Field label="Why is it going back" required>
+          <Input value={restoring.reason} placeholder="Found it in the die store / checked and it prints fine"
+            onChange={event=>setRestoring(current=>({...current, reason:event.target.value}))} />
+        </Field>
+      </div>
+    </Modal>}
     {/* Ad-hoc issue: the rack already holds the plates, so the job takes them without
         a PR being raised to buy what exists. It still lands on a JOB, so the plate
         returns through the normal completion flow. */}
@@ -1596,6 +1732,7 @@ export default function PlatesLifecycle() {
         <SubTabs active={warehouseView} onChange={value=>{setWarehouseView(value);setRackPicked([]);}} views={[
           {key:'fresh',label:'Fresh',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===FRESH_PLATES_RACK).length},
           {key:'used',label:'Used',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===USED_PLATES_RACK).length},
+          {key:'aside',label:'Set aside',count:asideRows.length},
         ]}/>
         {/* Size sits BESIDE the rack switch, not on a rail of its own — a second full
             band of chips is what made this page read as clutter. Lighter weight than
@@ -1619,10 +1756,15 @@ export default function PlatesLifecycle() {
         {rackPicked.length > 0 && <div className="ml-auto flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5">
           <b className="text-sm text-brand-900">{rackPicked.length} plate set(s) ticked</b>
           <Button size="sm" variant="ghost" onClick={()=>setRackPicked([])}>Clear</Button>
-          {canManage() && <Button size="sm" onClick={()=>setIssuing({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), job_card_id:'', note:'' })}>
+          {/* Neither of these is a question you can ask of a plate that is already off
+              the rack: Issue wants an available plate and Retire wants one to scrap.
+              Offering them on the Set aside tab would be two buttons whose only reply
+              is an error. Bringing a set back is offered per row instead, because the
+              condition is stated about ONE set of plates, not a tickbox full of them. */}
+          {canManage() && warehouseView !== 'aside' && <Button size="sm" onClick={()=>setIssuing({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), job_card_id:'', note:'' })}>
             <Send size={13}/> Issue to a Job
           </Button>}
-          {canManage() && <Button size="sm" variant="danger" onClick={()=>setRetiring({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), reason:'', note:'' })}>
+          {canManage() && warehouseView !== 'aside' && <Button size="sm" variant="danger" onClick={()=>setRetiring({ rows: warehouseRows.filter(row=>rackPicked.includes(row.id)), reason:'', note:'' })}>
             <Trash2 size={13}/> Retire
           </Button>}
         </div>}
@@ -1631,7 +1773,9 @@ export default function PlatesLifecycle() {
         selectedIds={rackPicked}
         onToggleRow={(row,checked)=>setRackPicked(current=>checked?[...current,row.id]:current.filter(id=>id!==row.id))}
         onToggleAll={(rows,checked)=>{ const ids=rows.map(row=>row.id); setRackPicked(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}
-        onRowClick={setAssetHistory} empty="No available plate sets in this rack" exportName="Plates Warehouse" />
+        onRowClick={setAssetHistory}
+        empty={warehouseView === 'aside' ? 'Nothing is set aside — every plate is on a rack or on a press' : 'No available plate sets in this rack'}
+        exportName={warehouseView === 'aside' ? 'Plates Set Aside' : 'Plates Warehouse'} />
     </>}
     {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} empty="No plates awaiting return verification" exportName="Plate Returns" />}
     {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} empty="No plate movements" exportName="Plate Movement History" />}
@@ -1736,7 +1880,7 @@ export default function PlatesLifecycle() {
         picker is open — the modal re-seeds its selection on that identity. */}
     <RackPickerModal open={Boolean(picker)} requestNumber={picker?.row?.request_number}
       lines={picker?.lines || []} busy={busyRow === picker?.row?.id}
-      onCancel={() => setPicker(null)} onConfirm={confirmPicks} />
+      onCancel={() => setPicker(null)} onConfirm={confirmPicks} onSetAside={setAsidePlate} />
     {verifying && <VerificationModal component={verifying} onClose={()=>setVerifying(null)} onSaved={refreshDetail}/>}
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
