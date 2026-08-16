@@ -27,6 +27,8 @@ import { boardShortOf } from '../lib/boardShort.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf, isGangRun, isMergeRun } from '../components/SetType.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
@@ -2748,68 +2750,57 @@ export default function Planning() {
           job IS in the workflow, zones are how it will PRINT. Opens on All so
           every To Plan job is visible before the planner narrows the queue.
           Counts are rows (a gang = one job), scoped to the active tab. */}
-      <div className="-mt-1 mb-3 flex flex-wrap items-center gap-1">
-        {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['new_output', 'New Output', SET_TYPE_META.new_output.icon], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
-          <button key={k} type="button" onClick={() => { setSubTab(k); clearSelection(); }}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-              subTab === k
-                ? k === 'hold' ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
-                  : k === 'gang' ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
-                  : k === 'new_output' ? 'bg-sky-100 text-sky-800 ring-1 ring-sky-200'
-                  : 'bg-[#1D1D1F]/[0.85] text-white'
-                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-            {Icon && <Icon size={11} />} {label}
-            <span className={`rounded-full px-1.5 text-[10px] ${subTab === k ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-              {fmt.num(zoneCounts[k])}
-            </span>
-          </button>
-        ))}
+      <FilterRail className="-mt-1 mb-3">
+        {/* Only Gang, New Output and Hold spend a hue — each is a job that
+            prints differently from the ordinary case and that the planner has
+            to treat differently. Single IS the ordinary case, so it lights
+            graphite next to All. Same rule on Print Planning's rail: colour
+            marks what needs acting on, the caption says which axis you are on. */}
+        <FilterGroup label="Set Type" divider={false}>
+          {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['new_output', 'New Output', SET_TYPE_META.new_output.icon], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
+            <FilterChip key={k} label={label} icon={Icon} count={zoneCounts[k]} on={subTab === k}
+              tone={k === 'hold' ? 'border-amber-200 bg-amber-100 text-amber-800'
+                : k === 'gang' ? 'border-violet-200 bg-violet-100 text-violet-800'
+                  : k === 'new_output' ? 'border-sky-200 bg-sky-100 text-sky-800'
+                    : undefined}
+              onClick={() => { setSubTab(k); clearSelection(); }} />
+          ))}
+        </FilterGroup>
         {/* The second AXIS — chips that narrow whichever zone is open rather
             than partitioning the tab the way the set-types do. They ride the
             same strip so the planner reaches them with the zone chips, but
-            behind a hairline divider and in their own colours. ONE divider
-            serves both, so adding Combined costs no separator, and each hides
-            at zero — on a day with neither the strip is exactly as wide as it
-            was before either existed. */}
-        {(mergeCount > 0 || draftCount > 0)
-          && <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />}
-        {/* Combined — one product, several sales orders, printed as one pile.
+            behind a hairline divider, under their own caption, and in their own
+            colours. ONE group serves both, so adding Combined costs no
+            separator, and the group hides when neither has anything to show —
+            on such a day the strip is exactly as wide as it was before either
+            existed.
+
+            Combined — one product, several sales orders, printed as one pile.
             Teal because across this ERP violet means "splits after die
             cutting", which is the one thing a combined run never does; Layers
             because that is the icon on the Combine Orders button that makes
             them. It is a FACT chip, so unlike the zones it needs no server
-            round-trip and cannot disagree with the row's own teal chip. */}
-        {mergeCount > 0 && (
-          <button type="button" onClick={() => { setMergeOnly(v => !v); clearSelection(); }}
-            title="Combined runs only — one product on several sales orders, printed as one pile"
-            aria-pressed={mergeOnly}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-              mergeOnly
-                ? 'bg-teal-100 text-teal-800 ring-1 ring-teal-200'
-                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-            <Layers size={11} /> Combined
-            <span className={`rounded-full px-1.5 text-[10px] ${mergeOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-              {fmt.num(mergeCount)}
-            </span>
-          </button>
-        )}
-        {/* Plan saved — hidden at zero for the same reason: only To Plan can
+            round-trip and cannot disagree with the row's own teal chip.
+
+            Plan saved is hidden at zero for its own reason: only To Plan can
             hold a saved-but-unlocked plan, so everywhere else the chip would be
             a control with nothing to do. */}
-        {draftCount > 0 && <>
-          <button type="button" onClick={() => { setDraftOnly(v => !v); clearSelection(); }}
-            title="Show only jobs whose plan is saved and still waiting to be locked"
-            aria-pressed={draftOnly}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-              draftOnly
-                ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
-                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-            <BookmarkCheck size={11} /> Plan saved
-            <span className={`rounded-full px-1.5 text-[10px] ${draftOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-              {fmt.num(draftCount)}
-            </span>
-          </button>
-        </>}
+        {(mergeCount > 0 || draftCount > 0) && (
+          <FilterGroup label="Only">
+            {mergeCount > 0 && (
+              <FilterChip label="Combined" icon={Layers} count={mergeCount} on={mergeOnly}
+                tone="border-teal-200 bg-teal-100 text-teal-800"
+                title="Combined runs only — one product on several sales orders, printed as one pile"
+                onClick={() => { setMergeOnly(v => !v); clearSelection(); }} />
+            )}
+            {draftCount > 0 && (
+              <FilterChip label="Plan saved" icon={BookmarkCheck} count={draftCount} on={draftOnly}
+                tone="border-blue-200 bg-blue-100 text-blue-800"
+                title="Show only jobs whose plan is saved and still waiting to be locked"
+                onClick={() => { setDraftOnly(v => !v); clearSelection(); }} />
+            )}
+          </FilterGroup>
+        )}
         {/* Customer — a third axis, and the only one on this rail that is about
             WHOSE work rather than how it prints. Multi-select, so "SGLS and SGB,
             nothing else" is two clicks rather than an impossible question.
@@ -2823,36 +2814,26 @@ export default function Planning() {
 
             Hidden below two customers — a filter offering one choice narrows
             nothing, and the strip should not grow to say so. */}
-        {customerChips.length > 1 && <>
-          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
-          {customerChips.map(c => {
-            const on = customerFilters.includes(c.id);
-            const hue = customerHue(c.id);
-            return (
-              <button key={c.id} type="button"
-                onClick={() => {
-                  setCustomerFilters(f => (f.includes(c.id) ? f.filter(x => x !== c.id) : [...f, c.id]));
-                  clearSelection();
-                }}
-                title={`${c.name || 'Unnamed customer'} — ${fmt.count(c.count, 'row')} in this zone. Composes with the zone, the board cards and the searches; click again to clear.`}
-                aria-pressed={on}
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                  on
-                    ? 'bg-[#1D1D1F]/[0.85] text-white'
-                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-                {hue && <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${hue.dot}`} />}
-                {customerInitials(c.name) || '—'}
-                <span className={`rounded-full px-1.5 text-[10px] ${on ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-                  {fmt.num(c.count)}
-                </span>
-              </button>
-            );
-          })}
-        </>}
+        {customerChips.length > 1 && (
+          <FilterGroup label="Customer">
+            {customerChips.map(c => {
+              const hue = customerHue(c.id);
+              return (
+                <FilterChip key={c.id} label={customerInitials(c.name) || '—'} count={c.count}
+                  dot={hue?.dot} on={customerFilters.includes(c.id)}
+                  title={`${c.name || 'Unnamed customer'} — ${fmt.count(c.count, 'row')} in this zone. Composes with the zone, the board cards and the searches; click again to clear.`}
+                  onClick={() => {
+                    setCustomerFilters(f => (f.includes(c.id) ? f.filter(x => x !== c.id) : [...f, c.id]));
+                    clearSelection();
+                  }} />
+              );
+            })}
+          </FilterGroup>
+        )}
         {/* The way back to the whole queue. Hidden while nothing is lit, so on an
             unfiltered board the rail is exactly as wide as it was. */}
         <ResetFilters filters={filters} className="ml-auto" />
-      </div>
+      </FilterRail>
 
       {/* ONE strip, one control. Every filter this page offers is a card here —
           there is no second row of chips saying the same thing in smaller type,
