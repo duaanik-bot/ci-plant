@@ -17,6 +17,8 @@ import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import PlateStatus from '../components/PlateStatus.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup } from '../components/FilterChip.jsx';
 // Printing colour + process follows the same one-vocabulary rule — see PrintColour.jsx.
 import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, ActiveColourFilters,
          COLOUR_RANK, PROCESS_RANK, colourTypeOf, processOf, totalColoursOf, colourSummary,
@@ -135,11 +137,16 @@ function LaneSearch({ value, onChange, placeholder }) {
   );
 }
 
+// Both places this renders — the board's header rail and an expanded lane's
+// toolbar — put something before it (the view switch; the lane name), so it
+// always wants its leading hairline.
 function BoardStatusChips({ value, onChange, counts, scope = 'across the board' }) {
   return (
-    <div className="flex shrink-0 items-center gap-1.5">
-      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
+    <FilterGroup label="Board">
       {[
+        // "All" reads identically here and in the Set Type group two chips to
+        // the right, and on a typical board both say 30. The caption is what
+        // tells them apart, which is why every group on this rail now has one.
         { key: 'all', label: 'All', count: counts.all },
         // Lit chips wear the badge's own tone, read from BOARD_TONE rather than
         // restated here: the chip you clicked and the badge you read must never
@@ -147,21 +154,15 @@ function BoardStatusChips({ value, onChange, counts, scope = 'across the board' 
         { key: 'covered', label: BOARD_LABEL.covered, count: counts.covered, on: BOARD_TONE.covered, pill: BOARD_COUNT_TONE.covered },
         { key: 'on_order', label: BOARD_LABEL.on_order, count: counts.on_order, on: BOARD_TONE.on_order, pill: BOARD_COUNT_TONE.on_order },
         { key: 'short', label: BOARD_LABEL.short, count: counts.short, on: BOARD_TONE.short, pill: BOARD_COUNT_TONE.short },
-      ].map(f => {
-        const on = value === f.key;
-        return (
-          <button key={f.key} type="button" onClick={() => onChange(f.key)}
-            title={f.key === 'all'
-              ? `${f.count} job${f.count === 1 ? '' : 's'} ${scope}`
-              : `${f.count} ${scope} — ${BOARD_HINT[f.key]}`}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-              on ? (f.on || 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]') : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-            {f.label}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? (f.pill || 'bg-white/70') : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
-          </button>
-        );
-      })}
-    </div>
+      ].map(f => (
+        <FilterChip key={f.key} label={f.label} count={f.count} on={value === f.key}
+          tone={f.on} countTone={f.pill}
+          title={f.key === 'all'
+            ? `${f.count} job${f.count === 1 ? '' : 's'} ${scope}`
+            : `${f.count} ${scope} — ${BOARD_HINT[f.key]}`}
+          onClick={() => onChange(f.key)} />
+      ))}
+    </FilterGroup>
   );
 }
 
@@ -1406,10 +1407,13 @@ export default function PrintPlanning() {
           <Radio size={14} /> Live Printing
         </Link></>} />
 
-      {/* ONE header row: view switch, the whole triage toolbar (count, select,
-          bulk send), and search. Everything above the cards lives here so the
-          cards start as high on the screen as possible. */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+      {/* ROW 1 — the view switch and every filter, and nothing else. Six axes
+          narrow this board; each is a captioned group behind a hairline, so the
+          rail reads as six short questions rather than one run of twenty chips.
+          The triage toolbar that used to share this container now has its own
+          row below. Gaps stay tight (gap-x-2): the dividers do the separating,
+          and a wide gap on top of them spaces the rail out twice. */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-2">
         <div className="inline-flex shrink-0 rounded-full border border-white/70 bg-white/60 p-1 shadow-card backdrop-blur-xl">
           {[['board', 'Board', LayoutGrid], ['completed', 'Completed', CheckCircle2]].map(([key, label, Icon]) => (
             <button key={key} onClick={() => setTab(key)}
@@ -1434,52 +1438,49 @@ export default function PrintPlanning() {
           // only, like every chip on this rail: positions are never rewritten,
           // and a change clears the selection so a bulk send can't carry rows
           // the eye just lost.
-          <div className="flex shrink-0 items-center gap-1">
+          //
+          // Only Gang and Hold spend a hue. Single is the ordinary case and has
+          // nothing to warn about, so it lights graphite alongside All — which
+          // is the rule the whole rail now follows: colour marks the jobs
+          // somebody has to act on, structure says which axis you are on.
+          <FilterGroup label="Set Type">
             {[['all', 'All', null], ['single', 'Single', SET_TYPE_META.single.icon], ['gang', 'Gang', Link2], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
-              <button key={k} type="button" onClick={() => { setZone(k); clearSel(); }}
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                  zone === k
-                    ? k === 'hold' ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
-                      : k === 'gang' ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
-                      : 'bg-[#1D1D1F]/[0.85] text-white'
-                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-                {Icon && <Icon size={11} />} {label}
-                <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${zone === k ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-                  {zoneCounts[k]}
-                </span>
-              </button>
+              <FilterChip key={k} label={label} icon={Icon} count={zoneCounts[k]} on={zone === k}
+                tone={k === 'hold' ? 'border-amber-200 bg-amber-100 text-amber-800'
+                  : k === 'gang' ? 'border-violet-200 bg-violet-100 text-violet-800'
+                    : undefined}
+                onClick={() => { setZone(k); clearSel(); }} />
             ))}
-            {/* Combined — a second AXIS, not a fifth zone: it narrows whichever
-                zone is open. Teal because violet here means "splits after die
-                cutting", the one thing a combined run never does. Hidden at
-                zero so the rail does not grow on a board without one. */}
-            {mergeCount > 0 && <>
-              <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
-              <button type="button" onClick={() => { setMergeOnly(v => !v); clearSel(); }}
-                title="Combined runs only — one product on several sales orders, printed as one pile"
-                aria-pressed={mergeOnly}
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                  mergeOnly
-                    ? 'bg-teal-100 text-teal-800 ring-1 ring-teal-200'
-                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
-                <Layers size={11} /> Combined
-                <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${mergeOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-                  {mergeCount}
-                </span>
-              </button>
-            </>}
-          </div>
+          </FilterGroup>
+        )}
+        {/* Combined — a second AXIS, not a fifth zone: it narrows whichever
+            zone is open, so it gets its own caption rather than sitting in the
+            Set Type run where it would read as one. Teal because violet here
+            means "splits after die cutting", the one thing a combined run never
+            does. Hidden at zero so the rail does not grow on a board without
+            one — and the group's hairline goes with it. */}
+        {tab === 'board' && mergeCount > 0 && (
+          <FilterGroup label="Only">
+            <FilterChip label="Combined" icon={Layers} count={mergeCount} on={mergeOnly}
+              tone="border-teal-200 bg-teal-100 text-teal-800"
+              title="Combined runs only — one product on several sales orders, printed as one pile"
+              onClick={() => { setMergeOnly(v => !v); clearSel(); }} />
+          </FilterGroup>
         )}
         {tab === 'board' && (
-          <button type="button" onClick={() => { setWipOnly(w => !w); clearSel(); }}
-            title="Only job CARDS carrying a Customer WIP line — composes with the board chips and searches. A third unit again: the Status Sheet counts WIP lines (its whole cumulative list), Planning counts WIP jobs in the planning queue, and this counts the cards already on the board, so all three numbers legitimately differ."
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-              wipOnly ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white shadow-sm' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-            <Zap size={12} fill={wipOnly ? 'currentColor' : 'none'} /> Customer WIP
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${wipOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-              {cards.filter(c => c.wip).length}
-            </span>
-          </button>
+          // The only chip here about URGENCY rather than about what the job is,
+          // and the one chip that keeps the system blue — which now appears
+          // exactly twice on this rail, here and on Reset, both meaning "a
+          // control you switched on". It sits before the ink block rather than
+          // after it so the rail breaks into two even rows: the three axes that
+          // describe the JOB, then the three that describe its INK (that block
+          // is its own flex container and always wraps whole).
+          <FilterGroup label="Urgency">
+            <FilterChip label="Customer WIP" icon={Zap} count={cards.filter(c => c.wip).length} on={wipOnly}
+              tone="border-[#0A84FF]/30 bg-[#0A84FF] text-white" countTone="bg-white/25"
+              title="Only job CARDS carrying a Customer WIP line — composes with the board chips and searches. A third unit again: the Status Sheet counts WIP lines (its whole cumulative list), Planning counts WIP jobs in the planning queue, and this counts the cards already on the board, so all three numbers legitimately differ."
+              onClick={() => { setWipOnly(w => !w); clearSel(); }} />
+          </FilterGroup>
         )}
         {tab === 'board' && (
           // Ink filters — the same rail the printing station queue uses, so a
@@ -1494,9 +1495,16 @@ export default function PrintPlanning() {
         )}
         {/* Nine axes narrow this board and every one of them is a small chip.
             One control puts them all back; hidden while none is lit. */}
-        {tab === 'board' && <ResetFilters filters={filters} />}
-        {tab === 'board' && (
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        {tab === 'board' && <ResetFilters filters={filters} className="ml-auto" />}
+      </div>
+
+      {/* The TRIAGE TOOLBAR — its own row, not more chips on the filter rail.
+          It used to share that wrap container, so "13 jobs · 22,026 sh", the
+          lane search and three buttons queued up behind twenty filter chips and
+          landed wherever the wrap happened to put them. They are not filters;
+          they act on the band directly below them, and they now sit with it. */}
+      {tab === 'board' && (
+          <div className="mb-2.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
             <span className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
               <Inbox size={14} className={TRIAGE_THEME.icon} /> Triage
             </span>
@@ -1536,9 +1544,8 @@ export default function PrintPlanning() {
                 </span>
               )}
             </>)}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {tab === 'board' && (<>
       {/* What the board is currently narrowed to, said back in words with one

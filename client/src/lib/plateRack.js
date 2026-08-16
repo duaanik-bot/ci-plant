@@ -21,6 +21,24 @@ export const PLATE_RETIRE_REASONS = [
   'Other',
 ];
 
+// Why a plate is coming OFF the rack today — a different question from
+// PLATE_RETIRE_REASONS above, which asks why a plate is dead. Sharing that list
+// would offer "Artwork changed" as a temporary state and "Can't find it" as a
+// reason to scrap.
+//
+// This is the only copy. server/src/plates.js imports it from here, the same
+// direction server/src/helpers.js already imports productCode.js — one home
+// beats a twin that has to be kept in step.
+//
+// No entry carries a condition: setting a plate aside records WHERE it stands,
+// never re-grades it. Grading is what inspection does.
+export const PLATE_SET_ASIDE_REASONS = [
+  { key: 'damaged', label: 'Damaged',        status: 'damaged',               action: 'damaged' },
+  { key: 'missing', label: "Can't find it",  status: 'lost',                  action: 'not_found' },
+  { key: 'check',   label: 'Needs checking', status: 'awaiting_verification', action: 'verification_requested' },
+  { key: 'other',   label: 'Other',          status: 'awaiting_verification', action: 'verification_requested' },
+];
+
 const DAY = 24 * 60 * 60 * 1000;
 
 // Counted in PHYSICAL PLATES, not sets — a warehouse row is a set of four, and "4"

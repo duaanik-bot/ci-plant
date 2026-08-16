@@ -1,4 +1,5 @@
 import { derivedCounts } from './print-colour.js';
+import { PLATE_SET_ASIDE_REASONS } from '../../client/src/lib/plateRack.js';
 
 const PROCESS_COMPONENTS = [
   ['cyan', 'Cyan'],
@@ -514,12 +515,134 @@ export function pickAvailableRackPlates({ rackAssets = [], assetIds = [] } = {})
   }
   const busy = wanted.map(id => byId.get(id)).find(row => row.status !== 'available');
   if (busy) {
+    // Asset number FIRST. This used to lead with component_label, and
+    // plate_assets.component_label is NOT NULL, so the asset number was never
+    // reached: every refusal read "cyan is not available". On a four-plate set
+    // with two cyans that does not say which plate is blocking, and the planner
+    // has no way to find it on the shelf. The colour still follows, because it
+    // is how the plate is labelled physically.
     throw Object.assign(
-      new Error(`${busy.component_label || busy.asset_number || `Plate ${busy.id}`} is not available — it is ${busy.status.replace(/_/g, ' ')}`),
+      new Error(`${busy.asset_number || `Plate ${busy.id}`}${busy.component_label ? ` (${busy.component_label})` : ''} is not available — it is ${busy.status.replace(/_/g, ' ')}`),
       { status: 409 },
     );
   }
   return wanted.map(id => byId.get(id));
+}
+
+const SET_ASIDE_BY_KEY = new Map(PLATE_SET_ASIDE_REASONS.map(row => [row.key, row]));
+
+// Taking a plate off the rack for now — damaged, missing, or wanting a look —
+// without scrapping it.
+//
+// The in-flight check is pickAvailableRackPlates, the same one Retire uses,
+// deliberately: a plate a job card is relying on must never leave the rack
+// underneath it, and two spellings of that rule would drift apart.
+//
+// Keyed by `key`, never by the label the screen shows, so re-wording a button
+// can never change what it does.
+export function validateSetAside({ rackAssets = [], assetIds = [], reason } = {}) {
+  const rule = SET_ASIDE_BY_KEY.get(String(reason ?? '').trim());
+  if (!rule) {
+    throw Object.assign(new Error('Choose why this plate is coming off the rack'), { status: 400 });
+  }
+  return { picked: pickAvailableRackPlates({ rackAssets, assetIds }), rule };
+}
+
+export const PLATE_SET_ASIDE_STATUSES = ['damaged', 'lost', 'awaiting_verification'];
+// Scrapped is here because un-retiring is allowed — see the design note. It is
+// the one restorable state that also has to clear active=0, which the route does.
+export const PLATE_RESTORABLE_STATUSES = [...PLATE_SET_ASIDE_STATUSES, 'scrapped'];
+
+const RESTORE_CONDITIONS = ['Good', 'Fair'];
+
+// Putting a plate back on the rack, including bringing back one that was
+// retired.
+//
+// The condition is REQUIRED and has no default. A scrapped plate's condition
+// reads 'Scrapped'; letting it return as 'Good' because nobody chose would put
+// an invented grade on a plate the floor prints from. The movements table stores
+// only the resulting condition, so there is no earlier value to restore either.
+export function validateMakeAvailable({ rackAssets = [], assetIds = [], condition } = {}) {
+  const wanted = [...new Set((Array.isArray(assetIds) ? assetIds : []).map(Number))].filter(Boolean);
+  if (!wanted.length) {
+    throw Object.assign(new Error('Tick at least one plate'), { status: 400 });
+  }
+  if (!RESTORE_CONDITIONS.includes(condition)) {
+    throw Object.assign(new Error('Say what condition the plate is in — Good or Fair'), { status: 400 });
+  }
+  const byId = new Map((Array.isArray(rackAssets) ? rackAssets : []).map(row => [Number(row.id), row]));
+  const stranger = wanted.find(id => !byId.has(id));
+  if (stranger) {
+    throw Object.assign(new Error(`Plate ${stranger} is not in this rack`), { status: 409 });
+  }
+  const busy = wanted.map(id => byId.get(id))
+    .find(row => !PLATE_RESTORABLE_STATUSES.includes(row.status));
+  if (busy) {
+    throw Object.assign(
+      new Error(`${busy.asset_number || `Plate ${busy.id}`} is not set aside — it is ${String(busy.status).replace(/_/g, ' ')}`),
+      { status: 409 });
+  }
+  return wanted.map(id => byId.get(id));
+}
+
+// The set-aside actions, and ONLY those, can be undone by replaying a movement
+// backwards. Retire is reversed by Return to rack, which asks for the condition
+// the record cannot supply; 'adjustment' is deliberately absent because
+// releaseDraftPlateAssets writes it too.
+const UNDOABLE_SET_ASIDE_ACTIONS = PLATE_SET_ASIDE_REASONS.map(row => row.action);
+
+// Undo, expressed as the inverse of one movement rather than as new state.
+//
+// Restores status and location only. Set aside never changed the grade, so there
+// is nothing to put back — and plate_asset_movements holds a single `condition`
+// column recording what the movement RESULTED in, with no from_condition, so a
+// grade could not be restored even if one had changed.
+export function invertMovement({ movement, asset } = {}) {
+  if (!movement || !asset) {
+    throw Object.assign(new Error('That change is no longer on record'), { status: 404 });
+  }
+  // A job-linked movement belongs to a reservation or an issue and has its own
+  // reversal path.
+  //
+  // The two guards below catch DIFFERENT things, and it is worth being exact
+  // about which, because the obvious reading is backwards:
+  //
+  //   • The ACTION check is what keeps releaseDraftPlateAssets out. Its rows
+  //     carry job ids when written — but plate_asset_movements.tooling_request_id
+  //     and .job_card_id are both ON DELETE SET NULL, and both parents really are
+  //     deleted (deletePlateRequirements drops the request; job cards are deleted
+  //     in workflow.js and gangs.js, cascading the request away). A released-plate
+  //     row with BOTH ids NULL is a reachable state, so the id check cannot be
+  //     what protects it. 'adjustment' being absent from the action list is.
+  //
+  //   • The ID check is what keeps the PR VERIFICATION flow out — and that flow
+  //     writes the very actions this one undoes. plate-lifecycle.js:177 writes
+  //     'verification_requested' with from_status === to_status, so it would clear
+  //     the action guard AND the superseded guard below; :314 writes 'not_found'
+  //     from issued_to_printing, and undoing that would put a lost plate back on
+  //     a press.
+  //
+  // So: do NOT add 'adjustment' here on the belief that the ids cover it.
+  if (movement.tooling_request_id || movement.job_card_id) {
+    throw Object.assign(
+      new Error('That change belongs to a job card — undo it from the requirement, not the rack'),
+      { status: 409, body: { code: 'MOVEMENT_NOT_UNDOABLE' } });
+  }
+  if (!UNDOABLE_SET_ASIDE_ACTIONS.includes(movement.action)) {
+    throw Object.assign(
+      new Error('That change cannot be undone here — bring the plate back from the Set aside tab instead'),
+      { status: 409, body: { code: 'MOVEMENT_NOT_UNDOABLE' } });
+  }
+  if (String(asset.status) !== String(movement.to_status)) {
+    throw Object.assign(
+      new Error(`${asset.asset_number} has changed since — it is now ${String(asset.status).replace(/_/g, ' ')}`),
+      { status: 409, body: { code: 'MOVEMENT_SUPERSEDED' } });
+  }
+  return {
+    status: movement.from_status,
+    rack_location: movement.from_location,
+    active: movement.from_status === 'scrapped' ? 0 : 1,
+  };
 }
 
 // Turn "the planner ticked these plates" into "assign these, skip those".

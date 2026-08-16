@@ -13,6 +13,7 @@
 // prints on a conventional offset unit; folding the two axes into one field is
 // exactly what put Pantone and metallic jobs into the same bucket on the floor.
 import { Droplet, Palette, Layers, Printer, Sparkles } from 'lucide-react';
+import { FilterChip, FilterGroup, FilterRail } from './FilterChip.jsx';
 import {
   COLOUR_TYPES, PRINT_PROCESSES, COLOUR_BANDS,
   colourTypeOf, processOf, totalColoursOf, cmykCountOf, pantoneCountOf, metallicCountOf,
@@ -50,10 +51,25 @@ export const PROCESS_HINT = {
 // at all. Composition runs cool (sky → violet), process runs warm (slate →
 // amber), so the two axes can never be mistaken for one scale.
 // Full class strings written out literally so Tailwind's JIT cannot purge them.
+//
+// The two SPOT states share the violet family and are separated by DEPTH, the
+// same way BOARD_TONE separates its two red states. That is not decoration: the
+// question this badge answers on the floor is "does the press need spot ink
+// pulled from the store?", and the answer is no (sky) / yes (violet) / yes and
+// process too (violet, heavier). One family, one question.
+//
+// `CMYK + Pantone` WAS indigo, and that was a real bug rather than a taste
+// call: tailwind.config.js aliases `indigo` to systemBlue, so the badge painted
+// #0A84FF — the exact hue this ERP reserves for "lit control" (RESERVED_HUES in
+// lib/customerColour.js). Worse, at the tint a badge actually renders, indigo-50
+// sat ΔE 1.3 from sky-50 — BELOW the ~2.3 an eye can catch — so CMYK and
+// CMYK + Pantone were the same colour on screen. The depth pair below measures
+// ΔE 14.6 apart at the background, 21.7 at the border, and 48.0 from the lit
+// blue. Do not "restore" indigo here; a name check cannot see the alias.
 export const COLOUR_TONE = {
   'CMYK': 'border-sky-200 bg-sky-50 text-sky-700',
   'Pantone': 'border-violet-200 bg-violet-50 text-violet-700',
-  'CMYK + Pantone': 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  'CMYK + Pantone': 'border-violet-300 bg-violet-100 text-violet-800',
 };
 export const PROCESS_TONE = {
   'Offset': 'border-slate-200 bg-slate-50 text-slate-600',
@@ -180,55 +196,56 @@ export function colourDetailLines(row) {
 // spot colour and hides CMYK-only work. Selection lives in the PAGE, so it
 // survives switching between the card board and the table view.
 
-function Chip({ label, count, on, onTone, pillTone, onClick, title }) {
-  return (
-    <button type="button" onClick={onClick} title={title}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-        on ? (onTone || 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]') : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-      {label}
-      {count != null && (
-        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? (pillTone || 'bg-white/70') : 'bg-[#1D1D1F]/[0.07]'}`}>{count}</span>
-      )}
-    </button>
-  );
-}
-
+// The chip shape itself now lives in FilterChip.jsx — shared with the board
+// chips, the set-type zones and Customer WIP, which is what stopped Print
+// Planning from alternating two pill styles across one line. This rail keeps
+// only what is ITS OWN: which axes exist, and which tone each value wears.
 export function PrintColourFilterRail({
   colour, setColour, process, setProcess, band, setBand,
   counts = {}, scope = 'across the board', showBands = true,
 }) {
   const cc = counts.colour || {}, pc = counts.process || {}, bc = counts.band || {};
+  // Still ONE element, not three loose groups: this rail is dropped into three
+  // different toolbars (the board header, an expanded lane's toolbar, and the
+  // printing station queue) and its three axes have to wrap together as a block
+  // wherever it lands, rather than scattering among that toolbar's own buttons.
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Colour</span>
+    <FilterRail className="shrink-0">
+      {/* "Ink", not "Colour" — this group and the count group below it read
+          "Colour" and "Colours" on the same rail, one letter apart, and the
+          planner had to count characters to tell which axis they were on. */}
+      <FilterGroup label="Ink">
         {COLOUR_TYPES.map(t => (
-          <Chip key={t} label={COLOUR_LABEL[t]} count={cc[t] || 0} on={colour.has(t)}
-            onTone={COLOUR_TONE[t]} pillTone={COLOUR_COUNT_TONE[t]}
+          <FilterChip key={t} label={COLOUR_LABEL[t]} count={cc[t] || 0} on={colour.has(t)}
+            icon={COLOUR_ICON[t]} tone={COLOUR_TONE[t]} countTone={COLOUR_COUNT_TONE[t]}
             title={`${cc[t] || 0} ${scope} — ${COLOUR_HINT[t]}`}
             onClick={() => setColour(toggleInSet(colour, t))} />
         ))}
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Process</span>
+      </FilterGroup>
+      <FilterGroup label="Process">
         {PRINT_PROCESSES.map(t => (
-          <Chip key={t} label={PROCESS_LABEL[t]} count={pc[t] || 0} on={process.has(t)}
-            onTone={PROCESS_TONE[t]} pillTone={PROCESS_COUNT_TONE[t]}
+          <FilterChip key={t} label={PROCESS_LABEL[t]} count={pc[t] || 0} on={process.has(t)}
+            icon={PROCESS_ICON[t]} tone={PROCESS_TONE[t]} countTone={PROCESS_COUNT_TONE[t]}
             title={`${pc[t] || 0} ${scope} — ${PROCESS_HINT[t]}`}
             onClick={() => setProcess(toggleInSet(process, t))} />
         ))}
-      </div>
+      </FilterGroup>
       {showBands && setBand && (
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Colours</span>
+        // No tone, so these light GRAPHITE. They used to fall through to the
+        // default lit blue, which put six chips in the exact hue this ERP
+        // reserves for "lit control" — and, because tailwind.config.js aliases
+        // indigo to systemBlue, in the exact hue of CMYK + Pantone three chips
+        // to their left. A colour COUNT is a quantity, not a status; it has
+        // nothing to warn about and so spends no hue.
+        <FilterGroup label="Colours">
           {COLOUR_BANDS.map(b => (
-            <Chip key={b.key} label={b.label} count={bc[b.key] || 0} on={band.has(b.key)}
+            <FilterChip key={b.key} label={b.label} count={bc[b.key] || 0} on={band.has(b.key)}
               title={`${bc[b.key] || 0} ${scope} with ${b.label} printing colours`}
               onClick={() => setBand(toggleInSet(band, b.key))} />
           ))}
-        </div>
+        </FilterGroup>
       )}
-    </div>
+    </FilterRail>
   );
 }
 
