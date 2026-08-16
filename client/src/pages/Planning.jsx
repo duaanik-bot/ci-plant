@@ -2852,10 +2852,7 @@ export default function Planning() {
         <FilterGroup label="Set Type" divider={false}>
           {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['new_output', 'New Output', SET_TYPE_META.new_output.icon], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
             <FilterChip key={k} label={label} icon={Icon} count={zoneCounts[k]} on={subTab === k}
-              tone={k === 'hold' ? 'border-amber-200 bg-amber-100 text-amber-800'
-                : k === 'gang' ? 'border-violet-200 bg-violet-100 text-violet-800'
-                  : k === 'new_output' ? 'border-sky-200 bg-sky-100 text-sky-800'
-                    : undefined}
+              tone={SET_TYPE_META[k]?.lit}
               onClick={() => { setSubTab(k); clearSelection(); }} />
           ))}
         </FilterGroup>

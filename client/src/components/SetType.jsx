@@ -25,11 +25,28 @@ import { Link2, PauseCircle, Square, Stamp, ChevronDown } from 'lucide-react';
 // rather than inside it because the two piles are worked by different people
 // on different days — plate-making has to happen before the job is schedulable
 // at all.
+// `chip` is the tag a ROW or card wears; `lit` is the same state as a SWITCHED-ON
+// filter chip, one step heavier so a lit rail reads louder than the tags below
+// it. Both live here so the two filter rails stop carrying their own copies —
+// a page that re-declares a set-type tone is how this vocabulary drifts.
+//
+// `single` has NO `lit`: it is the ordinary case, warns nobody, and so lights
+// graphite like All (see FilterChip.jsx — hue marks what must be acted on).
+//
+// These hues are the set-type axis's BY CONTRACT — RESERVED_HUES in
+// lib/customerColour.js names violet for gang, and customer-colour.test.js
+// measures every customer dot against it. The ink axis used to paint the very
+// same strings (gang == Pantone, new_output == CMYK, single == Offset, all
+// byte-identical); it now wears a neutral shell with a dot instead, so nothing
+// else on a card face competes for these. See PrintColour.jsx.
 export const SET_TYPE_META = {
   single:     { label: 'Single',     icon: Square,      chip: 'border-slate-200 bg-slate-50 text-slate-600' },
-  gang:       { label: 'Gang',       icon: Link2,       chip: 'border-violet-200 bg-violet-50 text-violet-700' },
-  new_output: { label: 'New Output', icon: Stamp,       chip: 'border-sky-200 bg-sky-50 text-sky-700' },
-  hold:       { label: 'Hold',       icon: PauseCircle, chip: 'border-amber-200 bg-amber-50 text-amber-700' },
+  gang:       { label: 'Gang',       icon: Link2,       chip: 'border-violet-200 bg-violet-50 text-violet-700',
+                lit: 'border-violet-200 bg-violet-100 text-violet-800' },
+  new_output: { label: 'New Output', icon: Stamp,       chip: 'border-sky-200 bg-sky-50 text-sky-700',
+                lit: 'border-sky-200 bg-sky-100 text-sky-800' },
+  hold:       { label: 'Hold',       icon: PauseCircle, chip: 'border-amber-200 bg-amber-50 text-amber-700',
+                lit: 'border-amber-200 bg-amber-100 text-amber-800' },
 };
 
 // The pure rules live in lib/setType.js so a node test can execute them — this

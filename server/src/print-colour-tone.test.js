@@ -13,21 +13,34 @@ import defaultColours from 'tailwindcss/colors.js';
 import tailwindConfig from '../../client/tailwind.config.js';
 import { RESERVED_HUES } from '../../client/src/lib/customerColour.js';
 
-// COLOUR_TONE / PROCESS_TONE live in PrintColour.jsx, which holds JSX and so
-// cannot be imported by node --test. Read the literals out of the source
-// instead — the point is to measure what ships, and the source is what ships.
+// These live in .jsx files, which hold JSX and cannot be imported by
+// node --test. Read the literals out of the source instead — the point is to
+// measure what ships, and the source is what ships.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SRC = fs.readFileSync(path.join(__dirname, '../../client/src/components/PrintColour.jsx'), 'utf8');
+const read = f => fs.readFileSync(path.join(__dirname, '../../client/src/components/', f), 'utf8');
+const INK = read('PrintColour.jsx');
+const SET = read('SetType.jsx');
 
-const toneMap = name => {
-  const body = SRC.match(new RegExp(`export const ${name} = \\{([\\s\\S]*?)\\n\\};`))?.[1];
-  assert.ok(body, `${name} not found in PrintColour.jsx — did it move or get renamed?`);
+const mapIn = (src, name) => {
+  const body = src.match(new RegExp(`export const ${name} = \\{([\\s\\S]*?)\\n\\};`))?.[1];
+  assert.ok(body, `${name} not found — did it move or get renamed?`);
   return Object.fromEntries([...body.matchAll(/'([^']+)':\s*'([^']*)'/g)].map(([, k, v]) => [k, v]));
 };
+// SET_TYPE_META is keyed by bare identifiers and each value is an object; pull
+// out the `chip` and `lit` strings per key.
+//
+// Returns PAIRS, never an object keyed by set type. `chip` and `lit` share
+// their keys (gang, new_output, hold), so merging them into one object drops
+// every `chip` value — and `chip` is exactly where the original byte-identical
+// collision lived, which made an earlier version of this guard pass while the
+// bug was reinstated. Keep it a list.
+const setTypeTones = field =>
+  [...SET.matchAll(new RegExp(`(\\w+):\\s*\\{[^}]*?${field}:\\s*'([^']*)'`, 'g'))]
+    .map(([, k, v]) => [`${k}.${field}`, v]);
 
 const over = tailwindConfig.theme.extend.colors;
 const hexOf = cls => {
-  const [, fam, shade] = cls.match(/^(?:bg|text|border)-([a-z]+)-(\d+)$/) || [];
+  const [, fam, shade] = cls.match(/^(?:bg|text|border|from|to)-([a-z]+)-(\d+)$/) || [];
   return over[fam]?.[shade] ?? defaultColours[fam]?.[shade] ?? null;
 };
 const classesOf = tone => tone.split(/\s+/).filter(c => hexOf(c));
@@ -49,11 +62,44 @@ function deltaE(hexA, hexB) {
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
 
-test('ink tones: no ink badge RENDERS as the lit-control blue', () => {
-  // The regression guard. `border-indigo-200 bg-indigo-50 text-indigo-700`
-  // fails here even though nothing in it says "blue".
+test('ink vs set type: the two axes never paint the same pill', () => {
+  // THE REGRESSION GUARD. Three pairs were byte-identical and shipped that way:
+  // gang == Pantone, new_output == CMYK, single == Offset. A card face showed a
+  // Gang chip and a Pantone badge as literally the same pixels.
+  const inkTones = Object.entries({ ...mapIn(INK, 'COLOUR_DOT'), ...mapIn(INK, 'PROCESS_DOT') });
+  const setTones = [...setTypeTones('chip'), ...setTypeTones('lit')];
+  // Both sides must be non-empty, or the double loop below asserts nothing.
+  assert.ok(inkTones.length >= 6, `ink tones parsed ${inkTones.length} entries — the guard would pass vacuously`);
+  assert.ok(setTones.length >= 6, `set-type tones parsed ${setTones.length} entries — the guard would pass vacuously`);
+  // Every set type must contribute its ROW tag, not just its lit-filter tone.
+  assert.ok(setTones.some(([k]) => k === 'gang.chip'), 'gang.chip missing — the original collision lived there');
+  for (const [ink, iTone] of inkTones) {
+    for (const [st, sTone] of setTones) {
+      assert.notEqual(iTone, sTone, `ink "${ink}" and set-type "${st}" are the SAME class string: ${iTone}`);
+    }
+  }
+});
+
+test('ink vs set type: ink stays a NEUTRAL shell, so hue cannot collide at all', () => {
+  // The structural fix: the ink axis carries its identity in a dot, not a tint.
+  // If someone re-tints these pills the collision comes straight back, because
+  // every pale tint is within a couple of ΔE of every other one.
+  const shell = INK.match(/export const INK_SHELL = '([^']*)'/)?.[1];
+  assert.ok(shell, 'INK_SHELL not found — the ink axis is meant to be a neutral shell');
+  for (const cls of classesOf(shell)) {
+    const hex = hexOf(cls).toLowerCase();
+    for (const hue of RESERVED_HUES) {
+      for (const shade of [50, 100, 200, 500, 700, 800]) {
+        const rHex = hexOf(`bg-${hue}-${shade}`);
+        if (rHex) assert.notEqual(hex, rHex.toLowerCase(), `INK_SHELL uses ${cls}, which is ${hue}-${shade}`);
+      }
+    }
+  }
+});
+
+test('ink dots: no dot RENDERS as the lit-control blue', () => {
   const litBlue = hexOf('bg-blue-500');
-  for (const [state, tone] of Object.entries({ ...toneMap('COLOUR_TONE'), ...toneMap('PROCESS_TONE') })) {
+  for (const [state, tone] of Object.entries({ ...mapIn(INK, 'COLOUR_DOT'), ...mapIn(INK, 'PROCESS_DOT') })) {
     for (const cls of classesOf(tone)) {
       assert.notEqual(hexOf(cls).toLowerCase(), litBlue.toLowerCase(),
         `${state} paints ${cls} = ${hexOf(cls)}, which IS the reserved "lit control" blue`);
@@ -61,36 +107,38 @@ test('ink tones: no ink badge RENDERS as the lit-control blue', () => {
   }
 });
 
-test('ink tones: the three colour states are told apart at the tint that ships', () => {
-  // A badge renders its bg-50/100, not its -500. indigo-50 sat ΔE 1.3 from
-  // sky-50 — below the ~2.3 an eye can catch — so CMYK and CMYK + Pantone were
-  // literally the same colour on screen while looking different in the source.
+test('ink dots: the three colour states are told apart, and so are the processes', () => {
+  // Dots are SATURATED (-400/-500), which is the whole reason this works where
+  // tints did not: at -50 every hue is near-white and indigo-50 sat ΔE 1.3 from
+  // sky-50, below the ~2.3 an eye can catch.
   const JND = 2.3;
-  const tones = toneMap('COLOUR_TONE');
-  const bg = s => hexOf(classesOf(tones[s]).find(c => c.startsWith('bg-')));
-  const states = Object.keys(tones);
-  for (let i = 0; i < states.length; i++) {
-    for (let j = i + 1; j < states.length; j++) {
-      const d = deltaE(bg(states[i]), bg(states[j]));
-      assert.ok(d > JND * 2,
-        `"${states[i]}" and "${states[j]}" render ΔE ${d.toFixed(1)} apart — too close to tell apart on a card`);
+  for (const map of ['COLOUR_DOT', 'PROCESS_DOT']) {
+    const dots = mapIn(INK, map);
+    const states = Object.keys(dots);
+    for (let i = 0; i < states.length; i++) {
+      for (let j = i + 1; j < states.length; j++) {
+        // A gradient dot ("both") is judged on its first stop against the other
+        // state's own colour — that stop is exactly the other single state.
+        const a = classesOf(dots[states[i]]), b = classesOf(dots[states[j]]);
+        const d = Math.max(...a.flatMap(x => b.map(y => deltaE(hexOf(x), hexOf(y)))));
+        assert.ok(d > JND * 2,
+          `"${states[i]}" and "${states[j]}" dots are only ΔE ${d.toFixed(1)} apart at their furthest stop`);
+      }
     }
   }
 });
 
-test('ink tones: every class in every tone resolves in THIS project theme', () => {
-  for (const map of ['COLOUR_TONE', 'PROCESS_TONE']) {
-    for (const [state, tone] of Object.entries(toneMap(map))) {
-      const colourish = tone.split(/\s+/).filter(c => /^(?:bg|text|border)-[a-z]+-\d+$/.test(c));
+test('ink dots: every class resolves in THIS project theme', () => {
+  for (const map of ['COLOUR_DOT', 'PROCESS_DOT']) {
+    for (const [state, tone] of Object.entries(mapIn(INK, map))) {
+      const colourish = tone.split(/\s+/).filter(c => /^(?:bg|from|to)-[a-z]+-\d+$/.test(c));
       assert.ok(colourish.length > 0, `${map}.${state} carries no resolvable colour class`);
-      for (const cls of colourish) {
-        assert.ok(hexOf(cls), `${map}.${state} uses ${cls}, which resolves to nothing`);
-      }
+      for (const cls of colourish) assert.ok(hexOf(cls), `${map}.${state} uses ${cls}, which resolves to nothing`);
     }
   }
 });
 
 test('ink tones: the reserved-hue list still names blue — this guard depends on it', () => {
   assert.ok(RESERVED_HUES.includes('blue'),
-    'RESERVED_HUES no longer reserves blue; revisit what "lit control" means before trusting the guard above');
+    'RESERVED_HUES no longer reserves blue; revisit what "lit control" means before trusting the guards above');
 });

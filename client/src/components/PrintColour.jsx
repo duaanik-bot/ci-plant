@@ -12,7 +12,6 @@
 // A Pantone spot colour is not a metallic ink. Pantone 871 C looks gold and
 // prints on a conventional offset unit; folding the two axes into one field is
 // exactly what put Pantone and metallic jobs into the same bucket on the floor.
-import { Droplet, Palette, Layers, Printer, Sparkles } from 'lucide-react';
 import { FilterChip, FilterGroup, FilterRail } from './FilterChip.jsx';
 import {
   COLOUR_TYPES, PRINT_PROCESSES, COLOUR_BANDS,
@@ -66,24 +65,52 @@ export const PROCESS_HINT = {
 // CMYK + Pantone were the same colour on screen. The depth pair below measures
 // ΔE 14.6 apart at the background, 21.7 at the border, and 48.0 from the lit
 // blue. Do not "restore" indigo here; a name check cannot see the alias.
-export const COLOUR_TONE = {
-  'CMYK': 'border-sky-200 bg-sky-50 text-sky-700',
-  'Pantone': 'border-violet-200 bg-violet-50 text-violet-700',
-  'CMYK + Pantone': 'border-violet-300 bg-violet-100 text-violet-800',
+// ── The ink axis wears a DOT, not a tint ───────────────────────────────────
+// The tinted pills above collided head-on with the set-type vocabulary, and not
+// approximately — three pairs were BYTE-IDENTICAL class strings, so on a card
+// face a Gang chip and a Pantone badge were the same pixels:
+//
+//     ink 'Pantone'  ==  set-type 'gang'        border-violet-200 bg-violet-50 …
+//     ink 'CMYK'     ==  set-type 'new_output'  border-sky-200    bg-sky-50    …
+//     ink 'Offset'   ==  set-type 'single'      border-slate-200  bg-slate-50  …
+//
+// No hue swap fixes it. A badge renders its -50/-100, and every pale tint is
+// near-white: measured against violet-50, fuchsia-50 is ΔE 1.5 away and
+// purple-50 is 2.2 — BELOW the ~2.3 an eye can catch. Every hue that would
+// separate is already spoken for (blue/emerald/violet/teal/amber/red are
+// RESERVED_HUES, cyan is "partly printed", orange is Offset + Metallic, and
+// pink/rose/lime/green/yellow/stone/slate are customer dots). Violet itself has
+// only two usable pale steps and gang owns the first, so three ink states do
+// not fit inside it either.
+//
+// So the axes are separated by FORM instead, and the set-type axis keeps the
+// hues it owns by contract (RESERVED_HUES names violet for gang, and
+// customer-colour.test.js measures every customer dot against it). The ink axis
+// takes a NEUTRAL shell with a saturated dot — the same answer customerColour.js
+// already reached for the same problem: "a chip tinted in a company's colour
+// would be read as a status. A dot is small enough to identify without
+// asserting anything." A filled violet pill and a neutral pill wearing a violet
+// dot cannot be confused however pale the fill is.
+//
+// It also puts this axis back under the rule the filter rails now follow: hue
+// marks what the plant must ACT on (board short, on hold, ganged). Ink is
+// classification — it warns nobody — so it classifies with a dot and lights
+// graphite, exactly like the customer chips beside it.
+export const INK_SHELL = 'border-slate-200 bg-white text-slate-700';
+// The two "both" states carry a dot that is literally half of each — the only
+// honest way to draw "CMYK *and* Pantone", and it needs no new hue to do it.
+export const COLOUR_DOT = {
+  'CMYK': 'bg-sky-500',
+  'Pantone': 'bg-violet-500',
+  'CMYK + Pantone': 'bg-gradient-to-r from-sky-500 to-violet-500',
 };
-export const PROCESS_TONE = {
-  'Offset': 'border-slate-200 bg-slate-50 text-slate-600',
-  'Metallic': 'border-amber-300 bg-amber-100 text-amber-800',
-  'Offset + Metallic': 'border-orange-300 bg-orange-100 text-orange-800',
+export const PROCESS_DOT = {
+  'Offset': 'bg-slate-400',
+  'Metallic': 'bg-amber-500',
+  'Offset + Metallic': 'bg-gradient-to-r from-slate-400 to-amber-500',
 };
-export const COLOUR_COUNT_TONE = {
-  'CMYK': 'bg-white/70', 'Pantone': 'bg-white/70', 'CMYK + Pantone': 'bg-white/70',
-};
-export const PROCESS_COUNT_TONE = {
-  'Offset': 'bg-white/70', 'Metallic': 'bg-white/80', 'Offset + Metallic': 'bg-white/80',
-};
-export const COLOUR_ICON = { 'CMYK': Droplet, 'Pantone': Palette, 'CMYK + Pantone': Layers };
-export const PROCESS_ICON = { 'Offset': Printer, 'Metallic': Sparkles, 'Offset + Metallic': Sparkles };
+// COLOUR_ICON / PROCESS_ICON retired with the tinted pills: the dot identifies
+// on screen and the label identifies on paper, so a third glyph earned nothing.
 // Sort order: richest build first, most special process first — "metallic jobs
 // first" and "Pantone jobs first" are the two orders a press planner asks for.
 export const COLOUR_RANK = { 'CMYK + Pantone': 0, 'Pantone': 1, 'CMYK': 2 };
@@ -96,22 +123,31 @@ export const PROCESS_RANK = { 'Offset + Metallic': 0, 'Metallic': 1, 'Offset': 2
 // Both always render their text. An unknown/absent value stays silent (returns
 // null) so a stale payload paints nothing rather than something wrong.
 
+// The dot replaces the icon rather than joining it: two leading glyphs in a
+// 20px pill is clutter, and the icon was never the thing doing the work —
+// PROCESS_ICON gave Metallic and Offset + Metallic the SAME Sparkles, so only
+// the words told them apart. The dot distinguishes all three, and the text
+// label is still what carries the badge into greyscale and onto paper, which is
+// the reason this module has always refused to encode anything in colour alone.
+function InkDot({ tone, band }) {
+  return <span aria-hidden className={`${band ? 'h-2.5 w-2.5' : 'h-2 w-2'} shrink-0 rounded-full ${tone}`} />;
+}
+
 export function ColourBadge({ row, band, compact, className = '' }) {
   const type = colourTypeOf(row);
   if (!type) return null;
-  const Icon = COLOUR_ICON[type];
   const total = totalColoursOf(row);
   const text = compact || total == null ? COLOUR_LABEL[type] : `${COLOUR_LABEL[type]} · ${total}`;
   const title = `${colourSummary(row)}${row?.pantone_codes ? `\nPantone: ${row.pantone_codes}` : ''}\n${COLOUR_HINT[type]}`;
   return band ? (
     <div title={title}
-      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${COLOUR_TONE[type]} ${className}`}>
-      <Icon size={13} className="shrink-0" /> {text}
+      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${INK_SHELL} ${className}`}>
+      <InkDot tone={COLOUR_DOT[type]} band /> {text}
     </div>
   ) : (
     <span title={title}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${COLOUR_TONE[type]} ${className}`}>
-      <Icon size={12} className="shrink-0" /> {text}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${INK_SHELL} ${className}`}>
+      <InkDot tone={COLOUR_DOT[type]} /> {text}
     </span>
   );
 }
@@ -122,19 +158,18 @@ export function ProcessBadge({ row, band, compact, className = '' }) {
   // Offset is the plant default and says nothing worth a chip in a tight rail,
   // so the common case stays quiet and only metallic work shouts.
   if (compact && p === 'Offset') return null;
-  const Icon = PROCESS_ICON[p];
   const name = metallicNameOf(row);
   const text = !compact && name && p !== 'Offset' ? `${PROCESS_LABEL[p]} · ${name}` : PROCESS_LABEL[p];
   const title = `${PROCESS_HINT[p]}${row?.metallic_details ? `\n${row.metallic_details}` : ''}`;
   return band ? (
     <div title={title}
-      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${PROCESS_TONE[p]} ${className}`}>
-      <Icon size={13} className="shrink-0" /> {text}
+      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${INK_SHELL} ${className}`}>
+      <InkDot tone={PROCESS_DOT[p]} band /> {text}
     </div>
   ) : (
     <span title={title}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${PROCESS_TONE[p]} ${className}`}>
-      <Icon size={12} className="shrink-0" /> {text}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${INK_SHELL} ${className}`}>
+      <InkDot tone={PROCESS_DOT[p]} /> {text}
     </span>
   );
 }
@@ -216,8 +251,12 @@ export function PrintColourFilterRail({
           planner had to count characters to tell which axis they were on. */}
       <FilterGroup label="Ink">
         {COLOUR_TYPES.map(t => (
+          // No `tone`, so these light GRAPHITE with the hue in the dot — the
+          // same shape the customer chips take, and for the same reason: ink is
+          // classification, and a tinted pill on this rail would be read as a
+          // status the way Gang and Hold are.
           <FilterChip key={t} label={COLOUR_LABEL[t]} count={cc[t] || 0} on={colour.has(t)}
-            icon={COLOUR_ICON[t]} tone={COLOUR_TONE[t]} countTone={COLOUR_COUNT_TONE[t]}
+            dot={COLOUR_DOT[t]}
             title={`${cc[t] || 0} ${scope} — ${COLOUR_HINT[t]}`}
             onClick={() => setColour(toggleInSet(colour, t))} />
         ))}
@@ -225,7 +264,7 @@ export function PrintColourFilterRail({
       <FilterGroup label="Process">
         {PRINT_PROCESSES.map(t => (
           <FilterChip key={t} label={PROCESS_LABEL[t]} count={pc[t] || 0} on={process.has(t)}
-            icon={PROCESS_ICON[t]} tone={PROCESS_TONE[t]} countTone={PROCESS_COUNT_TONE[t]}
+            dot={PROCESS_DOT[t]}
             title={`${pc[t] || 0} ${scope} — ${PROCESS_HINT[t]}`}
             onClick={() => setProcess(toggleInSet(process, t))} />
         ))}
@@ -256,10 +295,14 @@ export function ActiveColourFilters({ colour, process, band, onClear, className 
     <div className={`flex flex-wrap items-center gap-1.5 text-[11px] ${className}`}>
       <span className="font-bold uppercase tracking-wide text-slate-400">Filtered to</span>
       {[...colour].map(t => (
-        <span key={`c-${t}`} className={`rounded-full border px-2 py-0.5 font-bold ${COLOUR_TONE[t]}`}>{COLOUR_LABEL[t]}</span>
+        <span key={`c-${t}`} className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-bold ${INK_SHELL}`}>
+          <InkDot tone={COLOUR_DOT[t]} /> {COLOUR_LABEL[t]}
+        </span>
       ))}
       {[...process].map(t => (
-        <span key={`p-${t}`} className={`rounded-full border px-2 py-0.5 font-bold ${PROCESS_TONE[t]}`}>{PROCESS_LABEL[t]}</span>
+        <span key={`p-${t}`} className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-bold ${INK_SHELL}`}>
+          <InkDot tone={PROCESS_DOT[t]} /> {PROCESS_LABEL[t]}
+        </span>
       ))}
       {[...band].map(t => (
         <span key={`b-${t}`} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-bold text-slate-600">{t} colours</span>

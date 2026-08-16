@@ -1446,9 +1446,7 @@ export default function PrintPlanning() {
           <FilterGroup label="Set Type">
             {[['all', 'All', null], ['single', 'Single', SET_TYPE_META.single.icon], ['gang', 'Gang', Link2], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
               <FilterChip key={k} label={label} icon={Icon} count={zoneCounts[k]} on={zone === k}
-                tone={k === 'hold' ? 'border-amber-200 bg-amber-100 text-amber-800'
-                  : k === 'gang' ? 'border-violet-200 bg-violet-100 text-violet-800'
-                    : undefined}
+                tone={SET_TYPE_META[k]?.lit}
                 onClick={() => { setZone(k); clearSel(); }} />
             ))}
           </FilterGroup>
