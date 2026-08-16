@@ -800,6 +800,12 @@ r.get('/status-sheet', async (_req, res, next) => {
              p.party_item_code, p.size,
              ol.qty, ol.dispatched_qty, GREATEST(0, ol.qty - ol.dispatched_qty) AS pending_qty,
              ol.wip, ol.wip_date, ol.printed_override, ol.remarks,
+             -- The line's OWN planning status, beside the commercial one below.
+             -- Before a job card exists there is no route to read, so this is
+             -- the only thing that separates a line nobody has planned from one
+             -- the planner has committed that has not reached the floor —
+             -- Unplanned vs Planned on the "Where it is" rail (lib/lineStage.js).
+             ol.status,
              ${LINE_STATUS_SQL} AS line_status,
              ${overdueSql} AS overdue_days,
              EXISTS (
@@ -832,7 +838,8 @@ r.get('/status-sheet', async (_req, res, next) => {
     if (ids.length) {
       const stageRows = await q(`
         SELECT ol.id AS line_id, js.stage, js.status,
-               (jc.order_line_id IS NULL) AS gang_shared
+               (jc.order_line_id IS NULL) AS gang_shared,
+               jc.jc_number
         FROM order_lines ol
         JOIN job_cards jc ON (jc.order_line_id = ol.id
              OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
@@ -841,11 +848,21 @@ r.get('/status-sheet', async (_req, res, next) => {
         WHERE ol.id = ANY($1::int[])
         ORDER BY ol.id, (jc.order_line_id IS NULL) DESC, js.seq`, [ids]);
       const byLine = new Map();
+      // The cards a line is running on, in the same parent-then-own order the
+      // stages arrive in. A ganged line rides its gang's card until die cutting
+      // and its own after, so it legitimately answers to two numbers — the
+      // export names both rather than picking one and hiding the other.
+      const cardsByLine = new Map();
       for (const s of stageRows) {
         if (!byLine.has(s.line_id)) byLine.set(s.line_id, []);
         byLine.get(s.line_id).push({ stage: s.stage, status: s.status, gang_shared: s.gang_shared });
+        if (!cardsByLine.has(s.line_id)) cardsByLine.set(s.line_id, new Set());
+        if (s.jc_number) cardsByLine.get(s.line_id).add(s.jc_number);
       }
-      for (const l of rows) l.stages = byLine.get(l.line_id) || [];
+      for (const l of rows) {
+        l.stages = byLine.get(l.line_id) || [];
+        l.job_cards = [...(cardsByLine.get(l.line_id) || [])];
+      }
     }
     res.json({ lines: rows });
   } catch (e) { next(e); }

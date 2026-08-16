@@ -27,13 +27,15 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
+import { lineStageOf, lineStageRail, LINE_STAGE_LABEL, PRE_STAGE_KEYS } from '../lib/lineStage.js';
 import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays, CalendarCheck } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
-import { SECTION_META } from '../sections.js';
+import { SECTION_META, SECTION_ORDER } from '../sections.js';
 
 const STATUS_KPI_ROWS = {
   overdue: r => +r.overdue_days > 0,
@@ -52,10 +54,14 @@ const STATUS_KPI_LABEL = {
 // The three states a line can be at, in the order the plant moves through them.
 // `line_status` is derived server-side (wip-scope.js) as a cascade, so exactly
 // one of these is true for any line and a chip can never double-count a row.
+// Lit tones echo the row's own badge below (STATUS_PILL), so the chip a planner
+// clicks and the pill they read on the row cannot disagree. Pending carries no
+// tone and lights graphite — it is the ordinary state of the book, not a thing
+// to act on.
 const LINE_STATUSES = [
-  { key: 'pending', label: 'Pending', cls: 'bg-slate-700 text-white' },
-  { key: 'completed', label: 'Completed', cls: 'bg-emerald-600 text-white' },
-  { key: 'dispatched', label: 'Dispatched', cls: 'bg-blue-600 text-white' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'completed', label: 'Completed', tone: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  { key: 'dispatched', label: 'Dispatched', tone: 'border-blue-200 bg-blue-50 text-blue-700' },
 ];
 const STATUS_LABEL = Object.fromEntries(LINE_STATUSES.map(s => [s.key, s.label]));
 const STATUS_PILL = {
@@ -126,6 +132,41 @@ const STAGE_SHORT = {
   foiling: 'Foil', embossing: 'Emb', die_cutting: 'Die', sorting: 'Srt',
   pasting: 'Pst', qc: 'QC',
 };
+
+// ── Where it is ───────────────────────────────────────────────────────────────
+// The plant word for a `lineStageOf` key. Stages are named by SECTION_META and
+// nothing else, so this screen, the floor nav and the job card cannot end up
+// with three names for one station; the four non-stage keys come from the lib
+// that defines them. Falls back to the raw key so a stage invented tomorrow
+// shows up readable rather than blank.
+const stageKeyLabel = key =>
+  LINE_STAGE_LABEL[key] || SECTION_META[key]?.label || String(key || '').replace(/_/g, ' ');
+
+// Where ONE line is, as a word. `lineStageOf` is the single spelling behind the
+// chip, this cell and the exported column — see lib/lineStage.js.
+const whereItIs = m => stageKeyLabel(lineStageOf(m).key);
+
+// How far down its route a line is. Only meaningful once a job card exists:
+// before that there is no route, and "0/0" would read as a job that has stalled
+// rather than one that has not started.
+const stageProgress = m => { const { done, total } = lineStageOf(m); return total ? `${done}/${total}` : '—'; };
+
+// Unplanned / Planned / In production, as its own word for the export. The
+// chips answer this on screen; a workbook has no chips, so it gets a column it
+// can be filtered on in Excel.
+const PLANNING_STATUS = {
+  pending: 'Unplanned', planned: 'Planned', ready: 'Planned',
+  in_production: 'In production', produced: 'Produced', dispatched: 'Dispatched',
+};
+const planningStatus = m => PLANNING_STATUS[m.status] || m.status || '—';
+
+// Emerald is this page's existing word for "finished" (STATUS_PILL.completed and
+// the completed-stage ticks below both use it), so the chip that means finished
+// wears it too. Every other chip on the rail is CLASSIFICATION — where a job
+// happens to be standing is not something the plant must act on — so they light
+// graphite, which is FilterChip's default. See ci-erp-filter-chip-system: colour
+// is spent on severity, never on identity.
+const STAGE_CHIP_TONE = { done: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
 
 const selCls =
   'h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 ' +
@@ -283,6 +324,11 @@ export default function StatusSheet() {
   // searched set the KPI cards count, so every figure on screen agrees.
   const [statusKeys, setStatusKeys] = useState([]);
   const [custKeys, setCustKeys] = useState([]);
+  // WHERE the line is on the floor — Unplanned · Planned · Queued · the stage it
+  // is standing on · Done. A separate question from the commercial status beside
+  // it: "Pending" says the customer has not been supplied, this says what the
+  // plant is doing about it.
+  const [stageKeys, setStageKeys] = useState([]);
   const toggleIn = (set, key) => set(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
 
   const statusCounts = useMemo(() => {
@@ -290,6 +336,10 @@ export default function StatusSheet() {
     for (const r of rows) if (c[r.line_status] != null) c[r.line_status]++;
     return c;
   }, [rows]);
+  // Counted over LINES, like every other count on this page, and over the whole
+  // sheet rather than the filtered view — a chip has to say how much it would
+  // bring back, not how much of it survives the filters already lit.
+  const stageChips = useMemo(() => lineStageRail(rows, SECTION_ORDER), [rows]);
   // Customers present on the sheet, most lines first so the busiest chip is
   // reachable without reading an alphabet, then alphabetical for a stable rail.
   const customers = useMemo(() => {
@@ -324,6 +374,7 @@ export default function StatusSheet() {
     [q, setQ, '', 'search'],
     [kpi.keys, kpi.clear, [], 'KPI card'],
     [statusKeys, setStatusKeys, [], 'status'],
+    [stageKeys, setStageKeys, [], 'stage'],
     [custKeys, setCustKeys, [], 'customer'],
   ], () => setSelIds([]));
   const searched = useMemo(() => (q
@@ -332,7 +383,8 @@ export default function StatusSheet() {
   // Applied to LINES, before gangs collapse, because the cards count lines too.
   const chipped = useMemo(() => searched.filter(r =>
     (!statusKeys.length || statusKeys.includes(r.line_status))
-    && (!custKeys.length || custKeys.includes(r.customer_name))), [searched, statusKeys, custKeys]);
+    && (!stageKeys.length || stageKeys.includes(lineStageOf(r).key))
+    && (!custKeys.length || custKeys.includes(r.customer_name))), [searched, statusKeys, stageKeys, custKeys]);
   const filtered = kpi.apply(chipped, STATUS_KPI_ROWS);
   // A gang is ONE physical unit until die cutting — so it reads as ONE row here
   // too. Collapse every pending member line sharing a gang_run_id into a single
@@ -548,12 +600,17 @@ export default function StatusSheet() {
   // job_stages rows (dynamic per product), not the fixed 10-stage list.
   const StagesCell = m => {
     const st = m.stages || [];
-    if (!st.length) return <span className="text-[10px] font-bold uppercase tracking-wide text-slate-300">not started</span>;
+    // No route yet — but WHICH no-route this is matters, so it says so rather
+    // than one flat "not started" over both. Same words as the chips.
+    if (!st.length) return (
+      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{whereItIs(m)}</span>
+    );
     const done = st.filter(s => s.status === 'completed').length;
     const runningAt = st.findIndex(s => s.status === 'in_progress' || s.status === 'partially_completed');
-    // Where the eye should land: the stage actually running, else the next one
-    // waiting, else the last (the route is finished).
-    const here = runningAt >= 0 ? st[runningAt] : (st[done] || st[st.length - 1]);
+    // Where the eye should land — taken from lineStageOf, NOT recomputed here.
+    // This cell and the chip rail used to be free to disagree about a route that
+    // completes out of sequence; now there is one answer and both read it.
+    const here = lineStageOf(m).key;
     const finished = done === st.length;
     return (
       // ONE line, always. This used to be a wrapping cloud of chips with no
@@ -578,16 +635,20 @@ export default function StatusSheet() {
         </span>
         <span className={`text-[10px] font-bold uppercase tracking-wide ${
           finished ? 'text-emerald-600' : runningAt >= 0 ? 'text-amber-700' : 'text-slate-500'}`}>
-          {finished ? 'done' : (STAGE_SHORT[here.stage] || here.stage)}
+          {finished ? 'done' : (STAGE_SHORT[here] || stageKeyLabel(here))}
         </span>
         <span className="text-[10px] font-semibold tabular-nums text-slate-400">{done}/{st.length}</span>
       </div>
     );
   };
-  // Text form of the route for exports: Cut✓ Prt… Die (✓ done, … running).
+  // The route, spelled out, for the on-screen tooltip only. The EXPORT used to
+  // carry this — "Cut✓ Prt… Die" — and it was the wrong answer to the question
+  // being asked of it: whoever opens the workbook wants to know where the job
+  // is, not to decode a sequence and work it out. The exported column is
+  // `whereItIs` now, and this stays as the hover detail on the sheet.
   const stageText = m => {
     const st = m.stages || [];
-    if (!st.length) return 'Not started';
+    if (!st.length) return whereItIs(m);
     return st.map(s => `${STAGE_SHORT[s.stage] || s.stage}${
       s.status === 'completed' ? '✓'
         : (s.status === 'in_progress' || s.status === 'partially_completed') ? '…' : ''}`).join(' ');
@@ -656,9 +717,41 @@ export default function StatusSheet() {
       render: r => r._gang
         ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
         : <span className="font-semibold text-slate-900">{fmt.num(r.pending_qty)}</span> },
-    { key: 'stages', label: 'Stages', sortable: false,
-      export: r => perMember(r, stageText, ' | '),
+    // WHERE IT IS — one word, the same one the chip above is filtering on.
+    // Sortable in plant order rather than alphabetically, so sorting the column
+    // walks the floor from unplanned to done instead of from Coating to Queued.
+    { key: 'stages', label: 'Stage',
+      sortValue: r => { const k = lineStageOf(r._gang ? r._gang[0] : r).key;
+        const i = [...PRE_STAGE_KEYS, ...SECTION_ORDER].indexOf(k);
+        return i < 0 ? SECTION_ORDER.length + PRE_STAGE_KEYS.length : i; },
+      export: r => perMember(r, whereItIs, ' | '),
       render: r => r._gang ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'} render={StagesCell} /> : StagesCell(r) },
+    // How far down the route that stage sits. "Printing" alone does not say
+    // whether it is the second station of nine or the last one — on screen the
+    // bar already shows it, so this column exists for the workbook and stays
+    // out of the way with the other detail columns.
+    { key: 'stage_progress', colClass: 'ci-p3', label: 'Progress', align: 'right', card: 'detail',
+      sortValue: r => { const { done, total } = lineStageOf(r._gang ? r._gang[0] : r); return total ? done / total : -1; },
+      export: r => perMember(r, stageProgress),
+      render: r => <span className="text-xs tabular-nums text-slate-500">{perMember(r, stageProgress)}</span> },
+    // The job card the line is running on — the one thing that lets whoever
+    // reads the export go and look the job up. A ganged line answers to its
+    // gang's card and later its own, so both are named.
+    { key: 'job_cards', colClass: 'ci-p3', label: 'Job Card', card: 'detail', sortable: false,
+      searchValue: r => linesOf(r).flatMap(m => m.job_cards || []).join(' '),
+      export: r => perMember(r, m => (m.job_cards || []).join(' + ') || '—'),
+      render: r => {
+        const jc = [...new Set(linesOf(r).flatMap(m => m.job_cards || []))];
+        if (!jc.length) return <span className="text-slate-300">—</span>;
+        return <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-slate-600">{jc.join(' · ')}</span>;
+      } },
+    // Unplanned / Planned / In production. On screen the chips answer this, so
+    // it rides as a detail column; in the workbook it is what makes the sheet
+    // filterable the same way the rail filters it here.
+    { key: 'planning_status', colClass: 'ci-p3', label: 'Planning', card: 'detail',
+      sortValue: r => planningStatus(r._gang ? r._gang[0] : r),
+      export: r => perMember(r, planningStatus),
+      render: r => <span className="whitespace-nowrap text-xs text-slate-500">{perMember(r, planningStatus)}</span> },
     { key: 'printed', label: 'Print Status', sortable: false,
       export: r => perMember(r, m => printState(m)[0]),
       render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
@@ -731,50 +824,62 @@ export default function StatusSheet() {
       <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}
         shown={filtered.length} total={chipped.length} className="mt-3" />
 
-      {/* Two chip rails, one question each: WHERE the line is, and WHOSE it is.
-          Both multi-select, both narrowing the same set — so "Completed" beside
-          two customers reads as the sentence it looks like. The status rail
-          carries the weight (it is the one that decides whether finished work
-          is on screen at all); the customer rail sits in a lighter, scrolling
-          band because a busy plant has more customers than fit on one line.
-          Neither carries its own reset: both are registered with useFilterReset
-          below, so "Show everything" is the ONE control that clears the page. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
-          {LINE_STATUSES.map(s => {
-            const on = statusKeys.includes(s.key);
-            return (
-              <button key={s.key} type="button"
-                onClick={() => { toggleIn(setStatusKeys, s.key); clearSel(); }}
-                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                  on ? s.cls : 'text-slate-500 hover:bg-slate-100'}`}>
-                {s.label}
-                <span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>
-                  {statusCounts[s.key]}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {/* Three chip rails, one question each: what the CUSTOMER is owed, WHERE
+          the plant has got to, and WHOSE it is. All multi-select, all narrowing
+          the same set the KPI cards count — so "Pending" beside "Printing"
+          beside a customer reads as the sentence it looks like.
+
+          Every chip comes from FilterChip, never from a class string written
+          here: this page used to hand-roll two different pill shapes, which is
+          exactly the drift that component exists to stop (see
+          ci-erp-filter-chip-system). Structure carries identity — each axis has
+          a CAPTION, so "Pending 99" and "Planned 57" cannot be mistaken for the
+          same question. Colour is spent only on the states this plant acts on;
+          a stage chip is classification and lights graphite.
+
+          No rail carries its own reset: all three are registered with
+          useFilterReset above, so "Show everything" is the ONE control that
+          clears the page. */}
+      <FilterRail className="mt-3">
+        <FilterGroup label="Owed" divider={false}>
+          {LINE_STATUSES.map(s => (
+            <FilterChip key={s.key} label={s.label} count={statusCounts[s.key]}
+              on={statusKeys.includes(s.key)} tone={s.tone}
+              onClick={() => { toggleIn(setStatusKeys, s.key); clearSel(); }} />
+          ))}
+        </FilterGroup>
+        {/* The new axis. Reads left to right the way the plant runs: nobody has
+            planned it → planned → the card is waiting → the station it is
+            standing on → finished. A stage nothing is sitting at keeps its chip
+            and recedes, so the rail does not change width through the day. */}
+        <FilterGroup label="Where it is">
+          {stageChips.map(c => (
+            <FilterChip key={c.key} label={stageKeyLabel(c.key)} count={c.count}
+              on={stageKeys.includes(c.key)} tone={STAGE_CHIP_TONE[c.key]}
+              title={PRE_STAGE_KEYS.includes(c.key) || c.key === 'done'
+                ? undefined
+                : `Lines standing at ${stageKeyLabel(c.key)} — running there, or waiting to start`}
+              onClick={() => { toggleIn(setStageKeys, c.key); clearSel(); }} />
+          ))}
+        </FilterGroup>
+      </FilterRail>
       {customers.length > 1 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Customer</span>
-          {customers.map(c => {
-            const on = custKeys.includes(c.name);
-            return (
-              <button key={c.name} type="button"
-                onClick={() => { toggleIn(setCustKeys, c.name); clearSel(); }}
-                title={`${c.n} line${c.n === 1 ? '' : 's'}`}
-                className={`max-w-[13rem] truncate rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  on ? 'border-brand-500 bg-brand-500 text-white'
-                    : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-slate-100'}`}>
-                {c.name}
-                <span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{c.n}</span>
-              </button>
-            );
-          })}
-        </div>
+        <FilterRail className="mt-2">
+          <FilterGroup label="Customer" divider={false}>
+            {/* A customer name is the one chip label with no length limit —
+                "Swiss Garniers Biotech Private Limited" is a real party here.
+                The cap goes on the NAME, not the chip, so the count pill beside
+                it is never the thing that gets clipped: min-w-0 is what lets a
+                flex child truncate at all, and shrink-0 keeps the number whole. */}
+            {customers.map(c => (
+              <FilterChip key={c.name} count={c.n}
+                label={<span className="min-w-0 max-w-[11rem] truncate">{c.name}</span>}
+                on={custKeys.includes(c.name)}
+                title={`${c.name} — ${c.n} line${c.n === 1 ? '' : 's'}`}
+                onClick={() => { toggleIn(setCustKeys, c.name); clearSel(); }} />
+            ))}
+          </FilterGroup>
+        </FilterRail>
       )}
       {filters.dirty && (
         <div className="mt-3 flex justify-end">
@@ -838,12 +943,13 @@ export default function StatusSheet() {
           meta: [
             q ? `Search: "${q}"` : null,
             statusKeys.length ? `Status: ${statusKeys.map(k => STATUS_LABEL[k]).join(', ')}` : null,
+            stageKeys.length ? `Stage: ${stageKeys.map(stageKeyLabel).join(', ')}` : null,
             custKeys.length ? `Customers: ${custKeys.join(', ')}` : null,
             `${sortedRows.length} of ${rows.length} records`,
           ],
         })}
         empty={loadError ? 'Server unreachable — nothing to show until it reconnects.'
-          : (statusKeys.length || custKeys.length) ? 'Nothing matches these filters — clear one to widen the view.'
+          : (statusKeys.length || stageKeys.length || custKeys.length) ? 'Nothing matches these filters — clear one to widen the view.'
           : 'No pending orders — everything is dispatched or closed.'}
       />
       </div>
