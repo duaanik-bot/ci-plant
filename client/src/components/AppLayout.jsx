@@ -310,10 +310,9 @@ function FloorNav() {
   const onFloor = location.pathname.startsWith('/floor');
   const [open, setOpen] = useState(() => localStorage.getItem('ci_floor_nav') !== '0');
   const [counts, setCounts] = useState({});
-  const refreshCounts = () => api.get('/floor').then(secs => {
-    setCounts(Object.fromEntries(secs.map(s =>
-      [s.section, s.running.length + (s.held || []).length + s.queued.length])));
-  }).catch(() => {});
+  // /floor/counts, not /floor: the badge needs ten integers, and /floor ships
+  // ~730 KB of cards to supply them on a 120 s timer on every page.
+  const refreshCounts = () => api.get('/floor/counts').then(setCounts).catch(() => {});
 
   useFallbackRefresh(refreshCounts, { intervalMs: 120000 });
   useRealtimeRefresh(refreshCounts, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
@@ -441,8 +440,8 @@ function NavItem({ item }) {
 // uses inside the desktop rail, extracted because those tiers don't mount it.
 function useFloorTotal(enabled) {
   const [total, setTotal] = useState(0);
-  const load = () => api.get('/floor').then(secs => {
-    setTotal(secs.reduce((s, x) => s + x.running.length + (x.held || []).length + x.queued.length, 0));
+  const load = () => api.get('/floor/counts').then(counts => {
+    setTotal(Object.values(counts).reduce((s, n) => s + n, 0));
   }).catch(() => {});
   useFallbackRefresh(load, { enabled, intervalMs: 120000 });
   return total;

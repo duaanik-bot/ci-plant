@@ -13,6 +13,7 @@ import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, Tr
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
+import { leftoverSourceLabel } from '../lib/leftoverSource.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -1028,7 +1029,9 @@ export default function Inventory() {
                 { key: 'origin', label: 'Stage', render: b => b.origin === 'planned'
                     ? <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-600">Planned</span>
                     : <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600">Confirmed</span> },
-                { key: 'source', label: 'From', render: b => <span className="text-xs text-gray-500">{b.origin === 'planned' ? `line ${String(b.batch_no).replace('LO-PLAN-', '')}` : (String(b.batch_no).startsWith('LO-') ? String(b.batch_no).slice(3) : '—')}</span> },
+                { key: 'source', label: 'From',
+                  export: b => leftoverSourceLabel(b.batch_no, b.run_number),
+                  render: b => <span className="text-xs text-gray-500">{leftoverSourceLabel(b.batch_no, b.run_number)}</span> },
                 { key: 'qty', label: 'Sheets', align: 'right', render: b => fmt.num(b.qty) },
                 { key: 'age', label: 'Age', render: b => <AgeChip days={b.age_days} /> },
                 { key: 'created_at', label: 'Banked On', render: b => fmt.date(b.created_at) },

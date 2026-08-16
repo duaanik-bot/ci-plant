@@ -5,6 +5,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
+import { incompleteOrderLine, payloadLines } from '../lib/orderLines.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { nextCodeForRows } from '../lib/productCode.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
@@ -435,8 +436,14 @@ export default function Orders() {
     return { ...f, lines: [...f.lines.slice(0, i + 1), copy, ...f.lines.slice(i + 1)] };
   });
   const saveEdit = async () => {
-    const lines = editForm.lines
-      .filter(l => l.product_id && l.qty)
+    // Omitting a line from this payload DELETES it server-side — it is not a
+    // skip. So a persisted line whose qty was cleared has to stop the save;
+    // dropping it would destroy booked demand with nothing on screen to say so.
+    if (editForm.lines.some(incompleteOrderLine)) {
+      toast.error('Every line needs a product and a quantity above zero — use the line’s delete button to remove one');
+      return;
+    }
+    const lines = payloadLines(editForm.lines)
       .map(l => ({ ...l, qty: +l.qty, rate: l.rate === '' ? undefined : +l.rate }));
     const updated = await api.put(`/orders/${detail.id}`, { ...editForm, customer_id: +editForm.customer_id, lines });
     toast.success('Order updated');

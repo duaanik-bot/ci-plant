@@ -45,13 +45,51 @@ const machineTypeRank = t => { const i = MACHINE_TYPE_ORDER.indexOf(t); return i
 //   incoming — pending but ahead of an unfinished upstream stage (still startable)
 // `startable` is the single source of truth the Start button keys off: any
 // pending stage qualifies.
-const frontierState = (s, prev) =>
+export const frontierState = (s, prev) =>
   s.status === 'in_progress' ? 'running'
     : s.status === 'partially_completed' ? 'partial'
     : s.status === 'hold' ? 'hold'
     : (!prev || prev.status === 'completed') ? 'queued' : 'incoming';
 
 const prevStageOf = previousOf;
+
+// The sidebar badge counts active work at each station: every frontier state
+// EXCEPT incoming, which is work still sitting upstream and so not this
+// station's problem yet. Named rather than inlined because /floor pushes into
+// four arrays and the badge sums three of them — spelling that as "not
+// incoming" is what keeps a fifth state, if one is ever added, counted by
+// default instead of silently dropped.
+const countsTowardBadge = state => state !== 'incoming';
+
+// Per-section active-work tally from LEAN stage rows — id, job_card_id, seq,
+// stage, status is every field this needs.
+//
+// It runs the SAME frontierState() and previousOf() that /floor runs, on
+// purpose: this is the number the badge shows, and the two boards must never
+// disagree about what "11 at cutting" means. /floor answers the same question
+// but pays for readiness gates, tooling, gang member JSON and per-board mix to
+// draw actual cards — 730 KB of it — which the badge then throws away to keep
+// ten integers. Hence a separate lean path rather than a filter over that one.
+//
+// `stages` must carry EVERY stage of each card, completed ones included:
+// previousOf() reads them to decide whether a pending stage is queued (upstream
+// done) or incoming (still waiting).
+export function countsBySection(stages, sections = SECTIONS) {
+  const byJc = new Map();
+  for (const s of stages) {
+    if (!byJc.has(s.job_card_id)) byJc.set(s.job_card_id, []);
+    byJc.get(s.job_card_id).push(s);
+  }
+  const counts = Object.fromEntries(sections.map(s => [s, 0]));
+  for (const list of byJc.values()) {
+    for (const s of list) {
+      if (s.status === 'completed') continue;
+      if (!(s.stage in counts)) continue;
+      if (countsTowardBadge(frontierState(s, prevStageOf(list, s)))) counts[s.stage] += 1;
+    }
+  }
+  return counts;
+}
 
 // The queue-row twin of stageReceipt() in helpers.js: what this station has
 // received, in its own unit — computed from rows already fetched, so a board
@@ -524,6 +562,40 @@ r.get('/floor', async (req, res, next) => {
     });
     if (allowSec) payload = payload.filter(s => allowSec.includes(s.section));
     res.json(payload);
+  } catch (e) { next(e); }
+});
+
+// ── Live Floor badge counts ─────────────────────────────────────────────────
+// Just the numbers behind the sidebar badges: { cutting: 11, printing: 19, … }.
+//
+// This exists because the badge used to call /floor. That endpoint answers a
+// far bigger question — every card with its readiness gates, tooling, gang
+// members and board mix — and measured 730 KB on live prod to describe 65 jobs.
+// The badge kept ten integers (145 bytes) and dropped the rest, on a 120 s
+// timer, on every page, for every open tab, plus a realtime refresh on every
+// operations-table change. That one call was the plant's whole Vercel Fast
+// Origin Transfer bill.
+//
+// Registered before /floor/:section so the path wins — otherwise this arrives
+// as section='counts' and 404s.
+r.get('/floor/counts', async (req, res, next) => {
+  try {
+    // Every stage of every open card, five columns wide. Completed stages are
+    // deliberately included: previousOf() needs them to tell a queued stage
+    // (upstream done) from an incoming one.
+    const stages = await q(`
+      SELECT js.id, js.job_card_id, js.seq, js.stage, js.status
+      FROM job_stages js
+      JOIN job_cards jc ON jc.id = js.job_card_id
+      WHERE jc.status IN ('open','in_progress')
+      ORDER BY js.job_card_id, js.seq`);
+    const counts = countsBySection(stages);
+    // Same station scoping /floor applies, so a station-scoped login's badges
+    // and its board agree about which sections it can even see.
+    const { sections: allowSec } = await floorScope(req);
+    res.json(allowSec
+      ? Object.fromEntries(Object.entries(counts).filter(([s]) => allowSec.includes(s)))
+      : counts);
   } catch (e) { next(e); }
 });
 

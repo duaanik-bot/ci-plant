@@ -74,11 +74,27 @@ export default function BoardMix({
   // derivedCuts: the caller's cuts are COMPUTED, not chosen — a GANG-kind
   // run, whose members each cut the shared sheet by their own child fit, so
   // there is no one number for a planner to edit. Renders the Cuts column
-  // read-only, offers no strip chips (a gang banks nothing at plan — its
-  // offcut has no product identity until the die-cut split), and says so in
-  // one line under the table. Defaults false: the single-line engine and the
-  // merge run keep the editable input exactly as it is.
+  // read-only and says so in one line under the table. Defaults false: the
+  // single-line engine and the merge run keep the editable input as it is.
   derivedCuts = false,
+  // runLeftover: this caller banks a row's offcut at its NATURAL cut too, not
+  // only at a cut the planner has turned down.
+  //
+  // For a single LINE the two cases are split by design: the natural-cut strip
+  // belongs to the engine's own Leftover card (Planning's lo.push/lo.strip),
+  // and this chip exists for the case that card cannot reach. A RUN has no
+  // such split — its card is the no-mix decision and stands down entirely once
+  // a mix is active (the server routes the same way: a mixed save's leftover is
+  // the per-row one, never the card's). So without this flag a run with a mix
+  // could bank only by turning its cuts down, and a gang — whose cuts are
+  // derived and therefore never reduced — could not bank at all.
+  //
+  // `basis` is the parent+child the RUN's fit was struck on, straight from the
+  // server (mix.leftover_basis). It matters for a shared gang: planned_parent_*
+  // is the lead member's effectiveParent, while the co-printed cut runs on the
+  // board's own mother sheet, so a chip measuring on the former would promise a
+  // strip the lock refuses. Absent → the planned_parent_* fields, unchanged.
+  runLeftover = null,
   // boardFor: material_id → that board's MATERIALS row, for the per-row packet
   // advice. A resolver rather than a field on the rows, because neither ctx
   // carries the packet size where it is needed: the single line's `ctx.board`
@@ -202,26 +218,28 @@ export default function BoardMix({
   // promise a strip the server would bank differently.
   const stripInfoFor = r => {
     // Derived cuts are never reduced cuts — a gang row sits at its computed
-    // fit by definition, so there is neither a ragged state to warn about
-    // nor a strip to offer.
-    if (derivedCuts) return null;
+    // fit by definition, so there is no ragged state to warn about. It still
+    // leaves a strip, which is what runLeftover is for.
+    if (derivedCuts && !runLeftover) return null;
     if (!(Number(r.ups) > 0)) return null;
     const max = maxCutsFor(r);
-    // Only a REDUCED cut leaves anything new to bank here. A row at its own
-    // max is the pre-existing single-board Leftover card's territory
-    // (Planning's lo.push/lo.strip, untouched by this feature) — this chip
-    // exists for exactly the case that card can't reach: cuts the planner
-    // has turned down below the board's own ceiling.
-    if (!(Number(r.ups) < max)) return null;
-    const childL = Number(ctx?.line?.child_l), childW = Number(ctx?.line?.child_w);
+    // Only a REDUCED cut leaves anything new to bank HERE, for a single line:
+    // a row at its own max is the engine's own Leftover card's territory
+    // (Planning's lo.push/lo.strip), and this chip exists for exactly the case
+    // that card can't reach. A RUN has no such split — see runLeftover.
+    if (!runLeftover && !(Number(r.ups) < max)) return null;
+    const childL = Number(runLeftover?.child?.child_l ?? ctx?.line?.child_l);
+    const childW = Number(runLeftover?.child?.child_w ?? ctx?.line?.child_w);
     if (!(childL > 0 && childW > 0)) return null;
     const isPlannedRow = r.severity === 'none';
     const cand = byId.get(r.material_id);
     // Same asymmetry orders.js's rowParentFor uses at save: the planned row
-    // cuts from the trimmed effective parent, a substitute from its own
+    // cuts from the run's own planned parent, a substitute from its own
     // native mother sheet.
-    const pl = isPlannedRow ? Number(mix.planned_parent_l) : Number(cand?.sheet_l);
-    const pw = isPlannedRow ? Number(mix.planned_parent_w) : Number(cand?.sheet_w);
+    const pl = isPlannedRow
+      ? Number(runLeftover?.parent?.sheet_l ?? mix.planned_parent_l) : Number(cand?.sheet_l);
+    const pw = isPlannedRow
+      ? Number(runLeftover?.parent?.sheet_w ?? mix.planned_parent_w) : Number(cand?.sheet_w);
     if (!(pl > 0 && pw > 0)) return null;
     const valid = chosenCutsValid(pl, pw, childL, childW, r.ups);
     if (!valid.ok) return { valid };

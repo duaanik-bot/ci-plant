@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
@@ -320,6 +320,15 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
         if (line.dispatched_qty > 0 || job) {
           throw Object.assign(new Error('Cannot remove lines that already have dispatch or job card activity'), { status: 400 });
         }
+        // Audit BEFORE the DELETE, and put the product and quantity in the
+        // detail: this loop drops every line the payload omitted, so a partial
+        // save silently removes booked demand. Without this the only trace was
+        // one order/update row, and what left had to be reconstructed from
+        // gaps in the id sequence. Same action verb as rollbackLine's delete,
+        // so one timeline entry covers both ways a line can leave an order.
+        const removed = await oc('SELECT code, name FROM products WHERE id=$1', [line.product_id]);
+        await audit('order_line', line.id, 'deleted_entirely',
+          removedLineDetail(line, removed), qc, req.user.name);
         await qc('DELETE FROM order_lines WHERE id=$1', [line.id]);
       }
 

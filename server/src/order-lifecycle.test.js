@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { orderTransitionError, rollbackBlockers, forceDeleteBlockers } from './helpers.js';
+import { orderTransitionError, rollbackBlockers, forceDeleteBlockers, removedLineDetail } from './helpers.js';
+import { incompleteOrderLine, payloadLines } from '../../client/src/lib/orderLines.js';
 
 // ── orderTransitionError ──────────────────────────────────────────────
 test('order: pending → hold is allowed', () => {
@@ -146,4 +147,114 @@ test('seed: every shade card status it writes is allowed by the live constraint'
     const status = explicit ? explicit[1] : 'draft';
     assert.ok(valid.has(status), `seed.js writes shade_cards.status='${status}', not in ${[...valid].join('/')}`);
   }
+});
+
+// ── removedLineDetail ─────────────────────────────────────────────────
+// PUT /orders/:id treats the submitted lines array as the complete set and
+// hard-deletes every existing line whose id is absent. On 2026-08-13 that
+// silently dropped 16 lines (9,500 nos) from order 153 and 4 (4,000) from 154,
+// and the only trace was a single order/update row — the removed lines left no
+// record of what they were, so the loss had to be reconstructed from gaps in
+// the id sequence. The detail below is what makes that path readable: the row
+// is gone after the DELETE, so entity_id points at nothing and the detail must
+// carry the identity and quantity itself.
+test('removedLineDetail: names the product, the quantity and the status it was in', () => {
+  const s = removedLineDetail({ product_id: 7, qty: 500, status: 'pending' }, { code: 'FP-016', name: 'F3D3' });
+  assert.match(s, /FP-016/);
+  assert.match(s, /F3D3/);
+  assert.match(s, /\b500\b/);
+  assert.match(s, /pending/);
+});
+
+test('removedLineDetail: says it was an order edit, so the cause is not guesswork', () => {
+  const s = removedLineDetail({ product_id: 7, qty: 1, status: 'pending' }, { code: 'FP-001', name: 'X' });
+  assert.match(s, /order edit/i);
+});
+
+test('removedLineDetail: survives a product row the lookup could not resolve', () => {
+  // Never throw while auditing a delete — losing the audit row would restore
+  // exactly the blindness this exists to remove.
+  for (const prod of [null, undefined, {}]) {
+    const s = removedLineDetail({ product_id: 42, qty: 250, status: 'pending' }, prod);
+    assert.match(s, /42/, 'must still identify the product by id');
+    assert.match(s, /\b250\b/);
+  }
+});
+
+test('removedLineDetail: a missing status still produces a usable line', () => {
+  const s = removedLineDetail({ product_id: 1, qty: 10 }, { code: 'FP-001', name: 'X' });
+  assert.match(s, /FP-001/);
+  assert.match(s, /\b10\b/);
+});
+
+test('orders.js audits a removed line BEFORE it deletes the row', async () => {
+  // A DELETE that runs before the audit would leave the same blind spot: the
+  // ordering is the guarantee, not merely the presence of an audit() call.
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('routes/orders.js', new URL('.', import.meta.url)), 'utf8');
+
+  const loop = src.match(/for \(const line of existing\) \{[\s\S]*?\n {6}\}/);
+  assert.ok(loop, 'the line-removal loop must still exist in PUT /orders/:id');
+  const body = loop[0];
+
+  const auditAt = body.indexOf("audit('order_line'");
+  const deleteAt = body.indexOf('DELETE FROM order_lines');
+  assert.ok(auditAt !== -1, 'a removed line must be audited as order_line');
+  assert.ok(deleteAt !== -1, 'the loop must still delete the row');
+  assert.ok(auditAt < deleteAt, 'the audit must be written BEFORE the DELETE');
+  assert.match(body, /removedLineDetail\(/, 'the audit detail must come from the shared builder');
+});
+
+// ── order edit payload (client/src/lib/orderLines.js) ─────────────────
+// The client half of the same hazard: omitting a line from the PUT payload
+// deletes it, so the edit form must refuse an incomplete row rather than
+// filter it out. Tested here because a .jsx page cannot be imported by
+// node --test — the rule lives in client/src/lib/ for exactly that reason.
+test('edit payload: a persisted line with the qty cleared blocks the save', () => {
+  for (const qty of ['', null, undefined, 0, '0'])
+    assert.equal(incompleteOrderLine({ id: 9, product_id: '3', qty }), true, `qty ${JSON.stringify(qty)} must block`);
+});
+
+test('edit payload: a persisted line that is complete does not block', () => {
+  assert.equal(incompleteOrderLine({ id: 9, product_id: '3', qty: 500 }), false);
+  assert.equal(incompleteOrderLine({ id: 9, product_id: '3', qty: '500' }), false);
+});
+
+test('edit payload: a blank row the user just added is skipped, not an error', () => {
+  assert.equal(incompleteOrderLine({ product_id: '', qty: '' }), false);
+  assert.equal(incompleteOrderLine({}), false);
+});
+
+test('edit payload: a new row naming a product but no qty is lost input, so it blocks', () => {
+  assert.equal(incompleteOrderLine({ product_id: '3', qty: '' }), true);
+});
+
+test('edit payload: garbage qty blocks rather than posting NaN', () => {
+  assert.equal(incompleteOrderLine({ id: 9, product_id: '3', qty: 'abc' }), true);
+});
+
+test('edit payload: payloadLines keeps every real line and drops only blank rows', () => {
+  const rows = [
+    { id: 1, product_id: '3', qty: 500 },
+    { product_id: '', qty: '' },
+    { id: 2, product_id: '4', qty: '250' },
+  ];
+  assert.deepEqual(payloadLines(rows).map(l => l.product_id), ['3', '4']);
+  assert.deepEqual(payloadLines([]), []);
+  assert.deepEqual(payloadLines(), []);
+});
+
+test('edit payload: the two halves agree — nothing incompleteOrderLine clears is then dropped', () => {
+  // The invariant that makes the guard sufficient: once every row passes
+  // incompleteOrderLine, payloadLines may only remove rows that carry no id.
+  const rows = [
+    { id: 1, product_id: '3', qty: 500 },
+    { product_id: '', qty: '' },
+    { id: 2, product_id: '4', qty: '250' },
+    { product_id: '', qty: '' },
+  ];
+  assert.ok(!rows.some(incompleteOrderLine));
+  const kept = new Set(payloadLines(rows));
+  for (const r of rows)
+    if (r.id) assert.ok(kept.has(r), `persisted line ${r.id} must survive the filter`);
 });

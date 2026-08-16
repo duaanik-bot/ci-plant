@@ -498,6 +498,21 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
     const prMap = Object.fromEntries(prs.map(p => [p.material_id, p]));
     // A LO-PLAN- batch is booked at plan-lock and not yet cut ("planned");
     // once cutting completes it is renamed LO-<jc> and trued up ("confirmed").
+    //
+    // Run banks (LO-PLAN-RUN-<runId>-<materialId>) get their run's own number.
+    // One query over the ids actually present, skipped entirely when no run has
+    // banked — which is every plant that has not used the feature yet.
+    const runIdOf = batchNo => {
+      const s = String(batchNo || '');
+      if (!s.startsWith('LO-PLAN-RUN-')) return null;
+      const n = Number(s.slice('LO-PLAN-RUN-'.length).split('-')[0]);
+      return Number.isFinite(n) ? n : null;
+    };
+    const runIds = [...new Set(lots.map(l => runIdOf(l.batch_no)).filter(Boolean))];
+    const runNumbers = new Map(runIds.length
+      ? (await q('SELECT id, gang_number FROM gang_runs WHERE id = ANY($1)', [runIds]))
+        .map(r => [r.id, r.gang_number])
+      : []);
     res.json({
       masters: masters.map(m => enrichStockRow(m, {
         incoming: m.incoming,
@@ -510,6 +525,10 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
         ...l,
         bucket: bucketOf(l.age_days),
         origin: String(l.batch_no || '').startsWith('LO-PLAN-') ? 'planned' : 'confirmed',
+        // A RUN's bank carries only the run id in its key. The warehouse names
+        // every other run by its document number, so resolve it here rather
+        // than showing the planner an id they cannot look anything up by.
+        run_number: runNumbers.get(runIdOf(l.batch_no)) ?? null,
       })),
     });
   } catch (e) { next(e); }
