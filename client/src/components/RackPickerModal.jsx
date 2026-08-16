@@ -15,17 +15,22 @@
 // and untested arithmetic in here would be arithmetic nobody checks.
 import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, ShoppingBag } from 'lucide-react';
-import { defaultPickSelection, duplicatePickAssets, pickPayload, PLATE_SET_ASIDE_REASONS } from '../lib/plateRack.js';
+import { defaultPickSelection, duplicatePickAssets, pickPayload, PLATE_SET_ASIDE_REASONS, PLATE_RETIRE_REASONS } from '../lib/plateRack.js';
 import { Button, Modal } from './ui.jsx';
 
 // `lines` must be held in the caller's state, not rebuilt inline on each render:
 // the effect below re-seeds on its identity, so a fresh array every render would
 // throw away the planner's picks as fast as they are made.
-export default function RackPickerModal({ open, requestNumber, lines = [], busy = false, onCancel, onConfirm, onSetAside }) {
+export default function RackPickerModal({ open, requestNumber, lines = [], busy = false, onCancel, onConfirm, onSetAside, onRetire }) {
   const [selection, setSelection] = useState(() => defaultPickSelection(lines));
   // Which row has its reason strip open. One at a time: the strip is the whole
   // question, so two open at once would be two half-asked questions.
-  const [asideFor, setAsideFor] = useState(null);
+  // Which row's action strip is open, and which list it is showing.
+  // ONE piece of state carrying the mode, so the two reason lists can never both
+  // render: 'Damaged' is a label in BOTH, and a reversible Damaged sitting inches
+  // from a permanent one is the only way this screen could scrap a plate by
+  // accident. Reaching the retire list costs a deliberate second tap.
+  const [acting, setActing] = useState(null);   // { id, mode: 'aside' | 'retire' }
   // Re-seed when the candidate list itself changes — reopening the picker on a
   // different PR, or reopening it after a Change released a plate back.
   useEffect(() => { setSelection(defaultPickSelection(lines)); }, [lines]);
@@ -142,7 +147,7 @@ export default function RackPickerModal({ open, requestNumber, lines = [], busy 
                         {!row.current && (
                           <button type="button"
                             className="shrink-0 rounded-full px-2 py-1 text-[10px] font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            onClick={() => setAsideFor(asideFor === row.id ? null : row.id)}>
+                            onClick={() => setActing(acting?.id === row.id ? null : { id: row.id, mode: 'aside' })}>
                             Not this one
                           </button>
                         )}
@@ -150,16 +155,43 @@ export default function RackPickerModal({ open, requestNumber, lines = [], busy 
                       {/* The reason IS the confirmation. The first tap only opens this
                           strip — nothing is written until a reason is named, and there
                           is no second dialog after it. */}
-                      {asideFor === row.id && (
+                      {acting?.id === row.id && acting.mode === 'aside' && (
                         <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 pb-2">
                           <span className="text-[10px] font-bold text-slate-500">Take {row.asset_number} off the rack —</span>
                           {PLATE_SET_ASIDE_REASONS.map(reason => (
                             <button key={reason.key} type="button"
                               className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:border-slate-400"
-                              onClick={() => { setAsideFor(null); onSetAside(row.id, reason.key); }}>
+                              onClick={() => { setActing(null); onSetAside(row.id, reason.key); }}>
                               {reason.label}
                             </button>
                           ))}
+                          {/* The door to the permanent list — it REPLACES this strip
+                              rather than extending it, so the two Damageds are never
+                              on screen together. */}
+                          <button type="button"
+                            className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold text-[#B81F16] hover:bg-red-50"
+                            onClick={() => setActing({ id: row.id, mode: 'retire' })}>
+                            Retire it instead…
+                          </button>
+                        </div>
+                      )}
+                      {acting?.id === row.id && acting.mode === 'retire' && (
+                        <div className="flex flex-wrap items-center gap-1 border-b border-red-100 bg-red-50/40 pb-2">
+                          <span className="text-[10px] font-bold text-[#B81F16]">
+                            Retire {row.asset_number} — the plate is scrapped and this cannot be undone
+                          </span>
+                          {PLATE_RETIRE_REASONS.map(reason => (
+                            <button key={reason} type="button"
+                              className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[10px] font-bold text-[#B81F16] hover:border-[#B81F16]"
+                              onClick={() => { setActing(null); onRetire(row.id, reason); }}>
+                              {reason}
+                            </button>
+                          ))}
+                          <button type="button"
+                            className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100"
+                            onClick={() => setActing({ id: row.id, mode: 'aside' })}>
+                            Back
+                          </button>
                         </div>
                       )}
                     </Fragment>

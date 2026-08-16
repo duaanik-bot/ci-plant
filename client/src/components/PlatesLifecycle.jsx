@@ -1134,6 +1134,20 @@ export default function PlatesLifecycle() {
     } catch (error) { toast.error(error.message); }
     finally { if (detail) await refreshDetail(); else await load(); }
   };
+  // Retire straight from the picker. The endpoint is the one the warehouse has
+  // always used — this is a second door onto it, not a second implementation.
+  //
+  // The LABEL travels, not a key: /plates/assets/retire reads a free-text reason
+  // (String(req.body.reason).trim()) and writes it to the plate's remarks, where
+  // "Worn out — dot loss" is the point. Set aside is the opposite — keyed, because
+  // its reason resolves to a status.
+  const retireFromPicker = async (assetId, reason) => {
+    try {
+      const out = await api.post('/plates/assets/retire', { asset_ids: [assetId], reason });
+      toast.success(`${out.plates.join(', ')} retired — ${reason}`);
+    } catch (error) { toast.error(error.message); }
+    finally { if (detail) await refreshDetail(); else await load(); }
+  };
   // Put plates back. Takes the whole SET, not one plate: a warehouse row is a
   // grouped set — summarizePlateSet gives it `asset_ids` and `row.id` is only the
   // first plate in it — and Retire scraps every plate in a set at once. Sending
@@ -1880,7 +1894,7 @@ export default function PlatesLifecycle() {
         picker is open — the modal re-seeds its selection on that identity. */}
     <RackPickerModal open={Boolean(picker)} requestNumber={picker?.row?.request_number}
       lines={picker?.lines || []} busy={busyRow === picker?.row?.id}
-      onCancel={() => setPicker(null)} onConfirm={confirmPicks} onSetAside={setAsidePlate} />
+      onCancel={() => setPicker(null)} onConfirm={confirmPicks} onSetAside={setAsidePlate} onRetire={retireFromPicker} />
     {verifying && <VerificationModal component={verifying} onClose={()=>setVerifying(null)} onSaved={refreshDetail}/>}
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}

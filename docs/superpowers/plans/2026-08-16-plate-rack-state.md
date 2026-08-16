@@ -921,7 +921,18 @@ Seed a plate, then confirm end to end:
 
 **Spec coverage.** §1 state model → Tasks 1–2 (status-only, verified by test). §2 in-flight guard → Task 2. §3 un-retire → Tasks 3, 5, 7. §4 undo → Tasks 4, 5, 7. §5 placement → Tasks 6, 7. §6 endpoints → Task 5. §7 tests → each task. §8 delivery → Task 8.
 
-**One deliberate narrowing against the spec.** §5 says the picker offers **Set aside and Retire**; Task 6 offers Set aside only. Retire is permanent, its reasons are a different list, and a modal whose job is choosing a plate is the wrong place to scrap one — the warehouse already offers Retire and keeps doing so. Flagged rather than silently dropped; say so if you want Retire in the picker too.
+**One deliberate narrowing against the spec — SINCE OVERTURNED.** §5 says the picker offers
+**Set aside and Retire**; Task 6 shipped Set aside only, on the grounds that Retire is permanent
+and a modal whose job is choosing a plate is the wrong place to scrap one. Anik asked for Retire
+in the picker anyway, so it went in afterwards as a follow-up commit.
+
+It is NOT a peer of the set-aside reasons, and the hazard is specific: **`Damaged` is a label in
+both lists.** Rendering them together would put a reversible Damaged inches from a permanent one.
+So one piece of state carries the mode, the retire list REPLACES the set-aside strip rather than
+extending it, reaching it costs a deliberate second tap, and it says "this cannot be undone" where
+the planner reads it. Retire also posts to the existing `/plates/assets/retire` — a second door
+onto one route, so the in-flight guard comes free — and sends the reason LABEL, not a key, because
+that route writes it into the plate's remarks.
 
 **Type consistency.** `validateSetAside` returns `{ picked, rule }`; Task 5 uses both. `validateMakeAvailable` returns the picked rows; Task 5 uses that. `invertMovement` returns `{ status, rack_location, active }` and deliberately **no** `condition`; Task 5's UPDATE sets exactly those three. `PLATE_SET_ASIDE_REASONS` rows are `{ key, label, status, action }` — no `condition` — used identically in Tasks 1, 2, 4 and 6. Route names match between Tasks 5 and 7 (`set-aside`, `make-available`, `undo-movement`).
 

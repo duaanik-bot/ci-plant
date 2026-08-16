@@ -392,3 +392,33 @@ test('no plate is in two warehouse tabs, and none is in none', () => {
   // Fresh and Used stay keyed on available; the third tab takes what they exclude.
   assert.match(body, /status === 'available'/);
 });
+
+// Retire from the picker, at Anik's request. It is permanent, so the one thing
+// that must never happen is a mis-tap: 'Damaged' is a label in BOTH lists, and
+// showing them together would put a reversible Damaged inches from a permanent
+// one. The retire reasons therefore REPLACE the set-aside strip rather than
+// joining it — reaching them costs a deliberate extra tap, and the two lists are
+// never on screen at the same time.
+test('retire is reachable from the picker, but never beside the reversible reasons', () => {
+  const modal = read('client/src/components/RackPickerModal.jsx');
+  assert.match(modal, /PLATE_RETIRE_REASONS/);
+  assert.match(modal, /onRetire/);
+  // One piece of state carrying which mode the strip is in, so the two reason
+  // lists cannot both render.
+  assert.match(modal, /mode: 'retire'/);
+  assert.match(modal, /mode === 'retire'/);
+  // Still hidden on the row the line already holds — that plate is reserved and
+  // retire refuses it, same as set aside.
+  assert.match(modal, /!row\.current/);
+  // Named as permanent where the planner reads it.
+  assert.match(modal, /cannot be undone/i);
+});
+
+test('the picker retires through the existing endpoint, with a reason', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(page, /plates\/assets\/retire/);
+  // Retire's route reads a free-text reason (String(req.body.reason).trim()),
+  // not a key like set aside — so the LABEL travels here, deliberately.
+  assert.match(page, /const retireFromPicker/);
+  assert.match(page, /onRetire=\{retireFromPicker\}/);
+});
