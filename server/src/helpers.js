@@ -124,6 +124,19 @@ export async function audit(entity, entityId, action, detail = null, qc = q, use
     [entity, entityId, action, detail, user]);
 }
 
+// Audit detail for a line dropped by an order edit (PUT /orders/:id removes
+// every existing line the payload omits). The row is deleted immediately after,
+// so entity_id resolves to nothing forever — whatever identifies the line has
+// to live in the detail itself. Never throws: an unresolvable product still
+// yields a usable string, because losing the audit row to an exception would
+// restore exactly the blindness this exists to remove.
+export function removedLineDetail(line, product) {
+  const named = [product?.code, product?.name].filter(Boolean).join(' ');
+  const what = named || `product #${line?.product_id ?? '?'}`;
+  const was = line?.status ? ` (was ${line.status})` : '';
+  return `${what} · qty ${line?.qty ?? '?'} — removed by order edit${was}`;
+}
+
 // In-app notification fan-out — one row per recipient, surfaced by the bell in
 // the app shell. userIds may contain duplicates or nulls; both are dropped so
 // callers can pass "everyone who should hear this" without pre-cleaning.
