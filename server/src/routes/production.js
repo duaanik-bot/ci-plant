@@ -20,6 +20,9 @@ import {
   issuePlateAssetsForJob, plateReadinessForPrinting, plateSpecification,
 } from '../plate-lifecycle.js';
 import { plateComponentsFromSpec } from '../plates.js';
+// Which runs bank an offcut is ONE rule, and the cutting confirm must read the
+// same one the plan lock wrote by — see runBanksLeftover's own comment.
+import { runBanksLeftover } from './gangs.js';
 
 const r = Router();
 const canPlan = requireRole(...PLANNING_ROLES);
@@ -2403,16 +2406,76 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // double-book. Declined/absent plan = no-op.
       if (st.stage === 'cutting' && st.job_card_id) {
         const jcForLeftover = await oc('SELECT order_line_id, gang_run_id, jc_number FROM job_cards WHERE id=$1', [st.job_card_id]);
-        // A run card resolves its run's KIND the same way the die-cut split
-        // below does — read, never inferred from route shape — because the
-        // two kinds part ways here: a gang keeps the skip, a merge confirms.
-        const leftoverRunKind = !jcForLeftover?.order_line_id && jcForLeftover?.gang_run_id
-          ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jcForLeftover.gang_run_id]))?.kind
+        // A run card resolves its run the same way the die-cut split below
+        // does — read, never inferred from route shape — because runs part
+        // ways here: the ones that banked confirm, the rest skip. The rule is
+        // runBanksLeftover's, imported rather than re-spelled, so the confirm
+        // can never disagree with the lock about which runs bank.
+        const leftoverRun = !jcForLeftover?.order_line_id && jcForLeftover?.gang_run_id
+          ? await oc('SELECT kind, layout_mode FROM gang_runs WHERE id=$1', [jcForLeftover.gang_run_id])
           : null;
-        if (!jcForLeftover?.order_line_id && leftoverRunKind !== 'merge') {
-          // Gang parent leftovers are not booked automatically because the
-          // parent card may represent mixed child layouts; split children carry
-          // the product-specific traceability after die cutting.
+        if (!jcForLeftover?.order_line_id && !runBanksLeftover(leftoverRun)) {
+          // ── A SEPARATE-LAYOUT gang confirms PER MEMBER ─────────────────
+          //
+          // Its parent card carries N impositions, so there is no run-level
+          // strip to true up — but every member has its own, banked at the
+          // lock through the LINE's own v2 plan (leftover_plan on the member's
+          // row, batch LO-PLAN-<lineId>-<materialId>). So the confirm walks the
+          // members and settles each one against ITS OWN share of the parents
+          // this card actually cut.
+          //
+          // The split is by planned parent sheets, the same proportion the plan
+          // lock issued them in — distributeActualAcrossMembers, which the mixed
+          // true-up already uses, so a short cut is absorbed the same way here
+          // as everywhere else and the shares still sum to exactly stQtyIn.
+          //
+          // Confirmed keys carry the LINE as well as the board: two members of
+          // one run can sit on the same board and would otherwise collide on
+          // LO-<jc>-<mat>, silently confirming one and dropping the other.
+          const memberLines = jcForLeftover?.gang_run_id ? await qc(
+            `SELECT id, leftover_plan, parent_sheets_required
+               FROM order_lines WHERE gang_run_id=$1 ORDER BY id`,
+            [jcForLeftover.gang_run_id]) : [];
+          const memberPlans = memberLines.map(m => ({
+            ...m,
+            plan: typeof m.leftover_plan === 'string' ? JSON.parse(m.leftover_plan) : m.leftover_plan,
+          }));
+          if (memberPlans.some(m => m.plan?.version === 2 && m.plan.rows?.length)) {
+            const shares = distributeActualAcrossMembers(
+              stQtyIn, memberPlans.map(m => Number(m.parent_sheets_required) || 0));
+            for (let mi = 0; mi < memberPlans.length; mi++) {
+              const m = memberPlans[mi];
+              const rows = m.plan?.version === 2 && Array.isArray(m.plan.rows) ? m.plan.rows : [];
+              if (!rows.length) continue;
+              // And within a member, across the boards it drew from — by the
+              // sheets each was planned to supply.
+              const perBoard = distributeActualAcrossMembers(
+                shares[mi] || 0, rows.map(r => Number(r.est_sheets) || 0));
+              for (let ri = 0; ri < rows.length; ri++) {
+                const row = rows[ri];
+                const planNo = `LO-PLAN-${m.id}-${row.material_id}`;
+                const confirmedNo = `LO-${jcForLeftover.jc_number}-${m.id}-${row.material_id}`;
+                const already = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [confirmedNo]);
+                if (already) continue;                     // retried complete — idempotent
+                const pb = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [planNo]);
+                if (!pb) continue;                         // nothing was banked for this board
+                if (!(Number(pb.initial_qty) > 0 || Number(pb.qty) > 0)) continue;  // swept — dead record
+                const actualQty = (row.strips_per_parent || 1) * (perBoard[ri] || 0);
+                const delta = actualQty - Number(pb.initial_qty);
+                const newQty = Math.max(0, Number(pb.qty) + delta);
+                await qc(`UPDATE stock_batches SET qty=$1, initial_qty=$2, batch_no=$3, status=$4 WHERE id=$5`,
+                  [newQty, actualQty, confirmedNo, newQty > 0 ? 'available' : 'exhausted', pb.id]);
+                if (delta !== 0)
+                  await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                            VALUES ($1,$2,'leftover_in',$3,'job_stage',$4,$5)`,
+                    [pb.material_id, pb.id, delta, st.id,
+                     `Leftover trued up ${pb.initial_qty}→${actualQty} (actual cut) — ${jcForLeftover.jc_number} line ${m.id}`]);
+                await audit('materials', pb.material_id, 'leftover_in',
+                  `confirmed ${actualQty} sheets (planned ${pb.initial_qty}) — ${jcForLeftover.jc_number} line ${m.id}`,
+                  qc, req.user.name);
+              }
+            }
+          }
         } else if (!jcForLeftover?.order_line_id) {
           // A MERGE run is one product on one pile, so its offcut has full
           // product identity and confirms exactly as a line's v2 plan does —
@@ -2435,6 +2498,39 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           const runPrefix = `LO-PLAN-RUN-${jcForLeftover.gang_run_id}-`;
           const runPlanBatches = await qc(
             `SELECT * FROM stock_batches WHERE batch_no LIKE $1 ORDER BY id`, [`${runPrefix}%`]);
+          // Per-board parent sheets for THIS confirm, for the runs the
+          // aggregated mixRows above does not speak for.
+          //
+          // That aggregation is merge-only on purpose — a gang card's cutting
+          // variance is deliberately legacy, and widening it would rewrite the
+          // floor's completion contract for every gang. So a SHARED-LAYOUT
+          // gang's boards are summed here instead, straight off the members'
+          // own rows: a read for the leftover confirm alone, touching neither
+          // the variance nor the consumption. It lands on the same fallback
+          // rung a merge already uses when no variance row exists — the
+          // board's issued sheets.
+          //
+          // Null when the run carries no mix at all, which is the ordinary
+          // case this wave opened up: the card drew its whole issue off the
+          // one planned board, so that board's actual parents ARE the card's.
+          let runMixByBoard = null;
+          if (!mixRows) {
+            const runLineIds = (await qc(
+              'SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id',
+              [jcForLeftover.gang_run_id])).map(x => x.id);
+            const flat = [];
+            for (const id of runLineIds) flat.push(...await mixFor(id, 'issued', qc));
+            if (!flat.length) {
+              for (const id of runLineIds) flat.push(...await mixFor(id, 'plan', qc));
+            }
+            if (flat.length) {
+              runMixByBoard = new Map();
+              for (const rr of flat) {
+                const k = Number(rr.material_id);
+                runMixByBoard.set(k, (runMixByBoard.get(k) || 0) + Number(rr.sheets || 0));
+              }
+            }
+          }
           for (const pb of runPlanBatches) {
             const mid = Number(String(pb.batch_no).slice(runPrefix.length));
             if (!Number.isFinite(mid)) continue;
@@ -2448,7 +2544,16 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
             const issuedRow = mixRows?.find(x => Number(x.material_id) === mid);
             const actualParents = vRow ? vRow.actualParents
               : issuedRow ? Math.round(Number(issuedRow.sheets) || 0)
-              : null;
+              : runMixByBoard
+                // Mixed run the aggregation does not cover (a shared gang):
+                // absent from the mix means nothing was cut of that board, so
+                // the bank is stale — the same verdict `null` carries below.
+                ? (runMixByBoard.has(mid) ? Math.round(runMixByBoard.get(mid)) : null)
+                // No mix at all: one board, and stQtyIn is already the TRUE
+                // parents cut (both variance arms above assign it for exactly
+                // this booking). The sweep leaves at most one live batch on an
+                // unmixed run, so this cannot mis-credit a second board.
+                : Math.round(Number(stQtyIn) || 0);
             if (actualParents == null) continue; // board absent from the issue — stale bank, nothing was cut of it
             const confirmedNo = `LO-${jcForLeftover.jc_number}-${mid}`;
             const already = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [confirmedNo]);

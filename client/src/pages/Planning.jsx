@@ -541,11 +541,18 @@ export default function Planning() {
   const [gangWastage, setGangWastage] = useState(String(DEFAULT_WASTAGE_SHEETS)); // shared wastage in the gang engine
   const [gangIssue, setGangIssue] = useState(''); // planner's manual "sheets to issue" override ('' = follow the calc)
   const [gangMixRows, setGangMixRows] = useState([]); // the RUN's Board Mix draft — one row per board, run-level sheets
-  // Per-row leftover toggles for a MERGE run's mix — {[material_id]: bool},
+  // Per-row leftover toggles for a banking run's MIX — {[material_id]: bool},
   // seeded from the live LO-PLAN-RUN batches (the batches ARE the record; no
   // JSON column on gang_runs, by design) and reset whenever the mix rows
-  // reseed. A gang-kind run never banks, so this stays empty noise for it.
+  // reseed. A separate-layout gang never banks, so this stays empty noise
+  // for it.
   const [gangLeftovers, setGangLeftovers] = useState({});
+  // The run's offcut decision when there is NO mix — the single line's own
+  // {push, strip} shape, because it is the same decision a solo job makes.
+  const [gangLo, setGangLo] = useState({ push: false, strip: null });
+  // A SEPARATE-layout gang decides per member instead: {[line_id]: {push, strip}}.
+  // One strip per job, because one parent card cuts N impositions.
+  const [gangLoMem, setGangLoMem] = useState({});
   const [gangWhOpen, setGangWhOpen] = useState(false); // gang board Warehouse picker open (manual)
   const [gangSmart, setGangSmart] = useState(null);  // smart-match board suggestions (null = closed)
   const [gangExpand, setGangExpand] = useState(null); // line id whose full spec panel is open
@@ -1401,6 +1408,23 @@ export default function Planning() {
   // chips have real geometry to measure against instead of the bare
   // board_name the synthetic line used to carry.
   const gangIsMerge = gangView?.kind === 'merge';
+  // The parent + child THIS RUN's offcut is measured on, straight from the
+  // server (runLeftoverBasis). Its presence is also the eligibility test — null
+  // for a separate-layout gang, whose parent card stands for N impositions, and
+  // null for a run whose cut is not settled yet. One rule, read from one place,
+  // so the card on screen and the lock can never disagree about either.
+  const gangLoBasis = gangView?.mix?.leftover_basis || null;
+  // A SEPARATE-layout gang has no ONE strip — each job cuts its own imposition
+  // off the shared pile — so it banks PER MEMBER, and the card shows one row
+  // per job instead of one strip. Server-measured, like the run basis.
+  const gangLoMembers = gangView?.mix?.leftover_members || [];
+  // Why a gang shows no Leftover card at all, when it shows none. Silence reads
+  // as a missing feature, so the card explains itself instead. Only one reason
+  // is left now that a separate layout banks too: the members have not settled
+  // on one child sheet, so a CO-PRINTED run has no cut to measure.
+  // sharedLayoutState refuses the plan for the same reason.
+  const gangLoWhy = gangView?.kind !== 'gang' || gangLoBasis || gangLoMembers.length
+    ? null : 'pending';
   // Is the whole run still unlocked, and does it hold a SAVED plan?
   //
   // Both read the members, because that is where the server keeps the answer:
@@ -1441,24 +1465,51 @@ export default function Planning() {
   // of the single-line mixBankOn above it in this file, over the run's own
   // ctx fields, so the chip on screen and the payload can never disagree.
   // Merge only: a gang banks nothing at plan.
+  // Reads the run's own basis and skips the reduced-cut rule, exactly as the
+  // BoardMix chip does under `runLeftover` — the payload and the chip on
+  // screen must agree, and they only do that by applying one rule twice.
   const gangBankOn = r => {
     const m = gangView?.mix;
-    if (!gangIsMerge || !m || !(Number(r.ups) > 0)) return false;
+    if (!gangLoBasis || !m || !(Number(r.ups) > 0)) return false;
     const isPlanned = r.severity === 'none';
     const cand = isPlanned ? null : (m.candidates || []).find(c => c.id === r.material_id);
-    const max = isPlanned
-      ? (Number(m.planned_ups) > 0 ? Number(m.planned_ups) : Math.max(1, Number(r.ups) || 1))
-      : (Number(cand?.max_cuts) > 0 ? Number(cand.max_cuts) : Math.max(1, Number(r.ups) || 1));
-    if (!(Number(r.ups) < max)) return false;
-    const childL = Number(gangMixCtx?.line?.child_l), childW = Number(gangMixCtx?.line?.child_w);
+    const childL = Number(gangLoBasis.child.child_l), childW = Number(gangLoBasis.child.child_w);
     if (!(childL > 0 && childW > 0)) return false;
-    const pl = isPlanned ? Number(m.planned_parent_l) : Number(cand?.sheet_l);
-    const pw = isPlanned ? Number(m.planned_parent_w) : Number(cand?.sheet_w);
+    const pl = isPlanned ? Number(gangLoBasis.parent.sheet_l) : Number(cand?.sheet_l);
+    const pw = isPlanned ? Number(gangLoBasis.parent.sheet_w) : Number(cand?.sheet_w);
     if (!(pl > 0 && pw > 0)) return false;
     if (!chosenCutsValid(pl, pw, childL, childW, r.ups).ok) return false;
     if (!chosenStrips(pl, pw, childL, childW, r.ups).some(s => s.usable)) return false;
     return (r.material_id in gangLeftovers) ? !!gangLeftovers[r.material_id] : true;
   };
+  // The strips the run's cut leaves on its PLANNED board — the no-mix card's
+  // options. Measured on the server's basis, never on planned_parent_*: for a
+  // co-printed gang those are the lead member's solo trim, and a card drawn
+  // from them would offer a strip the lock refuses. est_sheets follows the
+  // run's live issue, one strip per parent sheet cut, so the figure moves with
+  // the number in "Sheets to Issue" above it.
+  const gangLoStrips = useMemo(() => {
+    if (!gangLoBasis) return [];
+    return clientStrips(gangLoBasis.parent.sheet_l, gangLoBasis.parent.sheet_w,
+      gangLoBasis.child.child_l, gangLoBasis.child.child_w)
+      .map(s => ({ ...s, est_sheets: (s.strips_per_parent || 1) * gangIssueNow }));
+  }, [gangLoBasis, gangIssueNow]);
+  // A pick the run's cut no longer yields must not ride into a 409 — same
+  // guard, same reason, as the single line's above.
+  useEffect(() => {
+    if (!gangView || !gangLo.strip) return;
+    const still = gangLoStrips.some(s =>
+      s.usable && Math.abs(s.l - gangLo.strip.l) < 0.01 && Math.abs(s.w - gangLo.strip.w) < 0.01);
+    if (!still) setGangLo({ push: false, strip: null });
+  }, [gangView, gangLoStrips, gangLo.strip]);
+  // Per-member strips for a separate-layout gang, each measured on that
+  // member's own parent and child — the same clientStrips/leftoverStrips twin
+  // the run card uses, so a member's chip and the lock agree the same way.
+  const gangLoMemberStrips = useMemo(() => gangLoMembers.map(m => ({
+    ...m,
+    strips: clientStrips(m.parent_l, m.parent_w, m.child_l, m.child_w)
+      .map(s => ({ ...s, est_sheets: (s.strips_per_parent || 1) * (m.est_parents || 0) })),
+  })), [gangLoMembers]);
   // What the run's issue actually presses on its PLANNED board. With no mix
   // that is the whole issue, exactly as before. With one it is the sheets
   // written against the planned board plus whatever the mix has not covered —
@@ -2013,9 +2064,27 @@ export default function Planning() {
     // explicit boolean per saved row, exactly like the single-line seed, so a
     // strip sent to waste last lock reopens OFF instead of drifting back to
     // the chip's default-ON. The banked set is the live batches themselves.
-    const bankedMats = new Set((d?.mix?.leftover_batches || []).map(b => +b.material_id));
+    const batches = d?.mix?.leftover_batches || [];
+    const bankedMats = new Set(batches.map(b => +b.material_id));
     setGangLeftovers(Object.fromEntries(
       (d?.mix?.rows || []).map(r => [r.material_id, bankedMats.has(+r.material_id)])));
+    // The no-mix card's own seed. Its bank sits on the run's PLANNED board, so
+    // that batch is the one to reopen on — and it carries the strip the planner
+    // actually picked, rather than defaulting to the largest and re-banking a
+    // rectangle they never chose. A run whose last lock carried a mix seeds the
+    // chips above and leaves the card off, which is what the server stored.
+    const planned = batches.find(b => +b.material_id === +(d?.mix?.planned_board_id));
+    setGangLo(planned?.strip?.l > 0 && !(d?.mix?.rows || []).length
+      ? { push: true, strip: { l: +planned.strip.l, w: +planned.strip.w } }
+      : { push: false, strip: null });
+    // A separate-layout gang's members each carry their own decision, seeded
+    // from the line plan the last lock wrote (leftover_members.banked/strip).
+    setGangLoMem(Object.fromEntries((d?.mix?.leftover_members || []).map(m => [
+      m.line_id,
+      m.banked && m.strip?.l > 0
+        ? { push: true, strip: { l: +m.strip.l, w: +m.strip.w } }
+        : { push: false, strip: null },
+    ])));
     // Not persisted yet, so there is nothing to seed — but opening (or
     // refreshing) a run must clear the previous one's picks, exactly as the
     // single-line seed does.
@@ -2226,13 +2295,37 @@ export default function Planning() {
           stock_batch_id: r.stock_batch_id ?? null, reason: r.reason || '',
           ...(gangIsMerge ? { ups: r.ups } : {}),
         })),
-        // Which rows bank their strip — merge only, each at its chip's
-        // effective state (gangBankOn), mirroring the single-line payload.
-        ...(gangIsMerge && activeGangMix.length ? {
+        // Which rows bank their strip, each at its chip's effective state
+        // (gangBankOn), mirroring the single-line payload. Sent by any run
+        // that banks — a shared-layout gang included, whose cuts are derived
+        // and so are always at their natural fit.
+        ...(gangLoBasis && activeGangMix.length ? {
           mix_leftovers: activeGangMix.filter(gangBankOn)
             .map(r => ({ material_id: +r.material_id, bank: true })),
         } : {}),
       }),
+      // The run's own offcut decision, for the NO-MIX case. The server routes
+      // exactly this way — a mixed save's leftover is the per-row one and this
+      // key is not read — which is why the card stands down on screen the
+      // moment a mix has rows. Sent even when push is false: that is a real
+      // instruction to take last lock's strip back off the shelf.
+      ...(gangLoBasis && !activeGangMix.length ? {
+        leftover: gangLo.push && gangLo.strip
+          ? { push: true, strip: gangLo.strip } : { push: false },
+      } : {}),
+      // A SEPARATE-layout gang's per-member decisions. Sent with OR without a
+      // mix — unlike the run card, a member's own strip is well defined either
+      // way, and the server derives each substitute board's strip from that
+      // member's split share. Every member is named, including the ones turned
+      // off: silence would leave last lock's strip on the shelf.
+      ...(gangLoMemberStrips.length ? {
+        leftovers: gangLoMemberStrips.map(m => {
+          const d = gangLoMem[m.line_id];
+          return d?.push && d.strip
+            ? { line_id: m.line_id, push: true, strip: d.strip }
+            : { line_id: m.line_id, push: false };
+        }),
+      } : {}),
     };
   };
 
@@ -5495,14 +5588,22 @@ export default function Planning() {
                     sub={`one pile, ${fmt.num(gangIssueNow)} parent sheets — cover it off one board or several`}>
                     {/* A MERGE run is one product, so it gets the full
                         single-line treatment: editable cuts, the Cartons
-                        column (the run's own ups), the order ledger line
+                        column (the run's own ups) and the order ledger line
                         (Σ members' still-to-produce — the same balance-
-                        after-FG figure calc.planQty feeds the line panel)
-                        and the per-row leftover chips, seeded from the live
-                        LO-PLAN-RUN batches. A GANG's cuts are derived per
-                        member (derivedCuts renders them read-only with one
-                        line saying so) and it banks nothing — no leftover
-                        wiring, no cartons column, exactly as before.
+                        after-FG figure calc.planQty feeds the line panel).
+                        A GANG's cuts are derived per member (derivedCuts
+                        renders them read-only with one line saying so) and it
+                        gets no cartons column, exactly as before.
+
+                        The per-row leftover chips are wired for ANY run that
+                        banks — a shared-layout gang included. runLeftover hands
+                        the panel the run's own measuring basis and tells it not
+                        to apply the single line's reduced-cut rule: that rule
+                        exists because a line's natural-cut strip belongs to its
+                        own Leftover card, and a run's card stands down entirely
+                        once a mix is active. Without it a gang could never bank
+                        through a mix at all, its cuts being derived and so
+                        never reduced.
 
                         boardFor turns on the run's per-board PACKET advice,
                         and it needed no server change: gangMixContext already
@@ -5524,9 +5625,148 @@ export default function Planning() {
                       orderQty={gangIsMerge
                         ? gangView.members.reduce((s, m) => s + Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0)), 0)
                         : null}
-                      {...(gangIsMerge ? { leftovers: gangLeftovers, onLeftovers: setGangLeftovers } : {})}
+                      {...(gangLoBasis
+                        ? { leftovers: gangLeftovers, onLeftovers: setGangLeftovers,
+                            runLeftover: gangLoBasis }
+                        : {})}
                       boardFor={boardMasterFor}
                       packetChoice={gangPacketChoice} onPacketChoice={setGangPacketChoice} />
+                  </Card>
+                )}
+
+                {/* The run's offcut, when it is covering the issue off its
+                    PLANNED board alone — banked into Leftover RM the moment the
+                    plan is locked (as "planned"), then trued up at cutting
+                    completion to the parents actually cut.
+
+                    Hidden the moment the mix has rows, because then the per-row
+                    chips above own the decision and the server reads those
+                    instead: two controls writing one batch key would be a race
+                    the planner could see. Same reason a single line's mixed save
+                    drops its card's decision (orders.js's storedLeftover).
+
+                    Strips come from gangLoStrips — the LIVE cut, measured on the
+                    basis the lock uses — so editing the child sheet or re-boarding
+                    the run re-measures the offcut in place instead of leaving a
+                    stale rectangle on screen for the save to 409 on. */}
+                {gangLoStrips.length > 0 && !gangMixRows.some(r => Number(r.sheets) > 0) && (
+                  <Card icon={Scissors} title="Leftover"
+                    sub="offcut strips this run's cut leaves on the parent sheet">
+                    <div className="space-y-1.5">
+                      {gangLoStrips.map((s, i) => {
+                        const sel = gangLo.push && gangLo.strip
+                          && Math.abs(gangLo.strip.l - s.l) < 0.01 && Math.abs(gangLo.strip.w - s.w) < 0.01;
+                        return (
+                          <button key={i} type="button" disabled={!s.usable}
+                            onClick={() => setGangLo({ push: true, strip: { l: s.l, w: s.w } })}
+                            className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-xs transition
+                              ${sel ? 'bg-[#0A84FF]/[0.08] ring-1 ring-[#0A84FF]/30' : 'bg-slate-50 hover:bg-slate-100'}
+                              ${s.usable ? '' : 'cursor-not-allowed opacity-40'}`}>
+                            <span className="font-semibold text-slate-800">{s.l}×{s.w}"</span>
+                            <span className="tabular-nums text-slate-500">
+                              {s.usable ? `≈ ${fmt.num(s.est_sheets)} sheets` : 'too small — waste'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {gangLoStrips.some(s => s.usable) ? (
+                        <>
+                          <Checkbox label="Bank to Leftover RM on lock"
+                            checked={gangLo.push}
+                            onChange={e => setGangLo(v => {
+                              if (!e.target.checked) return { push: false, strip: v.strip };
+                              const first = gangLoStrips.find(s => s.usable);
+                              return { push: true, strip: v.strip || (first ? { l: first.l, w: first.w } : null) };
+                            })} />
+                          {gangLo.push && !gangLo.strip && <p className="text-[10px] text-amber-600">Pick which strip to keep.</p>}
+                        </>
+                      ) : (
+                        <p className="text-[10px] text-slate-500">
+                          Nothing bankable — this cut leaves under 3" on the short side.
+                        </p>
+                      )}
+                    </div>
+                  </Card>
+                )}
+
+                {/* A SEPARATE-layout gang: one decision per job, because one
+                    parent card cuts N impositions and each leaves its own
+                    strip. Shown with or without a mix — a member's own cut is
+                    well defined either way, and the lock derives each
+                    substitute board's strip from that member's split share.
+
+                    Every row measures on ITS OWN parent and child, straight
+                    from the server (leftover_members), never on the lead
+                    member's — that is the whole reason this run cannot use the
+                    single run-level card above. */}
+                {gangLoMemberStrips.length > 0 && (
+                  <Card icon={Scissors} title="Leftover"
+                    sub={`each job's own offcut — ${gangLoMemberStrips.length} impositions on one pile`}>
+                    <div className="space-y-2.5">
+                      {gangLoMemberStrips.map(m => {
+                        const dec = gangLoMem[m.line_id] || { push: false, strip: null };
+                        const usable = m.strips.filter(s => s.usable);
+                        const set = next => setGangLoMem(v => ({ ...v, [m.line_id]: next }));
+                        return (
+                          <div key={m.line_id} className="rounded-xl bg-slate-50 p-2.5">
+                            <div className="mb-1.5 min-w-0 truncate text-[11px] font-bold text-slate-700"
+                              title={`${m.product_name} · ${m.board_name || ''}`}>
+                              {m.product_name}
+                            </div>
+                            {usable.length === 0 ? (
+                              <p className="text-[10px] text-slate-500">
+                                Nothing bankable — this cut leaves under 3" on the short side.
+                              </p>
+                            ) : (
+                              <>
+                                <div className="space-y-1">
+                                  {m.strips.map((s, i) => {
+                                    const sel = dec.push && dec.strip
+                                      && Math.abs(dec.strip.l - s.l) < 0.01 && Math.abs(dec.strip.w - s.w) < 0.01;
+                                    return (
+                                      <button key={i} type="button" disabled={!s.usable}
+                                        onClick={() => set({ push: true, strip: { l: s.l, w: s.w } })}
+                                        className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs transition
+                                          ${sel ? 'bg-[#0A84FF]/[0.08] ring-1 ring-[#0A84FF]/30' : 'bg-white hover:bg-slate-100'}
+                                          ${s.usable ? '' : 'cursor-not-allowed opacity-40'}`}>
+                                        <span className="font-semibold text-slate-800">{s.l}×{s.w}"</span>
+                                        <span className="tabular-nums text-slate-500">
+                                          {s.usable ? `≈ ${fmt.num(s.est_sheets)} sheets` : 'too small — waste'}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div className="mt-1.5">
+                                  <Checkbox label="Bank to Leftover RM on lock"
+                                    checked={dec.push}
+                                    onChange={e => set(e.target.checked
+                                      ? { push: true, strip: dec.strip || { l: usable[0].l, w: usable[0].w } }
+                                      : { push: false, strip: dec.strip })} />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                      Each job's sheets are cut on its own imposition, so each leaves its own
+                      strip. Banked at the lock and trued up to that job's share of the parents
+                      actually cut.
+                    </p>
+                  </Card>
+                )}
+
+                {/* Why there is no card, when there is none — see gangLoWhy. */}
+                {gangLoWhy && (
+                  <Card icon={Scissors} title="Leftover"
+                    sub="offcut strips this run's cut leaves on the parent sheet">
+                    <p className="text-[11px] leading-relaxed text-slate-500">
+                      The members have not settled on <b>one child sheet</b> yet, so this
+                      co-printed run has no single cut to measure an offcut on. Lock the layout —
+                      or enter the final child size in the Run Sheet — and the strip appears here.
+                    </p>
                   </Card>
                 )}
               </div>

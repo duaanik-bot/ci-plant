@@ -10,8 +10,8 @@ import {
   availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
-  readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
-  unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
+  readiness, chosenCutsValid, chosenStrips, leftoverStrips, bankRunLeftover, unbankRunLeftover,
+  bankPlanningLeftover, unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
@@ -188,6 +188,81 @@ function sharedLayoutState(gang, members) {
   return { pending: false, child: { l: overrides[0].l, w: overrides[0].w } };
 }
 
+
+// ── Which runs may bank their offcut as leftover stock ──────────────────────
+//
+// THE ONE SPELLING. Five call sites read this — the plan route's two bank arms,
+// gangDetail's toggle seed, reDeriveMemberSheets' unbank, and production.js's
+// cutting confirm — because an inline sixth copy is exactly how the gang anchor
+// drifted before (see the anchor-one-spelling wave: a name-grep is blind to
+// hand-written duplicates).
+//
+// A COMBINED run is one product on one pile, so its offcut has full product
+// identity — it always could bank, and did, but only through a board mix.
+//
+// A SHARED-LAYOUT gang qualifies for the same reason: sharedLayoutState already
+// refuses members carrying different child sizes, so the run has one child, one
+// childFit and therefore one strip. The guillotine trims that strip off each
+// parent as it cuts, so it reaches the leftover rack exactly when a single
+// job's does — it does not wait for the die-cut split.
+//
+// A SEPARATE-LAYOUT gang does not. Every member cuts its own imposition off the
+// shared pile, so one parent card stands for N different offcuts and no single
+// strip describes it. That is the original exclusion, kept.
+//
+// kind==='merge' short-circuits DELIBERATELY. A merge converted before
+// convert-to-merge began stamping layout_mode='separate' still carries a stale
+// 'shared' — the plan route says it plainly: the kind is the truth, the
+// layout_mode is a leftover. Reading layout first changes nothing today and is
+// wrong the moment that stale value matters.
+export function runBanksLeftover(gang) {
+  return gang?.kind === 'merge'
+      || (gang?.kind === 'gang' && gang?.layout_mode === 'shared');
+}
+
+// The sheet a run's offcut is measured on, and the child cut out of it.
+//
+// Must be the SAME pair the run's own fit was computed from, or the planner's
+// card promises a strip the lock then refuses with a 409 they cannot explain —
+// the exact failure the leftover-strip-parent wave paid for on single lines.
+//
+//   • merge → the lead member's effectiveParent: its declared parent trim
+//     folded over the board, because a combined run is one product cut on its
+//     own parent (the same runParent the mix arm's chosen-cuts check uses).
+//   • shared gang → the shared board's OWN mother sheet. NEVER a member's solo
+//     parent trim. That trim describes how the product cuts when planned
+//     ALONE; a co-printed layout is its own geometry. CI-GANG-0010 paid for
+//     this: a lead's 23×36 solo trim priced the run at 1,200 parent sheets
+//     where the shared 25×36 board cuts 600.
+//
+// Pure — the caller resolves the board and the child. Null whenever the run
+// cannot bank or is not measurable yet (no board, unsized child, pending
+// layout), which every caller treats as "no card, nothing to bank".
+export function runLeftoverBasis(gang, board, { mergeChild = null, sharedChild = null } = {}) {
+  if (!runBanksLeftover(gang) || !board) return null;
+  if (gang.kind === 'merge') {
+    if (!mergeChild) return null;
+    // Narrowed to the two dimensions on purpose. effectiveParent SPREADS the
+    // board row to keep the rest of a material's fields for its other callers,
+    // and this value is serialised to the browser — it would ship the board's
+    // rates and reorder levels to a screen that reads only the sheet. Every
+    // consumer of a basis (leftoverStrips, childFit, the client's clientStrips)
+    // reads sheet_l/sheet_w and nothing else.
+    const parent = effectiveParent(mergeChild, board);
+    if (!(+parent.sheet_l > 0) || !(+parent.sheet_w > 0)) return null;
+    if (!(+mergeChild.child_l > 0) || !(+mergeChild.child_w > 0)) return null;
+    return {
+      parent: { sheet_l: +parent.sheet_l, sheet_w: +parent.sheet_w },
+      child: { child_l: +mergeChild.child_l, child_w: +mergeChild.child_w },
+    };
+  }
+  if (!(+sharedChild?.l > 0) || !(+sharedChild?.w > 0)) return null;
+  if (!(+board.sheet_l > 0) || !(+board.sheet_w > 0)) return null;
+  return {
+    parent: { sheet_l: +board.sheet_l, sheet_w: +board.sheet_w },
+    child: { child_l: +sharedChild.l, child_w: +sharedChild.w },
+  };
+}
 
 // The compatibility check — pure, tiny, and the single source of truth.
 export function gangCompat(members) {
@@ -395,25 +470,86 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
     }
   }
 
-  // Live run-level leftover batches — the RECORD of what the last merge lock
-  // banked (there is deliberately no JSON column on gang_runs for this; the
-  // batches themselves are the truth, exactly as the warehouse reads them).
+  // Live run-level leftover batches — the RECORD of what the last lock banked
+  // (there is deliberately no JSON column on gang_runs for this; the batches
+  // themselves are the truth, exactly as the warehouse reads them).
   // The client seeds its per-row bank toggles from this list. material_id here
   // is the SOURCE board's — parsed back out of the batch key, because the
   // batch row itself carries the minted leftover MASTER's id, which is not
   // the id the mix rows (or the toggles) are keyed on.
   let leftoverBatches = [];
-  if (isMerge) {
+  if (runBanksLeftover(gang)) {
     const prefix = `LO-PLAN-RUN-${gang.id}-`;
     // initial_qty > 0 OR qty > 0 keeps a bank alive while another job draws
     // it down, yet drops a SWEPT row (unbankRunLeftover zeroes both) — a
     // strip the planner sent to waste must not seed its toggle back ON.
+    // The minted master's own sheet dims ARE the strip that was banked, so the
+    // no-mix card can reopen on the exact rectangle the planner picked instead
+    // of defaulting to the largest and quietly re-banking a different one.
     leftoverBatches = (await qc(
-      `SELECT batch_no, qty FROM stock_batches
-        WHERE batch_no LIKE $1 AND (initial_qty > 0 OR qty > 0) ORDER BY id`,
+      `SELECT sb.batch_no, sb.qty, m.sheet_l, m.sheet_w
+         FROM stock_batches sb JOIN materials m ON m.id = sb.material_id
+        WHERE sb.batch_no LIKE $1 AND (sb.initial_qty > 0 OR sb.qty > 0) ORDER BY sb.id`,
       [`${prefix}%`]))
-      .map(b => ({ material_id: Number(String(b.batch_no).slice(prefix.length)), qty: Number(b.qty) }))
+      .map(b => ({
+        material_id: Number(String(b.batch_no).slice(prefix.length)), qty: Number(b.qty),
+        strip: { l: Number(b.sheet_l), w: Number(b.sheet_w) },
+      }))
       .filter(b => Number.isFinite(b.material_id));
+  }
+
+  // ── A SEPARATE-layout gang's per-member offcuts ─────────────────────────
+  //
+  // It has no ONE strip — each member cuts its own imposition off the shared
+  // pile — so instead of a single basis it gets one entry per member: the
+  // geometry that member's own cut leaves, measured on the sheet its own fit
+  // was struck on (its OWN board, not the lead's: a plain gang only WARNS when
+  // members resolve to different boards). Same contract as leftover_basis —
+  // the server measures, the client draws — so a per-member chip cannot promise
+  // a strip the lock refuses. Empty for every other run.
+  //
+  // `banked` seeds the toggles from what the last lock actually wrote: a member
+  // banks through the LINE's own v2 plan, so leftover_plan on its row IS the
+  // record (MEMBER_VIEW does not carry that column — one small read here rather
+  // than widening a view eleven other callers share).
+  let memberLeftovers = [];
+  if (gang?.kind === 'gang' && gang?.layout_mode !== 'shared') {
+    const plans = new Map((await qc(
+      'SELECT id, leftover_plan FROM order_lines WHERE id = ANY($1)',
+      [members.map(m => m.id)])).map(r => [r.id, typeof r.leftover_plan === 'string'
+        ? JSON.parse(r.leftover_plan) : r.leftover_plan]));
+    memberLeftovers = effs.map((e, i) => {
+      const own = { sheet_l: e.member.sheet_l, sheet_w: e.member.sheet_w };
+      const p = effectiveParent(e.eff, own);
+      const lp = plans.get(e.member.id);
+      // Its own parents, by the LOCK's arithmetic — not memberParentSheets.
+      // The run prints once, so the wastage allowance is booked to the LEAD
+      // member alone and every other member carries zero; memberParentSheets
+      // reads each member's own stored wastage and so quotes a non-lead member
+      // ~100 parents too many. The card would then promise a strip count the
+      // lock immediately contradicts (measured: card 5,100, banked 5,000).
+      const w = i === 0 ? (Number(e.member.wastage_sheets) || 0) : 0;
+      const fit = childFit(p, e.eff);
+      const estParents = fit.count > 0
+        ? parentSheetsRequired(sheetsRequired(e.eff, netProduceQty(e.member), w), fit.count)
+        : 0;
+      // The PLANNED board's row is the one the card shows and the planner
+      // picked; a substitute's strip is derived at lock and never chosen here.
+      const own_row = lp?.version === 2 && Array.isArray(lp.rows)
+        ? lp.rows.find(r => +r.material_id === +e.member.board_material_id) : null;
+      return {
+        line_id: e.member.id,
+        product_name: e.member.product_name,
+        board_material_id: e.member.board_material_id,
+        board_name: e.member.board_name,
+        parent_l: +p.sheet_l || null, parent_w: +p.sheet_w || null,
+        child_l: +e.eff.child_l || null, child_w: +e.eff.child_w || null,
+        // Its own share of the run's issue — one strip per parent it cuts.
+        est_parents: estParents,
+        banked: !!(lp?.version === 2 && lp.rows?.length),
+        strip: own_row?.strip ?? null,
+      };
+    });
   }
 
   return {
@@ -439,6 +575,29 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
     covered,
     held_on_planned: heldOnPlanned,
     leftover_batches: leftoverBatches,
+    // The geometry the LOCK will measure this run's offcut on, handed to the
+    // client rather than re-derived there. planned_parent_* above is the LEAD
+    // MEMBER's effectiveParent, which is right for a merge and wrong for a
+    // shared gang (whose cut runs on the board's own mother sheet) — so a
+    // client that reached for it would draw a strip the lock refuses. Null
+    // when the run does not bank or is not measurable yet; the card then does
+    // not render at all.
+    //
+    // The shared child mirrors the plan route's own soft gate: the stamped
+    // override if there is one, else the size the members' effective specs
+    // already agree on — MEMBER_VIEW's child_l/child_w are COALESCE(override,
+    // master), the same effective pair the route feeds agreedChildSize.
+    leftover_basis: runLeftoverBasis(gang, board, {
+      mergeChild: effs[0].eff,
+      sharedChild: sharedLayoutState(gang, members).child
+        || agreedChildSize(members.map(m => ({ l: m.child_l, w: m.child_w }))),
+    }),
+    // A SEPARATE-layout gang has no ONE strip, so it gets one entry per member
+    // instead: the geometry that member's own cut leaves, on the sheet its own
+    // fit was struck on. Same contract as leftover_basis — the server measures,
+    // the client draws — so the per-member chips cannot promise a strip the
+    // lock refuses. Empty for every other run (which uses leftover_basis).
+    leftover_members: memberLeftovers,
   };
 }
 
@@ -999,6 +1158,17 @@ r.patch('/gang-runs/:id/layout', canPlan, async (req, res, next) => {
         await qc('UPDATE gang_runs SET layout_mode=$1 WHERE id=$2', [mode, gang.id]);
         await audit('gang_run', gang.id, 'layout_mode',
           `${gang.gang_number}: ${gang.layout_mode} → ${mode}`, qc, req.user.name);
+        // The layout decides whether this run may bank an offcut at all — a
+        // co-printed gang has one child and one strip, a separate one has as
+        // many as it has members. So flipping to 'separate' strands whatever a
+        // shared lock banked: live stock on a run that is no longer allowed to
+        // hold any, with no screen left that could give it back. Sweep it here.
+        // The other direction is a clean no-op (nothing was banked), and this
+        // route already refuses a merge above, so one unconditional call is the
+        // whole rule. The re-lock the planner must now do re-banks if they
+        // still want it.
+        await unbankRunLeftover(gang.id, qc, oc, req.user.name,
+          `layout ${gang.layout_mode} → ${mode}`);
       }
     });
     res.json(await gangDetail(+req.params.id));
@@ -1090,6 +1260,11 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       // zero so it is never multiplied by the number of products.
       const plan = [];
       let adoptedChildNote = '';
+      // The parent + child this run's offcut is measured on, captured by
+      // whichever branch below computes the run's fit so the two can never
+      // drift apart. Null for a run that does not bank (a separate-layout
+      // gang) or cannot be measured yet. See runLeftoverBasis.
+      let loBasis = null;
       // kind guard: a COMBINED RUN is one product across N sales orders — its
       // run is the SUM of every order, so it must never take the co-printed
       // MAX. Convert-to-merge now stamps layout_mode='separate', but a merge
@@ -1150,6 +1325,9 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // trim that fits the 18×25 child once, and the lock priced the run at
         // 1,200 parent when the shared 25×36 board cuts it twice — 600.
         const fit = childFit(board, { child_l: child.l, child_w: child.w });
+        // Same (board, child) pair, so the strip the planner ticked is cut out
+        // of the very sheet this fit was struck on.
+        loBasis = runLeftoverBasis(gang, board, { sharedChild: child });
         const runParent = parentSheetsRequired(run.run_child, fit.count);
         const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
         const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
@@ -1183,10 +1361,19 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
         const parent = effectiveParent(eff, board);
         const fit = childFit(parent, eff);
+        // A COMBINED run is one product, so the lead member's parent IS the
+        // run's — the same effectiveParent the mix arm's runParent uses. A
+        // separate-layout gang leaves this null: N members, N impositions, so
+        // there is no ONE strip. Its members bank individually instead, off the
+        // per-member geometry carried on each plan entry below.
+        if (i === 0) loBasis = runLeftoverBasis(gang, board, { mergeChild: eff });
         const w_i = i === 0 ? (wastage ?? line.wastage_sheets ?? 0) : 0;
         const sheets = sheetsRequired(eff, netProduceQty(line), w_i);
         const parentSheets = parentSheetsRequired(sheets, fit.count);
-        plan.push({ line, eff, fit, sheets, parentSheets, wastage: w_i });
+        // `board` and `parent` ride along so the per-member leftover arm can
+        // measure each member's offcut on the very sheet its own fit was struck
+        // on, without re-selecting a board it would then have to keep in step.
+        plan.push({ line, eff, fit, sheets, parentSheets, wastage: w_i, board, parent });
       }
       }
       // 2) If the planner overrode the total, distribute it across members in
@@ -1399,7 +1586,13 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // the PLANNED row validates and banks against this same trimmed
         // sheet, while a substitute uses its own mother sheet: the exact
         // rowParentFor asymmetry orders.js documents at length.
-        const runParent = isMerge ? effectiveParent(plan[0].eff, board) : null;
+        // A SHARED-LAYOUT gang has a planned parent too — the board's own
+        // mother sheet, which is what its fit was struck on — and its leftover
+        // arm below needs it. The merge expression is left spelled out rather
+        // than folded into loBasis so this line stays byte-identical for the
+        // path that already shipped: loBasis is null for a merge whose child is
+        // unsized, and chosenCutsValid must not start seeing null there.
+        const runParent = isMerge ? effectiveParent(plan[0].eff, board) : (loBasis?.parent ?? null);
         const runRowParentFor = (role, mat) =>
           role === 'planned' ? runParent : { sheet_l: mat.sheet_l, sheet_w: mat.sheet_w };
         const runRows = [];
@@ -1532,22 +1725,30 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           runRows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
           qc, req.user.name);
 
-        // ── Run-level leftover banking (merge only) ──────────────────────
+        // ── Run-level leftover banking ───────────────────────────────────
         // Mirrors orders.js's v2 per-row bank, at run level: banking is
         // opt-in per mix row (req.body.mix_leftovers), the strip is derived
         // HERE from the row's own geometry — planned row off the run's
-        // trimmed parent, substitute off its own mother sheet, the same
+        // planned parent, substitute off its own mother sheet, the same
         // runRowParentFor the chosen-cuts validation used, so cuts and
         // strips can never disagree about the sheet. Batch qty is Task 4's
         // unit: strips = strips_per_parent × that board's RUN-level parent
         // sheets; cutting-complete trues it to spp × actual parents. The
         // keep-list makes the sweep reconcile: dropped rows and toggled-off
         // boards zero, survivors delta through bankRunLeftover itself.
-        // A gang-kind run banks nothing here, explicitly — its parent card
-        // can carry mixed child layouts, so its offcut has no product
-        // identity until the die-cut split (the same reasoning as
-        // production.js's gang-parent skip).
-        if (isMerge) {
+        //
+        // Gated on the KIND predicate, so a SHARED-LAYOUT gang banks here too.
+        // Without this arm it could bank on its plain board and then silently
+        // could not the moment the planner covered a shortage with a second
+        // one — the same hole this wave closes for a combined run. A
+        // SEPARATE-layout gang still banks nothing: one parent card stands for
+        // N impositions and no single strip describes it.
+        //
+        // The predicate and not loBasis, because the SWEEP has to run for an
+        // eligible run whether or not its cut is measurable — a run that loses
+        // its child size must not keep stock banked against a cut nobody can
+        // still quote. An unmeasurable run that is ASKED to bank refuses.
+        if (runBanksLeftover(gang)) {
           const bankWanted = new Map(
             (Array.isArray(req.body.mix_leftovers) ? req.body.mix_leftovers : [])
               .map(x => [+x.material_id, !!x.bank]));
@@ -1555,7 +1756,16 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           for (const r of runRows) {
             if (!bankWanted.get(r.material_id)) continue;
             const mat = matById.get(r.material_id);
-            const strips = chosenStrips(runRowParentFor(r.role, mat), plan[0].eff, r.ups);
+            if (!loBasis) throw Object.assign(new Error(
+              `${gang.gang_number} has no settled cut to measure an offcut on — set the run's board and child sheet size first`),
+              { status: 409 });
+            const rowParent = runRowParentFor(r.role, mat);
+            // A merge row carries its cuts (chosen or natural); a gang row
+            // carries none — the differing-cuts 409 still stands for a gang,
+            // so its cuts ARE the board's natural fit for the run's one
+            // child, and chosenStrips collapses to leftoverStrips there.
+            const rowUps = r.ups ?? childFit(rowParent, loBasis.child).count;
+            const strips = chosenStrips(rowParent, loBasis.child, rowUps);
             if (!strips.length) throw Object.assign(
               new Error(`No strip left to bank on ${mat.name}`), { status: 409 });
             const usable = strips.filter(s => s.usable);
@@ -1577,19 +1787,158 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
             await bankRunLeftover(gang.id, b.mat, b.strip, b.spp, b.spp * b.sheets, qc, oc, req.user.name);
           }
         }
-      } else if (gang.kind === 'merge' && (!draft || Array.isArray(req.body.mix))) {
-        // A merge run re-locked WITHOUT a mix: the members' rows were already
-        // cleared in the plan loop above, so any run-level batches an earlier
-        // lock banked now mirror nothing — sweep them to zero. No-op when
-        // nothing was banked; gang-kind runs never bank, so they skip even
-        // the lookup and this branch changes nothing for them.
+      } else if (runBanksLeftover(gang) && (!draft || Array.isArray(req.body.mix))) {
+        // ── The run's offcut with NO mix ─────────────────────────────────
         //
-        // The same draft exemption as the clear above, and for the same reason:
-        // that premise ("already cleared") is false when a draft withheld its
-        // mix. Those rows are still there, and this bank is what mirrors them —
-        // sweeping it would leave the preserved mix with its planned offcut
-        // taken back off the shelf.
-        await unbankRunLeftover(gang.id, qc, oc, req.user.name, 'plan re-locked without a mix');
+        // The ordinary case, and until now the one with no way to bank at all:
+        // one run, one board, no substitute. The option existed only as a side
+        // effect of opening a Board Mix, and re-locking without one took back
+        // whatever a mixed lock had banked.
+        //
+        // The payload is the SINGLE LINE's own shape — `leftover: {push,
+        // strip}` — because this is the same decision a solo job makes, and
+        // giving the run a different spelling would be one more thing to keep
+        // in step. The strip is validated against the run's real cut and
+        // refused with the same sentence orders.js uses, so a card quoting a
+        // stale geometry cannot write stock measured on a sheet nobody cuts.
+        //
+        // Qty is strips_per_parent × the run's ISSUED parent sheets — the same
+        // total the mix arm balances against, so an issue override is priced
+        // in. Cutting-complete then trues it to the actual parents cut.
+        //
+        // The draft exemption above is unchanged and load-bearing for both
+        // arms: a draft that withheld its mix left the members' rows in place,
+        // and the bank mirrors those rows — sweeping here would leave the
+        // preserved mix with its planned offcut taken back off the shelf.
+        const wantsBank = req.body.leftover?.push && req.body.leftover?.strip;
+        let banked = null;
+        if (wantsBank) {
+          if (!loBasis) throw Object.assign(new Error(
+            `${gang.gang_number} has no settled cut to measure an offcut on — set the run's board and child sheet size first`),
+            { status: 409 });
+          const want = req.body.leftover.strip;
+          const pick = leftoverStrips(loBasis.parent, loBasis.child).find(s =>
+            s.usable
+            && Math.abs(s.l - +want.l) < 0.01 && Math.abs(s.w - +want.w) < 0.01);
+          if (!pick) throw Object.assign(
+            new Error('Leftover strip does not match this run\'s cut plan'), { status: 409 });
+          const srcBoard = await oc('SELECT id, name, spec, sheet_l, sheet_w FROM materials WHERE id=$1',
+            [plan[0].eff.board_material_id]);
+          if (!srcBoard) throw Object.assign(
+            new Error('The run has no board to bank an offcut from'), { status: 409 });
+          banked = { srcBoard, strip: pick, spp: pick.strips_per_parent || 1 };
+        }
+        // Sweep first, keeping only what this save is about to re-bank —
+        // bankRunLeftover's own delta logic reconciles the survivor. Same
+        // keep-list contract as the mix arm.
+        await unbankRunLeftover(gang.id, qc, oc, req.user.name,
+          banked ? 'run leftover re-planned' : 'plan re-locked without a leftover',
+          banked ? [`LO-PLAN-RUN-${gang.id}-${banked.srcBoard.id}`] : []);
+        if (banked) {
+          await bankRunLeftover(gang.id, banked.srcBoard, banked.strip, banked.spp,
+            banked.spp * issuedTotal, qc, oc, req.user.name);
+        }
+      }
+
+      // ── A SEPARATE-LAYOUT gang banks PER MEMBER ─────────────────────────
+      //
+      // The run-level arms above cannot speak for it: each member cuts its own
+      // imposition off the shared pile, so one parent card stands for N
+      // different offcuts. But each of those offcuts is perfectly well defined
+      // — it is exactly the strip that member would leave planned alone — so
+      // the decision is per member, and the bank is the LINE's own v2 bank
+      // (batch LO-PLAN-<lineId>-<materialId>, leftover_plan on the member's
+      // row). No new storage: a separate gang's member IS a line being cut on
+      // its own terms, and reusing the line machinery means the sweep
+      // (unbankPlanningLeftover), the reverse path and the warehouse's own
+      // reading of a line bank all work here unchanged.
+      //
+      // Payload: `leftovers: [{ line_id, push, strip }]` — one decision per
+      // member. Absent entirely means "no opinion", which on a lock is the same
+      // as none, and the sweep below is what makes that true.
+      //
+      // Runs on the SAME draft rule as the arms above, and for the same reason:
+      // a draft withholding its mix must not sweep a bank that mirrors it.
+      if (gang.kind === 'gang' && gang.layout_mode !== 'shared'
+          && (!draft || Array.isArray(req.body.mix))) {
+        const wanted = new Map(
+          (Array.isArray(req.body.leftovers) ? req.body.leftovers : [])
+            .map(x => [+x.line_id, x]));
+        for (let idx = 0; idx < plan.length; idx++) {
+          const { line, eff, board, parent } = plan[idx];
+          const want = wanted.get(line.id);
+          // Which boards this member actually draws, and how many parents off
+          // each. With a mix that is its split share, already written above by
+          // replaceMixPlan; without one it is the whole of its issue off its
+          // own planned board. Reading the stored rows rather than re-deriving
+          // means the bank can never disagree with what the floor will cut.
+          const rows = wantsMix ? await mixFor(line.id, 'plan', qc) : [];
+          const draws = rows.length
+            ? rows.map(r => ({ material_id: +r.material_id, sheets: Number(r.sheets) || 0,
+                               role: r.role }))
+            : [{ material_id: +eff.board_material_id, sheets: Number(issued[idx]) || 0,
+                 role: 'planned' }];
+
+          const v2Rows = [];
+          const keep = [];
+          if (want?.push && want?.strip) {
+            for (const d of draws) {
+              if (!(d.material_id > 0) || !(d.sheets > 0)) continue;
+              const mat = d.material_id === +eff.board_material_id
+                ? board
+                : await oc('SELECT id, name, spec, sheet_l, sheet_w FROM materials WHERE id=$1', [d.material_id]);
+              if (!mat) continue;
+              // The same rowParentFor asymmetry every other arm uses: this
+              // member's planned board cuts from its trimmed parent, a
+              // substitute from its own mother sheet.
+              const rowParent = d.role === 'planned' && d.material_id === +eff.board_material_id
+                ? parent : { sheet_l: mat.sheet_l, sheet_w: mat.sheet_w };
+              const usable = leftoverStrips(rowParent, eff).filter(s => s.usable);
+              if (!usable.length) continue;   // this board leaves nothing — skip it, not the member
+              // The PLANNED board must yield the strip the planner ticked; a
+              // substitute has its own geometry the planner never saw, so it
+              // banks whatever it actually leaves (largest by area, the same
+              // pick every other arm takes).
+              const isPlanned = d.material_id === +eff.board_material_id;
+              const pick = isPlanned
+                ? usable.find(s => Math.abs(s.l - +want.strip.l) < 0.01
+                                && Math.abs(s.w - +want.strip.w) < 0.01)
+                : [...usable].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+              if (isPlanned && !pick) throw Object.assign(new Error(
+                `Leftover strip does not match the cut plan for ${eff.name || `line ${line.id}`}`),
+                { status: 409 });
+              if (!pick) continue;
+              v2Rows.push({
+                material_id: mat.id, cuts: childFit(rowParent, eff).count,
+                strip: { l: pick.l, w: pick.w },
+                strips_per_parent: pick.strips_per_parent || 1,
+                est_sheets: d.sheets,
+                _mat: mat, _qty: (pick.strips_per_parent || 1) * d.sheets,
+              });
+              keep.push(`LO-PLAN-${line.id}-${mat.id}`);
+            }
+            if (!v2Rows.length) throw Object.assign(new Error(
+              `Nothing bankable on ${eff.name || `line ${line.id}`} — this cut leaves under 3" on the short side`),
+              { status: 409 });
+          }
+          // Sweep this member's own family, keeping what it is about to
+          // re-bank; bankPlanningLeftover's delta logic reconciles those.
+          await unbankPlanningLeftover(line.id, qc, oc, req.user.name,
+            v2Rows.length ? 'member leftover re-planned' : 'plan re-locked without a leftover', keep);
+          for (const r of v2Rows) {
+            await bankPlanningLeftover(line, r._mat, r.strip, r.strips_per_parent, r._qty,
+              qc, oc, req.user.name, `LO-PLAN-${line.id}-${r._mat.id}`);
+          }
+          // The RECORD the cutting confirm reads. Same v2 shape orders.js
+          // writes for a mixed line, so one confirm can serve both.
+          await qc('UPDATE order_lines SET leftover_plan=$1 WHERE id=$2',
+            [v2Rows.length
+              ? JSON.stringify({ version: 2, decided_by: req.user.name,
+                  decided_at: new Date().toISOString(),
+                  rows: v2Rows.map(({ _mat, _qty, ...keepRow }) => keepRow) })
+              : null,
+             line.id]);
+        }
       }
       await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
       await audit('gang_run', gang.id, draft ? 'plan_draft' : 'plan',
@@ -1844,16 +2193,33 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   // clear, so calling it unconditionally here (rather than diffing old vs new
   // sheets) matches how plan-save itself doesn't diff either.
   await clearMixPlan(lineId, qc, user, why || 'gang member re-derived — cut plan changed');
-  // On a MERGE run the member rows just cleared were the run's own split mix,
-  // and the run-level leftover bank mirrors that mix — so it goes with it,
-  // exactly as re-locking without a mix sweeps it. The re-lock that follows a
-  // spec change re-banks whatever the planner keeps. Gang-kind runs never
-  // bank, so the kind read is the whole cost for them.
+  // The member rows just cleared were the run's own split mix, and the
+  // run-level leftover bank mirrors that mix — so it goes with it, exactly as
+  // re-locking without a mix sweeps it. The re-lock that follows a spec change
+  // re-banks whatever the planner keeps.
+  //
+  // THIS IS THE GUARD RAIL FOR THE WHOLE FEATURE, and it is why it lives here
+  // rather than in three routes. All three callers change an input the strip is
+  // measured on — a per-member board reassignment (/board), the shared child
+  // size (/shared), a qty or ups edit (/lines/:lineId) — and a banked strip is
+  // live warehouse stock the moment the lock writes it. Leaving it behind would
+  // stock the rack with a size the run no longer cuts.
+  //
+  // A run that cannot bank reads its kind and stops there, as before.
   if (line.gang_run_id) {
-    const kindRow = await oc('SELECT kind FROM gang_runs WHERE id=$1', [line.gang_run_id]);
-    if (kindRow?.kind === 'merge') {
+    const run = await oc('SELECT kind, layout_mode FROM gang_runs WHERE id=$1', [line.gang_run_id]);
+    if (runBanksLeftover(run)) {
       await unbankRunLeftover(line.gang_run_id, qc, oc, user,
         why || 'gang member re-derived — cut plan changed');
+    } else {
+      // A SEPARATE-layout gang banks on the MEMBER, so the strip that goes with
+      // this member's cut plan is its own line bank — swept here for the same
+      // reason and by the same rule. Also catches a bank the line carried in
+      // from being planned solo before it joined: clearMixPlan above has just
+      // dropped the rows that bank mirrored.
+      await unbankPlanningLeftover(line.id, qc, oc, user,
+        why || 'gang member re-derived — cut plan changed');
+      await qc('UPDATE order_lines SET leftover_plan=NULL WHERE id=$1', [line.id]);
     }
   }
 }
