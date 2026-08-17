@@ -355,7 +355,13 @@ test('Product colours and Plate Rates flow into finalized Plate PO rows', () => 
 test('Gang Plate demand stays unified and Output remains visible throughout the lifecycle', () => {
   const tooling = read('server/src/routes/tooling.js');
   const route = read('server/src/routes/plates.js');
-  const page = read('client/src/components/PlatesLifecycle.jsx');
+  // The plate module's screen and the identity vocabulary it renders with. The
+  // gang wording used to live inside PlatesLifecycle.jsx; it moved to
+  // plateIdentity.jsx so the PO edit modal, the register and the PRINTED
+  // purchase order could say it too. The rule is that the plant sees it — not
+  // which file holds the string — so both are read.
+  const page = read('client/src/components/PlatesLifecycle.jsx')
+    + read('client/src/components/plateIdentity.jsx');
   // ONE gang prints from ONE plate set, so a gang's plate demand must be raised
   // as a single unified requirement rather than one per member. The rule now
   // lives only in the MANUAL door (tooling.js): the Job Card finalise no longer
@@ -365,6 +371,11 @@ test('Gang Plate demand stays unified and Output remains visible throughout the 
   for (const label of ['Unified gang plate','Gang members','All approvals','Approved','Unapproved','Output']) {
     assert.ok(page.includes(label), `${label} is missing`);
   }
+  // A vocabulary nothing imports is a vocabulary nobody sees. Pin the wiring so
+  // the strings above cannot pass by sitting in an orphaned module.
+  assert.match(read('client/src/components/PlatesLifecycle.jsx'),
+    /from '\.\/plateIdentity\.jsx'/,
+    'PlatesLifecycle must render through the shared plate identity, or the screens will drift apart again');
 });
 
 test('Converted Plate PRs leave the open queue and move to the converted chip', () => {

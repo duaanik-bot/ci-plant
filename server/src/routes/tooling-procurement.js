@@ -3,7 +3,7 @@
 // follow the same guarded hand-offs as Procurement without sharing board stock.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber } from '../helpers.js';
+import { audit, nextNumber, outputNumberSql } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
   PHYSICAL_TOOLING_FAMILIES,
@@ -79,15 +79,36 @@ async function poRows(family, id = null) {
     WHERE po.family=$1 ${where}
     ORDER BY po.id DESC`, params);
   if (!rows.length) return rows;
+  // A plate line carries its own identity — the product it is for, the output
+  // number the plant calls it by, its size, and the inks actually on the
+  // plates. Without them the printed PO tells the vendor only "Plate 1030x800",
+  // which is the inventory item, not the job. The lateral is LEFT and yields an
+  // empty list, so a die or block line is untouched by it.
   const lines = await q(`SELECT pl.*, pl.inventory_item_id AS material_id,
       ti.code AS material_code, ti.name AS material_name,
       ti.specification AS spec, ti.size, ti.tool_type, ti.product_id,
-      tr.request_number, jc.jc_number, p.name AS product_name
+      tr.request_number, jc.jc_number,
+      COALESCE(NULLIF(tr.specification->>'product_name',''), p.name) AS product_name,
+      ${outputNumberSql({ run: 'gr', product: 'p' })} AS output_number,
+      COALESCE((tr.specification->>'is_gang')::boolean, false) AS is_gang,
+      tr.specification->'gang_members' AS gang_members,
+      plate.plate_size, COALESCE(plate.components, '[]'::json) AS components
     FROM tooling_po_lines pl
     JOIN tooling_inventory_items ti ON ti.id=pl.inventory_item_id
     LEFT JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
     LEFT JOIN job_cards jc ON jc.id=tr.job_card_id
+    LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
     LEFT JOIN products p ON p.id=tr.product_id
+    LEFT JOIN LATERAL (
+      SELECT MIN(pm.plate_size) AS plate_size,
+        json_agg(json_build_object(
+          'id',prc.id,'component_label',prc.component_label,'status',prc.status,
+          'component_type',prc.component_type,'pantone_code',prc.pantone_code
+        ) ORDER BY prc.sequence_no) AS components
+      FROM plate_request_components prc
+      LEFT JOIN plate_masters pm ON pm.id=prc.plate_master_id
+      WHERE prc.po_line_id=pl.id
+    ) plate ON true
     WHERE pl.purchase_order_id=ANY($1::int[]) ORDER BY pl.id`, [rows.map(row => row.id)]);
   const byPo = {};
   for (const line of lines) (byPo[line.purchase_order_id] ||= []).push(line);

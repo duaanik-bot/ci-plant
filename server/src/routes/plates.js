@@ -421,7 +421,8 @@ async function platePoRows() {
       COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
       tr.specification->'gang_members' AS gang_members,
       pm.plate_size,COALESCE(json_agg(json_build_object(
-        'id',prc.id,'component_label',prc.component_label,'status',prc.status,'pantone_code',prc.pantone_code
+        'id',prc.id,'component_label',prc.component_label,'status',prc.status,
+        'component_type',prc.component_type,'pantone_code',prc.pantone_code
       ) ORDER BY prc.sequence_no) FILTER (WHERE prc.id IS NOT NULL),'[]'::json) AS components
     FROM tooling_po_lines pl
     LEFT JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
@@ -1283,73 +1284,124 @@ r.get('/plates/grns', async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// ONE receipt of ONE plate PO line — asset creation, movement, the line's
+// received quantity, the PO's status and the requirement's sync.
+//
+// Both endpoints below run this and nothing else. They differ only in how many
+// lines they hand it and in the transaction that wraps them: the single-line
+// door opens its own, the whole-PO door opens one for the entire delivery. A
+// second copy of this body is how the two would drift, and the drift would be
+// silent — the plates would land, the paperwork would disagree.
+async function receivePlateLine(qc, oc, { poLineId, componentIds = [], body = {}, userName }) {
+  const poLine = await oc(`SELECT pl.*,po.vendor_id,po.po_number,po.status AS po_status,
+      tr.job_card_id,tr.product_id,tr.request_number,tr.specification
+    FROM tooling_po_lines pl
+    JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
+    JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
+    WHERE pl.id=$1 AND po.family='plate' FOR UPDATE OF pl,po,tr`, [poLineId]);
+  if (!poLine) throw Object.assign(new Error('Plate PO line not found'), { status: 404 });
+  const requested = [...new Set((componentIds || []).map(Number).filter(Boolean))];
+  const values = [poLine.id];
+  const chosen = requested.length ? (values.push(requested), 'AND prc.id=ANY($2::int[])') : '';
+  const components = await qc(`SELECT prc.*,pm.inventory_item_id,pm.plate_size
+    FROM plate_request_components prc JOIN plate_masters pm ON pm.id=prc.plate_master_id
+    WHERE prc.po_line_id=$1 AND prc.status IN ('po_created','ordered') ${chosen}
+    ORDER BY prc.sequence_no FOR UPDATE OF prc`, values);
+  if (!components.length) throw Object.assign(new Error('No outstanding plates remain on this PO line'), { status: 409 });
+  const pending = Number(poLine.qty) - Number(poLine.received_qty);
+  if (components.length > pending) throw Object.assign(new Error(`Receipt exceeds ${poLine.po_number}'s pending quantity`), { status: 409 });
+  const grnNumber = await nextNumber('CI-PL-GRN-', 'tooling_grns', 'grn_number', oc);
+  const [grn] = await qc(`INSERT INTO tooling_grns
+    (grn_number,family,purchase_order_id,po_line_id,tooling_request_id,inventory_item_id,vendor_id,
+     qty,accepted_qty,status,batch_no,vehicle_no,supplier_invoice_no,supplier_invoice_date,
+     received_by,remarks,qc_by,qc_at,created_by)
+    VALUES ($1,'plate',$2,$3,$4,$5,$6,$7,$7,'accepted',$8,$9,$10,$11,$12,$13,$12,now(),$14) RETURNING *`,
+  [grnNumber, poLine.purchase_order_id, poLine.id, poLine.tooling_request_id,
+   poLine.inventory_item_id, poLine.vendor_id, components.length, body.batch_no || null,
+   body.vehicle_no || null, body.supplier_invoice_no || null, body.supplier_invoice_date || null,
+   body.received_by || userName, body.remarks || null, userName]);
+  for (const component of components) {
+    const assetNumber = await nextNumber('CI-PL-A-', 'plate_assets', 'asset_number', oc);
+    const spec = poLine.specification || {};
+    const receivedCondition = body.condition || 'Good';
+    const assetStatus = 'available';
+    const componentStatus = 'available';
+    const [asset] = await qc(`INSERT INTO plate_assets
+      (asset_number,plate_master_id,product_id,output_number,artwork_reference,artwork_version,
+       component_type,component_label,pantone_code,source_grn_id,vendor_id,purchase_rate,
+       rack_location,status,condition,current_job_card_id,verified_by,verified_at,remarks)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),$18) RETURNING *`,
+    [assetNumber, component.plate_master_id, poLine.product_id, spec.output_number || null,
+     spec.party_artwork_code || null, spec.artwork_version || spec.party_artwork_code || spec.output_number || 'Unversioned',
+     component.component_type, component.component_label, component.pantone_code || null,
+     grn.id, poLine.vendor_id, Number(body.rate ?? poLine.rate) || 0,
+     FRESH_PLATES_RACK, assetStatus, receivedCondition, null,
+     userName, body.remarks || null]);
+    await qc(`UPDATE plate_request_components SET status=$1,matched_asset_id=$2,grn_id=$3,
+      updated_at=now() WHERE id=$4`, [componentStatus, asset.id, grn.id, component.id]);
+    await qc(`INSERT INTO plate_asset_movements
+      (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
+       to_location,condition,note,user_name)
+      VALUES ($1,$2,$3,$4,'received',NULL,$5,$6,$7,$8,$9)`,
+    [asset.id, component.id, poLine.tooling_request_id, poLine.job_card_id,
+     assetStatus, asset.rack_location, asset.condition, grnNumber, userName]);
+  }
+  await qc('UPDATE tooling_po_lines SET received_qty=received_qty+$1 WHERE id=$2', [components.length, poLine.id]);
+  const poLines = await qc('SELECT qty,received_qty FROM tooling_po_lines WHERE purchase_order_id=$1', [poLine.purchase_order_id]);
+  await qc('UPDATE tooling_purchase_orders SET status=$1,updated_at=now() WHERE id=$2',
+    [toolingPoStatus(poLines), poLine.purchase_order_id]);
+  await qc(`UPDATE tooling_requests SET received_at=now(),grn_number=$1,updated_at=now() WHERE id=$2`,
+    [grnNumber, poLine.tooling_request_id]);
+  await syncPlateRequest(qc, oc, poLine.tooling_request_id, userName);
+  await audit('tooling_grn', grn.id, 'create', `${grnNumber} · ${components.length} plates`, qc, userName);
+  return grn;
+}
+
 r.post('/plates/grns', canBuy, async (req, res, next) => {
   try {
     const poLineId = Number(req.body.po_line_id);
     if (!poLineId) return res.status(400).json({ error: 'Choose a Plate PO line' });
+    const result = await tx((qc, oc) => receivePlateLine(qc, oc, {
+      poLineId, componentIds: req.body.component_ids, body: req.body, userName: req.user.name,
+    }));
+    res.status(201).json(result);
+  } catch (error) { next(error); }
+});
+
+// The whole delivery, in one transaction.
+//
+// A plate PO carries several plate sets and the vendor delivers them when they
+// are ready. Receiving them one endpoint call at a time meant a failure on the
+// third set left the first two received, the PO's status recomputed against a
+// half-state, and nothing on screen saying which half had landed. One
+// transaction or none.
+//
+// It produces one GRN PER LINE, exactly as the boards module's /grns/bulk does:
+// a plate GRN row is keyed to one requirement, product and plate size, so a
+// receipt spanning three sets IS three documents.
+r.post('/plates/grns/bulk', canBuy, async (req, res, next) => {
+  try {
+    const purchaseOrderId = Number(req.body.purchase_order_id);
+    const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
+    if (!purchaseOrderId) return res.status(400).json({ error: 'Choose a Plate purchase order' });
+    if (!lines.length) return res.status(400).json({ error: 'Choose at least one received plate' });
     const result = await tx(async (qc, oc) => {
-      const poLine = await oc(`SELECT pl.*,po.vendor_id,po.po_number,po.status AS po_status,
-          tr.job_card_id,tr.product_id,tr.request_number,tr.specification
-        FROM tooling_po_lines pl
-        JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
-        JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
-        WHERE pl.id=$1 AND po.family='plate' FOR UPDATE OF pl,po,tr`, [poLineId]);
-      if (!poLine) throw Object.assign(new Error('Plate PO line not found'), { status: 404 });
-      const requested = [...new Set((req.body.component_ids || []).map(Number).filter(Boolean))];
-      const values = [poLine.id];
-      const chosen = requested.length ? (values.push(requested), 'AND prc.id=ANY($2::int[])') : '';
-      const components = await qc(`SELECT prc.*,pm.inventory_item_id,pm.plate_size
-        FROM plate_request_components prc JOIN plate_masters pm ON pm.id=prc.plate_master_id
-        WHERE prc.po_line_id=$1 AND prc.status IN ('po_created','ordered') ${chosen}
-        ORDER BY prc.sequence_no FOR UPDATE OF prc`, values);
-      if (!components.length) throw Object.assign(new Error('No outstanding plates remain on this PO line'), { status: 409 });
-      const pending = Number(poLine.qty) - Number(poLine.received_qty);
-      if (components.length > pending) throw Object.assign(new Error(`Receipt exceeds ${poLine.po_number}'s pending quantity`), { status: 409 });
-      const grnNumber = await nextNumber('CI-PL-GRN-', 'tooling_grns', 'grn_number', oc);
-      const [grn] = await qc(`INSERT INTO tooling_grns
-        (grn_number,family,purchase_order_id,po_line_id,tooling_request_id,inventory_item_id,vendor_id,
-         qty,accepted_qty,status,batch_no,vehicle_no,supplier_invoice_no,supplier_invoice_date,
-         received_by,remarks,qc_by,qc_at,created_by)
-        VALUES ($1,'plate',$2,$3,$4,$5,$6,$7,$7,'accepted',$8,$9,$10,$11,$12,$13,$12,now(),$14) RETURNING *`,
-      [grnNumber, poLine.purchase_order_id, poLine.id, poLine.tooling_request_id,
-       poLine.inventory_item_id, poLine.vendor_id, components.length, req.body.batch_no || null,
-       req.body.vehicle_no || null, req.body.supplier_invoice_no || null, req.body.supplier_invoice_date || null,
-       req.body.received_by || req.user.name, req.body.remarks || null, req.user.name]);
-      for (const component of components) {
-        const assetNumber = await nextNumber('CI-PL-A-', 'plate_assets', 'asset_number', oc);
-        const spec = poLine.specification || {};
-        const receivedCondition = req.body.condition || 'Good';
-        const assetStatus = 'available';
-        const componentStatus = 'available';
-        const [asset] = await qc(`INSERT INTO plate_assets
-          (asset_number,plate_master_id,product_id,output_number,artwork_reference,artwork_version,
-           component_type,component_label,pantone_code,source_grn_id,vendor_id,purchase_rate,
-           rack_location,status,condition,current_job_card_id,verified_by,verified_at,remarks)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),$18) RETURNING *`,
-        [assetNumber, component.plate_master_id, poLine.product_id, spec.output_number || null,
-         spec.party_artwork_code || null, spec.artwork_version || spec.party_artwork_code || spec.output_number || 'Unversioned',
-         component.component_type, component.component_label, component.pantone_code || null,
-         grn.id, poLine.vendor_id, Number(req.body.rate ?? poLine.rate) || 0,
-         FRESH_PLATES_RACK, assetStatus, receivedCondition, null,
-         req.user.name, req.body.remarks || null]);
-        await qc(`UPDATE plate_request_components SET status=$1,matched_asset_id=$2,grn_id=$3,
-          updated_at=now() WHERE id=$4`, [componentStatus, asset.id, grn.id, component.id]);
-        await qc(`INSERT INTO plate_asset_movements
-          (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
-           to_location,condition,note,user_name)
-          VALUES ($1,$2,$3,$4,'received',NULL,$5,$6,$7,$8,$9)`,
-        [asset.id, component.id, poLine.tooling_request_id, poLine.job_card_id,
-         assetStatus, asset.rack_location, asset.condition, grnNumber, req.user.name]);
+      // Every line must belong to the PO named in the body. Without this a
+      // single receipt could span two purchase orders and produce one document
+      // describing two different deliveries.
+      const owned = await qc('SELECT id FROM tooling_po_lines WHERE purchase_order_id=$1', [purchaseOrderId]);
+      const ownedIds = new Set(owned.map(row => Number(row.id)));
+      const grns = [];
+      for (const line of lines) {
+        const poLineId = Number(line.po_line_id);
+        if (!ownedIds.has(poLineId)) {
+          throw Object.assign(new Error('A selected plate does not belong to this purchase order'), { status: 400 });
+        }
+        grns.push(await receivePlateLine(qc, oc, {
+          poLineId, componentIds: line.component_ids, body: req.body, userName: req.user.name,
+        }));
       }
-      await qc('UPDATE tooling_po_lines SET received_qty=received_qty+$1 WHERE id=$2', [components.length, poLine.id]);
-      const poLines = await qc('SELECT qty,received_qty FROM tooling_po_lines WHERE purchase_order_id=$1', [poLine.purchase_order_id]);
-      await qc('UPDATE tooling_purchase_orders SET status=$1,updated_at=now() WHERE id=$2',
-        [toolingPoStatus(poLines), poLine.purchase_order_id]);
-      await qc(`UPDATE tooling_requests SET received_at=now(),grn_number=$1,updated_at=now() WHERE id=$2`,
-        [grnNumber, poLine.tooling_request_id]);
-      await syncPlateRequest(qc, oc, poLine.tooling_request_id, req.user.name);
-      await audit('tooling_grn', grn.id, 'create', `${grnNumber} · ${components.length} plates`, qc, req.user.name);
-      return grn;
+      return grns;
     });
     res.status(201).json(result);
   } catch (error) { next(error); }

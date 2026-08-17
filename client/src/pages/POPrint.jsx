@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, ExportMenu } from '../components/ui.jsx';
 import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
+import { plateLinePrintSpec } from '../components/plateIdentity.jsx';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { kgPerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Printer, ArrowLeft } from 'lucide-react';
@@ -207,10 +208,21 @@ export default function POPrint() {
                      +l.sheets_per_packet > 0 ? `${l.sheets_per_packet} sheets/packet` : null,
                     ].filter(Boolean).join(' · ')
                   : (l.spec || '');
+                // A plate line names the inventory item — "Plate 1030x800" —
+                // which tells the vendor the size and nothing else. What it has
+                // to make is a product, at an output number, in these inks.
+                const plate = toolingFamily === 'plate' ? plateLinePrintSpec(l) : null;
                 return (
                 <tr key={l.id} className="border-b border-gray-100 align-top">
                   <td className="px-2 py-2 text-gray-500">{i + 1}</td>
-                  <td className="px-2 py-2 font-semibold">{l.material_name}{spec ? <span className="block text-[10px] font-normal text-gray-400">{spec}</span> : null}</td>
+                  <td className="px-2 py-2 font-semibold">
+                    {plate?.name || l.material_name}
+                    {plate ? <>
+                      {plate.refs && <span className="block text-[10px] font-normal text-gray-500">{plate.refs}</span>}
+                      {plate.spec && <span className="block text-[10px] font-normal text-gray-500">{plate.spec}</span>}
+                      {plate.inks && <span className="block text-[10px] font-normal text-gray-400">{plate.inks}</span>}
+                    </> : (spec ? <span className="block text-[10px] font-normal text-gray-400">{spec}</span> : null)}
+                  </td>
                   <td className="px-2 py-2 text-xs text-gray-500">{l.hsn_code || '—'}</td>
                   {/* Packets lead, sheets underneath, weight in brackets — the
                       order the stores counts a delivery in. A non-board line has

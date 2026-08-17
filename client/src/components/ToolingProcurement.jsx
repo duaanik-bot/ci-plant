@@ -9,6 +9,9 @@ import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import {
+  initialReceipt, lineTicked, receiptTotals, toggleToolingLine, fillAll, clearAll, toReceiptPayload,
+} from '../lib/toolingGrnSelection.js';
+import {
   ActionMenu, Button, DataTable, Field, FulfillmentBar, Input, KpiCard, Modal,
   PageHeader, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
 } from './ui.jsx';
@@ -225,18 +228,22 @@ function GrnModal({ family, form, setForm, pos, inventory, vendors, onClose, onC
   const meta = FAMILY[family];
   const [busy, setBusy] = useState(false);
   const set = patch => setForm(current => ({ ...current, ...patch }));
+  // Every line on the PO, outstanding balances pre-filled. The finished ones are
+  // KEPT and shown greyed — filtering them out made a part-received PO render as
+  // a smaller order than the one that was raised.
   const pickPo = value => {
     const po = pos.find(row => String(row.id) === String(value));
-    setForm(current => ({ ...current, purchase_order_id: value, lines: po ? po.lines
-      .filter(line => num(line.received_qty) < num(line.qty))
-      .map(line => ({ ...line, order_qty: line.qty, receive_qty: '', batch_no: '' })) : [] }));
+    setForm(current => ({ ...current, purchase_order_id: value, lines: po ? initialReceipt(po) : [] }));
   };
   const updateLine = (index, patch) => setForm(current => ({ ...current,
     lines: current.lines.map((line, i) => i === index ? { ...line, ...patch } : line) }));
+  const setLines = next => setForm(current => ({ ...current, lines: next(current.lines) }));
+  const totals = receiptTotals(form.lines);
+  const receivable = (form.lines || []).filter(line => line.receivable).length;
   const save = async () => {
     if (form.mode === 'po' && !form.purchase_order_id) return toast.error('Choose a purchase order');
     if (form.mode === 'direct' && (!form.inventory_item_id || !(num(form.qty) > 0))) return toast.error(`Choose a ${meta.singular.toLowerCase()} and quantity`);
-    const lines = form.mode === 'po' ? form.lines.filter(line => num(line.receive_qty) > 0).map(line => ({ po_line_id: line.id, qty: +line.receive_qty, batch_no: line.batch_no || undefined })) : [];
+    const lines = form.mode === 'po' ? toReceiptPayload(form.lines) : [];
     if (form.mode === 'po' && !lines.length) return toast.error('Enter at least one received quantity');
     setBusy(true);
     try {
@@ -260,7 +267,10 @@ function GrnModal({ family, form, setForm, pos, inventory, vendors, onClose, onC
   };
   return (
     <Modal open onClose={onClose} title={`Create ${meta.singular} GRN`} wide
-      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="success" disabled={busy} onClick={save}><PackagePlus size={14} /> Create GRN</Button></>}>
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="success" disabled={busy || (form.mode === 'po' && !totals.lines)} onClick={save}>
+          <PackagePlus size={14} /> Create GRN{form.mode === 'po' && totals.lines > 1 ? `s · ${totals.lines} lines` : ''}
+        </Button></>}>
       <div className="space-y-4">
         <SubTabs active={form.mode} onChange={mode => set({ mode })} views={[
           { key: 'po', label: 'Against Purchase Order' }, { key: 'direct', label: 'Direct Receipt' },
@@ -270,11 +280,41 @@ function GrnModal({ family, form, setForm, pos, inventory, vendors, onClose, onC
             <Field label="Open Purchase Order" required><SearchableSelect value={form.purchase_order_id} onChange={e => pickPo(e.target.value)} options={[
               { value: '', label: 'Choose purchase order' }, ...pos.filter(po => ['open','partially_received'].includes(po.status)).map(po => ({ value: String(po.id), label: `${po.po_number} · ${po.vendor_name}` })),
             ]} /></Field>
+            {form.lines.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" disabled={totals.lines >= receivable}
+                onClick={() => setLines(fillAll)}>Select all</Button>
+              <Button size="sm" variant="ghost" disabled={!totals.lines}
+                onClick={() => setLines(clearAll)}>Deselect all</Button>
+              <span className="ml-auto text-[11px] font-bold uppercase tracking-wide text-slate-400 tabular-nums">
+                {totals.lines} of {receivable} line{receivable === 1 ? '' : 's'} · {fmt.num(totals.qty)} {meta.singular.toLowerCase()}s
+              </span>
+            </div>}
             <div className="mt-3 space-y-2">{form.lines.map((line, index) => (
-              <div key={line.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(200px,1fr)_120px_160px]">
-                <div className="text-sm font-semibold">{line.material_name}<span className="block text-[11px] font-normal text-slate-400">Pending {fmt.num(num(line.order_qty) - num(line.received_qty))} {line.unit || 'nos'}</span></div>
-                <Field label={`Receive / ${fmt.num(num(line.order_qty) - num(line.received_qty))}`}><Input type="number" min="0" max={num(line.order_qty) - num(line.received_qty)} value={line.receive_qty} onChange={e => updateLine(index, { receive_qty: e.target.value })} /></Field>
-                <Field label="Batch / serial"><Input value={line.batch_no} onChange={e => updateLine(index, { batch_no: e.target.value })} /></Field>
+              <div key={line.id}
+                className={`grid gap-2 rounded-lg border p-3 sm:grid-cols-[auto_minmax(200px,1fr)_120px_160px] ${line.receivable ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50'}`}>
+                {/* A die is a quantity, so the tick means "the whole outstanding
+                    balance" and the box below stays editable for a part delivery. */}
+                <input type="checkbox" className="mt-2 h-4 w-4 shrink-0 accent-brand-600 disabled:opacity-40"
+                  aria-label={`Receive the full balance of ${line.material_name || `line ${line.id}`}`}
+                  disabled={!line.receivable} checked={lineTicked(line)}
+                  onChange={() => setLines(current => toggleToolingLine(current, index))} />
+                <div className="min-w-0 text-sm font-semibold">
+                  {line.material_name}
+                  {(line.request_number || line.jc_number) && <span className="block truncate text-[11px] font-normal text-slate-400">
+                    {[line.request_number, line.jc_number].filter(Boolean).join(' · ')}
+                  </span>}
+                  <span className="block text-[11px] font-normal text-slate-400">
+                    {line.receivable
+                      ? `Pending ${fmt.num(line.pending)} of ${fmt.num(line.order_qty)} ${line.unit || 'nos'}`
+                      : `Fully received · ${fmt.num(line.order_qty)} ${line.unit || 'nos'}`}
+                  </span>
+                </div>
+                <Field label={`Receive / ${fmt.num(line.pending)}`}>
+                  <Input type="number" min="0" max={line.pending} value={line.receive_qty} disabled={!line.receivable}
+                    onChange={e => updateLine(index, { receive_qty: e.target.value })} /></Field>
+                <Field label="Batch / serial">
+                  <Input value={line.batch_no} disabled={!line.receivable}
+                    onChange={e => updateLine(index, { batch_no: e.target.value })} /></Field>
               </div>
             ))}</div>
           </> : <div className="grid gap-3 sm:grid-cols-2">
@@ -451,9 +491,10 @@ function GenericToolingProcurement({ family }) {
   const blankGrn = () => ({ mode: 'po', purchase_order_id: '', lines: [], inventory_item_id: '', qty: '', batch_no: '', vendor_id: '',
     vehicle_no: '', supplier_invoice_no: '', supplier_invoice_date: '', received_by: auth.user?.name || '', remarks: '' });
   const openGrn = () => setGrnModal(blankGrn());
+  // Both doors into the GRN form fill the same way, so the row-level button can
+  // never offer something the PO picker would not.
   const openGrnFor = po => setGrnModal({ ...blankGrn(), purchase_order_id: String(po.id),
-    lines: po.lines.filter(line => num(line.received_qty) < num(line.qty))
-      .map(line => ({ ...line, order_qty: line.qty, receive_qty: '', batch_no: '' })) });
+    lines: initialReceipt(po) });
 
   const approve = async row => { await api.post(`/tooling/procurement/${family}/requirements/${row.id}/approve`); toast.success(`${row.request_number} approved`); load(); };
   const reserve = async row => {

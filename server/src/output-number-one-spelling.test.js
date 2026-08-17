@@ -124,11 +124,15 @@ test('the guard finds the real call sites', () => {
   const users = sourceFiles()
     .filter(([, src]) => src.includes('outputNumberSql('))
     .map(([n]) => n).sort();
-  assert.deepEqual(users, ['extrasheets.js', 'floor.js', 'helpers.js', 'orders.js', 'plates.js', 'production.js'],
+  assert.deepEqual(users, ['extrasheets.js', 'floor.js', 'helpers.js', 'orders.js', 'plates.js',
+    'production.js', 'tooling-procurement.js'],
     'the job card + press board (production.js), the station queues (floor.js) and '
     + 'the planning/artwork line views (orders.js), and Extra Sheets are every screen that names a job '
     + 'by its plate number — and plates.js, where the number IS the subject: the Plate PR, '
-    + 'its PO and its GRN all name the plate set by it');
+    + 'its PO and its GRN all name the plate set by it. tooling-procurement.js is poRows(), which '
+    + 'feeds the PRINTED purchase order: the vendor is told which plate to make by the same number '
+    + 'the floor will call it by, and a mixed gang must show blank there for the same reason it does '
+    + 'everywhere else — one member’s number on a shared sheet is worse than none');
 });
 
 test('the plate module does not keep its own output-number rule', () => {
