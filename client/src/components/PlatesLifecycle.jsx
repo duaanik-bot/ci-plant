@@ -21,6 +21,7 @@ import {
   Textarea, useToast,
 } from './ui.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
+import { PlateWear, WEAR_LABEL } from './PlateStatus.jsx';
 import RackPickerModal from './RackPickerModal.jsx';
 import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 
@@ -74,6 +75,37 @@ const emptyPo = () => ({ vendor_id: '', expected_date: '', rate: '', gst_rate: '
 const PROCESS_PLATES = [
   ['cyan','Cyan'],['magenta','Magenta'],['yellow','Yellow'],['black','Black'],
 ];
+
+// ── Wear, as the register reads it ────────────────────────────────────────
+// The server decides Fresh/Used and what needs replacing (plates.plateWearSummary);
+// everything here is presentation only. Same division of labour the rack_reuse
+// column keeps: a screen that recomputed the verdict could print a different one.
+const COMPONENT_DOT = {
+  cyan: 'bg-cyan-400', magenta: 'bg-fuchsia-400', yellow: 'bg-amber-400',
+  black: 'bg-slate-800', pantone: 'bg-violet-400',
+};
+// One letter in the cycles column, because five words would wrap the row. Spelled
+// out rather than taken from the label's first letter: that gives Black a 'B'
+// under a column headed CMYK+P, and the press calls it K.
+const SHORT_COMPONENT = { cyan: 'C', magenta: 'M', yellow: 'Y', black: 'K', pantone: 'P' };
+const shortComponent = component => SHORT_COMPONENT[component.component_type]
+  || String(component.component_label || component.component_type || '?').charAt(0).toUpperCase();
+// Process order first, Pantone after, mirroring plateQuantityBreakdown so the two
+// strips on one row cannot list the same four colours in different orders.
+const orderedWear = (components = []) => [
+  ...PROCESS_PLATES.flatMap(([type]) => components.filter(row => row.component_type === type)),
+  ...components.filter(row => !PROCESS_PLATES.some(([type]) => type === row.component_type)),
+];
+// Sorting on Quality puts what needs ACTION on top, exactly as PLATE_RANK does for
+// the plate badge: plates to replace, then used, then fresh, then nothing in hand.
+const wearRank = row => row.plate_wear
+  ? (row.plate_wear.replace.length ? 0 : row.plate_wear.wear === 'used' ? 1 : 2) : 3;
+// "Good", or the conditions that are not — the plant only ever needs the exception
+// named, and today every plate on the rack is Good.
+const conditionSummary = wear => {
+  const bad = [...new Set(wear.replace.map(row => row.condition))];
+  return bad.length ? bad.join(', ') : 'Good';
+};
 const componentKey = component => `${component.component_type}|${component.component_type === 'pantone'
   ? String(component.pantone_code || component.component_label || '').trim().toLowerCase() : ''}`;
 
@@ -1180,6 +1212,11 @@ export default function PlatesLifecycle() {
   const [tab, setTab] = useState('requirements');
   const [reqView, setReqView] = useState('open');
   const [approvalView, setApprovalView] = useState('all');
+  // Fresh / Used / All. A third, INDEPENDENT axis: it narrows whatever stage and
+  // approval have already chosen, and unlike the approval chips it is offered in
+  // every view — a converted PR is exactly where "what did we actually spend"
+  // gets asked, so hiding it there would hide it where it matters most.
+  const [wearView, setWearView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
   const [addingPlates, setAddingPlates] = useState(false);
   // Rack selection + the ad-hoc issue dialog: plates handed straight to a job with
@@ -1280,8 +1317,17 @@ export default function PlatesLifecycle() {
   };
   const lifecycleRows = reqGroups[reqView] || reqGroups.open;
   const approvedStatuses = new Set(['approved']);
-  const reqRows = reqView === 'converted' ? lifecycleRows : lifecycleRows.filter(row => approvalView === 'all'
+  const approvalRows = reqView === 'converted' ? lifecycleRows : lifecycleRows.filter(row => approvalView === 'all'
     || (approvalView === 'approved' ? approvedStatuses.has(row.approval_status) : !approvedStatuses.has(row.approval_status)));
+  // A row with no plate in hand belongs to NEITHER Fresh nor Used — there is no
+  // plate yet to be either. It is dropped by both chips and only "All" shows it,
+  // which is the same answer the Quality column gives it: a dash.
+  const wearRows = {
+    fresh: approvalRows.filter(row => row.plate_wear?.wear === 'fresh'),
+    used: approvalRows.filter(row => row.plate_wear?.wear === 'used'),
+    all: approvalRows,
+  };
+  const reqRows = wearRows[wearView] || wearRows.all;
   const selectedRequirements = requirements.filter(row => selectedIds.includes(row.id));
   const selectedPoGroups = selectedRequirements.map(request => ({
     request, components: request.components.filter(component => component.status === 'approved'),
@@ -1606,6 +1652,56 @@ export default function PlatesLifecycle() {
           <span className="block text-[10px] font-semibold text-slate-400">of {needed} to find</span>
         </div>;
       } },
+    // ── The three wear columns ────────────────────────────────────────────
+    // What the row is about to print WITH, which "On Rack" beside it cannot say:
+    // that column counts plates the rack can give, and a plate the rack can give
+    // may have been round the press a dozen times.
+    { key: 'plate_wear', label: 'Quality', sortValue: row => wearRank(row),
+      export: row => row.plate_wear
+        ? `${WEAR_LABEL[row.plate_wear.wear]} · ${conditionSummary(row.plate_wear)} · ${row.plate_wear.plates} plates`
+        : '',
+      render: row => {
+        const wear = row.plate_wear;
+        // No plate either side means nothing is IN HAND to judge — the set is
+        // still to be bought. A dash, never a "Fresh": calling plates the plant
+        // does not own brand new is the one reading that could send a buyer home.
+        if (!wear) return <span className="text-xs text-slate-300">—</span>;
+        return <div className="space-y-1">
+          <PlateWear wear={wear.wear} runs={wear.max_runs} replace={wear.replace.length} />
+          <span className="block text-[10px] font-semibold text-slate-400">
+            {conditionSummary(wear)} · {wear.plates} plate{wear.plates === 1 ? '' : 's'}
+          </span>
+        </div>;
+      } },
+    // Per colour, because "which plate should be replaced" is a question about ONE
+    // plate and the set's headline cannot answer it. C M Y K in process order, any
+    // Pantone after — the same order ComponentStrip uses two columns to the left.
+    { key: 'plate_cycles', label: 'Cycles · CMYK+P', sortable: false,
+      export: row => (row.plate_wear?.components || [])
+        .map(c => `${shortComponent(c)} ${c.runs}`).join(' · '),
+      render: row => {
+        const parts = row.plate_wear?.components || [];
+        if (!parts.length) return <span className="text-xs text-slate-300">—</span>;
+        return <div className="flex flex-wrap gap-1">
+          {orderedWear(parts).map((component, index) => (
+            <span key={`${component.component_label}-${index}`}
+              title={`${component.component_label}${component.asset_number ? ` · ${component.asset_number}` : ''} · ${component.runs} run${component.runs === 1 ? '' : 's'} · ${component.condition}`}
+              className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold ${component.replace
+                ? 'border-red-300 bg-red-100 text-red-700'
+                : component.runs > 0 ? 'border-red-100 bg-red-50 text-red-600' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${COMPONENT_DOT[component.component_type] || 'bg-slate-400'}`} />
+              {shortComponent(component)}<span className="tabular-nums">{component.runs}</span>
+            </span>
+          ))}
+        </div>;
+      } },
+    { key: 'plate_wear_remark', label: 'Remarks', sortable: false,
+      export: row => row.plate_wear_remark || '',
+      render: row => row.plate_wear_remark
+        ? <span className={`block max-w-[220px] text-[11px] leading-snug ${row.plate_wear?.replace.length ? 'font-bold text-red-700' : 'text-slate-500'}`}>
+          {row.plate_wear_remark}
+        </span>
+        : <span className="text-xs text-slate-300">—</span> },
     { key: 'delivery_date', label: 'Needed by', render: row => fmt.date(row.needed_by || row.delivery_date) },
     { key: 'approval_status', label: 'PR Status', render: row => <StatusChip value={row.approval_status} /> },
     { key: 'po_number', label: 'PO', render: row => row.po_number || '—' },
@@ -1929,8 +2025,42 @@ export default function PlatesLifecycle() {
             })}
           </div>
         )}
+        {/* The wear axis. Same quiet weight as the approval chips — it narrows the
+            stage you have already chosen rather than replacing it — but offered in
+            every view, including Converted. */}
+        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+          {[
+            { key: 'fresh', label: '🙂 Fresh', count: wearRows.fresh.length,
+              title: 'Requirements whose every plate has never printed' },
+            { key: 'used', label: 'Used', count: wearRows.used.length,
+              title: 'Requirements where at least one plate has already run' },
+            // "All plates", for the same reason the approval band says "All
+            // approvals": a bare "All" a centimetre from two other Alls is worse
+            // than the extra word.
+            { key: 'all', label: 'All plates', count: wearRows.all.length,
+              title: 'Every requirement, including those with no plate in hand yet' },
+          ].map(option => {
+            const on = wearView === option.key;
+            return (
+              <button key={option.key} type="button" title={option.title}
+                aria-pressed={on}
+                onClick={()=>{setWearView(option.key);setSelectedIds([]);}}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                {option.label}<span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{option.count}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <DataTable searchable selectable rows={reqRows} columns={requestColumns}
+      // A used set tints the WHOLE row, not just its Quality cell: on a register of
+      // thirty requirements the question "which of these are reprints off old
+      // plates" has to survive a scan, and a chip three columns in does not.
+      // `!bg` because the table's own zebra stripe is a background utility too, and
+      // which of two same-specificity classes wins is decided by stylesheet order,
+      // not by the order they appear on the element.
+      rowClass={row => row.plate_wear?.replace.length ? '!bg-red-100'
+        : row.plate_wear?.wear === 'used' ? '!bg-red-50' : ''}
       selectedIds={selectedIds}
       onToggleRow={(row, checked) => setSelectedIds(current => checked ? [...new Set([...current,row.id])] : current.filter(id => id !== row.id))}
       onToggleAll={(rows, checked) => { const ids=rows.map(row=>row.id); setSelectedIds(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}

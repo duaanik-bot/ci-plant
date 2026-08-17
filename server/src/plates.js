@@ -543,6 +543,112 @@ export const PLATE_RETURN_CONDITIONS = ['Good', 'Fair', 'Damaged'];
 // main offset size; 560 x 670 is the metallic one and always the second question.
 export const PLATE_SIZES_IN_ORDER = ['600 x 730', '560 x 670'];
 
+// ── Plate wear: is this colour's plate brand new, and is any of them due out ──
+//
+// The same two words MANUAL_PLATE_RACKS already files a plate under — Fresh, never
+// printed; Used, has already run — asked of a REQUIREMENT, whose row is a set of
+// four or five plates rather than one. It answers the only question a planner has
+// looking at a reused set: am I about to print off plates that have been round the
+// press before, and is one of them finished.
+//
+// Replacement is decided by CONDITION ALONE. A run count is a fact and never a
+// verdict: the plant has no plate-life limit, and inventing one here would put a
+// red "Replace" on a perfectly good plate on the strength of a number nobody
+// agreed to. A plate leaves the rack when somebody looks at it and says so.
+export const PLATE_REPLACE_CONDITIONS = new Set(['Fair', 'Damaged', 'Scrapped', 'Lost']);
+
+// The plate a colour is actually about to print off. MATCHED beats proposed: the
+// matched asset is the plate the job has taken, while the proposed one is only
+// what the rack is offering — reporting the offer once the choice is made would
+// describe a plate the job is not going to use.
+export function componentPlate(component = {}) {
+  const row = component || {};
+  const pick = row.matched_asset_id
+    ? { source: 'matched', number: row.matched_asset_number, runs: row.matched_use_count,
+      condition: row.matched_condition, last_used_at: row.matched_last_used_at,
+      created_on: row.matched_plate_created_on }
+    : row.proposed_asset_id
+      ? { source: 'proposed', number: row.proposed_asset_number, runs: row.proposed_use_count,
+        condition: row.proposed_condition, last_used_at: row.proposed_last_used_at,
+        created_on: row.proposed_plate_created_on }
+      : null;
+  if (!pick) return null;
+  // use_count is NOT NULL DEFAULT 0 in the table, so a missing value means the
+  // plate has never run — a zero, not an unknown. Same reading plateRackSummary
+  // gives it, and the two must not disagree about what "no number" means.
+  return {
+    source: pick.source,
+    asset_number: pick.number || null,
+    runs: Math.max(0, Number(pick.runs) || 0),
+    condition: clean(pick.condition) || 'Good',
+    last_used_at: pick.last_used_at || null,
+    created_on: pick.created_on || null,
+  };
+}
+
+// The whole set's wear, folded from its colours.
+//
+// A set is Fresh only when EVERY plate in it is brand new. One plate that has run
+// makes the set Used, because the risk the flag exists to surface belongs to the
+// row: three new plates and one that has been round the press is not a fresh set,
+// and calling it one is exactly the reassurance that gets a worn plate onto a
+// press. Cancelled colours leave the set for the same reason they leave
+// plateCountsOf — they are neither owed nor held.
+//
+// null, not an empty summary, when no colour has a plate: a requirement waiting on
+// plates to be BOUGHT has no wear to report, and a zero-run set would render as
+// brand-new stock the plant does not own.
+export function plateWearSummary(components = []) {
+  const rows = (Array.isArray(components) ? components : [])
+    .filter(row => row && row.status !== 'cancelled');
+  const held = rows.map(row => ({ row, plate: componentPlate(row) })).filter(entry => entry.plate);
+  if (!held.length) return null;
+  const detail = held.map(({ row, plate }) => ({
+    component_type: row.component_type || null,
+    component_label: row.component_label || row.component_type || 'Plate',
+    pantone_code: row.pantone_code || null,
+    asset_number: plate.asset_number,
+    runs: plate.runs,
+    condition: plate.condition,
+    last_used_at: plate.last_used_at,
+    wear: plate.runs > 0 ? 'used' : 'fresh',
+    replace: PLATE_REPLACE_CONDITIONS.has(plate.condition),
+  }));
+  const runs = detail.map(row => row.runs);
+  return {
+    wear: detail.some(row => row.wear === 'used') ? 'used' : 'fresh',
+    plates: detail.length,
+    fresh: detail.filter(row => row.wear === 'fresh').length,
+    used: detail.filter(row => row.wear === 'used').length,
+    max_runs: Math.max(...runs),
+    min_runs: Math.min(...runs),
+    total_runs: runs.reduce((sum, n) => sum + n, 0),
+    replace: detail.filter(row => row.replace),
+    components: detail,
+  };
+}
+
+// The sentence the Remarks column prints. Names the plate to pull rather than
+// grading the set, because "which one do I replace" is the only actionable form
+// of the question — and when nothing is due it says so, so an empty cell is never
+// mistaken for a column that failed to load.
+export function plateWearRemark(summary) {
+  if (!summary) return '';
+  if (summary.replace.length) {
+    return `Replace ${summary.replace.map(row => `${row.component_label} (${row.condition})`).join(', ')}`;
+  }
+  if (summary.wear === 'fresh') return 'Fresh set — nothing to replace';
+  // Where the wear sits, but only when the colours actually differ. On a set that
+  // has all run the same number of times there is no standout, and naming one
+  // anyway would invent a weak plate out of a tie.
+  const worst = summary.max_runs > summary.min_runs
+    ? summary.components.filter(row => row.runs === summary.max_runs).map(row => row.component_label).join('/')
+    : null;
+  return worst
+    ? `Condition Good — none due · most run: ${worst} ×${summary.max_runs}`
+    : 'Condition Good — none due';
+}
+
 // What a rack holds, counted in PHYSICAL PLATES rather than sets — a warehouse row is
 // a set of four, and "4" on a KPI card has to mean four plates, not four sets.
 // Undated plates are counted in the total but cannot be averaged, so they neither

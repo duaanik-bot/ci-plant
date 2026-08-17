@@ -782,7 +782,7 @@ export default function Production() {
                       the document the floor works from, and "are the plates in?" is
                       asked on every one of them — a green tick answers it, where an
                       absent badge would just look like nobody had checked. */}
-                  {jc.plate_state && <PlateStatus state={jc.plate_state} compact className="ml-1" />}
+                  {jc.plate_state && <PlateStatus state={jc.plate_state} wear={jc.plate_wear} wearRuns={jc.plate_wear_runs} wearReplace={jc.plate_wear_replace} compact className="ml-1" />}
                   <Link to={`/production/jobcard/${jc.id}`} title="Print job card"
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
                     <Printer size={13} />

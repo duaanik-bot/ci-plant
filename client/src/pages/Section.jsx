@@ -1432,7 +1432,7 @@ export default function Section() {
                     warning is not the same as being told, and "are the plates in?"
                     is the question the operator asks out loud. Compact circle, so
                     the row height is untouched. */}
-                {r.plate_state && <PlateStatus state={r.plate_state} compact />}
+                {r.plate_state && <PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact />}
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
@@ -1618,7 +1618,7 @@ export default function Section() {
                         <div className="mt-0.5"><BoardBadge state={r.board_state} compact /></div>
                       )}
                       {/* Shown in every state, including green — see the queue row. */}
-                      {r.plate_state && <div className="mt-0.5"><PlateStatus state={r.plate_state} compact /></div>}
+                      {r.plate_state && <div className="mt-0.5"><PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact /></div>}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                       {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (

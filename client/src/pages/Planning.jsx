@@ -3474,7 +3474,7 @@ export default function Planning() {
                   ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
                   : <ReadinessCell readiness={l.readiness} light={l.light} />}
                 <BoardBadge state={rowBoardState(l)} compact />
-                {l.plate_state && <PlateStatus state={l.plate_state} compact className="ml-1" />}
+                {l.plate_state && <PlateStatus state={l.plate_state} wear={l.plate_wear} wearRuns={l.plate_wear_runs} wearReplace={l.plate_wear_replace} compact className="ml-1" />}
               </div>
             ) },
           // Set-type triage — the dropdown that moves a row between the zones

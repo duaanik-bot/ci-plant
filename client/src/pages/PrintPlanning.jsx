@@ -343,7 +343,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
             in the lane, which is why the chip sits inline here instead. */}
         <div className="flex items-center gap-1.5">
           <div className="min-w-0 flex-1"><BoardBadge state={boardStateOf(card)} band /></div>
-          {card.plate_state && <PlateStatus state={card.plate_state} compact className="mt-1 shrink-0" />}
+          {card.plate_state && <PlateStatus state={card.plate_state} wear={card.plate_wear} wearRuns={card.plate_wear_runs} wearReplace={card.plate_wear_replace} compact className="mt-1 shrink-0" />}
         </div>
 
         {/* Spec + blockers — words, not colours to memorise */}
@@ -1858,7 +1858,7 @@ export default function PrintPlanning() {
               <td className={`${td} whitespace-nowrap`}>
                 <div className="flex items-center gap-1">
                   <BoardBadge state={boardStateOf(card)} />
-                  {card.plate_state && <PlateStatus state={card.plate_state} compact />}
+                  {card.plate_state && <PlateStatus state={card.plate_state} wear={card.plate_wear} wearRuns={card.plate_wear_runs} wearReplace={card.plate_wear_replace} compact />}
                 </div>
               </td>
               <td className={`${td} whitespace-nowrap`}>

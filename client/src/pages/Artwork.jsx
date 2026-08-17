@@ -702,7 +702,7 @@ export default function Artwork() {
             searchValue: l => `${PLATE_FULL[l.plate_state || 'none']} plates`,
             export: l => PLATE_FULL[l.plate_state || 'none']
               + (l.plate_counts ? ` (${l.plate_counts.have}/${l.plate_counts.need} on the rack)` : ''),
-            render: l => <PlateStatus state={l.plate_state || 'none'} counts={l.plate_counts} /> },
+            render: l => <PlateStatus state={l.plate_state || 'none'} counts={l.plate_counts} wear={l.plate_wear} wearRuns={l.plate_wear_runs} wearReplace={l.plate_wear_replace} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang

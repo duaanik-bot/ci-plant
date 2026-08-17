@@ -6,6 +6,8 @@ import { mixBalance } from './board-mix.js';
 import { planWriteOn } from './stock-writeon.js';
 import { looseAfter, looseFloor } from './packet-plan.js';
 import { issuableFor, stockHoldBudget } from './board-allocation.js';
+// plates.js imports nothing from here, so this direction stays acyclic.
+import { plateWearSummary } from './plates.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
@@ -2536,9 +2538,16 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
   const ids = [...new Set((rows || []).map(jobCardIdOf).filter(id => id != null))];
   if (!ids.length) return rows;
   const components = await qc(
-    `SELECT tr.job_card_id, prc.status
+    `SELECT tr.job_card_id, prc.status, prc.component_type, prc.component_label,
+            prc.matched_asset_id, prc.proposed_asset_id,
+            -- The wear of the plate behind each colour, so the badge every module
+            -- already renders can say Fresh or Used without a second round trip.
+            ma.use_count AS matched_use_count, ma.condition AS matched_condition,
+            pa.use_count AS proposed_use_count, pa.condition AS proposed_condition
        FROM tooling_requests tr
        JOIN plate_request_components prc ON prc.tooling_request_id = tr.id
+       LEFT JOIN plate_assets ma ON ma.id = prc.matched_asset_id
+       LEFT JOIN plate_assets pa ON pa.id = prc.proposed_asset_id
       WHERE tr.family = 'plate' AND tr.job_card_id = ANY($1::int[])`, [ids]);
   const byJob = new Map();
   for (const row of components) {
@@ -2556,6 +2565,15 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
     // Rides with the state, from the same components, so a screen can say HOW
     // MANY plates are on the rack without a second round trip.
     row.plate_counts = id == null ? null : plateCountsOf(parts);
+    // Fresh or Used, riding along for the same reason: every module that shows a
+    // plate badge wants to know whether the job is about to print off plates that
+    // have been round the press before, and none of them should ask separately.
+    const wear = id == null ? null : plateWearSummary(parts);
+    row.plate_wear = wear ? wear.wear : null;
+    row.plate_wear_runs = wear ? wear.max_runs : null;
+    // A Damaged or Fair plate on a job about to print is the one fact on this
+    // badge that is worth interrupting somebody for.
+    row.plate_wear_replace = wear ? wear.replace.length : 0;
   }
   // A gang goes on press as ONE job: three members holding their plates and a
   // fourth still waiting is a RUN that cannot run. Members are made to AGREE on
@@ -2576,7 +2594,19 @@ export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null
     // 4/4 beside a red badge would read as a contradiction.
     const counts = group.map(row => row.plate_counts).filter(Boolean)
       .sort((a, b) => (a.have - a.need) - (b.have - b.need))[0] || null;
-    for (const row of group) { row.plate_state = worst; row.plate_counts = counts; }
+    // Wear collapses the same way, and for the same reason a set is Used the
+    // moment one plate in it has run: the gang goes on press as one job, so one
+    // member printing off a used plate makes the RUN a used run.
+    const wear = group.some(row => row.plate_wear === 'used') ? 'used'
+      : group.some(row => row.plate_wear === 'fresh') ? 'fresh' : null;
+    const runs = group.map(row => row.plate_wear_runs).filter(n => n != null);
+    const replace = group.reduce((sum, row) => sum + (row.plate_wear_replace || 0), 0);
+    for (const row of group) {
+      row.plate_state = worst; row.plate_counts = counts;
+      row.plate_wear = wear;
+      row.plate_wear_runs = runs.length ? Math.max(...runs) : null;
+      row.plate_wear_replace = replace;
+    }
   }
   return rows;
 }

@@ -10,7 +10,7 @@ import {
   plateComponentKey, plateComponentsFromSpec,
   invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry,
   plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
-  suggestedPlateQuantities,
+  plateWearRemark, plateWearSummary, suggestedPlateQuantities,
   RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, releasableRackComponents,
   resolvePlateRate, resolveRackPicks,
   USED_PLATES_RACK, pickAvailableRackPlates, validateMakeAvailable, validatePlateReplacementRequest,
@@ -216,7 +216,14 @@ async function componentRows(where = '', values = []) {
       pa.asset_number AS proposed_asset_number, pa.rack_location AS proposed_rack_location,
       pa.condition AS proposed_condition, pa.last_used_at AS proposed_last_used_at,
       pa.use_count AS proposed_use_count, pa.artwork_version AS proposed_artwork_version,
+      pa.plate_created_on AS proposed_plate_created_on,
       ma.asset_number AS matched_asset_number, ma.rack_location AS matched_rack_location,
+      -- The wear of the plate the job HAS TAKEN. Only the proposed candidate's was
+      -- read before, so a requirement holding a plate off the rack reported the
+      -- offer's run count and never the taken plate's — the two are different
+      -- plates the moment somebody picks one.
+      ma.use_count AS matched_use_count, ma.condition AS matched_condition,
+      ma.last_used_at AS matched_last_used_at, ma.plate_created_on AS matched_plate_created_on,
       (SELECT COUNT(*)::int FROM plate_assets old
        WHERE old.product_id=tr.product_id AND old.component_type=prc.component_type
          AND lower(COALESCE(old.pantone_code,''))=lower(COALESCE(prc.pantone_code,''))
@@ -350,6 +357,7 @@ async function requirementRows(id = null) {
   const shaped = rows.map(row => {
     const requestComponents = grouped.get(row.id) || [];
     const suggestedSize = defaultPlateSize(row.specification || {}, requestComponents);
+    const wear = plateWearSummary(requestComponents);
     const productMasterComponents = plateComponentsFromSpec({
       colors: row.master_colors,
       colour_type: row.master_colour_type,
@@ -374,6 +382,12 @@ async function requirementRows(id = null) {
       components: requestComponents,
       component_breakdown: plateQuantityBreakdown(requestComponents),
       plate_summary: plateReadinessSummary(requestComponents),
+      // Fresh or Used, per colour and as one verdict for the set, plus the plate
+      // to pull if any is finished. Computed here rather than on the screen for
+      // the same reason rack_reuse is: the figure printed in a column has to be
+      // the figure every other reader of this row sees.
+      plate_wear: wear,
+      plate_wear_remark: plateWearRemark(wear),
       // The live warehouse answer, per colour and as one headline. The screen
       // prints it and the Use-from-Rack button spends exactly it.
       rack_reuse: rackReusePlan({
