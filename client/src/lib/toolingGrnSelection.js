@@ -55,6 +55,23 @@ export function toggleToolingLine(lines, index) {
 export const fillAll = lines => (lines || []).map(fillLine);
 export const clearAll = lines => (lines || []).map(clearLine);
 
+// Where one PO line stands, in one chip.
+//
+// The die and block register showed only the FIRST item and "+3", so a four-line
+// order could not say what the other three were, let alone which of them had
+// arrived. A plate set says its colour build here; a die is a quantity, so what
+// it has to say is how much of it has landed.
+export function lineReceipt(line) {
+  const ordered = num(line?.qty);
+  const received = num(line?.received_qty);
+  const unit = line?.unit || 'nos';
+  if (received <= 0) return { state: 'open', label: `${ordered} ${unit}` };
+  // Partial reads as a fraction: "2 nos" on a half-received line is the same
+  // text as an untouched one, which is exactly the confusion to avoid.
+  if (received < ordered) return { state: 'partial', label: `${received}/${ordered} ${unit}` };
+  return { state: 'received', label: `${ordered} ${unit}` };
+}
+
 // Only lines with a positive quantity reach the server — an empty or zero line
 // in the body would mint a GRN number for a delivery that did not happen.
 export function toReceiptPayload(lines) {

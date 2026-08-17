@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  toolingGrnLines, initialReceipt, lineTicked, receiptTotals,
+  toolingGrnLines, initialReceipt, lineTicked, lineReceipt, receiptTotals,
   toggleToolingLine, fillAll, clearAll, toReceiptPayload,
 } from '../../client/src/lib/toolingGrnSelection.js';
 
@@ -98,4 +98,46 @@ test('a zero or negative typed quantity is not a receipt', () => {
   assert.equal(lineTicked(rows[0]), false);
   assert.equal(lineTicked(rows[1]), false);
   assert.deepEqual(toReceiptPayload(rows), []);
+});
+
+// ── What one PO line says about itself on the register ──────────────────────
+//
+// The die and block register showed only the FIRST item and "+3", so a
+// four-line order could not say what the other three were, let alone which of
+// them had arrived. A plate set says its colour build there; a die is a
+// quantity, so what it has to say is how much of it has landed.
+
+test('an untouched line states what was ordered', () => {
+  assert.deepEqual(lineReceipt({ qty: 2, received_qty: 0, unit: 'nos' }),
+    { state: 'open', label: '2 nos' });
+});
+
+test('a part-received line reads as a FRACTION, never as the order', () => {
+  // "2 nos" on a half-received line is the same text as an untouched one, which
+  // is exactly the confusion this chip exists to remove.
+  assert.deepEqual(lineReceipt({ qty: 4, received_qty: 1, unit: 'nos' }),
+    { state: 'partial', label: '1/4 nos' });
+});
+
+test('a finished line is not still asking to be received', () => {
+  assert.deepEqual(lineReceipt({ qty: 1, received_qty: 1, unit: 'nos' }),
+    { state: 'received', label: '1 nos' });
+  // Over-received (a correction elsewhere) is still done, not still partial.
+  assert.equal(lineReceipt({ qty: 2, received_qty: 3, unit: 'nos' }).state, 'received');
+});
+
+test('the unit travels with the number', () => {
+  // A block is counted in its own unit; hard-coding "nos" would misstate it.
+  assert.equal(lineReceipt({ qty: 5, received_qty: 0, unit: 'sets' }).label, '5 sets');
+  assert.equal(lineReceipt({ qty: 5, received_qty: 0 }).label, '5 nos', 'a missing unit falls back');
+});
+
+test('the three states are exactly the three the register paints', () => {
+  // A fourth state would render with no tone at all — an invisible chip.
+  const states = new Set([
+    lineReceipt({ qty: 2, received_qty: 0 }).state,
+    lineReceipt({ qty: 2, received_qty: 1 }).state,
+    lineReceipt({ qty: 2, received_qty: 2 }).state,
+  ]);
+  assert.deepEqual([...states].sort(), ['open', 'partial', 'received']);
 });

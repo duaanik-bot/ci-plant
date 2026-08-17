@@ -9,8 +9,17 @@ import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import {
-  initialReceipt, lineTicked, receiptTotals, toggleToolingLine, fillAll, clearAll, toReceiptPayload,
+  initialReceipt, lineTicked, lineReceipt, receiptTotals, toggleToolingLine,
+  fillAll, clearAll, toReceiptPayload,
 } from '../lib/toolingGrnSelection.js';
+
+// A line's receipt state, in the same three tones the rest of the module uses:
+// nothing yet, part landed, all in.
+const RECEIPT_TONE = {
+  open: 'bg-slate-100 text-slate-600',
+  partial: 'bg-amber-50 text-amber-700',
+  received: 'bg-emerald-50 text-emerald-700',
+};
 import {
   ActionMenu, Button, DataTable, Field, FulfillmentBar, Input, KpiCard, Modal,
   PageHeader, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
@@ -532,7 +541,37 @@ function GenericToolingProcurement({ family }) {
   const poColumns = [
     { key: 'po_number', label: 'PO No', render: po => <Link className="font-bold text-brand-600 hover:underline" to={`/tooling/${meta.plural.toLowerCase()}/po/${po.id}`}>{po.po_number}</Link> },
     { key: 'vendor_name', label: 'Vendor' },
-    { key: 'lines', label: meta.plural, sortable: false, render: po => <span>{po.lines[0]?.material_name || '—'}{po.lines.length > 1 && ` +${po.lines.length - 1}`}<span className="block text-[11px] text-slate-400">{po.lines.map(line => line.request_number).filter(Boolean).join(', ') || 'Direct PO'}</span></span> },
+    // One item, one numbered line — the same grammar the Plate register uses, so
+    // the two read alike.
+    //
+    // This showed the FIRST item and "+3". A four-line order could not say what
+    // the other three were, and the request numbers underneath were a comma list
+    // that belonged to no item in particular — so a PO covering four job cards
+    // could not tell you which die was for which. The trailing chip is this
+    // family's version of the plate build: a die is a quantity, so what a line
+    // has to say is how much of it has landed.
+    { key: 'lines', label: meta.plural, sortable: false, render: po => <div className="space-y-0.5">
+      {po.lines.map((line, index) => {
+        const receipt = lineReceipt(line);
+        const refs = [line.request_number, line.jc_number].filter(Boolean).join(' · ');
+        return <div key={line.id ?? index} className="flex min-w-0 items-start gap-2">
+          <span className="mt-px w-4 shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">{index + 1}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-xs font-bold text-slate-700">{line.material_name || '—'}</span>
+              {(line.size || line.spec) && <span className="shrink-0 truncate font-mono text-[10px] text-slate-400">{line.size || line.spec}</span>}
+              <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold ${RECEIPT_TONE[receipt.state]}`}>{receipt.label}</span>
+            </div>
+            {refs && <span className="block truncate text-[10px] text-slate-400">{refs}</span>}
+          </div>
+        </div>;
+      })}
+      {!po.lines.length && <span className="text-xs text-slate-400">—</span>}
+      <span className="block pl-6 pt-0.5 text-[11px] text-slate-400">
+        {po.lines.length} {po.lines.length === 1 ? meta.singular.toLowerCase() : meta.plural.toLowerCase()}
+        {po.lines.some(line => line.request_number) ? '' : ' · Direct PO'}
+      </span>
+    </div> },
     { key: 'expected_date', label: 'Expected', render: po => fmt.date(po.expected_date) },
     { key: 'fulfilment', label: 'Fulfilment', sortable: false, render: po => {
       const ordered = po.lines.reduce((sum, line) => sum + num(line.qty), 0);
