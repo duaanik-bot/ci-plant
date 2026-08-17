@@ -10,6 +10,8 @@ import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lu
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
 import PlateStatus, { PLATE_LABEL, PLATE_FULL, PLATE_HINT, PLATE_TONE, PLATE_RANK } from '../components/PlateStatus.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 // Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
          colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -103,30 +105,29 @@ function ToolingChip({ line }) {
 // control makes that two passes over the same queue. Selecting several states
 // is a UNION; selecting none is no filter at all, which is what makes "All"
 // the way back rather than a fourth state to keep in sync.
+// Renders a GROUP, not a rail: both this and its plate twin below sit inside one
+// FilterRail at the call site. They used to be two stacked rows, each opening
+// with its own uncaptioned-looking `All` — on a full tab that read as "All 24"
+// twice over, and a second `PR Raised` chip meaning something different from the
+// first. Under one rail the captions and the hairline do that work, and the
+// header gives a row back to the table.
 function BoardFilterChips({ active, counts, onToggle, onClear }) {
   const chips = ['covered', 'on_order', 'short'];
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
-      <button type="button" onClick={onClear}
+    <FilterGroup label="Board">
+      {/* `All` is the way back, not a fourth state — it lights whenever nothing
+          is selected and clears on click. Graphite, because "no filter" is not
+          a condition anyone acts on. */}
+      <FilterChip label="All" count={counts.all} on={active.length === 0}
         title={`${counts.all} job${counts.all === 1 ? '' : 's'} in this tab`}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-          active.length === 0 ? 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-        All
-        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${active.length === 0 ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts.all}</span>
-      </button>
-      {chips.map(k => {
-        const on = active.includes(k);
-        return (
-          <button key={k} type="button" onClick={() => onToggle(k)} title={`${counts[k]} — ${BOARD_HINT[k]}`}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-              on ? BOARD_TONE[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-            {BOARD_LABEL[k]}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? BOARD_COUNT_TONE[k] : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
-          </button>
-        );
-      })}
-    </div>
+        onClick={onClear} />
+      {chips.map(k => (
+        <FilterChip key={k} label={BOARD_LABEL[k]} count={counts[k]} on={active.includes(k)}
+          tone={BOARD_TONE[k]} countTone={BOARD_COUNT_TONE[k]}
+          title={`${counts[k]} — ${BOARD_HINT[k]}`}
+          onClick={() => onToggle(k)} />
+      ))}
+    </FilterGroup>
   );
 }
 
@@ -134,31 +135,21 @@ function BoardFilterChips({ active, counts, onToggle, onClear }) {
 // in exactly one state — so the counts always add to the tab total and a planner
 // can ask "what have I not raised plates for" in one click instead of reading
 // down a column. Deliberately the same shape, tones and vocabulary as the board
-// rail directly above it: two readiness questions asked the same way.
+// rail beside it: two readiness questions asked the same way.
 function PlateFilterChips({ active, counts, onToggle, onClear }) {
   const chips = ['none', 'on_order', 'ready'];
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Plates</span>
-      <button type="button" onClick={onClear}
+    <FilterGroup label="Plates" divider={false}>
+      <FilterChip label="All" count={counts.all} on={active.length === 0}
         title={`${counts.all} job${counts.all === 1 ? '' : 's'} in this tab`}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-          active.length === 0 ? 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-        All
-        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${active.length === 0 ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts.all}</span>
-      </button>
-      {chips.map(k => {
-        const on = active.includes(k);
-        return (
-          <button key={k} type="button" onClick={() => onToggle(k)} title={`${counts[k]} — ${PLATE_HINT[k]}`}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-              on ? PLATE_TONE[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-            {PLATE_LABEL[k]}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70 text-slate-700' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
-          </button>
-        );
-      })}
-    </div>
+        onClick={onClear} />
+      {chips.map(k => (
+        <FilterChip key={k} label={PLATE_LABEL[k]} count={counts[k]} on={active.includes(k)}
+          tone={PLATE_TONE[k]}
+          title={`${counts[k]} — ${PLATE_HINT[k]}`}
+          onClick={() => onToggle(k)} />
+      ))}
+    </FilterGroup>
   );
 }
 
@@ -548,14 +539,16 @@ export default function Artwork() {
           Deliberately NOT reset when the tab changes — "show me everything
           short" is a standing question, and the counts go to 0 in a tab that
           has none, which explains itself. */}
-      <PlateFilterChips active={plateFilters} counts={plateCounts}
-        onToggle={togglePlateFilter} onClear={() => { setPlateFilters([]); clearSelection(); }} />
-      <BoardFilterChips active={boardFilters} counts={boardCounts}
-        onToggle={toggleBoardFilter}
-        onClear={() => { setBoardFilters([]); clearSelection(); }} />
-      {filters.dirty && (
-        <div className="mb-2 flex justify-end"><ResetFilters filters={filters} /></div>
-      )}
+      <FilterRail className="mb-3">
+        <PlateFilterChips active={plateFilters} counts={plateCounts}
+          onToggle={togglePlateFilter} onClear={() => { setPlateFilters([]); clearSelection(); }} />
+        <BoardFilterChips active={boardFilters} counts={boardCounts}
+          onToggle={toggleBoardFilter}
+          onClear={() => { setBoardFilters([]); clearSelection(); }} />
+        {/* On the rail's own line now, like every other page — it used to take a
+            whole right-aligned row of its own below the two chip rows. */}
+        <ResetFilters filters={filters} className="ml-auto" />
+      </FilterRail>
       <BulkWorkflowControls lines={selectedLines} context="artwork" onDone={load} onClear={clearSelection} />
       <DataTable searchable resetSignal={filters.token}
         selectable

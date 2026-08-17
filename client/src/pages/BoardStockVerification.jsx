@@ -26,6 +26,8 @@ import {
   ClipboardCheck, History, Layers, PackageSearch, Scissors, ShieldCheck, Truck,
 } from 'lucide-react';
 import ProductIdentity, { productSearchText } from '../components/ProductIdentity.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 // Physical verification is its own dimension beside the stock verdict, so it
@@ -154,33 +156,21 @@ function CutChip({ status }) {
   );
 }
 
-// One labelled chip rail — All + a chip per state, counts from the searched set.
-function ChipRail({ label, states, labels, tones, countTones, counts, active, onToggle, onClear }) {
+// One labelled chip group — All + a chip per state, counts from the searched set.
+// A GROUP rather than its own rail: the page stacks several of these, and under
+// one FilterRail they share the caption/divider treatment every other page uses,
+// so a run of `All` chips can no longer read as one undifferentiated line.
+function ChipRail({ label, states, labels, tones, countTones, counts, active, onToggle, onClear, first }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">{label}</span>
-      <button type="button" onClick={onClear}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${
-          active.length === 0 ? 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-        All
-        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${active.length === 0 ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>
-          {Object.values(counts).reduce((s, n) => s + n, 0)}
-        </span>
-      </button>
-      {states.map(k => {
-        const on = active.includes(k);
-        return (
-          <button key={k} type="button" onClick={() => onToggle(k)}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${
-              on ? tones[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-            {labels[k]}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? (countTones?.[k] || 'bg-white/70') : 'bg-[#1D1D1F]/[0.07]'}`}>
-              {counts[k] || 0}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <FilterGroup label={label} divider={!first}>
+      <FilterChip label="All" on={active.length === 0} onClick={onClear}
+        count={Object.values(counts).reduce((s, n) => s + n, 0)} />
+      {states.map(k => (
+        <FilterChip key={k} label={labels[k]} count={counts[k] || 0} on={active.includes(k)}
+          tone={tones[k]} countTone={countTones?.[k]}
+          onClick={() => onToggle(k)} />
+      ))}
+    </FilterGroup>
   );
 }
 
@@ -438,16 +428,16 @@ export default function BoardStockVerification() {
       <KpiFilterNotice filter={kpi} label={BSV_KPI_LABEL[kpi.key]} shown={shown.length} total={searched.length} />
 
       <div className="mb-4 space-y-2">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <ChipRail label="Stock" states={['covered', 'on_order', 'short']}
+        <FilterRail>
+          <ChipRail first label="Stock" states={['covered', 'on_order', 'short']}
             labels={BOARD_LABEL} tones={BOARD_TONE} countTones={BOARD_COUNT_TONE} counts={stockCounts}
             active={stockFilter} onToggle={toggleIn(setStockFilter)} onClear={() => setStockFilter([])} />
           <ChipRail label="Verification" states={Object.keys(VERIF_LABEL)}
             labels={VERIF_LABEL} tones={VERIF_TONE} countTones={VERIF_COUNT_TONE} counts={verifCounts}
             active={verifFilter} onToggle={toggleIn(setVerifFilter)} onClear={() => setVerifFilter([])} />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <ChipRail label="Cutting" states={['not_sent', 'waiting', 'planned']}
+        </FilterRail>
+        <FilterRail>
+          <ChipRail first label="Cutting" states={['not_sent', 'waiting', 'planned']}
             labels={CUT_LABEL} tones={{
               not_sent: 'border-slate-300 bg-slate-100 text-slate-600',
               waiting: 'border-amber-200 bg-amber-50 text-amber-700',
@@ -477,7 +467,7 @@ export default function BoardStockVerification() {
               {Object.entries(SORTS).map(([kk, s]) => <option key={kk} value={kk}>{s.label}</option>)}
             </Select>
           </div>
-        </div>
+        </FilterRail>
       </div>
 
       <Tabs active={tab} onChange={setTab} tabs={[
