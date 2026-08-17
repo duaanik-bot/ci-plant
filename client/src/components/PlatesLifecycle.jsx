@@ -2026,7 +2026,20 @@ export default function PlatesLifecycle() {
     { key: 'asset_number', label: 'Plate Set', render: row => <span><b>{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
-    { key: 'component_label', label: 'Contains', render: row => <span>{row.contains || row.component_label}<span className="block text-[11px] text-slate-400">{row.plate_size}</span></span> },
+    // The build, not the roll-call — same collapse as the rack this set is going
+    // back to. Per STATE, because a returned set is exactly where the plates stop
+    // agreeing: the press keeps two and sends two back damaged.
+    //
+    // `row.contains` stays the sort key and the export, or the workbook inherits
+    // "CMYK" from the chip and loses the colour names entirely.
+    { key: 'component_label', label: 'Contains', sortValue: row => row.contains || row.component_label || '',
+      export: row => row.contains || row.component_label || '',
+      render: row => <span>
+        {row.components?.length
+          ? <InkStateSummary components={row.components} />
+          : <span className="font-semibold">{row.contains || row.component_label}</span>}
+        <span className="mt-0.5 block text-[11px] text-slate-400">{row.plate_size}</span>
+      </span> },
     { key: 'jc_number', label: 'Job Card' },
     // How much life this set has already had. Shown, never enforced — the decision
     // stays with the person holding the plate.
