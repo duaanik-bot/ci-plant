@@ -29,7 +29,8 @@ import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 import {
   PLATE_TONE as TONE, plateStatusLabel as statusLabel, PlateStatusChip as StatusChip,
   PROCESS_PLATES, componentKey, groupedComponents, inkOrder, componentTickLabel,
-  ComponentStrip, PlateProductIdentity, PlateLineIdentity,
+  SHORT_COMPONENT, shortComponent, gangMemberNames,
+  ComponentStrip, InkSummary, PlateProductIdentity, PlateLineIdentity,
 } from './plateIdentity.jsx';
 import {
   receivableLines, initialSelection, selectedOf, selectedTotal, outstandingTotal,
@@ -51,12 +52,10 @@ const COMPONENT_DOT = {
   cyan: 'bg-cyan-400', magenta: 'bg-fuchsia-400', yellow: 'bg-amber-400',
   black: 'bg-slate-800', pantone: 'bg-violet-400',
 };
-// One letter in the cycles column, because five words would wrap the row. Spelled
-// out rather than taken from the label's first letter: that gives Black a 'B'
-// under a column headed CMYK+P, and the press calls it K.
-const SHORT_COMPONENT = { cyan: 'C', magenta: 'M', yellow: 'Y', black: 'K', pantone: 'P' };
-const shortComponent = component => SHORT_COMPONENT[component.component_type]
-  || String(component.component_label || component.component_type || '?').charAt(0).toUpperCase();
+// The cycles column's one-letter names are shortComponent(), now shared from
+// plateIdentity.jsx — the ink summary on the PO register needs the same letters,
+// and two spellings of "Black is K" is how one of them becomes B.
+//
 // Process order first, Pantone after, mirroring plateQuantityBreakdown so the two
 // strips on one row cannot list the same four colours in different orders.
 const orderedWear = (components = []) => [
@@ -658,7 +657,9 @@ function NewPlateGrnModal({ pos, onClose, onPickPo, onDirect }) {
         {chosen && <section className="ci-form-panel">
           <div className="ci-form-panel-title"><span>{chosen.vendor_name}</span>
             <span>{chosen.lines.length} plate set{chosen.lines.length === 1 ? '' : 's'} · {outstandingTotal(chosen)} plates due</span></div>
-          <div className="space-y-1.5">{chosen.lines.map(line => <PlateLineIdentity key={line.id} line={line} compact />)}</div>
+          {/* A confirmation, not a picking list — the build is enough here, and the
+              next screen names every plate. */}
+          <div className="space-y-1.5">{chosen.lines.map(line => <PlateLineIdentity key={line.id} line={line} compact inks="summary" />)}</div>
         </section>}
         {!openPos.length && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
           No plate purchase order is waiting on a delivery. Plates that arrived without one are entered
@@ -1872,13 +1873,29 @@ export default function PlatesLifecycle() {
     { key: 'vendor_name', label: 'Vendor' },
     // A plate set is a product AND its inks — "4 individual plates" never said
     // which four, so the register could not answer the question it exists for.
-    { key: 'lines', label: 'Plate Sets', sortable: false, render: row => <div className="space-y-1.5">
-      {row.lines.map(line => <div key={line.id} className="min-w-0">
-        <span className="block truncate text-xs font-bold text-slate-700">{line.product_name || '—'}
-          <span className="ml-1 font-normal text-slate-400">{line.plate_size || ''}</span></span>
-        <ComponentStrip components={line.components} compact />
-      </div>)}
-      <span className="block text-[11px] text-slate-400">{row.lines.reduce((sum,line) => sum + Number(line.qty),0)} individual plates</span>
+    // One set, one line. This listed every plate as its own chip, so a nineteen-set
+    // PO printed seventy-six of them to say "CMYK" nineteen times over — and the
+    // set that was actually different could not be picked out of the noise.
+    //
+    // The build replaces the roll-call (InkSummary), the full colour names stay on
+    // hover, and a gang names the cartons on its sheet: the run number alone is
+    // exactly what does not answer "what is on it".
+    { key: 'lines', label: 'Plate Sets', sortable: false, render: row => <div className="space-y-0.5">
+      {row.lines.map((line, index) => {
+        const members = gangMemberNames(line);
+        return <div key={line.id} className="flex min-w-0 items-start gap-2">
+          <span className="mt-px w-4 shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">{index + 1}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-xs font-bold text-slate-700">{line.product_name || '—'}</span>
+              <span className="shrink-0 font-mono text-[10px] text-slate-400">{line.plate_size || ''}</span>
+              <InkSummary components={line.components} />
+            </div>
+            {members && <span className="block truncate text-[10px] text-slate-400" title={members}>{members}</span>}
+          </div>
+        </div>;
+      })}
+      <span className="block pl-6 pt-0.5 text-[11px] text-slate-400">{row.lines.reduce((sum,line) => sum + Number(line.qty),0)} individual plates</span>
     </div> },
     // A PO can carry several plate sets, so its Output is a SET of numbers. It
     // sorts on the first of them via sortValue rather than on the rendered join,

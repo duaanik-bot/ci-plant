@@ -91,9 +91,11 @@ test('the row names the plant’s decision, not the mechanism', () => {
 
 test('a grouped colour carries the rack plates it is holding', () => {
   // Retire needs asset ids; groupedComponents only collected component ids, so
-  // the row had nothing to retire.
-  const identity = read('client/src/components/plateIdentity.jsx');
-  assert.match(identity, /asset_ids: \[\]/, 'groupedComponents must collect asset_ids');
-  assert.match(identity, /if \(component\.matched_asset_id\) group\.asset_ids\.push/,
+  // the row had nothing to retire. The grouping itself lives in lib/ — `.jsx`
+  // cannot be run under node --test, and this is exactly the kind of rule that
+  // should be pinned rather than eyeballed.
+  const inks = read('client/src/lib/plateInks.js');
+  assert.match(inks, /asset_ids: \[\]/, 'groupedComponents must collect asset_ids');
+  assert.match(inks, /if \(component\.matched_asset_id\) group\.asset_ids\.push/,
     'the held plate is prc.matched_asset_id — the PROPOSED one is a candidate, not a plate the job has');
 });
