@@ -36,7 +36,18 @@ import verification from './routes/verification.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// One route posts a whole document's OCR word boxes, which is legitimately far
+// larger than any other body here: a 3-page purchase order is already ~100KB of
+// coordinates, and body-parser's default ceiling is 100KB. Left at the default
+// it rejected the very documents the OCR path exists to read, as a bare 413
+// with no explanation. The ceiling is raised for that ONE path rather than
+// globally — every other route keeps the tighter default, and the real guard on
+// this one is the word/page count checked inside the route.
+const standardJson = express.json();
+const ocrJson = express.json({ limit: '12mb' });
+const OCR_PATH = '/api/orders/import/parse-ocr';
+app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson : standardJson)(req, res, next));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public

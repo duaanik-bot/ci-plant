@@ -28,3 +28,7 @@ board-freeze-backfill-*.txt
 # rows, customer and all.
 *SNAPSHOT*.json
 backups/
+
+# staged from node_modules by client/scripts/copy-ocr-assets.mjs — never committed
+client/public/tesseract/
+client/public/tessdata/

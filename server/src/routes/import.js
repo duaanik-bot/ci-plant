@@ -6,7 +6,8 @@ import multer from 'multer';
 import { q, one } from '../db.js';
 import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { parsePO } from '../poparse.js';
+import { parsePO, parseFromRows, rowsFromItems, ocrPagesToItems } from '../poparse.js';
+import { cleanOcrPages } from '../ocr-words.js';
 import { normalize, scrub, matchLine } from '../pomatch.js';
 
 const r = Router();
@@ -96,6 +97,40 @@ async function attachForeignMatches(customerId, lines) {
   }
 }
 
+// Shared by the text-layer route and the OCR route: once there are parsed lines
+// it makes no difference where the characters came from, and the two paths must
+// not be allowed to drift into answering differently.
+async function buildImportResult(parsed, seedWarnings = []) {
+  const { customer_id, candidates } = await detectCustomer(parsed.header_text);
+  const lines = customer_id
+    ? await matchAll(customer_id, parsed.lines)
+    : parsed.lines.map(l => ({ ...l, match: { status: 'none', best: null, suggestions: [] } }));
+  const warnings = [...seedWarnings];
+  if (!parsed.lines.length) warnings.push('No item table detected — add lines manually.');
+  if (!customer_id) warnings.push('Customer not recognized — pick one to run matching.');
+  // Every line the columnar reader produces carries the amount the document
+  // printed for it, so the line's own arithmetic can be checked against the
+  // page. A mismatch is the one signal that a figure was read out of the
+  // wrong column, and it is worth far more to the planner than a silent
+  // number: a wrong quantity here becomes a wrong board order downstream.
+  // On the OCR route it does double duty: it is also the check that catches a
+  // misread digit, which is the failure mode that matters there.
+  const offBy = parsed.lines
+    .map((l, i) => ({ n: i + 1, l }))
+    .filter(({ l }) => l.reconciled === false);
+  if (offBy.length) {
+    warnings.push(offBy.length === parsed.lines.length
+      ? `None of the ${offBy.length} lines add up against the amounts printed on the PO — check every quantity and rate before saving.`
+      : `Check line${offBy.length > 1 ? 's' : ''} ${offBy.map(o => o.n).join(', ')} — quantity × rate does not match the amount printed on the PO.`);
+  }
+  return {
+    reader: parsed.reader ?? null,
+    customer_id, customer_candidates: candidates,
+    po_number: parsed.po_number, po_date: parsed.po_date, delivery_date: parsed.delivery_date,
+    lines, warnings,
+  };
+}
+
 r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -133,30 +168,54 @@ r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, 
         warnings: ["This is a scanned copy — nothing could be read from it. Pick the customer and key the lines in below, or ask for the original digital PDF."],
       });
     }
-    const { customer_id, candidates } = await detectCustomer(parsed.header_text);
-    const lines = customer_id
-      ? await matchAll(customer_id, parsed.lines)
-      : parsed.lines.map(l => ({ ...l, match: { status: 'none', best: null, suggestions: [] } }));
-    const warnings = [];
-    if (!parsed.lines.length) warnings.push('No item table detected — add lines manually.');
-    if (!customer_id) warnings.push('Customer not recognized — pick one to run matching.');
-    // Every line the columnar reader produces carries the amount the document
-    // printed for it, so the line's own arithmetic can be checked against the
-    // page. A mismatch is the one signal that a figure was read out of the
-    // wrong column, and it is worth far more to the planner than a silent
-    // number: a wrong quantity here becomes a wrong board order downstream.
-    const offBy = parsed.lines
-      .map((l, i) => ({ n: i + 1, l }))
-      .filter(({ l }) => l.reconciled === false);
-    if (offBy.length) {
-      warnings.push(offBy.length === parsed.lines.length
-        ? `None of the ${offBy.length} lines add up against the amounts printed on the PO — check every quantity and rate before saving.`
-        : `Check line${offBy.length > 1 ? 's' : ''} ${offBy.map(o => o.n).join(', ')} — quantity × rate does not match the amount printed on the PO.`);
+    res.json(await buildImportResult(parsed));
+  } catch (e) { next(e); }
+});
+
+// A scanned PO has no text layer to read, so the CLIENT renders each page with
+// pdfjs and OCRs it, and posts the word boxes here. The server does not trust
+// the client to have understood the table — it re-runs the identical row
+// bucketing, heading model and columnar reader that a digital PO goes through,
+// so the two paths cannot diverge in what they consider a line.
+//
+// Deliberately NOT done on the server: rendering a page needs a canvas, which
+// on Vercel means a native dependency, and OCR of three A4 pages runs well past
+// the function's 30s ceiling. The planner's own machine has both, for free.
+const OCR_MAX_PAGES = 40;
+const OCR_MAX_WORDS = 60000;
+
+r.post('/orders/import/parse-ocr', canPlan, async (req, res, next) => {
+  try {
+    const pages = req.body?.pages;
+    if (!Array.isArray(pages) || !pages.length) {
+      return res.status(400).json({ error: 'pages required' });
     }
+    if (pages.length > OCR_MAX_PAGES) {
+      return res.status(413).json({ error: `That PDF has more than ${OCR_MAX_PAGES} pages` });
+    }
+    const words = pages.reduce((n, p) => n + (Array.isArray(p?.words) ? p.words.length : 0), 0);
+    if (!words) return res.status(422).json({ code: 'ocr_empty', error: 'Nothing could be read off this scan.' });
+    if (words > OCR_MAX_WORDS) return res.status(413).json({ error: 'That scan produced too much text to import' });
+
+    // Repair the engine's tokens before anything geometric is read off them —
+    // rules glued onto figures, cells welded together, glyphs read twice.
+    const rows = rowsFromItems(ocrPagesToItems(cleanOcrPages(pages)));
+    // No shape fallback here — see parseFromRows. On OCR output the fallback
+    // reader would answer with a confident wrong quantity far more often than
+    // it would answer correctly, and there is no way for the planner to tell.
+    const parsed = parseFromRows(rows, { allowShapeFallback: false });
+    if (!parsed.lines.length) {
+      return res.status(422).json({
+        code: 'ocr_no_table',
+        error: 'The scan was read, but no item table could be made out in it. Key the lines in by hand.',
+      });
+    }
+    // Say it once, at the top, and make it the loudest thing in the list: every
+    // figure below was guessed from pixels. The per-line arithmetic check that
+    // buildImportResult adds is what turns that from a plea into a pointer.
     res.json({
-      customer_id, customer_candidates: candidates,
-      po_number: parsed.po_number, po_date: parsed.po_date, delivery_date: parsed.delivery_date,
-      lines, warnings,
+      ...await buildImportResult(parsed, ['Read by OCR from a scanned copy — check every code, quantity and rate against the PDF before saving.']),
+      ocr: true,
     });
   } catch (e) { next(e); }
 });

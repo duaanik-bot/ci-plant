@@ -45,6 +45,7 @@ const sameDims = (a, b, c, d) => {
 export default function ImportPOWizard({ open, onClose, customers, products, gstRates, onCreated }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [ocr, setOcr] = useState(null);   // {page, pages, phase} while reading a scan
   const [result, setResult] = useState(null);
   const [form, setForm] = useState(null);        // null = upload step
   const [creating, setCreating] = useState(null); // { lineIdx, name, rate, product_type, gst_pct }
@@ -101,11 +102,39 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const reset = () => { setResult(null); setForm(null); setCreating(null); setBusy(false); setConfirmRate(null); setRateOverrides({}); setMigrating(null); };
   const close = () => { if (creating) return; reset(); onClose(); };
 
+  // Render + recognise locally, then hand the words to the server. Any failure
+  // here falls back to the empty form the scan would have produced anyway —
+  // a planner who cannot OCR should still be able to key the order in.
+  const readScannedPO = async (file, scannedRes) => {
+    try {
+      setOcr({ page: 0, pages: 0, phase: 'starting' });
+      const { ocrPdf } = await import('../lib/ocrScan.js');
+      const payload = await ocrPdf(await file.arrayBuffer(), p => setOcr(p));
+      setOcr({ phase: 'matching' });
+      return await api.post('/orders/import/parse-ocr', payload);
+    } catch (e) {
+      // 'ocr_no_table' is the honest outcome, not a crash: the page was read
+      // but no item table could be made out. Never guess a table from a scan.
+      const msg = e?.data?.code === 'ocr_no_table'
+        ? e.message
+        : 'Could not read this scan automatically — key the lines in below.';
+      toast.error(msg);
+      return scannedRes;
+    } finally {
+      setOcr(null);
+    }
+  };
+
   const handleFile = async file => {
     if (!file) return;
     setBusy(true);
     try {
-      const res = await api.upload('/orders/import/parse', file);
+      let res = await api.upload('/orders/import/parse', file);
+      // No text layer. Rather than handing the planner an empty form, read the
+      // page here: render it and recognise it in this browser, then let the
+      // server run the identical table reader over the words. Slow — about a
+      // minute for three pages — so it narrates what it is doing.
+      if (res.scanned) res = await readScannedPO(file, res);
       setResult(res);
       setForm({
         po_number: res.po_number || '',
@@ -408,8 +437,16 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]); }}>
             {busy ? <Loader2 size={28} className="animate-spin text-blue-500" /> : <FileUp size={28} className="text-slate-400" />}
-            <div className="text-sm font-semibold text-slate-600">{busy ? 'Reading the PDF…' : 'Drop the customer PO PDF here, or click to choose'}</div>
-            <div className="text-xs text-slate-400">Digital PDFs only (text-selectable) — scans need the original file</div>
+            <div className="text-sm font-semibold text-slate-600">
+              {ocr ? 'This is a scanned copy — reading it here' : busy ? 'Reading the PDF…' : 'Drop the customer PO PDF here, or click to choose'}
+            </div>
+            <div className="text-xs text-slate-400">
+              {ocr
+                ? (ocr.phase === 'matching' ? 'Matching the lines to your masters…'
+                  : ocr.pages ? `${ocr.phase === 'reading' ? 'Reading' : 'Rendering'} page ${ocr.page} of ${ocr.pages} — this takes about a minute`
+                  : 'Starting the reader…')
+                : 'Digital PDFs read instantly; a scanned copy is read here and takes about a minute'}
+            </div>
             <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }} />
           </label>
         )}

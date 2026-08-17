@@ -302,3 +302,177 @@ test('a table with no usable heading still falls back to the shape reader', asyn
   assert.equal(parsed.lines.length, 2);
   assert.equal(parsed.lines[0].qty, 5000);
 });
+
+// ---------------------------------------------------------------------------
+// The OCR ingest path.
+//
+// A scanned PO has no text layer, so the client renders each page and OCRs it,
+// and the word boxes arrive here instead of pdfjs runs. The contract that makes
+// that safe is that NOTHING below extraction knows the difference: the same row
+// bucketing, heading model and columnar reader must produce the same answer.
+// ---------------------------------------------------------------------------
+import { parseFromRows, rowsFromItems, ocrPagesToItems } from './poparse.js';
+
+// pdfjs runs -> the canvas-space word boxes an OCR engine would have returned
+// for the same page, rendered at `scale`.
+async function asOcrPages(buffer, scale = 3) {
+  const { getDocument } = await loadPdfjs();
+  const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, isEvalSupported: false }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+    const words = [];
+    for (const it of content.items) {
+      const s = String(it.str).trim();
+      if (!s) continue;
+      const [, , , , x, y] = it.transform;
+      const bottom = (vp.height - y) * scale;   // canvas y grows DOWNWARD
+      words.push({ text: s, x0: x * scale, x1: (x + (it.width || 0)) * scale, y0: bottom - 30, y1: bottom });
+    }
+    pages.push({ page: p, scale, width_px: vp.width * scale, height_px: vp.height * scale, words });
+  }
+  return pages;
+}
+
+test('OCR word boxes convert to points with y flipped off the page height', () => {
+  const items = ocrPagesToItems([{
+    page: 1, scale: 2, width_px: 1190, height_px: 1684,
+    words: [{ text: 'Qty.', x0: 200, y0: 100, x1: 260, y1: 140 }],
+  }]);
+  assert.equal(items.length, 1);
+  const [it] = items;
+  assert.equal(it.x, 100);                 // 200 / scale
+  assert.equal(it.w, 30);                  // (260-200) / scale
+  // A canvas box 140px from the TOP at 2x sits (1684-140)/2 = 772pt from the
+  // BOTTOM, which is how pdfjs reports it. Getting this backwards flips the
+  // page over and the totals read as the heading.
+  assert.equal(it.y, 772);
+});
+
+test('a blank or unparseable OCR word is dropped, not turned into NaN geometry', () => {
+  const items = ocrPagesToItems([{
+    page: 1, scale: 1, height_px: 100,
+    words: [
+      { text: '  ', x0: 1, y0: 1, x1: 2, y1: 2 },
+      { text: 'ok', x0: 'x', y0: 1, x1: 2, y1: 2 },
+      { text: 'good', x0: 10, y0: 1, x1: 20, y1: 30 },
+    ],
+  }]);
+  assert.deepEqual(items.map(i => i.str), ['good']);
+});
+
+test('the OCR path reads a PO identically to the text-layer path', async () => {
+  // Same document, same numbers, arriving as pixels instead of runs. If these
+  // ever diverge, a scanned PO and its digital twin would import differently.
+  for (const fixture of [SWISS, TALLY]) {
+    const buf = await makeTable(fixture);
+    const direct = await parsePO(buf);
+    const viaOcr = parseFromRows(rowsFromItems(ocrPagesToItems(await asOcrPages(buf))));
+    assert.equal(viaOcr.reader, direct.reader);
+    assert.deepEqual(
+      viaOcr.lines.map(l => [l.raw_text, l.qty, l.rate, l.amount]),
+      direct.lines.map(l => [l.raw_text, l.qty, l.rate, l.amount]),
+    );
+  }
+});
+
+test('the OCR path does not re-apply the scanned test that sent it there', async () => {
+  // parsePO refuses a document with almost no text as "scanned". parseFromRows
+  // must NOT repeat that check: OCR output is exactly the case that arrives
+  // having already failed it, and re-testing would reject the rescue.
+  const buf = await makeTable(TALLY);
+  const parsed = parseFromRows(rowsFromItems(ocrPagesToItems(await asOcrPages(buf))));
+  assert.equal(parsed.scanned, false);
+  assert.ok(parsed.lines.length >= 2);
+});
+
+test('rowsFromItems keeps pages apart and orders rows down the page', () => {
+  const rows = rowsFromItems([
+    { page: 2, str: 'second-page', x: 10, y: 500, w: 20 },
+    { page: 1, str: 'lower', x: 10, y: 100, w: 20 },
+    { page: 1, str: 'upper', x: 10, y: 700, w: 20 },
+    { page: 1, str: 'beside-upper', x: 40, y: 700.5, w: 20 },
+  ]);
+  assert.deepEqual(rows.map(r => [r.page, r.text]), [
+    [1, 'upper beside-upper'],   // within 2.5pt -> one row, ordered by x
+    [1, 'lower'],
+    [2, 'second-page'],
+  ]);
+});
+
+test('a derived figure is never reported as reconciled', async () => {
+  // A table with no amount column at all: the amount can only be qty x rate.
+  // Checking that product against the multiplication that produced it is not a
+  // check, and reporting it as one puts a tick beside a figure nobody printed.
+  // This is the ORDINARY way OCR fails — a column drops out — so the tick would
+  // have appeared exactly where it was least deserved.
+  const parsed = await parsePO(await makeTable([
+    [60, [['ACME LABS PRIVATE LIMITED', 38]]],
+    [70, [['GSTIN : 02ABACS5319Q1Z5', 38]]],
+    [100, [['Sl', 40], ['Description of Goods', 102], ['Quantity', 309], ['Rate', 369]]],
+    [120, [['1', 40], ['WIDGET CARTON', 102], ['500 NOS', 303], ['12.500', 375]]],
+  ]));
+  assert.equal(parsed.reader, 'columns');
+  const [line] = parsed.lines;
+  assert.equal(line.qty, 500);
+  assert.equal(line.rate, 12.5);
+  assert.equal(line.amount, 6250);          // still offered, as a convenience
+  assert.equal(line.amount_derived, true);  // ...but flagged as ours, not theirs
+  assert.equal(line.reconciled, null,       // and emphatically not "true"
+    'a derived amount cannot corroborate the numbers it was derived from');
+});
+
+test('both figures read off the page still reconcile normally', async () => {
+  const parsed = await parsePO(await makeTable(TALLY));
+  assert.ok(parsed.lines.every(l => l.rate_derived === false && l.amount_derived === false));
+  assert.ok(parsed.lines.every(l => l.reconciled === true));
+});
+
+test('with no readable heading, the figures name their own columns', async () => {
+  // The real failure on a scan: every data row read perfectly while "Qty." came
+  // back as "aty.", so the heading model found no quantity column and the whole
+  // table was lost. The columns are recoverable from the figures — but only on
+  // the document's own evidence, that qty x rate equals the amount on EVERY row.
+  const buf = await makeTable(NO_HEADING_BUT_CONSISTENT);
+  const rows = rowsFromItems(ocrPagesToItems(await asOcrPages(buf)));
+  const strict = parseFromRows(rows, { allowShapeFallback: false });
+  assert.equal(strict.reader, 'columns');
+  assert.deepEqual(strict.lines.map(l => [l.qty, l.rate, l.amount]), [[500, 12.5, 6250], [250, 10, 2500]]);
+  // Both figures were READ, so the arithmetic is a real check and says so.
+  assert.ok(strict.lines.every(l => l.reconciled === true && !l.amount_derived));
+  // The serial must not end up inside the item name.
+  assert.match(strict.lines[0].raw_text, /^WIDGET/);
+});
+
+test('when the arithmetic does not hold, nothing is read rather than guessed', async () => {
+  // Same shape, but the amounts are not the product of anything on the row —
+  // so no triple of columns can be confirmed. The guessing reader would happily
+  // answer here; on a scan its answer is a plausible wrong quantity that a
+  // planner has no way to catch, so the honest output is none at all.
+  const buf = await makeTable(NO_HEADING_INCONSISTENT);
+  const rows = rowsFromItems(ocrPagesToItems(await asOcrPages(buf)));
+  const strict = parseFromRows(rows, { allowShapeFallback: false });
+  assert.deepEqual(strict.lines, []);
+  assert.equal(strict.reader, null, 'no reader may be claimed when nothing was read');
+  // The text-layer path still has its last resort, where the digits are exact.
+  assert.equal((await parsePO(buf)).reader, 'shape');
+});
+
+// A table whose heading names no column at all — what an unreadable heading
+// leaves behind. Here the money adds up: 500 x 12.50 = 6250, 250 x 10 = 2500.
+const NO_HEADING_BUT_CONSISTENT = [
+  [60, [['ACME LABS PRIVATE LIMITED', 38]]],
+  [70, [['GSTIN : 02ABACS5319Q1Z5', 38]]],
+  [120, [['1', 40], ['WIDGET CARTON', 102], ['500', 303], ['12.500', 375], ['6250.000', 447]]],
+  [140, [['2', 40], ['GADGET CARTON', 102], ['250', 303], ['10.000', 375], ['2500.000', 447]]],
+];
+
+// The same table with amounts that are the product of nothing on the row.
+const NO_HEADING_INCONSISTENT = [
+  [60, [['ACME LABS PRIVATE LIMITED', 38]]],
+  [70, [['GSTIN : 02ABACS5319Q1Z5', 38]]],
+  [120, [['1', 40], ['WIDGET CARTON', 102], ['500', 303], ['12.500', 375], ['7777.000', 447]]],
+  [140, [['2', 40], ['GADGET CARTON', 102], ['250', 303], ['10.000', 375], ['3333.000', 447]]],
+];
