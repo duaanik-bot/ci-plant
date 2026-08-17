@@ -1535,6 +1535,40 @@ export default function PlatesLifecycle() {
     } catch (error) { toast.error(error.message); }
     finally { setBusyRow(null); if (detail) await refreshDetail(); else await load(); }
   };
+  // "This plate is dead and I am not printing from it."
+  //
+  // TWO calls, in this order, and the order is forced: /plates/assets/retire runs
+  // pickAvailableRackPlates, which refuses any plate whose status is not
+  // 'available' — and a plate this requirement is HOLDING is 'reserved'. Retiring
+  // it straight from here would 409 every time and read as a dead button. So the
+  // plate is released back to the rack first, which is also what makes the colour
+  // pr_required, and then scrapped.
+  //
+  // Not atomic, deliberately: if the retire half fails the plate is simply back on
+  // the rack, visible, and retirable from the Warehouse tab — a valid state that
+  // nobody has to reconcile. The colour is pr_required either way, which is the
+  // half that decides whether the plant buys a plate.
+  const retireHeldPlate = async (row, componentIds, assetIds) => {
+    if (!assetIds?.length) return toast.error('This colour is not holding a rack plate to retire');
+    setBusyRow(row.id);
+    let released = false;
+    try {
+      await api.post(`/plates/requirements/${row.id}/release-rack`, { component_ids: componentIds });
+      released = true;
+      // One click, so the reason is written rather than typed. It still has to say
+      // something true — the endpoint stamps it into the plate's remarks and its
+      // movement note, and `undefined` would be stamped there literally.
+      const out = await api.post('/plates/assets/retire', {
+        asset_ids: assetIds,
+        reason: `Retired from ${row.request_number || 'Plate PR'} — not fit to reprint`,
+      });
+      toast.success(`${out.plates.join(', ')} retired — undo it on the Plates Warehouse tab`);
+    } catch (error) {
+      toast.error(released
+        ? `Plate returned to the rack but NOT retired (${error.message}) — retire it on the Plates Warehouse tab`
+        : (error.message || 'Could not retire this plate'));
+    } finally { setBusyRow(null); if (detail) await refreshDetail(); else await load(); }
+  };
   // Take a plate off the rack from inside the picker. One plate, one reason: the
   // picker lists individual plate assets, not sets.
   const setAsidePlate = async (assetId, reason) => {
@@ -2357,7 +2391,10 @@ export default function PlatesLifecycle() {
             // Change and Undo therefore cannot live inside the `rack` branch below:
             // nested there they would be controls that never once render.
             const rackHeld=canVerify() && lifecycle?.status==='verified_existing';
-            return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(170px,1fr)_140px_150px_132px]">
+            // The action cell holds up to THREE controls now (Change · Raise PR ·
+            // Retire plate). At 150px they wrapped to two lines each, so a row of
+            // four colours read as a wall of stacked words.
+            return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(150px,1fr)_130px_minmax(230px,auto)_132px]">
               <div><b className="text-sm">{row.component_label}</b>{row.component_type==='pantone'&&<span className="block text-[11px] text-slate-400">Pantone identity retained on every physical plate</span>}</div>
               <div>{lifecycle ? <StatusChip value={lifecycle.status}/> : <span className="text-xs text-slate-400">Not required</span>}</div>
               {/* One cell, three states: a line the rack can still fill offers Use, a
@@ -2372,11 +2409,23 @@ export default function PlatesLifecycle() {
                   {canVerify() && rack.usable > 0 && <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
                     onClick={()=>openPicker(detail,rack.component_ids)}>Use</Button>}
                 </>}
+                {/* Three decisions about a plate the rack already holds, named for
+                    what the plant means rather than for the mechanism. "Undo" used
+                    to sit where Raise PR is: it reads as "I mis-clicked", but the
+                    call behind it sets the colour to pr_required — which IS the
+                    decision to buy a new plate. Retire adds the second half of that
+                    sentence: and this old one is finished. */}
                 {rackHeld && <>
                   <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
                     onClick={()=>openPicker(detail,lifecycle.component_ids)}>Change</Button>
                   <Button size="sm" variant="ghost" disabled={busyRow===detail.id}
-                    onClick={()=>releaseRack(detail,lifecycle.component_ids)}>Undo</Button>
+                    onClick={()=>releaseRack(detail,lifecycle.component_ids)}>Raise PR</Button>
+                  {/* Ghost geometry so it sits in the row, red text so a
+                      destructive one-click action does not read like the two
+                      reversible ones beside it. */}
+                  <Button size="sm" variant="ghost" className="!text-red-600 hover:!bg-red-50"
+                    disabled={busyRow===detail.id}
+                    onClick={()=>retireHeldPlate(detail,lifecycle.component_ids,lifecycle.asset_ids)}>Retire plate</Button>
                 </>}
                 {!rack && !rackHeld && <span className="text-xs text-slate-300">—</span>}
               </div>

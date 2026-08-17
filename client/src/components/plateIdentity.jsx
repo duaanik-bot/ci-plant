@@ -75,8 +75,12 @@ export function groupedComponents(components = []) {
     const group = groups.get(key) || {
       key, component_type: component.component_type, component_label: component.component_label,
       pantone_code: component.pantone_code || null, qty: 0, component_ids: [], statuses: [],
+      // The rack plates this colour is actually HOLDING. Needed by Retire, which
+      // acts on the asset rather than on the requirement line.
+      asset_ids: [],
     };
     group.qty += 1; group.component_ids.push(component.id); group.statuses.push(component.status);
+    if (component.matched_asset_id) group.asset_ids.push(Number(component.matched_asset_id));
     groups.set(key, group);
   }
   return [...groups.values()].map(group => ({
