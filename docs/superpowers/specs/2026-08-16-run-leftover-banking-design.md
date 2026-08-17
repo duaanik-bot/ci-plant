@@ -1,4 +1,4 @@
-# Bank to Leftover RM for combined runs and shared-layout gangs
+# Bank to Leftover RM for every press run
 
 **Date:** 2026-08-16
 **Base:** `origin/main@785474ee`
@@ -81,7 +81,8 @@ that already computed the run's fit:
   run at 1,200 parent sheets where the shared 25×36 board cuts 600.
 - **merge run** — `effectiveParent(plan[0].eff, board)` with `plan[0].eff` as the child. This is
   today's `runParent`, unchanged; a merge is one product by construction.
-- **separate gang** — none. Not eligible.
+- **separate gang** — none. Not eligible. *(Wave 2 overturns this: the RUN still has no single
+  strip, but each MEMBER does. See "Wave 2 — the separate-layout gang, per member" below.)*
 
 The run detail returns that exact parent and child. The client renders its strip list from them
 with `clientStrips` (`client/src/lib/cutFit.js`, the twin pinned to `leftoverStrips` by the
