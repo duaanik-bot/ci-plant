@@ -8,7 +8,8 @@ import {
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, isBareArtworkRevision,
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
-  invertMovement, issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
+  invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
+  suggestedPlateQuantities,
   RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, releasableRackComponents,
   resolvePlateRate, resolveRackPicks,
   USED_PLATES_RACK, pickAvailableRackPlates, validateMakeAvailable, validatePlateReplacementRequest,
@@ -1393,6 +1394,133 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
       return { ...grn, status: 'reversed', reversal_reason: reason };
     });
     res.json(result);
+  } catch (error) { next(error); }
+});
+
+// ── Add plates by output number ───────────────────────────────────────────
+// The plant calls a job by its output number, so that is the only thing the Add
+// Plates form asks for. Everything else it needs is already recorded somewhere.
+//
+// Where a number can live, and why all three are read:
+//   • products.output_number — the master, and the ordinary case.
+//   • order_lines.spec_override->>'output_number' — Planning's override. Some
+//     numbers exist ONLY here: three of the seven run numbers recovered in
+//     2026-08 were never written back to the master.
+//   • gang_runs.output_number where kind='gang' — a mixed SHEET, not a carton.
+//
+// A gang number is reported and then refused. Its plates are not one product's:
+// the sheet carries several cartons, and which of them a plate "belongs" to is a
+// question only the gang's own Plate PR can answer, through the specification it
+// carries. Guessing an anchor product here would file the set under one carton
+// and hide it from the others.
+r.get('/plates/output-number/:number', async (req, res, next) => {
+  try {
+    const wanted = String(req.params.number || '').trim();
+    if (!wanted) return res.status(400).json({ error: 'Enter an output number' });
+    // Matched case-insensitively and trimmed at both ends: these numbers are
+    // typed by hand at both ends of the plant.
+    const matches = await q(`SELECT DISTINCT ON (p.id)
+        p.id AS product_id,p.code AS product_code,p.name AS product_name,
+        p.party_item_code,p.party_artwork_code,p.colour_type,p.colors,p.print_process,
+        p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,
+        c.id AS customer_id,c.name AS customer_name,
+        COALESCE(NULLIF(p.output_number,''),src.override_number) AS output_number,
+        src.source,
+        (SELECT pm.plate_size FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
+          WHERE pa.product_id=p.id AND pa.active=1 ORDER BY pa.id DESC LIMIT 1) AS last_plate_size
+      FROM products p
+      JOIN customers c ON c.id=p.customer_id
+      JOIN LATERAL (
+        SELECT 'master'::text AS source, NULL::text AS override_number
+        WHERE upper(btrim(COALESCE(p.output_number,''))) = upper(btrim($1))
+        UNION ALL
+        SELECT 'planning'::text, upper(btrim($1))
+        WHERE EXISTS (SELECT 1 FROM order_lines ol
+          WHERE ol.product_id=p.id
+            AND upper(btrim(COALESCE(ol.spec_override->>'output_number',''))) = upper(btrim($1)))
+      ) src ON true
+      WHERE p.active=1
+      -- 'master' before 'planning' so a product carrying the number on its own
+      -- master is never reported as an override.
+      ORDER BY p.id, src.source`, [wanted]);
+    const gangs = await q(`SELECT gang_number,output_number,kind FROM gang_runs
+      WHERE kind='gang' AND upper(btrim(COALESCE(output_number,''))) = upper(btrim($1))
+      ORDER BY id DESC`, [wanted]);
+    res.json({
+      output_number: wanted,
+      gang_runs: gangs,
+      matches: matches.map(row => {
+        const components = plateComponentsFromSpec(row);
+        return {
+          product_id: row.product_id,
+          product_code: row.product_code,
+          product_name: row.product_name,
+          party_item_code: row.party_item_code,
+          party_artwork_code: row.party_artwork_code,
+          customer_id: row.customer_id,
+          customer_name: row.customer_name,
+          output_number: row.output_number || wanted,
+          source: row.source,
+          artwork_version: artworkVersionOf({
+            party_artwork_code: row.party_artwork_code,
+            output_number: row.output_number || wanted,
+          }),
+          // The size this product's plates actually use beats the rule, because it
+          // is a fact about this carton rather than an inference from its colours.
+          plate_size: row.last_plate_size || defaultPlateSize(row, []),
+          plate_size_from: row.last_plate_size ? 'previous plates' : 'colour build',
+          components: suggestedPlateQuantities(row),
+        };
+      }),
+    });
+  } catch (error) { next(error); }
+});
+
+// Write the plates. One row per PHYSICAL plate, exactly as a GRN would — the rack
+// is counted in plates, and a set is a grouping the read side derives.
+r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
+  try {
+    const entry = manualPlateEntry(req.body);
+    const result = await tx(async (qc, oc) => {
+      const product = await oc(`SELECT p.id,p.code,p.name,p.party_artwork_code,c.id AS customer_id
+        FROM products p LEFT JOIN customers c ON c.id=p.customer_id
+        WHERE p.id=$1 AND p.active=1`, [Number(req.body.product_id) || 0]);
+      if (!product) throw Object.assign(new Error('Choose a product by its output number'), { status: 400 });
+      // GET /plates/warehouse INNER JOINs customers. A product with no customer
+      // would take the plates and they would render NOWHERE — no error, just a
+      // shorter rack. Refuse while there is still someone to tell.
+      if (!product.customer_id) {
+        throw Object.assign(new Error(`${product.code} has no customer on its master, so its plates could not be shown on the rack`), { status: 409 });
+      }
+      const master = await oc('SELECT id,plate_size FROM plate_masters WHERE id=$1 AND active=1',
+        [Number(req.body.plate_master_id) || 0]);
+      if (!master) throw Object.assign(new Error('Choose the plate size'), { status: 400 });
+      const created = [];
+      for (const plate of entry.plates) {
+        const assetNumber = await nextNumber('CI-PL-A-', 'plate_assets', 'asset_number', oc);
+        const [asset] = await qc(`INSERT INTO plate_assets
+          (asset_number,plate_master_id,product_id,output_number,artwork_reference,artwork_version,
+           component_type,component_label,pantone_code,source_grn_id,vendor_id,purchase_rate,
+           use_count,rack_location,status,condition,verified_by,verified_at,remarks)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,NULL,0,$10,$11,'available',$12,$13,now(),$14) RETURNING *`,
+        [assetNumber, master.id, product.id, entry.output_number, product.party_artwork_code || null,
+         entry.artwork_version, plate.component_type, plate.component_label, plate.pantone_code,
+         entry.use_count, entry.rack_location, entry.condition, req.user.name, entry.remarks]);
+        // 'received' is the honest action and an existing one — the plate arrived
+        // on the rack. No new status string, so no migration and no CHECK to widen.
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,action,from_status,to_status,to_location,condition,note,user_name)
+          VALUES ($1,'received',NULL,'available',$2,$3,$4,$5)`,
+        [asset.id, asset.rack_location, asset.condition,
+         entry.remarks || `Added to ${entry.rack_location} by hand`, req.user.name]);
+        created.push(asset);
+      }
+      await audit('plate_asset', product.id, 'create',
+        `${created.length} plate(s) added to ${entry.rack_location} · ${product.code} · ${entry.artwork_version}`,
+        qc, req.user.name);
+      return { count: created.length, rack_location: entry.rack_location, assets: created };
+    });
+    res.status(201).json(result);
   } catch (error) { next(error); }
 });
 

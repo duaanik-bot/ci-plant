@@ -662,6 +662,242 @@ function QuantityControl({ row, onChange, disabled = false }) {
   </div>;
 }
 
+// ── Add plates already in the plant ───────────────────────────────────────
+// Stock that never came through a PR/PO/GRN: opening stock, a set cut outside the
+// system, plates found on a shelf. The form asks for ONE identifier — the output
+// number the plant already calls the job by — and reads the rest out of Product
+// Master and Planning. Typing the product name again is how the rack ends up
+// holding a plate filed against a carton nobody can find.
+function rackEntryRows(components = []) {
+  const byType = new Map(components.filter(row => row.component_type !== 'pantone')
+    .map(row => [row.component_type, row]));
+  return [
+    ...PROCESS_PLATES.map(([component_type, component_label]) => ({
+      component_type, component_label, pantone_code: null, qty: byType.get(component_type)?.qty || 0,
+    })),
+    ...components.filter(row => row.component_type === 'pantone').map(row => ({
+      component_type: 'pantone', component_label: row.component_label,
+      pantone_code: row.pantone_code, qty: Number(row.qty) || 1,
+    })),
+  ];
+}
+
+const RACK_CHOICES = [
+  { key: 'fresh', label: 'Fresh', hint: 'Never printed', conditions: ['Good'] },
+  { key: 'used', label: 'Used', hint: 'Has already run', conditions: ['Good', 'Fair'] },
+];
+
+function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
+  const toast = useToast();
+  const [number, setNumber] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [lookup, setLookup] = useState(null);
+  const [match, setMatch] = useState(null);
+  const [form, setForm] = useState(null);
+  const [newPantone, setNewPantone] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const choose = picked => {
+    setMatch(picked);
+    setForm({
+      rack: defaultRack === 'used' ? 'used' : 'fresh',
+      condition: 'Good',
+      plate_master_id: masters.find(row => row.plate_size === picked.plate_size)?.id || '',
+      artwork_version: picked.artwork_version || '',
+      remarks: '',
+      components: rackEntryRows(picked.components),
+    });
+  };
+
+  // Editing the number throws away what the last one resolved to. Without this the
+  // panel keeps naming the OLD carton under a number that has been changed, and
+  // Add writes the plates against it — the operator's own correction is what makes
+  // the screen lie. Cleared on edit, not merely disabled: a stale identity panel is
+  // the thing being read to decide this is the right job.
+  const retype = value => {
+    setNumber(value);
+    if (value.trim() !== (match?.output_number || '')) { setMatch(null); setForm(null); setLookup(null); }
+  };
+
+  const find = async () => {
+    const wanted = number.trim();
+    if (!wanted) return;
+    setLooking(true); setMatch(null); setForm(null);
+    try {
+      const result = await api.get(`/plates/output-number/${encodeURIComponent(wanted)}`);
+      setLookup(result);
+      // One match is not a choice — fill the form and let them get on with it.
+      if (result.matches.length === 1) choose(result.matches[0]);
+    } catch (error) { toast.error(error.message || 'That output number could not be looked up'); }
+    finally { setLooking(false); }
+  };
+
+  const rack = RACK_CHOICES.find(row => row.key === form?.rack) || RACK_CHOICES[0];
+  const total = (form?.components || []).reduce((sum, row) => sum + Math.max(0, Number(row.qty) || 0), 0);
+  const updateQty = (key, qty) => setForm(current => ({
+    ...current,
+    components: current.components.map(row => (componentKey(row) === key ? { ...row, qty } : row)),
+  }));
+  const addPantone = () => {
+    const identity = newPantone.trim();
+    if (!identity) return;
+    const row = { component_type: 'pantone', component_label: `Pantone - ${identity}`, pantone_code: identity, qty: 1 };
+    if (form.components.some(existing => componentKey(existing) === componentKey(row))) {
+      return toast.error(`${row.component_label} is already listed`);
+    }
+    setForm(current => ({ ...current, components: [...current.components, row] }));
+    setNewPantone('');
+  };
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const result = await api.post('/plates/warehouse/assets', {
+        product_id: match.product_id,
+        plate_master_id: Number(form.plate_master_id),
+        output_number: match.output_number,
+        rack: form.rack,
+        condition: form.condition,
+        artwork_version: form.artwork_version,
+        remarks: form.remarks,
+        components: form.components.filter(row => Number(row.qty) > 0),
+      });
+      toast.success(`${result.count} plate(s) added to ${result.rack_location}`);
+      await onSaved();
+      onClose();
+    } catch (error) { toast.error(error.message || 'The plates could not be added'); }
+    finally { setBusy(false); }
+  };
+
+  return <Modal open onClose={onClose} title="Add plates to the warehouse" wide
+    footer={<>
+      <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button variant="success" disabled={!form || !form.plate_master_id || !total || busy} onClick={submit}>
+        <PackagePlus size={14} /> {busy ? 'Adding…' : `Add ${total} plate${total === 1 ? '' : 's'}`}
+      </Button>
+    </>}>
+    <div className="space-y-4">
+      <Field label="Output number" required
+        hint="The number the plant calls this job by. Product, customer, artwork and colours are read from Product Master and Planning.">
+        <div className="flex gap-2">
+          <Input value={number} autoFocus placeholder="e.g. 18604"
+            onChange={event => retype(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); find(); } }} />
+          <Button type="button" variant="secondary" disabled={!number.trim() || looking} onClick={find}>
+            {looking ? 'Looking…' : 'Find'}
+          </Button>
+        </div>
+      </Field>
+
+      {/* A gang number names a SHEET of several cartons, so there is no one product
+          to file the plates against. Said plainly, with the run number, rather than
+          left as an empty result the operator would read as a typo. */}
+      {lookup?.gang_runs?.length > 0 && <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+        <span>{lookup.output_number} is the gang run {lookup.gang_runs.map(row => row.gang_number).join(', ')} — a shared sheet, not one carton.
+          Plates for a gang are received against that run's own Plate PR.</span>
+      </div>}
+
+      {lookup && !lookup.matches.length && !lookup.gang_runs.length && <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+        <span>No active product carries output number {lookup.output_number}, in Product Master or on a planned order line. Check the number, or set it on the product's master first.</span>
+      </div>}
+
+      {/* output_number is plain text on the master — nothing stops two cartons
+          sharing one. Show them both rather than silently taking the first. */}
+      {lookup?.matches?.length > 1 && <section className="ci-form-panel">
+        <div className="ci-form-panel-title"><span>Which product?</span><span>{lookup.matches.length} carry this number</span></div>
+        <div className="divide-y divide-slate-100">{lookup.matches.map(option => (
+          <button key={option.product_id} type="button" onClick={() => choose(option)}
+            className={`flex w-full items-center gap-3 py-2 text-left ${match?.product_id === option.product_id ? 'bg-brand-50' : 'hover:bg-slate-50'}`}>
+            <span className="min-w-0 flex-1">
+              <b className="text-sm text-slate-800">{option.product_name}</b>
+              <span className="block font-mono text-[10px] text-slate-400">{option.product_code} · {option.customer_name}</span>
+            </span>
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              {option.source === 'planning' ? 'From planning' : 'Product Master'}
+            </span>
+          </button>
+        ))}</div>
+      </section>}
+
+      {match && form && <>
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title">
+            <span>{match.product_name}</span>
+            <span>{match.source === 'planning' ? 'Number from a planned order line' : 'Number from Product Master'}</span>
+          </div>
+          <div className="grid gap-3 py-1 text-xs text-slate-600 sm:grid-cols-3">
+            <span><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Customer</span>{match.customer_name}</span>
+            <span><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Product code</span><span className="font-mono">{match.product_code}</span></span>
+            <span><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Party code</span><span className="font-mono">{match.party_item_code || '—'}</span></span>
+          </div>
+        </section>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Rack" required hint={rack.key === 'used' ? 'Recorded with one run so far — a used plate has printed at least once' : 'Recorded with no runs'}>
+            <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+              {RACK_CHOICES.map(option => {
+                const on = form.rack === option.key;
+                return <button key={option.key} type="button"
+                  onClick={() => setForm(current => ({ ...current, rack: option.key, condition: 'Good' }))}
+                  className={`flex-1 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  {option.label}<span className={`ml-1 font-semibold ${on ? 'text-white/70' : 'text-slate-400'}`}>{option.hint}</span>
+                </button>;
+              })}
+            </div>
+          </Field>
+          <Field label="Plate size" required
+            hint={`Suggested from ${match.plate_size_from}`}>
+            <Select value={form.plate_master_id} onChange={event => setForm(current => ({ ...current, plate_master_id: event.target.value }))}>
+              <option value="">Choose a size</option>
+              {masters.map(row => <option key={row.id} value={row.id}>{row.plate_size}</option>)}
+            </Select>
+          </Field>
+          {/* Only a used plate can be anything but Good — a plate that has never
+              printed and is already Fair is a plate with a story the rack cannot tell. */}
+          {rack.key === 'used' && <Field label="Condition" required>
+            <Select value={form.condition} onChange={event => setForm(current => ({ ...current, condition: event.target.value }))}>
+              {rack.conditions.map(option => <option key={option} value={option}>{option}</option>)}
+            </Select>
+          </Field>}
+          <Field label="Artwork / revision" required
+            hint="How a Plate PR will find these plates. R1 never matches an R2 job.">
+            <Input value={form.artwork_version}
+              onChange={event => setForm(current => ({ ...current, artwork_version: event.target.value }))} />
+          </Field>
+        </div>
+
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title">
+            <span>Which plates are you entering?</span>
+            <span>{total} plate{total === 1 ? '' : 's'} · 0 leaves a colour out</span>
+          </div>
+          <div className="divide-y divide-slate-100">{form.components.map(row => (
+            <div key={componentKey(row)} className="grid items-center gap-3 py-2 sm:grid-cols-[1fr_132px]">
+              <div>
+                <b className="text-sm">{row.component_label}</b>
+                {row.component_type === 'pantone' && <span className="block text-[11px] text-slate-400">Pantone identity kept on every physical plate</span>}
+              </div>
+              <QuantityControl row={row} onChange={qty => updateQty(componentKey(row), qty)} />
+            </div>
+          ))}</div>
+          <div className="mt-3 flex max-w-md gap-2 border-t border-slate-100 pt-3">
+            <Input value={newPantone} placeholder="Pantone number or name"
+              onChange={event => setNewPantone(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addPantone(); } }} />
+            <Button type="button" variant="secondary" onClick={addPantone}><Plus size={14} /> Add Pantone</Button>
+          </div>
+        </section>
+
+        <Field label="Remarks" hint="Where these plates came from, if it is worth recording">
+          <Textarea value={form.remarks} onChange={event => setForm(current => ({ ...current, remarks: event.target.value }))} />
+        </Field>
+      </>}
+    </div>
+  </Modal>;
+}
+
 function ReasonActionModal({ action, onClose, onConfirm }) {
   const toast = useToast();
   const [reason,setReason] = useState('');
@@ -833,6 +1069,7 @@ export default function PlatesLifecycle() {
   const [reqView, setReqView] = useState('open');
   const [approvalView, setApprovalView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
+  const [addingPlates, setAddingPlates] = useState(false);
   // Rack selection + the ad-hoc issue dialog: plates handed straight to a job with
   // no PR behind them.
   const [rackPicked, setRackPicked] = useState([]);
@@ -1767,7 +2004,14 @@ export default function PlatesLifecycle() {
             );
           })}
         </div>
-        {rackPicked.length > 0 && <div className="ml-auto flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5">
+        {/* Stock arriving without paperwork. Sits with the rack switch because it
+            is the one thing on this screen that ADDS to the rack rather than
+            narrowing what you can see of it — and it stays put when rows are
+            ticked, so it never trades places with the selection actions. */}
+        {canManage() && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setAddingPlates(true)}>
+          <PackagePlus size={13} /> Add Plates
+        </Button>}
+        {rackPicked.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5">
           <b className="text-sm text-brand-900">{rackPicked.length} plate set(s) ticked</b>
           <Button size="sm" variant="ghost" onClick={()=>setRackPicked([])}>Clear</Button>
           {/* Neither of these is a question you can ask of a plate that is already off
@@ -1901,6 +2145,8 @@ export default function PlatesLifecycle() {
     {grnModal && <PlateGrnModal po={grnModal.po} line={grnModal.line} onClose={()=>setGrnModal(null)} onSaved={load}/>}
     {editPo && <PlatePoEditModal po={editPo} vendors={vendors} onClose={()=>setEditPo(null)} onSaved={load}/>}
     {returnModal && <ReturnModal asset={returnModal} onClose={()=>setReturnModal(null)} onSaved={load}/>}
+    {addingPlates && <AddPlatesModal masters={masters} defaultRack={warehouseView}
+      onClose={()=>setAddingPlates(false)} onSaved={load}/>}
     {assetHistory && <AssetHistoryModal asset={assetHistory} onClose={()=>setAssetHistory(null)} onChanged={load}/>}
     {reasonAction && <ReasonActionModal action={reasonAction} onClose={()=>setReasonAction(null)} onConfirm={performReasonAction}/>}
   </div>;

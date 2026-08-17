@@ -273,7 +273,12 @@ export function plateQuantityBreakdown(components = []) {
 
 // Expand an editable quantity model back into one row per physical plate. CMYK
 // labels are controlled; each Pantone keeps its own exact identity.
-export function expandPlateQuantities(entries = []) {
+//
+// `emptyMessage` exists because two callers ask the same question of different
+// things — a Plate PR being saved, and plates being put on the rack by hand. One
+// expansion rule, two vocabularies; a second copy of this loop is how the Pantone
+// and quantity rules would drift apart.
+export function expandPlateQuantities(entries = [], { emptyMessage = 'A Plate Requirement needs at least one plate' } = {}) {
   const expanded = [];
   for (const entry of entries) {
     const componentType = clean(entry.component_type).toLowerCase();
@@ -305,9 +310,91 @@ export function expandPlateQuantities(entries = []) {
     }
   }
   if (!expanded.length) {
-    throw Object.assign(new Error('A Plate Requirement needs at least one plate'), { status: 400 });
+    throw Object.assign(new Error(emptyMessage), { status: 400 });
   }
   return expanded;
+}
+
+// ── Putting plates the plant already owns onto the rack ───────────────────
+// A plate normally reaches the rack through paperwork: PR → PO → GRN. Stock that
+// predates the system, or a set cut outside it, has no such trail. This path
+// writes the asset rows directly and leaves source_grn_id NULL — which is what
+// tells a hand-entered plate from a bought one, with no magic string to grep.
+//
+// The operator names ONE thing: the output number. Everything else — which
+// product, whose carton, which artwork revision, how many colours — is already in
+// the software, so asking for it again is asking to be told a different answer.
+
+// Which rack, and what that choice MEANS. Fresh is a plate that has never
+// printed; Used has already run. The run count is not cosmetic: a Used plate
+// recorded with zero runs reads as brand new everywhere wear is asked about — the
+// Average wear card, and the "used N times" line a verifier reads before agreeing
+// to reuse it. One run is the least it can honestly have.
+export const MANUAL_PLATE_RACKS = [
+  { key: 'fresh', label: 'Fresh — never printed', rack: FRESH_PLATES_RACK, use_count: 0, conditions: ['Good'] },
+  { key: 'used', label: 'Used — has already run', rack: USED_PLATES_RACK, use_count: 1, conditions: ['Good', 'Fair'] },
+];
+
+export function manualPlateRack(key) {
+  return MANUAL_PLATE_RACKS.find(row => row.key === clean(key).toLowerCase()) || null;
+}
+
+// The colour + quantity rows the form opens with, folded from the product's own
+// colour build. plateComponentsFromSpec is the plant's one answer to "what plates
+// does this job take" — the Plate PR is built from it, so a rack entry that
+// disagreed with it would put a different set of plates on the shelf than the PR
+// for the same carton would have bought.
+export function suggestedPlateQuantities(spec = {}) {
+  const rows = [];
+  const index = new Map();
+  for (const component of plateComponentsFromSpec(spec)) {
+    const key = plateComponentKey(component);
+    const found = index.get(key);
+    if (found) { found.qty += 1; continue; }
+    const row = {
+      component_type: component.component_type,
+      component_label: component.component_label,
+      pantone_code: component.pantone_code || null,
+      qty: 1,
+    };
+    index.set(key, row);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// Everything the route needs to write, or a 400 naming the field that is wrong.
+// Pure, so the button can ask the same question before it offers itself.
+export function manualPlateEntry(input = {}) {
+  const rack = manualPlateRack(input.rack);
+  if (!rack) {
+    throw Object.assign(new Error('Choose whether these plates are Fresh or Used'), { status: 400 });
+  }
+  const condition = clean(input.condition) || rack.conditions[0];
+  if (!rack.conditions.includes(condition)) {
+    throw Object.assign(new Error(`A ${rack.key} plate cannot be recorded as ${condition}`), { status: 400 });
+  }
+  // NOT NULL in the table, and load-bearing far beyond that: plateArtworkKey
+  // matches a rack plate to a requirement on this string. A plate filed under
+  // 'Unversioned' is invisible to every PR that names a revision, so the plant
+  // buys a plate it just told the system it owns.
+  const artworkVersion = artworkVersionOf({
+    artwork_version: input.artwork_version,
+    party_artwork_code: input.party_artwork_code,
+    output_number: input.output_number,
+  });
+  const plates = expandPlateQuantities(input.components || [], {
+    emptyMessage: 'Tick at least one colour and give it a quantity',
+  });
+  return {
+    rack_location: rack.rack,
+    use_count: rack.use_count,
+    condition,
+    artwork_version: artworkVersion,
+    output_number: clean(input.output_number) || null,
+    remarks: clean(input.remarks) || null,
+    plates,
+  };
 }
 
 // ── Approval rules, asked by the route AND by the button ──────────────────
