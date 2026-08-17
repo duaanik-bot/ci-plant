@@ -609,6 +609,78 @@ function PlateGrnModal({ po, onClose, onSaved }) {
   </Modal>;
 }
 
+// The GRN register's own front door.
+//
+// Receiving could only START on the PO register: find the order, press GRN on its
+// row. That works while the paperwork exists — and there was no door AT ALL for
+// plates that arrived without it (opening stock, a set cut outside the system,
+// plates found on a shelf). The purchase order is therefore offered here, never
+// demanded.
+//
+// The direct door is Add Plates, unchanged and not reimplemented: the same two
+// keys (output number OR product), the same Sync Master? write-back, the same
+// /plates/warehouse/assets endpoint. A second answer to "identify a carton and
+// put its plates on the rack" is how the two would start disagreeing about what
+// counts as a match — and the number is exactly the field nobody remembers for
+// old stock, which is why that form has two doors of its own.
+function NewPlateGrnModal({ pos, onClose, onPickPo, onDirect }) {
+  const [mode, setMode] = useState('po');
+  const [poId, setPoId] = useState('');
+  // Only orders with something still outstanding. A fully received PO in this
+  // list is a choice that leads to a form with nothing tickable on it.
+  const openPos = (pos || []).filter(po => !['reversed', 'closed'].includes(po.status) && outstandingTotal(po) > 0);
+  const chosen = openPos.find(po => String(po.id) === String(poId));
+  return <Modal open onClose={onClose} title="Create Plate GRN" wide
+    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>
+      {mode === 'po'
+        ? <Button variant="success" disabled={!chosen} onClick={() => onPickPo(chosen)}>
+            <PackagePlus size={14} /> Receive against {chosen ? chosen.po_number : 'a PO'}</Button>
+        : <Button variant="success" onClick={onDirect}>
+            <PackagePlus size={14} /> Enter plates directly</Button>}
+    </>}>
+    <div className="space-y-4">
+      <SubTabs active={mode} onChange={setMode} views={[
+        { key: 'po', label: 'Against a purchase order' },
+        { key: 'direct', label: 'Direct — no PO' },
+      ]} />
+
+      {mode === 'po' ? <>
+        <Field label="Open purchase order" required
+          hint="Every plate set still outstanding on it comes through on the next screen — tick what arrived.">
+          <SearchableSelect value={poId} onChange={event => setPoId(event.target.value)}
+            placeholder={openPos.length ? 'Search by PO number, vendor or product…' : 'No plate PO is awaiting delivery'}
+            options={openPos.map(po => ({
+              value: String(po.id),
+              label: `${po.po_number} · ${po.vendor_name} · ${outstandingTotal(po)} plate${outstandingTotal(po) === 1 ? '' : 's'} due`,
+              search: searchText(po, `${po.po_number} ${po.vendor_name} ${po.lines.map(line => `${line.product_name} ${line.output_number || ''}`).join(' ')}`),
+            }))} />
+        </Field>
+        {chosen && <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>{chosen.vendor_name}</span>
+            <span>{chosen.lines.length} plate set{chosen.lines.length === 1 ? '' : 's'} · {outstandingTotal(chosen)} plates due</span></div>
+          <div className="space-y-1.5">{chosen.lines.map(line => <PlateLineIdentity key={line.id} line={line} compact />)}</div>
+        </section>}
+        {!openPos.length && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+          No plate purchase order is waiting on a delivery. Plates that arrived without one are entered
+          on the Direct tab.</p>}
+      </> : (
+        <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>Plates that arrived without a purchase order</span><span>opening stock · outside job · found on a shelf</span></div>
+          <p className="text-xs text-slate-600">
+            Name the job by its <b>output number</b> or by <b>product</b> — whichever you have — and the
+            product, customer, artwork revision and colour build are read back for you. The plates go
+            straight onto the rack, and a master with no output number can be told the one you typed.
+          </p>
+          <p className="mt-2 text-[11px] text-slate-400">
+            These plates carry no GRN number because nothing was purchased. They are told apart from
+            bought plates by having no source GRN, and they appear in the Plates Warehouse.
+          </p>
+        </section>
+      )}
+    </div>
+  </Modal>;
+}
+
 // Verification is per PLATE, not per set: the warehouse has the pile in front of it
 // and three of a set can be fit to run again while the fourth is finished. Ticked
 // keeps a plate — it goes to the Used Plates Rack; unticked scraps it. Each row
@@ -1237,6 +1309,7 @@ export default function PlatesLifecycle() {
   const [wearView, setWearView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
   const [addingPlates, setAddingPlates] = useState(false);
+  const [newGrn, setNewGrn] = useState(false);
   // Rack selection + the ad-hoc issue dialog: plates handed straight to a job with
   // no PR behind them.
   const [rackPicked, setRackPicked] = useState([]);
@@ -2280,7 +2353,16 @@ export default function PlatesLifecycle() {
       </div>
     </Modal>}
     {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
-    {tab==='grns' && <DataTable searchable rows={grns} columns={grnColumns} empty="No Plate GRNs" exportName="Plate GRN Register" />}
+    {tab==='grns' && <>
+      {/* Receiving starts here as well as on the PO row. The PO register is where
+          you go when you already know the order; this is where you go when what
+          you have is a delivery. */}
+      {canManage() && <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="success" onClick={()=>setNewGrn(true)}><PackagePlus size={13}/> Create GRN</Button>
+        <span className="text-[11px] text-slate-400">Against a purchase order, or direct for plates that arrived without one.</span>
+      </div>}
+      <DataTable searchable rows={grns} columns={grnColumns} empty="No Plate GRNs" exportName="Plate GRN Register" />
+    </>}
     {tab==='warehouse' && <>
       {/* Rack switch sits with the selection bar rather than on a band of its own —
           the KPI strip above already names which rack you are in. */}
@@ -2463,6 +2545,11 @@ export default function PlatesLifecycle() {
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
     {grnModal && <PlateGrnModal po={grnModal} onClose={()=>setGrnModal(null)} onSaved={load}/>}
+    {/* Both doors hand off to a form that already exists: the PO route to the
+        whole-PO receipt, the direct route to Add Plates untouched. */}
+    {newGrn && <NewPlateGrnModal pos={pos} onClose={()=>setNewGrn(false)}
+      onPickPo={po=>{setNewGrn(false); setGrnModal(po);}}
+      onDirect={()=>{setNewGrn(false); setAddingPlates(true);}}/>}
     {editPo && <PlatePoEditModal po={editPo} vendors={vendors} onClose={()=>setEditPo(null)} onSaved={load}/>}
     {returnModal && <ReturnModal asset={returnModal} onClose={()=>setReturnModal(null)} onSaved={load}/>}
     {addingPlates && <AddPlatesModal masters={masters} defaultRack={warehouseView}
