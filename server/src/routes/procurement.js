@@ -14,6 +14,7 @@ import { normalisePurpose } from '../replenishment.js';
 import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
 import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-substitution.js';
 import { consolidate, consolidateEdit } from '../po-consolidate.js';
+import { planPrQtyChange } from '../pr-qty-cascade.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -146,6 +147,62 @@ async function attachReqLines(prs) {
 }
 
 // Insert PO lines with full GST detail and remember each material's last rate.
+// A requisition that has already become a purchase order stays editable, but
+// only its quantities, and the change is carried through to the order. Leaving
+// the PO behind would let the two drift — and since the PO's traceability is
+// derived from these very rows, the order would start reporting quantities
+// nobody asked for.
+//
+// Applied as a DELTA: consolidation merges several requisitions onto one PO
+// line, so setting that line would erase what the others contributed.
+export async function cascadePrQtyToPo(qc, oc, pr, newLines, user = null) {
+  const oldLines = await qc('SELECT material_id, qty FROM requisition_lines WHERE requisition_id=$1', [pr.id]);
+  const { deltas, error } = planPrQtyChange(oldLines, newLines);
+  if (error) throw Object.assign(new Error(error), { status: 409 });
+  if (!deltas.length) return;
+
+  const po = pr.purchase_order_id
+    ? await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [pr.purchase_order_id])
+    : null;
+  // Converted with nothing to point at: the order was deleted out from under
+  // it. Editing quantities here would change nothing anybody can see.
+  if (!po) throw Object.assign(new Error('This requisition is marked converted but its purchase order is gone — reopen it from the PO register first'), { status: 409 });
+  if (po.status === 'closed') throw Object.assign(new Error(`${po.po_number} is closed — no further change to what was ordered`), { status: 409 });
+
+  for (const d of deltas) {
+    const pl = await oc('SELECT * FROM po_lines WHERE purchase_order_id=$1 AND material_id=$2 ORDER BY id LIMIT 1',
+      [po.id, d.material_id]);
+    const mat = await oc('SELECT name FROM materials WHERE id=$1', [d.material_id]);
+    if (!pl) throw Object.assign(new Error(`${mat?.name || 'That board'} is no longer on ${po.po_number} — edit the order directly`), { status: 409 });
+
+    const nextQty = +pl.qty + d.delta;
+    // Nothing-left comes FIRST. A delta can outrun the line when the order was
+    // edited down on its own afterwards, and blaming receipts for a negative
+    // result names a number ("below the 0 already received") that explains
+    // nothing to the person reading it.
+    if (nextQty <= 0)
+      throw Object.assign(new Error(`${mat?.name || 'That board'} would leave nothing on ${po.po_number} — it now carries ${+pl.qty}, so edit the order directly`), { status: 409 });
+    // Then the same rule the PO editor enforces: never below what has already
+    // arrived, counting quarantined receipts as arrived.
+    const grn = await oc('SELECT COALESCE(SUM(qty),0)::float AS q FROM grns WHERE po_line_id=$1', [pl.id]);
+    const committed = Math.max(+pl.received_qty, +grn?.q || 0);
+    if (nextQty < committed)
+      throw Object.assign(new Error(`${mat?.name || 'That board'} would drop ${po.po_number} to ${nextQty}, below the ${committed} already received/in-QC`), { status: 409 });
+
+    await qc('UPDATE po_lines SET qty=$1 WHERE id=$2', [nextQty, pl.id]);
+  }
+
+  // The order may have been fully received and is now short again, or the other
+  // way round. Same derivation the PO editor uses.
+  const fresh = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [po.id]);
+  const full = fresh.length > 0 && fresh.every(l => l.received_qty >= l.qty);
+  const some = fresh.some(l => l.received_qty > 0);
+  await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
+    [full ? 'received' : some ? 'partially_received' : 'open', po.id]);
+  await audit('purchase_order', po.id, 'update',
+    `quantities followed ${pr.pr_number}: ${deltas.map(d => `${d.from}→${d.to}`).join(', ')}`, qc, user);
+}
+
 // A consolidated PO line has to be able to name what fed it. Derived, never
 // stored: both conversion paths stamp requisitions.purchase_order_id, so the
 // answer comes from rows the PR module already owns — nothing to migrate,
@@ -343,11 +400,15 @@ r.put('/requisitions/:id', canBuy, async (req, res, next) => {
     const result = await tx(async (qc, oc) => {
       const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
-      if (!['pending', 'approved'].includes(pr.status))
+      // A converted requisition stays editable, but only its quantities — and
+      // the change is carried through to the order it produced. See
+      // cascadePrQtyToPo. Anything past converted is done with.
+      if (!['pending', 'approved', 'converted'].includes(pr.status))
         throw Object.assign(new Error(`A ${pr.status} requisition can no longer be edited`), { status: 409 });
       const lines = reqLinesFrom(req.body);
       if (!lines.length) throw Object.assign(new Error('A requisition needs at least one line with a material and quantity'), { status: 400 });
       await assertPurchasable(oc, lines);
+      if (pr.status === 'converted') await cascadePrQtyToPo(qc, oc, pr, lines, req.user.name);
       const first = lines[0];
       await qc('DELETE FROM requisition_lines WHERE requisition_id=$1', [pr.id]);
       await insertReqLines(qc, pr.id, lines);

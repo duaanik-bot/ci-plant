@@ -12,6 +12,7 @@ import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { kgPerSheet, packets, totalWeight, ratePerSheet, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { unset } from '../lib/replenishment.js';
+import { consolidate } from '../lib/poConsolidate.js';
 
 const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
 
@@ -215,7 +216,12 @@ function QtyInUnits({ mat, qty, onQty, min = 0, className = '' }) {
 // `stockFor(materialId)` is optional. When supplied, every line shows the live
 // position under its material picker. Callers that do not pass it (the PR edit
 // modal) render exactly as before.
-export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, infoPrsFor, rateFor, stockFor }) {
+// `qtyOnly` is the shape a CONVERTED requisition edits in: the order already
+// exists, so its items are fixed and only the numbers move. Adding or dropping
+// a board there would mean a line the vendor was never asked for, or an orphan
+// on the order — the server refuses both, and the form should not offer what
+// the server will reject.
+export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, infoPrsFor, rateFor, stockFor, qtyOnly = false }) {
   const set = (i, patch) => onChange(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const add = () => onChange([...lines, { material_id: '', qty: '', est_rate: '', unit: '', remarks: '' }]);
   const clone = i => onChange([...lines.slice(0, i + 1), { ...lines[i] }, ...lines.slice(i + 1)]);
@@ -223,9 +229,42 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
   const estValue = lines.reduce((s, l) => s + (+l.qty || 0) * (+l.est_rate || 0), 0);
   const ready = lines.filter(l => l.material_id && +l.qty > 0).length;
 
+  // The same board typed on two lines of the form being filled in. Offered, not
+  // enforced — two lines can be deliberate (different remarks, different jobs),
+  // so this says what could be clubbed and waits to be asked. Uses the very
+  // consolidate() the purchase order will apply later, so the preview and the
+  // eventual order cannot disagree about what merging means.
+  const dupes = qtyOnly ? [] : consolidate(lines).filter(r => r.merged);
+  const club = materialId => onChange(consolidate(lines).flatMap(r => (
+    String(r.material_id) === String(materialId)
+      ? [{ ...r, qty: String(r.qty), sources: undefined, merged: undefined,
+           // A dropped line's remark would otherwise vanish without trace.
+           remarks: r.sources.map(s => s.remarks).filter(Boolean).join(' · ') }]
+      : r.sources.map(({ index, ...rest }) => ({ ...rest, qty: String(rest.qty) }))
+  )));
+
   return (
     <section className="ci-form-panel">
       <div className="ci-form-panel-title"><span>Requisition items</span><span>{ready} item{ready === 1 ? '' : 's'}</span></div>
+      {dupes.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2">
+          <span className="text-[11px] font-bold text-violet-700">Same board twice</span>
+          {dupes.map(g => {
+            const m = materials.find(x => String(x.id) === String(g.material_id));
+            return (
+              <button key={g.material_id} type="button" onClick={() => club(g.material_id)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-colors hover:bg-violet-100 touch:min-h-[38px]">
+                <span className="max-w-[190px] truncate">{m?.name || `Material #${g.material_id}`}</span>
+                <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-bold">
+                  lines {g.sources.map(s => s.index + 1).join(' & ')}
+                </span>
+                <span className="tabular-nums text-violet-500">→ {fmt.num(g.qty)}</span>
+              </button>
+            );
+          })}
+          <span className="text-[11px] text-violet-400">click to club into one line</span>
+        </div>
+      )}
       <div className="space-y-2">
         {lines.map((l, i) => {
           const dupes = activePrsFor ? activePrsFor(l.material_id) : [];
@@ -238,9 +277,15 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
               <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_84px_84px_58px_96px_104px_68px] md:items-start">
                 <LineNo i={i} />
                 <div className="ci-line-key min-w-0">
-                  <MaterialPicker value={l.material_id} materials={materials} rateFor={rateFor} stockFor={stockFor}
-                    onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
-                    onPick={m => set(i, fillFromMaterialPr(l, m, rateFor))} />
+                  {qtyOnly ? (
+                    <div className="flex h-10 items-center rounded-xl bg-slate-50 px-3 text-sm font-semibold text-slate-700">
+                      {mat?.name || `Material #${l.material_id}`}
+                    </div>
+                  ) : (
+                    <MaterialPicker value={l.material_id} materials={materials} rateFor={rateFor} stockFor={stockFor}
+                      onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
+                      onPick={m => set(i, fillFromMaterialPr(l, m, rateFor))} />
+                  )}
                   <BoardSpec mat={mat} />
                   {l.material_id && dupes.length > 0 && (
                     <div className="mt-1 text-[11px] font-semibold text-amber-600">
@@ -275,8 +320,10 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-0.5 md:h-10">
-                  <IconBtn title="Clone item" onClick={() => clone(i)}><Copy size={14} /></IconBtn>
-                  <IconBtn title="Remove item" danger disabled={lines.length === 1} onClick={() => remove(i)}><Trash2 size={15} /></IconBtn>
+                  {!qtyOnly && <>
+                    <IconBtn title="Clone item" onClick={() => clone(i)}><Copy size={14} /></IconBtn>
+                    <IconBtn title="Remove item" danger disabled={lines.length === 1} onClick={() => remove(i)}><Trash2 size={15} /></IconBtn>
+                  </>}
                 </div>
               </div>
             </div>
@@ -284,7 +331,9 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
         })}
       </div>
       <div className="mt-3 flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={add}><Plus size={13} /> Add item</Button>
+        {qtyOnly
+          ? <span className="text-[11px] font-semibold text-slate-400">Items are fixed once the order exists — quantities only</span>
+          : <Button variant="ghost" size="sm" onClick={add}><Plus size={13} /> Add item</Button>}
         <div className="text-sm font-semibold text-slate-600">
           Estimated value <span className="ml-1 tabular-nums text-slate-900">{fmt.inr(estValue)}</span>
         </div>
