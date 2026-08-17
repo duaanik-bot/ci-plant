@@ -7,7 +7,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
@@ -19,7 +21,7 @@ import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { clubSuggestions } from '../lib/prClubbing.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
-import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
+import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
 // The extra fact a club pill carries past its headline. Amber when there is
@@ -180,6 +182,13 @@ export default function Procurement() {
   // Each register splits into "still needs action" vs "done", so pendency is
   // one glance away instead of buried among converted/received/closed rows.
   const [prView, setPrView] = useState('open');      // open (pending+approved) | converted | closed
+  // The register's own axes, narrower than the view tabs above them. "Open"
+  // holds two queues that belong to different people — a PR waiting on an
+  // approver and one waiting on the buyer — and the tab could not tell them
+  // apart. See the rail below.
+  const [prWaiting, setPrWaiting] = useState(null);  // null | 'approval' | 'buyer'
+  const [prOverdue, setPrOverdue] = useState(false);
+  const [prUrgent, setPrUrgent] = useState(false);
   const [clubHidden, setClubHidden] = useState(false); // the club strip is a suggestion, not a nag
   const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
@@ -806,7 +815,36 @@ export default function Procurement() {
 
   // ── Register sub-views: split each list into open/actionable vs done ──────────
   const PR_GROUPS = { open: ['pending', 'approved'], converted: ['converted'], closed: ['closed', 'rejected'] };
-  const prRows = prs.filter(p => PR_GROUPS[prView].includes(p.status));
+  // What the view tab alone shows — the scope every chip below counts within,
+  // so a chip's number always says how much of THIS list it would leave.
+  const prScope = prs.filter(p => PR_GROUPS[prView].includes(p.status));
+  // Late only means late while something can still be done about it: a PR that
+  // is already ordered or closed is not waiting on anyone.
+  const prIsOverdue = p => ['pending', 'approved'].includes(p.status) && dueDelta(p.needed_by) > 0;
+  const prIsUrgent = p => p.priority === 'urgent';
+  const prWaitingOn = p => (p.status === 'pending' ? 'approval' : p.status === 'approved' ? 'buyer' : null);
+  // "Waiting on" and "Overdue" only mean anything while a requisition is still
+  // open, so they are offered on that view alone — and they must stop FILTERING
+  // when they stop being offered. A lit chip that is no longer on screen empties
+  // the list with nothing to point at, which reads as lost data. Left lit
+  // underneath, so coming back restores what was chosen.
+  const prOpenAxes = prView === 'open';
+  const prRows = prScope
+    .filter(p => !prWaiting || !prOpenAxes || prWaitingOn(p) === prWaiting)
+    .filter(p => !prOverdue || !prOpenAxes || prIsOverdue(p))
+    .filter(p => !prUrgent || prIsUrgent(p));
+  // Counts are independent of one another: each says what that chip alone would
+  // leave. Compounding them would make a chip read 0 because a DIFFERENT chip is
+  // lit, which is how a rail starts lying about what it has.
+  const prChipCount = fn => prScope.filter(fn).length;
+  // Changing an axis drops the selection with it — a selection that outlives a
+  // filter is how a bulk PO ends up carrying rows nobody can see.
+  const prFilter = set => v => { set(v); setSelectedIds([]); };
+  const prFilters = useFilterReset([
+    [prWaiting, setPrWaiting, null, 'waiting on'],
+    [prOverdue, setPrOverdue, false, 'overdue'],
+    [prUrgent, setPrUrgent, false, 'urgent'],
+  ], () => setSelectedIds([]));
   const poIsDone = po => po.status === 'received' || po.status === 'closed';
   const poList = pos.filter(po => (poView === 'completed' ? poIsDone(po) : !poIsDone(po)));
   const grnRows = grns.filter(g => (grnView === 'completed' ? g.status !== 'quarantine' : g.status === 'quarantine'));
@@ -893,10 +931,42 @@ export default function Procurement() {
       {tab === 'prs' && (
         <div className="mb-3">
           <SubTabs active={prView} onChange={setPrView} views={[
-            { key: 'open', label: 'Pending', count: prCount('open') },
+            { key: 'open', label: 'Open', count: prCount('open') },
             { key: 'converted', label: 'Converted', count: prCount('converted') },
             { key: 'closed', label: 'Closed', count: prCount('closed') },
           ]} />
+          {/* One shape for every filter rail in the ERP — see FilterChip.jsx.
+              STRUCTURE says which axis a chip belongs to (the group caption),
+              COLOUR is spent only where somebody has to act: late and urgent.
+              Which queue a PR sits in is classification, so it lights graphite —
+              four hues on a four-chip rail would be a paint chart. */}
+          <FilterRail className="mt-2">
+            {prOpenAxes && (
+              <FilterGroup label="Waiting on" divider={false}>
+                <FilterChip label="Approval" count={prChipCount(p => p.status === 'pending')}
+                  on={prWaiting === 'approval'}
+                  title="Raised, not yet approved — the approver's queue"
+                  onClick={() => prFilter(setPrWaiting)(prWaiting === 'approval' ? null : 'approval')} />
+                <FilterChip label="Buyer" count={prChipCount(p => p.status === 'approved')}
+                  on={prWaiting === 'buyer'}
+                  title="Approved and still unordered — this is the queue the club pills act on"
+                  onClick={() => prFilter(setPrWaiting)(prWaiting === 'buyer' ? null : 'buyer')} />
+              </FilterGroup>
+            )}
+            <FilterGroup label="Flag" divider={prOpenAxes}>
+              {prOpenAxes && (
+                <FilterChip label="Overdue" icon={AlertTriangle} count={prChipCount(prIsOverdue)}
+                  on={prOverdue} tone="border-transparent bg-[#D70015] text-white" countTone="bg-white/25"
+                  title="Needed-by date has passed and the requisition is still open"
+                  onClick={() => prFilter(setPrOverdue)(!prOverdue)} />
+              )}
+              <FilterChip label="Urgent" count={prChipCount(prIsUrgent)}
+                on={prUrgent} tone="border-amber-200 bg-amber-100 text-amber-800" countTone="bg-white/70"
+                title="Raised at urgent priority"
+                onClick={() => prFilter(setPrUrgent)(!prUrgent)} />
+            </FilterGroup>
+            <ResetFilters filters={prFilters} className="ml-auto" />
+          </FilterRail>
         </div>
       )}
 
@@ -972,7 +1042,13 @@ export default function Procurement() {
                 )}
               </div>);
             } },
-            { key: 'needed_by', label: 'Needed By', render: p => fmt.date(p.needed_by) },
+            // When it was asked for, next to when it is wanted — the two dates
+            // read as a pair, and this is the one the register is sorted on.
+            // `export:` is explicit: a column that leaves it off can export an
+            // empty cell, which is how the gang columns silently shipped blank.
+            { key: 'created_at', label: 'Raised', export: p => fmt.date(p.created_at),
+              render: p => <span className="whitespace-nowrap tabular-nums">{fmt.date(p.created_at)}</span> },
+            { key: 'needed_by', label: 'Needed By', export: p => fmt.date(p.needed_by), render: p => fmt.date(p.needed_by) },
             // Every requisition that names a job lists it, gang or not. The
             // prose reason buries the product in a sentence and states neither
             // the customer, the sheets nor the due date — a single job deserves
@@ -1092,7 +1168,19 @@ export default function Procurement() {
                 ]} />
               </div>) },
           ]}
-          rows={prRows} empty={prView === 'open' ? 'No pending requisitions' : prView === 'converted' ? 'No converted requisitions yet' : 'Nothing closed or rejected'}
+          rows={prRows}
+          // Newest first. Without this the table sorts on its first keyed column
+          // — PR number ascending — so the register opened on the oldest
+          // requisition raised and the one just written sat at the bottom.
+          // Every header is still a sorter; this only decides where it starts.
+          defaultSort={{ key: 'created_at', dir: 'desc' }}
+          // The table owns the search box, so the rail's Reset only clears it
+          // through this token — without it the page would say "cleared" while
+          // its own search bar still held a word.
+          resetSignal={prFilters.token}
+          empty={prFilters.dirty
+            ? 'Nothing matches those filters — Reset filters brings the list back'
+            : prView === 'open' ? 'No open requisitions' : prView === 'converted' ? 'No converted requisitions yet' : 'Nothing closed or rejected'}
           rowClass={unreadRowClass(prThreads, p => p.id)}
           getRowId={p => p.id}
           exportName="Purchase Requisitions"
