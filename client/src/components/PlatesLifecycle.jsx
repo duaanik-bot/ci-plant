@@ -30,7 +30,7 @@ import {
   PLATE_TONE as TONE, plateStatusLabel as statusLabel, PlateStatusChip as StatusChip,
   PROCESS_PLATES, componentKey, groupedComponents, inkOrder, componentTickLabel,
   SHORT_COMPONENT, shortComponent, gangMemberNames,
-  ComponentStrip, InkSummary, PlateProductIdentity, PlateLineIdentity,
+  ComponentStrip, InkSummary, InkStateSummary, PlateProductIdentity, PlateLineIdentity,
 } from './plateIdentity.jsx';
 import {
   receivableLines, initialSelection, selectedOf, selectedTotal, outstandingTotal,
@@ -1762,7 +1762,18 @@ export default function PlatesLifecycle() {
     { key: 'request_number', label: 'Requirement', render: row => <span><b>{row.request_number}</b><span className="block text-[11px] text-slate-400">{row.jc_number}</span></span> },
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
-    { key: 'components', label: 'Plate Set', sortable: false, render: row => <div><ComponentStrip components={row.components} compact /><span className="mt-1 block text-[10px] font-semibold text-slate-400">{row.plate_summary.ready}/{row.plate_summary.required} ready</span></div> },
+    // The build once per STATE, not the roll-call.
+    //
+    // Unlike the PO register, a requirement's colours genuinely differ — two may
+    // be on the rack while the other two must be bought — and WHICH ones is the
+    // question this column exists to answer. So it collapses per state rather
+    // than per set: a set that is wholly one state reads "CMYK", a split one
+    // reads "CM" ready beside "YK" to buy. Shorter than four chips and more
+    // pointed than them.
+    { key: 'components', label: 'Plate Set', sortable: false, render: row => <div>
+      <InkStateSummary components={row.components} />
+      <span className="mt-1 block text-[10px] font-semibold text-slate-400">{row.plate_summary.ready}/{row.plate_summary.required} ready</span>
+    </div> },
     // The warehouse, answered on the requirement itself. Before this column the
     // rack was consulted once — when the PR was raised — and never again, so a
     // plate that came back from the press an hour later was invisible and the

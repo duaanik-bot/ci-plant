@@ -9,7 +9,7 @@
 // you are ticking plates off a delivery the roll-call IS the point.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inkSummary, shortComponent, SHORT_COMPONENT, gangMemberNames }
+import { inkSummary, inkSummaryByStatus, shortComponent, SHORT_COMPONENT, gangMemberNames }
   from '../../client/src/lib/plateInks.js';
 
 const c = (component_type, component_label, extra = {}) =>
@@ -97,4 +97,76 @@ test('a gang row names the cartons on its sheet', () => {
   );
   assert.equal(gangMemberNames({ gang_members: [] }), '');
   assert.equal(gangMemberNames({}), '', 'a non-gang line has no members and must not throw');
+});
+
+// ── The requirement register: the build once per STATE ──────────────────────
+//
+// A purchase order's plates are all in the same state, so one "CMYK" says it.
+// A REQUIREMENT's are not — two colours may sit on the rack while the other two
+// have to be bought — and which ones is the entire question that column exists
+// to answer. Collapsing to a single chip there would hide it.
+
+test('a set that is wholly one state is still ONE chip', () => {
+  const parts = inkSummaryByStatus(CMYK());
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].label, 'CMYK');
+  assert.equal(parts[0].status, 'po_created');
+});
+
+test('a SPLIT set says which colours are in which state', () => {
+  // This is the case a plain collapse destroys: "CMYK · mixed" tells the buyer
+  // nothing about what to buy.
+  const parts = inkSummaryByStatus([
+    c('cyan', 'Cyan', { status: 'verified_existing' }),
+    c('magenta', 'Magenta', { status: 'verified_existing' }),
+    c('yellow', 'Yellow', { status: 'pr_required' }),
+    c('black', 'Black', { status: 'pr_required' }),
+  ]);
+  assert.deepEqual(parts.map(p => [p.status, p.label]), [
+    ['verified_existing', 'CM'],
+    ['pr_required', 'YK'],
+  ]);
+});
+
+test('spots keep their own state alongside the process build', () => {
+  const parts = inkSummaryByStatus([
+    ...CMYK(),
+    c('pantone', 'Pantone - 485C', { pantone_code: '485C', status: 'pr_required' }),
+  ]);
+  assert.deepEqual(parts.map(p => [p.status, p.label]), [
+    ['po_created', 'CMYK'],
+    ['pr_required', '1 Pantone'],
+  ]);
+});
+
+test('one state holding both process and spots reads as one chip', () => {
+  const parts = inkSummaryByStatus([
+    ...CMYK(),
+    c('pantone', 'Pantone - 485C', { pantone_code: '485C' }),
+  ]);
+  assert.deepEqual(parts.map(p => p.label), ['CMYK + 1 Pantone']);
+});
+
+test('the states come out in PRESS order, not map order', () => {
+  // Two rows holding the same plates must not shuffle their chips between them.
+  const parts = inkSummaryByStatus([
+    c('black', 'Black', { status: 'pr_required' }),
+    c('cyan', 'Cyan', { status: 'verified_existing' }),
+    c('yellow', 'Yellow', { status: 'pr_required' }),
+    c('magenta', 'Magenta', { status: 'verified_existing' }),
+  ]);
+  assert.deepEqual(parts.map(p => [p.status, p.label]), [
+    ['verified_existing', 'CM'],
+    ['pr_required', 'YK'],
+  ]);
+});
+
+test('a cancelled plate is not in any state group', () => {
+  const parts = inkSummaryByStatus([...CMYK(), c('pantone', 'Pantone - Old', { status: 'cancelled' })]);
+  assert.deepEqual(parts.map(p => p.label), ['CMYK']);
+});
+
+test('an empty requirement summarises to nothing', () => {
+  assert.deepEqual(inkSummaryByStatus([]), []);
+  assert.deepEqual(inkSummaryByStatus(), []);
 });

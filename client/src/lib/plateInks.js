@@ -70,8 +70,10 @@ const sharedStatus = rows => {
 // plus its spots — so that is what a dense list shows, with the full names kept
 // on hover. Detail views still name every plate: where you are ticking plates off
 // a delivery, the roll-call IS the point.
-export function inkSummary(components = []) {
-  const groups = inkOrder(groupedComponents(components));
+// The build of an already-grouped, already-ordered set of colours: the process
+// letters (CMYK when all four are there) and a count of the spots. One place,
+// because a whole-set summary and a per-state one must not word it differently.
+function buildParts(groups) {
   const process = groups.filter(row => row.component_type !== 'pantone');
   const spots = groups.filter(row => row.component_type === 'pantone');
   const spotQty = spots.reduce((sum, row) => sum + row.qty, 0);
@@ -82,7 +84,7 @@ export function inkSummary(components = []) {
       key: 'process',
       label: full ? 'CMYK' : process.map(shortComponent).join(''),
       title: process.map(row => row.component_label).join(' · '),
-      status: sharedStatus(process),
+      rows: process,
     });
   }
   if (spotQty) {
@@ -92,10 +94,46 @@ export function inkSummary(components = []) {
       // sets, and are one hover away.
       label: `${spotQty} Pantone`,
       title: spots.map(row => `${row.component_label}${row.qty > 1 ? ` x${row.qty}` : ''}`).join(' · '),
-      status: sharedStatus(spots),
+      rows: spots,
     });
   }
   return parts;
+}
+
+export function inkSummary(components = []) {
+  return buildParts(inkOrder(groupedComponents(components)))
+    .map(({ rows, ...part }) => ({ ...part, status: sharedStatus(rows) }));
+}
+
+// The build, said once PER STATE.
+//
+// On a purchase order every plate of a set is in the same state, so the four
+// chips were pure noise and one "CMYK" says it. On a REQUIREMENT they are not:
+// two colours may be sitting on the rack while the other two have to be bought,
+// and which colours those are is the entire question the column exists to
+// answer. Collapsing to one chip there would hide it; leaving four spells out
+// "Cyan Magenta Yellow Black" on every row that is simply fine.
+//
+// So: group by state first, then say each group's build. A uniform set is one
+// chip, exactly as before. A split set is two — "CM" ready, "YK" to buy — which
+// is both shorter than the roll-call and more pointed than it.
+export function inkSummaryByStatus(components = []) {
+  const groups = inkOrder(groupedComponents(components));
+  // Insertion order is press order, so the states come out in the order their
+  // first colour prints — stable between two rows holding the same plates.
+  const byStatus = new Map();
+  for (const row of groups) {
+    if (!byStatus.has(row.status)) byStatus.set(row.status, []);
+    byStatus.get(row.status).push(row);
+  }
+  return [...byStatus.entries()].map(([status, rows]) => {
+    const parts = buildParts(rows);
+    return {
+      status,
+      label: parts.map(part => part.label).join(' + '),
+      title: parts.map(part => part.title).join(' · '),
+    };
+  });
 }
 
 // What to call one plate on a tick list. A spot plate's Pantone is the thing

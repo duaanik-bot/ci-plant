@@ -24,13 +24,13 @@ import { fmt } from '../api.js';
 import ProductIdentity from './ProductIdentity.jsx';
 import {
   PROCESS_PLATES, SHORT_COMPONENT, shortComponent, componentKey, groupedComponents,
-  inkOrder, inkSummary, componentTickLabel, gangMemberNames,
+  inkOrder, inkSummary, inkSummaryByStatus, componentTickLabel, gangMemberNames,
   plateLineRefs, plateLineSpec, plateLinePrintSpec,
 } from '../lib/plateInks.js';
 
 export {
   PROCESS_PLATES, SHORT_COMPONENT, shortComponent, componentKey, groupedComponents,
-  inkOrder, inkSummary, componentTickLabel, gangMemberNames,
+  inkOrder, inkSummary, inkSummaryByStatus, componentTickLabel, gangMemberNames,
   plateLineRefs, plateLineSpec, plateLinePrintSpec,
 };
 
@@ -97,6 +97,21 @@ export function InkSummary({ components = [] }) {
   if (!parts.length) return null;
   return <span className="flex shrink-0 flex-wrap items-center gap-1">
     {parts.map(part => <span key={part.key} title={part.title}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PLATE_TONE[part.status] || 'bg-slate-100 text-slate-600'}`}>
+      <span className={`h-1 w-1 rounded-full ${DOT(part.status)}`} />
+      {part.label}
+    </span>)}
+  </span>;
+}
+
+// The build once per STATE, for a requirement — where the colours genuinely
+// differ and which ones differ is the question. A set that is wholly one state
+// renders exactly one chip, same as InkSummary.
+export function InkStateSummary({ components = [] }) {
+  const parts = inkSummaryByStatus(components);
+  if (!parts.length) return null;
+  return <span className="flex flex-wrap items-center gap-1">
+    {parts.map(part => <span key={part.status} title={`${plateStatusLabel(part.status)} — ${part.title}`}
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PLATE_TONE[part.status] || 'bg-slate-100 text-slate-600'}`}>
       <span className={`h-1 w-1 rounded-full ${DOT(part.status)}`} />
       {part.label}

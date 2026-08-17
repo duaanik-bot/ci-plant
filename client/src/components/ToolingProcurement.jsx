@@ -12,14 +12,7 @@ import {
   initialReceipt, lineTicked, lineReceipt, receiptTotals, toggleToolingLine,
   fillAll, clearAll, toReceiptPayload,
 } from '../lib/toolingGrnSelection.js';
-
-// A line's receipt state, in the same three tones the rest of the module uses:
-// nothing yet, part landed, all in.
-const RECEIPT_TONE = {
-  open: 'bg-slate-100 text-slate-600',
-  partial: 'bg-amber-50 text-amber-700',
-  received: 'bg-emerald-50 text-emerald-700',
-};
+import { stockPosition } from '../lib/toolingStock.js';
 import {
   ActionMenu, Button, DataTable, Field, FulfillmentBar, Input, KpiCard, Modal,
   PageHeader, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
@@ -100,22 +93,36 @@ const num = value => Number(value) || 0;
 const canBuy = () => ['admin', 'planner'].includes(auth.user?.role);
 const canQc = () => ['admin', 'qc'].includes(auth.user?.role);
 
+// A PO line's receipt state, in the same three tones the rest of the module uses:
+// nothing yet, part landed, all in.
+const RECEIPT_TONE = {
+  open: 'bg-slate-100 text-slate-600',
+  partial: 'bg-amber-50 text-amber-700',
+  received: 'bg-emerald-50 text-emerald-700',
+};
+
+const STOCK_TONE = {
+  free: 'bg-emerald-50 text-emerald-700',
+  spoken_for: 'bg-amber-50 text-amber-700',
+  none: 'bg-slate-100 text-slate-500',
+};
+const QUALIFIER_TONE = { amber: 'text-amber-600', sky: 'text-sky-600' };
+
+// One chip and its exceptions. See lib/toolingStock.js for why the chip counts
+// FREE rather than what is on the shelf.
 function StockPosition({ row, compact = false }) {
-  const available = num(row.stock_available);
-  const reserved = num(row.stock_reserved);
-  const free = num(row.stock_free);
-  const ordered = num(row.stock_ordered);
+  const stock = stockPosition(row);
   return (
     <div className={compact ? 'mt-1.5' : ''}>
-      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${free > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-        <Warehouse size={11} /> {fmt.num(available)} in warehouse
+      <span title={stock.title}
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${STOCK_TONE[stock.state]}`}>
+        <Warehouse size={11} /> {stock.headline}
       </span>
-      <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
-        <span className="text-slate-500">Available <b className="text-slate-700">{fmt.num(available)}</b></span>
-        <span className={reserved > 0 ? 'text-amber-600' : 'text-slate-400'}>Reserved {fmt.num(reserved)}</span>
-        <span className={free > 0 ? 'text-emerald-600' : 'text-slate-400'}>Free {fmt.num(free)}</span>
-        {ordered > 0 && <span className="text-sky-600">Ordered {fmt.num(ordered)}</span>}
-      </div>
+      {stock.qualifiers.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
+          {stock.qualifiers.map(q => <span key={q.key} className={QUALIFIER_TONE[q.tone]}>{q.label}</span>)}
+        </div>
+      )}
     </div>
   );
 }
