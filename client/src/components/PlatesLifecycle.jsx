@@ -1972,7 +1972,19 @@ export default function PlatesLifecycle() {
   const warehouseColumns = [
     { key: 'asset_number', label: 'Plate Set', render: row => <span><b className="font-mono text-xs">{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
-    { key: 'component_label', label: 'Contains', render: row => <span className="font-semibold">{row.contains || row.component_label}</span> },
+    // The build, not the roll-call — the rack runs to hundreds of rows and
+    // "Cyan, Magenta, Yellow, Black" on every one of them is four words saying
+    // what "CMYK" says in one. Per STATE, like the PR register: a set with two
+    // plates issued and two on the shelf must still say WHICH two, and the row's
+    // own Status column collapses that to "mixed".
+    //
+    // `row.contains` is the same list as plain text and stays on the row — it is
+    // what the export writes and what deep search matches.
+    { key: 'component_label', label: 'Contains', sortValue: row => row.contains || row.component_label || '',
+      export: row => row.contains || row.component_label || '',
+      render: row => (row.components?.length
+        ? <InkStateSummary components={row.components} />
+        : <span className="font-semibold">{row.contains || row.component_label}</span>) },
     // Size earns its own sortable column: it is how the rack is physically organised
     // and the first thing asked when a job needs plates.
     { key: 'plate_size', label: 'Size', render: row => <span className="whitespace-nowrap font-mono text-xs font-bold text-slate-700">{row.plate_size || '—'}</span> },
