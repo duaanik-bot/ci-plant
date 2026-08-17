@@ -241,8 +241,17 @@ function PushToToolingModal({ line, onClose, onDone }) {
     try {
       const res = await api.post('/tools/push', { product_id: line.product_id, families: chosen });
       if (res.created?.length) toast.success(`Pushed to ${res.created.map(c => c.label).join(', ')} triage`);
-      if (res.skipped?.length) toast.info(`Already in hub: ${res.skipped.join(', ')}`);
-      if (!res.created?.length && !res.skipped?.length) toast.info('Nothing to push');
+      else toast.info('Nothing to push');
+      // Say what the plant already holds, and say it accurately. A row still in
+      // Incoming or at the maker is a send already made — it is NOT a tool the
+      // plant has, and it no longer withholds the send. Each ask is its own line.
+      if (res.present?.length) {
+        toast.info(`Already on the rack: ${res.present.map(o => `${o.label} ${o.code}`).join(', ')}`);
+      }
+      if (res.pending?.length) {
+        toast.info(`Still awaited: ${res.pending.map(o => `${o.label} ${o.code} (${fmt.title(o.zone)})`).join(', ')}`
+          + ' — sent again as a separate line');
+      }
       onDone?.();
       onClose();
     } catch (e) {
@@ -262,12 +271,20 @@ function PushToToolingModal({ line, onClose, onDone }) {
       {line && (
         <div className="space-y-3">
           <div className="ci-summary-panel text-xs">
-            Sends this product into each selected section&rsquo;s <b>triage (Incoming)</b> at once — the send-decision is then made inside the section.
+            Sends this product into each selected section&rsquo;s <b>triage (Incoming)</b> at once — the send-decision is then made inside the section. Sending again is allowed and adds a <b>separate line</b>; anything already awaited or on the rack is shown below.
           </div>
           <div className="space-y-1.5">
             {sections.map(s => {
               const d = statusOf(s.key);
-              const inHub = d && d.status !== 'missing';
+              // Two different facts, and they used to share one green pill. A
+              // plate in the rack is one the plant HOLDS; a plate in Incoming or
+              // at the maker is one that has been ASKED FOR and has not arrived.
+              // Showing them alike is what told Anik a plate was there when it
+              // was not. Neither state blocks the send any more, so this label is
+              // now the only thing standing between him and a duplicate — it has
+              // to be honest.
+              const held = d?.status === 'ready';
+              const awaited = d?.status === 'not_ready';
               return (
                 <label key={s.key}
                   className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition-colors ${
@@ -281,7 +298,8 @@ function PushToToolingModal({ line, onClose, onDone }) {
                     </div>
                     <div className="text-xs text-gray-400">{s.hint}</div>
                   </div>
-                  {inHub && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">In hub{d.zone ? ` · ${fmt.title(d.zone)}` : ''}</span>}
+                  {held && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">On the rack{d.zone ? ` · ${fmt.title(d.zone)}` : ''}</span>}
+                  {awaited && <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Awaited{d.zone ? ` · ${fmt.title(d.zone)}` : ''}</span>}
                 </label>
               );
             })}
@@ -460,7 +478,11 @@ export default function Artwork() {
       const res = await api.post('/tools/push', { product_id: m.product_id, families: fams }).catch(() => null);
       n += res?.created?.length || 0;
     }
-    toast.success(n ? `Pushed ${members.length} cartons' tooling to triage` : 'Tooling already in the hub');
+    // Every carton sends; a family already awaited or on the rack no longer
+    // withholds it. So a zero here means the calls FAILED, not that the hub
+    // already had the work — say the two apart.
+    if (n) toast.success(`Pushed ${members.length} cartons' tooling to triage — ${n} lines`);
+    else toast.error('Nothing was pushed — the send failed');
     load();
   };
   // Send the gang to the Job Card station as ONE parent card. createJobCardForLine

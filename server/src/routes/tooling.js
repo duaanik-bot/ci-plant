@@ -8,7 +8,7 @@ import { q, one, tx } from '../db.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { readiness, setLineStatus, nextNumber, nextNumberFrom } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { TOOL_FAMILIES, TOOL_ZONES, toolingDetail, toolingGateOk } from '../tooling-gate.js';
+import { TOOL_FAMILIES, TOOL_ZONES, pushTargets, toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import {
   defaultToolingFamilies,
   statusForSource,
@@ -681,9 +681,17 @@ r.post('/tools', canManage, async (req, res, next) => {
 
 // ── Push from the Artwork Queue ─────────────────────────────────────────────
 // Fan one product out into several sections' triage (the Incoming zone) at
-// once. The send-decision then happens inside each section. Families that
-// already have an active tool for the product are skipped, so triage stays
-// clean and the button is safe to press twice.
+// once. The send-decision then happens inside each section.
+//
+// The send is NEVER refused. This door used to skip any family that already had
+// an active tool row and reply "Already in hub" — which read a plate sitting in
+// Incoming as a plate the plant holds, then used that to block asking for it
+// again. A row in the pipeline is paperwork, not a plate: pushTargets() draws
+// that line with toolReady(), the gate's own rule.
+//
+// Each send writes its OWN row, so a re-send stands as a separate line beside
+// the pending one. Nothing is folded into an existing row — the pipeline is a
+// list of things asked for, and two asks are two lines.
 r.post('/tools/push', canManage, async (req, res, next) => {
   try {
     const { product_id, families } = req.body;
@@ -694,23 +702,26 @@ r.post('/tools/push', canManage, async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       const prod = await oc('SELECT id, name, code, ups, colors FROM products WHERE id=$1', [pid]);
       if (!prod) throw Object.assign(new Error('Product not found'), { status: 404 });
-      const have = new Set((await qc(
-        'SELECT family FROM tools WHERE product_id=$1 AND active=1', [pid])).map(t => t.family));
-      const created = [], skipped = [];
-      for (const family of want) {
-        if (have.has(family)) { skipped.push(TOOL_FAMILIES[family].label); continue; }
+      const held = await qc('SELECT * FROM tools WHERE product_id=$1 AND active=1', [pid]);
+      const created = [], present = [], pending = [];
+      for (const target of pushTargets(want, held)) {
+        const { family, label } = target;
         const code = await nextToolCode(family, oc);
         const [t] = await qc(`
           INSERT INTO tools (family, code, title, product_id, ups, colors)
           VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-          [family, code, `${prod.name} — ${TOOL_FAMILIES[family].label}`, pid,
+          [family, code, `${prod.name} — ${label}`, pid,
            family === 'die' ? (prod.ups || null) : null,
            family === 'plate' ? (prod.colors || null) : null]);
         await qc(`INSERT INTO tool_events (tool_id, action, to_zone, user_name)
                   VALUES ($1,'created','incoming',$2)`, [t.id, req.user.name]);
-        created.push({ family, code, label: TOOL_FAMILIES[family].label });
+        created.push({ family, code, label });
+        // Reported, never enforced — the modal shows both before the button is
+        // pressed, which is where the judgement belongs.
+        for (const o of target.present) present.push({ family, label, code: o.code, zone: o.zone });
+        for (const o of target.pending) pending.push({ family, label, code: o.code, zone: o.zone });
       }
-      return { created, skipped };
+      return { created, present, pending };
     });
     res.json(out);
   } catch (e) { next(e); }

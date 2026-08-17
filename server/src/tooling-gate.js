@@ -63,6 +63,33 @@ export function toolingDetail(product, tools) {
   });
 }
 
+// What the Artwork Queue's push has to say about one product, per requested
+// family. Two rules, and the second is the reason this exists:
+//
+//   1. EVERY requested family is a target. A send is never refused. The old
+//      door skipped any family that already had an active row and answered
+//      "Already in hub" — so a plate nobody had made yet could not be asked
+//      for a second time.
+//   2. Only a tool the plant can pick up is PRESENT. A row in incoming/making
+//      is a send already made, NOT a tool that exists. That is toolReady()'s
+//      own rule, borrowed rather than restated — a second spelling is how the
+//      push starts disagreeing with the gate the floor is judged by.
+//
+// The caller creates one fresh row per target, so a re-send stands as its own
+// line beside the pending one and neither hides the other.
+export function pushTargets(want, tools = []) {
+  const families = [...new Set((want || []).filter(f => TOOL_FAMILIES[f]))];
+  return families.map(family => {
+    const mine = (tools || []).filter(t => t.family === family && t.active === 1);
+    return {
+      family,
+      label: TOOL_FAMILIES[family].label,
+      present: mine.filter(toolReady),
+      pending: mine.filter(t => !toolReady(t)),
+    };
+  });
+}
+
 // Plates NEVER block, at any status. Everything else keeps the rule it has run
 // on: a hard family must be ready, a soft one blocks only once it is REGISTERED
 // but not ready.
