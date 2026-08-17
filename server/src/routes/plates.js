@@ -1714,7 +1714,13 @@ r.get('/plates/returns', async (_req, res, next) => {
 
 r.get('/plates/history', async (_req, res, next) => {
   try {
-    res.json(await q(`SELECT pam.*,pa.asset_number,pa.component_label,pa.artwork_version,
+    // pa.product_id is what lets the screen render this row's product the way
+    // every other plate register does. ProductIdentity resolves
+    // `row.product_id ?? row.id`, and a movement row's own id is the MOVEMENT id
+    // — without this it would look a carton up by a movement number and print a
+    // different product's party codes. plate_asset_movements has no product_id
+    // of its own, so the alias is unambiguous.
+    res.json(await q(`SELECT pam.*,pa.product_id,pa.asset_number,pa.component_label,pa.artwork_version,
         pm.plate_size,
         COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,

@@ -128,21 +128,54 @@ test('the movement ledger is one plate per row, so it has nothing to collapse', 
   assert.match(body, /pa\.component_label/, 'the column is one plate’s own colour');
 });
 
-test('history cannot use ProductIdentity until its query ships product_id', () => {
-  // productRecord() resolves `row.product_id ?? row.id`. A history row is
-  // SELECT pam.* — its `id` is the MOVEMENT id — so falling through to `id`
-  // would look a product up by a movement number and print another carton's
-  // party codes. The rack and the return queue are safe because both SELECT pa.*,
-  // and plate_assets carries product_id.
+// The ledger renders ProductIdentity like every other plate register, and that
+// is only safe because its query carries pa.product_id. The two must move
+// together: productRecord() resolves `row.product_id ?? row.id`, and a movement
+// row's own `id` is the MOVEMENT id — dropping the column would silently start
+// looking cartons up by movement number and printing another product's party
+// codes. Nothing would throw; the codes would just be wrong.
+const historyQuery = () => {
   const route = read('server/src/routes/plates.js');
-  const historyAt = route.indexOf("r.get('/plates/history'");
-  const history = route.slice(historyAt, route.indexOf('\nr.', historyAt + 1));
+  const at = route.indexOf("r.get('/plates/history'");
+  return route.slice(at, route.indexOf('\nr.', at + 1));
+};
+// The SELECT LIST only — everything between SELECT and FROM.
+//
+// Asserting `pa.product_id` against the whole query is a guard that cannot fail:
+// the join reads `JOIN products p ON p.id=pa.product_id`, so the string is
+// present whether or not the column is actually selected. Verified by deleting
+// the column and watching the naive version stay green.
+const historySelectList = () => {
+  const body = historyQuery();
+  const from = body.indexOf('FROM plate_asset_movements');
+  return body.slice(body.indexOf('SELECT'), from);
+};
+const historyCols = () => {
   const page = read('client/src/components/PlatesLifecycle.jsx');
   const at = page.indexOf('const historyColumns = [');
-  const cols = page.slice(at, page.indexOf('\n  ];', at));
+  return page.slice(at, page.indexOf('\n  ];', at));
+};
 
-  if (/product_id/.test(history)) return; // query now ships it — the guard is moot
-  assert.doesNotMatch(cols, /PlateProductIdentity|<ProductIdentity/,
-    'history has no product_id, so ProductIdentity would resolve the MOVEMENT id as a product '
-    + 'and render a different carton’s codes — add pa.product_id to the query first');
+test('the history query SELECTS the plate’s own product id', () => {
+  assert.match(historySelectList(), /pa\.product_id/,
+    'without pa.product_id in the select list the ledger resolves `row.id` — a MOVEMENT id — '
+    + 'as a product, and prints another carton’s party codes. Nothing throws; the codes are '
+    + 'simply wrong. (Assert the SELECT LIST: the join mentions pa.product_id regardless.)');
+});
+
+test('the ledger renders the same product identity as every other register', () => {
+  assert.match(historyCols(), /<PlateProductIdentity row=\{row\} compact \/>/,
+    'a gang movement must say it is a gang and list its cartons, as the rack and PR registers do');
+});
+
+test('the ledger’s product EXPORT stays flat text, and does not say it twice', () => {
+  // exporter.js walks the rendered node when there is no export:, so a chip-based
+  // identity would put "Unified gang plate · 2 products" into a spreadsheet cell.
+  // A ledger is exported to be filtered and pivoted.
+  const cols = historyCols();
+  assert.match(cols, /export: row =>/, 'the ledger export must stay flat text, not the rendered chips');
+  // A gang names ITSELF: product_code === product_name, and the old
+  // `code · name` wrote "CI-GANG-0011 · CI-GANG-0011" into every gang row.
+  assert.match(cols, /new Set\(\[row\.product_code, row\.product_name\]/,
+    'code and name are the same string on a gang and must not be printed twice');
 });

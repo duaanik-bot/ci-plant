@@ -2067,8 +2067,23 @@ export default function PlatesLifecycle() {
   const historyColumns = [
     { key: 'at', label: 'When', render: row => fmt.dt(row.at) },
     { key: 'asset_number', label: 'Plate', render: row => <b>{row.asset_number}</b> },
-    { key: 'product_name', label: 'Product', render: row => `${row.product_code} · ${row.product_name}` },
+    // The same product identity every other plate register shows — gang-aware,
+    // with the carton's own codes. It could not be used until the query carried
+    // pa.product_id: ProductIdentity resolves `row.product_id ?? row.id`, and a
+    // movement row's `id` is the MOVEMENT id, so it would have printed a
+    // different carton's party codes.
+    //
+    // The export keeps the flat `code · name` it always wrote — a ledger is
+    // exported to be filtered and pivoted, and a workbook cannot hover a chip.
+    // A gang names ITSELF, so its code and its name are the same string and the
+    // old `code · name` printed "CI-GANG-0011 · CI-GANG-0011". Deduped.
+    { key: 'product_name', label: 'Product',
+      export: row => [...new Set([row.product_code, row.product_name].filter(Boolean))].join(' · '),
+      render: row => <PlateProductIdentity row={row} compact /> },
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
+    // One plate's own colour, not a set's list — this ledger has a row per
+    // physical plate, so there is no build to summarise. See
+    // plate-warehouse-contains.test.js.
     { key: 'component_label', label: 'Component' },
     { key: 'action', label: 'Movement', render: row => <StatusChip value={row.action} /> },
     { key: 'jc_number', label: 'Job Card', render: row => row.jc_number || '—' },
