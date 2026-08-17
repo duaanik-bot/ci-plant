@@ -11,6 +11,13 @@ backups
 
 # Developer tooling and reference material; the deployment does not use these.
 # The schema is applied to Supabase as a migration, never by the running app.
+#
+# The leading slash on /scripts is load-bearing. Unanchored, these patterns match
+# a directory of that name at ANY depth — so `scripts` also excluded
+# client/scripts, which holds the step that stages the OCR engine's runtime files
+# before the client is built. The file was committed and pushed, and then simply
+# was not there: "Cannot find module client/scripts/copy-ocr-assets.mjs", and the
+# production build failed. Anchor anything meant to name a directory at the root.
 docs
-scripts
+/scripts
 supabase

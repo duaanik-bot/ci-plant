@@ -20,7 +20,20 @@ const publicDir = resolve(here, '..', 'public');
 
 // Resolved through require.resolve so this follows npm's actual layout rather
 // than assuming deps are hoisted to the workspace root (they may not be).
-const pkgDir = name => dirname(require.resolve(`${name}/package.json`));
+const pkgDir = (name, from = require) => dirname(from.resolve(`${name}/package.json`));
+
+// tesseract.js-core is not a direct dependency — it belongs to tesseract.js.
+// Resolve it FROM tesseract.js: if npm nests it under that package rather than
+// hoisting it, a lookup from here walks past it and never looks inside, and the
+// build fails on Vercel while passing on a machine that happened to hoist.
+const coreDir = () => {
+  const fromTesseract = createRequire(join(pkgDir('tesseract.js'), 'package.json'));
+  try {
+    return pkgDir('tesseract.js-core', fromTesseract);
+  } catch {
+    return pkgDir('tesseract.js-core');
+  }
+};
 
 const JOBS = [
   // The worker script tesseract.js loads to run the engine off the main thread.
@@ -28,8 +41,8 @@ const JOBS = [
   // BOTH lstm cores. corePath is given as a directory, and tesseract.js picks
   // between them by probing for wasm SIMD at run time; shipping only the SIMD
   // build would leave an older browser with no engine and no clear error.
-  [join(pkgDir('tesseract.js-core'), 'tesseract-core-simd-lstm.wasm.js'), 'tesseract/tesseract-core-simd-lstm.wasm.js'],
-  [join(pkgDir('tesseract.js-core'), 'tesseract-core-lstm.wasm.js'), 'tesseract/tesseract-core-lstm.wasm.js'],
+  [join(coreDir(), 'tesseract-core-simd-lstm.wasm.js'), 'tesseract/tesseract-core-simd-lstm.wasm.js'],
+  [join(coreDir(), 'tesseract-core-lstm.wasm.js'), 'tesseract/tesseract-core-lstm.wasm.js'],
   // The 4.0.0 model — the same data the engine fetches from its own CDN by
   // default, which is what this feature's accuracy was measured against. Do not
   // quietly swap it for a smaller variant.
