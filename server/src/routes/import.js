@@ -120,8 +120,18 @@ r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, 
       }
       return next(e);
     }
+    // A scanned PO used to end the import here, with a 422 the wizard turned
+    // into a toast and nothing else — the planner was bounced out of the flow
+    // and had to key the whole order somewhere else. There is still no text to
+    // read, but the wizard itself (customer detection aside) is the fastest way
+    // to key an order in, so open it empty and say plainly what happened.
     if (parsed.scanned) {
-      return res.status(422).json({ code: 'scanned', error: "This looks like a scanned copy — text extraction isn't possible. Ask for the original digital PDF." });
+      return res.json({
+        scanned: true, code: 'scanned',
+        customer_id: null, customer_candidates: [],
+        po_number: null, po_date: null, delivery_date: null, lines: [],
+        warnings: ["This is a scanned copy — nothing could be read from it. Pick the customer and key the lines in below, or ask for the original digital PDF."],
+      });
     }
     const { customer_id, candidates } = await detectCustomer(parsed.header_text);
     const lines = customer_id
@@ -130,6 +140,19 @@ r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, 
     const warnings = [];
     if (!parsed.lines.length) warnings.push('No item table detected — add lines manually.');
     if (!customer_id) warnings.push('Customer not recognized — pick one to run matching.');
+    // Every line the columnar reader produces carries the amount the document
+    // printed for it, so the line's own arithmetic can be checked against the
+    // page. A mismatch is the one signal that a figure was read out of the
+    // wrong column, and it is worth far more to the planner than a silent
+    // number: a wrong quantity here becomes a wrong board order downstream.
+    const offBy = parsed.lines
+      .map((l, i) => ({ n: i + 1, l }))
+      .filter(({ l }) => l.reconciled === false);
+    if (offBy.length) {
+      warnings.push(offBy.length === parsed.lines.length
+        ? `None of the ${offBy.length} lines add up against the amounts printed on the PO — check every quantity and rate before saving.`
+        : `Check line${offBy.length > 1 ? 's' : ''} ${offBy.map(o => o.n).join(', ')} — quantity × rate does not match the amount printed on the PO.`);
+    }
     res.json({
       customer_id, customer_candidates: candidates,
       po_number: parsed.po_number, po_date: parsed.po_date, delivery_date: parsed.delivery_date,

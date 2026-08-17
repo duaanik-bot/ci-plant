@@ -113,7 +113,9 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
         po_date: res.po_date || '', delivery_date: res.delivery_date || '', notes: '',
         lines: res.lines.length ? res.lines.map(toFormLine) : [emptyLine()],
       });
-      res.warnings?.forEach(w => toast.info(w));
+      // A scanned PO now opens the wizard empty rather than failing outright,
+      // so its warning has to read as loudly as the old error did.
+      res.warnings?.forEach(w => (res.scanned ? toast.error(w) : toast.info(w)));
     } catch (e) {
       if (e.data?.code === 'scanned') toast.error(e.message);
     } finally { setBusy(false); }

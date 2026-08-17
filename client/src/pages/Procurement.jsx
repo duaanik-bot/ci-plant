@@ -2,7 +2,7 @@
 // Row-level PR actions (view/edit/approve/convert/close), multi-select PRs
 // into ONE purchase order, direct POs without a PR, partial/full GRN in one
 // modal, and a pendency dashboard (vendor / category / material / PO-wise).
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
@@ -17,10 +17,48 @@ import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
+import { clubSuggestions } from '../lib/prClubbing.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
+// The extra fact a club pill carries past its headline. Amber when there is
+// still something to do before it can go on an order — a pending approval, or
+// lines that need merging.
+function ClubTag({ tone, children }) {
+  return (
+    <span className={`shrink-0 rounded-full px-1.5 py-px text-[10px] font-bold ${tone === 'amber'
+      ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>{children}</span>
+  );
+}
+
+// One axis of the club strip. Three pills show; the tail is one click away
+// rather than silently dropped, because "3 shown" reads as "3 exist". Same
+// geometry as Planning's gang bands so the two read as one system.
+function ClubBand({ label, note, items, chip, onPick }) {
+  const [all, setAll] = useState(false);
+  const SHOWN = 3;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-[132px] text-[11px] font-bold text-violet-700">{label}</span>
+      {(all ? items : items.slice(0, SHOWN)).map(s => (
+        <button key={s.kind === 'within-pr' ? `${s.requisition_id}|${s.material_id}` : `m${s.material_id}`}
+          type="button" onClick={() => onPick(s)}
+          className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-colors hover:bg-violet-100 touch:min-h-[38px]">
+          {chip(s)}
+        </button>
+      ))}
+      {items.length > SHOWN && (
+        <button type="button" onClick={() => setAll(a => !a)}
+          className="text-[11px] font-bold text-violet-500 underline-offset-2 hover:underline">
+          {all ? 'Show less' : `+${items.length - SHOWN} more`}
+        </button>
+      )}
+      <span className="text-[11px] text-violet-400">{note}</span>
+    </div>
+  );
+}
+
 // Auto-populated downstream from the requisition where possible, always editable.
 const PO_META = { vendor_notes: '', payment_terms: '', delivery_terms: '', reference: '' };
 const PoMetaFields = ({ value, onChange }) => (
@@ -142,6 +180,7 @@ export default function Procurement() {
   // Each register splits into "still needs action" vs "done", so pendency is
   // one glance away instead of buried among converted/received/closed rows.
   const [prView, setPrView] = useState('open');      // open (pending+approved) | converted | closed
+  const [clubHidden, setClubHidden] = useState(false); // the club strip is a suggestion, not a nag
   const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
 
@@ -325,6 +364,35 @@ export default function Procurement() {
   const vendorById = id => vendors.find(v => String(v.id) === String(id));
 
   const selectedPrs = prs.filter(p => selectedIds.includes(p.id));
+
+  // Boards worth buying on one order instead of several. Derived from the
+  // register the page already holds — no second endpoint to keep in step.
+  const clubs = useMemo(() => clubSuggestions(prs), [prs]);
+
+  // Open a requisition that names one board on several lines, with those lines
+  // already merged — the same consolidate() the PO forms use, so the register
+  // and the order agree about what "clubbed" means. Nothing is saved until the
+  // buyer presses Save Changes.
+  const openPrClub = s => {
+    const pr = prs.find(p => p.id === s.requisition_id);
+    if (!pr) return;
+    const rows = consolidate((pr.lines || []).map(l => ({
+      material_id: String(l.material_id), qty: String(l.qty), unit: l.unit || '',
+      est_rate: l.est_rate != null ? String(l.est_rate) : '', remarks: l.remarks || '',
+    })));
+    setPrModal({
+      pr, edit: true,
+      form: {
+        requested_by: pr.requested_by || '', department: pr.department || '',
+        needed_by: pr.needed_by || '', priority: pr.priority || 'normal',
+        reason: pr.reason || '', remarks: pr.remarks || '',
+        // A merged line's remarks come from the first contributing line; the
+        // others would otherwise vanish without trace, so they are carried over.
+        lines: rows.map(r => ({ ...r, qty: String(r.qty),
+          remarks: r.sources.map(x => x.remarks).filter(Boolean).join(' · ') })),
+      },
+    });
+  };
   const selectableOk = selectedPrs.length > 0 && selectedPrs.every(p => p.status === 'approved');
 
   // Every requisition write below — approve, reject, un-approve, close, convert,
@@ -763,6 +831,49 @@ export default function Procurement() {
         { key: 'pendency', label: 'Pendency', count: pendingCount },
       ]} />
 
+      {/* Club opportunities — the same board sitting on several open requisitions,
+          or named twice inside one. PO consolidation merges lines within ONE
+          order; it cannot help once the buyer has already made three separate
+          orders, so the offer has to happen here, before any of them exist. */}
+      {tab === 'prs' && !clubHidden && (clubs.acrossPrs.length > 0 || clubs.withinPr.length > 0) && (
+        <div className="mb-3 rounded-2xl border border-violet-200/70 bg-violet-50/50 px-4 py-3 shadow-card backdrop-blur-xl animate-fadeIn">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-xs font-bold text-violet-800">
+              <ShoppingBag size={13} /> Worth buying together
+            </span>
+            <button type="button" onClick={() => setClubHidden(true)}
+              className="text-[11px] font-bold text-violet-400 underline-offset-2 hover:underline">Hide</button>
+          </div>
+          <div className="space-y-2">
+            {clubs.acrossPrs.length > 0 && (
+              <ClubBand label="Across requisitions" items={clubs.acrossPrs}
+                note="selects them — then Create One PO"
+                onPick={s => {
+                  setSelectedIds(s.prs.map(p => p.id));
+                  setPrView('open');
+                  if (!s.readyToOrder) toast.info('Approve the pending ones and the PO button opens up');
+                }}
+                chip={s => <>
+                  <span className="max-w-[190px] truncate">{s.material_name}</span>
+                  <ClubTag tone={s.readyToOrder ? 'violet' : 'amber'}>{s.prCount} PRs</ClubTag>
+                  <span className="tabular-nums text-violet-500">{fmt.num(s.total_qty)}</span>
+                </>} />
+            )}
+            {clubs.withinPr.length > 0 && (
+              <ClubBand label="Inside one requisition" items={clubs.withinPr}
+                note="opens it with the lines already clubbed"
+                onPick={s => openPrClub(s)}
+                chip={s => <>
+                  <span className="font-bold">{s.pr_number}</span>
+                  <span className="max-w-[160px] truncate">{s.material_name}</span>
+                  <ClubTag tone="amber">{s.lineCount} lines</ClubTag>
+                  <span className="tabular-nums text-violet-500">{fmt.num(s.total_qty)}</span>
+                </>} />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Bulk bar — multi-select approved PRs → one PO */}
       {tab === 'prs' && selectedIds.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-card backdrop-blur-xl animate-fadeIn">
@@ -946,7 +1057,9 @@ export default function Procurement() {
                   // The one entry every role keeps. `editable` carries the
                   // permission too, so a non-buyer gets the read-only view
                   // rather than a form whose save is a guaranteed 403.
-                  { key: 'view', label: 'View / Edit', icon: Eye, onClick: () => openPrModal(p, canRetirePr && ['pending', 'approved'].includes(p.status)) },
+                  // A converted PR opens editable too — quantities only, and the
+                  // change follows through to the order it produced.
+                  { key: 'view', label: 'View / Edit', icon: Eye, onClick: () => openPrModal(p, canRetirePr && ['pending', 'approved', 'converted'].includes(p.status)) },
                   // Selection exists only to reach the bulk convert-to-PO, which
                   // is canBuy — offering it to a role that cannot convert builds
                   // a basket that can never be checked out.
@@ -1395,8 +1508,10 @@ export default function Procurement() {
               own View / Edit stays open to everyone by design. Leaving Edit here
               ungated would also hand a non-buyer the edit form that the menu's
               `editable` argument just refused them, and its save would 403. */}
-          {canRetirePr && ['pending', 'approved'].includes(prModal.pr.status) && (
-            <Button onClick={() => setPrModal(m => ({ ...m, edit: true }))}><Pencil size={14} /> Edit</Button>
+          {canRetirePr && ['pending', 'approved', 'converted'].includes(prModal.pr.status) && (
+            <Button onClick={() => setPrModal(m => ({ ...m, edit: true }))}>
+              <Pencil size={14} /> {prModal.pr.status === 'converted' ? 'Edit Quantity' : 'Edit'}
+            </Button>
           )}
           {canRetirePr && prModal.pr.status === 'pending' && (
             <Button variant="success" onClick={async () => { await api.post(`/requisitions/${prModal.pr.id}/approve`); toast.success('Approved'); setPrModal(null); load(); }}>
@@ -1435,7 +1550,15 @@ export default function Procurement() {
                 </Select>
               </Field>
             </div>
+            {prModal.pr.status === 'converted' && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs text-slate-600">
+                Already ordered on <span className="font-bold text-slate-700">{prModal.pr.po_number || 'its purchase order'}</span> —
+                changing a quantity here moves that order by the same amount. Its items are fixed, and it cannot
+                drop below what has already been received.
+              </div>
+            )}
             <PrLineEditor lines={prModal.form.lines} materials={materials} activePrsFor={() => []} rateFor={rateFor} stockFor={stockFor}
+              qtyOnly={prModal.pr.status === 'converted'}
               onChange={lines => setPrModal(m => ({ ...m, form: { ...m.form, lines } }))} />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Reason">
