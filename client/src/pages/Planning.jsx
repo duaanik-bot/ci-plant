@@ -38,7 +38,12 @@ import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf, proces
          totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
-import { customerHue } from '../lib/customerColour.js';
+// The row dot and the chip rail this page introduced — now shared with Artwork,
+// Job Cards and Print Planning, so one company is one colour everywhere and the
+// four rails cannot drift apart. See CustomerDot.jsx / CustomerFilterGroup.jsx.
+import { CustomerDot } from '../components/CustomerDot.jsx';
+import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
+import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
 import { canPlan } from '../modules.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
@@ -90,22 +95,6 @@ function MgtChip({ a }) {
       <ShieldQuestion size={10} /> {label}
     </span>
   );
-}
-
-// The customer's identity colour, riding just ahead of the initials it belongs
-// to. The SAME dot appears in the filter chip and on every row, so the rail and
-// the queue speak one language — and, more to the point, so an UNFILTERED queue
-// is scannable. That is where this earns its keep: the queue runs 112 lines of
-// Swiss Garnier Life Sciences against 26 of Swiss Garniers Biotech, which as
-// text are nearly the same string and as SGLS/SGB are two letters apart.
-//
-// Decorative only — the initials beside it already carry the name, and the full
-// name is on the cell's title — so it is aria-hidden and never the sole carrier
-// of the fact.
-function CustomerDot({ id }) {
-  const hue = customerHue(id);
-  if (!hue) return null;
-  return <span aria-hidden className={`mr-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full align-middle ${hue.dot}`} />;
 }
 
 
@@ -682,27 +671,18 @@ export default function Planning() {
   const mergeCount = zoneRows.filter(isMergeRun).length;
   // Every customer a row speaks for. A gang can span companies — it is one row
   // but it belongs to all of them, so it answers to each of their chips.
-  const rowCustomerIds = r => [...new Set((r._gang || [r]).map(m => m.customer_id).filter(v => v != null))];
+  const customerMembers = r => r._gang;
   // The customers present in the ZONE, counted like every other chip on this
   // rail: before the customer filter narrows anything, so a chip says how many
   // rows it would keep and never how many the other chips left. A run counts
   // ONCE per customer however many of its members that customer owns — the
   // chip counts rows, which is what the table shows. Busiest first, because
   // that is the order the planner already holds the queue in.
-  const customerChips = (() => {
-    const seen = new Map();
-    for (const r of zoneRows) {
-      for (const m of (r._gang || [r])) {
-        if (m.customer_id == null) continue;
-        if (!seen.has(m.customer_id)) seen.set(m.customer_id, { id: m.customer_id, name: m.customer_name, rows: new Set() });
-        seen.get(m.customer_id).rows.add(r);
-      }
-    }
-    return [...seen.values()]
-      .map(c => ({ id: c.id, name: c.name, count: c.rows.size }))
-      .sort((a, b) => b.count - a.count
-        || customerInitials(a.name).localeCompare(customerInitials(b.name)));
-  })();
+  //
+  // The arithmetic moved to lib/customerChips.js when Artwork, Job Cards and
+  // Print Planning grew the same rail; it is unchanged, and covered by
+  // server/src/customer-chips.test.js.
+  const customerChips = customerChipsFrom(zoneRows, customerMembers);
   // Narrowed HERE, where the zone is applied, so the KPI strip, the board
   // counts, the suggestions and the table all keep describing one and the same
   // set — the invariant the comment above depends on. Both axes compose, and
@@ -718,12 +698,7 @@ export default function Planning() {
     // left the zone drops out of the test, and once none of the selection
     // survives the filter releases entirely instead of stranding the planner on
     // an empty table whose chips are all gone.
-    const liveCustomers = customerFilters.filter(id => customerChips.some(c => c.id === id));
-    if (liveCustomers.length) {
-      const keep = new Set(liveCustomers);
-      rows = rows.filter(r => rowCustomerIds(r).some(id => keep.has(id)));
-    }
-    return rows;
+    return filterByCustomers(rows, customerFilters, customerChips, customerMembers);
   })();
   // The zone's LINES (gang rows unfolded) — feeds the KPI strip and the
   // suggestion filter, exactly what `shown` meant before zones existed.
@@ -2895,31 +2870,12 @@ export default function Planning() {
             WHOSE work rather than how it prints. Multi-select, so "SGLS and SGB,
             nothing else" is two clicks rather than an impossible question.
 
-            The pill stays neutral, lit exactly the way the zone chips light, and
-            the company's colour lives in the dot alone. That is deliberate: on
-            this page violet already means gang, teal combined, amber hold,
-            emerald covered and red short, so a chip tinted in a company's colour
-            would be read as a status. A dot is small enough to identify without
-            asserting anything.
-
-            Hidden below two customers — a filter offering one choice narrows
-            nothing, and the strip should not grow to say so. */}
-        {customerChips.length > 1 && (
-          <FilterGroup label="Customer">
-            {customerChips.map(c => {
-              const hue = customerHue(c.id);
-              return (
-                <FilterChip key={c.id} label={customerInitials(c.name) || '—'} count={c.count}
-                  dot={hue?.dot} on={customerFilters.includes(c.id)}
-                  title={`${c.name || 'Unnamed customer'} — ${fmt.count(c.count, 'row')} in this zone. Composes with the zone, the board cards and the searches; click again to clear.`}
-                  onClick={() => {
-                    setCustomerFilters(f => (f.includes(c.id) ? f.filter(x => x !== c.id) : [...f, c.id]));
-                    clearSelection();
-                  }} />
-              );
-            })}
-          </FilterGroup>
-        )}
+            The pill stays neutral and the company's colour lives in the dot
+            alone — CustomerFilterGroup.jsx carries the whole reason, and now
+            renders this same group on Artwork, Job Cards and Print Planning. */}
+        <CustomerFilterGroup chips={customerChips} selected={customerFilters}
+          scope="in this zone" note="Composes with the zone, the board cards and the searches"
+          onToggle={id => { setCustomerFilters(f => toggleCustomer(f, id)); clearSelection(); }} />
         {/* The way back to the whole queue. Hidden while nothing is lit, so on an
             unfiltered board the rail is exactly as wide as it was. */}
         <ResetFilters filters={filters} className="ml-auto" />

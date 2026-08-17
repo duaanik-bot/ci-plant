@@ -97,6 +97,15 @@ export default function ProductIdentity({
   productId,
   code,
   meta,
+  // A node rendered at the head of the meta line — the customer's colour dot on
+  // the Job Card register, and anything of that shape later.
+  //
+  // Deliberately NOT folded into `meta`: `title` below joins its parts with ' · '
+  // and a React element stringifies to "[object Object]", so passing a node as
+  // `meta` silently replaces the hover tooltip with that. `meta` stays text and
+  // owns the title; this is display only, and is left out of the title because
+  // a decorative dot has nothing to say to a screen reader or a tooltip.
+  metaPrefix,
   className = '',
   nameClassName = '',
   codesClassName = '',
@@ -166,7 +175,9 @@ export default function ProductIdentity({
           </div>
         )}
         {codes && <ProductCodes row={enriched} compact={compact} className={`mt-1 ${codesClassName}`} />}
-        {meta && <div className="mt-0.5 min-w-0 truncate text-[11px] text-slate-400">{meta}</div>}
+        {(meta || metaPrefix) && (
+          <div className="mt-0.5 min-w-0 truncate text-[11px] text-slate-400">{metaPrefix}{meta}</div>
+        )}
       </div>
       {open && <MasterHistory kind="products" record={enriched} onClose={() => setOpen(false)} />}
     </>

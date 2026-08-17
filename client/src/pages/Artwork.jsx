@@ -12,6 +12,12 @@ import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOAR
 import PlateStatus, { PLATE_LABEL, PLATE_FULL, PLATE_HINT, PLATE_TONE, PLATE_RANK } from '../components/PlateStatus.jsx';
 // One chip shape for every filter rail in the ERP — see FilterChip.jsx.
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
+// The customer axis, identical here and on Planning, Job Cards and Print
+// Planning: a graphite pill carrying the company's colour in a dot, and the same
+// dot on every row so an unfiltered queue is scannable.
+import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
+import { CustomerDot } from '../components/CustomerDot.jsx';
+import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
 // Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
          colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -317,10 +323,16 @@ export default function Artwork() {
   const [tab, setTab] = useState('open');
   const [boardFilters, setBoardFilters] = useState([]); // [] = no filter, i.e. All
   const [plateFilters, setPlateFilters] = useState([]); // [] = no filter, i.e. All
-  // Both chip rails plus the table's own search box. The tab stays put.
+  // Customer — multi-select, because "SGLS and SGB, nothing else" is a real
+  // question and a single pick cannot answer it. Holds customer_ids, never
+  // names: the id is what the colour is keyed on and what survives the day
+  // somebody corrects a misspelled company.
+  const [customerFilters, setCustomerFilters] = useState([]); // customer_ids; empty = all
+  // All three chip rails plus the table's own search box. The tab stays put.
   const filters = useFilterReset([
     [boardFilters, setBoardFilters, [], 'board'],
     [plateFilters, setPlateFilters, [], 'plate'],
+    [customerFilters, setCustomerFilters, [], 'customer'],
   ], () => setSelectedIds([]));
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
@@ -348,6 +360,10 @@ export default function Artwork() {
   // row here too. Collapse every member line of a gang into a single synthetic
   // row carrying `_gang` (all members, in id order); everything else is a plain
   // line. Mirrors the Planning queue so a gang looks identical plan-to-artwork.
+  //
+  // Which also makes a gang row belong to EVERY company printed on that sheet —
+  // what the customer chips group and filter on.
+  const customerMembers = r => r._gang;
   const displayRows = (() => {
     const out = [];
     const seen = new Set();
@@ -377,6 +393,16 @@ export default function Artwork() {
     { all: boardOnly.length, ready: 0, on_order: 0, none: 0 });
   const boardRows = plateFilters.length === 0 ? boardOnly
     : boardOnly.filter(r => plateFilters.includes(r.plate_state || 'none'));
+  // A THIRD axis, and a different question from the two above it: those ask
+  // whether a job can be printed, this asks whose job it is. Counted last in the
+  // chain — on what the board and plate rails have already left — for the same
+  // reason the plate counts are taken after the board rail: a chip should
+  // describe the pile actually on screen.
+  //
+  // A gang can span companies, so it answers to each of their chips; the shared
+  // rules and their guards live in lib/customerChips.js.
+  const customerChips = customerChipsFrom(boardRows, customerMembers);
+  const rows = filterByCustomers(boardRows, customerFilters, customerChips, customerMembers);
   const togglePlateFilter = key => {
     setPlateFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
     clearSelection();
@@ -567,6 +593,12 @@ export default function Artwork() {
         <BoardFilterChips active={boardFilters} counts={boardCounts}
           onToggle={toggleBoardFilter}
           onClear={() => { setBoardFilters([]); clearSelection(); }} />
+        {/* WHOSE job it is — the one axis here that is not about whether the job
+            can be printed. Last on the rail because it is counted last, on what
+            Plates and Board have already left. */}
+        <CustomerFilterGroup chips={customerChips} selected={customerFilters}
+          scope="in this tab" note="Composes with the plate and board chips and the search"
+          onToggle={id => { setCustomerFilters(f => toggleCustomer(f, id)); clearSelection(); }} />
         {/* On the rail's own line now, like every other page — it used to take a
             whole right-aligned row of its own below the two chip rows. */}
         <ResetFilters filters={filters} className="ml-auto" />
@@ -588,11 +620,20 @@ export default function Artwork() {
             render: l => l._gang
             ? (() => {
                 const pos = [...new Set(l._gang.map(m => m.po_number))];
-                const custs = [...new Set(l._gang.map(m => m.customer_name))];
+                // Deduped by ID, not by name — the id is what the dot is keyed
+                // on, and two members of one company must not draw two dots.
+                const custs = [...new Map(l._gang.map(m => [m.customer_id ?? m.customer_name, m])).values()];
                 return (
                   <div className="max-w-[180px]">
                     {l.run_kind === 'merge' ? <MergeChip number={l.gang_number} /> : <GangChip number={l.gang_number} />}
-                    <div className="mt-1 font-semibold leading-snug text-[#1D1D1F]">{custs.join(' · ')}</div>
+                    <div className="mt-1 font-semibold leading-snug text-[#1D1D1F]">
+                      {custs.map((m, i) => (
+                        <span key={m.customer_id ?? m.customer_name}>
+                          {i > 0 && <span className="text-gray-300"> · </span>}
+                          <CustomerDot id={m.customer_id} />{m.customer_name}
+                        </span>
+                      ))}
+                    </div>
                     <div className="mt-0.5 text-xs text-gray-500">PO {pos.join(' · ')}</div>
                     <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>
                       {l.run_kind === 'merge' ? `${l._gang.length} orders · one pile` : `${l._gang.length} cartons · one run`}
@@ -602,7 +643,9 @@ export default function Artwork() {
               })()
             : (
             <div className="max-w-[160px]">
-              <div className="font-semibold leading-snug text-[#1D1D1F] line-clamp-2">{l.customer_name}</div>
+              <div className="font-semibold leading-snug text-[#1D1D1F] line-clamp-2">
+                <CustomerDot id={l.customer_id} />{l.customer_name}
+              </div>
               <div className="mt-0.5 text-xs text-gray-500">PO {l.po_number}</div>
             </div>) },
           // PO Date and OD — the same pair, and the same vocabulary, as the
@@ -835,7 +878,7 @@ export default function Artwork() {
               </div>);
           } },
         ]}
-        rows={boardRows}
+        rows={rows}
         rowClass={rowClass}
         empty={boardFilters.length
           ? `Nothing in this tab is ${boardFilters.map(k => BOARD_LABEL[k]).join(' or ')}`

@@ -13,6 +13,14 @@ import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 // PLANNED date. The rule and the presets live in one lib so the chip counts and
 // the filtered list can never disagree; see its header for why planned_date.
 import { TIMELINE_PRESETS, presetRange, inTimeline, timelineCounts, unplannedCount } from '../lib/jobCardTimeline.js';
+// The customer axis — the same rail, the same colours and the same rules as
+// Planning, Artwork and Print Planning. One chip shape for every filter rail in
+// the ERP (FilterChip.jsx); the register's timeline presets above are a
+// segmented control and deliberately stay as they are.
+import { FilterRail } from '../components/FilterChip.jsx';
+import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
+import { CustomerDot } from '../components/CustomerDot.jsx';
+import { customerChipsFrom, filterByCustomers, showCustomerChips, toggleCustomer } from '../lib/customerChips.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import PlateStatus from '../components/PlateStatus.jsx';
@@ -169,8 +177,16 @@ export default function Production() {
   // Opens on the planner's queue — the cards still owing a finalise.
   const [tab, setTab] = useState('pending');
   const [q, setQ] = useState('');
+  // Customer — multi-select, because "SGLS and SGB, nothing else" is a real
+  // question and a single pick cannot answer it. Holds customer_ids, never
+  // names: one customer is on the books misspelled with a trailing space, and a
+  // name-keyed filter would break the day somebody corrects it.
+  const [customerFilters, setCustomerFilters] = useState([]); // customer_ids; empty = all
   // `sort` re-orders and never hides, so it is not part of the reset.
-  const filters = useFilterReset([[q, setQ, '', 'search']]);
+  const filters = useFilterReset([
+    [q, setQ, '', 'search'],
+    [customerFilters, setCustomerFilters, [], 'customer'],
+  ]);
   // Timeline — which days of the register to show, by planned date. Opens on
   // 'all': the tab a planner lands on is his whole queue, and a date filter he
   // did not ask for would hide work on the first paint.
@@ -261,9 +277,10 @@ export default function Production() {
   };
   const rungs = { pending: [], finalised: [], running: [], closed: [] };
   jobs.forEach(j => rungs[rung(j)].push(j));
-  // Tab → timeline → search, in that order, so each count means what it says:
-  // the TAB counts stay the true plant totals, the TIMELINE chips count within
-  // the chosen tab, and only the search narrows what is finally listed.
+  // Tab → timeline → customer → search, in that order, so each count means what
+  // it says: the TAB counts stay the true plant totals, the TIMELINE chips count
+  // within the chosen tab, the CUSTOMER chips count within the chosen window,
+  // and only the search narrows what is finally listed.
   const inTab = tab === 'all' ? jobs : rungs[tab] || [];
   const range = timeline === 'custom'
     ? (customRange.from || customRange.to ? customRange : null)
@@ -273,14 +290,27 @@ export default function Production() {
   // Cards this timeline is hiding purely because nobody planned them — named
   // on screen rather than left to evaporate. Zero while the timeline is off.
   const unplanned = range ? unplannedCount(inTab) : 0;
+  // WHOSE cards these are. Counted on the window the tab and timeline have
+  // already chosen and BEFORE the customer filter narrows anything, so a chip
+  // says how many of the cards in front of the planner it would keep — never how
+  // many the other chips left.
+  //
+  // A gang parent is ONE card standing for several cartons that can belong to
+  // different companies, so it answers to each of their chips. The rules and
+  // their guards — including the one that RELEASES a selection whose customer
+  // has left the tab rather than stranding an empty register — are shared with
+  // Planning, Artwork and Print Planning in lib/customerChips.js.
+  const customerMembers = j => (j.gang_parent ? j.gang_members : null);
+  const customerChips = customerChipsFrom(inWindow, customerMembers);
+  const inCustomer = filterByCustomers(inWindow, customerFilters, customerChips, customerMembers);
   // Deep row search, so a job is findable by any value on it — JC, product,
   // customer, PO, board size ("2038"), stage — and a gang parent by any of its
   // member products.
-  // Ordering is the LAST step, after tab → timeline → search, so it only ever
-  // rearranges what those three already decided to show — no count moves.
+  // Ordering is the LAST step, after tab → timeline → customer → search, so it
+  // only ever rearranges what those already decided to show — no count moves.
   // A card with no PO date sorts to the back of either PO ordering rather than
   // to the top: an undated card is not the oldest thing on the board.
-  const listed = inWindow
+  const listed = inCustomer
     .filter(j => rowMatches(j, q, (j.gang_members || []).map(productSearchText).join(' ')));
   const shown = sort === 'newest' ? listed : [...listed].sort((a, b) => {
     const x = poAgeOf(a), y = poAgeOf(b);
@@ -703,6 +733,27 @@ export default function Production() {
         )}
       </div>
 
+      {/* WHOSE cards these are — a third lens under the tabs and the timeline,
+          and the register's first proper filter rail. The timeline row above is
+          deliberately NOT chips: those are a segmented control, one choice at a
+          time, and they keep the shape they have.
+
+          The pill lights graphite and the company's colour lives in the dot
+          alone; CustomerFilterGroup.jsx carries the reason, and renders this
+          same group on Planning, Artwork and Print Planning. Hidden below two
+          customers, so a register holding one company looks exactly as it did.
+          The RAIL is gated too, not just the group inside it: an empty FilterRail
+          is still a div carrying mb-3, which would open 12px of dead space under
+          the timeline on exactly the boards that have no chips to show. */}
+      {showCustomerChips(customerChips) && (
+        <FilterRail className="mb-3">
+          <CustomerFilterGroup chips={customerChips} selected={customerFilters} divider={false}
+            scope="in this tab and window" unit="card"
+            note="Composes with the tab, the timeline and the search"
+            onToggle={id => setCustomerFilters(f => toggleCustomer(f, id))} />
+        </FilterRail>
+      )}
+
       {/* Selection bar — appears only once something is ticked. It reports the
           FULL selection, including cards picked under another tab or timeline,
           so a print run can never be larger than the number on screen. */}
@@ -800,6 +851,7 @@ export default function Production() {
                       <>
                         <MergeBanner number={jc.gang_number} members={jc.gang_members} />
                         <ProductIdentity row={jc} className="mt-1.5 max-w-lg"
+                          metaPrefix={<CustomerDot id={jc.customer_id} />}
                           meta={[jc.customer_name, jc.po_number ? `PO ${jc.po_number}` : null, jc.delivery_date ? `delivery ${fmt.date(jc.delivery_date)}` : null].filter(Boolean).join(' · ')} />
                         <MergeMemberList members={jc.gang_members} className="mt-1.5" />
                       </>
@@ -813,6 +865,7 @@ export default function Production() {
                 ) : (
                   <div className="mt-0.5 text-xs text-gray-500">
                     <ProductIdentity row={jc}
+                      metaPrefix={<CustomerDot id={jc.customer_id} />}
                       meta={[jc.customer_name, jc.po_number ? `PO ${jc.po_number}` : null, jc.delivery_date ? `delivery ${fmt.date(jc.delivery_date)}` : null].filter(Boolean).join(' · ')} />
                     <GangOriginLine className="mt-0.5" number={jc.gang_number} mates={jc.gang_run_mates} />
                   </div>

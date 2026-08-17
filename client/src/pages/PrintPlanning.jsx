@@ -19,6 +19,13 @@ import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOAR
 import PlateStatus from '../components/PlateStatus.jsx';
 // One chip shape for every filter rail in the ERP — see FilterChip.jsx.
 import { FilterChip, FilterGroup } from '../components/FilterChip.jsx';
+// The customer axis — identical here and on Planning, Artwork and Job Cards, so
+// one company is one colour wherever a planner meets it.
+import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
+import { CustomerDot } from '../components/CustomerDot.jsx';
+import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
+import { customerInitials } from '../lib/customerCode.js';
+import { customerHue } from '../lib/customerColour.js';
 // Printing colour + process follows the same one-vocabulary rule — see PrintColour.jsx.
 import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, ActiveColourFilters,
          COLOUR_RANK, PROCESS_RANK, colourTypeOf, processOf, totalColoursOf, colourSummary,
@@ -293,8 +300,17 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           nameClassName="text-[12.5px] font-extrabold leading-4 tracking-tight text-slate-900" />
         <div className="mt-px flex items-center gap-1 truncate text-[10.5px] leading-4 text-slate-500">
           {card.customer_name && (
-            <span className="flex min-w-0 items-center gap-1 truncate">
-              <Building2 size={10} className="shrink-0 text-slate-300" /> <span className="truncate">{card.customer_name}</span>
+            // The company's own colour REPLACES the generic building glyph
+            // rather than joining it. Both say "this is the customer" and only
+            // one of them says WHICH — and on a kanban card this line is 10.5px
+            // with a truncated name already fighting for it, so icon + dot +
+            // name is clutter. The glyph stays as the fallback for a card whose
+            // customer has no id to colour, so the line never loses its marker.
+            <span className="flex min-w-0 items-center gap-1 truncate" title={card.customer_name}>
+              {customerHue(card.customer_id)
+                ? <CustomerDot id={card.customer_id} className="mr-0" />
+                : <Building2 size={10} className="shrink-0 text-slate-300" />}
+              <span className="truncate">{card.customer_name}</span>
             </span>
           )}
         </div>
@@ -578,6 +594,19 @@ export default function PrintPlanning() {
   // Customer-WIP filter — on = only jobs the customer is chasing. A second
   // axis beside the board chips; both narrow at once, like the searches do.
   const [wipOnly, setWipOnly] = useState(false);
+  // WHICH customer — a different question from Customer WIP beside it, which
+  // asks about urgency. Multi-select on customer_ids, never names: the id is
+  // what the colour is keyed on and what survives a spelling correction.
+  const [customerFilters, setCustomerFilters] = useState([]); // customer_ids; empty = all
+  // Counted over the WHOLE board, exactly like boardCounts and the Customer WIP
+  // count below it — on this page a chip says what it would keep out of every
+  // card on the board, not out of whatever the lane filters have already left.
+  //
+  // ONE customer per card here: a gang's card resolves its order through the
+  // run's LEAD line, which is what the Customer column has always shown, so no
+  // members function is passed. Declared before boardFilterActive and
+  // emptyLaneReason because both read it.
+  const customerChips = useMemo(() => customerChipsFrom(cards), [cards]);
   // Printing colour + process filters. MULTI-select, because the question a
   // press planner actually asks is "show me everything with spot colour in it",
   // which is Pantone AND CMYK + Pantone at once. An empty Set means ALL — never
@@ -594,7 +623,8 @@ export default function PrintPlanning() {
   // would write positions computed from the rows still visible, silently
   // reordering the jobs it is hiding. It was spelled out five separate times,
   // which is how a new filter axis ends up wired into four of them.
-  const boardFilterActive = boardStatus !== 'all' || wipOnly || zone !== 'all' || mergeOnly || anyColourFilter;
+  const boardFilterActive = boardStatus !== 'all' || wipOnly || zone !== 'all' || mergeOnly
+    || anyColourFilter || customerFilters.length > 0;
   // Why a lane that HAS jobs is showing none. It named the board-status filter
   // unconditionally, so any OTHER axis doing the hiding printed the literal
   // `is "undefined"` — already true of Customer WIP, and the colour axes would
@@ -608,6 +638,11 @@ export default function PrintPlanning() {
     if (zone !== 'all') return `Nothing in ${laneName} is ${SET_TYPE_META[zone]?.label || zone}`;
     if (mergeOnly) return `Nothing in ${laneName} is a combined run`;
     if (wipOnly) return `Nothing in ${laneName} is marked Customer WIP`;
+    if (customerFilters.length) {
+      const names = customerChips.filter(c => customerFilters.includes(c.id))
+        .map(c => customerInitials(c.name) || c.name);
+      if (names.length) return `Nothing in ${laneName} belongs to ${names.join(' or ')}`;
+    }
     return `Nothing in ${laneName} matches the filters`;
   };
   const [undo, setUndo] = useState(null);          // { msg, entries } | null
@@ -686,7 +721,8 @@ export default function PrintPlanning() {
   const zoneOf = c => (heldRuns.has(c.gang_run_id) ? 'hold' : cardSetType(c));
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
-    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all' && !mergeOnly && !anyColourFilter) return fullLanes;
+    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all' && !mergeOnly
+        && !anyColourFilter && !customerFilters.length) return fullLanes;
     const byLane = {};
     for (const k of Object.keys(fullLanes)) {
       let list = fullLanes[k];
@@ -694,13 +730,18 @@ export default function PrintPlanning() {
       if (boardStatus !== 'all') list = list.filter(statusPass);
       if (zone !== 'all') list = list.filter(c => zoneOf(c) === zone);
       if (mergeOnly) list = list.filter(isMergeRun);
+      // Guarded against the WHOLE board's chips, not this lane's: a customer
+      // with cards on press 2 and none on press 1 must still narrow press 1 to
+      // empty rather than release there and show it unfiltered.
+      list = filterByCustomers(list, customerFilters, customerChips);
       if (anyColourFilter) list = list.filter(c => matchesColourFilters(c, colourFilters));
       if (q) list = list.filter(c => rowMatches(c, q, productSearchText(c)));
       if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k], productSearchText(c)));
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, mergeOnly, heldRuns, colourSel, processSel, bandSel]);
+  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, mergeOnly, heldRuns, colourSel, processSel, bandSel,
+      customerFilters, customerChips]);
   // Zone counts run over the unfiltered board and count JOBS the way the eye
   // does — a gang run's stack is one job, however many cards it carries.
   const zoneCounts = useMemo(() => {
@@ -786,7 +827,7 @@ export default function PrintPlanning() {
   // here — those are two different lists, and moving between them is
   // navigation. Everything else defaults to "show everything" and so resets:
   // the whole-board search, each lane's own box, the board-status cards, the
-  // zone, Combined, Customer WIP and the three ink axes.
+  // zone, Combined, Customer WIP, the customer chips and the three ink axes.
   const filters = useFilterReset([
     [q, setQ, '', 'search'],
     [laneQ, setLaneQ, {}, 'lane searches'],
@@ -794,6 +835,7 @@ export default function PrintPlanning() {
     [zone, setZone, 'all', 'zone'],
     [mergeOnly, setMergeOnly, false, 'Combined'],
     [wipOnly, setWipOnly, false, 'Customer WIP'],
+    [customerFilters, setCustomerFilters, [], 'customer'],
     [colourSel, setColourSel, new Set(), 'ink'],
     [processSel, setProcessSel, new Set(), 'process'],
     [bandSel, setBandSel, new Set(), 'band'],
@@ -1481,6 +1523,20 @@ export default function PrintPlanning() {
           </FilterGroup>
         )}
         {tab === 'board' && (
+          // WHOSE job it is — next to Urgency because Customer WIP asks about
+          // the same company and the two read together, but a separate axis: WIP
+          // is "they are chasing it", this is "it is theirs". Sits before the ink
+          // block for the same reason Urgency does — that block is its own flex
+          // container and always wraps whole.
+          //
+          // Selecting clears the triage selection like every chip on this rail:
+          // a bulk send must never carry cards the filter has just hidden.
+          <CustomerFilterGroup chips={customerChips} selected={customerFilters}
+            scope="across the board" unit="card"
+            note="Composes with the board cards, the zones and the ink chips"
+            onToggle={id => { setCustomerFilters(f => toggleCustomer(f, id)); clearSel(); }} />
+        )}
+        {tab === 'board' && (
           // Ink filters — the same rail the printing station queue uses, so a
           // planner and a press operator narrow the same way. Selecting also
           // clears the triage selection: a bulk send must never carry rows the
@@ -1821,7 +1877,8 @@ export default function PrintPlanning() {
                   {card.output_no || '—'}
                 </span>
               </td>
-              <td className={`${td} max-w-[160px] truncate text-[11px] font-semibold text-slate-600`} title={card.customer_name}>{card.customer_name || '—'}</td>
+              <td className={`${td} max-w-[160px] truncate text-[11px] font-semibold text-slate-600`} title={card.customer_name}>
+                <CustomerDot id={card.customer_id} />{card.customer_name || '—'}</td>
               <td className={`${td} max-w-[130px] truncate text-[11px] font-semibold text-slate-500`} title={card.party_artwork_code || ''}>{card.party_artwork_code || '—'}</td>
               <td className={`${td} whitespace-nowrap`}>
                 {/* The date moved to its own sortable column beside this one. */}
@@ -2114,7 +2171,7 @@ export default function PrintPlanning() {
                         <td className={td}>
                           <ProductIdentity row={c} compact />
                         </td>
-                        <td className={`${td} text-slate-600`}>{c.customer_name}</td>
+                        <td className={`${td} text-slate-600`}><CustomerDot id={c.customer_id} />{c.customer_name}</td>
                         <td className={`${td} text-xs font-semibold text-slate-600`}>{pressName(c.machine_id)}</td>
                         <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(c.printed_sheets ?? c.sheets_issued)}</td>
                         <td className={`${td} text-xs text-slate-500`}>{c.printing_operator || '—'}</td>

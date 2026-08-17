@@ -137,7 +137,11 @@ const JC_VIEW = `
          -- delivery_date, so the PO date is the only date most job cards have —
          -- the Delivery column beside it is blank for ~92% of the book.
          o.po_number, o.po_date, o.delivery_date,
-         c.name AS customer_name, m.name AS machine_name,
+         -- customer_id rides beside the name because the register's customer
+         -- chips and their colour dots are keyed on the ID, never the name —
+         -- one customer is stored misspelled with a trailing space, and a
+         -- name-keyed colour would reassign itself the day that is corrected.
+         o.customer_id, c.name AS customer_name, m.name AS machine_name,
          -- Multi-board: a job with a job_board_mix plan carries its OWN
          -- shortfall, one row per board, instead of the single planned board's
          -- gap. bmp (below) folds both derived columns into one LATERAL so the
@@ -184,7 +188,12 @@ const JC_VIEW = `
              'party_item_code', p3.party_item_code,
              -- Each member's own PO date, so a gang can answer for its OLDEST
              -- one: a run is as overdue as the longest-waiting order on it.
-             'qty', ol3.qty, 'po_number', o3.po_number, 'po_date', o3.po_date, 'customer_name', c3.name,
+             'qty', ol3.qty, 'po_number', o3.po_number, 'po_date', o3.po_date,
+             -- Each member's customer, id AND name. A gang is ONE row standing
+             -- for several cartons and those cartons can belong to different
+             -- companies, so the row has to answer to every one of their
+             -- customer chips — which it can only do from the ids.
+             'customer_id', o3.customer_id, 'customer_name', c3.name,
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required,
              -- Per-carton artwork detail: each product on the gang sheet keeps
@@ -1418,7 +1427,11 @@ r.get('/print-planning', async (_req, res, next) => {
              -- effective board material's name (spec_override wins, same rule as
              -- the stock lateral below and the job-card traveler).
              COALESCE(NULLIF(p.board_name, ''), bm.name) AS board_display, p.gsm,
-             c.name AS customer_name, o.po_number, o.po_date, o.delivery_date,
+             -- Keyed on the ID for the board's customer chips and their colour
+             -- dots, the same as JC_VIEW above. ONE customer per card here: the
+             -- orders row is resolved through the gang's LEAD line, which is
+             -- exactly what the Customer column beside it has always shown.
+             o.customer_id, c.name AS customer_name, o.po_number, o.po_date, o.delivery_date,
              COALESCE(ol.planned_date, gol.planned_date) AS planned_date,
              COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
              -- Board-covered is MIX-AWARE, same CASE as the job-card register
