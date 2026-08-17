@@ -476,3 +476,74 @@ const NO_HEADING_INCONSISTENT = [
   [120, [['1', 40], ['WIDGET CARTON', 102], ['500', 303], ['12.500', 375], ['7777.000', 447]]],
   [140, [['2', 40], ['GADGET CARTON', 102], ['250', 303], ['10.000', 375], ['3333.000', 447]]],
 ];
+
+// ---------------------------------------------------------------------------
+// Finding the order number.
+//
+// A boxed header prints a label's value either to its right on the same line or
+// directly under it, and on a scan a value printed on one line can still arrive
+// on another — the row bucket is 2.5pt and PO 02037's number sits 2.8pt below
+// its own label. Reading only the label's own row found the date beside it, or
+// nothing at all.
+// ---------------------------------------------------------------------------
+const withHeader = rows => [
+  [40, [['SWISS GARNIER LIFE SCIENCES', 38]]],
+  [50, [['GSTIN : 02ABDFS0457R2ZW', 38]]],
+  ...rows,
+];
+
+test('the number is read from the right of its label on the same row', async () => {
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [['P.O.', 298], ['No.', 316], [':SGB/2627/POS/PMP/01796', 337], ['Date', 475], ['13/08/2026', 506]]],
+  ])));
+  assert.equal(parsed.po_number, 'SGB/2627/POS/PMP/01796');
+});
+
+test('a number that drifted onto the next row is still found', async () => {
+  // 2.8pt below the label — outside the row bucket, so it arrives as a row of
+  // its own while the label is left sitting beside the date.
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [['Swiss Garnier', 70], ['P.O.', 298], ['No.', 316], ['Date', 475], ['13/08/2026', 506]]],
+    [72.8, [['Factory', 19], [':SGB/2627/POS/PMP/02037', 337]]],
+  ])));
+  assert.equal(parsed.po_number, 'SGB/2627/POS/PMP/02037');
+});
+
+test('the date printed beside the label is never taken for the number', async () => {
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [['P.O.', 298], ['No.', 316], ['Date', 475], ['13/08/2026', 506]]],
+  ])));
+  assert.equal(parsed.po_number, null, 'a date is not an order number');
+});
+
+test('a boxed header puts the value UNDER its label, at the same x', async () => {
+  // Tally: "Buyer's Ref./Order No." at x=279 with its value two rows below at
+  // the same x. Anything to the LEFT belongs to the neighbouring box.
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [["Buyer's Ref./Order No.", 279], ['Other References', 391]]],
+    [76, [['State Name : Punjab, Code : 03', 39]]],
+    [82, [['4', 279]]],
+  ])));
+  assert.equal(parsed.po_number, '4');
+});
+
+test('the label words in running text do not yield an order number', async () => {
+  // "PO number" occurs in the terms, and "po" inside the print footer's own URL.
+  // Matched there, the search walks down the page and returns whatever figure it
+  // meets — on a real document, the page marker "1/1".
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [['1. Deliver to works quoting this PO number with a batch-wise packing list.', 24]]],
+    [80, [['https://motionci.in/procurement/po/12', 24], ['1/1', 300]]],
+  ])));
+  assert.equal(parsed.po_number, null);
+});
+
+test('a bare PURCHASE ORDER title beside a page marker yields nothing', async () => {
+  // These POs print "PURCHASE ORDER" and "Page : 1/ 3" on one line. Treating the
+  // bare title as a label made the order number the word "Page", and once that
+  // was excluded, "1/".
+  const parsed = await parsePO(await makeTable(withHeader([
+    [70, [['PURCHASE ORDER', 235], ['Page', 507], ['1/', 543], ['3', 556]]],
+  ])));
+  assert.equal(parsed.po_number, null);
+});

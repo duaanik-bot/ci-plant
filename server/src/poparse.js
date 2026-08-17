@@ -142,17 +142,93 @@ const findDate = (rows, labelRe) => {
 const looksLikeDate = s => new RegExp(`^${DATE_RE.source}$`).test(s)
   || /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/.test(s);
 
+// The label, matched on the row's text so it can span several runs ("P.O." +
+// "No."). Two accepted forms, and the difference between them is deliberate:
+//   - "P.O."/"PO", which names an order on its own. The lookahead stops it
+//     matching inside a word — without it "SGB/2627/POS/PMP/02037" matches its
+//     own middle, finds the PO in POS, and returns "S/PMP/02037".
+//   - anything ending in ORDER only when a NO./NUMBER/# follows it. Bare
+//     "PURCHASE ORDER" is a page title and appears in the terms as well
+//     ("Purchase Order reference must be quoted in all challan"), where the
+//     next figure along has nothing to do with the order.
+const PO_LABEL_RE = /\bP\.?\s*O\.?(?![A-Za-z])(?:\s*(?:NO\.?|NUMBER|#))?|\bORDER\s*(?:NO\.?|NUMBER|#)/i;
+
+// A value must be a document number: it carries a digit, it is not the date
+// printed beside it, and it is not the word that happened to follow the label.
+const isPoValue = s => {
+  const v = s.replace(/^[:\-#\s]+/, '').replace(/[.,;:]+$/, '');
+  if (!v || v.length > 40 || !/\d/.test(v) || !/^[A-Za-z0-9][A-Za-z0-9/\-._]*$/.test(v)) return null;
+  if (looksLikeDate(v) || /^(DATE|NO|NUMBER|PAGE)$/i.test(v)) return null;
+  return v;
+};
+
+// A boxed header prints a label's value either to its RIGHT on the same line,
+// or DIRECTLY UNDER it at the same x — Swiss does the first, Tally the second
+// ("Buyer's Ref./Order No." at x=279 with "4" at x=279 two rows down). And on a
+// scan the two can come apart even when they were printed on one line: the row
+// bucket is 2.5pt, and PO 02037's number sits 2.8pt below its own label, which
+// left the label sitting next to the date and the number found by nobody.
+//
+// So look right of the label on its own row, then straight down for a short
+// distance, taking the first thing that reads like a document number. Anything
+// to the LEFT of the label belongs to the neighbouring box, not to this one.
+const LOOK_BELOW_PT = 22;   // ~1.5 rows on these headers
+const X_SLACK = 2;
+
+// The label words also occur in running text — "Deliver to works quoting this PO
+// number with a batch-wise packing list", and the print footer's own URL
+// ".../procurement/po/12". Matched there, the search then walks down the page
+// and returns whatever figure it meets; on one document that was the page
+// marker "1/1". A header cell is a label, not a sentence: three or more words
+// beginning in lower case is prose. Every real label row on file —
+// "P.O. No. Date 13/08/2026", "Buyer's Ref./Order No. Other References" — has
+// none at all.
+const isProse = text => (String(text).match(/(?:^|\s)[a-z]{2,}/g) || []).length >= 3
+  || /:\/\//.test(text);
+
 function findPoNumber(rows) {
-  for (const row of rows) {
-    // The lookahead stops "PO" matching inside a word. Without it the number
-    // "SGB/2627/POS/PMP/02037" matches its own middle — the reader finds the PO
-    // in POS and returns "S/PMP/02037", a PO number that never existed.
-    const m = row.text.match(/(?:P\.?\s*O\.?(?![A-Z])|PURCHASE\s+ORDER|ORDER)\s*(?:NO\.?|NUMBER|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i);
-    // A document number carries a digit. That one test retires the whole
-    // blacklist habit: "Page" off "PURCHASE ORDER  Page : 1/ 3", and
-    // "reference" off "Purchase Order reference must be quoted in all challan",
-    // are both prose that happened to follow the words being matched on.
-    if (m && /\d/.test(m[1]) && !looksLikeDate(m[1]) && !/^(DATE|NO|NUMBER|PAGE)$/i.test(m[1])) return m[1];
+  // Header only. The label words recur in the terms and conditions, and a
+  // number picked up down there would be some clause's figure.
+  const header = rows.filter(r => r.page === 1).slice(0, 40);
+  for (let i = 0; i < header.length; i++) {
+    const row = header[i];
+    if (isProse(row.text)) continue;
+    const m = PO_LABEL_RE.exec(row.text);
+    if (!m) continue;
+
+    // Map the match back onto the run it ends in, so the search starts after
+    // the label rather than after some earlier column on the same line.
+    const mEnd = m.index + m[0].length;
+    let at = 0, lastLabelIdx = -1, labelX = null, labelEndInItem = 0;
+    for (let k = 0; k < row.items.length; k++) {
+      const start = at, end = at + row.items[k].str.length;
+      if (labelX == null && end > m.index) labelX = row.items[k].x;
+      if (start < mEnd) { lastLabelIdx = k; labelEndInItem = mEnd - start; }
+      at = end + 1;                       // the single space `text` joins with
+    }
+    if (labelX == null) continue;
+
+    // The value is often inside the SAME run as its label — a PDF that lays a
+    // header line down as one string gives "PURCHASE ORDER NO: SGB/2627/..."
+    // whole. Read the tail of that run before looking at anything else, or the
+    // number is invisible to a search that only walks between runs.
+    const tail = String(row.items[lastLabelIdx]?.str ?? '').slice(labelEndInItem);
+    for (const tok of tail.split(/\s+/)) {
+      const v = isPoValue(tok);
+      if (v) return v;
+    }
+
+    const sameRow = row.items.slice(lastLabelIdx + 1);
+    const below = header
+      .filter(r => r.y < row.y && row.y - r.y <= LOOK_BELOW_PT)
+      .sort((a, z) => z.y - a.y)
+      .flatMap(r => r.items);
+
+    for (const it of [...sameRow, ...below]) {
+      if (it.x < labelX - X_SLACK) continue;   // a different box on the same line
+      const v = isPoValue(it.str);
+      if (v) return v;
+    }
   }
   return null;
 }
