@@ -26,6 +26,7 @@ import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDet
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import { approvalExport, statusExport, toolingExport, toolingGaps, toolingLabel } from '../lib/artworkCells.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { canPlan } from '../modules.js';
 
@@ -62,13 +63,14 @@ const poAgeOf = line => {
 // satisfied; amber = registered tooling not ready yet; red = die missing.
 function ToolingChip({ line }) {
   const nav = useNavigate();
-  const d = line.tooling || [];
-  const gaps = d.filter(x => (x.hard ? x.status !== 'ready' : x.status === 'not_ready'));
+  // The words come from lib/artworkCells.js so the chip and the EXPORT of this
+  // column cannot describe the same gap differently. The tick is the chip's own
+  // — a spreadsheet gets "Ready", not "✓ Ready".
+  const gaps = toolingGaps(line);
   const cls = line.tooling_ready ? 'bg-emerald-100 text-emerald-700'
     : gaps.some(g => g.hard && g.status === 'missing') ? 'bg-red-100 text-red-700'
     : 'bg-amber-100 text-amber-700';
-  const label = line.tooling_ready ? '✓ Ready'
-    : gaps.map(g => `${g.label} ${g.status === 'missing' ? 'missing' : g.zone === 'making' ? 'at maker' : 'not ready'}`).join(' · ');
+  const label = line.tooling_ready ? '✓ Ready' : toolingLabel(line);
   return (
     <button title="Open in Tooling Hub"
       onClick={e => { e.stopPropagation(); nav(`/tooling?product=${line.product_id}`); }}
@@ -789,7 +791,11 @@ export default function Artwork() {
             const dates = [...new Set(l._gang.map(m => m.planned_date).filter(Boolean))].sort();
             return <div><div>{fmt.date(dates[0])}</div>{dates.length > 1 && <div className="text-[10px] font-semibold text-amber-600">earliest of {dates.length}</div>}</div>;
           } },
-          { key: 'appr', label: 'Approvals', sortable: false, render: l => {
+          // These three cells render COMPONENTS (Toggle, ToolingChip,
+          // StatusBadge), and nodeText walks props.children rather than
+          // rendering — so without an export: they resolved to '' on every row.
+          // Measured before this: blank on 33 of 33.
+          { key: 'appr', label: 'Approvals', sortable: false, export: approvalExport, render: l => {
             if (l._gang) {
               // The gang is ONE product — approve every carton together.
               const allC = l._gang.every(m => m.artwork_customer_ok);
@@ -848,13 +854,13 @@ export default function Artwork() {
                   <span className={`text-xs font-bold ${n === l._gang.length ? 'text-emerald-600' : 'text-violet-700'}`}>{n}/{l._gang.length} locked</span>)}
               </div>);
           } },
-          { key: 'tooling', label: 'Tooling', sortable: false, render: l => {
+          { key: 'tooling', label: 'Tooling', sortable: false, export: toolingExport, render: l => {
             const cell = m => <div className="flex items-center gap-1.5"><ToolingChip line={m} /></div>;
             return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
           // Explicitly claimed, so the card badge stays the LINE's status no
           // matter what other /state/-shaped columns land above it later.
-          { key: 'status', label: 'Status', card: 'status', render: l => {
+          { key: 'status', label: 'Status', card: 'status', export: statusExport, render: l => {
             // A job whose plan is SAVED but not locked says so here instead of
             // "pending". It reached this queue early on purpose — the spec the
             // designer needs is settled, the board is not — and "pending" on a
