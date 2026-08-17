@@ -754,7 +754,12 @@ export default function Production() {
           The RAIL is gated too, not just the group inside it: an empty FilterRail
           is still a div carrying mb-3, which would open 12px of dead space under
           the timeline on exactly the boards that have no chips to show. */}
-      {(showCustomerChips(customerChips) || wipCount > 0 || wipOnly) && (
+      {/* The rail shows whenever this tab and window HAVE cards. It used to be
+          gated on the WIP count too, which stopped meaning anything once the WIP
+          chip started receding at zero instead of hiding — and an empty register
+          is the one case where a lone "Customer WIP 0" would be answering a
+          question nobody could be asking. */}
+      {inWindow.length > 0 && (
         <FilterRail className="mb-3">
           <CustomerFilterGroup chips={customerChips} selected={customerFilters} divider={false}
             scope="in this tab and window" unit="card"

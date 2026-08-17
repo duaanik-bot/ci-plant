@@ -25,14 +25,19 @@ import { FilterChip, FilterGroup } from './FilterChip.jsx';
 //      the customer's, not a fault. Amber and red stay for things that are
 //      wrong; a job being chased is not wrong.
 //
-// Hidden at zero. Every other chip on these rails RECEDES at zero rather than
-// hiding, because "Stock Short 0" is worth reading — it is the good news. This
-// one is the exception: "Customer WIP 0" is not news, it is the ordinary state
-// of a board, and a permanently dark blue chip on four rails is exactly the
-// clutter the caption structure exists to avoid. The group's hairline goes with
-// it, so a board with nothing being chased looks as it did before this shipped.
+// ── IT RECEDES AT ZERO, IT DOES NOT HIDE ────────────────────────────────────
+// I shipped this hiding at zero and it was wrong. The press board had no chased
+// job that day, so the chip vanished from the one rail Anik had just asked to
+// have it on — and "the control is there, it is just invisible today" is not a
+// control. A filter that appears and disappears with the data cannot be learnt,
+// and it makes the rail change width through the day.
+//
+// So it follows the same rule as every other chip here (UNLIT_EMPTY in
+// FilterChip.jsx): at zero it goes quiet — pale hairline, no lift — but it keeps
+// its place, its size and its click. "Customer WIP 0" is a real answer to a real
+// question: nothing is being chased right now. That is worth reading, the same
+// way "Stock Short 0" is the good news on the board rail.
 export function WipFilterGroup({ count = 0, on, onToggle, scope = 'here', unit = 'job', divider = true }) {
-  if (!count && !on) return null;
   const n = `${count} ${unit}${count === 1 ? '' : 's'}`;
   return (
     <FilterGroup label="Urgency" divider={divider}>
