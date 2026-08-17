@@ -396,7 +396,7 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
   const candIds = candidates.map(c => c.id);
   if (candIds.length) {
     const [candLines, candAllocs] = await Promise.all([
-      boardClaimLines(candIds, members.map(m => m.id)),
+      boardClaimLines(candIds, members.map(m => m.id), qc),
       qc(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [candIds]),
     ]);
     const candClaims = claimsByBoard({ lines: candLines, allocations: candAllocs });
@@ -449,7 +449,7 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
     // says it is, or the same board tells two different stories on one screen.
     // Own members excluded for the same reason: these rows ARE this run's holds.
     const [rowLines, rowAllocs] = await Promise.all([
-      boardClaimLines(rowIds, members.map(m => m.id)),
+      boardClaimLines(rowIds, members.map(m => m.id), qc),
       qc(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [rowIds]),
     ]);
     const rowClaims = claimsByBoard({ lines: rowLines, allocations: rowAllocs });
@@ -824,7 +824,11 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   // so the engine can show the planner exactly what the co-printed run does.
   if (gang.layout_mode === 'shared') {
     const layout = sharedLayout;
-    const die = await findDieTemplate(withSheets.map(m => m.product_id), q, oc).catch(() => null);
+    // qc, never the module-level q: raise-pr calls gangDetail inside its
+    // transaction, and on a one-client serverless pool a pool read from in
+    // there deadlocks. The .catch would swallow it, so the only symptom would
+    // be the die panel silently emptying after a ten-second stall.
+    const die = await findDieTemplate(withSheets.map(m => m.product_id), qc, oc).catch(() => null);
     // The hoisted run above — now carrying cpp / run_parent / need_parent so
     // the engine's client twin and this payload can never disagree on the
     // parent conversion.

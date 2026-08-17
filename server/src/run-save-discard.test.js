@@ -183,8 +183,12 @@ test('run mix candidates are costed — gross available is never labelled free',
     'the client still falls back to available — so the server must set free');
   const ctx = gangs.slice(gangs.indexOf('async function gangMixContext'),
     gangs.indexOf('// A line can arrive carrying a board mix'));
-  assert.match(ctx, /boardClaimLines\(candIds, members\.map\(m => m\.id\)\)/,
-    "candidates must be costed against every OTHER job's claim");
+  // Through `qc`, always: raise-pr calls gangDetail (and so this) inside its
+  // transaction, and boardClaimLines' own default is the module-level pool —
+  // which on a one-client serverless pool deadlocks against the transaction
+  // holding that client. See gang-detail-in-caller-tx.test.js.
+  assert.match(ctx, /boardClaimLines\(candIds, members\.map\(m => m\.id\), qc\)/,
+    "candidates must be costed against every OTHER job's claim, through the caller's qc");
   // free now comes from stockHoldBudget — the SAVE path's own arithmetic —
   // because available − committed alone missed heldOutsideClaims: a pending
   // draft's freeze reserved the shelf while its line sat in no claim set, so
@@ -193,8 +197,8 @@ test('run mix candidates are costed — gross available is never labelled free',
     'candidate free is stockHoldBudget.free — the same figure the lock caps at');
   // The SAVED rows too: a reopened mix must not read its board as freer than
   // the "+ Add board" list says it is, or one board tells two stories on a screen.
-  assert.match(ctx, /boardClaimLines\(rowIds, members\.map\(m => m\.id\)\)/,
-    'the saved mix rows must be costed on the same rule');
+  assert.match(ctx, /boardClaimLines\(rowIds, members\.map\(m => m\.id\), qc\)/,
+    'the saved mix rows must be costed on the same rule, through the same qc');
   assert.match(ctx, /r\.free = Math\.round\(budget\.free\)/);
 });
 
