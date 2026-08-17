@@ -994,13 +994,40 @@ export const SEARCH_FX =
   'focus:border-[#0A84FF] focus:from-white focus:to-white focus:ring-[3px] focus:ring-[#0A84FF]/25 ' +
   'focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14)]';
 
+// A search box must always be long enough to read its own placeholder — that
+// placeholder is the only thing telling the operator WHAT this box searches, so
+// a box that hides it is a box nobody trusts enough to type in.
+//
+// A width class alone never guaranteed that. The wrapper is usually a flex item
+// with the default `min-width: auto`, which resolves to the min-content width of
+// its contents — and Chrome gives an `<input>` carrying a percentage width
+// (`w-full`) a min-content of ZERO. So `w-72` was a WISH, not a floor: on any
+// row where every other control is `shrink-0`, the search box is the only thing
+// that can yield, and it yields everything. Live Floor → Printing did exactly
+// that — the colour rail beside it is `shrink-0` and 1334px wide, and the search
+// box was crushed to 47px, a bare circle with the placeholder gone entirely.
+//
+// So the floor is derived from the placeholder itself rather than guessed per
+// page: ~7.6px per character at the 14px type scale (measured against the real
+// strings — the widest, "Search anything — order, company, product, code,
+// remark…", needs 395px) plus the 44px the icon gutter and right padding cost.
+// Deliberately a shade generous; a search box a few px longer than its text
+// reads finished, one a few px shorter reads broken.
+//
+// `min(…, 100%)` is what keeps that safe on a phone. A fixed width wider than
+// the screen makes the WHOLE page pan sideways — Section.jsx shipped that bug
+// once already — so the floor always yields to the parent when the parent is
+// the smaller of the two.
+const searchFloor = placeholder => `min(${Math.ceil(String(placeholder || '').length * 7.6) + 44}px, 100%)`;
+
 // Search input
-// `className` replaces the default width (w-72) when given — the phone card
+// `className` replaces the default width (w-80) when given — the phone card
 // list stretches the box across its toolbar, pages with long placeholders go
-// wider still. Wide enough by default that a typical placeholder reads whole.
+// wider still. Either way the placeholder floor above still applies, so no
+// caller can size this box shorter than the words it is showing.
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
-    <div className={`relative ${className || 'w-72'}`}>
+    <div className={`relative ${className || 'w-80'}`} style={{ minWidth: searchFloor(placeholder) }}>
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
       <input
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
@@ -1582,8 +1609,13 @@ export function DataTable({
     <div className="ci-data-panel">
       {showToolbar && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-3">
+          {/* max-w-xl, not max-w-md: a controlled search carries the PAGE's
+              placeholder, and those name every field they sweep. The Status
+              Sheet's — "Search anything — order, company, product, code,
+              remark…" — measured 395px inside a 404px box, nine pixels from
+              clipping the word that says it searches remarks at all. */}
           {onSearchChange
-            ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full max-w-md" />
+            ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full max-w-xl" />
             : searchable ? <SearchInput value={q} onChange={setQ} /> : <span />}
           {exportName && <ExportMenu build={buildExport} />}
         </div>

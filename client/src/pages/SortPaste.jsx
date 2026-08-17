@@ -699,7 +699,10 @@ export default function SortPaste() {
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
-        <div className="mb-4 flex items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
+        {/* flex-WRAP, for the reason spelled out on Section's twin of this rail:
+            a non-wrapping row pays for its overflow out of the one child that
+            will shrink, and that child is always the search box. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           {tab === 'completed' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
               {PERIODS.map(p => (

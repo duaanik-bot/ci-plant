@@ -1232,7 +1232,15 @@ export default function Section() {
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
-        <div className="mb-4 flex items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
+        {/* flex-WRAP. The phone override below already says `ph:flex-nowrap`,
+            which only means anything if the wider tiers wrap — they never did,
+            and a row that cannot wrap has to take its overflow out of whichever
+            child is willing to shrink. On Printing → Production Queue that was
+            the search box and nothing else: the colour rail beside it is
+            shrink-0 and 1334px wide, so 1898px of controls were forced into
+            1840px by crushing one field to 47px. Wrapping spends a second line
+            instead, which is what every other toolbar in the app does. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           {tab === 'queue' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
               {QUEUE_FILTERS.map(f => (
