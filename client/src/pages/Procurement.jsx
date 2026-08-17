@@ -191,6 +191,13 @@ export default function Procurement() {
   const [prUrgent, setPrUrgent] = useState(false);
   const [clubHidden, setClubHidden] = useState(false); // the club strip is a suggestion, not a nag
   const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed
+  // The order register's own axes, same shape as the requisition rail above.
+  // "Pending" holds two different chases — an order the vendor has not started
+  // and one part-delivered — and "Completed" holds an order still waiting to be
+  // closed alongside ones already shut.
+  const [poReceipt, setPoReceipt] = useState(null);  // null | 'none' | 'part'   (pending view)
+  const [poStage, setPoStage] = useState(null);      // null | 'received' | 'closed' (completed view)
+  const [poOverdue, setPoOverdue] = useState(false); // pending view
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
 
   // Build the requisition payload from the multi-line form.
@@ -846,7 +853,27 @@ export default function Procurement() {
     [prUrgent, setPrUrgent, false, 'urgent'],
   ], () => setSelectedIds([]));
   const poIsDone = po => po.status === 'received' || po.status === 'closed';
-  const poList = pos.filter(po => (poView === 'completed' ? poIsDone(po) : !poIsDone(po)));
+  const poScope = pos.filter(po => (poView === 'completed' ? poIsDone(po) : !poIsDone(po)));
+  // The server derives PO status from its own lines — full → received, some →
+  // partially_received, else open — so the status IS the receipt state and
+  // there is nothing to recompute from the lines here.
+  const poReceiptOf = po => (po.status === 'partially_received' ? 'part' : po.status === 'open' ? 'none' : null);
+  // Late only while something can still arrive: a received or closed order is
+  // not waiting on the vendor, whatever its expected date says.
+  const poIsOverdue = po => !poIsDone(po) && dueDelta(po.expected_date) > 0;
+  const poPending = poView === 'pending';
+  // Each axis is offered on ONE view and must stop filtering on the other —
+  // a chip left lit but off screen empties the list with nothing to point at.
+  const poList = poScope
+    .filter(po => !poReceipt || !poPending || poReceiptOf(po) === poReceipt)
+    .filter(po => !poOverdue || !poPending || poIsOverdue(po))
+    .filter(po => !poStage || poPending || po.status === poStage);
+  const poChipCount = fn => poScope.filter(fn).length;
+  const poFilters = useFilterReset([
+    [poReceipt, setPoReceipt, null, 'receipt'],
+    [poStage, setPoStage, null, 'stage'],
+    [poOverdue, setPoOverdue, false, 'overdue'],
+  ]);
   const grnRows = grns.filter(g => (grnView === 'completed' ? g.status !== 'quarantine' : g.status === 'quarantine'));
   const prCount = k => prs.filter(p => PR_GROUPS[k].includes(p.status)).length;
 
@@ -1195,11 +1222,53 @@ export default function Procurement() {
 
       {tab === 'pos' && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SubTabs active={poView} onChange={setPoView} views={[
-              { key: 'pending', label: 'Pending', count: pos.filter(p => !poIsDone(p)).length },
-              { key: 'completed', label: 'Completed', count: pos.filter(poIsDone).length },
-            ]} />
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SubTabs active={poView} onChange={setPoView} views={[
+                { key: 'pending', label: 'Pending', count: pos.filter(p => !poIsDone(p)).length },
+                { key: 'completed', label: 'Completed', count: pos.filter(poIsDone).length },
+              ]} />
+            </div>
+            {/* The same rail as the requisition register — FilterChip.jsx, group
+                caption for identity, colour only where somebody has to act. Late
+                is the one thing here anybody chases, so it is the only hue. */}
+            <FilterRail className="mt-2">
+              {poPending ? (
+                <>
+                  <FilterGroup label="Receipt" divider={false}>
+                    <FilterChip label="Not started" count={poChipCount(p => poReceiptOf(p) === 'none')}
+                      on={poReceipt === 'none'}
+                      title="Ordered, nothing received against it yet"
+                      onClick={() => setPoReceipt(poReceipt === 'none' ? null : 'none')} />
+                    <FilterChip label="Part received" count={poChipCount(p => poReceiptOf(p) === 'part')}
+                      on={poReceipt === 'part'}
+                      title="Some of the order has arrived — the balance is still owed"
+                      onClick={() => setPoReceipt(poReceipt === 'part' ? null : 'part')} />
+                  </FilterGroup>
+                  <FilterGroup label="Flag">
+                    <FilterChip label="Overdue" icon={AlertTriangle} count={poChipCount(poIsOverdue)}
+                      on={poOverdue} tone="border-transparent bg-[#D70015] text-white" countTone="bg-white/25"
+                      title="Expected date has passed and the order is still short"
+                      onClick={() => setPoOverdue(!poOverdue)} />
+                  </FilterGroup>
+                </>
+              ) : (
+                // A fully received order that nobody has closed is still a job —
+                // it sits in Completed looking finished while the register keeps
+                // counting it open. Worth being able to see on its own.
+                <FilterGroup label="Stage" divider={false}>
+                  <FilterChip label="To close" count={poChipCount(p => p.status === 'received')}
+                    on={poStage === 'received'}
+                    title="Fully received but not yet closed"
+                    onClick={() => setPoStage(poStage === 'received' ? null : 'received')} />
+                  <FilterChip label="Closed" count={poChipCount(p => p.status === 'closed')}
+                    on={poStage === 'closed'}
+                    title="Closed — no further receipts expected"
+                    onClick={() => setPoStage(poStage === 'closed' ? null : 'closed')} />
+                </FilterGroup>
+              )}
+              <ResetFilters filters={poFilters} className="ml-auto" />
+            </FilterRail>
           </div>
           {pos.length > 0 && (
             <div className="flex justify-end">
@@ -1227,7 +1296,9 @@ export default function Procurement() {
               })} />
             </div>
           )}
-          {poList.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">{poView === 'completed' ? 'No completed purchase orders yet.' : 'No pending purchase orders — every order is fully received.'}</p>}
+          {poList.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">
+            {poFilters.dirty ? 'Nothing matches those filters — Reset filters brings the register back'
+              : poView === 'completed' ? 'No completed purchase orders yet.' : 'No pending purchase orders — every order is fully received.'}</p>}
           {poList.map(po => {
             const pendingLines = po.lines.filter(l => l.received_qty < l.qty);
             const received = po.lines.some(l => +l.received_qty > 0) || po.grn_count > 0;
