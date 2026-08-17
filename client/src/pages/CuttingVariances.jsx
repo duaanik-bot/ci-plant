@@ -7,6 +7,8 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { DataTable, KpiCard, KpiFilterNotice, PageHeader, ResetFilters, rowMatches, useFilterReset, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+// One chip shape for every filter rail in the ERP — see FilterChip.jsx.
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 
 const VARIANCE_KPI_ROWS = {
   over: r => +r.parent_delta > 0,
@@ -81,19 +83,19 @@ export default function CuttingVariances() {
           control in it, so the written-on toggle sits fused directly above,
           hairline-tight, rather than floating a separate card of its own. */}
       <div className="mt-3">
-      <div className="mb-1.5 flex items-center gap-2">
-        <button type="button" onClick={() => setOnlyWritten(v => !v)}
-          title="Only variances where the shortfall was written onto the book"
-          aria-pressed={onlyWritten}
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-            onlyWritten ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white shadow-sm' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
-          <AlertTriangle size={12} /> Written on only
-          <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${onlyWritten ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
-            {fmt.num(kpis.writtenOn)}
-          </span>
-        </button>
-        <ResetFilters filters={filters} />
-      </div>
+      {/* A single chip, but the same chip every other rail uses — a lone filter
+          in its own private style is how the vocabulary drifted in the first
+          place. Keeps the system blue: like Customer WIP on Print Planning this
+          is a flag the reader switched on, not a state of the work. */}
+      <FilterRail className="mb-1.5">
+        <FilterGroup label="Only" divider={false}>
+          <FilterChip label="Written on" icon={AlertTriangle} count={kpis.writtenOn} on={onlyWritten}
+            tone="border-[#0A84FF]/30 bg-[#0A84FF] text-white" countTone="bg-white/25"
+            title="Only variances where the shortfall was written onto the book"
+            onClick={() => setOnlyWritten(v => !v)} />
+        </FilterGroup>
+        <ResetFilters filters={filters} className="ml-auto" />
+      </FilterRail>
       <DataTable
         exportName="cutting-variances"
         searchValue={q} onSearchChange={setQ}
