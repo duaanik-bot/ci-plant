@@ -300,7 +300,13 @@ export function linePosition({ line, others = [], available, allocations = [], m
     my_open_need: myOpen,
     others_open_need: othersOpen,
     net,
-    short: Math.max(0, -net),
+    // `net` keeps its sign so an over-committed board reads as one. `short` is
+    // the PURCHASE figure the Planning engine puts on a requisition, and a job
+    // can never be short of more than it still needs: the neighbour's unmet
+    // need is the neighbour's own PR, already sitting in the register. Charging
+    // it here buys that board twice — see boardPositionView, same rule, and the
+    // GLYCOMET incident of 17 Aug 2026 that names the numbers.
+    short: Math.max(0, myOpen - Math.max(0, free - othersOpen)),
     over_held,
   };
 }
@@ -502,9 +508,16 @@ export function gangPosition({ needed, committedOther = 0, heldOthers = 0, avail
   // A fresh_pr run refuses the shelf outright: its still-to-buy is the full
   // requirement less what its own PR covers and what is already held for it —
   // the shelf and the other jobs' claims on it are not this run's business.
+  // A 'book' run takes what the shelf can actually spare it — stock the other
+  // jobs claim is not its to plan on — and buys the rest of ITS OWN
+  // requirement. It does not buy their shortfall too: this figure is written
+  // straight into the gang's requisition by POST /gang-runs/:id/raise-pr, so an
+  // over-committed board used to turn three ganged 5,000-sheet jobs into a
+  // 30,000-sheet order. Same rule as linePosition.short and boardPositionView.
+  const freeForRun = Math.max(0, num(available) - num(committedOther) - num(heldOthers));
   const short = stockBooking === 'fresh_pr'
     ? Math.max(0, num(needed) - held - incoming)
-    : Math.max(0, num(needed) + num(committedOther) + num(heldOthers) - num(available) - incoming);
+    : Math.max(0, num(needed) - incoming - freeForRun);
   return {
     available: num(available),
     committed_other: num(committedOther),

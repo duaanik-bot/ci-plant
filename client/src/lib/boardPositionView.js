@@ -117,6 +117,24 @@ export function boardPositionView({
   return {
     available: avail, committed, free, free_for_others: freeForOthers, net,
     drawn: !!drawn, fresh: false,
-    short: Math.max(0, -net),
+    // `net` is measured off freeRaw and keeps its sign — an over-committed board
+    // must say so. `short` is a different question with a different answer: it
+    // is what THIS job puts on a purchase order, and no job is short of more
+    // than it needs. Measuring it off freeRaw too charged this plan with every
+    // other job's unmet need.
+    //
+    // GLYCOMET, 17 Aug 2026. Saffire · 290 GSM · 26x30, bare shelf. Line 487
+    // wanted 2,475 and CI-PR-0066 was already buying them; line 490 was then
+    // planned for 2,038 and the engine offered 4,513 — the two added together.
+    // CI-VPO-0035 went to the mill carrying line 487's board twice, while
+    // CI-PR-0066 sat in the register still waiting to be ordered. Three ganged
+    // 5,000-sheet jobs on a bare shelf came out as 15,000 + 10,000 + 5,000:
+    // 30,000 bought for 15,000 of work.
+    //
+    // The other job's shortfall is the other job's PR. Clamped at `free`, not
+    // freeRaw, so contested stock still counts against this plan (someone
+    // else's claim genuinely is not available to it) while their UNMET need
+    // falls away.
+    short: Math.max(0, num(need) - free),
   };
 }

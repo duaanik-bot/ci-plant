@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lineRequirement, rowCovers, mixBalance, substitutionFlags, mixPosition, mixUnstockedRows } from './board-mix.js';
-import { linePosition } from './board-allocation.js';
+import { linePosition, openNeed } from './board-allocation.js';
 
 test('lineRequirement: parent sheets win, child sheets are the fallback', () => {
   assert.equal(lineRequirement({ parent_sheets_required: 500, sheets_required: 9000 }), 500);
@@ -297,7 +297,12 @@ test('PROPERTY: with no mix rows, every number equals the pre-feature value', ()
     // PROPERTY test checks against its legacyNet.
     const old = legacyNet({ line: LINE, others, available });
     assert.equal(legacy.net, old, `net disagreed at available=${available}`);
-    assert.equal(legacy.short, Math.max(0, -old), `short disagreed at available=${available}`);
+    // `short` is capped at this line's own open need now — the pre-feature
+    // formula was −net, which on a bare shelf told a job needing 4,000 to buy
+    // 30,000, the whole board's demand including the two other jobs'. `net` is
+    // still byte-identical, which is what this property is really guarding.
+    assert.equal(legacy.short, Math.min(openNeed(LINE, []), Math.max(0, -old)),
+      `short disagreed at available=${available}`);
     assert.equal(mixBalance({ required: 4000, rows: [] }).active, false);
   }
 });

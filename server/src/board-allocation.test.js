@@ -97,7 +97,15 @@ test('PROPERTY: with no allocations, the new engine equals the old formula', () 
       const fresh = linePosition({ line: me, others, available, allocations: [] });
       const old = legacyNet({ lineId: me.id, lines: LINES, available });
       assert.equal(fresh.net, old, `net disagreed for line ${me.id} at available=${available}`);
-      assert.equal(fresh.short, Math.max(0, -old), `short disagreed for line ${me.id} at available=${available}`);
+      // `net` still reduces to the old formula exactly. `short` deliberately no
+      // longer does: the old one was −net, which handed this line every other
+      // line's unmet need to buy. It is now capped at this line's own open
+      // need, so the two agree on every board that is not over-committed and
+      // differ only where the old answer was a double purchase.
+      const capped = Math.min(openNeed(me, []), Math.max(0, -old));
+      assert.equal(fresh.short, capped, `short disagreed for line ${me.id} at available=${available}`);
+      assert.ok(fresh.short <= openNeed(me, []),
+        `line ${me.id} was asked to buy more than it needs at available=${available}`);
     }
   }
 });
@@ -384,7 +392,11 @@ test('gangPosition: partial cover leaves only the balance short', () => {
     needed: 10000, committedOther: 2000, available: 1000, memberIds: [1, 2], materialId: 238,
     allocations: [{ order_line_id: 2, qty: 4000, source: 'requisition', status: 'active', material_id: 238 }],
   });
-  assert.equal(p.short, 7000);
+  // The balance, and only the balance: 10,000 needed less the 4,000 already on
+  // order. The 1,000 on the shelf is spoken for twice over by other jobs, so
+  // none of it is free to this run — but their 1,000 overhang is their PR to
+  // raise, not this run's. It read 7,000 until the cap went in.
+  assert.equal(p.short, 6000);
 });
 
 test('gangPosition: with nothing allocated it reduces to the old formula', () => {
@@ -1046,4 +1058,47 @@ test('A2: a partial bite into a hold is still a bite', () => {
   }));
   assert.equal(plan.ok, false);
   assert.equal(plan.refusal.frozen_qty, 120, 'the refusal reports the FROZEN part, not the whole move');
+});
+
+// ── A job's still-to-buy is capped at its OWN open need ─────────────────────
+//
+// The same rule as boardPositionView's `short`, and for the same reason. These
+// three figures are not display: linePosition.short is the Planning engine's PR
+// quantity and gangPosition.short is written straight into the gang's
+// requisition by POST /gang-runs/:id/raise-pr. A job that is charged with a
+// NEIGHBOUR's unmet need buys that neighbour's board a second time, and the
+// neighbour's own PR is still sitting in the register waiting to be ordered.
+//
+// GLYCOMET, 17 Aug 2026: line 490 (2,038 parent sheets) was offered 4,513 —
+// its own 2,038 plus line 487's 2,475, which CI-PR-0066 was already buying.
+test('linePosition: an over-committed board does not make this job buy the overage', () => {
+  const me = { id: 490, parent_sheets_required: 2038 };
+  const neighbour = { id: 487, parent_sheets_required: 2475 };
+  const p = linePosition({ line: me, others: [neighbour], available: 0, allocations: [] });
+  assert.equal(p.others_open_need, 2475, 'the neighbour really is unbought');
+  assert.equal(p.net, -4513, 'and the board really is 4,513 short — net says so');
+  assert.equal(p.short, 2038, 'but THIS job buys only its own 2,038');
+});
+
+test('linePosition: the cap is the open need, so a drawn or covered job asks for nothing', () => {
+  const me = { id: 490, parent_sheets_required: 2038, board_drawn: true };
+  const neighbour = { id: 487, parent_sheets_required: 2475 };
+  const p = linePosition({ line: me, others: [neighbour], available: 0, allocations: [] });
+  assert.equal(p.short, 0, 'nothing outstanding — the neighbour raises its own PR');
+});
+
+// A gang buys as one, so its cap is the RUN's requirement. Three ganged jobs of
+// 5,000 ask for 15,000 even when the shelf is bare and other work on the board
+// is unbought — which is the shape Anik reported as 15,000 becoming 30,000.
+test('gangPosition: a run buys its own requirement, never the board\'s', () => {
+  const p = gangPosition({ needed: 15000, committedOther: 15000, available: 0, memberIds: [1, 2, 3] });
+  assert.equal(p.short, 15000, 'the run needs 15,000 and buys 15,000');
+});
+
+test('gangPosition: its own incoming still nets off, and a contested shelf still counts', () => {
+  const covered = gangPosition({ needed: 15000, committedOther: 15000, available: 0, memberIds: [1, 2, 3],
+    allocations: [{ order_line_id: 1, qty: 15000, source: 'requisition', status: 'active' }] });
+  assert.equal(covered.short, 0, 'the run already has its board on order');
+  const contested = gangPosition({ needed: 5000, committedOther: 3000, available: 6000, memberIds: [1] });
+  assert.equal(contested.short, 2000, '3,000 of the 6,000 belongs to someone else');
 });

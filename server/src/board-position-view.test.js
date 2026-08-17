@@ -50,7 +50,13 @@ test('free − this plan = net after plan, for any world', () => {
       'free is the clamped view of available − committed');
     assert.equal(p.net, (p.available - p.committed) - w.need,
       `net must be free − this plan for ${JSON.stringify(w)}`);
-    assert.equal(p.short, Math.max(0, -p.net));
+    // short is NOT −net. net is measured off the unclamped free so the tile can
+    // show an over-committed board as over-committed; short is what this job
+    // BUYS, and it is capped at its own requirement. The two only diverge once
+    // other jobs have claimed more than the shelf holds — and there, −net is
+    // their shortfall, not this plan's.
+    assert.equal(p.short, Math.max(0, w.need - p.free));
+    assert.ok(p.short <= w.need, `no job is short of more than it needs: ${JSON.stringify(w)}`);
   }
 });
 
@@ -103,7 +109,10 @@ test('an over-committed board keeps its sign instead of flooring at zero', () =>
   const p = boardPositionView({ available: 100, committedOpen: 0, held: 900, heldForMe: 0, need: 50 });
   assert.equal(p.free, 0, 'the tile never shows negative free');
   assert.equal(p.net, -850, 'but net still carries the whole hole: 100 − 900 − 50');
-  assert.equal(p.short, 850);
+  // …and the hole is not this job's to buy. 800 of it is other jobs holding
+  // board that is not on the shelf; they answer for that. This plan needs 50,
+  // has nothing free to it, and buys 50.
+  assert.equal(p.short, 50, 'it buys its own 50, not the 850-sheet hole');
 });
 
 // ACEBROBID's own view. It chose "Fresh PR — leave stock free", so the shelf is
@@ -232,4 +241,51 @@ test('once cutting has drawn the board nothing is outstanding', () => {
   const f = boardPositionView({ available: 41, committedOpen: 0, held: 0, heldForMe: 0,
     need: 0, fresh: true, drawn: true, planParent: 8959 });
   assert.equal(f.short, 0, 'a drawn fresh-PR plan has nothing left to buy either');
+});
+
+// ── A job may never be asked to buy another job's shortfall ─────────────────
+//
+// GLYCOMET, 17 Aug 2026. Saffire · 290 GSM · 26x30, nothing on the shelf.
+// Line 487 wants 2,475 parent sheets and CI-PR-0066 is already buying them —
+// but that PR wrote no incoming row (it was raised seconds before the plan that
+// moved the job onto this board), so line 487 still reads as 2,475 unbought.
+//
+// Line 490 is then planned for 2,038 of the same board and the engine offered
+// 4,513 = 2,038 + 2,475. The buyer took it, and CI-VPO-0035 went out carrying
+// line 487's board TWICE.
+//
+// `net` is right to go negative — the board really is over-committed and the
+// tile must say so. `short` is a different question: it is what THIS job puts
+// on a purchase order, and no job can be short of more than it needs.
+test('short never exceeds this job\'s own requirement, however over-committed the board', () => {
+  const p = boardPositionView({
+    available: 0,
+    committedOpen: 2475,   // line 487's open need — its PR is invisible
+    held: 0, heldForMe: 0,
+    need: 2038,            // line 490's own cut plan
+  });
+  assert.equal(p.short, 2038, 'this job buys ITS 2,038 — the other job raises its own PR');
+  assert.equal(p.net, -4513, 'the NET tile still tells the truth about the board');
+  assert.equal(p.committed, 2475);
+  assert.equal(p.free, 0);
+});
+
+// Three jobs, 5,000 each, empty shelf — the shape Anik reported. Whatever order
+// they are planned in, and even with every sibling PR invisible, the three
+// requisitions can only ever add up to what the three jobs need.
+test('three equal jobs on a bare shelf ask for their own need, never the pile', () => {
+  const need = 5000;
+  const asks = [10000, 5000, 0].map(committedOpen =>
+    boardPositionView({ available: 0, committedOpen, held: 0, heldForMe: 0, need }).short);
+  assert.deepEqual(asks, [5000, 5000, 5000]);
+  assert.equal(asks.reduce((a, b) => a + b), 15000, 'three 5,000 jobs buy 15,000 — not 30,000');
+});
+
+// The clamp must not touch the ordinary contested shelf: stock that is genuinely
+// spoken for by someone else is not available to this job, and it still buys the
+// difference. Only the part that is other jobs' UNMET need falls away.
+test('a contested but not over-committed shelf still charges this job the difference', () => {
+  const p = boardPositionView({ available: 8000, committedOpen: 5000, held: 0, heldForMe: 0, need: 5000 });
+  assert.equal(p.free, 3000);
+  assert.equal(p.short, 2000, '5,000 needed, 3,000 genuinely free to it');
 });
