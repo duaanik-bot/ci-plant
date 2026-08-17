@@ -12,7 +12,7 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, odDays, odExport, odTone, OverdueDays, PageHeader, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Layers } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Layers, SlidersHorizontal } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
@@ -22,6 +22,7 @@ import { FilterChip, FilterGroup } from '../components/FilterChip.jsx';
 // The customer axis — identical here and on Planning, Artwork and Job Cards, so
 // one company is one colour wherever a planner meets it.
 import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
+import { WipFilterGroup } from '../components/WipFilter.jsx';
 import { CustomerDot } from '../components/CustomerDot.jsx';
 import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
 import { customerInitials } from '../lib/customerCode.js';
@@ -617,6 +618,16 @@ export default function PrintPlanning() {
   const [bandSel, setBandSel] = useState(() => new Set());
   const colourFilters = { colour: colourSel, process: processSel, band: bandSel };
   const anyColourFilter = colourSel.size > 0 || processSel.size > 0 || bandSel.size > 0;
+  // The ink block folds behind a disclosure on the board rail — see its own
+  // comment there. Opens automatically for a planner who arrives with ink
+  // already filtering (a filter set, then the view switched and switched back),
+  // so the chips doing the narrowing are never a click away from being seen.
+  const [inkOpen, setInkOpen] = useState(anyColourFilter);
+  // How many of the three folded axes are narrowing, and which — the disclosure
+  // has to be able to say so while the chips themselves are hidden.
+  const inkActiveCount = colourSel.size + processSel.size + bandSel.size;
+  const activeInkNames = [...colourSel, ...processSel,
+    ...(bandSel.size ? [`${[...bandSel].join(' / ')} colours`] : [])];
   const clearColourFilters = () => { setColourSel(new Set()); setProcessSel(new Set()); setBandSel(new Set()); };
   // ONE name for "the board is showing a subset". Reordering, dragging and the
   // queue-position numbers all key off this: a drag inside a filtered lane
@@ -1509,18 +1520,17 @@ export default function PrintPlanning() {
         )}
         {tab === 'board' && (
           // The only chip here about URGENCY rather than about what the job is,
-          // and the one chip that keeps the system blue — which now appears
-          // exactly twice on this rail, here and on Reset, both meaning "a
-          // control you switched on". It sits before the ink block rather than
-          // after it so the rail breaks into two even rows: the three axes that
-          // describe the JOB, then the three that describe its INK (that block
-          // is its own flex container and always wraps whole).
-          <FilterGroup label="Urgency">
-            <FilterChip label="Customer WIP" icon={Zap} count={cards.filter(c => c.wip).length} on={wipOnly}
-              tone="border-[#0A84FF]/30 bg-[#0A84FF] text-white" countTone="bg-white/25"
-              title="Only job CARDS carrying a Customer WIP line — composes with the board chips and searches. A third unit again: the Status Sheet counts WIP lines (its whole cumulative list), Planning counts WIP jobs in the planning queue, and this counts the cards already on the board, so all three numbers legitimately differ."
-              onClick={() => { setWipOnly(w => !w); clearSel(); }} />
-          </FilterGroup>
+          // and the one chip that keeps the system blue. It sits before the ink
+          // block rather than after it so the rail breaks into even rows: the
+          // axes that describe the JOB, then the ones that describe its INK
+          // (that block is its own flex container and always wraps whole).
+          //
+          // Now the shared group, so the artwork queue and the job-card register
+          // filter urgency with the identical control — WipFilter.jsx carries
+          // the reason the blue is spent here and nowhere else.
+          <WipFilterGroup count={cards.filter(c => c.wip).length} on={wipOnly}
+            scope="across the board" unit="card"
+            onToggle={() => { setWipOnly(w => !w); clearSel(); }} />
         )}
         {tab === 'board' && (
           // WHOSE job it is — next to Urgency because Customer WIP asks about
@@ -1536,11 +1546,47 @@ export default function PrintPlanning() {
             note="Composes with the board cards, the zones and the ink chips"
             onToggle={id => { setCustomerFilters(f => toggleCustomer(f, id)); clearSel(); }} />
         )}
+        {/* ── INK, BEHIND A DISCLOSURE ────────────────────────────────────────
+            Eight axes on one rail is a paint chart even after every one of them
+            got a caption: Board, Set Type, Only, Urgency and Customer describe
+            WHICH JOB, and the eye triages on those. Ink, Process and Colours
+            describe how it PRINTS — three more axes and eleven more chips,
+            asked for far less often, and between them they were most of why
+            this rail wrapped onto three rows.
+
+            So they fold. The four triage axes stay always-visible and the ink
+            block opens on demand, which puts the ordinary board back on one or
+            two rows without taking a single control away.
+
+            THE TOGGLE LIGHTS WHEN THE FOLDED AXES ARE FILTERING, and carries
+            their count. That is the whole safety of this: a filter that
+            narrows the board while invisible is the bug this page has already
+            shipped once — a chip left lit somewhere it is no longer offered
+            empties the register with nothing on screen to explain it. Collapsed
+            and active, the control is blue, counts the active axes and names
+            them on hover; Reset still clears them with everything else. */}
         {tab === 'board' && (
+          <FilterGroup label="Ink">
+            <FilterChip label={inkOpen ? 'Hide' : 'Filters'} icon={inkOpen ? ChevronUp : SlidersHorizontal}
+              count={inkActiveCount || null} on={inkOpen || inkActiveCount > 0}
+              tone={inkActiveCount > 0
+                ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white'
+                : undefined}
+              countTone={inkActiveCount > 0 ? 'bg-white/25' : undefined}
+              title={inkActiveCount > 0
+                ? `Narrowed by ${activeInkNames.join(', ')} — ${inkOpen ? 'the chips are below' : 'click to show the chips, or Reset filters to clear them'}.`
+                : 'Ink, process and colour-count filters — the same three axes the printing station queue uses.'}
+              onClick={() => setInkOpen(v => !v)} />
+          </FilterGroup>
+        )}
+        {tab === 'board' && inkOpen && (
           // Ink filters — the same rail the printing station queue uses, so a
           // planner and a press operator narrow the same way. Selecting also
           // clears the triage selection: a bulk send must never carry rows the
           // filter has just hidden from the eye.
+          //
+          // Its own flex container, so it always wraps as one whole block onto
+          // the row the disclosure opens.
           <PrintColourFilterRail
             colour={colourSel} setColour={s => { setColourSel(s); clearSel(); }}
             process={processSel} setProcess={s => { setProcessSel(s); clearSel(); }}

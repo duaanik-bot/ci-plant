@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -18,6 +18,8 @@ import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.js
 import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
 import { CustomerDot } from '../components/CustomerDot.jsx';
 import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
+// Customer WIP — the same chip, badge and blue the press board uses.
+import { WipFilterGroup, rowIsWip } from '../components/WipFilter.jsx';
 // Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
          colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
@@ -328,11 +330,15 @@ export default function Artwork() {
   // names: the id is what the colour is keyed on and what survives the day
   // somebody corrects a misspelled company.
   const [customerFilters, setCustomerFilters] = useState([]); // customer_ids; empty = all
-  // All three chip rails plus the table's own search box. The tab stays put.
+  // Customer WIP — the designer's version of the question the press board already
+  // answers: of everything waiting on artwork, which is the customer chasing?
+  const [wipOnly, setWipOnly] = useState(false);
+  // All the chip rails plus the table's own search box. The tab stays put.
   const filters = useFilterReset([
     [boardFilters, setBoardFilters, [], 'board'],
     [plateFilters, setPlateFilters, [], 'plate'],
     [customerFilters, setCustomerFilters, [], 'customer'],
+    [wipOnly, setWipOnly, false, 'Customer WIP'],
   ], () => setSelectedIds([]));
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
@@ -402,7 +408,12 @@ export default function Artwork() {
   // A gang can span companies, so it answers to each of their chips; the shared
   // rules and their guards live in lib/customerChips.js.
   const customerChips = customerChipsFrom(boardRows, customerMembers);
-  const rows = filterByCustomers(boardRows, customerFilters, customerChips, customerMembers);
+  const custRows = filterByCustomers(boardRows, customerFilters, customerChips, customerMembers);
+  // Counted on what the rails above have left, like every other count on this
+  // page, and BEFORE this chip narrows anything — so it says how many of the
+  // rows in front of the designer it would keep.
+  const wipCount = custRows.filter(rowIsWip).length;
+  const rows = wipOnly && wipCount ? custRows.filter(rowIsWip) : custRows;
   const togglePlateFilter = key => {
     setPlateFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
     clearSelection();
@@ -599,6 +610,10 @@ export default function Artwork() {
         <CustomerFilterGroup chips={customerChips} selected={customerFilters}
           scope="in this tab" note="Composes with the plate and board chips and the search"
           onToggle={id => { setCustomerFilters(f => toggleCustomer(f, id)); clearSelection(); }} />
+        {/* Last, and the only chip here about URGENCY rather than about the job —
+            the same position and the same blue it has on the press board. */}
+        <WipFilterGroup count={wipCount} on={wipOnly} scope="in this tab"
+          onToggle={() => { setWipOnly(v => !v); clearSelection(); }} />
         {/* On the rail's own line now, like every other page — it used to take a
             whole right-aligned row of its own below the two chip rows. */}
         <ResetFilters filters={filters} className="ml-auto" />
@@ -638,6 +653,10 @@ export default function Artwork() {
                     <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>
                       {l.run_kind === 'merge' ? `${l._gang.length} orders · one pile` : `${l._gang.length} cartons · one run`}
                     </div>
+                    {/* A run is chased when ANY carton on it is — the sheet prints
+                        together, so one urgent member makes the whole run urgent.
+                        Same rule as the planning queue and as JC_VIEW's own wip. */}
+                    {l._gang.some(m => m.wip) && <div className="mt-0.5"><WipChip on /></div>}
                   </div>
                 );
               })()
@@ -647,6 +666,7 @@ export default function Artwork() {
                 <CustomerDot id={l.customer_id} />{l.customer_name}
               </div>
               <div className="mt-0.5 text-xs text-gray-500">PO {l.po_number}</div>
+              {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
             </div>) },
           // PO Date and OD — the same pair, and the same vocabulary, as the
           // Planning board. Artwork carries no delivery date at all, so before

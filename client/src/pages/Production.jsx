@@ -21,6 +21,7 @@ import { FilterRail } from '../components/FilterChip.jsx';
 import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
 import { CustomerDot } from '../components/CustomerDot.jsx';
 import { customerChipsFrom, filterByCustomers, showCustomerChips, toggleCustomer } from '../lib/customerChips.js';
+import { WipFilterGroup } from '../components/WipFilter.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import PlateStatus from '../components/PlateStatus.jsx';
@@ -182,10 +183,14 @@ export default function Production() {
   // names: one customer is on the books misspelled with a trailing space, and a
   // name-keyed filter would break the day somebody corrects it.
   const [customerFilters, setCustomerFilters] = useState([]); // customer_ids; empty = all
+  // Customer WIP — JC_VIEW already stamps it (a run is WIP when any member line
+  // is), the register already wears the badge, and only the filter was missing.
+  const [wipOnly, setWipOnly] = useState(false);
   // `sort` re-orders and never hides, so it is not part of the reset.
   const filters = useFilterReset([
     [q, setQ, '', 'search'],
     [customerFilters, setCustomerFilters, [], 'customer'],
+    [wipOnly, setWipOnly, false, 'Customer WIP'],
   ]);
   // Timeline — which days of the register to show, by planned date. Opens on
   // 'all': the tab a planner lands on is his whole queue, and a date filter he
@@ -303,6 +308,10 @@ export default function Production() {
   const customerMembers = j => (j.gang_parent ? j.gang_members : null);
   const customerChips = customerChipsFrom(inWindow, customerMembers);
   const inCustomer = filterByCustomers(inWindow, customerFilters, customerChips, customerMembers);
+  // Counted on what the customer chips have left and before this one narrows
+  // anything, so each chip on the rail says what IT would keep.
+  const wipCount = inCustomer.filter(j => j.wip).length;
+  const inWip = wipOnly && wipCount ? inCustomer.filter(j => j.wip) : inCustomer;
   // Deep row search, so a job is findable by any value on it — JC, product,
   // customer, PO, board size ("2038"), stage — and a gang parent by any of its
   // member products.
@@ -310,7 +319,7 @@ export default function Production() {
   // only ever rearranges what those already decided to show — no count moves.
   // A card with no PO date sorts to the back of either PO ordering rather than
   // to the top: an undated card is not the oldest thing on the board.
-  const listed = inCustomer
+  const listed = inWip
     .filter(j => rowMatches(j, q, (j.gang_members || []).map(productSearchText).join(' ')));
   const shown = sort === 'newest' ? listed : [...listed].sort((a, b) => {
     const x = poAgeOf(a), y = poAgeOf(b);
@@ -745,12 +754,18 @@ export default function Production() {
           The RAIL is gated too, not just the group inside it: an empty FilterRail
           is still a div carrying mb-3, which would open 12px of dead space under
           the timeline on exactly the boards that have no chips to show. */}
-      {showCustomerChips(customerChips) && (
+      {(showCustomerChips(customerChips) || wipCount > 0 || wipOnly) && (
         <FilterRail className="mb-3">
           <CustomerFilterGroup chips={customerChips} selected={customerFilters} divider={false}
             scope="in this tab and window" unit="card"
             note="Composes with the tab, the timeline and the search"
             onToggle={id => setCustomerFilters(f => toggleCustomer(f, id))} />
+          {/* Urgency last, as on the artwork queue and the press board. Takes
+              the rail's first hairline when it is the only group on it. */}
+          <WipFilterGroup count={wipCount} on={wipOnly} unit="card"
+            divider={showCustomerChips(customerChips)}
+            scope="in this tab and window"
+            onToggle={() => setWipOnly(v => !v)} />
         </FilterRail>
       )}
 
