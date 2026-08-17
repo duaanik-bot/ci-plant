@@ -8,7 +8,7 @@ import { api, auth, fmt } from '../api.js';
 import { lineAmount, lineTaxable, poTotals } from '../lib/poTotals.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS, PLATE_SET_ASIDE_REASONS } from '../lib/plateRack.js';
+import { masterOutputSync, plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_REASONS, PLATE_SET_ASIDE_REASONS } from '../lib/plateRack.js';
 
 // The movement actions a set-aside writes, and therefore the only ones Undo may
 // offer. Derived from the same table the picker offers and the server keys on,
@@ -17,7 +17,7 @@ const UNDOABLE_SET_ASIDE_ACTIONS = PLATE_SET_ASIDE_REASONS.map(row => row.action
 import { resolvePlateRate } from '../lib/plateRates.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
-  KpiCard, Modal, PageHeader, SearchableSelect, Select, SelectionDock, SubTabs, Tabs,
+  KpiCard, Modal, PageHeader, SearchableSelect, searchText, Select, SelectionDock, SubTabs, Tabs,
   Textarea, useToast,
 } from './ui.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
@@ -664,10 +664,17 @@ function QuantityControl({ row, onChange, disabled = false }) {
 
 // ── Add plates already in the plant ───────────────────────────────────────
 // Stock that never came through a PR/PO/GRN: opening stock, a set cut outside the
-// system, plates found on a shelf. The form asks for ONE identifier — the output
-// number the plant already calls the job by — and reads the rest out of Product
-// Master and Planning. Typing the product name again is how the rack ends up
-// holding a plate filed against a carton nobody can find.
+// system, plates found on a shelf.
+//
+// TWO WAYS IN, and the second is not a fallback. The output number is how the
+// plant names a job and is the fast key — but it is NOT a gate: plenty of cartons
+// have no number on the master yet, and the number is exactly the thing nobody
+// remembers for old stock. Making it mandatory turned a two-second entry into a
+// dead end. Either key resolves the SAME context, so neither can drift.
+//
+// Whatever is known gets written back through Sync Master?, the plant's existing
+// fork for output_number (Artwork form, Planning). That is what stops this screen
+// from being a place where the plant's knowledge goes to die.
 function rackEntryRows(components = []) {
   const byType = new Map(components.filter(row => row.component_type !== 'pantone')
     .map(row => [row.component_type, row]));
@@ -689,13 +696,23 @@ const RACK_CHOICES = [
 
 function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
   const toast = useToast();
+  const [mode, setMode] = useState('output');
   const [number, setNumber] = useState('');
+  const [productId, setProductId] = useState('');
+  const [products, setProducts] = useState([]);
   const [looking, setLooking] = useState(false);
   const [lookup, setLookup] = useState(null);
   const [match, setMatch] = useState(null);
   const [form, setForm] = useState(null);
   const [newPantone, setNewPantone] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Only when the product door is opened — most entries never need the list, and
+  // it is 1,600 rows.
+  useEffect(() => {
+    if (mode !== 'product' || products.length) return;
+    api.get('/plates/entry-products').then(setProducts).catch(() => {});
+  }, [mode, products.length]);
 
   const choose = picked => {
     setMatch(picked);
@@ -704,10 +721,18 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
       condition: 'Good',
       plate_master_id: masters.find(row => row.plate_size === picked.plate_size)?.id || '',
       artwork_version: picked.artwork_version || '',
+      // Editable in the form, wherever it came from. Entering by product with the
+      // number in hand is the whole reason Sync Master? has anything to offer.
+      output_number: picked.output_number || '',
+      update_master: masterOutputSync({
+        typed: picked.output_number, master: picked.master_output_number,
+      }).suggested,
       remarks: '',
       components: rackEntryRows(picked.components),
     });
   };
+
+  const clear = () => { setMatch(null); setForm(null); setLookup(null); };
 
   // Editing the number throws away what the last one resolved to. Without this the
   // panel keeps naming the OLD carton under a number that has been changed, and
@@ -716,21 +741,34 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
   // the thing being read to decide this is the right job.
   const retype = value => {
     setNumber(value);
-    if (value.trim() !== (match?.output_number || '')) { setMatch(null); setForm(null); setLookup(null); }
+    if (value.trim() !== (match?.output_number || '')) clear();
   };
 
-  const find = async () => {
-    const wanted = number.trim();
-    if (!wanted) return;
+  const swapMode = next => { setMode(next); setNumber(''); setProductId(''); clear(); };
+
+  const find = async (query = `output_number=${encodeURIComponent(number.trim())}`) => {
     setLooking(true); setMatch(null); setForm(null);
     try {
-      const result = await api.get(`/plates/output-number/${encodeURIComponent(wanted)}`);
+      const result = await api.get(`/plates/entry-context?${query}`);
       setLookup(result);
       // One match is not a choice — fill the form and let them get on with it.
       if (result.matches.length === 1) choose(result.matches[0]);
-    } catch (error) { toast.error(error.message || 'That output number could not be looked up'); }
+    } catch (error) { toast.error(error.message || 'That job could not be looked up'); }
     finally { setLooking(false); }
   };
+
+  const pickProduct = value => {
+    setProductId(value);
+    clear();
+    if (value) find(`product_id=${encodeURIComponent(value)}`);
+  };
+
+  // The Sync Master? state, asked of the number as it stands in the form, using
+  // the SAME rule the route re-asks before writing (lib/plateRack.js). This only
+  // decides what to OFFER — the server never trusts the flag alone.
+  const typedNumber = (form?.output_number || '').trim();
+  const heldNumber = (match?.master_output_number || '').trim();
+  const sync = masterOutputSync({ typed: typedNumber, master: heldNumber });
 
   const rack = RACK_CHOICES.find(row => row.key === form?.rack) || RACK_CHOICES[0];
   const total = (form?.components || []).reduce((sum, row) => sum + Math.max(0, Number(row.qty) || 0), 0);
@@ -755,14 +793,16 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
       const result = await api.post('/plates/warehouse/assets', {
         product_id: match.product_id,
         plate_master_id: Number(form.plate_master_id),
-        output_number: match.output_number,
+        output_number: typedNumber,
         rack: form.rack,
         condition: form.condition,
         artwork_version: form.artwork_version,
         remarks: form.remarks,
+        update_master: Boolean(form.update_master),
         components: form.components.filter(row => Number(row.qty) > 0),
       });
-      toast.success(`${result.count} plate(s) added to ${result.rack_location}`);
+      toast.success(`${result.count} plate(s) added to ${result.rack_location}`
+        + (result.master_synced ? ` · master output number set to ${result.master_synced.to}` : ''));
       await onSaved();
       onClose();
     } catch (error) { toast.error(error.message || 'The plates could not be added'); }
@@ -777,17 +817,43 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
       </Button>
     </>}>
     <div className="space-y-4">
-      <Field label="Output number" required
-        hint="The number the plant calls this job by. Product, customer, artwork and colours are read from Product Master and Planning.">
-        <div className="flex gap-2">
-          <Input value={number} autoFocus placeholder="e.g. 18604"
-            onChange={event => retype(event.target.value)}
-            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); find(); } }} />
-          <Button type="button" variant="secondary" disabled={!number.trim() || looking} onClick={find}>
-            {looking ? 'Looking…' : 'Find'}
-          </Button>
-        </div>
-      </Field>
+      {/* Two doors, said plainly. The output number leads because it is how the
+          plant names a job — but it is a choice, not a gate: a carton whose master
+          has no number yet is entered by name and tells the master afterwards. */}
+      <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+        {[{ key: 'output', label: 'By output number' }, { key: 'product', label: 'By product' }].map(option => {
+          const on = mode === option.key;
+          return <button key={option.key} type="button" onClick={() => swapMode(option.key)}
+            className={`flex-1 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+            {option.label}
+          </button>;
+        })}
+      </div>
+
+      {mode === 'output' ? (
+        <Field label="Output number" required
+          hint="Product, customer, artwork and colours are read from Product Master and Planning.">
+          <div className="flex gap-2">
+            <Input value={number} autoFocus placeholder="e.g. 18604"
+              onChange={event => retype(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); find(); } }} />
+            <Button type="button" variant="secondary" disabled={!number.trim() || looking} onClick={() => find()}>
+              {looking ? 'Looking…' : 'Find'}
+            </Button>
+          </div>
+        </Field>
+      ) : (
+        <Field label="Product" required
+          hint="Search by carton name, internal code or the customer's item code.">
+          <SearchableSelect value={productId} onChange={event => pickProduct(event.target.value)}
+            placeholder={products.length ? 'Search the Carton Product Master…' : 'Loading products…'}
+            options={products.map(row => ({
+              value: String(row.id),
+              label: `${row.name}${row.output_number ? ` · ${row.output_number}` : ''}`,
+              search: searchText(row, `${row.code} ${row.name} ${row.party_item_code || ''} ${row.customer_name} ${row.output_number || ''}`),
+            }))} />
+        </Field>
+      )}
 
       {/* A gang number names a SHEET of several cartons, so there is no one product
           to file the plates against. Said plainly, with the run number, rather than
@@ -798,9 +864,12 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
           Plates for a gang are received against that run's own Plate PR.</span>
       </div>}
 
-      {lookup && !lookup.matches.length && !lookup.gang_runs.length && <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+      {/* A miss is no longer a dead end — the other door is right there, and the
+          product it finds can be given this very number on the way through. */}
+      {lookup && !lookup.matches.length && !lookup.gang_runs.length && <div className="flex flex-wrap items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-        <span>No active product carries output number {lookup.output_number}, in Product Master or on a planned order line. Check the number, or set it on the product's master first.</span>
+        <span className="min-w-0 flex-1">No active product carries output number {lookup.output_number}, in Product Master or on a planned order line.</span>
+        <Button size="sm" variant="secondary" onClick={() => swapMode('product')}>Find it by product</Button>
       </div>}
 
       {/* output_number is plain text on the master — nothing stops two cartons
@@ -825,7 +894,12 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
         <section className="ci-form-panel">
           <div className="ci-form-panel-title">
             <span>{match.product_name}</span>
-            <span>{match.source === 'planning' ? 'Number from a planned order line' : 'Number from Product Master'}</span>
+            {/* Three states, not two. Entering by product with a blank master, the
+                old "Number from Product Master" was a caption on a number that did
+                not exist — it read as confirmation that the master had one. */}
+            <span>{match.source === 'planning' ? 'Number from a planned order line'
+              : match.source === 'master' ? 'Number from Product Master'
+              : heldNumber ? 'Found by product' : 'Found by product · no output number on file'}</span>
           </div>
           <div className="grid gap-3 py-1 text-xs text-slate-600 sm:grid-cols-3">
             <span><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Customer</span>{match.customer_name}</span>
@@ -866,7 +940,45 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
             <Input value={form.artwork_version}
               onChange={event => setForm(current => ({ ...current, artwork_version: event.target.value }))} />
           </Field>
+          {/* Editable whichever door was used. Entered by product, this is where
+              the number the plant knows finally gets written down. */}
+          <Field label="Output number"
+            hint={heldNumber ? `Product Master says ${heldNumber}` : 'Nothing on the master yet'}>
+            {/* The tick follows the CURRENT proposal: type a number into a blank
+                master and syncing is suggested again, because it is a new offer. */}
+            <Input value={form.output_number} placeholder="Not known"
+              onChange={event => setForm(current => ({
+                ...current,
+                output_number: event.target.value,
+                update_master: masterOutputSync({ typed: event.target.value, master: heldNumber }).suggested,
+              }))} />
+          </Field>
         </div>
+
+        {/* ── Sync Master? — the plant's existing fork for output_number ──────
+            Filling a blank leads and is ticked: the master is incomplete and the
+            plant is telling it the answer. Replacing a number the master already
+            holds is a disagreement about which is right, so it arrives UNTICKED
+            and prints both — a typo here would otherwise rename the number every
+            future job for this carton prints under. */}
+        {sync.offer && <section className={`rounded-lg border px-3 py-2.5 ${sync.state === 'conflict' ? 'border-amber-200 bg-amber-50' : 'border-brand-200 bg-brand-50'}`}>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600"
+              checked={Boolean(form.update_master)}
+              onChange={event => setForm(current => ({ ...current, update_master: event.target.checked }))} />
+            <span className="min-w-0 text-xs">
+              <b className={sync.state === 'conflict' ? 'text-amber-900' : 'text-brand-900'}>Sync Master?</b>
+              <span className={`ml-1.5 font-semibold ${sync.state === 'conflict' ? 'text-amber-800' : 'text-brand-800'}`}>
+                {sync.state === 'conflict'
+                  ? <>Change {match.product_code}'s output number from <b className="line-through">{sync.from}</b> to <b>{sync.to}</b> on the Carton Product Master?</>
+                  : <>{match.product_code} has no output number on its master. Save <b>{sync.to}</b> to it.</>}
+              </span>
+              <span className="mt-0.5 block text-[11px] font-medium text-slate-500">
+                Left unticked, the number still goes on these plates — the master keeps what it has.
+              </span>
+            </span>
+          </label>
+        </section>}
 
         <section className="ci-form-panel">
           <div className="ci-form-panel-title">

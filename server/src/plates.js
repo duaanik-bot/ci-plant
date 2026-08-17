@@ -1,5 +1,5 @@
 import { derivedCounts } from './print-colour.js';
-import { PLATE_SET_ASIDE_REASONS } from '../../client/src/lib/plateRack.js';
+import { masterOutputSync, PLATE_SET_ASIDE_REASONS } from '../../client/src/lib/plateRack.js';
 
 const PROCESS_COMPONENTS = [
   ['cyan', 'Cyan'],

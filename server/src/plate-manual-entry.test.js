@@ -1,10 +1,14 @@
-// Adding plates the plant already owns, by OUTPUT NUMBER.
+// Adding plates the plant already owns — by output number OR by product.
 //
 // The form asks for one identifier and reads the rest — product, customer,
 // artwork revision, colour build — out of Product Master and Planning. Everything
-// tested here protects that: the number resolving to the wrong thing, or to
-// nothing quietly, is how a plate ends up on the rack filed against a carton no
+// tested here protects that: the key resolving to the wrong thing, or to nothing
+// quietly, is how a plate ends up on the rack filed against a carton no
 // requirement will ever match.
+//
+// The output number is a KEY, never a gate. Whatever the plant knows on the way
+// through goes back to the master under the Sync Master? fork — filling a blank
+// is suggested, overwriting an existing number never is.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -12,6 +16,7 @@ import {
   MANUAL_PLATE_RACKS, manualPlateEntry, manualPlateRack, suggestedPlateQuantities,
   FRESH_PLATES_RACK, USED_PLATES_RACK, expandPlateQuantities,
 } from './plates.js';
+import { masterOutputSync } from '../../client/src/lib/plateRack.js';
 
 const root = new URL('../../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
@@ -120,10 +125,70 @@ test('the suggested colours are the product master\'s own build, folded to quant
   assert.equal(twice[0].qty, 2);
 });
 
+test('the output number is a KEY, never a gate — a product resolves the same context', () => {
+  // Anik, 2026-08-17: "output becomes a hard blocker, sometimes we just want to
+  // enter the product name also". Two doors, one context builder — a second
+  // shape per door is how the product path would quietly stop suggesting
+  // colours, or start filing plates under a size the number path got right.
+  const routes = read('server/src/routes/plates.js');
+  const start = routes.indexOf("r.get('/plates/entry-context'");
+  const body = routes.slice(start, routes.indexOf("r.get('/plates/entry-products'", start));
+  assert.ok(body.length > 500, 'the entry-context route was not found — this test is asserting nothing');
+  assert.match(body, /req\.query\.output_number/, 'the number opens one door');
+  assert.match(body, /req\.query\.product_id/, 'the product opens the other');
+  // Both doors return plateEntryMatch(), so neither can drift from the other.
+  const byProduct = body.slice(body.indexOf('if (productId)'));
+  assert.match(byProduct, /plateEntryMatch\(row\)/, 'the product path must build the same match');
+  assert.match(body, /matches: matches\.map\(row => plateEntryMatch\(row, wanted\)\)/,
+    'and so must the number path');
+
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(screen, /By output number/, 'the form has to offer both doors');
+  assert.match(screen, /By product/);
+  assert.match(screen, /api\.get\('\/plates\/entry-products'\)/, 'and a product list to search');
+});
+
+test('a master with no output number is offered the one being typed', () => {
+  // Sync Master? — the plant's existing fork (db.js, PUT /orders/:id). Filling a
+  // blank and overwriting a number are different acts and default differently.
+  assert.deepEqual(masterOutputSync({ typed: '18604', master: '' }),
+    { state: 'missing', offer: true, suggested: true, from: '', to: '18604' });
+  assert.deepEqual(masterOutputSync({ typed: '18999', master: '18604' }),
+    { state: 'conflict', offer: true, suggested: false, from: '18604', to: '18999' });
+  // Nothing to say when they agree, or when no number is known at all.
+  assert.equal(masterOutputSync({ typed: '18604', master: '18604' }).offer, false);
+  assert.equal(masterOutputSync({ typed: '', master: '18604' }).offer, false);
+  assert.equal(masterOutputSync({ typed: '  ', master: '' }).offer, false);
+  // Whitespace is not a difference — it would otherwise offer to "change" 18604 to 18604.
+  assert.equal(masterOutputSync({ typed: ' 18604 ', master: '18604' }).offer, false);
+
+  // A conflict must NEVER be suggested. A typo in a warehouse form would rename
+  // the number every future job for that carton prints under.
+  assert.equal(masterOutputSync({ typed: '1', master: '18604' }).suggested, false,
+    'overwriting an existing master number is a decision, never a default');
+});
+
+test('the route re-decides the sync rather than trusting the form', () => {
+  const routes = read('server/src/routes/plates.js');
+  const start = routes.indexOf("r.post('/plates/warehouse/assets'");
+  const body = routes.slice(start, routes.indexOf("r.get('/plates/warehouse'", start));
+  assert.ok(body.length > 500, 'the add-plates route was not found — this test is asserting nothing');
+  assert.match(body, /masterOutputSync\(\{ typed: entry\.output_number, master: product\.output_number \}\)/,
+    'the state is recomputed server-side; a stale form must not overwrite a master that moved');
+  assert.match(body, /req\.body\.update_master && sync\.offer/,
+    'the flag alone is not enough — the rule has to agree there is something to sync');
+  // The master row is locked with the plates, or two entries race on it.
+  assert.match(body, /FOR UPDATE OF p/, 'the product row must be locked before it is written');
+  assert.match(body, /'master_update'/, 'a master write is audited, same action as the Artwork form');
+  // Only output_number. party_item_code and party_artwork_code are the customer's.
+  assert.doesNotMatch(body, /UPDATE products SET (party_item_code|party_artwork_code)/,
+    "the customer's own codes are never written from here");
+});
+
 test('the lookup reads the master, Planning\'s override AND names a gang run', () => {
   const routes = read('server/src/routes/plates.js');
-  const lookup = routes.slice(routes.indexOf("r.get('/plates/output-number/:number'"));
-  const body = lookup.slice(0, lookup.indexOf("r.post('/plates/warehouse/assets'"));
+  const lookup = routes.slice(routes.indexOf("r.get('/plates/entry-context'"));
+  const body = lookup.slice(0, lookup.indexOf("r.get('/plates/entry-products'"));
   assert.ok(body.length > 500, 'the lookup route body was not found — this test is asserting nothing');
   assert.match(body, /p\.output_number/, 'Product Master is where the number usually lives');
   assert.match(body, /spec_override->>'output_number'/,
@@ -149,8 +214,8 @@ test('the gang run is read by the column that exists', () => {
   assert.doesNotMatch(columns, /run_number/, 'there is no run_number to select');
 
   const routes = read('server/src/routes/plates.js');
-  const lookup = routes.slice(routes.indexOf("r.get('/plates/output-number/:number'"));
-  const body = lookup.slice(0, lookup.indexOf("r.post('/plates/warehouse/assets'"));
+  const lookup = routes.slice(routes.indexOf("r.get('/plates/entry-context'"));
+  const body = lookup.slice(0, lookup.indexOf("r.get('/plates/entry-products'"));
   assert.match(body, /SELECT gang_number/, 'the lookup must select the column that exists');
   // The screen prints what the route returns; a mismatch here is a blank run name
   // in the one message explaining why a gang number was refused.
@@ -200,7 +265,7 @@ test('the Add Plates button is wired to the modal, not just present', () => {
   assert.match(screen, /\{addingPlates && <AddPlatesModal/, 'and the modal has to be rendered');
   assert.match(screen, /api\.post\('\/plates\/warehouse\/assets'/,
     'the modal must talk to the route that writes the plates');
-  assert.match(screen, /api\.get\(`\/plates\/output-number\//,
+  assert.match(screen, /api\.get\(`\/plates\/entry-context\?/,
     'and to the lookup that fills the form');
   // Adding stock is a planner action, exactly as Retire and Issue are.
   assert.match(screen, /canManage\(\) && <Button size="sm" variant="secondary" className="ml-auto"/,

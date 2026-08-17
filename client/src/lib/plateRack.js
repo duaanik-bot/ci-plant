@@ -39,6 +39,39 @@ export const PLATE_SET_ASIDE_REASONS = [
   { key: 'other',   label: 'Other',          status: 'awaiting_verification', action: 'verification_requested' },
 ];
 
+// ── Sync Master? ──────────────────────────────────────────────────────────
+// The output number is NOT a hard gate on the Add Plates form. A plate can be
+// entered by product when nobody remembers the number, and the number can be
+// typed for a carton whose master has never carried one — which is the ordinary
+// state of a master that has not caught up with the plant.
+//
+// So the plant's existing fork applies here too: "Sync Master? / This Job Only",
+// the same one the Artwork form uses for output_number (see db.js and
+// PUT /orders/:id). output_number is OURS to write — unlike party_item_code and
+// party_artwork_code, which belong to the customer and are never rewritten.
+//
+// FILLING A BLANK AND OVERWRITING A NUMBER ARE DIFFERENT ACTS:
+//   • missing  — the master is incomplete and the plant is telling it the
+//     answer. Offered ticked.
+//   • conflict — the master already names a different number. That is a
+//     disagreement about which is right and nothing here knows, so it is
+//     offered UNTICKED and prints both. Auto-syncing this case is how a typo in
+//     a warehouse form silently renames the number every future job for that
+//     carton prints under.
+//
+// This is the only copy. server/src/plates.js imports it from here, the same
+// direction PLATE_SET_ASIDE_REASONS already travels — the route recomputes the
+// state rather than trusting the form's flag, so a stale screen cannot overwrite
+// a master that moved under it. A twin would let the button offer one thing and
+// the route do another.
+export function masterOutputSync({ typed, master } = {}) {
+  const wanted = String(typed ?? '').trim();
+  const held = String(master ?? '').trim();
+  if (!wanted || wanted === held) return { state: 'in_sync', offer: false, suggested: false };
+  if (!held) return { state: 'missing', offer: true, suggested: true, from: '', to: wanted };
+  return { state: 'conflict', offer: true, suggested: false, from: held, to: wanted };
+}
+
 const DAY = 24 * 60 * 60 * 1000;
 
 // Counted in PHYSICAL PLATES, not sets — a warehouse row is a set of four, and "4"

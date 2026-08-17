@@ -8,7 +8,8 @@ import {
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, isBareArtworkRevision,
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
-  invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
+  invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry,
+  plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf,
   suggestedPlateQuantities,
   RACK_CLAIMABLE_COMPONENT_STATUSES, rackReusePlan, releasableRackComponents,
   resolvePlateRate, resolveRackPicks,
@@ -19,6 +20,8 @@ import {
   bestPlateCandidate, createPlateComponents, issuedPlatesForStage,
   PLATE_ALREADY_CLAIMED_SQL, plateCandidates, syncPlateRequest,
 } from '../plate-lifecycle.js';
+// One home for the Sync Master? rule, shared with the form that offers it.
+import { masterOutputSync } from '../../../client/src/lib/plateRack.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
 
 const r = Router();
@@ -1397,15 +1400,19 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ── Add plates by output number ───────────────────────────────────────────
-// The plant calls a job by its output number, so that is the only thing the Add
-// Plates form asks for. Everything else it needs is already recorded somewhere.
+// ── What the Add Plates form needs to know about a job ────────────────────
+// TWO KEYS, ONE DOOR. The output number is how the plant names a job and is the
+// fast way in — but it is NOT a gate. Plenty of cartons have no number on the
+// master yet, and the number is exactly the thing nobody remembers for old
+// stock. Either key resolves to the same context, so neither can go stale
+// against the other.
 //
-// Where a number can live, and why all three are read:
+// Where an output number can live, and why all three are read:
 //   • products.output_number — the master, and the ordinary case.
 //   • order_lines.spec_override->>'output_number' — Planning's override. Some
 //     numbers exist ONLY here: three of the seven run numbers recovered in
-//     2026-08 were never written back to the master.
+//     2026-08 were never written back to the master. Reading it is also what
+//     makes the Sync Master? offer possible — see masterOutputSync.
 //   • gang_runs.output_number where kind='gang' — a mixed SHEET, not a carton.
 //
 // A gang number is reported and then refused. Its plates are not one product's:
@@ -1413,28 +1420,68 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
 // question only the gang's own Plate PR can answer, through the specification it
 // carries. Guessing an anchor product here would file the set under one carton
 // and hide it from the others.
-r.get('/plates/output-number/:number', async (req, res, next) => {
+const PLATE_ENTRY_COLUMNS = `p.id AS product_id,p.code AS product_code,p.name AS product_name,
+  p.party_item_code,p.party_artwork_code,p.colour_type,p.colors,p.print_process,
+  p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,
+  p.output_number AS master_output_number,
+  c.id AS customer_id,c.name AS customer_name,
+  (SELECT pm.plate_size FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
+    WHERE pa.product_id=p.id AND pa.active=1 ORDER BY pa.id DESC LIMIT 1) AS last_plate_size`;
+
+// One shape, whichever key found the row. `wanted` is the typed output number
+// when there was one; entering by product leaves the master's own number to
+// stand, and a blank one stays blank rather than being invented here.
+function plateEntryMatch(row, wanted = '') {
+  const output = String(wanted || '').trim() || row.master_output_number || '';
+  return {
+    product_id: row.product_id,
+    product_code: row.product_code,
+    product_name: row.product_name,
+    party_item_code: row.party_item_code,
+    party_artwork_code: row.party_artwork_code,
+    customer_id: row.customer_id,
+    customer_name: row.customer_name,
+    output_number: output,
+    master_output_number: row.master_output_number || '',
+    source: row.source || 'product',
+    artwork_version: artworkVersionOf({
+      party_artwork_code: row.party_artwork_code,
+      output_number: output,
+    }),
+    // The size this product's plates actually use beats the rule, because it is
+    // a fact about this carton rather than an inference from its colours.
+    plate_size: row.last_plate_size || defaultPlateSize(row, []),
+    plate_size_from: row.last_plate_size ? 'previous plates' : 'colour build',
+    components: suggestedPlateQuantities(row),
+  };
+}
+
+r.get('/plates/entry-context', async (req, res, next) => {
   try {
-    const wanted = String(req.params.number || '').trim();
-    if (!wanted) return res.status(400).json({ error: 'Enter an output number' });
+    const wanted = String(req.query.output_number || '').trim();
+    const productId = Number(req.query.product_id) || 0;
+    if (!wanted && !productId) {
+      return res.status(400).json({ error: 'Give an output number or choose a product' });
+    }
+    // By product: an exact key, so there is nothing to disambiguate and no gang
+    // question to ask. The master's own number comes back for the form to show.
+    if (productId) {
+      const row = await one(`SELECT ${PLATE_ENTRY_COLUMNS}
+        FROM products p JOIN customers c ON c.id=p.customer_id
+        WHERE p.id=$1 AND p.active=1`, [productId]);
+      if (!row) return res.status(404).json({ error: 'That product is not on the active master' });
+      return res.json({ output_number: '', gang_runs: [], matches: [plateEntryMatch(row)] });
+    }
     // Matched case-insensitively and trimmed at both ends: these numbers are
     // typed by hand at both ends of the plant.
-    const matches = await q(`SELECT DISTINCT ON (p.id)
-        p.id AS product_id,p.code AS product_code,p.name AS product_name,
-        p.party_item_code,p.party_artwork_code,p.colour_type,p.colors,p.print_process,
-        p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,
-        c.id AS customer_id,c.name AS customer_name,
-        COALESCE(NULLIF(p.output_number,''),src.override_number) AS output_number,
-        src.source,
-        (SELECT pm.plate_size FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
-          WHERE pa.product_id=p.id AND pa.active=1 ORDER BY pa.id DESC LIMIT 1) AS last_plate_size
+    const matches = await q(`SELECT DISTINCT ON (p.id) ${PLATE_ENTRY_COLUMNS},src.source
       FROM products p
       JOIN customers c ON c.id=p.customer_id
       JOIN LATERAL (
-        SELECT 'master'::text AS source, NULL::text AS override_number
+        SELECT 'master'::text AS source
         WHERE upper(btrim(COALESCE(p.output_number,''))) = upper(btrim($1))
         UNION ALL
-        SELECT 'planning'::text, upper(btrim($1))
+        SELECT 'planning'::text
         WHERE EXISTS (SELECT 1 FROM order_lines ol
           WHERE ol.product_id=p.id
             AND upper(btrim(COALESCE(ol.spec_override->>'output_number',''))) = upper(btrim($1)))
@@ -1449,30 +1496,19 @@ r.get('/plates/output-number/:number', async (req, res, next) => {
     res.json({
       output_number: wanted,
       gang_runs: gangs,
-      matches: matches.map(row => {
-        const components = plateComponentsFromSpec(row);
-        return {
-          product_id: row.product_id,
-          product_code: row.product_code,
-          product_name: row.product_name,
-          party_item_code: row.party_item_code,
-          party_artwork_code: row.party_artwork_code,
-          customer_id: row.customer_id,
-          customer_name: row.customer_name,
-          output_number: row.output_number || wanted,
-          source: row.source,
-          artwork_version: artworkVersionOf({
-            party_artwork_code: row.party_artwork_code,
-            output_number: row.output_number || wanted,
-          }),
-          // The size this product's plates actually use beats the rule, because it
-          // is a fact about this carton rather than an inference from its colours.
-          plate_size: row.last_plate_size || defaultPlateSize(row, []),
-          plate_size_from: row.last_plate_size ? 'previous plates' : 'colour build',
-          components: suggestedPlateQuantities(row),
-        };
-      }),
+      matches: matches.map(row => plateEntryMatch(row, wanted)),
     });
+  } catch (error) { next(error); }
+});
+
+// The product list the picker searches. Deliberately NOT /products: that returns
+// the whole master row for 1,600 cartons to fill a dropdown. This is the four
+// fields the picker shows and searches on.
+r.get('/plates/entry-products', async (_req, res, next) => {
+  try {
+    res.json(await q(`SELECT p.id,p.code,p.name,p.party_item_code,p.output_number,c.name AS customer_name
+      FROM products p JOIN customers c ON c.id=p.customer_id
+      WHERE p.active=1 ORDER BY c.name,p.name`));
   } catch (error) { next(error); }
 });
 
@@ -1482,10 +1518,10 @@ r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
   try {
     const entry = manualPlateEntry(req.body);
     const result = await tx(async (qc, oc) => {
-      const product = await oc(`SELECT p.id,p.code,p.name,p.party_artwork_code,c.id AS customer_id
+      const product = await oc(`SELECT p.id,p.code,p.name,p.party_artwork_code,p.output_number,c.id AS customer_id
         FROM products p LEFT JOIN customers c ON c.id=p.customer_id
-        WHERE p.id=$1 AND p.active=1`, [Number(req.body.product_id) || 0]);
-      if (!product) throw Object.assign(new Error('Choose a product by its output number'), { status: 400 });
+        WHERE p.id=$1 AND p.active=1 FOR UPDATE OF p`, [Number(req.body.product_id) || 0]);
+      if (!product) throw Object.assign(new Error('Choose a product, by output number or by name'), { status: 400 });
       // GET /plates/warehouse INNER JOINs customers. A product with no customer
       // would take the plates and they would render NOWHERE — no error, just a
       // shorter rack. Refuse while there is still someone to tell.
@@ -1518,7 +1554,26 @@ r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
       await audit('plate_asset', product.id, 'create',
         `${created.length} plate(s) added to ${entry.rack_location} · ${product.code} · ${entry.artwork_version}`,
         qc, req.user.name);
-      return { count: created.length, rack_location: entry.rack_location, assets: created };
+      // Sync Master? — the same fork the Artwork form uses (PUT /orders/:id).
+      // Asked by the CLIENT and re-decided here: the route recomputes the state
+      // rather than trusting the flag, so a stale form cannot overwrite a master
+      // that changed under it. Nothing to sync is not an error — the plates are
+      // already written and the number lives on them either way.
+      const sync = masterOutputSync({ typed: entry.output_number, master: product.output_number });
+      let master_synced = null;
+      if (req.body.update_master && sync.offer) {
+        await qc('UPDATE products SET output_number=$1 WHERE id=$2', [sync.to, product.id]);
+        await audit('product', product.id, 'master_update',
+          `from plates warehouse: output_number: ${sync.from || '—'} → ${sync.to}`,
+          qc, req.user.name);
+        master_synced = { from: sync.from, to: sync.to };
+      }
+      return {
+        count: created.length,
+        rack_location: entry.rack_location,
+        master_synced,
+        assets: created,
+      };
     });
     res.status(201).json(result);
   } catch (error) { next(error); }
