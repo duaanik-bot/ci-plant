@@ -41,7 +41,20 @@ const fmtNum = n => (n ?? 0).toLocaleString('en-IN');
 // and the day a classification chip borrows it, Customer WIP and Reset filters
 // stop being the two things on the rail that blue points at.
 const LIT_NEUTRAL = 'border-transparent bg-[#1D1D1F]/[0.88] text-white';
-const UNLIT = 'border-transparent bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]';
+// An unlit chip must still LOOK LIKE A CONTROL. The first version of this file
+// set `border-transparent` on it and leaned on a 5% wash to draw the pill, which
+// measured fine in isolation and failed in place: several of these rails sit on
+// pure #ffffff, where a 5% wash is a 1.10 contrast ratio and a transparent
+// border is 1.00. The chip had NO perceptible edge — the rail read as a row of
+// grey words rather than buttons, and Anik reported the Artwork chips as simply
+// missing. Definition now comes from a real hairline plus a 1px lift, which
+// survives a white background instead of depending on a tinted one.
+// The 0.22 hairline measures 1.58 against white — just past slate-300 (1.48),
+// the border weight most UIs trust on white, and well short of slate-400 (2.56),
+// which on a rail of twenty chips reads as a cage. Paired with a 1px lift so the
+// pill has a top edge as well as an outline.
+const UNLIT = 'border-[#1D1D1F]/[0.22] bg-white text-[#4B4B4F] shadow-[0_1px_2px_rgba(29,29,31,0.07)] '
+  + 'hover:border-[#1D1D1F]/40 hover:bg-[#1D1D1F]/[0.04] hover:text-[#1D1D1F]';
 // A chip for something this board does not currently have. It stays a control —
 // same size, same place, same click — but stops competing for the eye with the
 // chips that have work behind them. On a typical Print Planning rail eight of
@@ -49,7 +62,15 @@ const UNLIT = 'border-transparent bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#
 // of the line. Deliberately NOT hidden: a chip that vanishes at zero makes the
 // rail change width as the board works through the day, and "Stock Short 0" is
 // itself worth reading — it is the good news.
-const UNLIT_EMPTY = 'border-transparent bg-[#1D1D1F]/[0.025] text-[#1D1D1F]/25 hover:bg-[#1D1D1F]/[0.06] hover:text-[#6E6E73]';
+//
+// It recedes by DROPPING THE LIFT and lightening the hairline, not by fading the
+// text to nothing. `text-[#1D1D1F]/25` composited to #C2C2C3 on white — a 1.69
+// contrast ratio, far under the 4.5 WCAG AA floor and under even the 3.0 large-
+// text floor. "Stock Short 0" is the good news and has to be READABLE to deliver
+// it. This keeps the text above 4.5 and lets the flat, borderless-looking shell
+// carry the "nothing here" signal.
+const UNLIT_EMPTY = 'border-[#1D1D1F]/[0.14] bg-white/50 text-[#6E6E73] '
+  + 'hover:border-[#1D1D1F]/30 hover:bg-white hover:text-[#1D1D1F]';
 
 // Fixed height, not padding — a rail mixing icon chips with text-only chips
 // otherwise sits on two different baselines. touch: bumps it to a 40px target
@@ -68,7 +89,9 @@ export function FilterChip({
   // over a pale wash is invisible. Graphite and solid fills take the knockout.
   // BOARD_COUNT_TONE and friends override both when a state needs something
   // else again (`short` is a solid red fill and knocks its count out in white).
-  const pill = on ? (countTone || (tone ? 'bg-white/70' : 'bg-white/25')) : empty ? 'bg-[#1D1D1F]/[0.04]' : 'bg-[#1D1D1F]/[0.07]';
+  // Unlit pills sit on a WHITE shell now, so they need real weight of their own —
+  // the old 4%/7% washes were drawn against a grey chip and disappear on white.
+  const pill = on ? (countTone || (tone ? 'bg-white/70' : 'bg-white/25')) : empty ? 'bg-[#1D1D1F]/[0.06]' : 'bg-[#1D1D1F]/[0.09]';
   return (
     <button type="button" onClick={onClick} title={title} aria-pressed={!!on}
       className={`${BASE} ${shell} ${className}`}>
