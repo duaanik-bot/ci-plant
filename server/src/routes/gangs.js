@@ -705,21 +705,34 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // them here would bill the same sheets twice; only the outsiders are new
     // information. Without this the run read "Stock OK" against board a saved
     // draft had already frozen.
-    const positionFor = (mid, needed) => {
+    const positionFor = (mid, needed, neededGross = needed) => {
       const heldOthers = allocations
         .filter(a => a.status === 'active' && a.source === 'stock'
           && Number(a.material_id) === Number(mid)
           && !memberIdSet.has(Number(a.order_line_id))
           && !claimLineIds.has(Number(a.order_line_id)))
         .reduce((s, a) => s + Number(a.qty || 0), 0);
-      return gangPosition({
-        needed,
-        committedOther: claims.get(mid)?.committed || 0,
-        heldOthers,
-        available: availById.get(Number(mid)) || 0,
-        allocations, memberIds, materialId: mid,
-        stockBooking: gang.stock_booking || 'book',
-      });
+      return {
+        ...gangPosition({
+          needed,
+          committedOther: claims.get(mid)?.committed || 0,
+          heldOthers,
+          available: availById.get(Number(mid)) || 0,
+          allocations, memberIds, materialId: mid,
+          stockBooking: gang.stock_booking || 'book',
+        }),
+        // The SAME requirement before any mix credit is taken off it.
+        //
+        // `needed` answers "what does this board owe, given the mix we have
+        // SAVED" — right for every reader here, and wrong for the one reader
+        // that is looking at a mix still being TYPED. The engine re-applies
+        // pressingOnPlanned to the live rows (client/src/lib/gangShort.js) and
+        // needs the figure the credit comes off, or it would either credit the
+        // draft twice or not at all. Subtracting the saved mix back out of
+        // `needed` cannot recover it — the max() in the rule has already
+        // clamped it. New field; existing readers of `position` are untouched.
+        needed_gross: Number(neededGross) || 0,
+      };
     };
     // The LEAD board answers for its own members' sheets, not the whole
     // run's. A shared (co-printed) layout is the exception by construction:
@@ -746,11 +759,12 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // "Stock OK" on a run about to draw more (override up) or buy board the
     // floor never takes (override down). The engine shows the override chip
     // beside the computed figure, so a stale override is loud, not silent.
+    const requiredOnPlanned = sharedRun ? (gang.issue_parent_sheets ?? sharedRun.run_parent) : leadParent;
     const neededOnPlanned = pressingOnPlanned({
-      required: sharedRun ? (gang.issue_parent_sheets ?? sharedRun.run_parent) : leadParent,
+      required: requiredOnPlanned,
       active: !!mix?.active,
       covered: mix?.covered, heldOnPlanned: mix?.held_on_planned });
-    position = positionFor(boardId, neededOnPlanned);
+    position = positionFor(boardId, neededOnPlanned, requiredOnPlanned);
     // Any member running on a DIFFERENT board gets that board its own
     // position — same books, its own members' demand — so a two-board gang
     // stops hiding the second board's shortage inside the first's surplus.

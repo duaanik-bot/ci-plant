@@ -22,6 +22,7 @@ import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
+import { gangShortView } from '../lib/gangShort.js';
 import { boardPositionView } from '../lib/boardPositionView.js';
 import { boardShortOf } from '../lib/boardShort.js';
 import { parseBoardName } from '../lib/boardCode.js';
@@ -1485,72 +1486,32 @@ export default function Planning() {
     strips: clientStrips(m.parent_l, m.parent_w, m.child_l, m.child_w)
       .map(s => ({ ...s, est_sheets: (s.strips_per_parent || 1) * (m.est_parents || 0) })),
   })), [gangLoMembers]);
-  // What the run's issue actually presses on its PLANNED board. With no mix
-  // that is the whole issue, exactly as before. With one it is the sheets
-  // written against the planned board plus whatever the mix has not covered —
-  // board-mix.js's rule, that a substitute is never "needed" beyond what is
-  // written against it and only the planned board carries the remainder.
-  //
-  // Derived here, once, because THREE places quote it (the Board Position
-  // card, the dialog footer, and the server's own gangDetail) and the two
-  // client ones derive `short` themselves off the live draft — a server-only
-  // fix shows nothing, and two hand-rolled copies drift the moment one is
-  // edited. Without it a run covered off a second board still reads "Short"
-  // and still offers a PR for board the planner has just sourced.
-  const gangPressingOnPlanned = (() => {
-    if (!gangMixRows.length) return gangIssueNow;
-    const covered = mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).covered;
-    const held = gangMixRows
-      .filter(r => r.material_id === gangView?.mix?.planned_board_id)
-      .reduce((s, r) => s + Number(r.sheets || 0), 0);
-    return held + Math.max(0, gangIssueNow - covered);
-  })();
-
   // ONE spelling of "is the run short right now", shared by the footer verdict,
   // the Board Position card and the lock gate — three copies of this arithmetic
   // is how the single engine's footer said "stock OK" beside a list saying
-  // Stock Short. held_others is the server's own new figure (stock frozen by
-  // lines outside both the members and the claim set); the book branch must
-  // carry it or the client twin drifts from gangPosition's.
-  const gangShortNow = (() => {
-    if (!gangView) return null;
-    const onOrder = gangView.position?.incoming ?? 0;
-    const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
-    const heldRun = gangView.position?.held ?? 0;
-    const avail = gangView.position?.available ?? 0;
-    const other = (gangView.position?.committed_other ?? 0) + (gangView.position?.held_others ?? 0);
-    // The LEAD board answers for its OWN members' sheets, not the whole run's —
-    // the server scopes position.needed that way ("the lead board answers for
-    // its own members") and gives every other board its own entry in
-    // other_board_positions. Charging the run total to the lead board here made
-    // the client twin read short against a board that was never asked for those
-    // sheets. A shared (co-printed) layout is the exception by construction:
-    // one sheet prints every member, so the run figure IS the lead board's.
-    // Keyed on gangCalc.sharedMode, not layout_mode — the server's sharedRun is
-    // also null for a merge run and for a pending layout, and gangCalc already
-    // carries exactly that state.
-    const leadShare = gangCalc?.sharedMode
-      ? gangPressingOnPlanned
-      : (gangView.position?.needed ?? gangPressingOnPlanned);
-    const short = freshRun
-      ? Math.max(0, leadShare - heldRun - onOrder)
-      : Math.max(0, leadShare + other - avail - onOrder);
-    // Boards the other members run on, each with its own shortfall — a
-    // two-board gang stopped hiding the second board's gap inside the first's
-    // surplus the moment the server started answering per board.
-    const otherBoards = (gangView.other_board_positions || [])
-      .map(b => ({
-        board_material_id: b.board_material_id,
-        board_name: b.board_name,
-        short: Math.max(0, Number(b.position?.short || 0)),
-      }))
-      .filter(b => b.short > 0);
-    return {
-      short, freshRun, onOrder, otherBoards,
-      totalShort: short + otherBoards.reduce((s, b) => s + b.short, 0),
-      free: Math.max(0, avail - other),
-    };
-  })();
+  // Stock Short.
+  //
+  // Measured against the mix ON SCREEN, not the one last saved. The server's
+  // position.needed credits saved rows only, and reading it here meant a run the
+  // planner had just covered with a second board went on reading "short" — with
+  // the Lock button still offering that shortfall — while the panel three inches
+  // below totalled "Fully covered ✓". CI-MRG-0014 showed both numbers at once.
+  // The rule lives in lib/gangShort.js so `node --test` can reach it; the same
+  // reason lib/boardShort.js sits apart from the .jsx that renders it.
+  const gangShortNow = gangView ? gangShortView({
+    position: gangView.position,
+    otherBoardPositions: gangView.other_board_positions,
+    stockBooking: gangView.stock_booking,
+    // A shared (co-printed) layout is the exception by construction: one sheet
+    // prints every member, so the run figure IS the lead board's. Keyed on
+    // gangCalc.sharedMode, not layout_mode — the server's sharedRun is also null
+    // for a merge run and for a pending layout, and gangCalc carries that state.
+    sharedMode: !!gangCalc?.sharedMode,
+    issueNow: gangIssueNow,
+    mixRows: gangMixRows,
+    plannedBoardId: gangView.mix?.planned_board_id,
+    mixCovered: mixTotals(gangMixRows, gangView.mix?.planned_ups, gangIssueNow).covered,
+  }) : null;
 
   // Smart Match — fetched only when the selected board runs short, debounced
   // so cut-plan typing doesn't spam the API.
@@ -4926,10 +4887,9 @@ export default function Planning() {
             // "on order" is what sent the planner back to the button.
             const onOrder = gangView.position?.incoming ?? 0;
             // A fresh_pr run refuses the shelf: its still-to-buy is what the
-            // run presses (mix-credited via gangPressingOnPlanned) less its
-            // own PR and the stock already held for the run. Twin of
-            // gangPosition's rule — the Board Position card carries the same
-            // branch.
+            // run presses (mix-credited in lib/gangShort.js) less its own PR
+            // and the stock already held for the run. Twin of gangPosition's
+            // rule — the Board Position card carries the same branch.
             const { short, freshRun } = gangShortNow ?? { short: 0, freshRun: false };
             return (
               <span className="mr-auto self-center pl-1 text-xs text-slate-500">

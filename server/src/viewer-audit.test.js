@@ -136,22 +136,55 @@ test('reopened mix rows read free first, and a frozen board is not "empty"', () 
 
 test('the run panel has ONE spelling of "short right now"', () => {
   const src = read('../../client/src/pages/Planning.jsx');
-  const inline = [...src.matchAll(/leadShare \+ other - avail - onOrder/g)];
-  assert.equal(inline.length, 1,
-    'the book-branch shortfall arithmetic lives ONLY in gangShortNow — three '
-    + 'inline copies is how the single engine\'s verdicts drifted');
-  assert.match(src, /held_others \?\? 0/, 'and it carries the server\'s new held_others');
-  // The LEAD board answers for its own members' sheets — the server scopes
-  // position.needed that way and gives every other board its own entry. The
-  // client charged the whole run to the lead board and read short against a
-  // board never asked for those sheets.
-  assert.match(src, /gangCalc\?\.sharedMode\s*\n?\s*\? gangPressingOnPlanned\s*\n?\s*: \(gangView\.position\?\.needed \?\? gangPressingOnPlanned\)/,
-    'scoped on gangCalc.sharedMode — the server\'s sharedRun is also null for a '
-    + 'merge run and a pending layout, which layout_mode alone cannot tell');
-  assert.match(src, /other_board_positions \|\| \[\]/,
+  const lib = read('../../client/src/lib/gangShort.js');
+  // The arithmetic lives in the lib and NOWHERE else. Three inline copies is
+  // how the single engine's verdicts drifted, and an inline copy in a .jsx is
+  // unreachable by `node --test`, which is how it drifted unnoticed.
+  assert.equal([...lib.matchAll(/leadShare \+ other - avail - onOrder/g)].length, 1,
+    'the book-branch shortfall arithmetic lives ONLY in lib/gangShort.js');
+  assert.equal([...src.matchAll(/leadShare \+ other - avail - onOrder/g)].length, 0,
+    'and Planning.jsx re-derives none of it');
+  assert.equal([...src.matchAll(/gangShortView\(/g)].length, 1,
+    'the page calls it exactly once — the footer, the Board Position card and '
+    + 'the lock gate all read that one result');
+  assert.match(lib, /held_others \?\? 0/, 'and it carries the server\'s held_others');
+  // The LEAD board answers for its own members' sheets — the server scopes it
+  // that way and gives every other board its own entry. A shared layout is the
+  // exception: one sheet prints every member.
+  assert.match(lib, /sharedMode \? num\(issueNow\) : num\(position\?\.needed_gross \?\? issueNow\)/,
+    'scoped on sharedMode — the server\'s sharedRun is also null for a merge '
+    + 'run and a pending layout, which layout_mode alone cannot tell');
+  assert.match(lib, /otherBoardPositions \|\| \[\]/,
     'and the other boards\' shortfalls are read, not left invisible');
-  assert.match(src, /totalShort: short \+ otherBoards\.reduce/,
+  assert.match(lib, /totalShort: short \+ otherBoards\.reduce/,
     'the lock gate and the button quote the WHOLE run — the lock caps holds on every board');
+});
+
+// CI-MRG-0014, 18 Aug 2026: the Board Mix panel totalled "Fully covered ✓" over
+// 2,875 of 2,875 while the footer and the Lock button both read "short 507" —
+// the exact shortfall the mix had just been seeded to close. The verdict was
+// read off position.needed, which credits the SAVED mix and cannot see rows
+// still being typed.
+test('the run\'s shortfall is measured against the mix ON SCREEN', () => {
+  const src = read('../../client/src/pages/Planning.jsx');
+  const lib = read('../../client/src/lib/gangShort.js');
+  assert.match(src, /mixRows: gangMixRows/,
+    'the LIVE draft rows go in, not gangView.mix.rows — the planner is looking '
+    + 'at what they have typed, and the server has not seen it');
+  assert.match(src, /mixCovered: mixTotals\(gangMixRows,/,
+    'and the coverage the panel itself totals, so the two cannot disagree');
+  // needed_gross is the lead board's requirement BEFORE any mix credit.
+  // position.needed is the same figure with the saved mix already taken off, so
+  // re-applying pressingOnPlanned to it would credit a saved mix twice and a
+  // drafted one not at all.
+  assert.doesNotMatch(lib, /position\?\.needed\b(?!_gross)/,
+    'the lead share is built from needed_gross, never the mix-credited needed');
+  const gangs = read('./routes/gangs.js');
+  assert.match(gangs, /needed_gross: Number\(neededGross\) \|\| 0/,
+    'which the server has to ship — it cannot be recovered by subtraction once '
+    + 'pressingOnPlanned\'s max() has clamped it');
+  assert.match(gangs, /position = positionFor\(boardId, neededOnPlanned, requiredOnPlanned\)/,
+    'and it is the PRE-mix requirement that goes in');
 });
 
 // The server owns the others-only figure, because only the server knows each
