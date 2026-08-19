@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus, Minus, PackagePlus, SlidersHorizontal } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { AgeChip, Button, DataTable, Field, Input, Modal, useToast } from './ui.jsx';
+import { AgeChip, Button, DataTable, Field, Input, Modal, Select, Textarea, useToast } from './ui.jsx';
 import ProductIdentity, { productExport, productSearchText } from './ProductIdentity.jsx';
 
 const AGE_BANDS = [['0-30d', 'bg-emerald-400'], ['31-60d', 'bg-amber-400'], ['61-90d', 'bg-orange-400'], ['90d+', 'bg-red-500']];
@@ -33,7 +34,7 @@ function AgeBar({ items, unit = 'lines' }) {
 
 function SubTabs({ active, onChange, tabs }) {
   return (
-    <div className="mb-3 inline-flex items-center gap-1 rounded-full bg-slate-100/80 p-1">
+    <div className="inline-flex items-center gap-1 rounded-full bg-slate-100/80 p-1">
       {tabs.map(t => (
         <button key={t.key} type="button" onClick={() => onChange(t.key)}
           className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${active === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -44,16 +45,28 @@ function SubTabs({ active, onChange, tabs }) {
   );
 }
 
+const ADD_BLANK = { product_id: '', qty: '', box_number: '', location: '', note: '' };
+const ADJ_BLANK = { product_id: '', mode: 'add', qty: '', actual: '', note: '' };
+const ADD_REASONS = ['Opening stock', 'Physical count — found on rack', 'Customer return', 'Sample stock'];
+
 export default function FgStockPanel({ onCountsChange }) {
   const toast = useToast();
   const nav = useNavigate();
   const [fg, setFg] = useState([]);
   const [leftoverFg, setLeftoverFg] = useState([]);
+  const [products, setProducts] = useState([]);
   const [fgSub, setFgSub] = useState('in');
   const [fgSel, setFgSel] = useState(() => new Set());
   const [pickedBoxes, setPickedBoxes] = useState([]);
   const [move, setMove] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // Add-a-leftover-box and adjust-loose-stock. Two doors, deliberately separate:
+  // a box is a numbered physical thing on the Leftover shelf, loose FG is a pool.
+  const [addOpen, setAddOpen] = useState(false);
+  const [add, setAdd] = useState(ADD_BLANK);
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [adj, setAdj] = useState(ADJ_BLANK);
 
   const pickedRows = leftoverFg.filter(l => pickedBoxes.includes(l.id));
 
@@ -71,7 +84,101 @@ export default function FgStockPanel({ onCountsChange }) {
     }
   };
   useEffect(() => { load(); }, []);
+  // The picker lists the whole Product Master, not just what is already in FG.
+  // Seeding opening stock for a product the ERP has never produced is the point
+  // of these two doors, and such a product has no fg_stock row to be found in.
+  useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
+
+  // ── Add a leftover box ──────────────────────────────────────────────────
+  const addProduct = products.find(p => String(p.id) === String(add.product_id));
+  const saveAdd = async () => {
+    setSaving(true);
+    try {
+      const lot = await api.post('/fg-lots/manual', {
+        product_id: +add.product_id,
+        qty: Math.floor(+add.qty || 0),
+        box_number: add.box_number.trim(),
+        location: add.location.trim(),
+        note: add.note.trim(),
+      });
+      toast.success(`Box ${lot.box_number || lot.lot_number} added — ${fmt.num(lot.qty)} cartons`);
+      setAddOpen(false);
+      setAdd(ADD_BLANK);
+      setFgSub('leftover');
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not add leftover stock');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Adjust loose FG stock — the same shape as the RM warehouse's dialog ──
+  // The operator types EITHER the quantity to move OR the figure actually
+  // counted; the other one, and the add/reduce direction, are derived. Nobody
+  // types a signed number and nobody does the arithmetic.
+  const adjProduct = products.find(p => String(p.id) === String(adj.product_id));
+  const adjAvail = +fg.find(f => String(f.product_id) === String(adj.product_id))?.qty || 0;
+  const adjMag = Math.floor(Math.abs(+adj.qty || 0));
+  const adjDelta = adj.mode === 'reduce' ? -adjMag : adjMag;
+  // Preview the CLAMP, not the arithmetic: the server brings a product to nil
+  // rather than negative, so a dialog promising −110 would be lying.
+  const adjNewBalance = Math.max(0, adjAvail + adjDelta);
+  const adjClamps = adj.mode === 'reduce' && adjMag > adjAvail;
+  const adjLostQty = adjClamps ? adjMag - adjAvail : 0;
+  const ADJ_REASONS = adj.mode === 'reduce'
+    ? ['Damage / wastage', 'Physical count correction', 'Sample / testing', 'Write-off']
+    : ['Opening stock', 'Physical count correction', 'Customer return', 'Rework returned'];
+
+  const setAdjQty = v => setAdj(a => {
+    const mag = Math.floor(Math.abs(+v || 0));
+    return { ...a, qty: v, actual: v === '' ? '' : String(Math.max(0, adjAvail + (a.mode === 'reduce' ? -mag : mag))) };
+  });
+  const setAdjActual = v => setAdj(a => {
+    if (v === '') return { ...a, actual: '', qty: '' };
+    const delta = Math.floor(+v || 0) - adjAvail;
+    return {
+      ...a, actual: v,
+      qty: delta === 0 ? '' : String(Math.abs(delta)),
+      mode: delta < 0 ? 'reduce' : delta > 0 ? 'add' : a.mode,
+    };
+  });
+  const setAdjMode = mode => setAdj(a => {
+    const mag = Math.floor(Math.abs(+a.qty || 0));
+    return { ...a, mode, actual: a.qty === '' ? '' : String(Math.max(0, adjAvail + (mode === 'reduce' ? -mag : mag))) };
+  });
+  const setAdjProduct = id => setAdj(a => {
+    const avail = +fg.find(f => String(f.product_id) === String(id))?.qty || 0;
+    const mag = Math.floor(Math.abs(+a.qty || 0));
+    return { ...a, product_id: id, actual: a.qty === '' ? '' : String(Math.max(0, avail + (a.mode === 'reduce' ? -mag : mag))) };
+  });
+
+  const saveAdj = async () => {
+    setSaving(true);
+    try {
+      const r = await api.post('/fg/adjust', { product_id: +adj.product_id, qty: adjDelta, note: adj.note.trim() });
+      toast.success(r.clamped
+        ? `Brought to nil — only ${fmt.num(r.applied)} was on the book`
+        : `Stock adjusted — ${fmt.num(r.before)} → ${fmt.num(r.after)}`);
+      setAdjOpen(false);
+      setAdj(ADJ_BLANK);
+      setFgSub('in');
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not adjust FG stock');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // One option list, both dialogs. data-search makes the whole record findable
+  // (codes, artwork code, customer), not just the name shown on the row.
+  const productOptions = products.map(p => (
+    <option key={p.id} value={p.id} data-search={productSearchText({ ...p, product_name: p.name, product_code: p.code })}>
+      {p.name}{p.code ? ` · ${p.code}` : ''}
+    </option>
+  ));
 
   const boxNumbersLabel = boxes => {
     if (!boxes?.length) return '';
@@ -183,10 +290,23 @@ export default function FgStockPanel({ onCountsChange }) {
 
   return (
     <div>
-      <SubTabs active={fgSub} onChange={setFgSub} tabs={[
-        { key: 'in', label: 'In Stock', count: fg.length },
-        { key: 'leftover', label: 'Leftover', count: leftoverFg.length || 0 },
-      ]} />
+      {/* Both doors stay on screen on both sub-tabs. A control that only appears
+          on the view it writes to is a control nobody finds on the day the shelf
+          holds something the ERP never saw produced. */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <SubTabs active={fgSub} onChange={setFgSub} tabs={[
+          { key: 'in', label: 'In Stock', count: fg.length },
+          { key: 'leftover', label: 'Leftover', count: leftoverFg.length || 0 },
+        ]} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={() => { setAdj(ADJ_BLANK); setAdjOpen(true); }}>
+            <SlidersHorizontal size={15} /> Adjust Stock
+          </Button>
+          <Button size="sm" onClick={() => { setAdd(ADD_BLANK); setAddOpen(true); }}>
+            <PackagePlus size={15} /> Add Leftover Stock
+          </Button>
+        </div>
+      </div>
 
       {fgSub === 'in' && (<>
         <AgeBar items={fg.map(f => f.age_days)} unit="SKUs" />
@@ -262,6 +382,169 @@ export default function FgStockPanel({ onCountsChange }) {
           exportName="Leftover FG Boxes"
           exportSubtitle="Dispatch & Invoice - Finished-goods leftover boxes" />
       </>)}
+
+      {/* ── Add a leftover box from scratch ── */}
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Leftover Stock"
+        footer={<>
+          <Button variant="secondary" onClick={() => setAddOpen(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={saveAdd} disabled={saving || !add.product_id || !(Math.floor(+add.qty) > 0)}>
+            Add {Math.floor(+add.qty) > 0 ? `${fmt.num(Math.floor(+add.qty))} cartons` : 'box'}
+          </Button>
+        </>}>
+        <div className="space-y-4">
+          <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
+            Puts finished goods the ERP never saw produced onto the books as a numbered
+            leftover box — an opening count, a customer return, cartons found on the rack.
+            In Stock is left alone; nothing is carved out of the loose pool to pay for it.
+          </p>
+
+          <Field label="Product" required>
+            <Select value={add.product_id} onChange={e => setAdd({ ...add, product_id: e.target.value })}>
+              <option value="">Select product…</option>
+              {productOptions}
+            </Select>
+          </Field>
+
+          {addProduct && (
+            <div className="rounded-2xl border border-[#1D1D1F]/[0.08] bg-white/70 px-3.5 py-2.5 text-xs text-slate-500">
+              {addProduct.code && <span className="font-mono font-semibold text-slate-700">{addProduct.code}</span>}
+              {addProduct.party_artwork_code && <> · AW {addProduct.party_artwork_code}</>}
+              {addProduct.size && <> · {addProduct.size}</>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Quantity (cartons)" required>
+              <Input type="number" min="1" step="1" value={add.qty}
+                onChange={e => setAdd({ ...add, qty: e.target.value })} placeholder="e.g. 250" />
+            </Field>
+            <Field label="Box number" hint="Leave blank for the next CI-BOX-####">
+              <Input value={add.box_number} onChange={e => setAdd({ ...add, box_number: e.target.value })}
+                placeholder="Physical label, if any" />
+            </Field>
+          </div>
+
+          <Field label="Location" hint="Defaults to FG-STORE">
+            <Input value={add.location} onChange={e => setAdd({ ...add, location: e.target.value })}
+              placeholder="e.g. FG-STORE, Rack 4" />
+          </Field>
+
+          <Field label="Reason">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {ADD_REASONS.map(r0 => (
+                <button key={r0} type="button" onClick={() => setAdd({ ...add, note: r0 })}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${add.note === r0 ? 'border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF]' : 'border-[#1D1D1F]/10 bg-white/60 text-slate-600 hover:border-[#007AFF]/40'}`}>
+                  {r0}
+                </button>
+              ))}
+            </div>
+            <Textarea value={add.note} onChange={e => setAdd({ ...add, note: e.target.value })}
+              placeholder="Where these cartons came from" />
+          </Field>
+        </div>
+      </Modal>
+
+      {/* ── Adjust the loose FG pool — the RM warehouse dialog, for finished goods ── */}
+      <Modal open={adjOpen} onClose={() => setAdjOpen(false)} title="FG Stock Adjustment"
+        footer={<>
+          <Button variant="secondary" onClick={() => setAdjOpen(false)} disabled={saving}>Cancel</Button>
+          <Button variant={adj.mode === 'reduce' ? 'danger' : 'success'} onClick={saveAdj}
+            disabled={saving || !adj.product_id || !adjMag}>
+            {adj.mode === 'reduce' ? 'Reduce' : 'Add'} Stock
+          </Button>
+        </>}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#1D1D1F]/[0.05] p-1">
+            {[
+              { key: 'add', label: 'Add stock', icon: Plus, on: 'bg-emerald-500 text-white shadow-sm', off: 'text-emerald-700' },
+              { key: 'reduce', label: 'Reduce stock', icon: Minus, on: 'bg-red-500 text-white shadow-sm', off: 'text-red-700' },
+            ].map(o => (
+              <button key={o.key} type="button" onClick={() => setAdjMode(o.key)}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-semibold transition-all ${adj.mode === o.key ? o.on : `bg-transparent ${o.off} hover:bg-white/50`}`}>
+                <o.icon size={15} /> {o.label}
+              </button>
+            ))}
+          </div>
+
+          <Field label="Product" required>
+            <Select value={adj.product_id} onChange={e => setAdjProduct(e.target.value)}>
+              <option value="">Select product…</option>
+              {productOptions}
+            </Select>
+          </Field>
+
+          {adjProduct && (
+            <div className="rounded-2xl border border-[#1D1D1F]/[0.08] bg-white/70 p-3.5">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-mono font-semibold text-slate-700">{adjProduct.code || '—'}</span>
+                <span>{adjAvail === 0 ? 'Nothing in loose FG yet' : `${fmt.num(adjAvail)} cartons in loose FG`}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 tabular-nums">
+                <div className="text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Current</div>
+                  <div className="text-lg font-bold text-slate-800">{fmt.num(adjAvail)}</div>
+                </div>
+                <div className={`text-2xl font-black ${adj.mode === 'reduce' ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {adj.mode === 'reduce' ? '−' : '+'}
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">Change</div>
+                  <div className={`text-lg font-bold ${adj.mode === 'reduce' ? 'text-red-600' : 'text-emerald-600'}`}>{fmt.num(adjMag)}</div>
+                </div>
+                <div className="text-xl font-black text-slate-300">=</div>
+                <div className="text-center">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400">New balance</div>
+                  <div className={`text-xl font-black ${adjClamps ? 'text-amber-600' : 'text-[#007AFF]'}`}>
+                    {fmt.num(adjNewBalance)} <span className="text-xs font-semibold text-slate-400">cartons</span>
+                  </div>
+                </div>
+              </div>
+              {adjClamps && (
+                <div className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
+                  Only {fmt.num(adjAvail)} cartons on the book. The extra {fmt.num(adjLostQty)} cannot come off —
+                  this product is brought to nil, never negative, and the ledger records the {fmt.num(adjAvail)} that
+                  actually moved.
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-2">
+            <Field label={adj.mode === 'reduce' ? 'Quantity to remove' : 'Quantity to add'} required>
+              <Input type="number" min="0" step="1" value={adj.qty}
+                onChange={e => setAdjQty(e.target.value)} placeholder="e.g. 500" />
+            </Field>
+            <div className="pt-8 text-xs font-bold uppercase tracking-wide text-slate-300">or</div>
+            <Field label="Actual stock counted" hint={adjProduct ? `On system: ${fmt.num(adjAvail)} cartons` : 'Pick a product first'}>
+              <Input type="number" min="0" step="1" value={adj.actual} disabled={!adjProduct}
+                onChange={e => setAdjActual(e.target.value)} placeholder="e.g. 420" />
+            </Field>
+          </div>
+
+          {/* Suppressed once the reduction exceeds the book — the counted figure is
+              clamped at nil there, so this line would contradict the banner above. */}
+          {adjProduct && adj.actual !== '' && !adjClamps && (
+            <div className={`-mt-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${adjMag === 0 ? 'bg-slate-50 text-slate-500' : adj.mode === 'reduce' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+              {adjMag === 0
+                ? 'Counted figure matches the system — nothing to adjust.'
+                : `Counted ${fmt.num(Math.floor(+adj.actual))} vs ${fmt.num(adjAvail)} on system — auto-set to ${adj.mode === 'reduce' ? 'reduce' : 'add'} ${fmt.num(adjMag)} cartons.`}
+            </div>
+          )}
+
+          <Field label="Reason">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {ADJ_REASONS.map(r0 => (
+                <button key={r0} type="button" onClick={() => setAdj({ ...adj, note: r0 })}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${adj.note === r0 ? 'border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF]' : 'border-[#1D1D1F]/10 bg-white/60 text-slate-600 hover:border-[#007AFF]/40'}`}>
+                  {r0}
+                </button>
+              ))}
+            </div>
+            <Textarea value={adj.note} onChange={e => setAdj({ ...adj, note: e.target.value })}
+              placeholder="Why the book is changing" />
+          </Field>
+        </div>
+      </Modal>
 
       <Modal wide open={!!move} onClose={() => setMove(null)}
         title={move ? `Move FG - ${move.product.product_name}` : ''}

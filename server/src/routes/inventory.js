@@ -234,13 +234,21 @@ r.get('/inventory/fg', async (_req, res, next) => {
       JOIN customers c ON c.id=p.customer_id
       WHERE f.qty > 0 ORDER BY p.name`);
     // FG age in stock: plain fg_stock carries no date, so derive it FIFO — the
-    // oldest production receipt still represented by the on-hand balance (walk
-    // receipts newest-first, accumulate to the current qty, anchor on the last).
+    // oldest receipt still represented by the on-hand balance (walk receipts
+    // newest-first, accumulate to the current qty, anchor on the last).
+    //
+    // A receipt is anything that PUT cartons into the loose pool, not just
+    // production: a manual adjustment keyed in from a count, and a leftover box
+    // moved back to FG, are both the day that stock arrived on the shelf. Left
+    // to fg_receipt alone, a product that was never produced through the ERP
+    // shows a blank age forever — which is the whole of the new manual door.
+    // qty>0 keeps this to arrivals: boxing OUT to leftover writes a negative
+    // adjustment, and lot bookkeeping writes a zero.
     const ids = rows.map(f => f.product_id);
     let recs = [];
     if (ids.length)
       recs = await q(`SELECT product_id, qty, created_at FROM stock_movements
-                      WHERE type='fg_receipt' AND qty>0 AND product_id=ANY($1::int[])
+                      WHERE type IN ('fg_receipt','adjustment') AND qty>0 AND product_id=ANY($1::int[])
                       ORDER BY created_at DESC`, [ids]);
     const byProd = {};
     for (const m of recs) (byProd[m.product_id] ||= []).push(m);

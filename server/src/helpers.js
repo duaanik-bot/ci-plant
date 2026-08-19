@@ -1870,17 +1870,24 @@ export async function fgIssue(productId, qty, refType, refId, qc, oc) {
 // Box loose finished goods into a numbered Leftover box. This is a PHYSICAL
 // move: the qty is carved OUT of the loose fg_stock balance (In Stock drops, the
 // box holds it) so nothing is double-counted. Pass reduceFg=false when the goods
-// arrive from elsewhere (e.g. an un-shipped dispatch) and were never in loose
-// stock. Returns { id, lot_number, box_number, qty }.
-export async function boxLeftoverFromFg({ product_id, qty, source = 'fg_leftover', created_by, reduceFg = true, remarks }, qc, oc) {
+// arrive from elsewhere (e.g. an un-shipped dispatch, or stock keyed in off a
+// physical count) and were never in loose stock. Returns
+// { id, lot_number, box_number, qty }.
+//
+// box_number is normally the auto CI-BOX-####, but a box keyed in from the floor
+// may already wear a physical label — pass it and it wins. The STOCK REFERENCE
+// (CI-FG-####) is never caller-supplied: that number is the ledger's spine.
+export async function boxLeftoverFromFg({ product_id, qty, source = 'fg_leftover', created_by, reduceFg = true,
+                                          remarks, box_number: label, location, note,
+                                          movement_type = 'excess_stock' }, qc, oc) {
   const n = Math.floor(+qty);
   if (!(n > 0)) return null;
   const lot_number = await nextNumber('CI-FG-', 'fg_lots', 'lot_number', oc);
-  const box_number = await nextNumber('CI-BOX-', 'fg_lots', 'box_number', oc);
+  const box_number = String(label || '').trim() || await nextNumber('CI-BOX-', 'fg_lots', 'box_number', oc);
   const [lot] = await qc(`
-    INSERT INTO fg_lots (lot_number, box_number, kind, product_id, qty, source, status, location, created_by, verified_by, verified_at)
-    VALUES ($1,$2,'leftover',$3,$4,$5,'verified','FG-STORE',$6,$6,now()) RETURNING id`,
-    [lot_number, box_number, product_id, n, source, created_by]);
+    INSERT INTO fg_lots (lot_number, box_number, kind, product_id, qty, source, status, location, note, created_by, verified_by, verified_at)
+    VALUES ($1,$2,'leftover',$3,$4,$5,'verified',$6,$7,$8,$8,now()) RETURNING id`,
+    [lot_number, box_number, product_id, n, source, location || 'FG-STORE', note || null, created_by]);
   if (reduceFg) {
     await qc('UPDATE fg_stock SET qty = qty - $1 WHERE product_id=$2', [n, product_id]);
     await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
@@ -1890,11 +1897,52 @@ export async function boxLeftoverFromFg({ product_id, qty, source = 'fg_leftover
   const cust = await oc('SELECT customer_id FROM products WHERE id=$1', [product_id]);
   await fgMove({
     ref_number: lot_number, fg_lot_id: lot.id, product_id, customer_id: cust?.customer_id,
-    qty_in: n, movement_type: 'excess_stock', source_module: 'warehouse',
+    qty_in: n, movement_type, source_module: 'warehouse',
     created_by, remarks: remarks || `Boxed as leftover ${box_number}`,
   }, qc, oc);
   await audit('fg_lot', lot.id, 'create', `${lot_number} · box ${box_number} — ${n} pcs leftover`, qc, created_by);
   return { id: lot.id, lot_number, box_number, qty: n };
+}
+
+// Manual correction of the LOOSE finished-goods pool (FG Stock → In Stock), the
+// finished-goods twin of the RM warehouse's Stock Adjustment. Seeds opening
+// stock for a product that has never been produced, and corrects a count.
+//
+// Two rules make this safe to hand to the floor:
+//
+//   • The pool never goes negative. A reduction beyond the book is a real
+//     event — untracked consumption caught late — so it is allowed, but it
+//     lands at nil. Same shape as issueWithWriteOn() on the RM side.
+//   • THE LEDGER RECORDS WHAT MOVED, NOT WHAT WAS TYPED. When a reduction is
+//     cut short, the movement row carries the clamped figure, so
+//     SUM(movements) still equals the pool for every downstream reader.
+//
+// Deliberately type 'adjustment', never 'fg_receipt': Product 360 sums
+// fg_receipt as PRODUCED, and a stock correction is not production.
+// Returns { before, after, applied, clamped }.
+export async function adjustFgStock({ product_id, qty, note, user }, qc, oc) {
+  const n = Math.floor(+qty);
+  if (!n) throw Object.assign(new Error('Enter a quantity to add or remove'), { status: 400 });
+  const row = await oc('SELECT qty FROM fg_stock WHERE product_id=$1 FOR UPDATE', [product_id]);
+  const before = +row?.qty || 0;
+
+  if (n > 0) {
+    await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
+              ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [product_id, n]);
+  } else {
+    await qc('UPDATE fg_stock SET qty = GREATEST(0, qty - $1) WHERE product_id=$2', [-n, product_id]);
+  }
+  const applied = n > 0 ? n : Math.min(-n, before);
+  const clamped = n < 0 && -n > before;
+  const after = n > 0 ? before + n : before - applied;
+
+  await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+            VALUES ($1,'adjustment',$2,'fg_adjust',$3,$4)`,
+    [product_id, n > 0 ? applied : -applied, product_id,
+     `${note || 'Manual FG adjustment'}${clamped ? ` (asked ${-n}, only ${before} on the book — brought to nil)` : ''}`]);
+  await audit('fg_stock', product_id, 'adjust',
+    `${before} → ${after}${note ? ` — ${note}` : ''}`, qc, user);
+  return { before, after, applied, clamped };
 }
 
 // Move a leftover box's remaining qty back into loose FG stock. The box empties

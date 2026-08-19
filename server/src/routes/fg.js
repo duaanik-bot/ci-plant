@@ -4,7 +4,7 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan } from '../helpers.js';
+import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -134,6 +134,60 @@ r.put('/fg-lots/:id', canStore, async (req, res, next) => {
         `${lot.lot_number}${nextBox !== lot.box_number ? ` · box ${lot.box_number || '—'} → ${nextBox || '—'}` : ''}`, qc, req.user.name);
     });
     res.json(await one(`${LOT_VIEW} WHERE fl.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// Add a leftover box from scratch — product off the Product Master plus a
+// quantity, no job card behind it. This is how finished goods that the ERP never
+// saw produced get onto the books: an opening count, a customer return, cartons
+// found on the rack during a stocktake.
+//
+// reduceFg is FALSE on purpose. POST /fg/move boxes goods that are ALREADY in the
+// loose pool, so it carves them out; these arrive from outside it, and carving
+// would silently drain In Stock to pay for a box nobody took from it.
+r.post('/fg-lots/manual', canStore, async (req, res, next) => {
+  try {
+    const { product_id, qty, box_number, location, note } = req.body;
+    if (!product_id) return res.status(400).json({ error: 'Pick a product' });
+    if (!qty || +qty <= 0) return res.status(400).json({ error: 'Enter a quantity greater than zero' });
+
+    const lotId = await tx(async (qc, oc) => {
+      const p = await oc('SELECT id, name FROM products WHERE id=$1', [product_id]);
+      if (!p) throw Object.assign(new Error('Product not found'), { status: 404 });
+      // The physical label is optional, but if one is typed it has to be free —
+      // box_number is uniquely indexed, and a raw 23505 reads as a 500 on the floor.
+      const label = String(box_number || '').trim();
+      if (label) {
+        const clash = await oc('SELECT id FROM fg_lots WHERE box_number=$1', [label]);
+        if (clash) throw Object.assign(new Error(`Box number ${label} is already in use`), { status: 409 });
+      }
+      const box = await boxLeftoverFromFg({
+        product_id: +product_id, qty: +qty, source: 'manual', created_by: req.user.name,
+        reduceFg: false, box_number: label, location, note,
+        movement_type: 'opening_stock',
+        remarks: `Added manually — ${note || 'opening leftover stock'}`,
+      }, qc, oc);
+      return box.id;
+    });
+    res.json(await one(`${LOT_VIEW} WHERE fl.id=$1`, [lotId]));
+  } catch (e) { next(e); }
+});
+
+// Correct the LOOSE finished-goods pool (FG Stock → In Stock) — the FG twin of
+// the RM warehouse's Stock Adjustment. Signed qty: + adds, − removes. A
+// reduction beyond the book brings the product to nil, never negative, and the
+// ledger records the clamped figure (see adjustFgStock).
+r.post('/fg/adjust', canStore, async (req, res, next) => {
+  try {
+    const { product_id, qty, note } = req.body;
+    if (!product_id) return res.status(400).json({ error: 'Pick a product' });
+    if (!qty || !Math.trunc(+qty)) return res.status(400).json({ error: 'Enter a quantity to add or remove' });
+    const out = await tx(async (qc, oc) => {
+      const p = await oc('SELECT id FROM products WHERE id=$1', [product_id]);
+      if (!p) throw Object.assign(new Error('Product not found'), { status: 404 });
+      return adjustFgStock({ product_id: +product_id, qty: +qty, note, user: req.user.name }, qc, oc);
+    });
+    res.json({ ok: true, ...out });
   } catch (e) { next(e); }
 });
 
