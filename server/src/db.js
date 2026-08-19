@@ -1897,6 +1897,16 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS inspected_at TIMESTAMPTZ;
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS box_number TEXT;
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'fg_excess';
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS dispatch_id INTEGER REFERENCES dispatches(id);
+-- Retiring a box takes it OUT OF CIRCULATION without destroying it: planning
+-- stops offering it against any line, but the cartons stay on the books, in the
+-- warehouse and in every report. Deliberately NOT a status value — status
+-- already means "where this lot is in its own lifecycle" (awaiting check,
+-- checked, written off, used up), and a retired box can be any of those. It is
+-- also reversible, which a status transition would not be.
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_reason TEXT;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_by TEXT;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
 -- Widen the source enum so a box can be created straight off the FG list.
 ALTER TABLE fg_lots DROP CONSTRAINT IF EXISTS fg_lots_source_check;
 ALTER TABLE fg_lots ADD CONSTRAINT fg_lots_source_check

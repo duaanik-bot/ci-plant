@@ -359,9 +359,23 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
       : <span className="text-gray-300">—</span> },
     { key: 'qty', label: 'Ordered', align: 'right', render: r0 => <span className="font-semibold">{fmt.num(r0.qty)}</span> },
     { key: 'dispatched_qty', label: 'Dispatched', align: 'right', render: r0 => <span className="text-sky-700">{fmt.num(r0.dispatched_qty)}</span> },
-    { key: 'pending_qty', label: 'Pending', align: 'right', render: r0 => +r0.pending_qty > 0
-      ? <span className="font-bold text-amber-700">{fmt.num(r0.pending_qty)}</span>
-      : <span className="font-semibold text-emerald-700">0</span> },
+    // Pending is what the CUSTOMER is still owed, so FG reserved against the
+    // line does not reduce it — those cartons have not shipped. It does reduce
+    // what has to be MADE, and saying so here is the difference between "we owe
+    // 5,000" and "we owe 5,000 and 2,000 of it is already sitting in the store".
+    { key: 'pending_qty', label: 'Pending', align: 'right',
+      export: r0 => +r0.pending_qty || 0,
+      render: r0 => +r0.pending_qty > 0 ? (
+        <div className="leading-tight">
+          <span className="font-bold text-amber-700">{fmt.num(r0.pending_qty)}</span>
+          {+r0.fg_consumed_qty > 0 && (
+            <div className="whitespace-nowrap text-[10px] font-semibold text-violet-600"
+              title={`${fmt.num(r0.fg_consumed_qty)} already covered from finished-goods stock — only ${fmt.num(r0.to_make_qty)} still has to be made`}>
+              {fmt.num(r0.fg_consumed_qty)} from FG · make {fmt.num(r0.to_make_qty)}
+            </div>
+          )}
+        </div>
+      ) : <span className="font-semibold text-emerald-700">0</span> },
     { key: 'status', label: 'Status', render: r0 => (
       <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${ORDER_STATUS_CLS[r0.status] || 'bg-slate-100 text-slate-600'}`}>
         {fmt.title(r0.status)}</span>) },

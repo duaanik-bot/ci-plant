@@ -254,6 +254,12 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
   };
 
   // Dispatch the entered per-order quantities — one challan per sales order.
+  // The remainder is boxed in the SAME transaction (the server's 'dispatch' mode
+  // takes an optional leftover_qty), so loose FG always lands back at zero: a
+  // carton at rest carries a box number, never an anonymous loose balance.
+  // Safe because the server dispatches EXACTLY the qty sent — it throws on a
+  // tolerance breach rather than clamping — so what remains after the debit is
+  // exactly this leftover, and the server's own over-box guard passes on equality.
   const dispatchNow = async () => {
     const allocations = moving.allocations
       .filter(a => (Math.floor(+a.dispatch_now) || 0) > 0)
@@ -263,10 +269,12 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
     try {
       const res = await api.post('/fg/move', {
         product_id: moving.product_id, mode: 'dispatch', allocations,
+        leftover_qty: leftover,
         vehicle: moving.vehicle, driver: moving.driver,
       });
       const nums = (res.challans || []).map(c => c.challan_number).join(', ');
-      toast.success(`Dispatched ${fmt.num(toDispatch)} — challan ${nums}`);
+      const boxed = res.boxes?.length ? ` · ${fmt.num(leftover)} boxed as ${boxNumbersLabel(res.boxes)}` : '';
+      toast.success(`Dispatched ${fmt.num(toDispatch)} — challan ${nums}${boxed}`);
       setMoving(null); load();
       if (res.challans?.length === 1) nav(`/dispatch/challan/${res.challans[0].id}`);
     } catch { /* tolerance / stock 409 surfaces via central toast */ } finally { setSaving(false); }
@@ -493,8 +501,24 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
             { key: 'dispatched_qty', label: 'Dispatched', align: 'right', card: 'metric',
               render: l => <span className="tabular-nums">{fmt.num(l.dispatched_qty)}</span>, export: l => fmt.num(l.dispatched_qty) },
             { key: 'fg_qty', label: 'FG in Stock', align: 'right', card: 'metric',
-              render: l => <span className="font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</span>,
-              export: l => fmt.num(l.fg_qty) },
+              render: l => (
+                <div className="leading-tight">
+                  <span className="font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</span>
+                  {/* A box consumed against this line in planning is sitting in
+                      the store under its own number and belongs in THIS lot.
+                      Unsaid, the storekeeper ships loose stock and leaves the
+                      box on the rack against an order that has already gone. */}
+                  {+l.reserved_qty > 0 && (
+                    <div className="whitespace-nowrap text-[10px] font-bold text-violet-600"
+                      title={`Box ${l.reserved_boxes} was consumed in planning for this line — send it with this lot`}>
+                      + box {l.reserved_boxes} ({fmt.num(l.reserved_qty)})
+                    </div>
+                  )}
+                </div>
+              ),
+              export: l => (+l.reserved_qty > 0
+                ? `${fmt.num(l.fg_qty)} (+ box ${l.reserved_boxes}: ${fmt.num(l.reserved_qty)})`
+                : fmt.num(l.fg_qty)) },
             { key: 'suggested_dispatch', label: 'Suggested Dispatch', align: 'right', card: 'metric',
               render: l => (
                 <span className={`font-bold tabular-nums ${l.suggested_dispatch > 0 ? 'text-brand-600' : 'text-slate-300'}`}>
@@ -856,6 +880,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
               </Button>
               <Button onClick={dispatchNow} disabled={saving || toDispatch <= 0}>
                 <PackageCheck size={14} /> Dispatch {fmt.num(toDispatch)}
+                {leftover > 0 && ` · box ${fmt.num(leftover)}`}
               </Button>
             </div>
           </div>
@@ -869,7 +894,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
               {[
                 ['FG on hand', moving.fg_stock, 'from-slate-50 to-slate-100 text-slate-800'],
                 ['To dispatch', toDispatch, 'from-emerald-50 to-emerald-100 text-emerald-700'],
-                ['Leftover', leftover, 'from-amber-50 to-amber-100 text-amber-700'],
+                ['Leftover → boxed', leftover, 'from-amber-50 to-amber-100 text-amber-700'],
               ].map(([k, v, cls]) => (
                 <div key={k} className={`rounded-2xl bg-gradient-to-br ${cls} px-4 py-3 shadow-sm`}>
                   <div className="text-[10px] font-bold uppercase tracking-wide opacity-70">{k}</div>

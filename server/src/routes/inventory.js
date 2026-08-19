@@ -225,14 +225,66 @@ r.get('/inventory/movements', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ONE ROW PER PRODUCT MASTER, not per stock row — the Board RM shape.
+//
+// The old query was `FROM fg_stock … WHERE f.qty > 0`, so a product could only
+// appear once it already held loose stock: there was no row to reveal when the
+// zero-stock switch was turned on, and a product holding nothing but BOXES was
+// missing from the warehouse entirely. The position set is now every master, and
+// the switch governs the LIST only — the same rule the board warehouse learned
+// the hard way (counting only boards WITH stock is how "PR raised" read nil
+// while six live requisitions sat against three empty boards).
+//
+// Three quantities, because the plant thinks in three:
+//   ready  — the loose pool, what Ready to Dispatch can ship today
+//   boxed  — numbered CI-BOX leftovers, carved OUT of loose (never double-counted)
+//   total  — ready + boxed, the cartons physically in the FG store
+// and `reserved`, which is neither: boxes already consumed against a live order
+// line in planning. Those must travel with that PO's lot at dispatch, so the row
+// names the boxes and the POs waiting on them.
 r.get('/inventory/fg', async (_req, res, next) => {
   try {
     const rows = await q(`
-      SELECT f.*, p.name AS product_name, p.code, p.party_artwork_code, p.party_item_code,
+      SELECT p.id AS product_id,
+             COALESCE(f.qty,0) AS qty,
+             COALESCE(f.qty,0) AS ready_qty,
+             COALESCE(lb.boxed_qty,0)::int AS boxed_qty,
+             COALESCE(f.qty,0) + COALESCE(lb.boxed_qty,0) AS total_qty,
+             COALESCE(lb.box_count,0)::int AS box_count,
+             COALESCE(lb.retired_qty,0)::int AS retired_qty,
+             COALESCE(lb.retired_count,0)::int AS retired_count,
+             lb.box_numbers,
+             COALESCE(rsv.reserved_qty,0)::int AS reserved_qty,
+             rsv.reserved_boxes, rsv.reserved_for,
+             p.name AS product_name, p.code, p.party_artwork_code, p.party_item_code,
              p.rate, c.name AS customer_name
-      FROM fg_stock f JOIN products p ON p.id=f.product_id
+      FROM products p
       JOIN customers c ON c.id=p.customer_id
-      WHERE f.qty > 0 ORDER BY p.name`);
+      LEFT JOIN fg_stock f ON f.product_id=p.id
+      LEFT JOIN (
+        SELECT product_id,
+               SUM(qty - consumed_qty) AS boxed_qty,
+               COUNT(*) AS box_count,
+               SUM(CASE WHEN COALESCE(retired,0)=1 THEN qty - consumed_qty ELSE 0 END) AS retired_qty,
+               COUNT(*) FILTER (WHERE COALESCE(retired,0)=1) AS retired_count,
+               STRING_AGG(COALESCE(box_number, lot_number), ', ' ORDER BY COALESCE(box_number, lot_number)) AS box_numbers
+        FROM fg_lots
+        WHERE kind='leftover' AND (qty - consumed_qty) > 0
+        GROUP BY product_id) lb ON lb.product_id = p.id
+      LEFT JOIN (
+        -- Consumed in planning against a line that has NOT shipped yet. This is
+        -- the "there is a box against this PO, send it with that lot" note.
+        SELECT fl.product_id,
+               SUM(fc.qty) AS reserved_qty,
+               STRING_AGG(DISTINCT COALESCE(fl.box_number, fl.lot_number), ', ') AS reserved_boxes,
+               STRING_AGG(DISTINCT o.po_number, ', ') AS reserved_for
+        FROM fg_consumptions fc
+        JOIN fg_lots fl     ON fl.id = fc.fg_lot_id
+        JOIN order_lines ol ON ol.id = fc.order_line_id
+        JOIN orders o       ON o.id  = ol.order_id
+        WHERE ol.status NOT IN ('dispatched','cancelled')
+        GROUP BY fl.product_id) rsv ON rsv.product_id = p.id
+      ORDER BY p.name`);
     // FG age in stock: plain fg_stock carries no date, so derive it FIFO — the
     // oldest receipt still represented by the on-hand balance (walk receipts
     // newest-first, accumulate to the current qty, anchor on the last).
@@ -244,7 +296,11 @@ r.get('/inventory/fg', async (_req, res, next) => {
     // shows a blank age forever — which is the whole of the new manual door.
     // qty>0 keeps this to arrivals: boxing OUT to leftover writes a negative
     // adjustment, and lot bookkeeping writes a zero.
-    const ids = rows.map(f => f.product_id);
+    // Only products actually holding loose stock can have a FIFO age, and the
+    // row set is now the whole master (thousands), so asking for every product's
+    // receipts would scan the ledger for nothing. A zero row has no age by
+    // definition — there is no on-hand balance to anchor.
+    const ids = rows.filter(f => +f.qty > 0).map(f => f.product_id);
     let recs = [];
     if (ids.length)
       recs = await q(`SELECT product_id, qty, created_at FROM stock_movements
@@ -268,6 +324,7 @@ r.get('/inventory/leftover-fg', async (_req, res, next) => {
   try {
     res.json(await q(`
       SELECT fl.id, fl.product_id, fl.lot_number, fl.box_number, fl.kind, fl.status, fl.source, fl.created_at,
+             COALESCE(fl.retired,0) AS retired, fl.retired_reason, fl.retired_by, fl.retired_at,
              fl.qty, fl.consumed_qty, (fl.qty - fl.consumed_qty) AS remaining,
              p.name AS product_name, p.code, p.party_artwork_code, p.party_item_code,
              c.name AS customer_name,

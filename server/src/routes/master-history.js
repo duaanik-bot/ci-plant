@@ -165,8 +165,15 @@ async function productHistory(id, params) {
   // Order book — every sales-order line for this product in the window, with how
   // much of each is still pending (ordered − dispatched). Windowed by PO date,
   // the same way the invoice tab is windowed by invoice date.
+  // fg_consumed_qty rides alongside but is deliberately NOT subtracted from
+  // pending: pending is what the CUSTOMER is still owed, and FG reserved against
+  // a line has not shipped yet. What it does change is how much still has to be
+  // MADE, so the drawer shows it as coverage against the pending figure rather
+  // than quietly shrinking it. (netProduceQty is the production-side number.)
   const orders = await q(`
     SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status,
+           COALESCE(ol.fg_consumed_qty,0) AS fg_consumed_qty,
+           GREATEST(0, ol.qty - ol.dispatched_qty - COALESCE(ol.fg_consumed_qty,0)) AS to_make_qty,
            GREATEST(0, ol.qty - ol.dispatched_qty) AS pending_qty,
            o.po_number, o.po_date, o.delivery_date, o.status AS order_status
     FROM order_lines ol

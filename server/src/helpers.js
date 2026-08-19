@@ -1831,7 +1831,8 @@ export async function fgAvailableForLine(line, oc = one) {
     FROM fg_lots fl
     JOIN products fp ON fp.id = fl.product_id
     JOIN products p  ON p.id = $1
-    WHERE fl.status='verified' AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}`,
+    WHERE fl.status='verified' AND COALESCE(fl.retired,0)=0
+      AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}`,
     [line.product_id]);
   return row.qty;
 }
@@ -1967,6 +1968,128 @@ export async function moveLeftoverBoxToFg(lotId, qc, oc, user) {
   }, qc, oc);
   await audit('fg_lot', lot.id, 'to_fg', `${lot.lot_number} · box ${lot.box_number} — ${remaining} pcs returned to FG`, qc, user);
   return { remaining };
+}
+
+// Scrap a leftover box — the cartons are damaged, obsolete or otherwise unusable
+// and are leaving the building. The box empties and drops out of the Leftover
+// view exactly as it does when moved back to FG, but the goods do NOT return to
+// loose stock: they are gone. A reason is mandatory — this is not reversible
+// from the UI, and a write-off with no stated cause is unauditable.
+//
+// NO stock_movements ROW, DELIBERATELY. That ledger mirrors fg_stock, and these
+// cartons were already carved OUT of fg_stock when the box was made
+// (boxLeftoverFromFg debits it). fg_stock does not move here, so a movement row
+// would break the reconciliation `fg_receipt + dispatch + adjustment =
+// SUM(fg_stock)`. A box-level event belongs in the box's own ledger, and the
+// real-world invariant `physical = fg_stock + Σ(box remaining)` correctly falls
+// by the scrapped quantity because the goods genuinely left.
+export async function scrapLeftoverBox(lotId, reason, qc, oc, user) {
+  const why = String(reason || '').trim();
+  if (!why) throw Object.assign(new Error('A scrap reason is required'), { status: 400 });
+  const lot = await oc('SELECT * FROM fg_lots WHERE id=$1 FOR UPDATE', [lotId]);
+  if (!lot) throw Object.assign(new Error('Box not found'), { status: 404 });
+  if (lot.kind !== 'leftover') throw Object.assign(new Error('Only a leftover box can be scrapped'), { status: 409 });
+  const remaining = Math.max(0, +lot.qty - +lot.consumed_qty);
+  if (remaining <= 0) throw Object.assign(new Error('This box is already empty'), { status: 409 });
+  await qc(`UPDATE fg_lots SET consumed_qty=qty, status='rejected' WHERE id=$1`, [lot.id]);
+  const cust = await oc('SELECT customer_id FROM products WHERE id=$1', [lot.product_id]);
+  await fgMove({
+    ref_number: lot.lot_number, fg_lot_id: lot.id, product_id: lot.product_id, customer_id: cust?.customer_id,
+    qty_out: remaining, movement_type: 'manual_adjustment', source_module: 'warehouse',
+    created_by: user, remarks: `Box ${lot.box_number} scrapped — ${why}`,
+  }, qc, oc);
+  await audit('fg_lot', lot.id, 'scrap',
+    `${lot.lot_number} · box ${lot.box_number} — ${remaining} pcs scrapped (${why})`, qc, user);
+  return { remaining, reason: why };
+}
+
+// Take a box out of circulation, or put it back. Retiring does NOT destroy the
+// cartons — they stay on the books, in the warehouse total and in every report;
+// planning simply stops offering them against any line. That is the difference
+// from scrapping, and it is why this is reversible.
+export async function setLotRetired(lotId, retired, reason, qc, oc, user) {
+  const lot = await oc('SELECT * FROM fg_lots WHERE id=$1 FOR UPDATE', [lotId]);
+  if (!lot) throw Object.assign(new Error('Box not found'), { status: 404 });
+  const want = retired ? 1 : 0;
+  if ((+lot.retired || 0) === want)
+    throw Object.assign(new Error(want ? 'This box is already retired' : 'This box is not retired'), { status: 409 });
+  const why = String(reason || '').trim();
+  if (want && !why) throw Object.assign(new Error('A reason is required to retire stock'), { status: 400 });
+  await qc(`UPDATE fg_lots SET retired=$1, retired_reason=$2, retired_by=$3,
+                               retired_at=CASE WHEN $1=1 THEN now() ELSE NULL END
+            WHERE id=$4`, [want, want ? why : null, want ? user : null, lot.id]);
+  await audit('fg_lot', lot.id, want ? 'retire' : 'unretire',
+    `${lot.lot_number}${lot.box_number ? ` · box ${lot.box_number}` : ''}${want ? ` — retired (${why})` : ' — back in circulation'}`,
+    qc, user);
+  return { retired: !!want, lot_number: lot.lot_number, box_number: lot.box_number };
+}
+
+// Give back FG that was consumed against a line in planning — the exact inverse
+// of POST /order-lines/:id/consume-fg, step for step. Pass a consumption id to
+// release one booking, or omit it to release everything on the line.
+//
+// Order matters: the line's balance goes back UP, so its sheet requirement has
+// to be re-derived on the larger figure, and any frozen mix is cleared for the
+// same reason consuming clears it — the board requirement moved under it.
+export async function releaseFgConsumption({ lineId, consumptionId }, qc, oc, user) {
+  const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+  if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
+  if (!['pending', 'planned', 'ready'].includes(line.status))
+    throw Object.assign(new Error('FG can only be released while the line is still in planning'), { status: 409 });
+  const jc = await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]);
+  if (jc) throw Object.assign(new Error('A job card already exists for this line — adjust the job card instead'), { status: 409 });
+
+  const rows = await qc(
+    consumptionId
+      ? 'SELECT * FROM fg_consumptions WHERE id=$1 AND order_line_id=$2'
+      : 'SELECT * FROM fg_consumptions WHERE order_line_id=$1',
+    consumptionId ? [consumptionId, line.id] : [line.id]);
+  const list = Array.isArray(rows) ? rows : (rows ? [rows] : []);
+  if (!list.length) throw Object.assign(new Error('Nothing is reserved on this line'), { status: 409 });
+
+  let released = 0;
+  for (const fc of list) {
+    const lot = await oc('SELECT * FROM fg_lots WHERE id=$1 FOR UPDATE', [fc.fg_lot_id]);
+    const n = +fc.qty;
+    // Put it back in the box and un-exhaust it. `consumed` is only ever set by a
+    // full consumption, so anything short of full goes back to 'verified'.
+    await qc(`UPDATE fg_lots SET consumed_qty = GREATEST(0, consumed_qty - $1),
+                                 status = CASE WHEN status='consumed' THEN 'verified' ELSE status END
+              WHERE id=$2`, [n, lot.id]);
+    // Consuming a LEFTOVER box pushed its qty into loose fg_stock so the order
+    // could dispatch it. Releasing has to take that back out, or the cartons
+    // exist twice — once in the box and once loose.
+    if (lot.kind === 'leftover') await fgReceipt(lot.product_id, -n, 'fg_release', lot.id, qc);
+    await qc('DELETE FROM fg_consumptions WHERE id=$1', [fc.id]);
+    const ord = await oc('SELECT order_id FROM order_lines WHERE id=$1', [line.id]);
+    const cust = await oc('SELECT customer_id FROM orders WHERE id=$1', [ord?.order_id]);
+    await fgMove({
+      ref_number: lot.lot_number, fg_lot_id: lot.id, product_id: lot.product_id,
+      order_line_id: line.id, order_id: ord?.order_id, customer_id: cust?.customer_id,
+      qty_in: n, movement_type: 'manual_adjustment', source_module: 'planning',
+      created_by: user, remarks: `Reservation released back from line ${line.id}`,
+    }, qc, oc);
+    released += n;
+  }
+  await qc('UPDATE order_lines SET fg_consumed_qty = GREATEST(0, fg_consumed_qty - $1) WHERE id=$2',
+    [released, line.id]);
+
+  // Re-plan the material requirement on the RESTORED balance.
+  const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+  if (fresh.sheets_required != null) {
+    const master = await oc('SELECT * FROM products WHERE id=$1', [fresh.product_id]);
+    const product = effectiveProduct(master, fresh);
+    const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
+    const sheets = sheetsRequired(product, netProduceQty(fresh));
+    const fit = childFit(board, product);
+    await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
+      [sheets, parentSheetsRequired(sheets, fit.count), fresh.id]);
+    await clearMixPlan(line.id, qc, user,
+      `${released} pcs released back to FG — board requirement re-derived`);
+  }
+  await audit('order_line', line.id, 'fg_released',
+    `${released} pcs released back to FG stock`, qc, user);
+  return { released, balance_to_produce: netProduceQty(fresh) };
 }
 
 // Classify a coating/finish into the production stage it needs. Handles both
@@ -2217,7 +2340,8 @@ export async function readinessBatch(lines, oc = one, qc = q) {
         FROM products p
         LEFT JOIN products fp ON ${fgMatchPredicate()}
         LEFT JOIN fg_lots fl ON fl.product_id = fp.id
-             AND fl.status='verified' AND (fl.qty - fl.consumed_qty) > 0
+             AND fl.status='verified' AND COALESCE(fl.retired,0)=0
+             AND (fl.qty - fl.consumed_qty) > 0
         WHERE p.id = ANY($1)
         GROUP BY p.id`, [productIds]),
   ]);

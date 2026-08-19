@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, PackagePlus, SlidersHorizontal } from 'lucide-react';
+import { Plus, Minus, PackagePlus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -48,6 +48,9 @@ function SubTabs({ active, onChange, tabs }) {
 const ADD_BLANK = { product_id: '', qty: '', box_number: '', location: '', note: '' };
 const ADJ_BLANK = { product_id: '', mode: 'add', qty: '', actual: '', note: '' };
 const ADD_REASONS = ['Opening stock', 'Physical count — found on rack', 'Customer return', 'Sample stock'];
+// Scrapping is a write-off, not a move — the cartons leave the building and do
+// not return to loose FG. The reason is mandatory, so offer the real ones.
+const SCRAP_REASONS = ['Damaged in storage', 'Print/quality defect', 'Obsolete artwork', 'Wet or soiled', 'Sent to mill for pulping'];
 
 export default function FgStockPanel({ onCountsChange }) {
   const toast = useToast();
@@ -59,6 +62,9 @@ export default function FgStockPanel({ onCountsChange }) {
   const [fgSel, setFgSel] = useState(() => new Set());
   const [pickedBoxes, setPickedBoxes] = useState([]);
   const [move, setMove] = useState(null);
+  const [scrap, setScrap] = useState(null);   // { box, reason } while confirming a box write-off
+  const [wipe, setWipe] = useState(null);     // { row, reason } while confirming a READY-stock write-off
+  const [showZero, setShowZero] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Add-a-leftover-box and adjust-loose-stock. Two doors, deliberately separate:
@@ -70,6 +76,13 @@ export default function FgStockPanel({ onCountsChange }) {
 
   const pickedRows = leftoverFg.filter(l => pickedBoxes.includes(l.id));
 
+  // /inventory/fg now returns EVERY product master, zeros included, so the
+  // switch has something to reveal. A row counts as holding stock if it holds
+  // either pool — a product with no loose stock but three boxes on the rack is
+  // very much a live position, and the old `qty > 0` query hid exactly that.
+  const fgHidden = fg.filter(f => +f.total_qty <= 0).length;
+  const fgRows = showZero ? fg : fg.filter(f => +f.total_qty > 0);
+
   const load = async () => {
     try {
       const [fgRows, leftoverRows] = await Promise.all([
@@ -78,7 +91,13 @@ export default function FgStockPanel({ onCountsChange }) {
       ]);
       setFg(fgRows);
       setLeftoverFg(leftoverRows);
-      onCountsChange?.({ in: fgRows.length, leftover: leftoverRows.length });
+      // The tab badge counts what is IN STOCK, not how many masters exist — the
+      // row set is now the whole master list, and "In Stock 1,661" would be a
+      // lie told in the loudest place on the screen.
+      onCountsChange?.({
+        in: fgRows.filter(f => +f.total_qty > 0).length,
+        leftover: leftoverRows.length,
+      });
     } catch (e) {
       if (!e.data) toast.error(e.message || 'Could not load FG stock');
     }
@@ -270,6 +289,69 @@ export default function FgStockPanel({ onCountsChange }) {
     }
   };
 
+  // Open the adjustment door already pointed at the row that was clicked — no
+  // hunting the product back out of a dropdown you just came from. 'reduce'
+  // pre-loads the whole on-hand figure, which is the "zero it down" case.
+  const openAdjFor = (f, mode = 'add') => {
+    setAdj({ ...ADJ_BLANK, product_id: String(f.product_id), mode,
+             qty: mode === 'reduce' ? String(Math.floor(+f.ready_qty || 0)) : '' });
+    setAdjOpen(true);
+  };
+
+  // Put a retired box back in circulation. Retiring happens in planning (it is a
+  // planning decision), but the warehouse is where you SEE what is retired, so
+  // the way back has to be here too or the state is a one-way door.
+  const unretireBox = async box => {
+    if (!window.confirm(`Put ${box.box_number || box.lot_number} back in circulation? Planning will start offering it again.`)) return;
+    setSaving(true);
+    try {
+      await api.post(`/fg-lots/${box.id}/unretire`, {});
+      toast.success(`${box.box_number || box.lot_number} is back in circulation`);
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not un-retire the box');
+    } finally { setSaving(false); }
+  };
+
+  // Write off the READY (loose) stock of a product. Distinct from adjusting it
+  // down: an adjustment is a count correction, this is stock that existed and is
+  // being destroyed, so the reason is mandatory and says so in the ledger.
+  // Boxes are NOT touched from here — each carries its own number and has to be
+  // written off individually, or the audit trail stops meaning anything.
+  const wipeReadyStock = async () => {
+    const why = (wipe.reason || '').trim();
+    if (!why) return toast.error('Give a reason for writing this stock off');
+    const n = Math.floor(+wipe.row.ready_qty || 0);
+    setSaving(true);
+    try {
+      await api.post('/fg/adjust', { product_id: wipe.row.product_id, qty: -n, note: `Scrapped — ${why}` });
+      toast.success(`${fmt.num(n)} cartons of ${wipe.row.code} written off`);
+      setWipe(null);
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not write the stock off');
+    } finally { setSaving(false); }
+  };
+
+  // Write the box off. Deliberately a modal and not a window.confirm: the reason
+  // is mandatory and is the only record of WHY stock vanished, so it has to be
+  // typed before the button will fire.
+  const scrapBox = async () => {
+    const why = (scrap.reason || '').trim();
+    if (!why) return toast.error('Give a reason for scrapping this box');
+    setSaving(true);
+    try {
+      const res = await api.post(`/fg-lots/${scrap.box.id}/scrap`, { reason: why });
+      toast.success(`Box ${scrap.box.box_number || scrap.box.lot_number} scrapped — ${fmt.num(res.remaining)} cartons written off`);
+      setScrap(null);
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not scrap the box');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const bulkMoveToFg = async () => {
     const ids = pickedRows.map(l => l.id);
     if (!ids.length) return;
@@ -295,7 +377,9 @@ export default function FgStockPanel({ onCountsChange }) {
           holds something the ERP never saw produced. */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <SubTabs active={fgSub} onChange={setFgSub} tabs={[
-          { key: 'in', label: 'In Stock', count: fg.length },
+          // What is IN STOCK, not how many masters exist — `fg` is now the whole
+          // product master, so fg.length would read 1,661 on the live plant.
+          { key: 'in', label: 'In Stock', count: fg.filter(f => +f.total_qty > 0).length },
           { key: 'leftover', label: 'Leftover', count: leftoverFg.length || 0 },
         ]} />
         <div className="flex flex-wrap gap-2">
@@ -309,7 +393,22 @@ export default function FgStockPanel({ onCountsChange }) {
       </div>
 
       {fgSub === 'in' && (<>
-        <AgeBar items={fg.map(f => f.age_days)} unit="SKUs" />
+        {/* THE POSITION IS EVERY MASTER — the switch governs the LIST only.
+            Same rule the board warehouse arrived at: a product at zero is a real
+            position, and it is exactly the row a box gets booked onto tomorrow.
+            The count on the switch says what it is holding back, so nothing
+            disappears silently. */}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <AgeBar items={fgRows.map(f => f.age_days)} unit="SKUs" />
+          <label className="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#1D1D1F]/[0.06] bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:border-slate-300">
+            <input type="checkbox" className="h-3.5 w-3.5 accent-[#007AFF]"
+              checked={showZero} onChange={e => setShowZero(e.target.checked)} />
+            Show zero stock
+            {fgHidden > 0 && !showZero && (
+              <span className="rounded-full bg-slate-100 px-1.5 text-[10px] tabular-nums text-slate-500">{fgHidden}</span>
+            )}
+          </label>
+        </div>
         {fgSel.size > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50/60 px-4 py-2.5">
             <span className="text-sm font-semibold text-brand-700">{fgSel.size} selected</span>
@@ -328,18 +427,81 @@ export default function FgStockPanel({ onCountsChange }) {
               searchValue: productSearchText,
               export: productExport },
             { key: 'customer_name', label: 'Customer' },
-            { key: 'qty', label: 'Cartons in Stock', align: 'right', render: f => <span className="font-bold tabular-nums">{fmt.num(f.qty)}</span> },
+            // Three quantities, because the plant thinks in three. Ready is what
+            // Ready to Dispatch can ship today; boxed is carved OUT of it and
+            // never double-counted; total is what is physically in the store.
+            { key: 'ready_qty', label: 'Ready Stock', align: 'right',
+              render: f => +f.ready_qty > 0
+                ? <span className="font-bold tabular-nums text-emerald-700">{fmt.num(f.ready_qty)}</span>
+                : <span className="tabular-nums text-slate-300">0</span> },
+            { key: 'boxed_qty', label: 'In Leftover Boxes', align: 'right',
+              export: f => +f.boxed_qty || 0,
+              render: f => +f.boxed_qty > 0 ? (
+                <div className="leading-tight">
+                  <span className="font-bold tabular-nums text-amber-700">{fmt.num(f.boxed_qty)}</span>
+                  <div className="font-mono text-[10px] text-slate-400" title={f.box_numbers || ''}>
+                    {f.box_count} box{f.box_count > 1 ? 'es' : ''}
+                  </div>
+                  {/* Retired stock is still ON the books and still counted in
+                      this row — it is simply no longer offered in planning. Say
+                      so here, or it looks like stock that has gone missing. */}
+                  {+f.retired_qty > 0 && (
+                    <div className="text-[10px] font-bold text-slate-500"
+                      title="Retired — still in the warehouse, but planning will not offer it">
+                      {fmt.num(f.retired_qty)} retired
+                    </div>
+                  )}
+                </div>
+              ) : <span className="tabular-nums text-slate-300">0</span> },
+            { key: 'box_numbers', label: 'Box Numbers',
+              render: f => f.box_numbers
+                ? <span className="font-mono text-[10px] text-slate-500">{f.box_numbers}</span>
+                : <span className="text-xs text-slate-300">-</span> },
+            { key: 'total_qty', label: 'Total Available', align: 'right',
+              render: f => +f.total_qty > 0
+                ? <span className="font-black tabular-nums text-slate-900">{fmt.num(f.total_qty)}</span>
+                : <span className="tabular-nums text-slate-300">0</span> },
+            // Consumed in planning against a line that has not shipped. These
+            // cartons must travel with that PO's lot — saying so on the row is
+            // the only place the storekeeper would ever see it.
+            { key: 'reserved_qty', label: 'Committed in Planning', align: 'right',
+              export: f => +f.reserved_qty || 0,
+              render: f => +f.reserved_qty > 0 ? (
+                <div className="leading-tight">
+                  <span className="font-bold tabular-nums text-violet-700">{fmt.num(f.reserved_qty)}</span>
+                  <div className="text-[10px] font-semibold text-violet-500" title={`${f.reserved_boxes || ''} → ${f.reserved_for || ''}`}>
+                    send with {f.reserved_for}
+                  </div>
+                </div>
+              ) : <span className="text-xs text-slate-300">-</span> },
             { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: f => f.age_days != null ? <AgeChip days={f.age_days} /> : <span className="text-xs text-slate-300">-</span> },
-            { key: 'value', label: 'Value', align: 'right', render: f => fmt.inr(f.qty * f.rate) },
-            { key: 'move', label: '', align: 'right', render: f => <Button size="sm" onClick={() => openMove(f)}>Move...</Button> },
+            { key: 'value', label: 'Value', align: 'right',
+              export: f => (+f.total_qty || 0) * (+f.rate || 0),
+              render: f => fmt.inr((+f.total_qty || 0) * (+f.rate || 0)) },
+            { key: 'move', label: '', align: 'right', render: f => (
+              <div className="flex items-center justify-end gap-1.5">
+                <Button size="sm" onClick={() => openMove(f)} disabled={!(+f.ready_qty > 0)}>Move...</Button>
+                <Button size="sm" variant="secondary" onClick={() => openAdjFor(f, 'add')}>Adjust</Button>
+                <button type="button"
+                  title={`Write off the ready stock of ${f.code}`}
+                  aria-label={`Write off the ready stock of ${f.code}`}
+                  disabled={!(+f.ready_qty > 0)}
+                  onClick={() => setWipe({ row: f, reason: '' })}
+                  className="rounded-lg border border-red-200 bg-white/70 p-1.5 text-red-500 transition-all hover:border-red-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300 disabled:hover:bg-white/70">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ) },
           ]}
-          rows={fg} empty="No finished goods in stock"
+          rows={fgRows} empty={showZero ? 'No product masters' : 'Nothing in finished goods — tick "Show zero stock" to see every master.'}
           exportName="FG Stock"
           exportSubtitle="Dispatch & Invoice - Finished goods"
           exportSummary={rows => [
-            { label: 'SKUs in stock', value: rows.length },
-            { label: 'Cartons', value: fmt.num(rows.reduce((s, f) => s + (+f.qty || 0), 0)) },
-            { label: 'Stock value', value: fmt.inr(rows.reduce((s, f) => s + (+f.qty || 0) * (+f.rate || 0), 0)) },
+            { label: 'SKUs listed', value: rows.length },
+            { label: 'Ready cartons', value: fmt.num(rows.reduce((s, f) => s + (+f.ready_qty || 0), 0)) },
+            { label: 'Boxed cartons', value: fmt.num(rows.reduce((s, f) => s + (+f.boxed_qty || 0), 0)) },
+            { label: 'Total cartons', value: fmt.num(rows.reduce((s, f) => s + (+f.total_qty || 0), 0)) },
+            { label: 'Stock value', value: fmt.inr(rows.reduce((s, f) => s + (+f.total_qty || 0) * (+f.rate || 0), 0)) },
           ]} />
       </>)}
 
@@ -376,12 +538,101 @@ export default function FgStockPanel({ onCountsChange }) {
             { key: 'remaining', label: 'Cartons', align: 'right', render: l => <span className="font-bold tabular-nums">{fmt.num(l.remaining)}</span> },
             { key: 'source', label: 'Source', render: l => <span className="text-xs capitalize text-gray-500">{(l.source || '').replace(/_/g, ' ') || l.jc_number || '-'}</span> },
             { key: 'age', label: 'Age', render: l => <AgeChip days={l.age_days} /> },
-            { key: 'move', label: '', align: 'right', render: l => <Button size="sm" variant="secondary" onClick={() => moveBoxToFg(l)}>Move to FG</Button> },
+            { key: 'retired', label: 'Retired',
+              export: l => (+l.retired ? `Yes — ${l.retired_reason || ''}` : ''),
+              render: l => +l.retired ? (
+                <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600"
+                  title={`Retired by ${l.retired_by || 'someone'} — ${l.retired_reason || 'no reason given'}. Still in the warehouse; planning will not offer it.`}>
+                  retired
+                </span>
+              ) : <span className="text-xs text-slate-300">-</span> },
+            { key: 'move', label: '', align: 'right', render: l => (
+              <div className="flex items-center justify-end gap-1.5">
+                {+l.retired ? (
+                  <Button size="sm" variant="secondary" onClick={() => unretireBox(l)}>Un-retire</Button>
+                ) : null}
+                <Button size="sm" variant="secondary" onClick={() => moveBoxToFg(l)}>Move to FG</Button>
+                <button type="button"
+                  title={`Scrap box ${l.box_number || l.lot_number}`}
+                  aria-label={`Scrap box ${l.box_number || l.lot_number}`}
+                  onClick={() => setScrap({ box: l, reason: '' })}
+                  className="rounded-lg border border-red-200 bg-white/70 p-1.5 text-red-500 transition-all hover:border-red-400 hover:bg-red-50 hover:text-red-600">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ) },
           ]}
           rows={leftoverFg} empty="No finished-goods leftover boxes - move some from FG stock (In Stock > Move...) or box a dispatch overrun."
           exportName="Leftover FG Boxes"
           exportSubtitle="Dispatch & Invoice - Finished-goods leftover boxes" />
       </>)}
+
+      {/* ── Write off a product's READY stock ── */}
+      <Modal open={!!wipe} onClose={() => setWipe(null)} title="Write off ready stock"
+        footer={<>
+          <Button variant="secondary" onClick={() => setWipe(null)} disabled={saving}>Cancel</Button>
+          <Button onClick={wipeReadyStock} disabled={saving || !(wipe?.reason || '').trim()}>
+            Write off {fmt.num(Math.floor(+wipe?.row?.ready_qty || 0))} cartons
+          </Button>
+        </>}>
+        {wipe && (
+          <div className="space-y-4">
+            <p className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              Writes off all <span className="font-bold">{fmt.num(Math.floor(+wipe.row.ready_qty || 0))}</span> ready
+              cartons of {wipe.row.product_name}. The stock is gone and this cannot be undone from here.
+              {+wipe.row.boxed_qty > 0 && (
+                <> Its <span className="font-bold">{fmt.num(wipe.row.boxed_qty)}</span> boxed cartons
+                  ({wipe.row.box_numbers}) are <span className="font-bold">not</span> touched — write each box
+                  off from the Leftover tab so every box number is accounted for separately.</>
+              )}
+            </p>
+            <Field label="Reason">
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {SCRAP_REASONS.map(r0 => (
+                  <button key={r0} type="button" onClick={() => setWipe({ ...wipe, reason: r0 })}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${wipe.reason === r0 ? 'border-red-500 bg-red-500/10 text-red-600' : 'border-[#1D1D1F]/10 bg-white/60 text-slate-600 hover:border-red-400/40'}`}>
+                    {r0}
+                  </button>
+                ))}
+              </div>
+              <Textarea value={wipe.reason} onChange={e => setWipe({ ...wipe, reason: e.target.value })}
+                placeholder="Why this stock is being written off" />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Scrap a leftover box — a write-off, not a move ── */}
+      <Modal open={!!scrap} onClose={() => setScrap(null)} title="Scrap leftover box"
+        footer={<>
+          <Button variant="secondary" onClick={() => setScrap(null)} disabled={saving}>Cancel</Button>
+          <Button onClick={scrapBox} disabled={saving || !(scrap?.reason || '').trim()}>
+            Scrap {fmt.num(scrap?.box?.remaining || 0)} cartons
+          </Button>
+        </>}>
+        {scrap && (
+          <div className="space-y-4">
+            <p className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              Writes off box <span className="font-mono font-bold">{scrap.box.box_number || scrap.box.lot_number}</span> —{' '}
+              <span className="font-bold">{fmt.num(scrap.box.remaining)}</span> cartons of {scrap.box.product_name}.
+              The cartons are gone: they do <span className="font-bold">not</span> come back to FG stock,
+              and this cannot be undone from here.
+            </p>
+            <Field label="Reason">
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {SCRAP_REASONS.map(r0 => (
+                  <button key={r0} type="button" onClick={() => setScrap({ ...scrap, reason: r0 })}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${scrap.reason === r0 ? 'border-red-500 bg-red-500/10 text-red-600' : 'border-[#1D1D1F]/10 bg-white/60 text-slate-600 hover:border-red-400/40'}`}>
+                    {r0}
+                  </button>
+                ))}
+              </div>
+              <Textarea value={scrap.reason} onChange={e => setScrap({ ...scrap, reason: e.target.value })}
+                placeholder="Why these cartons are being written off" />
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       {/* ── Add a leftover box from scratch ── */}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Leftover Stock"

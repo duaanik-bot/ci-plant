@@ -1395,7 +1395,8 @@ r.get('/order-lines/:id/fg-match', async (req, res, next) => {
       LEFT JOIN job_cards jc ON jc.id = fl.job_card_id
       LEFT JOIN order_lines sol ON sol.id = fl.order_line_id
       LEFT JOIN orders o ON o.id = sol.order_id
-      WHERE fl.status='verified' AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}
+      WHERE fl.status='verified' AND COALESCE(fl.retired,0)=0
+        AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}
       ORDER BY fl.id`, [line.product_id]);
     const withMatch = lots.map(l => ({
       ...l,

@@ -2712,6 +2712,34 @@ export default function Planning() {
     load();
   };
 
+  // Give the reserved FG back — the line's balance goes up again and the box
+  // returns to the shelf. The planner changed their mind about USING it; the
+  // stock itself is fine, which is what separates this from retiring.
+  const releaseFg = async line => {
+    const back = Math.max(0, +line.fg_consumed_qty || 0);
+    if (!window.confirm(`Release ${fmt.num(back)} pcs of FG back to stock? This line goes back to making ${fmt.num(line.qty)}.`)) return;
+    try {
+      const r = await api.post(`/order-lines/${line.id}/release-fg`, {});
+      toast.success(`${fmt.num(r.released)} pcs released — balance to produce ${fmt.num(r.balance_to_produce)}`);
+      if (planLine?.id === line.id) setPlanLine(pl => ({ ...pl, fg_consumed_qty: 0 }));
+      load();
+    } catch (e) { if (!e.data) toast.error(e.message || 'Could not release the FG'); }
+  };
+
+  // Take a box out of circulation without destroying it — planning stops
+  // offering it anywhere. Reversible; the cartons stay on the books.
+  const retireLot = async (lot, ctxReload = false) => {
+    const why = window.prompt(`Retire ${lot.box_number || lot.lot_number} (${fmt.num(lot.remaining ?? lot.qty)} pcs)?\n\nIt stays in the warehouse and on every report, but planning will stop offering it.\n\nReason:`);
+    if (why === null) return;
+    if (!why.trim()) return toast.error('A reason is required to retire stock');
+    try {
+      await api.post(`/fg-lots/${lot.id}/retire`, { reason: why.trim() });
+      toast.success(`${lot.box_number || lot.lot_number} retired — no longer offered in planning`);
+      if (ctxReload && planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
+      load();
+    } catch (e) { if (!e.data) toast.error(e.message || 'Could not retire the stock'); }
+  };
+
   const verifyLot = async (lot, approve) => {
     await api.post(`/fg-lots/${lot.id}/verify`, { approve });
     toast.success(`${lot.lot_number} ${approve ? 'verified — approved for consumption' : 'rejected'}`);
@@ -3344,6 +3372,16 @@ export default function Planning() {
                   {m.fg_consumed_qty > 0 && (
                     <div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">
                       −{fmt.num(m.fg_consumed_qty)} FG → {fmt.num(m.qty - m.fg_consumed_qty)}
+                      {/* The undo lives beside the number it undoes. Without it
+                          a mis-clicked "Use FG Stock" could only be unpicked in
+                          the database. */}
+                      {['pending', 'planned', 'ready'].includes(m.status) && (
+                        <button type="button" onClick={e => { e.stopPropagation(); releaseFg(m); }}
+                          title="Give this FG back — the line goes back to making the full quantity"
+                          className="ml-1 rounded border border-violet-200 px-1 text-[10px] font-bold text-violet-500 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700">
+                          release
+                        </button>
+                      )}
                     </div>
                   )}
                   {m.sheets_required ? (
@@ -3698,6 +3736,17 @@ export default function Planning() {
                 <input type="number" min="1" value={form.qty}
                   onChange={e => setForm({ ...form, qty: e.target.value })}
                   className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm font-bold tabular-nums text-slate-900 outline-none focus:ring-0" />
+                {/* The engine has ALWAYS planned the balance — calc.planQty is
+                    order minus FG consumed — but this field shows the ORDER, so
+                    the deduction happened silently and the cut plan looked wrong
+                    by exactly the FG. State it where the number it changes is. */}
+                {planLine.fg_consumed_qty > 0 && (
+                  <div className="mt-0.5 text-[10px] font-bold leading-tight text-violet-600">
+                    −{fmt.num(planLine.fg_consumed_qty)} FG
+                    {' → '}
+                    <span className="text-violet-800">{fmt.num(calc?.planQty ?? Math.max(0, planLine.qty - planLine.fg_consumed_qty))}</span> to make
+                  </div>
+                )}
               </div>
               <Stat small label="Delivery" value={fmt.date(planLine.delivery_date)} />
               <Stat small wrap label="Die" value={planLine.die_number || '—'} />
@@ -4699,20 +4748,29 @@ export default function Planning() {
                     FG Stock Reference{fgUse.lots.length > 1 ? ` — ${fgUse.lots.length} matches` : ''}
                   </div>
                   <div className="space-y-1.5">
+                    {/* The row is a div, not a button — retire is its own control
+                        and a button cannot legally nest inside another. */}
                     {fgUse.lots.map(l => (
-                      <button key={l.id} type="button"
-                        onClick={() => setFgUse(f => ({ ...f, lotId: l.id, qty: String(Math.min(l.remaining, bal)) }))}
-                        className={`flex w-full flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs transition
-                          ${l.id === fgUse.lotId ? 'bg-[#0A84FF]/[0.08] ring-1 ring-[#0A84FF]/30' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                        <span className="font-bold text-slate-800">{l.lot_number}</span>
-                        {l.box_number && <span className="rounded bg-slate-200/70 px-1.5 py-px font-mono text-[10px] font-semibold text-slate-600">{l.box_number}</span>}
-                        {l.kind === 'leftover' && <span className="rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">leftover</span>}
-                        <span className="tabular-nums text-slate-500">{fmt.num(l.remaining)} pcs available</span>
-                        {l.source_batch && <span className="text-[10px] text-slate-400">batch {l.source_batch}</span>}
-                        <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                          matched · {matchLabel[l.matched_by]}
-                        </span>
-                      </button>
+                      <div key={l.id} className="flex items-stretch gap-1.5">
+                        <button type="button"
+                          onClick={() => setFgUse(f => ({ ...f, lotId: l.id, qty: String(Math.min(l.remaining, bal)) }))}
+                          className={`flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs transition
+                            ${l.id === fgUse.lotId ? 'bg-[#0A84FF]/[0.08] ring-1 ring-[#0A84FF]/30' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                          <span className="font-bold text-slate-800">{l.lot_number}</span>
+                          {l.box_number && <span className="rounded bg-slate-200/70 px-1.5 py-px font-mono text-[10px] font-semibold text-slate-600">{l.box_number}</span>}
+                          {l.kind === 'leftover' && <span className="rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">leftover</span>}
+                          <span className="tabular-nums text-slate-500">{fmt.num(l.remaining)} pcs available</span>
+                          {l.source_batch && <span className="text-[10px] text-slate-400">batch {l.source_batch}</span>}
+                          <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                            matched · {matchLabel[l.matched_by]}
+                          </span>
+                        </button>
+                        <button type="button" onClick={() => retireLot(l, true)}
+                          title="Retire this stock — it stays in the warehouse but planning stops offering it"
+                          className="shrink-0 rounded-xl border border-slate-200 px-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700">
+                          retire
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>

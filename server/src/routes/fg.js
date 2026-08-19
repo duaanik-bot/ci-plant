@@ -4,7 +4,7 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock } from '../helpers.js';
+import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -197,6 +197,48 @@ r.post('/fg-lots/:id/to-fg', canStore, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => { await moveLeftoverBoxToFg(+req.params.id, qc, oc, req.user.name); });
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Scrap a leftover box — damaged, obsolete or otherwise unusable cartons that
+// are leaving the building. The box empties and drops off the Leftover view;
+// the goods do NOT come back to loose FG. Destructive and not reversible from
+// the UI, so the reason is mandatory (enforced in the helper).
+r.post('/fg-lots/:id/scrap', canStore, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) =>
+      scrapLeftoverBox(+req.params.id, req.body.reason, qc, oc, req.user.name));
+    res.json({ ok: true, ...out });
+  } catch (e) { next(e); }
+});
+
+// Retire a box / put it back. Retiring keeps the cartons on the books but stops
+// planning offering them — the planner's "I don't want this used" without
+// destroying anything. canPlan, not canStore: this is a planning decision.
+r.post('/fg-lots/:id/retire', canPlan, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) =>
+      setLotRetired(+req.params.id, true, req.body.reason, qc, oc, req.user.name));
+    res.json({ ok: true, ...out });
+  } catch (e) { next(e); }
+});
+
+r.post('/fg-lots/:id/unretire', canPlan, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) =>
+      setLotRetired(+req.params.id, false, null, qc, oc, req.user.name));
+    res.json({ ok: true, ...out });
+  } catch (e) { next(e); }
+});
+
+// Give FG back that was reserved against this line — the inverse of consume-fg.
+// Pass consumption_id to release one booking, omit it to release the lot.
+r.post('/order-lines/:id/release-fg', canPlan, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => releaseFgConsumption(
+      { lineId: +req.params.id, consumptionId: req.body.consumption_id ? +req.body.consumption_id : null },
+      qc, oc, req.user.name));
+    res.json({ ok: true, ...out });
   } catch (e) { next(e); }
 });
 

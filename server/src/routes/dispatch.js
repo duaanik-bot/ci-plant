@@ -5,6 +5,7 @@ import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, 
 import { requireRole } from '../auth.js';
 import { cascadeAllocate, annotateReadyLines } from '../tolerance-cascade.js';
 import { boxBreakdown } from '../box-math.js';
+import { plantDateStr } from '../plant-calendar.js';
 import { isShortage, shortfallOf, productionOver } from '../shortage.js';
 
 const r = Router();
@@ -59,6 +60,13 @@ r.get('/dispatch/ready', async (_req, res, next) => {
              COALESCE(f.qty,0) AS fg_qty,
              jc.id AS job_card_id, jc.qty_produced, jc.status AS jc_status,
              pk.pack_boxes, pk.pack_qty_per_box, pk.packed_total,
+             -- Boxes already earmarked for THIS line in planning. Those cartons
+             -- are physically in the FG store under their own box number and
+             -- must travel with this lot — without naming them here the
+             -- storekeeper picks loose stock and the box sits on the rack
+             -- against an order that has already gone.
+             COALESCE(rsv.reserved_qty,0)::int AS reserved_qty,
+             rsv.reserved_boxes,
              GREATEST(0, COALESCE(jc.qty_produced,0) - ol.dispatched_qty
                          - COALESCE(lot.lotted,0) - (ol.qty - ol.dispatched_qty)) AS excess_available
       FROM order_lines ol
@@ -72,6 +80,11 @@ r.get('/dispatch/ready', async (_req, res, next) => {
                (SELECT COALESCE(SUM(total),0)::int FROM packing_lines WHERE job_stage_id=js.id) AS packed_total
         FROM job_stages js WHERE js.job_card_id=jc.id AND js.stage='pasting' AND js.status='completed'
         LIMIT 1) pk ON true
+      LEFT JOIN LATERAL (
+        SELECT SUM(fc.qty)::int AS reserved_qty,
+               STRING_AGG(DISTINCT COALESCE(fl.box_number, fl.lot_number), ', ') AS reserved_boxes
+        FROM fg_consumptions fc JOIN fg_lots fl ON fl.id = fc.fg_lot_id
+        WHERE fc.order_line_id = ol.id) rsv ON true
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(fl.qty),0)::int AS lotted FROM fg_lots fl
         WHERE fl.job_card_id=jc.id AND fl.status != 'rejected') lot ON true
@@ -559,10 +572,59 @@ export async function resolveShortage({ lineId, action, reason, vehicle, driver 
         `${ol.jc_number || 'The job card'} has not closed yet — this line is still in production, not short`), { status: 409 });
 
     if (action === 'replan') {
-      await setLineStatus(ol.id, 'planned', qc, oc, user);
+      // The plant does NOT re-plan the original PO line — it raises a separate
+      // Shortage order and makes the balance there. Flipping the original back to
+      // 'planned' (what this used to do, and its ONLY write) put the line in
+      // Planning's *Planned* tab still wearing the spent plan — machine, date and
+      // a sheet count sized for the WHOLE PO, not the balance — and dropped it out
+      // of the shortage register, which reads status='produced'. So: close the
+      // original at what it actually shipped, and open a NEW line for the balance.
+      const balance = Math.max(0, ol.qty - (ol.fg_consumed_qty || 0) - ol.dispatched_qty);
+      if (balance <= 0)
+        throw Object.assign(new Error('Nothing is short on this line — there is no balance to re-make'), { status: 409 });
+
+      const origin = await oc('SELECT po_number, customer_id FROM orders WHERE id=$1', [ol.order_id]);
+      // ONE canonical spelling. The hand-built ones read 'Shortage', 'Shortage '
+      // and 'SHORTAGE'; anything keyed on the text needs them to agree.
+      const [so] = await qc(
+        `INSERT INTO orders (po_number, customer_id, po_date, delivery_date, notes)
+         VALUES ('SHORTAGE',$1,$2,$3,$4) RETURNING id`,
+        [origin.customer_id, plantDateStr(), ol.delivery_date || null,
+         `Shortage balance of PO ${origin.po_number} (order ${ol.order_id}, line ${ol.id})`]);
+
+      // Carry the commercials and any board choice across — the balance is the
+      // same product on the same terms, so the engine reopens pre-filled.
+      const wiring = `Shortage balance of PO ${origin.po_number} (order ${ol.order_id}, line ${ol.id}, `
+        + `${ol.product_name}) — ${balance} of ${ol.qty} short after `
+        + `${ol.jc_number || 'the job card'} closed (reason: ${reason}).`;
+      const [newLine] = await qc(
+        `INSERT INTO order_lines (order_id, product_id, qty, rate, tolerance_pct, delivery_date,
+                                  spec_override, remarks, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending') RETURNING id`,
+        [so.id, ol.product_id, balance, ol.rate, ol.tolerance_pct, ol.delivery_date || null,
+         ol.spec_override || null, wiring]);
+
+      // Close the original at what it really shipped. The job card STAYS — those
+      // cartons were genuinely made and that is production history, not a mistake.
+      await forceLineStatus(ol.id, 'dispatched',
+        `closed short — balance moved to Shortage order ${so.id} line ${newLine.id} (${reason})`, qc, oc, user);
+      await qc(`UPDATE order_lines SET remarks = COALESCE(remarks || E'\n', '') || $1 WHERE id=$2`,
+        [`Short by ${balance}; balance re-raised as SHORTAGE order ${so.id}, line ${newLine.id}.`, ol.id]);
+
       await audit('order_line', ol.id, 'shortage:replan',
-        `short — back to Planning for the balance (${reason})`, qc, user);
-      return { action, order_line_id: ol.id, balance_to_produce: Math.max(0, ol.qty - (ol.fg_consumed_qty || 0) - ol.dispatched_qty) };
+        `short ${balance} of ${ol.qty} — balance raised as SHORTAGE order ${so.id} line ${newLine.id} (${reason})`, qc, user);
+      await audit('order_line', newLine.id, 'shortage:balance_raised',
+        `${balance} for ${ol.product_name} — balance of PO ${origin.po_number} line ${ol.id} (${reason})`, qc, user);
+
+      const openL = await oc(`SELECT COUNT(*)::int AS n FROM order_lines
+                              WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [ol.order_id]);
+      let origin_order_completed = false;
+      if (openL.n === 0) {
+        await qc(`UPDATE orders SET status='completed' WHERE id=$1 AND status='pending'`, [ol.order_id]);
+        origin_order_completed = true;
+      }
+      return { action, order_line_id: ol.id, balance_to_produce: balance,
+               shortage_order_id: so.id, shortage_line_id: newLine.id, origin_order_completed };
     }
 
     // close — ship what exists (within tolerance), then close the gap.
