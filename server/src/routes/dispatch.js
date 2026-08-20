@@ -51,7 +51,7 @@ const PRODUCED_LINES_SQL = `
 r.get('/dispatch/ready', async (_req, res, next) => {
   try {
     const rows = await q(`
-      SELECT ol.id AS order_line_id, ol.qty, ol.dispatched_qty, ol.rate, ol.order_id,
+      SELECT ol.id AS order_line_id, ol.qty, ol.dispatched_qty, ol.rate, ol.order_id, ol.line_remark,
              COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
              o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name, c.city,
              p.id AS product_id, p.name AS product_name, p.code,

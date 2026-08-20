@@ -44,6 +44,9 @@ export function productRecord(row = {}) {
     id,
     name: row.product_name ?? row.name ?? '',
     code: row.product_code ?? row.code ?? row.internal_carton_code ?? '',
+    // Rows reach this component under many shapes — an order line, a job card,
+    // a press queue row, a dispatch row. Accept the aliases they use.
+    line_remark: row.line_remark ?? row.order_line_remark ?? row.remark ?? null,
   };
 }
 
@@ -70,6 +73,7 @@ export function productSearchText(row = {}) {
     r.output_number,
     r.size,
     r.customer_name,
+    r.line_remark,
   ].filter(Boolean).join(' ');
 }
 
@@ -174,6 +178,22 @@ export default function ProductIdentity({
             <span className="line-clamp-2 break-words">{enriched.name || '—'}</span>
           </div>
         )}
+        {/* THE LINE'S OWN NOTE — typed once at order entry and carried the whole
+            way: planning, job card, press, cutting, dispatch, and the FG shelf.
+            It lives HERE rather than in each table because this component is
+            what every one of those screens already uses to name a product, so
+            the note travels with the product by construction instead of by
+            twenty separate columns kept in step by hand. */}
+        {hasValue(enriched.line_remark) && (
+          <div className="mt-1">
+            <span
+              className="inline-flex max-w-full items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 ring-1 ring-amber-300/70"
+              title={`Line remark: ${enriched.line_remark}`}>
+              <span className="shrink-0 opacity-60">REM</span>
+              <span className="min-w-0 truncate font-mono">{enriched.line_remark}</span>
+            </span>
+          </div>
+        )}
         {codes && <ProductCodes row={enriched} compact={compact} className={`mt-1 ${codesClassName}`} />}
         {(meta || metaPrefix) && (
           <div className="mt-0.5 min-w-0 truncate text-[11px] text-slate-400">{metaPrefix}{meta}</div>
@@ -187,5 +207,6 @@ export default function ProductIdentity({
 export function productExport(row = {}) {
   const r = productRecord(row);
   const codes = productCodeParts(r).map(p => `${p.label}: ${p.value}`).join(' · ');
-  return [r.name, codes].filter(Boolean).join(' — ') || '—';
+  const rem = hasValue(r.line_remark) ? `REM: ${r.line_remark}` : '';
+  return [r.name, codes, rem].filter(Boolean).join(' — ') || '—';
 }

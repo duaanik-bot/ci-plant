@@ -126,6 +126,7 @@ const JC_VIEW = `
                   COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
          dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
+         ol.line_remark,   -- the line's travelling note, carried onto the card
          gg.kind AS run_kind,
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
          gmm.members AS gang_members,

@@ -749,6 +749,16 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip_date TEXT;
 -- short-close paths write — a coordination remark must not be overwritten by a
 -- machine.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS remarks TEXT;
+-- The planner's own short note on a line, typed at order entry and carried on
+-- the row for the whole journey: planning, job card, press, cutting, dispatch.
+-- Mostly a batch number, so it is capped at 20 characters and rendered as a
+-- badge beside the product everywhere ProductIdentity appears.
+--
+-- Deliberately NOT the remarks column above. That one is a SYSTEM field holding
+-- unbounded prose (the shortage wiring writes whole sentences into it), and a
+-- 20-character badge printed on every production screen cannot share a column
+-- with paragraphs.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS line_remark TEXT;
 -- EDD per PRODUCT, as an override of the order's own delivery date.
 --
 -- orders.delivery_date is one date for the whole PO, and 79% of the lines on

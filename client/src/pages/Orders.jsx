@@ -420,6 +420,7 @@ export default function Orders() {
       qty: l.qty,
       rate: l.rate,
       gst: l.gst_pct,
+      line_remark: l.line_remark || '',
       dispatched_qty: l.dispatched_qty,
       status: l.status,
     })),
@@ -964,6 +965,13 @@ export default function Orders() {
                           </button>
                         </div>
                         <ProductSpec product={prod} />
+                        {/* The line's own note, under the product it belongs to.
+                            Carried from here to dispatch — usually a batch number. */}
+                        <Input className="mt-1.5 !h-8 !text-xs" maxLength={20}
+                          placeholder="Remarks / batch no"
+                          title="A short note carried with this line all the way to dispatch — batch number, usually. Max 20 characters."
+                          value={l.line_remark ?? ''}
+                          onChange={e => setLine(i, { line_remark: e.target.value })} />
                       </div>
                       <Input type="number" min="1" placeholder="Qty" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
                       <Input type="number" step="0.01" placeholder="Rate ₹" value={l.rate} onChange={e => setLine(i, { rate: e.target.value })} />
@@ -1145,6 +1153,13 @@ export default function Orders() {
                           </button>
                         </div>
                         <ProductSpec product={prod} />
+                        {/* The line's own note, under the product it belongs to.
+                            Carried from here to dispatch — usually a batch number. */}
+                        <Input className="mt-1.5 !h-8 !text-xs" maxLength={20}
+                          placeholder="Remarks / batch no"
+                          title="A short note carried with this line all the way to dispatch — batch number, usually. Max 20 characters."
+                          value={l.line_remark ?? ''}
+                          onChange={e => setEditLine(i, { line_remark: e.target.value })} />
                       </div>
                       <Input type="number" min={Math.max(1, l.dispatched_qty || 0)} placeholder="Qty" value={l.qty} onChange={e => setEditLine(i, { qty: e.target.value })} />
                       <Input type="number" step="0.01" placeholder="Rate ₹" value={l.rate} onChange={e => setEditLine(i, { rate: e.target.value })} />

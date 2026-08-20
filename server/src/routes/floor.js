@@ -184,6 +184,9 @@ const STAGE_VIEW = `
          -- same expression; the readiness gates are keyed on it, so without it
          -- here the section workspace could not compute a light at all.
          COALESCE(ol.id, gol.id) AS anchor_line_id,
+         -- The line's travelling note, on the press and cutting queues too.
+         -- A gang parent has no line of its own, so it wears its anchor's.
+         COALESCE(ol.line_remark, gol.line_remark) AS line_remark,
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
          jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
@@ -302,6 +305,9 @@ r.get('/floor', async (req, res, next) => {
              -- Anchor line: the card's own order line, or the gang's lead
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
+         -- The line's travelling note, on the press and cutting queues too.
+         -- A gang parent has no line of its own, so it wears its anchor's.
+         COALESCE(ol.line_remark, gol.line_remark) AS line_remark,
              p.name AS product_name, p.code AS product_code,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
              p.party_item_code,
@@ -1228,7 +1234,7 @@ r.get('/floor/:section', async (req, res, next) => {
 r.get('/track', async (_req, res, next) => {
   try {
     res.json(await q(`
-      SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status, ol.planned_date,
+      SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status, ol.planned_date, ol.line_remark,
              o.po_number, o.delivery_date, c.name AS customer_name,
              p.name AS product_name, p.code AS product_code, p.party_item_code,
              jc.jc_number, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,

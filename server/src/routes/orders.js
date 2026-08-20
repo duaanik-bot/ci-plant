@@ -25,6 +25,16 @@ import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, LINE_EDD_SQL, overdueDaysSql, 
 import { eddPlan, eddForRow } from '../wip-edd.js';
 
 const r = Router();
+
+// A line's short travelling note — a batch number, nearly always. Capped at 20
+// characters because it is rendered as a badge beside the product on every
+// production screen; anything longer stops being a badge and starts wrapping
+// rows. Blank becomes NULL so "no note" is one value, not two.
+const LINE_REMARK_MAX = 20;
+const cleanLineRemark = v => {
+  const t = String(v ?? '').trim().slice(0, LINE_REMARK_MAX);
+  return t || null;
+};
 const canPlan = requireRole('planner');
 // Planning-side work — planning a line, its zone, its spec/artwork, its tooling,
 // its PR and its stock call. The designer and the plant do all of this. The
@@ -245,8 +255,8 @@ r.post('/orders', canPlan, async (req, res, next) => {
           SELECT p.rate, p.gst_pct, gr.rate AS type_gst
           FROM products p LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
           WHERE p.id=$1`, [l.product_id]);
-        await qc('INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct) VALUES ($1,$2,$3,$4,$5,$6)',
-          [o.id, l.product_id, l.qty, l.rate ?? prod?.rate ?? 0, resolveGst(l.gst, prod || {}), tol]);
+        await qc('INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [o.id, l.product_id, l.qty, l.rate ?? prod?.rate ?? 0, resolveGst(l.gst, prod || {}), tol, cleanLineRemark(l.line_remark)]);
       }
       await audit('order', o.id, 'create', po_number, qc, req.user.name);
       return o.id;
@@ -302,14 +312,14 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
           if (qty < current.dispatched_qty) {
             throw Object.assign(new Error('Quantity cannot be below dispatched quantity'), { status: 400 });
           }
-          await qc('UPDATE order_lines SET product_id=$1, qty=$2, rate=$3, gst_pct=$4 WHERE id=$5',
-            [product.id, qty, rate, gst, current.id]);
+          await qc('UPDATE order_lines SET product_id=$1, qty=$2, rate=$3, gst_pct=$4, line_remark=$6 WHERE id=$5',
+            [product.id, qty, rate, gst, current.id, cleanLineRemark(l.line_remark)]);
           keepIds.push(current.id);
         } else {
           const cust = await oc('SELECT tolerance_pct FROM customers WHERE id=$1', [customer_id]);
           const [created] = await qc(
-            'INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-            [orderId, product.id, qty, rate, gst, cust?.tolerance_pct ?? 0]);
+            'INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+            [orderId, product.id, qty, rate, gst, cust?.tolerance_pct ?? 0, cleanLineRemark(l.line_remark)]);
           keepIds.push(created.id);
         }
       }
