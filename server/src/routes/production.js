@@ -195,6 +195,9 @@ const JC_VIEW = `
              -- companies, so the row has to answer to every one of their
              -- customer chips — which it can only do from the ids.
              'customer_id', o3.customer_id, 'customer_name', c3.name,
+             -- Each member's own travelling note. A gang parent has none of
+             -- its own, so the badge belongs on the members, not the pile.
+             'line_remark', ol3.line_remark,
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required,
              -- Per-carton artwork detail: each product on the gang sheet keeps
@@ -1390,6 +1393,10 @@ r.get('/print-planning', async (_req, res, next) => {
              -- already read gg.kind; the column itself was simply never
              -- selected, so every card arrived with run_kind undefined.
              gg.kind AS run_kind,
+             -- The line's travelling note on the press board. A gang parent has
+             -- no line and therefore no note of its own; its members carry
+             -- theirs, so the board shows a badge only where one truly belongs.
+             ol.line_remark,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,

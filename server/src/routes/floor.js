@@ -145,6 +145,7 @@ const GANG_MEMBERS_LATERAL = `
              'delivery_date', o3.delivery_date,
              'output_number', COALESCE(ol3.spec_override->>'output_number', p3.output_number),
              'party_artwork_code', COALESCE(ol3.spec_override->>'party_artwork_code', p3.party_artwork_code),
+             'line_remark', ol3.line_remark,
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required
            ) ORDER BY ol3.id) AS members
@@ -185,8 +186,12 @@ const STAGE_VIEW = `
          -- here the section workspace could not compute a light at all.
          COALESCE(ol.id, gol.id) AS anchor_line_id,
          -- The line's travelling note, on the press and cutting queues too.
-         -- A gang parent has no line of its own, so it wears its anchor's.
-         COALESCE(ol.line_remark, gol.line_remark) AS line_remark,
+         -- A gang parent has NO line of its own and therefore no note of its
+         -- own: it prints several cartons, each with its own batch number, so
+         -- borrowing the anchor member's would print one member's batch on a
+         -- pile belonging to all of them. The parent stays blank and each
+         -- member carries its own in gang_members.line_remark.
+         ol.line_remark,
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
          jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
@@ -306,8 +311,12 @@ r.get('/floor', async (req, res, next) => {
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
          -- The line's travelling note, on the press and cutting queues too.
-         -- A gang parent has no line of its own, so it wears its anchor's.
-         COALESCE(ol.line_remark, gol.line_remark) AS line_remark,
+         -- A gang parent has NO line of its own and therefore no note of its
+         -- own: it prints several cartons, each with its own batch number, so
+         -- borrowing the anchor member's would print one member's batch on a
+         -- pile belonging to all of them. The parent stays blank and each
+         -- member carries its own in gang_members.line_remark.
+         ol.line_remark,
              p.name AS product_name, p.code AS product_code,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
              p.party_item_code,
