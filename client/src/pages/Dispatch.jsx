@@ -17,6 +17,11 @@ import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
+// Reasons offered when stock stops being available. Same shape as the FG
+// warehouse's own scrap chips — one vocabulary for the same decision.
+const SCRAP_REASONS = ['Damaged in storage', 'Print/quality defect', 'Obsolete artwork', 'Wet or soiled', 'Sent to mill for pulping'];
+const RETIRE_REASONS = ['Obsolete artwork', 'Customer on hold', 'Quality under review', 'Held for a specific order'];
+
 const THREAD_CHUNK = 200;
 const threadSummary = (entity, ids) => {
   const calls = [];
@@ -52,6 +57,8 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
   const [shorts, setShorts] = useState([]);             // the Shortage ZONE's own rows
   const [shortage, setShortage] = useState(null);       // shortage decision modal
   const [loadingMove, setLoadingMove] = useState(false);
+  const [boxesFor, setBoxesFor] = useState(null);       // { row, boxes } leftover-box drawer
+  const [pending, setPending] = useState(null);         // { box, kind:'retire'|'scrap', reason }
   const [saving, setSaving] = useState(false);
 
   const [threads, setThreads] = useState({});
@@ -278,6 +285,75 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
       setMoving(null); load();
       if (res.challans?.length === 1) nav(`/dispatch/challan/${res.challans[0].id}`);
     } catch { /* tolerance / stock 409 surfaces via central toast */ } finally { setSaving(false); }
+  };
+
+  // ── Leftover boxes of ONE product, opened from its dispatch row ───────────
+  // The storekeeper is standing at the Ready list deciding what physically goes
+  // on the vehicle. Old boxed stock of the same product belongs in that decision
+  // — and so do the ways of acting on it — or fresh cartons ship while numbered
+  // boxes of the same carton age on the rack.
+  const openBoxes = async row => {
+    setBoxesFor({ row, boxes: null });
+    try {
+      const all = await api.get('/inventory/leftover-fg');
+      setBoxesFor({ row, boxes: all.filter(l => l.product_id === row.product_id) });
+    } catch (e) {
+      setBoxesFor(null);
+      if (!e.data) toast.error(e.message || 'Could not load the boxes');
+    }
+  };
+  // Refresh BOTH halves. The tiles are read off the dispatch row, so refetching
+  // only the box list leaves them quoting the figures from before the action —
+  // a box visibly leaves the list while "in leftover boxes" stays put.
+  const reloadBoxes = async () => {
+    const row = boxesFor?.row;
+    if (!row) return;
+    const [all, freshReady] = await Promise.all([
+      api.get('/inventory/leftover-fg').catch(() => []),
+      api.get('/dispatch/ready').catch(() => null),
+    ]);
+    if (freshReady) setReady(freshReady);
+    const fresh = freshReady?.find(r => r.order_line_id === row.order_line_id)
+      || freshReady?.find(r => r.product_id === row.product_id)
+      || row;
+    setBoxesFor({ row: fresh, boxes: all.filter(l => l.product_id === fresh.product_id) });
+    load();
+  };
+  const boxAction = async (fn, okMsg) => {
+    setSaving(true);
+    try { await fn(); toast.success(okMsg); await reloadBoxes(); }
+    catch (e) { if (!e.data) toast.error(e.message || 'That did not work'); }
+    finally { setSaving(false); }
+  };
+  const boxToFg = b => boxAction(
+    () => api.post(`/fg-lots/${b.id}/to-fg`, {}),
+    `${b.box_number || b.lot_number} moved back to ready stock`);
+  const boxUnretire = b => boxAction(
+    () => api.post(`/fg-lots/${b.id}/unretire`, {}),
+    `${b.box_number || b.lot_number} back in circulation`);
+  // Retire and scrap both demand a reason, and that reason is the only record of
+  // why stock stopped being available. Captured inline in the drawer rather than
+  // a window.prompt (used once in PrintPlanning, but never for a mandatory
+  // reason): a native box offers no preset reasons, no validation short of a
+  // toast, and it blocks the page while a destructive decision is pending.
+  const confirmReason = async () => {
+    const why = (pending.reason || '').trim();
+    if (!why) return toast.error(`A reason is required to ${pending.kind} stock`);
+    const b = pending.box;
+    const label = b.box_number || b.lot_number;
+    await boxAction(() => api.post(`/fg-lots/${b.id}/${pending.kind}`, { reason: why }),
+      `${label} ${pending.kind === 'retire' ? 'retired' : 'scrapped'}`);
+    setPending(null);
+  };
+  // Box this product's LOOSE stock into fresh numbered cartons, from the same
+  // drawer — the other half of the workflow, so nobody has to leave for it.
+  const boxLooseFromDrawer = async row => {
+    const n = Math.floor(+row.fg_qty || 0);
+    if (!(n > 0)) return toast.error('No loose stock to box');
+    if (!window.confirm(`Box all ${fmt.num(n)} loose cartons of ${row.code} into numbered boxes?`)) return;
+    return boxAction(
+      () => api.post('/fg/move', { product_id: row.product_id, mode: 'leftover', leftover_qty: n }),
+      `Boxed ${fmt.num(n)} cartons`);
   };
 
   // Cancel an entire challan — reverse every line back to FG stock, one click.
@@ -519,6 +595,24 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
               export: l => (+l.reserved_qty > 0
                 ? `${fmt.num(l.fg_qty)} (+ box ${l.reserved_boxes}: ${fmt.num(l.reserved_qty)})`
                 : fmt.num(l.fg_qty)) },
+            // Old boxed stock of this product, and the door to acting on it.
+            { key: 'boxed_qty', label: 'Leftover Stock', align: 'right', card: 'metric',
+              export: l => (+l.boxed_qty > 0 ? `${fmt.num(l.boxed_qty)} in ${l.box_count} (${l.box_numbers})` : '—'),
+              render: l => +l.boxed_qty > 0 ? (
+                <button type="button" onClick={e => { e.stopPropagation(); openBoxes(l); }}
+                  title={`${l.box_numbers} — open to move back to ready stock, retire, scrap or box more`}
+                  className="rounded-lg px-1.5 py-0.5 text-right leading-tight transition hover:bg-amber-50">
+                  <span className="font-bold tabular-nums text-amber-700 underline decoration-dotted underline-offset-2">{fmt.num(l.boxed_qty)}</span>
+                  <div className="text-[10px] font-semibold text-amber-600">
+                    {l.box_count} box{l.box_count > 1 ? 'es' : ''}
+                    {+l.boxed_retired_qty > 0 && <span className="text-slate-400"> · {fmt.num(l.boxed_retired_qty)} retired</span>}
+                  </div>
+                </button>
+              ) : (
+                <button type="button" onClick={e => { e.stopPropagation(); openBoxes(l); }}
+                  title="No leftover boxes yet — open to box this product's loose stock"
+                  className="rounded-lg px-1.5 py-0.5 text-xs text-slate-300 transition hover:bg-slate-50 hover:text-slate-500">—</button>
+              ) },
             { key: 'suggested_dispatch', label: 'Suggested Dispatch', align: 'right', card: 'metric',
               render: l => (
                 <span className={`font-bold tabular-nums ${l.suggested_dispatch > 0 ? 'text-brand-600' : 'text-slate-300'}`}>
@@ -712,6 +806,102 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
 
       {/* Shortage — the batch is finished and the order still is not met.
           Two decisions and only two: accept the gap, or make the balance. */}
+      {/* Leftover boxes of one product, with every right that eases the job:
+          send a box back to ready stock, retire it, scrap it, or box the loose
+          stock into fresh numbered cartons — without leaving the dispatch list. */}
+      <Modal open={!!boxesFor} onClose={() => { setBoxesFor(null); setPending(null); }} wide
+        title={boxesFor ? `Leftover boxes — ${boxesFor.row.product_name}` : 'Leftover boxes'}
+        footer={<>
+          <Button variant="secondary" onClick={() => setBoxesFor(null)}>Close</Button>
+          {boxesFor && +boxesFor.row.fg_qty > 0 && (
+            <Button onClick={() => boxLooseFromDrawer(boxesFor.row)} disabled={saving}>
+              <Boxes size={14} /> Box the {fmt.num(boxesFor.row.fg_qty)} loose
+            </Button>
+          )}
+        </>}>
+        {boxesFor && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              {[['Loose / ready', boxesFor.row.fg_qty, 'text-emerald-700'],
+                ['In leftover boxes', boxesFor.row.boxed_qty, 'text-amber-700'],
+                ['Total on hand', (+boxesFor.row.fg_qty || 0) + (+boxesFor.row.boxed_qty || 0), 'text-slate-900']
+              ].map(([k, v, cls]) => (
+                <div key={k} className="rounded-2xl bg-slate-50 px-3 py-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{k}</div>
+                  <div className={`text-xl font-black tabular-nums ${cls}`}>{fmt.num(v)}</div>
+                </div>
+              ))}
+            </div>
+            {boxesFor.boxes === null ? (
+              <p className="py-6 text-center text-sm text-slate-400">Loading boxes…</p>
+            ) : !boxesFor.boxes.length ? (
+              <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-sm text-slate-500">
+                No leftover boxes for this product yet.
+                {+boxesFor.row.fg_qty > 0 && ' Use “Box the loose” below to give its ready stock box numbers.'}
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {boxesFor.boxes.map(b => (
+                  <div key={b.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
+                    <span className="font-mono font-bold text-slate-800">{b.box_number || b.lot_number}</span>
+                    <span className="font-bold tabular-nums text-slate-700">{fmt.num(b.remaining)} pcs</span>
+                    <span className="text-[10px] text-slate-400">{b.age_days}d old</span>
+                    {+b.retired === 1 && (
+                      <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600"
+                        title={`Retired by ${b.retired_by || 'someone'} — ${b.retired_reason || 'no reason given'}`}>retired</span>
+                    )}
+                    <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                      <Button size="sm" variant="secondary" disabled={saving} onClick={() => boxToFg(b)}>Move to FG</Button>
+                      {+b.retired === 1
+                        ? <Button size="sm" variant="secondary" disabled={saving} onClick={() => boxUnretire(b)}>Un-retire</Button>
+                        : <Button size="sm" variant="ghost" disabled={saving} onClick={() => setPending({ box: b, kind: 'retire', reason: '' })}>Retire</Button>}
+                      <button type="button" disabled={saving} onClick={() => setPending({ box: b, kind: 'scrap', reason: '' })}
+                        title={`Scrap ${b.box_number || b.lot_number}`} aria-label={`Scrap ${b.box_number || b.lot_number}`}
+                        className="rounded-lg border border-red-200 bg-white/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-red-500 transition hover:border-red-400 hover:bg-red-50 hover:text-red-600">
+                        Scrap
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pending && (
+              <div className={`rounded-2xl border px-3 py-2.5 ${pending.kind === 'scrap' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+                <div className={`text-xs font-bold ${pending.kind === 'scrap' ? 'text-red-700' : 'text-amber-800'}`}>
+                  {pending.kind === 'scrap'
+                    ? <>Scrap {pending.box.box_number || pending.box.lot_number} — {fmt.num(pending.box.remaining)} cartons written off for good</>
+                    : <>Retire {pending.box.box_number || pending.box.lot_number} — stays in the warehouse, planning stops offering it</>}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {(pending.kind === 'scrap' ? SCRAP_REASONS : RETIRE_REASONS).map(r0 => (
+                    <button key={r0} type="button" onClick={() => setPending({ ...pending, reason: r0 })}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${pending.reason === r0
+                        ? (pending.kind === 'scrap' ? 'border-red-500 bg-red-500/10 text-red-700' : 'border-amber-500 bg-amber-500/10 text-amber-800')
+                        : 'border-[#1D1D1F]/10 bg-white/70 text-slate-600 hover:border-slate-300'}`}>
+                      {r0}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Input className="min-w-[220px] flex-1" value={pending.reason}
+                    onChange={e => setPending({ ...pending, reason: e.target.value })}
+                    placeholder={pending.kind === 'scrap' ? 'Why these cartons are written off' : 'Why this stock should not be used'} />
+                  <Button size="sm" variant="secondary" onClick={() => setPending(null)} disabled={saving}>Cancel</Button>
+                  <Button size="sm" onClick={confirmReason} disabled={saving || !(pending.reason || '').trim()}>
+                    {pending.kind === 'scrap' ? 'Scrap it' : 'Retire it'}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500">
+              <span className="font-semibold">Move to FG</span> returns a box to loose ready stock so it can ship ·
+              <span className="font-semibold"> Retire</span> keeps it in the warehouse but stops planning offering it ·
+              <span className="font-semibold"> Scrap</span> writes the cartons off for good.
+            </p>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!shortage} onClose={() => setShortage(null)}
         title={shortage ? `Shortage — ${shortage.line.po_number}` : ''}
         footer={shortage && (

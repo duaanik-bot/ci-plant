@@ -482,7 +482,8 @@ export default function Planning() {
   const [smart, setSmart] = useState(null);      // smart-match results for the current shortage
   const [smartAll, setSmartAll] = useState(false);
   const [consumeLot, setConsumeLot] = useState(null); // { lot, qty } — confirm FG consumption
-  const [fgUse, setFgUse] = useState(null); // "Use FG Stock" popup straight from the queue
+  const [fgUse, setFgUse] = useState(null);
+  const [retiring, setRetiring] = useState(null);   // { lot, reason } armed retire in the Use FG dialog // "Use FG Stock" popup straight from the queue
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
   const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
   const [lockShortConfirm, setLockShortConfirm] = useState(null); // { short, free, parent } — soft gate: lock a SHORT plan out loud, never silently
@@ -2728,14 +2729,19 @@ export default function Planning() {
 
   // Take a box out of circulation without destroying it — planning stops
   // offering it anywhere. Reversible; the cartons stay on the books.
-  const retireLot = async (lot, ctxReload = false) => {
-    const why = window.prompt(`Retire ${lot.box_number || lot.lot_number} (${fmt.num(lot.remaining ?? lot.qty)} pcs)?\n\nIt stays in the warehouse and on every report, but planning will stop offering it.\n\nReason:`);
-    if (why === null) return;
-    if (!why.trim()) return toast.error('A reason is required to retire stock');
+  // Captured inline, not through window.prompt (which PrintPlanning uses once,
+  // but never for a mandatory reason): a native box offers no preset reasons and
+  // no validation, and it freezes the page while a stock decision is pending.
+  const retireLot = async () => {
+    const why = (retiring?.reason || '').trim();
+    if (!why) return toast.error('A reason is required to retire stock');
+    const lot = retiring.lot;
     try {
-      await api.post(`/fg-lots/${lot.id}/retire`, { reason: why.trim() });
+      await api.post(`/fg-lots/${lot.id}/retire`, { reason: why });
       toast.success(`${lot.box_number || lot.lot_number} retired — no longer offered in planning`);
-      if (ctxReload && planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
+      setRetiring(null);
+      if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
+      setFgUse(f => f ? { ...f, lots: f.lots.filter(l => l.id !== lot.id) } : f);
       load();
     } catch (e) { if (!e.data) toast.error(e.message || 'Could not retire the stock'); }
   };
@@ -4727,7 +4733,8 @@ export default function Planning() {
         const maxConsume = lot ? Math.min(lot.remaining, bal) : 0;
         const qtyNum = +fgUse?.qty || 0;
         const valid = qtyNum > 0 && qtyNum <= maxConsume;
-        const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork_code: 'Party Artwork Code', product_code: 'Product Code' };
+        const RETIRE_REASONS = ['Obsolete artwork', 'Customer on hold', 'Quality under review', 'Held for a specific order'];
+const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork_code: 'Party Artwork Code', product_code: 'Product Code' };
         const MOVE_LABEL = { opening_stock: 'Opening Stock', production_receipt: 'Production Receipt', stock_consumption: 'Stock Consumption', excess_stock: 'Excess Stock', manual_adjustment: 'Manual Adjustment' };
         return (
           <Modal wide open={!!fgUse} onClose={() => setFgUse(null)} title="Use FG Stock"
@@ -4782,7 +4789,7 @@ export default function Planning() {
                             matched · {matchLabel[l.matched_by]}
                           </span>
                         </button>
-                        <button type="button" onClick={() => retireLot(l, true)}
+                        <button type="button" onClick={() => setRetiring({ lot: l, reason: '' })}
                           title="Retire this stock — it stays in the warehouse but planning stops offering it"
                           className="shrink-0 rounded-xl border border-slate-200 px-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700">
                           retire
@@ -4790,6 +4797,31 @@ export default function Planning() {
                       </div>
                     ))}
                   </div>
+                  {retiring && (
+                    <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                      <div className="text-xs font-bold text-amber-800">
+                        Retire {retiring.lot.box_number || retiring.lot.lot_number} — stays in the warehouse and on every
+                        report, but planning stops offering it
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {RETIRE_REASONS.map(r0 => (
+                          <button key={r0} type="button" onClick={() => setRetiring({ ...retiring, reason: r0 })}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${retiring.reason === r0
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-800'
+                              : 'border-[#1D1D1F]/10 bg-white/70 text-slate-600 hover:border-slate-300'}`}>
+                            {r0}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Input className="min-w-[200px] flex-1" value={retiring.reason}
+                          onChange={e => setRetiring({ ...retiring, reason: e.target.value })}
+                          placeholder="Why this stock should not be used" />
+                        <Button size="sm" variant="secondary" onClick={() => setRetiring(null)}>Cancel</Button>
+                        <Button size="sm" onClick={retireLot} disabled={!(retiring.reason || '').trim()}>Retire it</Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Consume + remarks */}

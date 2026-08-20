@@ -67,6 +67,13 @@ r.get('/dispatch/ready', async (_req, res, next) => {
              -- against an order that has already gone.
              COALESCE(rsv.reserved_qty,0)::int AS reserved_qty,
              rsv.reserved_boxes,
+             -- The product's OLD leftover boxes, on the dispatch row. Without it
+             -- the storekeeper sees only loose stock and ships fresh cartons
+             -- while numbered boxes of the same product age on the rack.
+             COALESCE(box.boxed_qty,0)::int AS boxed_qty,
+             COALESCE(box.box_count,0)::int AS box_count,
+             COALESCE(box.retired_qty,0)::int AS boxed_retired_qty,
+             box.box_numbers,
              GREATEST(0, COALESCE(jc.qty_produced,0) - ol.dispatched_qty
                          - COALESCE(lot.lotted,0) - (ol.qty - ol.dispatched_qty)) AS excess_available
       FROM order_lines ol
@@ -85,6 +92,14 @@ r.get('/dispatch/ready', async (_req, res, next) => {
                STRING_AGG(DISTINCT COALESCE(fl.box_number, fl.lot_number), ', ') AS reserved_boxes
         FROM fg_consumptions fc JOIN fg_lots fl ON fl.id = fc.fg_lot_id
         WHERE fc.order_line_id = ol.id) rsv ON true
+      LEFT JOIN LATERAL (
+        SELECT SUM(fl.qty - fl.consumed_qty)::int AS boxed_qty,
+               COUNT(*)::int AS box_count,
+               SUM(CASE WHEN COALESCE(fl.retired,0)=1 THEN fl.qty - fl.consumed_qty ELSE 0 END)::int AS retired_qty,
+               STRING_AGG(COALESCE(fl.box_number, fl.lot_number), ', '
+                          ORDER BY COALESCE(fl.box_number, fl.lot_number)) AS box_numbers
+        FROM fg_lots fl
+        WHERE fl.product_id = p.id AND fl.kind='leftover' AND (fl.qty - fl.consumed_qty) > 0) box ON true
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(fl.qty),0)::int AS lotted FROM fg_lots fl
         WHERE fl.job_card_id=jc.id AND fl.status != 'rejected') lot ON true
