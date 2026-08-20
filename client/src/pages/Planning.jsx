@@ -4605,11 +4605,28 @@ export default function Planning() {
                         <Stat small label="Balance to Produce" value={fmt.num(ctx.fg.balance_to_produce)} accent="text-brand-600" />
                       </div>
 
-                      {ctx.fg.verified_available > 0 && ctx.fg.balance_to_produce > 0 && (
-                        <p className="mt-2 rounded-xl bg-emerald-50 px-2.5 py-2 text-[11px] font-semibold text-emerald-800">
-                          {fmt.num(ctx.fg.verified_available)} pcs verified FG can reduce this production plan — consume below.
-                        </p>
-                      )}
+                      {/* THE ASK. This used to be a sentence ending "consume
+                          below" with nothing to press — the planner had to know
+                          the Use FG dialog existed. It now states whether the
+                          stock covers the job in FULL or in PART, and offers the
+                          decision on the spot. Saying no is just not pressing it. */}
+                      {ctx.fg.verified_available > 0 && ctx.fg.balance_to_produce > 0 && (() => {
+                        const covers = Math.min(ctx.fg.verified_available, ctx.fg.balance_to_produce);
+                        const full = covers >= ctx.fg.balance_to_produce;
+                        return (
+                          <div className="mt-2 rounded-xl bg-emerald-50 px-2.5 py-2">
+                            <p className="text-[11px] font-semibold text-emerald-800">
+                              {full
+                                ? <>Finished stock <span className="font-bold">covers this job in full</span> — {fmt.num(covers)} pcs. Use it and nothing has to be made.</>
+                                : <>Finished stock covers <span className="font-bold">{fmt.num(covers)}</span> of {fmt.num(ctx.fg.balance_to_produce)} — use it and only {fmt.num(ctx.fg.balance_to_produce - covers)} has to be made.</>}
+                            </p>
+                            <Button size="sm" className="mt-1.5 !py-1 !text-[11px]"
+                              onClick={() => openFgUse(planLine)}>
+                              <PackageCheck size={12} /> Use {fmt.num(covers)} from stock
+                            </Button>
+                          </div>
+                        );
+                      })()}
                       {ctx.fg.pending_verification > 0 && (
                         <p className="mt-2 rounded-xl bg-amber-50 px-2.5 py-2 text-[11px] font-semibold text-amber-700">
                           {fmt.num(ctx.fg.pending_verification)} pcs awaiting physical verification.

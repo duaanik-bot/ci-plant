@@ -32,19 +32,6 @@ function AgeBar({ items, unit = 'lines' }) {
   );
 }
 
-function SubTabs({ active, onChange, tabs }) {
-  return (
-    <div className="inline-flex items-center gap-1 rounded-full bg-slate-100/80 p-1">
-      {tabs.map(t => (
-        <button key={t.key} type="button" onClick={() => onChange(t.key)}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${active === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-          {t.label}{t.count != null && <span className="ml-1.5 rounded-full bg-slate-200/80 px-1.5 text-[10px] tabular-nums">{t.count}</span>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 const ADD_BLANK = { product_id: '', qty: '', box_number: '', location: '', note: '' };
 const ADJ_BLANK = { product_id: '', mode: 'add', qty: '', actual: '', note: '' };
 const ADD_REASONS = ['Opening stock', 'Physical count — found on rack', 'Customer return', 'Sample stock'];
@@ -58,12 +45,12 @@ export default function FgStockPanel({ onCountsChange }) {
   const [fg, setFg] = useState([]);
   const [leftoverFg, setLeftoverFg] = useState([]);
   const [products, setProducts] = useState([]);
-  const [fgSub, setFgSub] = useState('in');
   const [fgSel, setFgSel] = useState(() => new Set());
   const [pickedBoxes, setPickedBoxes] = useState([]);
   const [move, setMove] = useState(null);
   const [scrap, setScrap] = useState(null);   // { box, reason } while confirming a box write-off
   const [wipe, setWipe] = useState(null);     // { row, reason } while confirming a READY-stock write-off
+  const [boxesFor, setBoxesFor] = useState(null);  // product whose boxes drawer is open
   const [showZero, setShowZero] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -82,6 +69,8 @@ export default function FgStockPanel({ onCountsChange }) {
   // very much a live position, and the old `qty > 0` query hid exactly that.
   const fgHidden = fg.filter(f => +f.total_qty <= 0).length;
   const fgRows = showZero ? fg : fg.filter(f => +f.total_qty > 0);
+  // Boxes of the product whose drawer is open — the old Leftover tab, scoped.
+  const boxRows = boxesFor ? leftoverFg.filter(l => l.product_id === boxesFor.product_id) : [];
 
   const load = async () => {
     try {
@@ -275,6 +264,24 @@ export default function FgStockPanel({ onCountsChange }) {
     }
   };
 
+  // Box this product's new production into numbered cartons. The server splits
+  // by the product's real per-box packing and allocates a CI-BOX number to each,
+  // so "box the leftover" and "allocate the box number" are one action — a box
+  // without a number is exactly the anonymous pile this whole module removes.
+  const boxRowLeftover = async f => {
+    const n = Math.floor(+f.ready_qty || 0);
+    if (!(n > 0)) return toast.error('No new production to box');
+    if (!window.confirm(`Box all ${fmt.num(n)} cartons of ${f.code} as leftover?\n\nThey leave ready stock and get their own CI-BOX numbers.`)) return;
+    setSaving(true);
+    try {
+      const res = await api.post('/fg/move', { product_id: f.product_id, mode: 'leftover', leftover_qty: n });
+      toast.success(`Boxed ${fmt.num(n)} — ${boxNumbersLabel(res.boxes)}`);
+      await load();
+    } catch (e) {
+      if (!e.data) toast.error(e.message || 'Could not box the stock');
+    } finally { setSaving(false); }
+  };
+
   const moveBoxToFg = async box => {
     if (!window.confirm(`Move box ${box.box_number || box.lot_number} (${fmt.num(box.remaining)}) back into FG stock?`)) return;
     setSaving(true);
@@ -376,12 +383,17 @@ export default function FgStockPanel({ onCountsChange }) {
           on the view it writes to is a control nobody finds on the day the shelf
           holds something the ERP never saw produced. */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <SubTabs active={fgSub} onChange={setFgSub} tabs={[
-          // What is IN STOCK, not how many masters exist — `fg` is now the whole
-          // product master, so fg.length would read 1,661 on the live plant.
-          { key: 'in', label: 'In Stock', count: fg.filter(f => +f.total_qty > 0).length },
-          { key: 'leftover', label: 'Leftover', count: leftoverFg.length || 0 },
-        ]} />
+        {/* ONE MODULE. In Stock and Leftover were two tabs over the same stock,
+            which meant a product's real position was never on one line: fresh
+            production on one tab, its old boxed leftovers on another, and no
+            total anywhere. They are now columns on a single master row, and the
+            per-box work (scrap, retire, move) lives in that row's Boxes drawer. */}
+        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          {fg.filter(f => +f.total_qty > 0).length} with stock
+          <span className="ml-2 font-semibold normal-case tracking-normal text-slate-400">
+            · {leftoverFg.length} leftover box{leftoverFg.length === 1 ? '' : 'es'}
+          </span>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => { setAdj(ADJ_BLANK); setAdjOpen(true); }}>
             <SlidersHorizontal size={15} /> Adjust Stock
@@ -392,7 +404,7 @@ export default function FgStockPanel({ onCountsChange }) {
         </div>
       </div>
 
-      {fgSub === 'in' && (<>
+      {(<>
         {/* THE POSITION IS EVERY MASTER — the switch governs the LIST only.
             Same rule the board warehouse arrived at: a product at zero is a real
             position, and it is exactly the row a box gets booked onto tomorrow.
@@ -430,11 +442,11 @@ export default function FgStockPanel({ onCountsChange }) {
             // Three quantities, because the plant thinks in three. Ready is what
             // Ready to Dispatch can ship today; boxed is carved OUT of it and
             // never double-counted; total is what is physically in the store.
-            { key: 'ready_qty', label: 'Ready Stock', align: 'right',
+            { key: 'ready_qty', label: 'New Production', align: 'right',
               render: f => +f.ready_qty > 0
                 ? <span className="font-bold tabular-nums text-emerald-700">{fmt.num(f.ready_qty)}</span>
                 : <span className="tabular-nums text-slate-300">0</span> },
-            { key: 'boxed_qty', label: 'In Leftover Boxes', align: 'right',
+            { key: 'boxed_qty', label: 'Old Leftover', align: 'right',
               export: f => +f.boxed_qty || 0,
               render: f => +f.boxed_qty > 0 ? (
                 <div className="leading-tight">
@@ -453,10 +465,18 @@ export default function FgStockPanel({ onCountsChange }) {
                   )}
                 </div>
               ) : <span className="tabular-nums text-slate-300">0</span> },
+            // Box numbers get their own column, and it is the door to the boxes:
+            // per-box work (scrap, retire, move back) has to live somewhere now
+            // that the Leftover tab is gone.
             { key: 'box_numbers', label: 'Box Numbers',
-              render: f => f.box_numbers
-                ? <span className="font-mono text-[10px] text-slate-500">{f.box_numbers}</span>
-                : <span className="text-xs text-slate-300">-</span> },
+              export: f => f.box_numbers || '',
+              render: f => f.box_numbers ? (
+                <button type="button" onClick={() => setBoxesFor(f)}
+                  title="Open this product's boxes — scrap, retire or move one back to ready stock"
+                  className="rounded font-mono text-[10px] text-slate-500 underline decoration-dotted underline-offset-2 hover:text-[#007AFF]">
+                  {f.box_numbers}
+                </button>
+              ) : <span className="text-xs text-slate-300">-</span> },
             { key: 'total_qty', label: 'Total Available', align: 'right',
               render: f => +f.total_qty > 0
                 ? <span className="font-black tabular-nums text-slate-900">{fmt.num(f.total_qty)}</span>
@@ -464,12 +484,18 @@ export default function FgStockPanel({ onCountsChange }) {
             // Consumed in planning against a line that has not shipped. These
             // cartons must travel with that PO's lot — saying so on the row is
             // the only place the storekeeper would ever see it.
+            // NOT a third pile. Consuming a box pushes its cartons INTO the loose
+            // pool, so what is committed is already counted in New Production and
+            // in Total. Sitting in a column of its own beside Total it reads as
+            // extra stock, so the cell says out loud that it is a subset.
             { key: 'reserved_qty', label: 'Committed in Planning', align: 'right',
               export: f => +f.reserved_qty || 0,
               render: f => +f.reserved_qty > 0 ? (
-                <div className="leading-tight">
+                <div className="leading-tight"
+                  title={`Already counted in New Production — not extra stock. Box ${f.reserved_boxes || ''} is earmarked for ${f.reserved_for || ''} and must travel with that lot.`}>
+                  <span className="text-[10px] font-semibold text-violet-400">of which </span>
                   <span className="font-bold tabular-nums text-violet-700">{fmt.num(f.reserved_qty)}</span>
-                  <div className="text-[10px] font-semibold text-violet-500" title={`${f.reserved_boxes || ''} → ${f.reserved_for || ''}`}>
+                  <div className="text-[10px] font-semibold text-violet-500">
                     send with {f.reserved_for}
                   </div>
                 </div>
@@ -480,7 +506,12 @@ export default function FgStockPanel({ onCountsChange }) {
               render: f => fmt.inr((+f.total_qty || 0) * (+f.rate || 0)) },
             { key: 'move', label: '', align: 'right', render: f => (
               <div className="flex items-center justify-end gap-1.5">
-                <Button size="sm" onClick={() => openMove(f)} disabled={!(+f.ready_qty > 0)}>Move...</Button>
+                {/* The two things a storekeeper does with new production: send it
+                    out, or box it and give it a number. Both live on the row. */}
+                <Button size="sm" onClick={() => openMove(f)} disabled={!(+f.ready_qty > 0)}
+                  title="Send this product's new production out against its open orders">Dispatch</Button>
+                <Button size="sm" variant="secondary" onClick={() => boxRowLeftover(f)} disabled={saving || !(+f.ready_qty > 0)}
+                  title="Box the new production into numbered CI-BOX cartons">Box it</Button>
                 <Button size="sm" variant="secondary" onClick={() => openAdjFor(f, 'add')}>Adjust</Button>
                 <button type="button"
                   title={`Write off the ready stock of ${f.code}`}
@@ -505,8 +536,14 @@ export default function FgStockPanel({ onCountsChange }) {
           ]} />
       </>)}
 
-      {fgSub === 'leftover' && (<>
-        <AgeBar items={leftoverFg.map(l => l.age_days)} unit="boxes" />
+      {/* The boxes of ONE product — what used to be the whole Leftover tab, now
+          scoped to the row you opened it from. Everything per-box still lives
+          here: scrap, retire/un-retire, move back to ready stock, ageing. */}
+      <Modal open={!!boxesFor} onClose={() => setBoxesFor(null)} size="xl"
+        title={boxesFor ? `Boxes — ${boxesFor.product_name}` : 'Boxes'}
+        footer={<Button variant="secondary" onClick={() => setBoxesFor(null)}>Close</Button>}>
+        {boxesFor && (<>
+        <AgeBar items={boxRows.map(l => l.age_days)} unit="boxes" />
         {pickedBoxes.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-card backdrop-blur-xl animate-fadeIn">
             <span className="text-sm font-semibold text-slate-700">
@@ -562,10 +599,11 @@ export default function FgStockPanel({ onCountsChange }) {
               </div>
             ) },
           ]}
-          rows={leftoverFg} empty="No finished-goods leftover boxes - move some from FG stock (In Stock > Move...) or box a dispatch overrun."
+          rows={boxRows} empty="This product has no leftover boxes yet — use Box it on its row to make one."
           exportName="Leftover FG Boxes"
           exportSubtitle="Dispatch & Invoice - Finished-goods leftover boxes" />
-      </>)}
+        </>)}
+      </Modal>
 
       {/* ── Write off a product's READY stock ── */}
       <Modal open={!!wipe} onClose={() => setWipe(null)} title="Write off ready stock"
