@@ -1435,11 +1435,24 @@ export default function Section() {
               <div className="flex items-start justify-between gap-2">
                 <span className="inline-flex min-w-0 items-center gap-1.5 text-[15px] font-bold text-slate-900">
                   {r.light && <ReadinessPopover light={r.light}><TrafficLight light={r.light} size="sm" /></ReadinessPopover>}
-                  <span className="truncate">{r.jc_number}</span>
+                  {/* Same two tap targets the wide table carries — the number and
+                      the carton both open the read-only traveler. The card tier
+                      missed them when the table cells got theirs. */}
+                  <button type="button" onClick={() => setCardId(r.job_card_id)}
+                    title="Open this job card (read-only)"
+                    className="truncate rounded text-left font-bold text-slate-900 underline decoration-dotted underline-offset-2 transition-colors active:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35">
+                    {r.jc_number}
+                  </button>
                 </span>
                 <QueueBadge state={r.queue_state} />
               </div>
-              <div className="mt-1.5"><ProductCell r={r} /></div>
+              <div className="mt-1.5">
+                <button type="button" onClick={() => setCardId(r.job_card_id)}
+                  title="Open this job card (read-only)"
+                  className="block w-full rounded text-left transition-colors active:bg-[#007AFF]/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35">
+                  <ProductCell r={r} />
+                </button>
+              </div>
               <div className="mt-1"><CustomerCell r={r} /></div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <OutputChip number={r.output_number} />
