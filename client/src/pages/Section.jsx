@@ -2,7 +2,7 @@
 // KPIs (received / produced / wastage / yield, pending / running / done),
 // live queue with search + status filters, completed runs with per-run yield,
 // machines, and the complete audit trail. Drilled into from Live Floor.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
@@ -13,6 +13,9 @@ import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BoardBadge } from '../components/BoardStatus.jsx';
 import PlateStatus from '../components/PlateStatus.jsx';
+// The read-only traveler, opened from a queue row. Lazy because this page is
+// already heavy and most visits never open one.
+const JobCardSheet = lazy(() => import('../components/JobCardSheet.jsx'));
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
@@ -485,6 +488,10 @@ export default function Section() {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('queue');
+  // Read-only job card opened from a queue row — the floor asks "what IS this
+  // job?" constantly, and until now the answer meant leaving the station.
+  const [cardId, setCardId] = useState(null);
+  const [card, setCard] = useState(null);
   // ?q= deep link — the machine board's jump button lands pre-filtered to a JC.
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [state, setState] = useState('all');
@@ -605,6 +612,18 @@ export default function Section() {
   useFallbackRefresh(load, { enabled: Boolean(meta), intervalMs: 30000, loadOnMount: false });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250, enabled: Boolean(meta) });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
+
+  // Fetch on open, clear on close, and drop a stale answer if the operator has
+  // already moved to another card — the floor taps quickly.
+  useEffect(() => {
+    if (!cardId) { setCard(null); return; }
+    let alive = true;
+    setCard(null);
+    api.get(`/job-cards/${cardId}`)
+      .then(jc => { if (alive) setCard(jc); })
+      .catch(() => { if (alive) setCardId(null); });
+    return () => { alive = false; };
+  }, [cardId]);
 
   // Who can be at this station. Rebuilt on every poll, which is what makes a
   // Masters crew change show up here without a reload. A pooled station also
@@ -1603,7 +1622,11 @@ export default function Section() {
                             <TrafficLight light={r.light} size="sm" />
                           </ReadinessPopover>
                         )}
-                        {r.jc_number}
+                        <button type="button" onClick={() => setCardId(r.job_card_id)}
+                          title="Open this job card (read-only)"
+                          className="rounded font-bold text-slate-900 underline decoration-dotted underline-offset-2 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35">
+                          {r.jc_number}
+                        </button>
                       </span>
                       {/* The output number, whatever kind of job this is — the
                           server resolved it (helpers.js outputNumberSql) and
@@ -1632,7 +1655,13 @@ export default function Section() {
                     {/* These two read as one unit — the carton and who bought it —
                         so the gap between them is halved and the room goes inside
                         the cells instead of between them. */}
-                    <td className={`${td} pr-1`}><ProductCell r={r} /></td>
+                    <td className={`${td} pr-1`}>
+                      <button type="button" onClick={() => setCardId(r.job_card_id)}
+                        title="Open this job card (read-only)"
+                        className="block w-full rounded text-left transition-colors hover:bg-[#007AFF]/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35">
+                        <ProductCell r={r} />
+                      </button>
+                    </td>
                     <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} ci-p3 text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     {showsBoard && (
@@ -2093,6 +2122,21 @@ export default function Section() {
           </ol>
         </div>
       )}
+
+      {/* The job card, read-only. JobCardSheet is the printed traveler — a pure
+          display component with no controls — so "read-only" needs no guard: it
+          simply has nothing to write with. Printing stays on the print page. */}
+      <Modal open={!!cardId} onClose={() => setCardId(null)} wide
+        title={card ? `Job Card ${card.jc_number}` : 'Job Card'}
+        footer={<Button variant="secondary" onClick={() => setCardId(null)}>Close</Button>}>
+        {!card ? (
+          <p className="py-10 text-center text-sm text-slate-400">Loading job card…</p>
+        ) : (
+          <Suspense fallback={<p className="py-10 text-center text-sm text-slate-400">Loading…</p>}>
+            <JobCardSheet jc={card} />
+          </Suspense>
+        )}
+      </Modal>
 
       <Modal open={!!xsCompleting} onClose={() => setXsCompleting(null)}
         title={xsCompleting ? `Complete Extra Sheets Cutting — ${xsCompleting.xs_number}` : ''}
