@@ -116,6 +116,24 @@ export async function plateMasterForSize(oc, size) {
   return oc('SELECT * FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [normalized]);
 }
 
+// Condition first, wear second. A Good plate ALWAYS beats a Fair one, however
+// many runs each has had: a worn-but-sound plate is a better bet on press than a
+// fresh plate somebody has already graded down. Within a condition the least-worn
+// plate is proposed; then the one idle longest, so the rack rotates instead of
+// favouring one corner of it; id last, purely so the choice is deterministic.
+//
+// This used to lead with verified_at DESC, which proposed whichever plate had
+// most recently been LOOKED AT — unrelated to either condition or life left, and
+// on a rack of identical plates it kept handing back the same one.
+//
+// ONE spelling, exported: the register's availability ranking (routes/plates.js)
+// interpolates this same string, so "which plate would the click take" cannot
+// drift between the picker and the wear a row reports. Alias is always `pa`.
+export const PLATE_CANDIDATE_ORDER_SQL = `CASE pa.condition WHEN 'Good' THEN 0 ELSE 1 END,
+             pa.use_count ASC,
+             pa.last_used_at ASC NULLS FIRST,
+             pa.id`;
+
 // Every plate the rack can offer this component, best first.
 //
 // ONE spelling of the candidate set. bestPlateCandidate is its head, the picker
@@ -142,19 +160,7 @@ export async function plateCandidates(rows, request, component, plateMasterId, e
       ${excludedSql}
       AND pa.status='available' AND pa.active=1 AND pa.condition IN ('Good','Fair')
       AND NOT ${PLATE_ALREADY_CLAIMED_SQL}
-    -- Condition first, wear second. A Good plate ALWAYS beats a Fair one, however
-    -- many runs each has had: a worn-but-sound plate is a better bet on press than a
-    -- fresh plate somebody has already graded down. Within a condition the least-worn
-    -- plate is proposed; then the one idle longest, so the rack rotates instead of
-    -- favouring one corner of it; id last, purely so the choice is deterministic.
-    --
-    -- This used to lead with verified_at DESC, which proposed whichever plate had
-    -- most recently been LOOKED AT — unrelated to either condition or life left, and
-    -- on a rack of identical plates it kept handing back the same one.
-    ORDER BY CASE pa.condition WHEN 'Good' THEN 0 ELSE 1 END,
-             pa.use_count ASC,
-             pa.last_used_at ASC NULLS FIRST,
-             pa.id ${limitSql}`, values);
+    ORDER BY ${PLATE_CANDIDATE_ORDER_SQL} ${limitSql}`, values);
 }
 
 // Takes a ROWS helper, not the one-row `oc` this used to be called with — see

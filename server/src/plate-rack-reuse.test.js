@@ -226,7 +226,11 @@ test('the Requirement page prints the rack figure at row level and at form level
   // its own, which is what stops the column and the button disagreeing.
   assert.match(page, /const rackTotal = row => Number\(row\?\.rack_reuse\?\.total\) \|\| 0/);
   const route = read('server/src/routes/plates.js');
-  assert.match(route, /rack_reuse: rackReusePlan\(\{/);
+  // The plan is built once and printed as-is — the same object also feeds
+  // plateWearSummary, so the offer a row shows and the wear it warns about
+  // describe the same plates.
+  assert.match(route, /const rackReuse = rackReusePlan\(\{/);
+  assert.match(route, /rack_reuse: rackReuse,/);
 });
 
 // Supersedes 'the row, the form and the dock all reuse through one function'.
@@ -328,9 +332,10 @@ test('plateCandidates keeps the condition-then-wear ordering and the safety filt
   const lifecycle = read('server/src/plate-lifecycle.js');
   const fn = lifecycle.slice(lifecycle.indexOf('export async function plateCandidates'));
   const body = fn.slice(0, fn.indexOf('\n}'));
-  assert.match(body, /CASE pa\.condition WHEN 'Good' THEN 0 ELSE 1 END/);
-  assert.match(body, /pa\.use_count ASC/);
-  assert.match(body, /pa\.last_used_at ASC NULLS FIRST/);
+  assert.ok(body.length > 300, 'plateCandidates not found — the anchor moved');
+  // The ordering itself is pinned on PLATE_CANDIDATE_ORDER_SQL (see the
+  // least-worn test in plate-lifecycle-wiring); here it must be USED, unedited.
+  assert.match(body, /ORDER BY \$\{PLATE_CANDIDATE_ORDER_SQL\}/);
   assert.match(body, /pa\.status='available' AND pa\.active=1/);
   assert.match(body, /pa\.condition IN \('Good','Fair'\)/);
   assert.match(body, /AND NOT \$\{PLATE_ALREADY_CLAIMED_SQL\}/);

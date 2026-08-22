@@ -156,17 +156,22 @@ test('return verification decides each plate and shows its age', () => {
 
 test('rack reuse proposes the least-worn plate, not the most recently touched', () => {
   const lifecycle = read('server/src/plate-lifecycle.js');
-  // The ordering lives in plateCandidates now — bestPlateCandidate is only its
-  // head, and the LIMIT is interpolated so the picker can ask for the whole list.
-  const order = lifecycle.slice(lifecycle.indexOf('async function plateCandidates'));
-  const clause = order.slice(order.indexOf('ORDER BY'), order.indexOf('${limitSql}'));
+  // The ordering lives in PLATE_CANDIDATE_ORDER_SQL now — plateCandidates
+  // interpolates it, and so does the register's availability ranking, so the
+  // picker and the wear a row reports can never order the shelf differently.
+  const at = lifecycle.indexOf('export const PLATE_CANDIDATE_ORDER_SQL');
+  assert.ok(at > 0, 'PLATE_CANDIDATE_ORDER_SQL not found — the anchor moved');
+  const clause = lifecycle.slice(at, lifecycle.indexOf('`;', at));
   // Condition is the first question: a Good plate ALWAYS beats a Fair one, however
   // many runs each has had. Wear then orders within a condition, so the least-worn
   // Good plate is proposed. Leading with verified_at (the original) handed out
   // whichever plate had been looked at most recently — unrelated to either.
-  assert.match(clause, /^ORDER BY CASE pa\.condition WHEN 'Good' THEN 0 ELSE 1 END/);
-  assert.doesNotMatch(clause, /^ORDER BY pa\.verified_at/);
+  assert.match(clause, /CASE pa\.condition WHEN 'Good' THEN 0 ELSE 1 END/);
+  assert.doesNotMatch(clause, /verified_at/);
   assert.match(clause, /pa\.use_count ASC/);
+  const candidates = lifecycle.slice(lifecycle.indexOf('async function plateCandidates'));
+  assert.match(candidates.slice(0, candidates.indexOf('${limitSql}')),
+    /ORDER BY \$\{PLATE_CANDIDATE_ORDER_SQL\}/);
 });
 
 test('plate age is visible wherever a plate is chosen or handled', () => {
