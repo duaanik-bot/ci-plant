@@ -7,7 +7,7 @@ import TopBar, { CountButton, countOf, plural, rung } from './TopBar.jsx';
 import {
   LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
-  Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
+  Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3,
 } from 'lucide-react';
@@ -16,6 +16,7 @@ import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { notificationLink } from '../lib/notificationLink.js';
+import { currentSubscription, readEnvironment, registerWorker, subscribe } from '../lib/webPush.js';
 import { useToast } from './ui.jsx';
 import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -128,6 +129,22 @@ function NotificationBell() {
   const [deciding, setDeciding] = useState(null); // approval id with a decide call in flight
   const ref = useRef(null);      // the trigger, in the header
   const popRef = useRef(null);   // the panel, portalled to <body>
+  // ── This device's standing to be buzzed ─────────────────────────────────
+  // `null` until the server has said whether it can push at all — the control
+  // stays out of the way rather than flashing a state it has not confirmed.
+  const [push, setPush] = useState(null);   // { enabled, key, support, on } | null
+  const [pushBusy, setPushBusy] = useState(false);
+
+  // What this device can do, and whether it is already doing it. Asked once on
+  // mount: the answer only changes when the reader acts, and every one of those
+  // paths refreshes it below.
+  const loadPush = () => api.get('/push/key')
+    .then(async ({ enabled, key }) => {
+      const support = readEnvironment(!!enabled);
+      const sub = support.can ? await currentSubscription() : null;
+      setPush({ enabled: !!enabled, key, support, on: !!sub, endpoint: sub?.endpoint || null });
+    })
+    .catch(() => setPush(null));
 
   const load = () => api.get('/dashboard').then(setD).catch(() => {});
   const loadPersonal = () => Promise.all([
@@ -136,6 +153,8 @@ function NotificationBell() {
   ]);
   useFallbackRefresh(load, { intervalMs: 300000 });
   useFallbackRefresh(loadPersonal, { intervalMs: 120000 });
+  useEffect(() => { loadPush(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     // The panel is not a DOM descendant of the trigger any more, so an outside
     // click has to miss BOTH or opening the panel would instantly close it.
@@ -180,6 +199,39 @@ function NotificationBell() {
     } catch { /* central toast already showed the error */ } finally { setDeciding(null); }
   };
 
+  // Turn this device on or off. A refusal at the browser prompt is an answer,
+  // not a failure — it re-reads the environment (permission is now 'denied')
+  // and the control says what to do about it instead of throwing a toast.
+  const togglePush = async () => {
+    if (!push?.support?.can) return;
+    setPushBusy(true);
+    try {
+      if (push.on) {
+        const sub = await currentSubscription();
+        if (sub) {
+          // The server first: a device deleted locally but still on the server's
+          // list would be pushed to forever, and the push service would keep
+          // accepting it. Unsubscribing locally after means the worst case is a
+          // row the next send prunes, never a phone nobody can silence.
+          await api.post('/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {});
+          await sub.unsubscribe().catch(() => {});
+        }
+        toast.success('This device will no longer buzz');
+      } else {
+        await registerWorker();
+        const sub = await subscribe(push.key);
+        if (!sub) { await loadPush(); return; }   // declined at the browser prompt
+        await api.post('/push/subscribe', { subscription: sub.toJSON() });
+        await api.post('/push/test').catch(() => {});
+        toast.success('Notifications on — a test buzz is on its way');
+      }
+      await loadPush();
+    } catch (e) {
+      toast.error(e?.message || 'Could not change notifications on this device');
+      await loadPush();
+    } finally { setPushBusy(false); }
+  };
+
   const critical = (d?.alerts || []).filter(a => a.type === 'shortage');
   const action = (d?.alerts || []).filter(a => a.type !== 'shortage');
   const completed = d?.closed_today?.jobs > 0
@@ -221,6 +273,37 @@ function NotificationBell() {
             )}
           </div>
           <div className="max-h-[70vh] overflow-y-auto">
+
+            {/* ── This device ─────────────────────────────────────────────
+                The bell below only speaks to somebody already looking at it.
+                This row is how the reader makes the plant reachable when they
+                are not — and, on a device that cannot, what to do about it. */}
+            {push && push.enabled && (
+              <div className="border-b border-slate-100 bg-white/40 p-3">
+                <div className="flex items-start gap-2">
+                  <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${push.on ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {push.on ? <BellRing size={13} /> : <BellOff size={13} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {push.on ? 'This device buzzes' : 'Notifications on this device'}
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      {push.on
+                        ? 'Approvals and messages reach this device even with the app closed.'
+                        : push.support.message}
+                    </p>
+                  </div>
+                  {push.support.can && (
+                    <button type="button" disabled={pushBusy} onClick={togglePush}
+                      className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-50 ${
+                        push.on ? 'text-slate-500 hover:bg-slate-100' : 'bg-[#007AFF] text-white hover:bg-[#0064D2]'}`}>
+                      {pushBusy ? '…' : push.on ? 'Turn off' : 'Turn on'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Approval desk — LIVE pending requests waiting on this login, not
                 stored notifications, so it can never show a stale ask. */}

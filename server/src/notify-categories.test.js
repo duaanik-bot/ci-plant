@@ -104,6 +104,12 @@ const NOT_NOTIFICATION_KINDS = new Map([
   ['wastage_reversal', 'reverseManifest item — recorded scrap reversed out'],
   ['extra_sheets_return', 'reverseManifest item — issued XS sheets clawed back'],
   ['runs_deleted', 'reverseManifest item — day-wise run rows removed'],
+  // The test buzz from /push/test. It is a PUSH payload kind, not a
+  // notification kind: nothing is written to notifications, the recipient is
+  // always the caller themselves, and it exists only to answer "did my phone
+  // actually ring?". Categorising it would put a row in the Approvals tab that
+  // no row ever lands in.
+  ['note', 'push-only payload kind — the /push/test buzz writes no bell row'],
 ]);
 
 // ── the map is well formed ────────────────────────────────────────────

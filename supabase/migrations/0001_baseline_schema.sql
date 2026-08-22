@@ -1973,6 +1973,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications (user_id) WHERE read_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications (user_id, created_at DESC);
 
+-- Web push — one row per DEVICE that agreed to be buzzed. A notification row
+-- above only reaches a reader with the app open; this is what reaches the phone
+-- in their pocket. See supabase/migrations/20260822120000_push_subscriptions.sql
+-- for the full note, including why the endpoint is unique on its own.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_ok_at TIMESTAMPTZ,
+  failures INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions (user_id);
+
 -- Management approval requests ---------------------------------------------
 -- A planner flags a planned job for management sign-off — advisory, for the
 -- selective job where something looks off (rate, quantity, board, date…).

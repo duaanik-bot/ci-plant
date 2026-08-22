@@ -1,5 +1,6 @@
 // ─── Shared business logic: state machine, stock ledger, routing ────────────
 import { q, one } from './db.js';
+import { deferPushToUsers, pushPayload } from './push.js';
 import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
@@ -182,6 +183,17 @@ export async function notify(userIds, { kind, title, body = null, link = null, r
       'INSERT INTO notifications (user_id, kind, title, body, link, ref_table, ref_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
       [id, kind, title, body, link, refTable, refId]);
   }
+  // …and buzz the phones in their pockets. ONE call site for the whole app,
+  // because every notification in this ERP already comes through here — which
+  // is the only reason push could be added without touching thirty routes.
+  //
+  // Deliberately NOT awaited, and deferPushToUsers returns undefined so it
+  // cannot be awaited by mistake. The rows above are written inside the
+  // caller's transaction; a push is an HTTPS round trip per device, and holding
+  // a pooled client open across the network is the shape that once deadlocked
+  // the floor. It is also not worth failing a plate issue over: a phone that
+  // missed a buzz still has the bell. See push.js for both rules in full.
+  deferPushToUsers(ids, pushPayload({ kind, title, body, link, refTable, refId }));
 }
 
 // Sheets needed for an order line (qty cartons → child print sheets incl. wastage).
