@@ -480,7 +480,7 @@ r.post('/extra-sheets', canRequest, async (req, res, next) => {
         kind: 'xs_request',
         title: `Extra sheets need your approval — ${xs_number}`,
         body: `${qty} parent sheets for ${st.jc_number} at ${st.stage.replace('_', ' ')} — ${reason} (by ${req.user.name})`,
-        link: '/extra-sheets',
+        link: `/extra-sheets?xs=${row.id}`,
         refTable: 'extra_sheet_requests', refId: row.id,
       }, qc);
       return row.id;
@@ -587,7 +587,7 @@ r.post('/extra-sheets/:id/approve', canApprove, async (req, res, next) => {
         body: `${req.user.name} approved ${qty} parent sheets${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}`
           + (substituting ? ` on ${chosen.name} instead of ${ctx.planned.name} — ${subReason}` : '')
           + `. Cutting must prepare them before Printing receives stock.`,
-        link: '/extra-sheets',
+        link: `/extra-sheets?xs=${x.id}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
       const users = await qc('SELECT id, role, active, sections FROM users');
@@ -637,7 +637,7 @@ r.post('/extra-sheets/:id/reject', canApprove, async (req, res, next) => {
         kind: 'xs_decision',
         title: `${x.xs_number} rejected`,
         body: `${req.user.name}: ${reason}${releaseNote ? `. ${releaseNote}.` : ''}`,
-        link: '/extra-sheets',
+        link: `/extra-sheets?xs=${x.id}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
     });
@@ -682,7 +682,7 @@ r.post('/extra-sheets/:id/cancel', canRequest, async (req, res, next) => {
         kind: 'xs_decision',
         title: `Extra Sheets Cancelled — ${jc?.jc_number || x.xs_number}`,
         body: `${req.user.name} cancelled ${x.xs_number} before Cutting started.${releaseNote ? ` ${releaseNote}.` : ''}`,
-        link: '/extra-sheets',
+        link: `/extra-sheets?xs=${x.id}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
     });
@@ -889,7 +889,7 @@ r.post('/extra-sheets/:id/reverse', canApprove, async (req, res, next) => {
         kind: 'xs_decision',
         title: `${x.xs_number} reversed`,
         body: `${req.user.name} reversed this extra-sheet approval: ${reason}${releaseNote ? `. ${releaseNote}.` : ''}`,
-        link: '/extra-sheets',
+        link: `/extra-sheets?xs=${x.id}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
     });

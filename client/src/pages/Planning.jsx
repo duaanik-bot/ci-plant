@@ -5,6 +5,7 @@
 // Press + date live in Print Planning. Shortfall raises a PR without leaving
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -75,6 +76,11 @@ const BOARD_FILTER_LABEL = {
   on_order: 'jobs with stock pending on a PR',
   short: 'jobs short of stock with no PR',
 };
+
+// Which tab holds a line, in the tabs' own words. A notification names a JOB,
+// not a queue, and the job can be sitting in any of the three — so a deep link
+// that did not switch tabs would land on "To Plan" and truthfully show nothing.
+const TAB_OF_STATUS = { pending: 'pending', planned: 'planned', ready: 'planned', in_production: 'completed' };
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
 // pending or rejected ask never blocks Job Card / production; it just shows
@@ -567,6 +573,19 @@ export default function Planning() {
   const [suggestExpanded, setSuggestExpanded] = useState(false); // '+N more' opens the full list in place
   const [approvals, setApprovals] = useState({});   // order_line_id → latest management ask (chips + menu state)
   const [askMgt, setAskMgt] = useState(null);       // { line, note } — "Ask Management Approval" popup
+  // ── The job a notification sent us here to decide ────────────────────────
+  // /planning?ar=4 — the request id, straight off the notification row. The
+  // bell used to link at the PAGE ('/planning'), which opened the default queue
+  // and left the reader to go find the job they had just been told about.
+  // `?line=` is the same idea from the universal search's side (record-entities
+  // has always emitted /planning?line=<id>; nothing read it until now).
+  const [params, setParams] = useSearchParams();
+  const arId = params.get('ar');
+  const lineParam = params.get('line');
+  const [focusAr, setFocusAr] = useState(null);   // the named request, with its job context
+  const [focusNote, setFocusNote] = useState(''); // the decider's optional note
+  const [focusBusy, setFocusBusy] = useState(false);
+  const focusedOnce = useRef(null);               // the line already brought into view
   const [askBusy, setAskBusy] = useState(false);
   const [specOpts, setSpecOpts] = useState({ coating: [], special: [], colour_type: [], pasting_type: [], leafing_colour: [] }); // distinct master values → engine pickers
   // Every board in the master, for the Board Identity picker. The Warehouse
@@ -612,6 +631,19 @@ export default function Planning() {
   // The last commit/release, for Undo — { kind, materialId, name, qty } | null.
   const [lastCommit, setLastCommit] = useState(null);
   const smartSeq = useRef(0);
+
+  // Read by id, not out of the by-line map: that map holds only the LATEST ask
+  // per line, so a decision bell for a superseded request would resolve to the
+  // wrong row — or to nothing.
+  useEffect(() => {
+    if (!arId) { setFocusAr(null); return undefined; }
+    let live = true;
+    setFocusNote('');
+    api.get(`/approvals/${arId}`)
+      .then(a => { if (live) setFocusAr(a); })
+      .catch(() => { if (live) setFocusAr(null); });
+    return () => { live = false; };
+  }, [arId]);
 
   const load = () => Promise.all([
     api.get('/planning').then(setLines),
@@ -837,6 +869,60 @@ export default function Planning() {
     [draftOnly, setDraftOnly, false, 'Plan saved'],
     [planKpi.keys, planKpi.clear, [], 'KPI card'],
   ], clearSelection);
+  // ── Landing on the job the notification named ────────────────────────────
+  // The line id behind the deep link, whichever door it came through.
+  const focusLineId = Number(focusAr?.order_line_id ?? lineParam) || null;
+  // A gang collapses into ONE row carrying a synthetic id, so the row standing
+  // for a line is not always the line itself.
+  const focusRow = focusLineId
+    ? tabGrouped.find(r => r.id === focusLineId || (r._gang || []).some(m => m.id === focusLineId))
+    : null;
+  useEffect(() => {
+    if (!focusLineId || !lines.length) return;
+    if (focusedOnce.current === focusLineId) return;   // the planner's own filtering, once we are here, is theirs to keep
+    const line = lines.find(l => Number(l.id) === focusLineId);
+    if (!line) return;                                  // not in the queue at all — the card below says so
+    focusedOnce.current = focusLineId;
+    // A zone chip, a customer chip, a KPI card or a word left in the search box
+    // could each be hiding the very row the bell promised. Clearing them is the
+    // only way the link can honestly claim to have brought the job into view.
+    filters.reset();
+    setTab(TAB_OF_STATUS[line.status] || 'all');
+    // Two frames: one for the tab switch to render the row, one for the table
+    // to lay it out. `data-row-id` is on BOTH DataTable renderers, so this finds
+    // the row on a phone card as readily as in the table.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const sel = [line.gang_run_id ? `gang-${line.gang_run_id}` : null, String(line.id)].filter(Boolean);
+      for (const id of sel) {
+        const el = document.querySelector(`[data-row-id="${CSS.escape(id)}"]`);
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      }
+    }));
+  }, [focusLineId, lines]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Decide it here, on the page, without opening anything. The server re-reads
+  // the grant from the users table (the JWT carries only id/name/role), so this
+  // is a convenience — never the gate.
+  const decideFocused = async action => {
+    if (!focusAr) return;
+    setFocusBusy(true);
+    try {
+      // A plain string, always. `|| undefined` would drop the key out of the
+      // JSON entirely, which is how a bare String(req.body.x) once wrote the
+      // word "undefined" into a plate's remark.
+      const a = await api.post(`/approvals/${focusAr.id}/${action}`, { note: focusNote.trim() });
+      // Merge: the POST answers with the raw request row, and the job context
+      // (product, PO, customer) only ever came from the GET.
+      setFocusAr(f => ({ ...f, ...a }));
+      setFocusNote('');
+      toast.success(`${focusAr.ar_number} ${action === 'approve' ? 'approved' : 'rejected'}`);
+      load();
+    } catch { /* the central toast already said what went wrong */ } finally { setFocusBusy(false); }
+  };
+  // Leaving the review card up after the reader is done with it would make the
+  // job look permanently "under review"; clearing the param puts Planning back.
+  const clearFocus = () => { setFocusAr(null); focusedOnce.current = null; setParams({}, { replace: true }); };
+
   // Selecting a gang row selects every member line (they act as one job).
   const rowIds = row => (row._gang ? [row.id, ...row._gang.map(m => m.id)] : [row.id]);
   const toggleSelected = (row, checked) => setSelectedIds(ids => checked
@@ -2801,6 +2887,83 @@ export default function Planning() {
   return (
     <div>
       <PageHeader title="Planning" subtitle="Requirement → cut plan → board position → machine & date → lock" />
+
+      {/* ── The request a notification sent the reader here to decide ────────
+          Pinned above the queue, not buried in it: the whole complaint about
+          the old link was that Planning opened on a job nobody had asked
+          about. This card names the one that was asked about, carries the
+          whole ask, and puts Approve / Reject under it — so the decision takes
+          the same one tap it takes in the bell, with the job in front of it. */}
+      {focusAr && (() => {
+        const pending = focusAr.status === 'pending';
+        const tone = pending ? 'border-amber-300 bg-amber-50/80'
+          : focusAr.status === 'approved' ? 'border-emerald-300 bg-emerald-50/80'
+          : 'border-red-200 bg-red-50/80';
+        const inQueue = lines.some(l => Number(l.id) === focusLineId);
+        return (
+          <div className={`mb-3 rounded-2xl border-2 p-3 shadow-[0_8px_22px_-12px_rgba(29,29,31,0.35)] ${tone}`}>
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-white/80 text-amber-700">
+                {pending ? <ShieldQuestion size={15} /> : focusAr.status === 'approved' ? <ShieldCheck size={15} /> : <AlertTriangle size={15} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-900">
+                  {focusAr.ar_number} — {focusAr.product_name}
+                  {focusAr.product_code ? <span className="ml-1.5 font-mono text-[11px] font-semibold text-slate-500">{focusAr.product_code}</span> : null}
+                </p>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                  PO {focusAr.po_number || '—'} · {focusAr.customer_name} · qty {fmt.num(focusAr.line_qty)}
+                </p>
+                <p className="mt-1 whitespace-pre-line text-xs italic text-slate-700">
+                  “{focusAr.note}” — {focusAr.requested_by}{focusAr.requested_at ? ` · ${fmt.dt(focusAr.requested_at)}` : ''}
+                </p>
+                {!inQueue && (
+                  <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                    This job has left the planning queue — the decision below still stands on the record.
+                  </p>
+                )}
+              </div>
+              <button type="button" onClick={clearFocus} title="Back to the whole queue"
+                className="shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/70 hover:text-slate-700">
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* A decided request shows what was decided. It does NOT show a
+                button: the server answers a second decision with a 409, and a
+                button whose only outcome is an error is a dead button. */}
+            {!pending ? (
+              <p className="mt-2 rounded-xl bg-white/70 px-2.5 py-2 text-xs font-semibold text-slate-700">
+                {fmt.title(focusAr.status)}{focusAr.decided_by ? ` by ${focusAr.decided_by}` : ''}
+                {focusAr.decided_at ? ` · ${fmt.dt(focusAr.decided_at)}` : ''}
+                {focusAr.decision_note ? <span className="mt-0.5 block font-normal italic text-slate-600">“{focusAr.decision_note}”</span> : null}
+              </p>
+            ) : focusAr.can_decide ? (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <Textarea rows={2} value={focusNote} onChange={e => setFocusNote(e.target.value)}
+                    placeholder="Add a note with your decision (optional)" />
+                </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <Button variant="solid" disabled={focusBusy} onClick={() => decideFocused('approve')}
+                    className="!bg-emerald-600 hover:!bg-emerald-700">
+                    <CheckCircle2 size={14} /> Approve
+                  </Button>
+                  <Button variant="solid" disabled={focusBusy} onClick={() => decideFocused('reject')}
+                    className="!bg-red-600 hover:!bg-red-700">
+                    <X size={14} /> Reject
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 rounded-xl bg-white/70 px-2.5 py-2 text-xs font-semibold text-slate-600">
+                Waiting on management. You can see where the ask stands; only a management login decides it.
+              </p>
+            )}
+          </div>
+        );
+      })()}
+
       <Tabs active={tab} onChange={k => { setTab(k); clearSelection(); }} tabs={[
         { key: 'pending', label: 'To Plan', count: pending.length },
         { key: 'planned', label: 'Planned', count: planned.length },
@@ -3114,7 +3277,10 @@ export default function Planning() {
             </div>
           );
         } : undefined}
-        rowClass={boardRowClass}
+        // The board tint the queue already carries, plus a ring on the ONE row
+        // the notification named — so "it brought me to the job" is something
+        // the planner can see, not something they have to take on trust.
+        rowClass={r => `${boardRowClass(r)} ${focusRow && r.id === focusRow.id ? '!bg-amber-50 ring-2 ring-inset ring-amber-400' : ''}`}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
           // full registered names ran three lines deep in this column and pushed
