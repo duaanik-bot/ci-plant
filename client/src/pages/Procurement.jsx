@@ -79,6 +79,16 @@ const PoMetaFields = ({ value, onChange }) => (
   </section>
 );
 
+// One fact on the opened receipt. Dash rather than blank for anything the
+// receipt never carried — an empty cell reads as "not loaded", a dash as
+// "nothing was recorded", and on a goods receipt those are different answers.
+const GrnFact = ({ label, children, wide }) => (
+  <div className={wide ? 'col-span-2' : ''}>
+    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+    <div className="mt-0.5 text-sm text-slate-800">{children || <span className="text-slate-300">—</span>}</div>
+  </div>
+);
+
 // GRN transaction context shared by the receive forms — receiver defaults to
 // the logged-in user; everything stays editable.
 const GrnMetaFields = ({ value, onChange }) => (
@@ -172,6 +182,7 @@ export default function Procurement() {
   const [newGrn, setNewGrn] = useState(null);         // header entry: against-PO or direct (no-PO)
   const [subLineId, setSubLineId] = useState(null);   // PO line being received as a DIFFERENT board
   const [qcGrn, setQcGrn] = useState(null);
+  const [grnModal, setGrnModal] = useState(null); // the receipt opened by clicking its row
   const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
   const [cover, setCover] = useState(null); // { grn, data, qty: { order_line_id: '…' } } — Cover Board modal
   const [coverBusy, setCoverBusy] = useState(false);
@@ -750,16 +761,28 @@ export default function Procurement() {
     } catch (e) { toast.error(e.message || 'Could not create GRN'); }
   };
 
+  // The receipt opened for correction. Every field it carries is filled from
+  // the row, so a form the user only half-touches saves the rest unchanged.
+  const openEditGrn = g => setEditGrn({ grn: g, qty: String(g.qty), batch_no: g.batch_no || '',
+    vehicle_no: g.vehicle_no || '', supplier_invoice_no: g.supplier_invoice_no || '',
+    supplier_invoice_date: g.supplier_invoice_date || '', received_by: g.received_by || '',
+    remarks: g.remarks || '' });
+
   const saveEditGrn = async () => {
-    if (!(+editGrn.qty > 0)) return toast.error('Received quantity must be positive');
+    // A receipt whose stock has been drawn on keeps its quantity locked, and
+    // the field is disabled — so the number is simply not part of that save.
+    // Posting it back unchanged would be harmless but says something the user
+    // did not ask for.
+    const qtyEditable = editGrn.grn.qty_editable !== false;
+    if (qtyEditable && !(+editGrn.qty > 0)) return toast.error('Received quantity must be positive');
     try {
       await api.put(`/grns/${editGrn.grn.id}`, {
-        qty: +editGrn.qty, batch_no: editGrn.batch_no || undefined,
+        ...(qtyEditable ? { qty: +editGrn.qty } : {}), batch_no: editGrn.batch_no || undefined,
         vehicle_no: editGrn.vehicle_no || null, supplier_invoice_no: editGrn.supplier_invoice_no || null,
         supplier_invoice_date: editGrn.supplier_invoice_date || null,
         received_by: editGrn.received_by || null, remarks: editGrn.remarks || null,
       });
-      toast.success(`${editGrn.grn.grn_number} updated`); setEditGrn(null); load();
+      toast.success(`${editGrn.grn.grn_number} updated`); setEditGrn(null); setGrnModal(null); load();
     } catch (e) { toast.error(e.message || 'Could not update GRN'); }
   };
 
@@ -1445,11 +1468,11 @@ export default function Procurement() {
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                 {g.status === 'quarantine' && <Button size="sm" onClick={() => setQcGrn({ grn: g, note: '' })}>QC Decision</Button>}
                 <ActionMenu label="GRN actions" items={[
-                  ...(g.status === 'quarantine' ? [{ key: 'edit', label: 'Edit GRN', icon: Pencil,
-                    onClick: () => setEditGrn({ grn: g, qty: String(g.qty), batch_no: g.batch_no || '',
-                      vehicle_no: g.vehicle_no || '', supplier_invoice_no: g.supplier_invoice_no || '',
-                      supplier_invoice_date: g.supplier_invoice_date || '', received_by: g.received_by || '',
-                      remarks: g.remarks || '' }) }] : []),
+                  { key: 'view', label: 'Open GRN', icon: Eye, onClick: () => setGrnModal(g) },
+                  // Every receipt carries an Edit, at any status. What that
+                  // form will actually let go of is the server's call, and it
+                  // has already answered on this row — see qty_editable.
+                  { key: 'edit', label: 'Edit GRN', icon: Pencil, onClick: () => openEditGrn(g) },
                   ...(g.status === 'accepted' && canCoverRole ? [{ key: 'cover', label: 'Cover board for jobs', icon: Package,
                     onClick: () => openCover(g) }] : []),
                   ...(g.status === 'accepted' ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
@@ -1462,6 +1485,10 @@ export default function Procurement() {
           rows={grnRows} empty={grnView === 'completed' ? 'No completed QC decisions yet' : 'Nothing awaiting QC'}
           rowClass={unreadRowClass(grnThreads, g => g.id)}
           getRowId={g => g.id}
+          // The register was a dead end: 55 completed receipts and no way to
+          // look inside one. A row now opens the receipt, exactly as a PR row
+          // does — the actions in that modal are gated the same as the menu's.
+          onRowClick={g => setGrnModal(g)}
           exportName="Goods Receipts"
           exportSubtitle="Procurement · GRN register with QC status" />
       )}
@@ -2271,22 +2298,126 @@ export default function Procurement() {
         </div>}
       </Modal>
 
-      {/* ── Edit GRN (quarantine only) ── */}
+      {/* ── Open a GRN ── the whole receipt, and what may still be done to it ── */}
+      <Modal open={!!grnModal} onClose={() => setGrnModal(null)} wide
+        title={grnModal ? `${grnModal.grn_number} — ${fmt.title(grnModal.status)}` : ''}
+        footer={grnModal && <>
+          <Button variant="secondary" onClick={() => setGrnModal(null)}>Close</Button>
+          <Button onClick={() => { openEditGrn(grnModal); setGrnModal(null); }}>
+            <Pencil size={14} /> Edit GRN
+          </Button>
+          {grnModal.status === 'quarantine' && (
+            <Button variant="success" onClick={() => { setQcGrn({ grn: grnModal, note: '' }); setGrnModal(null); }}>
+              <CheckCircle2 size={14} /> QC Decision
+            </Button>
+          )}
+          {/* Gated exactly as the row menu gates them — the modal is the more
+              exposed of the two now that any role reaches it by clicking. */}
+          {grnModal.status === 'accepted' && canCoverRole && (
+            <Button variant="secondary" onClick={() => { const g = grnModal; setGrnModal(null); openCover(g); }}>
+              <Package size={14} /> Cover board for jobs
+            </Button>
+          )}
+          {grnModal.status === 'accepted' && (
+            <Button variant="danger" onClick={() => { const g = grnModal; setGrnModal(null); rollbackGrn(g); }}>
+              <Undo2 size={14} /> {grnModal.po_number ? 'Roll back to PO' : 'Roll back receipt'}
+            </Button>
+          )}
+        </>}>
+        {grnModal && <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
+            <GrnFact label="Against PO">
+              {grnModal.po_number || <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Direct · No PO</span>}
+            </GrnFact>
+            <GrnFact label="Vendor">{grnModal.vendor_name}</GrnFact>
+            <GrnFact label="Board" wide>
+              {grnModal.material_name}
+              {grnModal.substituted_for_name && (
+                <div className="text-[11px] font-semibold text-amber-700">
+                  received in place of {grnModal.substituted_for_name}
+                </div>
+              )}
+            </GrnFact>
+            <GrnFact label="Quantity Received">
+              <span className="font-semibold tabular-nums">{fmt.num(grnModal.qty)}</span> {grnModal.unit}
+            </GrnFact>
+            <GrnFact label="Supplier Batch"><span className="font-mono text-xs">{grnModal.batch_no}</span></GrnFact>
+            <GrnFact label="Vehicle">{grnModal.vehicle_no}</GrnFact>
+            <GrnFact label="Supplier Invoice">
+              {grnModal.supplier_invoice_no
+                ? `${grnModal.supplier_invoice_no}${grnModal.supplier_invoice_date ? ` · ${fmt.date(grnModal.supplier_invoice_date)}` : ''}`
+                : null}
+            </GrnFact>
+            <GrnFact label="Received">
+              {fmt.date(grnModal.received_at)}{grnModal.received_by ? ` · by ${grnModal.received_by}` : ''}
+            </GrnFact>
+            <GrnFact label="QC">
+              <StatusBadge status={grnModal.status} />
+              {grnModal.qc_at && <span className="ml-2 text-xs text-slate-400">{fmt.date(grnModal.qc_at)}</span>}
+            </GrnFact>
+            {grnModal.qc_note && <GrnFact label="QC Note" wide>{grnModal.qc_note}</GrnFact>}
+            {grnModal.remarks && <GrnFact label="Remarks" wide>{grnModal.remarks}</GrnFact>}
+          </div>
+
+          {/* What is left on the shelf, and why the quantity may be frozen.
+              Said here rather than only inside the edit form, so the answer to
+              "can I still fix this?" does not need a second click. */}
+          {grnModal.batch_initial_qty != null && (
+            <div className="rounded-xl border border-slate-100 bg-white p-3.5 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">Stock from this receipt:</span>{' '}
+              {fmt.num(grnModal.batch_qty)} of {fmt.num(grnModal.batch_initial_qty)} {grnModal.unit} still on the shelf
+              {grnModal.qty_editable === false && grnModal.qty_lock_reason && (
+                <div className="mt-2 flex gap-2 rounded-lg bg-amber-50 p-2.5 text-amber-800">
+                  <AlertTriangle size={14} className="mt-px shrink-0" />
+                  <span>{grnModal.qty_lock_reason}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="font-semibold uppercase tracking-wide text-slate-400">Discussion</span>
+            <ThreadCell entity="grn" id={grnModal.id} summary={grnThreads[grnModal.id]} />
+          </div>
+        </div>}
+      </Modal>
+
+      {/* ── Edit GRN ── paperwork always; quantity where stock can still move ── */}
       <Modal open={!!editGrn} onClose={() => setEditGrn(null)} title={editGrn ? `Edit ${editGrn.grn.grn_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setEditGrn(null)}>Cancel</Button>
-          <Button onClick={saveEditGrn} disabled={!(+editGrn?.qty > 0)}>Save Changes</Button>
+          {/* A locked quantity must not disable Save — the paperwork on that
+              same receipt is exactly what the user came here to fix. */}
+          <Button onClick={saveEditGrn}
+            disabled={editGrn?.grn.qty_editable !== false && !(+editGrn?.qty > 0)}>Save Changes</Button>
         </>}>
-        {editGrn && <div className="space-y-3">
-          <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-            {editGrn.grn.material_name} · {editGrn.grn.po_number ? `against ${editGrn.grn.po_number}` : 'direct receipt (no PO)'} — correct a receipt entered in error, before QC.
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Quantity Received" required><Input type="number" min="1" value={editGrn.qty} onChange={e => setEditGrn({ ...editGrn, qty: e.target.value })} /></Field>
-            <Field label="Supplier Batch No"><Input value={editGrn.batch_no} onChange={e => setEditGrn({ ...editGrn, batch_no: e.target.value })} /></Field>
-          </div>
-          <GrnMetaFields value={editGrn} onChange={patch => setEditGrn(s => ({ ...s, ...patch }))} />
-        </div>}
+        {editGrn && (() => {
+          const qtyLocked = editGrn.grn.qty_editable === false;
+          return <div className="space-y-3">
+            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+              {editGrn.grn.material_name} · {editGrn.grn.po_number ? `against ${editGrn.grn.po_number}` : 'direct receipt (no PO)'}
+              {' — '}{qtyLocked
+                ? 'correct the batch, lorry, invoice or remarks on this receipt.'
+                : editGrn.grn.status === 'quarantine'
+                  ? 'correct a receipt entered in error, before QC.'
+                  : 'correcting the quantity after QC moves the stock batch, the PO line and the job coverage with it.'}
+            </div>
+            {qtyLocked && editGrn.grn.qty_lock_reason && (
+              <div className="flex gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+                <AlertTriangle size={14} className="mt-px shrink-0" />
+                <span>{editGrn.grn.qty_lock_reason}</span>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quantity Received" required={!qtyLocked}>
+                <Input type="number" min="1" value={editGrn.qty} disabled={qtyLocked}
+                  onChange={e => setEditGrn({ ...editGrn, qty: e.target.value })} />
+              </Field>
+              <Field label="Supplier Batch No"><Input value={editGrn.batch_no} onChange={e => setEditGrn({ ...editGrn, batch_no: e.target.value })} /></Field>
+            </div>
+            <GrnMetaFields value={editGrn} onChange={patch => setEditGrn(s => ({ ...s, ...patch }))} />
+          </div>;
+        })()}
       </Modal>
 
       {/* ── GRN QC decision ── */}
