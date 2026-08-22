@@ -80,7 +80,11 @@ test('every GRN receipt seeds loose through the one helper', () => {
   for (const s of withGrn) {
     assert.match(s, /loose_sheets/, `a GRN receipt that does not seed loose_sheets: ${s.slice(0, 90)}`);
   }
-  assert.equal((proc.match(/grnLooseSheets\(/g) || []).length, 4);
+  // Five call sites, not four: the four births above plus PUT /grns/:id,
+  // which re-seeds loose when a receipt's quantity is CORRECTED. It is
+  // allowed to seed rather than move because it only ever runs on an
+  // intact batch — a pile still at birth, holding no opened bundle.
+  assert.equal((proc.match(/grnLooseSheets\(/g) || []).length, 5);
 });
 
 test('the issue paths move loose in the same breath as qty', () => {

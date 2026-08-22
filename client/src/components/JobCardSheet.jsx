@@ -33,7 +33,7 @@ import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../
 function Group({ title, rows }) {
   return (
     <>
-      <div className="col-span-4 mt-1 border-b border-gray-200 pb-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">
+      <div className="jc-cap col-span-4 mt-1 border-b border-gray-200 pb-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">
         {title}
       </div>
       {rows.map(([k, v]) => (
@@ -212,9 +212,12 @@ export default function JobCardSheet({ jc }) {
   const printing = colourDetailLines(jc);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:border-0 print:shadow-none">
+    // The jc-* classes are inert everywhere except a PHONE-width modal: they are
+    // matched only under index.css's @container cimodal rules, and the print
+    // pages render outside any cimodal container, so paper cannot change.
+    <div className="jc-sheet rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:border-0 print:shadow-none">
       {/* Header */}
-      <div className="flex items-start justify-between border-b-2 border-ink-900 pb-4">
+      <div className="jc-head flex items-start justify-between border-b-2 border-ink-900 pb-4">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-600">
             {jc.gang_parent ? (jc.run_kind === 'merge' ? 'Combined Run Job Card' : 'Gang Production Job Card') : 'Production Job Card'}
@@ -233,7 +236,7 @@ export default function JobCardSheet({ jc }) {
               : <ProductIdentity row={jc} compact codesClassName="max-w-[320px]" />}
           </div>
         </div>
-        <div className="text-right text-xs text-gray-600">
+        <div className="jc-head-right text-right text-xs text-gray-600">
           <div className="text-sm font-extrabold text-ink-900">COLOUR IMPRESSIONS</div>
           {/* A run card serves SEVERAL sales orders — the anchor member's
               customer/PO presented as "the" value would lie to the floor.
@@ -258,7 +261,7 @@ export default function JobCardSheet({ jc }) {
 
       {/* Job Specification — ALL of it, at the top, board first. */}
       <div className="mt-5">
-        <div className="mb-2 flex items-baseline justify-between border-b-2 border-gray-300 pb-1">
+        <div className="jc-caphead mb-2 flex items-baseline justify-between border-b-2 border-gray-300 pb-1">
           <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">Job Specification</div>
           <div className="text-[10px] text-gray-400">
             Product #{jc.product_id} · Plan {fmt.date(jc.planned_date) || '—'} · Artwork {jc.artwork_locked ? 'Locked' : 'Open'}
@@ -273,7 +276,7 @@ export default function JobCardSheet({ jc }) {
             they are, what they cut to, how many cuts, and the three counts —
             packets pulled, parents on the machine, children off it. */}
         <div className="mb-3 rounded border-2 border-ink-900 px-3 py-2">
-          <div className="flex items-baseline justify-between gap-3">
+          <div className="jc-caphead flex items-baseline justify-between gap-3">
             <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board &amp; cutting plan</div>
             <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
               {board?.differsFromMaster ? 'Job board — not the master' : 'Product master board'}
@@ -290,6 +293,10 @@ export default function JobCardSheet({ jc }) {
               : ' — this job runs on its master board.'}
           </div>
 
+          {/* On a phone the seven columns pan inside jc-xscroll rather than
+              reflow — squeezed to 340px an auto table drives every column to
+              min-content and reads as broken. The printed column set is kept. */}
+          <div className="jc-xscroll">
           <table className="mt-2 w-full text-xs [&_td]:pr-3 [&_th]:pr-3 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
             <thead><tr className="border-b border-gray-300 text-left text-[9px] font-bold uppercase tracking-wide text-gray-500">
               {/* Read left to right as the work happens: pull this board at
@@ -333,6 +340,7 @@ export default function JobCardSheet({ jc }) {
               </tfoot>
             )}
           </table>
+          </div>
 
           {/* The cutter's actual work order on a mixed job — one instruction
               per pile, in plant words, with the banked strip named where the
@@ -368,7 +376,7 @@ export default function JobCardSheet({ jc }) {
           ))}
         </div>
 
-        <div className="grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
+        <div className="jc-spec grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
           <Group title="Sheet & Finish" rows={sheet} />
           <Group title="Product" rows={product} />
           {printing.length > 0 && <Group title="Printing Specifications" rows={printing} />}
@@ -386,6 +394,7 @@ export default function JobCardSheet({ jc }) {
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">Gang Run — {jc.gang_number}</div>
             <div className="text-[10px] text-gray-400">travels together · separates after die cutting</div>
           </div>
+          <div className="jc-xscroll">
           <table className="w-full text-xs">
             <thead><tr className="border-b border-gray-200 text-left text-[10px] font-bold uppercase text-gray-400">
               <th className="py-1">Product</th>
@@ -406,6 +415,7 @@ export default function JobCardSheet({ jc }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -413,6 +423,7 @@ export default function JobCardSheet({ jc }) {
       {jc.issues?.length > 0 && (
         <div className="mt-5">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Material Issued (FIFO)</div>
+          <div className="jc-xscroll">
           <table className="w-full text-xs">
             <thead><tr className="border-b border-gray-200 text-left text-[10px] font-bold uppercase text-gray-400">
               <th className="py-1">Material</th><th className="py-1">Batch</th>
@@ -429,11 +440,12 @@ export default function JobCardSheet({ jc }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* Sign-off */}
-      <div className="mt-10 grid grid-cols-3 gap-8 text-center text-xs text-gray-500">
+      <div className="jc-sign mt-10 grid grid-cols-3 gap-8 text-center text-xs text-gray-500">
         <div className="border-t border-gray-300 pt-2">Planned By</div>
         <div className="border-t border-gray-300 pt-2">Finalised By</div>
         <div className="border-t border-gray-300 pt-2">QA Release</div>

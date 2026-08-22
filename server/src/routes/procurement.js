@@ -15,6 +15,7 @@ import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingF
 import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-substitution.js';
 import { consolidate, consolidateEdit } from '../po-consolidate.js';
 import { planPrQtyChange } from '../pr-qty-cascade.js';
+import { grnEditPlan } from '../grn-edit.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -1029,16 +1030,31 @@ r.post('/purchase-orders/:id/revert-to-requisition', canBuy, async (req, res, ne
 // ── GRN + QC ────────────────────────────────────────────────────────────────
 r.get('/grns', async (_req, res, next) => {
   try {
-    res.json(await q(`
+    const rows = await q(`
       SELECT g.*, m.name AS material_name, m.unit, po.po_number,
              sm.name AS substituted_for_name,
-             COALESCE(pv.name, dv.name) AS vendor_name
+             COALESCE(pv.name, dv.name) AS vendor_name,
+             b.qty AS batch_qty, b.initial_qty AS batch_initial_qty,
+             (SELECT COUNT(*)::int FROM stock_movements mv
+               WHERE mv.batch_id = b.id
+                 AND mv.type IN ('consumption','dispatch','wastage','fg_receipt')) AS batch_drawn
       FROM grns g JOIN materials m ON m.id=g.material_id
+      LEFT JOIN stock_batches b ON b.grn_id = g.id
       LEFT JOIN materials sm ON sm.id=g.substituted_for_material_id
       LEFT JOIN purchase_orders po ON po.id=g.purchase_order_id
       LEFT JOIN vendors pv ON pv.id=po.vendor_id
       LEFT JOIN vendors dv ON dv.id=g.vendor_id
-      ORDER BY g.id DESC`));
+      ORDER BY g.id DESC`);
+    // Whether the received quantity may still be corrected is decided HERE, by
+    // the same function the PUT enforces. The register only reads the verdict,
+    // so the form can never offer a box whose save would come back 409 — and
+    // when it is locked it can say why, in the words the server would use.
+    res.json(rows.map(g => {
+      const batch = g.batch_initial_qty == null ? null
+        : { qty: g.batch_qty, initial_qty: g.batch_initial_qty };
+      const { qty } = grnEditPlan(g, batch, g.batch_drawn || 0, {});
+      return { ...g, qty_editable: qty.editable, qty_lock_reason: qty.reason };
+    }));
   } catch (e) { next(e); }
 });
 
@@ -1394,27 +1410,112 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Edit a GRN — only while it is still in quarantine (before QC). Corrects the
-// received quantity / supplier batch number and keeps the quarantine stock
-// batch and its ledger row in step.
+// Correct a goods receipt. Paperwork — batch, lorry, supplier invoice, who
+// received it, remarks — at ANY status: none of it moves a sheet, and sealing
+// it at QC left 55 completed receipts carrying invoice numbers nobody could
+// fix. The received QUANTITY is the half with a stock consequence, and where
+// it may move (and how) is grn-edit.js's call, not this route's.
 r.put('/grns/:id', canBuy, async (req, res, next) => {
   try {
-    const { qty, batch_no, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
     await tx(async (qc, oc) => {
       const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (g.status !== 'quarantine') throw Object.assign(new Error('Only a GRN awaiting QC can be edited'), { status: 409 });
-      const newQty = qty != null && qty !== '' ? +qty : +g.qty;
-      if (!(newQty > 0)) throw Object.assign(new Error('Received quantity must be positive'), { status: 400 });
-      const newBatch = (batch_no ?? g.batch_no) || g.batch_no;
+      // The unit is carried so a refusal here is worded exactly as the register
+      // words it — "3,600 of 11,500 sheets", never a bare "units". Two spellings
+      // of one refusal read as two different rules.
+      g.unit = (await oc('SELECT unit FROM materials WHERE id=$1', [g.material_id]))?.unit;
+      const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
+      const drawn = batch && await batchConsumed(oc, batch.id) ? 1 : 0;
+      const plan = grnEditPlan(g, batch, drawn, req.body);
+      // 400 when the number itself is wrong, 409 when the receipt's STATE
+      // refuses it — the form tells those two apart, and only the second one
+      // is worth showing as a locked field with a reason.
+      if (plan.error) throw Object.assign(new Error(plan.error),
+        { status: plan.qty.editable ? 400 : 409 });
+
+      const keep = k => (plan.fields[k] !== undefined ? plan.fields[k] : g[k]);
+      // The batch number NAMES the stock batch. It is the one field that may be
+      // corrected but never blanked.
+      const batch_no = keep('batch_no') || g.batch_no;
       await qc(`UPDATE grns SET qty=$1, batch_no=$2, vehicle_no=$3, supplier_invoice_no=$4,
                        supplier_invoice_date=$5, received_by=$6, remarks=$7 WHERE id=$8`,
-        [newQty, newBatch, vehicle_no ?? g.vehicle_no, supplier_invoice_no ?? g.supplier_invoice_no,
-         supplier_invoice_date ?? g.supplier_invoice_date, received_by ?? g.received_by,
-         remarks ?? g.remarks, g.id]);
-      await qc('UPDATE stock_batches SET qty=$1, initial_qty=$1, batch_no=$2 WHERE grn_id=$3', [newQty, newBatch, g.id]);
-      await qc(`UPDATE stock_movements SET qty=$1 WHERE ref_type='grn' AND ref_id=$2 AND type='grn'`, [newQty, g.id]);
-      await audit('grn', g.id, 'edit', `${g.grn_number}: qty ${g.qty} → ${newQty}`, qc, req.user.name);
+        [plan.qty.to, batch_no, keep('vehicle_no'), keep('supplier_invoice_no'),
+         keep('supplier_invoice_date'), keep('received_by'), keep('remarks'), g.id]);
+      if (batch) await qc('UPDATE stock_batches SET batch_no=$1 WHERE id=$2', [batch_no, batch.id]);
+
+      if (plan.stock !== 'none') {
+        // `set` re-states a receipt nothing downstream has been told about;
+        // `delta` moves one QC already pushed into stock. Both land the batch
+        // on the same figure — the delta path is only ever reached on an INTACT
+        // batch, where qty and initial_qty are still equal by definition. The
+        // pile being at birth is also why loose re-seeds from the corrected
+        // quantity: it holds no opened bundle and has absorbed no return, so
+        // this is exactly what the receipt would have seeded if keyed right.
+        const loose = await grnLooseSheets(g.material_id, plan.qty.to, oc);
+        await qc('UPDATE stock_batches SET qty=$1, initial_qty=$1, loose_sheets=$2 WHERE id=$3',
+          [plan.qty.to, loose, batch.id]);
+        await qc(`UPDATE stock_movements SET qty=$1 WHERE ref_type='grn' AND ref_id=$2 AND type='grn'`,
+          [plan.qty.to, g.id]);
+      }
+
+      if (plan.creditsPoLine) {
+        // Acceptance credited received_qty by what landed, so a correction owes
+        // it the difference. Status is then re-derived from the lines the way
+        // QC and reverseGrnRow both do — one spelling of "is this PO received".
+        await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty + $1) WHERE id=$2',
+          [plan.qty.delta, g.po_line_id]);
+        const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
+        if (po && po.status !== 'closed') {
+          const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1',
+            [g.purchase_order_id]);
+          const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
+          const some = lines.some(l => l.received_qty > 0);
+          await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
+            [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+        }
+      }
+
+      // QC retired the job's INCOMING coverage by exactly what landed. Correct
+      // that by the same difference or the board is counted twice — once as
+      // stock on hand, once as still on order. Walks the same set the accept
+      // burn-down walked: requisition-source holds on this board, this PO.
+      if (plan.stock === 'delta' && plan.qty.delta !== 0 && g.purchase_order_id) {
+        const alloc = await qc(
+          `SELECT a.id, a.qty, a.status FROM board_allocations a
+           JOIN requisitions rq ON rq.id = a.requisition_id
+           WHERE a.source='requisition' AND a.material_id=$1 AND rq.purchase_order_id=$2
+           ORDER BY a.id`, [g.material_id, g.purchase_order_id]);
+        if (plan.qty.delta > 0) {
+          let landed = plan.qty.delta;                       // more arrived — retire more
+          for (const a of alloc.filter(x => x.status === 'active')) {
+            if (landed <= 0) break;
+            const cut = Math.min(Number(a.qty), landed);
+            const left = Number(a.qty) - cut;
+            if (left > 0) await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [left, a.id]);
+            else await qc(`UPDATE board_allocations SET status='consumed', released_at=now() WHERE id=$1`, [a.id]);
+            landed -= cut;
+          }
+        } else {
+          // Less arrived — hand the shortfall back, never more than it. A live
+          // hold simply grows. With none left, the newest RETIRED hold comes
+          // back at exactly what is owed: its original size was answered by the
+          // board that did land, and only the shortfall is still needed.
+          const back = -plan.qty.delta;
+          const live = alloc.find(a => a.status === 'active');
+          if (live) await qc('UPDATE board_allocations SET qty = qty + $1 WHERE id=$2', [back, live.id]);
+          else {
+            const newest = [...alloc].reverse().find(a => a.status === 'consumed');
+            if (newest) await qc(
+              `UPDATE board_allocations SET status='active', released_at=NULL, qty=$1 WHERE id=$2`,
+              [back, newest.id]);
+          }
+        }
+      }
+
+      await audit('grn', g.id, 'edit', plan.qty.changed
+        ? `${g.grn_number}: qty ${g.qty} → ${plan.qty.to}`
+          + (plan.stock === 'delta' ? ' — after QC; stock, PO line and coverage moved with it' : '')
+        : `${g.grn_number}: receipt details corrected`, qc, req.user.name);
     });
     res.json(await one('SELECT * FROM grns WHERE id=$1', [req.params.id]));
   } catch (e) { next(e); }
