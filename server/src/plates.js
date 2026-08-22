@@ -404,6 +404,13 @@ export function manualPlateEntry(input = {}) {
   // matches a rack plate to a requirement on this string. A plate filed under
   // 'Unversioned' is invisible to every PR that names a revision, so the plant
   // buys a plate it just told the system it owns.
+  //
+  // That warning stood here as a comment for three weeks and nothing enforced it.
+  // 2026-08-22, BECELAC FORTZ SW-801: five Pantone plates went onto the Used rack
+  // at 09:00 and the Plate PR raised at 09:04 read "0 of 5 to find". The carton's
+  // artwork code lives on its ORDER LINE, never on its master, so every fallback
+  // below came back empty and all five were written 'Unversioned'. 99% of this
+  // rack is hand-entered, so this is the main door, not a side one — it refuses.
   const artworkVersion = artworkVersionOf({
     artwork_version: input.artwork_version,
     party_artwork_code: input.party_artwork_code,
@@ -412,6 +419,15 @@ export function manualPlateEntry(input = {}) {
   const plates = expandPlateQuantities(input.components || [], {
     emptyMessage: 'Tick at least one colour and give it a quantity',
   });
+  // Asked LAST, after the colours, so an operator who has ticked nothing is told
+  // about the empty list rather than being sent to a different field first. The
+  // literal word is refused however it arrives — as the fallback's own result, or
+  // typed into the box by someone who copied it off another row.
+  if (clean(artworkVersion).toLowerCase() === 'unversioned') {
+    throw Object.assign(new Error(
+      'These plates need an artwork / revision, or an output number to take it from — '
+      + 'without one no Plate Requirement can ever find them on the rack'), { status: 400 });
+  }
   return {
     rack_location: rack.rack,
     use_count: rack.use_count,

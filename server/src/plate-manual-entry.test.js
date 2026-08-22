@@ -47,7 +47,9 @@ test('the two racks say what they mean, and a used plate carries a run', () => {
 test('a fresh plate cannot be entered as anything but Good', () => {
   assert.throws(() => manualPlateEntry({ rack: 'fresh', condition: 'Fair', components: CMYK }),
     /cannot be recorded as Fair/);
-  assert.equal(manualPlateEntry({ rack: 'used', condition: 'Fair', components: CMYK }).condition, 'Fair');
+  assert.equal(manualPlateEntry({
+    rack: 'used', condition: 'Fair', artwork_version: 'R1', components: CMYK,
+  }).condition, 'Fair');
 });
 
 test('the rack must be chosen, and an unknown one is refused rather than defaulted', () => {
@@ -62,12 +64,67 @@ test('artwork version falls back through the party code to the output number', (
   assert.equal(manualPlateEntry({ rack: 'fresh', artwork_version: 'R2', components: CMYK }).artwork_version, 'R2');
   assert.equal(manualPlateEntry({ rack: 'fresh', party_artwork_code: 'PCS-W026/R1', components: CMYK }).artwork_version, 'PCS-W026/R1');
   assert.equal(manualPlateEntry({ rack: 'fresh', output_number: '18604', components: CMYK }).artwork_version, '18604');
-  assert.equal(manualPlateEntry({ rack: 'fresh', components: CMYK }).artwork_version, 'Unversioned');
+});
+
+test('a plate cannot be filed under Unversioned, because nothing would ever find it', () => {
+  // Anik, 2026-08-22, on BECELAC FORTZ SW-801: five Pantone plates entered by hand
+  // at 09:00 read "0 of 5 to find" on the Plate PR raised four minutes later. The
+  // carton's artwork code lives on its ORDER LINE, not its master, so the entry
+  // form resolved nothing and wrote all five under 'Unversioned' — a key no
+  // requirement asks for, so the rack was invisible and the plant would have
+  // bought five plates it had just been told it owned.
+  //
+  // The fallback chain above is the fix's other half; this is the floor under it.
+  // 99% of the rack is hand-entered, so a silent 'Unversioned' is not an edge case.
+  assert.throws(() => manualPlateEntry({ rack: 'fresh', components: CMYK }),
+    /artwork/i, 'no artwork and no output number must be refused, never defaulted');
+  // The refusal has to name the way out, or it is a dead end on the 139 active
+  // products whose master carries neither number.
+  assert.throws(() => manualPlateEntry({ rack: 'fresh', components: CMYK }),
+    /output number/i);
+  // Blank-ish input is the same as absent — whitespace must not buy a pass.
+  assert.throws(() => manualPlateEntry({
+    rack: 'fresh', artwork_version: '   ', output_number: '  ', components: CMYK,
+  }), /artwork/i);
+  // And the literal word is refused however it arrives, or the guard is one
+  // copy-paste away from being useless.
+  assert.throws(() => manualPlateEntry({
+    rack: 'fresh', artwork_version: 'Unversioned', components: CMYK,
+  }), /artwork/i);
+});
+
+test('the entry screen reads artwork from Planning when the master has none', () => {
+  // The asymmetry that caused the BECELAC failure. A Plate PR resolves its artwork
+  // from the ORDER LINE (plateSpecification -> artworkVersionOf over spec_override);
+  // this screen read the product master alone. Same carton, two spellings, so the
+  // rack plate and the requirement could never meet.
+  const routes = read('server/src/routes/plates.js');
+  assert.match(routes, /CARTON_ARTWORK_CODE_SQL/,
+    'one spelling of "the artwork code this carton is known by"');
+  assert.match(routes, /spec_override->>'party_artwork_code'/,
+    'and it must reach the order line, which is where Planning puts it');
+  const start = routes.indexOf('function plateEntryMatch');
+  const body = routes.slice(start, routes.indexOf("r.get('/plates/entry-context'", start));
+  assert.ok(body.length > 200, 'plateEntryMatch was not found — this test is asserting nothing');
+  assert.match(body, /planning_artwork_code/,
+    'plateEntryMatch must fall back to the planning code before giving up');
+});
+
+test('the Add button will not submit a plate with no artwork on it', () => {
+  // The field is labelled required and always was; nothing enforced it on either
+  // side, so Add stayed live over a blank box and wrote invisible plates.
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  const start = screen.indexOf('function AddPlatesModal');
+  const body = screen.slice(start, screen.indexOf('\nfunction ', start + 10));
+  assert.ok(body.length > 500, 'AddPlatesModal was not found — this test is asserting nothing');
+  assert.match(body, /!form\.artwork_version|artwork_version.*?\.trim\(\)/,
+    'the Add button must be disabled while the artwork box is empty');
 });
 
 test('one row per physical plate, and a quantity above one repeats the colour', () => {
   const entry = manualPlateEntry({
     rack: 'used',
+    artwork_version: 'R1',
     components: [{ component_type: 'cyan', component_label: 'Cyan', qty: 3 }],
   });
   assert.equal(entry.plates.length, 3);
@@ -90,13 +147,14 @@ test('an empty tick list is refused in the vocabulary of THIS form', () => {
 test('a Pantone plate keeps its identity and cannot be nameless', () => {
   const entry = manualPlateEntry({
     rack: 'fresh',
+    artwork_version: 'R1',
     components: [{ component_type: 'pantone', component_label: 'Pantone - 871 C', pantone_code: '871 C', qty: 2 }],
   });
   assert.equal(entry.plates.length, 2);
   assert.equal(entry.plates[0].pantone_code, '871 C');
   assert.equal(entry.plates[0].component_label, 'Pantone - 871 C');
   assert.throws(() => manualPlateEntry({
-    rack: 'fresh', components: [{ component_type: 'pantone', qty: 1 }],
+    rack: 'fresh', artwork_version: 'R1', components: [{ component_type: 'pantone', qty: 1 }],
   }), /needs its Pantone number or name/);
 });
 

@@ -962,7 +962,14 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
   return <Modal open onClose={onClose} title="Add plates to the warehouse" wide
     footer={<>
       <Button variant="secondary" onClick={onClose}>Cancel</Button>
-      <Button variant="success" disabled={!form || !form.plate_master_id || !total || busy} onClick={submit}>
+      {/* The artwork box has always been labelled required and nothing ever enforced
+          it, on this side or the server's. A blank one resolves to 'Unversioned',
+          which is the one value no Plate PR can ever match — so the plates land on
+          the rack and the requirement for the very same carton still reads "0 to
+          find". Disabled here so the refusal is visible before the click, not
+          returned as a toast after it. */}
+      <Button variant="success" disabled={!form || !form.plate_master_id || !total
+        || !String(form.artwork_version || '').trim() || busy} onClick={submit}>
         <PackagePlus size={14} /> {busy ? 'Adding…' : `Add ${total} plate${total === 1 ? '' : 's'}`}
       </Button>
     </>}>

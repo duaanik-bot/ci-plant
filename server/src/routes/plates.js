@@ -1513,6 +1513,34 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
 // stock. Either key resolves to the same context, so neither can go stale
 // against the other.
 //
+// ── The numbers a carton is known by, master first then Planning ──────────
+// A Plate PR resolves its own artwork from the ORDER LINE: plateSpecification
+// reads `spec_override.party_artwork_code` and artworkVersionOf turns it into the
+// key plateArtworkKey matches on. This screen read the product master alone.
+//
+// For most cartons those agree, so the gap stayed invisible until a carton came
+// along whose code lives ONLY on the order line — BECELAC FORTZ SW-801, whose
+// master carries neither a party artwork code nor an output number while its
+// order line carries 106137 / 18544. Five plates hand-entered against it were
+// filed 'Unversioned' and the requirement, asking for 106137, found none of them.
+//
+// So the fallback is spelled once and both the lookup and the write use it. The
+// master still wins — it is the carton's own record — and Planning only answers
+// where the master is silent, which is exactly the case that was broken.
+const CARTON_ARTWORK_CODE_SQL = alias => `COALESCE(NULLIF(${alias}.party_artwork_code,''),
+  (SELECT NULLIF(ol.spec_override->>'party_artwork_code','')
+     FROM order_lines ol
+    WHERE ol.product_id=${alias}.id
+      AND NULLIF(ol.spec_override->>'party_artwork_code','') IS NOT NULL
+    ORDER BY ol.id DESC LIMIT 1))`;
+
+const CARTON_OUTPUT_NUMBER_SQL = alias => `COALESCE(NULLIF(${alias}.output_number,''),
+  (SELECT NULLIF(ol.spec_override->>'output_number','')
+     FROM order_lines ol
+    WHERE ol.product_id=${alias}.id
+      AND NULLIF(ol.spec_override->>'output_number','') IS NOT NULL
+    ORDER BY ol.id DESC LIMIT 1))`;
+
 // Where an output number can live, and why all three are read:
 //   • products.output_number — the master, and the ordinary case.
 //   • order_lines.spec_override->>'output_number' — Planning's override. Some
@@ -1530,6 +1558,8 @@ const PLATE_ENTRY_COLUMNS = `p.id AS product_id,p.code AS product_code,p.name AS
   p.party_item_code,p.party_artwork_code,p.colour_type,p.colors,p.print_process,
   p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,p.coating,
   p.output_number AS master_output_number,
+  ${CARTON_ARTWORK_CODE_SQL('p')} AS planning_artwork_code,
+  ${CARTON_OUTPUT_NUMBER_SQL('p')} AS planning_output_number,
   c.id AS customer_id,c.name AS customer_name,
   (SELECT pm.plate_size FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
     WHERE pa.product_id=p.id AND pa.active=1 ORDER BY pa.id DESC LIMIT 1) AS last_plate_size`;
@@ -1538,20 +1568,28 @@ const PLATE_ENTRY_COLUMNS = `p.id AS product_id,p.code AS product_code,p.name AS
 // when there was one; entering by product leaves the master's own number to
 // stand, and a blank one stays blank rather than being invented here.
 function plateEntryMatch(row, wanted = '') {
-  const output = String(wanted || '').trim() || row.master_output_number || '';
+  // Master first, then whatever Planning wrote on the order line. Falling through
+  // to '' here is what used to hand artworkVersionOf nothing and get 'Unversioned'
+  // back — a plate filed under a key no requirement will ever ask for.
+  const output = String(wanted || '').trim() || row.master_output_number
+    || row.planning_output_number || '';
+  const artworkCode = row.party_artwork_code || row.planning_artwork_code || '';
   return {
     product_id: row.product_id,
     product_code: row.product_code,
     product_name: row.product_name,
     party_item_code: row.party_item_code,
-    party_artwork_code: row.party_artwork_code,
+    party_artwork_code: artworkCode,
     customer_id: row.customer_id,
     customer_name: row.customer_name,
     output_number: output,
     master_output_number: row.master_output_number || '',
     source: row.source || 'product',
+    // The SAME resolution a Plate PR performs, so the plate lands under the key
+    // the requirement will ask for. Two spellings here were two definitions of
+    // "the same plate", and only one of them was the one the rack answered on.
     artwork_version: artworkVersionOf({
-      party_artwork_code: row.party_artwork_code,
+      party_artwork_code: artworkCode,
       output_number: output,
     }),
     // The size this product's plates actually use beats the rule, because it is
@@ -1624,7 +1662,12 @@ r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
   try {
     const entry = manualPlateEntry(req.body);
     const result = await tx(async (qc, oc) => {
-      const product = await oc(`SELECT p.id,p.code,p.name,p.party_artwork_code,p.output_number,c.id AS customer_id
+      // party_artwork_code resolves through Planning for the same reason the lookup
+      // does — the plate's artwork_reference should name the artwork the plant
+      // knows, not go blank because the master was never filled in. output_number
+      // stays the MASTER's own, because that is what Sync Master? compares against.
+      const product = await oc(`SELECT p.id,p.code,p.name,p.output_number,c.id AS customer_id,
+          ${CARTON_ARTWORK_CODE_SQL('p')} AS party_artwork_code
         FROM products p LEFT JOIN customers c ON c.id=p.customer_id
         WHERE p.id=$1 AND p.active=1 FOR UPDATE OF p`, [Number(req.body.product_id) || 0]);
       if (!product) throw Object.assign(new Error('Choose a product, by output number or by name'), { status: 400 });
