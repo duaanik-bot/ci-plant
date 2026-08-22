@@ -92,6 +92,25 @@ export function plateSizeOf(spec = {}) {
   return match ? `${match[1]} x ${match[2]}` : null;
 }
 
+// ONE spelling of "what size is THIS plate", asked by every door that files a
+// plate: the Plate PR form, the requirement's own derivation, and the manual
+// warehouse entry. An ink takes the size the caller is working to; the DRIP OFF
+// mask takes its own — 560 x 670 unless it was explicitly given another.
+//
+// It exists because the manual door got this wrong in a way nothing could see:
+// the Add Plates form asks ONE size for the whole entry, which is right for an
+// ink set, so a mask entered beside it was filed at the ink size. Every other
+// door had already sized the mask correctly, and bestPlateCandidate filters on
+// plate_master_id — so the hand-entered plate was invisible to the requirement
+// that came looking for it at coating start, and coating began without its
+// plate while the rack held one. Manual entry is 99% of this rack, so that is
+// the main door, not an edge case. Three copies of a rule is how one of them
+// stays wrong; this is the one copy.
+export function plateComponentSize(component = {}, fallbackSize = null) {
+  if (!isDripOff(component)) return plateSizeOf({ plate_size: fallbackSize });
+  return plateSizeOf({ plate_size: component.plate_size }) || DRIP_OFF_PLATE_SIZE;
+}
+
 export function defaultPlateSize(spec = {}, components = []) {
   const metallic = Number(spec.metallic_colours) > 0
     || /metallic/i.test(clean(spec.metallic_details))

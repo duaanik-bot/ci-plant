@@ -1135,12 +1135,19 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
             <span>Which plates are you entering?</span>
             <span>{total} plate{total === 1 ? '' : 's'} · 0 leaves a colour out</span>
           </div>
+          {/* The recommendation, said out loud. The DRIP OFF line arrives at 1
+              for a drip-off carton, and a fifth plate appearing unexplained is
+              exactly how an operator zeroes it and files the set short. */}
+          {match.drip_off && <div className="mb-2 flex items-start gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[11px] font-semibold text-teal-800">
+            <Layers size={13} className="mt-px shrink-0" />
+            <span>Coating on this carton is <b>{match.coating || 'Drip Off'}</b> — it needs a <b>{DRIPOFF_LABEL}</b> plate, so one is included below at {DRIP_OFF_PLATE_SIZE}. Set it to 0 if you are not entering it now.</span>
+          </div>}
           <div className="divide-y divide-slate-100">{form.components.map(row => (
             <div key={componentKey(row)} className="grid items-center gap-3 py-2 sm:grid-cols-[1fr_132px]">
               <div>
                 <b className="text-sm">{row.component_label}</b>
                 {row.component_type === 'pantone' && <span className="block text-[11px] text-slate-400">Pantone identity kept on every physical plate</span>}
-                {isDripOff(row) && <span className="block text-[11px] text-slate-400">Drip-off coating plate — single use, usually {DRIP_OFF_PLATE_SIZE}</span>}
+                {isDripOff(row) && <span className="block text-[11px] font-semibold text-teal-700">Filed at {DRIP_OFF_PLATE_SIZE} — its own size, whatever the plate size above says</span>}
               </div>
               <QuantityControl row={row} onChange={qty => updateQty(componentKey(row), qty)} />
             </div>

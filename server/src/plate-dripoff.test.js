@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import {
-  expandPlateQuantities, plateComponentsFromSpec, suggestedPlateQuantities,
+  expandPlateQuantities, manualPlateEntry, plateComponentSize,
+  plateComponentsFromSpec, suggestedPlateQuantities,
 } from './plates.js';
 import { gangPlateSpecification, plateSpecification } from './plate-lifecycle.js';
 import {
@@ -324,4 +325,47 @@ test('the schema learns dripoff and issued_to_coating through a replayable migra
   assert.match(sql, /'issued_to_coating'/, 'plate_assets.status must allow issued_to_coating');
   assert.match(sql, /allowed_components/, 'the plate masters must allow the dripoff component');
   assert.match(sql, /DROP CONSTRAINT IF EXISTS/, 'constraint swaps must be replay-safe — init() runs on every boot');
+});
+
+// ── The MANUAL door sizes the mask itself ─────────────────────────────────
+// 99% of this rack is hand-entered, so manual entry is the MAIN way a DRIP OFF
+// plate reaches the shelf — not the PR/PO/GRN chain. The Add Plates form asks
+// for ONE size for the whole entry, which is right for an ink set and wrong for
+// the mask riding beside it: filed at the ink size, the plate is invisible to
+// the very requirement that will come looking for it at coating start, because
+// bestPlateCandidate filters on plate_master_id. Same shape as the bug where a
+// manual plate was filed under an artwork key no PR could match.
+
+test('plateComponentSize is ONE spelling of "what size is this plate"', () => {
+  // An ink takes the size the caller is working to.
+  assert.equal(plateComponentSize({ component_type: 'cyan' }, '600 x 730'), '600 x 730');
+  // The mask takes its OWN, and never the caller's.
+  assert.equal(plateComponentSize({ component_type: DRIPOFF_TYPE }, '600 x 730'), DRIP_OFF_PLATE_SIZE);
+  // Unless the mask was given one explicitly — 560 x 670 is a default, not a law.
+  assert.equal(plateComponentSize({ component_type: DRIPOFF_TYPE, plate_size: '600 x 730' }, null), '600 x 730');
+  // A blank caller size stays blank for an ink: "no size" means no size filter.
+  assert.equal(plateComponentSize({ component_type: 'black' }, null), null);
+});
+
+test('a hand-entered DRIP OFF keeps 560 x 670 while its ink set is entered at 600 x 730', () => {
+  const entry = manualPlateEntry({
+    rack: 'fresh', artwork_version: 'PCS-W026/R1',
+    components: [{ component_type: 'cyan', qty: 1 }, { component_type: DRIPOFF_TYPE, qty: 1 }],
+  });
+  const drip = entry.plates.find(isDripOff);
+  const cyan = entry.plates.find(row => row.component_type === 'cyan');
+  assert.equal(plateComponentSize(drip, '600 x 730'), DRIP_OFF_PLATE_SIZE,
+    'the hand-entered mask must not inherit the ink size, or no requirement can ever find it');
+  assert.equal(plateComponentSize(cyan, '600 x 730'), '600 x 730');
+});
+
+test('the manual warehouse write resolves a master PER PLATE, not one for the whole entry', () => {
+  // The loop used to write `master.id` for every plate it created. That is the
+  // whole defect: one size, chosen once, stamped on a mask that has its own.
+  const route = sliceOf(platesRoute, "r.post('/plates/warehouse/assets'", 3600);
+  assert.match(route, /plateComponentSize\(/,
+    'the manual entry no longer sizes each plate — a DRIP OFF filed at the ink size is invisible '
+    + 'to the requirement that comes looking for it at coating start');
+  assert.ok(!/VALUES \(\$1,\$2,[\s\S]{0,400}\[assetNumber, master\.id,/.test(route),
+    'the manual write still stamps the single entry-level master on every plate');
 });

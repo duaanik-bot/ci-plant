@@ -6,7 +6,7 @@ import { requireRole } from '../auth.js';
 import {
   APPROVABLE_COMPONENT_STATUSES, artworkVersionOf, canUnapprovePlateRequest,
   defaultPlateSize, DRIP_OFF_PLATE_SIZE, expandPlateQuantities, FRESH_PLATES_RACK,
-  isBareArtworkRevision, isDripOff,
+  hasDripOffCoating, isBareArtworkRevision, isDripOff, plateComponentSize,
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
   invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry,
@@ -556,17 +556,14 @@ r.put('/plates/requirements/:id', canBuy, async (req, res, next) => {
       // Each row answers to its OWN master: ink rows to the requirement-level
       // size, the DRIP OFF row to the size it carries — 560 x 670 by default,
       // even when the ink set runs 600 x 730.
-      const dripSizes = [...new Set(expanded.filter(isDripOff)
-        .map(row => plateSizeOf({ plate_size: row.plate_size }) || DRIP_OFF_PLATE_SIZE))];
+      const dripSizes = [...new Set(expanded.filter(isDripOff).map(row => plateComponentSize(row)))];
       const dripMasterBySize = new Map();
       for (const size of dripSizes) {
         const dripMaster = await oc('SELECT * FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [size]);
         if (!dripMaster) throw Object.assign(new Error(`No active Plate Master for ${size} — the DRIP OFF plate needs one`), { status: 400 });
         dripMasterBySize.set(size, dripMaster);
       }
-      const masterForRow = row => (isDripOff(row)
-        ? dripMasterBySize.get(plateSizeOf({ plate_size: row.plate_size }) || DRIP_OFF_PLATE_SIZE)
-        : master);
+      const masterForRow = row => (isDripOff(row) ? dripMasterBySize.get(plateComponentSize(row)) : master);
       const invalid = expanded.find(row => !masterForRow(row).allowed_components.includes(row.component_type));
       if (invalid) throw Object.assign(new Error(`${invalid.component_label} is not enabled for ${masterForRow(invalid).plate_size}`), { status: 409 });
       const stamped = expanded.map(row => ({ ...row, plate_master_id: masterForRow(row).id }));
@@ -1554,8 +1551,15 @@ function plateEntryMatch(row, wanted = '') {
       party_artwork_code: row.party_artwork_code,
       output_number: output,
     }),
+    // Why the DRIP OFF line arrives pre-filled: the carton's own coating. Sent
+    // so the form can SAY it rather than silently showing a fifth plate the
+    // operator did not ask for.
+    drip_off: hasDripOffCoating(row),
+    coating: row.coating || null,
     // The size this product's plates actually use beats the rule, because it is
     // a fact about this carton rather than an inference from its colours.
+    // NOTE this is the INK size — the DRIP OFF mask is filed at its own
+    // (plateComponentSize), whatever is chosen here.
     plate_size: row.last_plate_size || defaultPlateSize(row, []),
     plate_size_from: row.last_plate_size ? 'previous plates' : 'colour build',
     components: suggestedPlateQuantities(row),
@@ -1637,15 +1641,34 @@ r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
       const master = await oc('SELECT id,plate_size FROM plate_masters WHERE id=$1 AND active=1',
         [Number(req.body.plate_master_id) || 0]);
       if (!master) throw Object.assign(new Error('Choose the plate size'), { status: 400 });
+      // ONE size is asked for the whole entry, which is right for an ink set and
+      // wrong for a DRIP OFF mask standing beside it — the mask is 560 x 670
+      // while its inks run 600 x 730. Resolved PER PLATE through the shared
+      // rule, because a mask filed at the ink size is invisible to the
+      // requirement that comes looking for it at coating start
+      // (bestPlateCandidate filters on plate_master_id), and manual entry is
+      // how ~99% of this rack is filled.
+      const masterBySize = new Map([[plateSizeOf({ plate_size: master.plate_size }), master]]);
+      const masterForPlate = async plate => {
+        const size = plateComponentSize(plate, master.plate_size);
+        if (masterBySize.has(size)) return masterBySize.get(size);
+        const found = await oc('SELECT id,plate_size FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [size]);
+        if (!found) {
+          throw Object.assign(new Error(`No active Plate Master for ${size} — the ${plate.component_label} plate needs one`), { status: 400 });
+        }
+        masterBySize.set(size, found);
+        return found;
+      };
       const created = [];
       for (const plate of entry.plates) {
+        const plateMaster = await masterForPlate(plate);
         const assetNumber = await nextNumber('CI-PL-A-', 'plate_assets', 'asset_number', oc);
         const [asset] = await qc(`INSERT INTO plate_assets
           (asset_number,plate_master_id,product_id,output_number,artwork_reference,artwork_version,
            component_type,component_label,pantone_code,source_grn_id,vendor_id,purchase_rate,
            use_count,rack_location,status,condition,verified_by,verified_at,remarks)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,NULL,0,$10,$11,'available',$12,$13,now(),$14) RETURNING *`,
-        [assetNumber, master.id, product.id, entry.output_number, product.party_artwork_code || null,
+        [assetNumber, plateMaster.id, product.id, entry.output_number, product.party_artwork_code || null,
          entry.artwork_version, plate.component_type, plate.component_label, plate.pantone_code,
          entry.use_count, entry.rack_location, entry.condition, req.user.name, entry.remarks]);
         // 'received' is the honest action and an existing one — the plate arrived

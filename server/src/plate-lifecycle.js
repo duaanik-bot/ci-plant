@@ -1,6 +1,5 @@
 import {
   artworkVersionOf,
-  DRIP_OFF_PLATE_SIZE,
   hasDripOffCoating,
   isBareArtworkRevision,
   isDripOff,
@@ -10,6 +9,7 @@ import {
   plateArtworkKey,
   plateArtworkMatchSql,
   plateComponentKey,
+  plateComponentSize,
   plateComponentsFromSpec,
   plateComponentStatus,
   plateReadinessSummary,
@@ -178,7 +178,7 @@ export async function createPlateComponents(qc, oc, request, options = {}) {
   const masterOf = async component => {
     if (component.plate_master_id) return { id: component.plate_master_id };
     if (!isDripOff(component)) return master;
-    const size = plateSizeOf({ plate_size: component.plate_size }) || DRIP_OFF_PLATE_SIZE;
+    const size = plateComponentSize(component);
     if (!dripMasters.has(size)) dripMasters.set(size, await plateMasterForSize(oc, size));
     return dripMasters.get(size);
   };
