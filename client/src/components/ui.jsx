@@ -1500,6 +1500,11 @@ export function DataTable({
                   </div>
                 )}
                 <div
+                  // The anchor a deep link scrolls to. Both renderers carry it:
+                  // a notification opened on a tablet lands in THIS tree, and
+                  // wiring only the table below would leave the plant's tablets
+                  // pointed at a row they still have to go find.
+                  data-row-id={getRowId(r)}
                   className={`rounded-2xl border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_1px_2px_rgba(29,29,31,.04)] ${gKey ? 'border-violet-200 bg-violet-50/50' : checked ? 'border-[#0A84FF]/30 bg-indigo-50/60' : `border-white/70 bg-white/70 ${cardClass}`} ${rowClass?.(r) || ''}`}
                   onClick={onRowClick ? e => {
                     if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
@@ -1743,6 +1748,7 @@ export function DataTable({
                   </tr>
                 )}
               <tr
+                data-row-id={rowId}
                 onClick={onRowClick ? e => {
                   // Bubbling guard — clicks on interactive cells must not fire row navigation.
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;

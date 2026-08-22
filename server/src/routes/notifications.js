@@ -212,6 +212,38 @@ r.get('/approvals/by-line', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ONE management-approval request, by id — what the Planning review card reads
+// when a notification names a request. Neither list above can answer this:
+// /approvals/pending holds only what is STILL pending, and /approvals/by-line
+// only the LATEST ask per line, so a decided or superseded request — exactly
+// what a "CI-MA-0004 approved" bell carries — is invisible to both.
+//
+// Readable by any signed-in user on purpose. The planner following their own
+// decision bell is not management, and refusing them the row would leave that
+// notification opening an empty page. Deciding stays gated below.
+r.get('/approvals/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    // Postgres would answer a non-numeric id with 22P02 — a 500 at the plant
+    // for what is only a bad link.
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Approval id must be a number' });
+    const a = await one(`
+      SELECT a.*, ol.qty AS line_qty, ol.status AS line_status, ol.product_id,
+             p.name AS product_name, p.code AS product_code,
+             c.name AS customer_name, o.po_number, o.po_date
+      FROM approval_requests a
+      JOIN order_lines ol ON ol.id = a.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN products p ON p.id = ol.product_id
+      WHERE a.id=$1`, [id]);
+    if (!a) return res.status(404).json({ error: 'Request not found' });
+    // Whether the READER may decide it, answered by the server rather than by a
+    // JWT that carries only id/name/role — the client cannot work this out.
+    res.json({ ...a, can_decide: canDecideManagement(await meFlags(req)) });
+  } catch (e) { next(e); }
+});
+
 // ── Ask management (from Planning — form footer or row menu) ────────────────
 r.post('/approvals', requireRole('planner'), async (req, res, next) => {
   try {
@@ -244,7 +276,7 @@ r.post('/approvals', requireRole('planner'), async (req, res, next) => {
         kind: 'mgt_request',
         title: `Management approval asked — ${line.product_name}`,
         body: `${ar_number} · PO ${line.po_number || '—'} · ${line.customer_name} · qty ${line.qty}\n${req.user.name}: ${note}`,
-        link: '/planning',
+        link: `/planning?ar=${row.id}`,
         refTable: 'approval_requests', refId: row.id,
       }, qc);
       return row.id;
@@ -276,7 +308,7 @@ const decide = action => async (req, res, next) => {
         kind: 'mgt_decision',
         title: `${a.ar_number} ${status} by ${req.user.name}`,
         body: `${a.note}${req.body?.note ? `\n${req.user.name}: ${req.body.note}` : ''}`,
-        link: '/planning',
+        link: `/planning?ar=${a.id}`,
         refTable: 'approval_requests', refId: a.id,
       }, qc);
     });

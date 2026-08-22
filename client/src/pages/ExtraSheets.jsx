@@ -1,7 +1,8 @@
 // Extra Sheet Control — the plant's controlled refill loop when a running job
 // needs more sheets. Approval re-fires a linked Cutting counter, then Cutting's
 // final handoff consumes stock and refills the target stage.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
@@ -23,6 +24,11 @@ const threadSummary = (entity, ids) => {
   }
   return Promise.all(calls).then(parts => Object.assign({}, ...parts));
 };
+
+// Which tab holds a request. An extra-sheet notification names a REQUEST, and
+// the request can be in any of the three — so a deep link that did not switch
+// tabs would open "Open" and honestly show nothing for a rejected one.
+const tabOfStatus = status => (OPEN_STATUSES.includes(status) ? 'open' : status === 'issued' ? 'issued' : 'closed');
 
 const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
 // Approve/reject is the PLANT HEAD's decision alone — the xs_approver grant
@@ -155,6 +161,11 @@ export default function ExtraSheets() {
   // second client-side derivation of any of them is a second place to be wrong.
   const [picker, setPicker] = useState(null);         // {options, planned_cuts, ...} | 'loading'
   const [pickQ, setPickQ] = useState('');
+  // /extra-sheets?xs=7 — the request a notification named. The bell used to
+  // link at the page, which opened the request book at whatever sorted first.
+  const [params] = useSearchParams();
+  const focusXs = Number(params.get('xs')) || null;
+  const focusedOnce = useRef(null);
 
   const load = () => Promise.all([
     api.get('/extra-sheets').then(rs => {
@@ -193,6 +204,22 @@ export default function ExtraSheets() {
   // card can name rows this tab does not hold — "Rejected" from the Open tab
   // selects nothing. The notice says so plainly rather than looking broken.
   const filtered = kpi.apply(searched, XS_KPI_ROWS);
+
+  // Bring the named request into view: the right tab, no filter left hiding it,
+  // and the row itself scrolled to and ringed. Runs once per target — the
+  // planner's own filtering after they have arrived is theirs to keep.
+  useEffect(() => {
+    if (!focusXs || !rows.length || focusedOnce.current === focusXs) return;
+    const r = rows.find(x => Number(x.id) === focusXs);
+    if (!r) return;
+    focusedOnce.current = focusXs;
+    filters.reset();
+    setTab(tabOfStatus(r.status));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector(`[data-row-id="${CSS.escape(String(focusXs))}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+  }, [focusXs, rows]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = async (fn, msg) => { await fn(); toast.success(msg); load(); };
 
@@ -355,7 +382,8 @@ export default function ExtraSheets() {
                 const cpp = Math.max(1, r.effective_cuts || r.planned_cuts || r.children_per_parent || 1);
                 const short = r.status === 'pending' && r.board_free < r.qty;
                 return (
-                  <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
+                  <tr key={r.id} data-row-id={r.id}
+                    className={`ci-table-row ${threadRowClass(r)} ${Number(r.id) === focusXs ? '!bg-amber-50 ring-2 ring-inset ring-amber-400' : ''}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
                     <td className={`${td} font-bold text-slate-900`}>{r.xs_number}
                       <div className="text-[11px] font-normal text-slate-400">{fmt.dt(r.requested_at)} · {r.requested_by || '—'}</div>

@@ -15,6 +15,7 @@ import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { notificationLink } from '../lib/notificationLink.js';
 import { useToast } from './ui.jsx';
 import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -163,7 +164,11 @@ function NotificationBell() {
       window.dispatchEvent(new CustomEvent('ci-chat-open', { detail: { conversationId: n.ref_id } }));
       return;
     }
-    if (n.link) nav(n.link);
+    // The row's own (ref_table, ref_id) beats the stored link when the stored
+    // link is only a page name — which is what every approval notification
+    // already in the plant carries. See lib/notificationLink.js.
+    const to = notificationLink(n);
+    if (to) nav(to);
   };
   const markAllRead = () => api.post('/notifications/read', { all: true }).then(loadPersonal).catch(() => {});
   const decideMgt = async (a, action) => {
@@ -227,19 +232,20 @@ function NotificationBell() {
                   <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{approvalsCount}</span>
                 </div>
                 {pend.xs.map(x => (
-                  <button key={`xs-${x.id}`} onClick={() => { nav('/extra-sheets'); setOpen(false); }}
+                  <button key={`xs-${x.id}`} onClick={() => { nav(`/extra-sheets?xs=${x.id}`); setOpen(false); }}
                     className="block w-full rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-amber-50 [&+&]:mt-1.5">
                     <span className="font-bold text-slate-900">{x.xs_number}</span> — {fmt.num(x.qty)} parent sheets for {x.jc_number} at {fmt.stage(x.stage)}
                     <span className="mt-0.5 block text-[11px] text-slate-500">{x.reason} · {x.requested_by} · {fmt.dt(x.requested_at)}</span>
-                    <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">Tap to review &amp; approve on Extra Sheets</span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">Tap to open this request on Extra Sheets</span>
                   </button>
                 ))}
                 {pend.mgt.map(a => (
                   <div key={`mgt-${a.id}`} className="rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2 text-xs text-slate-700 [&+&]:mt-1.5 mt-1.5 first:mt-0">
-                    <button onClick={() => { nav('/planning'); setOpen(false); }} className="block w-full text-left">
+                    <button onClick={() => { nav(`/planning?ar=${a.id}`); setOpen(false); }} className="block w-full text-left">
                       <span className="font-bold text-slate-900">{a.ar_number}</span> — {a.product_name}
                       <span className="mt-0.5 block text-[11px] text-slate-500">PO {a.po_number || '—'} · {a.customer_name} · qty {fmt.num(a.line_qty)}</span>
                       <span className="mt-0.5 block text-[11px] italic text-slate-600">“{a.note}” — {a.requested_by}</span>
+                      <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">Tap to open this job in Planning</span>
                     </button>
                     <div className="mt-1.5 flex gap-1.5">
                       <button disabled={deciding === a.id} onClick={() => decideMgt(a, 'approve')}
