@@ -134,6 +134,17 @@ function NotificationBell() {
   // stays out of the way rather than flashing a state it has not confirmed.
   const [push, setPush] = useState(null);   // { enabled, key, support, on } | null
   const [pushBusy, setPushBusy] = useState(false);
+  // The nudge is aimed at APPROVERS, because theirs is the silence that holds a
+  // job still: an extra-sheet request or a management ask sits unanswered until
+  // they happen to open the bell. Dismissing it is remembered on the device — a
+  // prompt that came back every session would be nagging, not helping.
+  const [nudgeOff, setNudgeOff] = useState(() => {
+    try { return localStorage.getItem('ci_push_nudge_dismissed') === '1'; } catch { return false; }
+  });
+  const dismissNudge = () => {
+    setNudgeOff(true);
+    try { localStorage.setItem('ci_push_nudge_dismissed', '1'); } catch { /* private mode; the nudge simply returns next session */ }
+  };
 
   // What this device can do, and whether it is already doing it. Asked once on
   // mount: the answer only changes when the reader acts, and every one of those
@@ -278,32 +289,59 @@ function NotificationBell() {
                 The bell below only speaks to somebody already looking at it.
                 This row is how the reader makes the plant reachable when they
                 are not — and, on a device that cannot, what to do about it. */}
-            {push && push.enabled && (
-              <div className="border-b border-slate-100 bg-white/40 p-3">
-                <div className="flex items-start gap-2">
-                  <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${push.on ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                    {push.on ? <BellRing size={13} /> : <BellOff size={13} />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      {push.on ? 'This device buzzes' : 'Notifications on this device'}
-                    </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                      {push.on
-                        ? 'Approvals and messages reach this device even with the app closed.'
-                        : push.support.message}
-                    </p>
+            {push && push.enabled && (() => {
+              // An approver is whoever the SERVER says may decide something —
+              // /approvals/pending computes both grants from the users table,
+              // because the JWT carries only id/name/role and cannot answer it.
+              const approver = pend.can_xs || pend.can_mgt;
+              const nudging = approver && !push.on && !nudgeOff && push.support.can;
+              return (
+                <div className={`border-b p-3 ${nudging ? 'border-[#0A84FF]/20 bg-[#E1EFFF]/60' : 'border-slate-100 bg-white/40'}`}>
+                  <div className="flex items-start gap-2">
+                    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+                      push.on ? 'bg-emerald-50 text-emerald-700' : nudging ? 'bg-[#007AFF] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {push.on ? <BellRing size={13} /> : <BellOff size={13} />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[11px] font-semibold uppercase tracking-wide ${nudging ? 'text-[#0064D2]' : 'text-slate-500'}`}>
+                        {push.on ? 'This device buzzes'
+                          : nudging ? 'Approvals wait on you — put them on your phone'
+                          : 'Notifications on this device'}
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                        {push.on
+                          ? 'Approvals and messages reach this device even with the app closed.'
+                          : nudging
+                            ? 'A request nobody sees is a job standing still. Turn this on and this device buzzes the moment one is raised — even with the app closed.'
+                            : push.support.message}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {push.support.can && (
+                        <button type="button" disabled={pushBusy} onClick={togglePush}
+                          className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-50 ${
+                            push.on ? 'text-slate-500 hover:bg-slate-100' : 'bg-[#007AFF] text-white hover:bg-[#0064D2]'}`}>
+                          {pushBusy ? '…' : push.on ? 'Turn off' : 'Turn on'}
+                        </button>
+                      )}
+                      {nudging && (
+                        <button type="button" onClick={dismissNudge} title="Not now — the toggle stays here"
+                          className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/70 hover:text-slate-600">
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {push.support.can && (
-                    <button type="button" disabled={pushBusy} onClick={togglePush}
-                      className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-50 ${
-                        push.on ? 'text-slate-500 hover:bg-slate-100' : 'bg-[#007AFF] text-white hover:bg-[#0064D2]'}`}>
-                      {pushBusy ? '…' : push.on ? 'Turn off' : 'Turn on'}
-                    </button>
+                  {/* An iPhone cannot be talked into this by a prompt, so the
+                      nudge tells the approver the ONE thing that will fix it. */}
+                  {approver && !push.on && !push.support.can && (
+                    <p className="mt-1.5 rounded-lg bg-white/70 px-2 py-1.5 text-[11px] font-semibold leading-snug text-slate-600">
+                      {push.support.message}
+                    </p>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Approval desk — LIVE pending requests waiting on this login, not
                 stored notifications, so it can never show a stale ask. */}

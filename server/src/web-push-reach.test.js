@@ -171,3 +171,29 @@ test('the worker is re-registered on every boot, and the panel can turn a device
   // still on the server's list is one nobody can silence.
   assert.ok(layout.indexOf("api.post('/push/unsubscribe'") < layout.indexOf('sub.unsubscribe()'));
 });
+
+// ── The nudge: aimed at the people whose silence holds a job still ────────
+test('the nudge is aimed at approvers, and asked for once', () => {
+  // Both grants come from the SERVER (/approvals/pending computes them off the
+  // users table); the JWT carries only id/name/role and cannot answer this.
+  assert.match(layout, /const approver = pend\.can_xs \|\| pend\.can_mgt/);
+  assert.match(layout, /const nudging = approver && !push\.on && !nudgeOff && push\.support\.can/);
+  // Dismissal is remembered on the device — a prompt returning every session is
+  // nagging, not helping.
+  assert.match(layout, /localStorage\.setItem\('ci_push_nudge_dismissed', '1'\)/);
+  assert.match(layout, /localStorage\.getItem\('ci_push_nudge_dismissed'\) === '1'/);
+});
+
+test('an approver on an iPhone is told the fix, not nudged at a toggle that cannot work', () => {
+  // push.support.can is false there, so `nudging` is false and no button shows;
+  // this branch is what puts the Add-to-Home-Screen sentence in front of them.
+  assert.match(layout, /approver && !push\.on && !push\.support\.can/);
+});
+
+test('the bell count keeps its meaning — the nudge never inflates it', () => {
+  // The number the plant already reads is unread pings PLUS approvals waiting.
+  // A device that has not been switched on is neither.
+  assert.match(layout, /const attention = inbox\.unread \+ approvalsCount/);
+  assert.doesNotMatch(layout, /attention = [^;]*nudg/);
+  assert.doesNotMatch(layout, /count=\{countOf\(attention[^)]*nudg/);
+});
