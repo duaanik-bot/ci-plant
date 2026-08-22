@@ -751,6 +751,30 @@ div.ci-row-alarm-soft {
   }
 }
 
+/* The job-card traveler inside a PHONE-width modal (the station queue's
+   read-only viewer). The sheet is an A4 layout; squeezed into ~340px its
+   two-column header crushed the JC number to one syllable per line and the
+   seven-column cutting plan clipped past the modal's edge — columns simply
+   vanished. 560 clears every tablet dialog, and the print pages render
+   outside any cimodal container, so paper cannot be touched by these rules.
+   Tables PAN inside .jc-xscroll at their printed column set instead of
+   reflowing: a squeezed auto table drives every column to min-content and
+   reads as broken, and pinning the width inside a scroller is the same
+   round-12 lesson the tablet tables learned. Selectors carry .ci-modal-body
+   so they outrank the sheet's own utility classes (same specificity would
+   fall to source order against the utilities layer). */
+@container cimodal (max-width: 560px) {
+  .ci-modal-body .jc-sheet { padding: 1rem; }
+  .ci-modal-body .jc-head { flex-direction: column; gap: 0.75rem; }
+  .ci-modal-body .jc-head-right { text-align: left; }
+  .ci-modal-body .jc-caphead { flex-wrap: wrap; row-gap: 0.125rem; }
+  .ci-modal-body .jc-spec { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1rem; }
+  .ci-modal-body .jc-spec > .jc-cap { grid-column: 1 / -1; }
+  .ci-modal-body .jc-sign { column-gap: 0.75rem; }
+  .ci-modal-body .jc-xscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ci-modal-body .jc-xscroll > table { min-width: 560px; }
+}
+
 @media print {
   .no-print { display: none !important; }
   body { background: white; }
