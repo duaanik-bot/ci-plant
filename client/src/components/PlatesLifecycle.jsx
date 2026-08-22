@@ -962,7 +962,14 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
   return <Modal open onClose={onClose} title="Add plates to the warehouse" wide
     footer={<>
       <Button variant="secondary" onClick={onClose}>Cancel</Button>
-      <Button variant="success" disabled={!form || !form.plate_master_id || !total || busy} onClick={submit}>
+      {/* The artwork box has always been labelled required and nothing ever enforced
+          it, on this side or the server's. A blank one resolves to 'Unversioned',
+          which is the one value no Plate PR can ever match — so the plates land on
+          the rack and the requirement for the very same carton still reads "0 to
+          find". Disabled here so the refusal is visible before the click, not
+          returned as a toast after it. */}
+      <Button variant="success" disabled={!form || !form.plate_master_id || !total
+        || !String(form.artwork_version || '').trim() || busy} onClick={submit}>
         <PackagePlus size={14} /> {busy ? 'Adding…' : `Add ${total} plate${total === 1 ? '' : 's'}`}
       </Button>
     </>}>
@@ -1666,7 +1673,7 @@ export default function PlatesLifecycle() {
       released = true;
       // One click, so the reason is written rather than typed. It still has to say
       // something true — the endpoint stamps it into the plate's remarks and its
-      // movement note, and `undefined` would be stamped there literally.
+      // movement note, and this door offers no field for anyone to fill in later.
       const out = await api.post('/plates/assets/retire', {
         asset_ids: assetIds,
         reason: `Retired from ${row.request_number || 'Plate PR'} — not fit to reprint`,
@@ -1694,7 +1701,7 @@ export default function PlatesLifecycle() {
   // always used — this is a second door onto it, not a second implementation.
   //
   // The LABEL travels, not a key: /plates/assets/retire reads a free-text reason
-  // (String(req.body.reason).trim()) and writes it to the plate's remarks, where
+  // (optionalText(req.body.reason)) and writes it to the plate's remarks, where
   // "Worn out — dot loss" is the point. Set aside is the opposite — keyed, because
   // its reason resolves to a status.
   const retireFromPicker = async (assetId, reason) => {

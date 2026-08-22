@@ -6,9 +6,9 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
-import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle, Scissors, Undo2 } from 'lucide-react';
+import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle, Scissors, Undo2, Replace, Check, Lock } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
@@ -61,6 +61,83 @@ const XS_KPI_LABEL = {
   rejected: 'rejected or reversed requests',
 };
 
+// ── The warehouse pick ─────────────────────────────────────────────────────
+//
+// Every figure below comes off the SERVER's verdict for that board. The two the
+// dialog recomputes — yield and short — are recomputed with the server's own
+// formula against the live quantity box, so the approver watches them move as
+// he trims. The server re-judges the lot inside the approval transaction, so a
+// stale dialog cannot approve terms nobody saw; it only ever gets a 409 back.
+const yieldOf = (opt, qty, stage) =>
+  stage === 'cutting' ? Math.max(0, qty) : Math.max(0, qty) * Math.max(1, opt?.cuts || 1);
+const parentsFor = (printSheets, cuts) =>
+  (printSheets > 0 && cuts > 0) ? Math.ceil(printSheets / cuts) : null;
+
+const AXIS_CHIP = {
+  grade: { label: 'different grade', cls: 'bg-red-50 text-red-600 ring-red-100' },
+  gsm:   { label: 'GSM moves',       cls: 'bg-amber-50 text-amber-700 ring-amber-100' },
+  size:  { label: 'different size',  cls: 'bg-amber-50 text-amber-700 ring-amber-100' },
+  cuts:  { label: 'cuts change',     cls: 'bg-red-50 text-red-600 ring-red-100' },
+};
+const Chip = ({ cls, children }) => (
+  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ${cls}`}>{children}</span>
+);
+
+// One board on the shelf, as the plant head has to weigh it: what it is, how
+// much of it he may have, and what changes if he takes it.
+function BoardOption({ opt, qty, stage, selected, onPick }) {
+  const short = !opt.blocked && opt.free < qty;
+  const y = yieldOf(opt, qty, stage);
+  return (
+    <button type="button" disabled={opt.blocked} onClick={() => onPick(opt)}
+      className={`w-full rounded-xl border px-3 py-2.5 text-left transition
+        ${opt.blocked ? 'cursor-not-allowed border-slate-100 bg-slate-50 opacity-60'
+          : selected ? 'border-brand-400 bg-brand-50/70 ring-2 ring-brand-200'
+          : 'border-slate-200 bg-white hover:border-brand-300 hover:bg-brand-50/30'}`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {selected && <Check size={13} className="text-brand-600" />}
+        <span className="text-sm font-bold text-slate-800">{opt.name}</span>
+        {opt.planned && <Chip cls="bg-brand-50 text-brand-700 ring-brand-100">planned board</Chip>}
+        {!opt.planned && opt.kind === 'exact' && <Chip cls="bg-emerald-50 text-emerald-700 ring-emerald-100">identical spec</Chip>}
+        {opt.leftover && <Chip cls="bg-slate-100 text-slate-500 ring-slate-200">leftover</Chip>}
+        {!opt.blocked && opt.cautions.map(c => (
+          <Chip key={c.axis} cls={AXIS_CHIP[c.axis]?.cls || 'bg-slate-100 text-slate-500 ring-slate-200'}>
+            {AXIS_CHIP[c.axis]?.label || c.axis}
+          </Chip>
+        ))}
+      </div>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+        <span>{opt.size_label}{opt.gsm ? ` · ${opt.gsm} GSM` : ''}{opt.grade ? ` · ${opt.grade}` : ''}</span>
+        {!opt.blocked && (
+          <span className="tabular-nums">
+            <b className={short ? 'text-amber-700' : 'text-emerald-700'}>{fmt.num(opt.free)}</b> free
+            {opt.committed_elsewhere > 0 && <span className="text-slate-400"> · {fmt.num(opt.committed_elsewhere)} booked elsewhere</span>}
+            <span className="text-slate-400"> · {fmt.num(opt.shelf)} on the shelf</span>
+          </span>
+        )}
+        {!opt.blocked && (
+          <span className="tabular-nums font-semibold text-slate-600">
+            {opt.cuts} up → {fmt.num(y)} print sheets
+          </span>
+        )}
+      </div>
+      {opt.blocked && (
+        <div className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-slate-500">
+          <Lock size={11} className="mt-0.5 shrink-0" /> {opt.block_reason}
+        </div>
+      )}
+      {short && !opt.blocked && (
+        <div className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-amber-700">
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+          {opt.shelf < qty
+            ? `Only ${fmt.num(opt.shelf)} sheets physically on the shelf.`
+            : `${fmt.num(opt.free)} free — the other ${fmt.num(opt.committed_elsewhere)} are booked to other jobs.`}
+        </div>
+      )}
+    </button>
+  );
+}
+
 export default function ExtraSheets() {
   const toast = useToast();
   const [rows, setRows] = useState([]);
@@ -72,6 +149,12 @@ export default function ExtraSheets() {
   const [reversing, setReversing] = useState(null);   // request → reverse approval
   const [creating, setCreating] = useState(null);     // {job_stage_id, qty, reason, note}
   const [threads, setThreads] = useState({});
+  // The warehouse pick. `board` is the full server verdict for the board the
+  // approval will run on — never a bare id, because every number the dialog
+  // shows (cuts, yield, free, what it costs) comes off that verdict, and a
+  // second client-side derivation of any of them is a second place to be wrong.
+  const [picker, setPicker] = useState(null);         // {options, planned_cuts, ...} | 'loading'
+  const [pickQ, setPickQ] = useState('');
 
   const load = () => Promise.all([
     api.get('/extra-sheets').then(rs => {
@@ -113,10 +196,67 @@ export default function ExtraSheets() {
 
   const act = async (fn, msg) => { await fn(); toast.success(msg); load(); };
 
+  // Opening the approval loads the warehouse with it. The plant head should not
+  // have to guess whether an alternative exists before he goes looking for one —
+  // if the planned board is short, the answer is already on the screen.
+  const openApprove = async r => {
+    setApproving({ req: r, qty: String(r.qty), note: '', board: null, substitute_reason: '', allow_committed: false, browsing: false });
+    setPickQ('');
+    setPicker('loading');
+    try {
+      const p = await api.get(`/extra-sheets/${r.id}/board-options?qty=${r.qty}`);
+      setPicker(p);
+      const planned = p.options.find(o => o.planned);
+      // Pre-select the planned board so the dialog opens on exactly the
+      // approval it has always been, and open the shelf unprompted only when
+      // that board cannot cover the request.
+      setApproving(a => a && a.req.id === r.id
+        ? { ...a, board: planned || null, browsing: !!planned && planned.free < r.qty }
+        : a);
+    } catch { setPicker(null); }
+  };
+
+  const pickBoard = opt => setApproving(a => ({
+    ...a, board: opt, browsing: false,
+    // Moving back to the planned board drops the deviation paperwork with it —
+    // a stale reason left on the payload is a lie in the audit trail.
+    substitute_reason: opt.planned ? '' : a.substitute_reason,
+    allow_committed: opt.planned ? false : a.allow_committed,
+  }));
+
   const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
   const td = 'px-4 py-2.5';
 
   const selEligible = eligible.find(e => String(e.job_stage_id) === String(creating?.job_stage_id));
+
+  // ── The approval's live arithmetic ──────────────────────────────────────
+  // Derived from the SERVER's verdict for the selected board plus whatever is
+  // in the quantity box right now, so the yield moves as the plant head trims.
+  const approveQty = Math.max(0, Math.round(+approving?.qty || 0));
+  const substituting = !!(approving?.board && !approving.board.planned);
+  const boardShort = !!(approving?.board && approving.board.free < approveQty);
+  const approveYield = approving?.board ? yieldOf(approving.board, approveQty, approving.req.stage) : 0;
+  const cutsMoved = !!(picker && picker !== 'loading' && approving?.board
+    && approving.board.cuts !== picker.planned_cuts);
+  // "I was short 200 print sheets and this sheet only cuts 2 up" — how many
+  // parents of THIS board buy what the request was actually asking for.
+  const matchParents = cutsMoved && picker !== 'loading'
+    ? parentsFor(picker.planned_yield, approving.board.cuts) : null;
+
+  const visibleOptions = useMemo(() => {
+    const all = (picker && picker !== 'loading' ? picker.options : []) || [];
+    if (!pickQ.trim()) return all;
+    return all.filter(o => rowMatches(o, pickQ, `${o.size_label} ${o.grade || ''} ${o.gsm || ''}`));
+  }, [picker, pickQ]);
+
+  // The same three conditions the server's gate enforces, so the button is dark
+  // exactly when the POST would come back 409 — never the other way round. The
+  // server stays the judge; this only stops a pointless round trip.
+  const approveReady = !!approving?.board
+    && approveQty > 0 && approveQty <= approving.req.qty
+    && !approving.board.blocked
+    && (!substituting || approving.substitute_reason.trim().length > 0)
+    && (!boardShort || (substituting && approving.allow_committed && approving.board.shelf >= approveQty));
   // Hand-mounted: this page paints its own <table>, so the row tint is applied
   // to the <tr> the same way DataTable's rowClass would.
   const threadRowClass = unreadRowClass(threads, r => r.id);
@@ -206,11 +346,13 @@ export default function ExtraSheets() {
                 </td></tr>
               )}
               {filtered.map((r, i) => {
-                // PLANNED-BOARD RULE: extra sheets are issued against the
-                // PLANNED board, so the parent→child conversion uses that
-                // board's CHOSEN cuts when the job carries a mix
-                // (planned_cuts, from XS_VIEW), else the legacy cpp.
-                const cpp = Math.max(1, r.planned_cuts || r.children_per_parent || 1);
+                // The parent→child conversion follows the board that will
+                // actually be CUT. effective_cuts is that board's own count:
+                // the cuts stored at approval (geometry, for a substitute),
+                // else the planned board's chosen cuts under a mix, else the
+                // legacy cpp. Reading planned_cuts here printed the PLANNED
+                // board's 4-up against a request approved onto a 2-up sheet.
+                const cpp = Math.max(1, r.effective_cuts || r.planned_cuts || r.children_per_parent || 1);
                 const short = r.status === 'pending' && r.board_free < r.qty;
                 return (
                   <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
@@ -230,6 +372,12 @@ export default function ExtraSheets() {
                     </td>
                     <td className={`${td} text-xs`}>
                       <div className="text-slate-600">{r.board_name}</div>
+                      {r.board_substituted && (
+                        <div className="text-[11px] font-semibold text-amber-700" title={`Planned board: ${r.planned_board_name}`}>
+                          <Replace size={11} className="mr-0.5 inline" />
+                          substituted for {r.planned_board_name}
+                        </div>
+                      )}
                       <div className={`tabular-nums ${short ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
                         {short && <AlertTriangle size={11} className="mr-0.5 inline" />}
                         {fmt.num(r.board_free)} beyond booked jobs
@@ -255,7 +403,7 @@ export default function ExtraSheets() {
                     <td className={`${td} text-right`}>
                       <div className="flex justify-end gap-1.5">
                         {r.status === 'pending' && canDecide() && (
-                          <Button size="sm" onClick={() => setApproving({ req: r, qty: String(r.qty), note: '' })}>
+                          <Button size="sm" onClick={() => openApprove(r)}>
                             <ShieldCheck size={13} /> Approve
                           </Button>
                         )}
@@ -350,19 +498,28 @@ export default function ExtraSheets() {
         )}
       </Modal>
 
-      {/* Approve — the plant head's decision, quantity can be trimmed */}
-      <Modal open={!!approving} onClose={() => setApproving(null)}
+      {/* Approve — the plant head's decision: how many, and OFF WHICH BOARD */}
+      <Modal open={!!approving} onClose={() => { setApproving(null); setPicker(null); }} wide
         title={approving ? `Approve ${approving.req.xs_number} — ${approving.req.jc_number}` : ''}
         footer={<>
-          <Button variant="secondary" onClick={() => setApproving(null)}>Cancel</Button>
-          <Button disabled={!(+approving?.qty > 0) || +approving?.qty > approving?.req.qty} onClick={() =>
+          <Button variant="secondary" onClick={() => { setApproving(null); setPicker(null); }}>Cancel</Button>
+          <Button disabled={!approveReady} onClick={() =>
             act(async () => {
               await api.post(`/extra-sheets/${approving.req.id}/approve`, {
-                qty: +approving.qty, note: approving.note || undefined,
+                qty: +approving.qty,
+                note: approving.note || undefined,
+                // Only ever sent when the plant head actually moved off the
+                // planned board — an unchanged approval posts the payload it
+                // always did, and takes the path it always took.
+                board_material_id: substituting ? approving.board.id : undefined,
+                substitute_reason: substituting ? approving.substitute_reason : undefined,
+                allow_committed: substituting && boardShort ? true : undefined,
               });
-              setApproving(null);
-            }, `${approving.req.xs_number} approved — sent to Cutting`)}>
-            <ShieldCheck size={13} /> Approve & Send to Cutting
+              setApproving(null); setPicker(null);
+            }, substituting
+              ? `${approving.req.xs_number} approved on ${approving.board.name} — sent to Cutting`
+              : `${approving.req.xs_number} approved — sent to Cutting`)}>
+            <ShieldCheck size={13} /> Approve &amp; Send to Cutting
           </Button>
         </>}>
         {approving && (
@@ -373,10 +530,12 @@ export default function ExtraSheets() {
               reason: <b>{approving.req.reason}</b>{approving.req.note ? ` (${approving.req.note})` : ''}
               </span>
               <div className="mt-1 text-slate-500">
-                Board {approving.req.board_name} · {fmt.num(approving.req.board_free)} sheets beyond booked jobs (this one's own base included) of {fmt.num(approving.req.board_available)} in stock ·
-                job already issued {fmt.num(approving.req.sheets_issued)} parent sheets
+                Job already issued {fmt.num(approving.req.sheets_issued)} parent sheets
+                {picker?.product?.child_l ? ` · print sheet ${picker.product.child_l}×${picker.product.child_w}″` : ''}
+                {picker?.product?.parent_l ? ` · parent ${picker.product.parent_l}×${picker.product.parent_w}″` : ''}
               </div>
             </div>
+
             <section className="ci-form-panel">
               <div className="ci-form-grid">
                 <Field label="Approved quantity (parent sheets)" required hint={`Requested: ${fmt.num(approving.req.qty)} — you may trim, not raise`}>
@@ -387,6 +546,124 @@ export default function ExtraSheets() {
                   <Input value={approving.note} placeholder="Optional" onChange={e => setApproving({ ...approving, note: e.target.value })} />
                 </Field>
               </div>
+            </section>
+
+            {/* ── The board this will actually come off ───────────────────── */}
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title">
+                <span>Board</span>
+                <span>{picker === 'loading' ? 'reading the warehouse…'
+                  : `${(picker?.options || []).filter(o => !o.blocked).length} boards on the shelf`}</span>
+              </div>
+
+              {picker === 'loading' && <p className="py-3 text-center text-xs text-slate-400">Reading the warehouse…</p>}
+
+              {picker && picker !== 'loading' && approving.board && (
+                <>
+                  <div className={`rounded-xl border px-3 py-2.5 ${substituting
+                    ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-bold text-slate-800">{approving.board.name}</span>
+                          {substituting
+                            ? <Chip cls="bg-amber-100 text-amber-800 ring-amber-200">substituted</Chip>
+                            : <Chip cls="bg-brand-50 text-brand-700 ring-brand-100">planned board</Chip>}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">
+                          {approving.board.size_label}{approving.board.gsm ? ` · ${approving.board.gsm} GSM` : ''}
+                          {approving.board.grade ? ` · ${approving.board.grade}` : ''} ·{' '}
+                          <b className={boardShort ? 'text-amber-700' : 'text-emerald-700'}>{fmt.num(approving.board.free)}</b> free
+                          {approving.board.committed_elsewhere > 0 && ` · ${fmt.num(approving.board.committed_elsewhere)} booked elsewhere`}
+                          {` · ${fmt.num(approving.board.shelf)} on the shelf`}
+                          {substituting && <> · planned was <b>{picker.options.find(o => o.planned)?.name || approving.req.planned_board_name}</b></>}
+                        </div>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={() => setApproving({ ...approving, browsing: !approving.browsing })}>
+                        <Warehouse size={13} /> {approving.browsing ? 'Close warehouse' : 'Pick from warehouse'}
+                      </Button>
+                    </div>
+
+                    {/* The number the press actually cares about. */}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200/70 pt-2 text-xs">
+                      <span className="tabular-nums text-slate-600">
+                        <b>{fmt.num(+approving.qty || 0)}</b> parent sheets × <b>{approving.board.cuts}</b> up ={' '}
+                        <b className="text-slate-900">{fmt.num(approveYield)}</b>{' '}
+                        {approving.req.stage === 'cutting' ? 'parent sheets to Cutting' : 'print sheets at the press'}
+                      </span>
+                      {cutsMoved && (
+                        <span className="rounded-lg bg-red-50 px-2 py-0.5 font-semibold text-red-600">
+                          the planned board cuts {picker.planned_cuts} up — {fmt.num(picker.planned_yield)} sheets was what {fmt.num(picker.needed)} parents used to buy
+                        </span>
+                      )}
+                      {cutsMoved && matchParents && (
+                        <button type="button" className="rounded-lg bg-brand-50 px-2 py-0.5 font-semibold text-brand-700 hover:bg-brand-100"
+                          onClick={() => setApproving({ ...approving, qty: String(Math.min(approving.req.qty, matchParents)) })}>
+                          {matchParents > approving.req.qty
+                            ? `${fmt.num(matchParents)} parents would be needed to match — above the ${fmt.num(approving.req.qty)} requested`
+                            : `use ${fmt.num(matchParents)} parents to match the ${fmt.num(picker.planned_yield)} sheets requested`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* What changes on the floor if he takes it. */}
+                  {substituting && approving.board.cautions.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {approving.board.cautions.map(c => (
+                        <li key={c.axis} className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">
+                          <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {c.text}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {substituting && (
+                    <div className="mt-3 space-y-2">
+                      <Field label="Why not the planned board?" required
+                        hint="Goes on the job card, the Cutting slip and the audit trail — the board a job ran on is the first thing anyone asks later">
+                        <Input value={approving.substitute_reason} placeholder="e.g. planned board frozen for CI-JC-0161, press waiting"
+                          onChange={e => setApproving({ ...approving, substitute_reason: e.target.value })} />
+                      </Field>
+                      {boardShort && approving.board.shelf >= (+approving.qty || 0) && (
+                        <div className="rounded-xl bg-red-50 px-3 py-2">
+                          <Checkbox label={`Take ${fmt.num(+approving.qty || 0)} sheets that are booked to other jobs`}
+                            checked={!!approving.allow_committed}
+                            onChange={e => setApproving({ ...approving, allow_committed: e.target.checked })} />
+                          <p className="mt-1 text-[11px] font-semibold text-red-700">
+                            Only {fmt.num(approving.board.free)} of the {fmt.num(approving.board.shelf)} sheets on this pile are free.
+                            The rest are promised to other jobs, and those jobs will go short by what you take.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {boardShort && !substituting && approving.board.shelf >= (+approving.qty || 0) && (
+                    <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                      The planned board has only {fmt.num(approving.board.free)} free of {fmt.num(approving.board.shelf)} on the shelf.
+                      Pick another board from the warehouse, or trim the quantity.
+                    </p>
+                  )}
+
+                  {/* The shelf. */}
+                  {approving.browsing && (
+                    <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                      <SearchInput className="w-full" value={pickQ} onChange={setPickQ}
+                        placeholder="Board, grade, GSM, size…" />
+                      <div className="max-h-[42vh] space-y-1.5 overflow-y-auto pr-1">
+                        {visibleOptions.length === 0 && (
+                          <p className="py-6 text-center text-xs text-slate-400">No board on the shelf matches that.</p>
+                        )}
+                        {visibleOptions.map(o => (
+                          <BoardOption key={o.id} opt={o} qty={+approving.qty || 0} stage={approving.req.stage}
+                            selected={Number(o.id) === Number(approving.board?.id)} onPick={pickBoard} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </section>
           </div>
         )}

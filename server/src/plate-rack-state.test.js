@@ -417,8 +417,8 @@ test('retire is reachable from the picker, but never beside the reversible reaso
 test('the picker retires through the existing endpoint, with a reason', () => {
   const page = read('client/src/components/PlatesLifecycle.jsx');
   assert.match(page, /plates\/assets\/retire/);
-  // Retire's route reads a free-text reason (String(req.body.reason).trim()),
-  // not a key like set aside — so the LABEL travels here, deliberately.
+  // Retire's route reads a free-text reason (optionalText(req.body.reason)), not
+  // a key like set aside — so the LABEL travels here, deliberately.
   assert.match(page, /const retireFromPicker/);
   assert.match(page, /onRetire=\{retireFromPicker\}/);
 });
