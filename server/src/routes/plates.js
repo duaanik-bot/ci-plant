@@ -5,7 +5,8 @@ import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
   APPROVABLE_COMPONENT_STATUSES, artworkVersionOf, canUnapprovePlateRequest,
-  defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, isBareArtworkRevision,
+  defaultPlateSize, DRIP_OFF_PLATE_SIZE, expandPlateQuantities, FRESH_PLATES_RACK,
+  isBareArtworkRevision, isDripOff,
   plateArtworkIsRevisionSql, plateArtworkKey, plateArtworkKeySql, plateArtworkMatchSql,
   plateComponentKey, plateComponentsFromSpec,
   invertMovement, issuedPlateSummary, latestTimestamp, manualPlateEntry,
@@ -320,6 +321,7 @@ async function requirementRows(id = null) {
       p.cmyk_colours AS master_cmyk_colours,p.pantone_colours AS master_pantone_colours,
       p.pantone_codes AS master_pantone_codes,p.print_process AS master_print_process,
       p.metallic_colours AS master_metallic_colours,p.metallic_details AS master_metallic_details,
+      p.coating AS master_coating,
       c.name AS customer_name,o.po_number AS sales_po_number,o.delivery_date
     FROM tooling_requests tr
     JOIN job_cards jc ON jc.id=tr.job_card_id
@@ -367,6 +369,9 @@ async function requirementRows(id = null) {
       print_process: row.master_print_process,
       metallic_colours: row.master_metallic_colours,
       metallic_details: row.master_metallic_details,
+      // Fetch Master Colours must bring the DRIP OFF mask with it — a
+      // drip-off carton's plate set is incomplete without one.
+      coating: row.master_coating,
     });
     const isGang = row.specification?.is_gang === true || !!row.gang_run_id;
     const gangMembers = Array.isArray(row.specification?.gang_members) ? row.specification.gang_members : [];
@@ -548,8 +553,23 @@ r.put('/plates/requirements/:id', canBuy, async (req, res, next) => {
       }
       const master = await oc('SELECT * FROM plate_masters WHERE id=$1 AND active=1', [plateMasterId]);
       if (!master) throw Object.assign(new Error('Choose an active Plate Master size'), { status: 400 });
-      const invalid = expanded.find(row => !master.allowed_components.includes(row.component_type));
-      if (invalid) throw Object.assign(new Error(`${invalid.component_label} is not enabled for ${master.plate_size}`), { status: 409 });
+      // Each row answers to its OWN master: ink rows to the requirement-level
+      // size, the DRIP OFF row to the size it carries — 560 x 670 by default,
+      // even when the ink set runs 600 x 730.
+      const dripSizes = [...new Set(expanded.filter(isDripOff)
+        .map(row => plateSizeOf({ plate_size: row.plate_size }) || DRIP_OFF_PLATE_SIZE))];
+      const dripMasterBySize = new Map();
+      for (const size of dripSizes) {
+        const dripMaster = await oc('SELECT * FROM plate_masters WHERE lower(plate_size)=lower($1) AND active=1', [size]);
+        if (!dripMaster) throw Object.assign(new Error(`No active Plate Master for ${size} — the DRIP OFF plate needs one`), { status: 400 });
+        dripMasterBySize.set(size, dripMaster);
+      }
+      const masterForRow = row => (isDripOff(row)
+        ? dripMasterBySize.get(plateSizeOf({ plate_size: row.plate_size }) || DRIP_OFF_PLATE_SIZE)
+        : master);
+      const invalid = expanded.find(row => !masterForRow(row).allowed_components.includes(row.component_type));
+      if (invalid) throw Object.assign(new Error(`${invalid.component_label} is not enabled for ${masterForRow(invalid).plate_size}`), { status: 409 });
+      const stamped = expanded.map(row => ({ ...row, plate_master_id: masterForRow(row).id }));
 
       const current = await qc(`SELECT * FROM plate_request_components
         WHERE tooling_request_id=$1 ORDER BY sequence_no FOR UPDATE`, [request.id]);
@@ -559,10 +579,12 @@ r.put('/plates/requirements/:id', canBuy, async (req, res, next) => {
         throw Object.assign(new Error('This Plate PR has downstream purchasing or floor activity. Reverse it one stage at a time before editing.'), { status: 409 });
       }
       const before = plateBreakdownText(current) || 'No plates';
-      const currentKeys = current.map(plateComponentKey).sort();
-      const nextKeys = expanded.map(plateComponentKey).sort();
-      const sameStructure = current.length === expanded.length
-        && current.every(row => Number(row.plate_master_id) === master.id)
+      // The size is part of a row's identity now — a DRIP OFF moved from
+      // 560 x 670 to 600 x 730 is a different physical plate, so it rebuilds.
+      const structureKey = row => `${plateComponentKey(row)}|${row.plate_master_id || ''}`;
+      const currentKeys = current.map(structureKey).sort();
+      const nextKeys = stamped.map(structureKey).sort();
+      const sameStructure = current.length === stamped.length
         && currentKeys.every((key, index) => key === nextKeys[index]);
       if (!sameStructure) {
         await releaseDraftPlateAssets(qc, request, current, req.user.name, `Released while editing ${request.request_number}`);
@@ -577,7 +599,7 @@ r.put('/plates/requirements/:id', canBuy, async (req, res, next) => {
       [expanded.length, master.inventory_item_id, req.body.vendor_id || null,
        String(req.body.notes || '').trim() || null, master.plate_size, req.user.name, request.id]);
       const created = sameStructure ? current : await createPlateComponents(qc, oc, saved, {
-        components: expanded, plateMasterId: master.id,
+        components: stamped, plateMasterId: master.id,
       });
       const after = plateBreakdownText(created);
       await syncPlateRequest(qc, oc, request.id, req.user.name);
@@ -958,20 +980,38 @@ r.post('/plates/requirements/:id/approve', canBuy, async (req, res, next) => {
       if (components.length !== componentIds.length) throw Object.assign(new Error('One or more plate components no longer exist'), { status: 409 });
       const blocked = components.find(component => !APPROVABLE_COMPONENT_STATUSES.includes(component.status));
       if (blocked) throw Object.assign(new Error(`${blocked.component_label} cannot be approved from ${blocked.status}`), { status: 409 });
+      // A DRIP OFF line keeps the size it was raised at (560 x 670 by default)
+      // — one Approve gesture must not quietly re-size the coating mask to the
+      // ink set's master. Its own master is read back for the allowed check.
+      const dripMasterIds = [...new Set(components
+        .filter(component => isDripOff(component) && component.plate_master_id)
+        .map(component => Number(component.plate_master_id)))];
+      const dripMasters = dripMasterIds.length
+        ? await qc('SELECT * FROM plate_masters WHERE id=ANY($1::int[])', [dripMasterIds])
+        : [];
+      const dripMasterById = new Map(dripMasters.map(row => [Number(row.id), row]));
+      const effectiveMaster = component => (isDripOff(component)
+        && dripMasterById.get(Number(component.plate_master_id))) || master;
       for (const component of components) {
-        if (!master.allowed_components.includes(component.component_type)) {
-          throw Object.assign(new Error(`${component.component_label} is not enabled for ${master.plate_size}`), { status: 409 });
+        if (!effectiveMaster(component).allowed_components.includes(component.component_type)) {
+          throw Object.assign(new Error(`${component.component_label} is not enabled for ${effectiveMaster(component).plate_size}`), { status: 409 });
         }
       }
-      await qc(`UPDATE plate_request_components SET approval_from_status=status,status='approved',plate_master_id=$1,
+      await qc(`UPDATE plate_request_components SET approval_from_status=status,status='approved',
+        plate_master_id=CASE WHEN component_type='dripoff' AND plate_master_id IS NOT NULL
+          THEN plate_master_id ELSE $1 END,
         approved_by=$2,approved_at=now(),updated_at=now() WHERE id=ANY($3::int[])`,
       [master.id, req.user.name, componentIds]);
       await qc(`UPDATE tooling_requests SET inventory_item_id=$1,approval_status='approved',approved_by=$2,
         approved_at=now(),source='procurement',status='procurement',updated_at=now() WHERE id=$3`,
       [master.inventory_item_id, req.user.name, request.id]);
       const breakdown = plateBreakdownText(components);
+      const dripKept = components.find(component => isDripOff(component) && component.plate_master_id
+        && Number(component.plate_master_id) !== Number(master.id));
       await addRequestEvent(qc, request.id, 'approve_components', request.approval_status, 'approved',
-        `${breakdown} · ${master.plate_size} · ${components.length} total`, req.user.name, 'procurement');
+        `${breakdown} · ${master.plate_size}${dripKept
+          ? ` (DRIP OFF stays ${dripMasterById.get(Number(dripKept.plate_master_id))?.plate_size || DRIP_OFF_PLATE_SIZE})`
+          : ''} · ${components.length} total`, req.user.name, 'procurement');
       await audit('tooling_requirement', request.id, 'approve_components', breakdown, qc, req.user.name);
       return { request_id: request.id, approved: components.length, plate_size: master.plate_size };
     });
@@ -1419,7 +1459,7 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
       if (grn.status === 'reversed') throw Object.assign(new Error('This Plate GRN is already reversed'), { status: 409 });
       const assets = await qc('SELECT * FROM plate_assets WHERE source_grn_id=$1 ORDER BY id FOR UPDATE', [grn.id]);
       const used = assets.find(asset => Number(asset.use_count) > 0
-        || ['issued_to_printing','returned_pending_verification'].includes(asset.status));
+        || ['issued_to_printing','issued_to_coating','returned_pending_verification'].includes(asset.status));
       if (used) {
         throw Object.assign(new Error(`${used.asset_number} has entered production and prevents GRN reversal`), { status: 409 });
       }
@@ -1488,7 +1528,7 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
 // and hide it from the others.
 const PLATE_ENTRY_COLUMNS = `p.id AS product_id,p.code AS product_code,p.name AS product_name,
   p.party_item_code,p.party_artwork_code,p.colour_type,p.colors,p.print_process,
-  p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,
+  p.cmyk_colours,p.pantone_colours,p.pantone_codes,p.metallic_colours,p.metallic_details,p.coating,
   p.output_number AS master_output_number,
   c.id AS customer_id,c.name AS customer_name,
   (SELECT pm.plate_size FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
@@ -1670,7 +1710,8 @@ r.get('/plates/warehouse', async (_req, res, next) => {
         FROM plate_asset_movements pam JOIN job_cards mjc ON mjc.id=pam.job_card_id
         WHERE pam.plate_asset_id=pa.id) hist ON true
       ORDER BY CASE pa.status WHEN 'available' THEN 0 WHEN 'reserved' THEN 1
-        WHEN 'issued_to_printing' THEN 2 WHEN 'returned_pending_verification' THEN 3 ELSE 4 END,
+        WHEN 'issued_to_printing' THEN 2 WHEN 'issued_to_coating' THEN 2
+        WHEN 'returned_pending_verification' THEN 3 ELSE 4 END,
         pa.id DESC`);
     res.json(groupPlateSets(rows, row => [
       row.status,
@@ -1845,14 +1886,20 @@ r.post('/plates/assets/issue', canBuy, async (req, res, next) => {
       const picked = pickAvailableRackPlates({ rackAssets, assetIds: ids });
 
       for (const asset of picked) {
-        await qc(`UPDATE plate_assets SET status='issued_to_printing',current_job_card_id=$1,
-          last_used_at=now(),use_count=use_count+1,rack_location='Printing',updated_at=now() WHERE id=$2`,
-        [jobCard.id, asset.id]);
+        // A DRIP OFF plate is coating work wherever it is issued from: it goes
+        // out as issued_to_coating, and coating completion will consume it —
+        // it must never read as a plate the press is holding.
+        const dripPlate = isDripOff(asset);
+        const nextStatus = dripPlate ? 'issued_to_coating' : 'issued_to_printing';
+        const location = dripPlate ? 'Coating' : 'Printing';
+        await qc(`UPDATE plate_assets SET status=$1,current_job_card_id=$2,
+          last_used_at=now(),use_count=use_count+1,rack_location=$3,updated_at=now() WHERE id=$4`,
+        [nextStatus, jobCard.id, location, asset.id]);
         await qc(`INSERT INTO plate_asset_movements
           (plate_asset_id,job_card_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
-          VALUES ($1,$2,'issued',$3,'issued_to_printing',$4,'Printing',$5,$6,$7)`,
-        [asset.id, jobCard.id, asset.status, asset.rack_location, asset.condition,
-         `Issued from rack to ${jobCard.jc_number}${req.body.note ? ` — ${req.body.note}` : ''}`, req.user.name]);
+          VALUES ($1,$2,'issued',$3,$4,$5,$6,$7,$8,$9)`,
+        [asset.id, jobCard.id, asset.status, nextStatus, asset.rack_location, location, asset.condition,
+         `Issued from rack to ${jobCard.jc_number}${dripPlate ? ' for coating — DRIP OFF is single use' : ''}${req.body.note ? ` — ${req.body.note}` : ''}`, req.user.name]);
       }
 
       // The job has its plates in hand, so the readiness light must stop asking for

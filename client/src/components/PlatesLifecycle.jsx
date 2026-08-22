@@ -30,6 +30,7 @@ import {
   PLATE_TONE as TONE, plateStatusLabel as statusLabel, PlateStatusChip as StatusChip,
   PROCESS_PLATES, componentKey, groupedComponents, inkOrder, componentTickLabel,
   SHORT_COMPONENT, shortComponent, gangMemberNames,
+  DRIPOFF_TYPE, DRIPOFF_LABEL, DRIP_OFF_PLATE_SIZE, isDripOff,
   ComponentStrip, InkSummary, InkStateSummary, PlateProductIdentity, PlateLineIdentity,
 } from './plateIdentity.jsx';
 import {
@@ -50,7 +51,7 @@ const emptyPo = () => ({ vendor_id: '', expected_date: '', rate: '', gst_rate: '
 // column keeps: a screen that recomputed the verdict could print a different one.
 const COMPONENT_DOT = {
   cyan: 'bg-cyan-400', magenta: 'bg-fuchsia-400', yellow: 'bg-amber-400',
-  black: 'bg-slate-800', pantone: 'bg-violet-400',
+  black: 'bg-slate-800', pantone: 'bg-violet-400', [DRIPOFF_TYPE]: 'bg-teal-500',
 };
 // The cycles column's one-letter names are shortComponent(), now shared from
 // plateIdentity.jsx — the ink summary on the PO register needs the same letters,
@@ -83,12 +84,24 @@ function editableComponentRows(components = []) {
       component_type: 'pantone', component_label: row.component_label,
       pantone_code: row.pantone_code, qty: row.qty,
     })),
+    // The DRIP OFF mask is always ON OFFER, like the process colours — a drip
+    // coated product arrives with qty 1 already derived, anything else can add
+    // one by hand. It carries its OWN size: 560 x 670 by default, whatever the
+    // ink set uses.
+    {
+      component_type: DRIPOFF_TYPE, component_label: DRIPOFF_LABEL, pantone_code: null,
+      qty: byType.get(DRIPOFF_TYPE)?.qty || 0,
+      plate_size: components.find(row => isDripOff(row) && row.plate_size)?.plate_size || DRIP_OFF_PLATE_SIZE,
+    },
   ];
 }
 
 function requirementDraft(request) {
   return {
-    plate_master_id: request.components.find(row => row.plate_master_id)?.plate_master_id
+    // The header size belongs to the INK set. The DRIP OFF line is born with
+    // its own master (560 x 670), so on a fresh draft it is the only component
+    // carrying one — reading it here made every drip PR open at 560 x 670.
+    plate_master_id: request.components.find(row => row.plate_master_id && !isDripOff(row))?.plate_master_id
       || request.suggested_plate_master_id || '',
     vendor_id: request.vendor_id || request.suggested_vendor_id || '',
     notes: request.notes || '',
@@ -219,7 +232,11 @@ function ApproveModal({ request, draft, masters, onSaveDraft, onClose, onSaved }
     footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>{request.approval_status!=='approved'&&<Button variant="secondary" onClick={async()=>{ await onSaveDraft(); toast.success('Plate PR saved'); onClose(); }}><Save size={14}/> Save Changes</Button>}<Button variant="success" disabled={!draft.plate_master_id || !selectedKeys.length} onClick={save}>Approve</Button></>}>
     <div className="space-y-4">
       <PlateProductIdentity row={request} compact />
-      <div className="ci-summary-panel text-sm"><b>Plate size</b><span className="ml-2">{masters.find(row=>String(row.id)===String(draft.plate_master_id))?.plate_size || 'Not selected'}</span></div>
+      <div className="ci-summary-panel text-sm"><b>Plate size</b><span className="ml-2">{masters.find(row=>String(row.id)===String(draft.plate_master_id))?.plate_size || 'Not selected'}</span>
+        {candidates.some(isDripOff) && <span className="mt-1 block text-[11px] font-semibold text-slate-500">
+          The DRIP OFF plate keeps its own size — {(draft.components || []).find(isDripOff)?.plate_size || DRIP_OFF_PLATE_SIZE}. The size above approves the ink plates.
+        </span>}
+      </div>
       <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate Requirement</span><span>{candidates.filter(row=>selectedKeys.includes(componentKey(row))).reduce((sum,row)=>sum+Number(row.qty),0)} plates</span></div>
         <div className="space-y-2">{candidates.map(row=><Checkbox key={componentKey(row)} checked={selectedKeys.includes(componentKey(row))}
           label={`${row.component_label} x ${row.qty}`} onChange={()=>setSelectedKeys(current=>current.includes(componentKey(row))?current.filter(key=>key!==componentKey(row)):[...current,componentKey(row)])}/>)}</div>
@@ -230,6 +247,10 @@ function ApproveModal({ request, draft, masters, onSaveDraft, onClose, onSaved }
 
 function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
   const toast = useToast();
+  // One PR can arrive SPLIT — the ink plates at one size and the DRIP OFF mask
+  // at 560 x 670 are two PO lines (the server insists one line = one size), so
+  // terms are keyed per GROUP, not per request.
+  const keyOf = group => group.group_key || group.request.id;
   const vendorIds = [...new Set(groups.map(group => String(group.request.vendor_id || group.request.suggested_vendor_id || '')).filter(Boolean))];
   const initialVendorId = vendorIds.length === 1 ? vendorIds[0] : '';
   const rateFor = (group, vendorId) => resolvePlateRate(
@@ -239,22 +260,22 @@ function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
   }));
   const [lineTerms, setLineTerms] = useState(() => Object.fromEntries(groups.map(group => {
     const rate = rateFor(group, initialVendorId);
-    return [group.request.id, {
+    return [keyOf(group), {
       rate, autoRate: rate, gst_rate: String(group.components[0]?.plate_gst_rate ?? 18), discount_pct: '',
     }];
   })));
   const [busy, setBusy] = useState(false);
   const patch = value => setForm(current => ({ ...current, ...value }));
-  const patchLine = (requestId, value) => setLineTerms(current => ({
-    ...current, [requestId]: { ...current[requestId], ...value },
+  const patchLine = (groupKey, value) => setLineTerms(current => ({
+    ...current, [groupKey]: { ...current[groupKey], ...value },
   }));
   const changeVendor = vendorId => {
     patch({ vendor_id: vendorId });
     setLineTerms(current => Object.fromEntries(groups.map(group => {
-      const terms = current[group.request.id];
+      const terms = current[keyOf(group)];
       const nextAutoRate = rateFor(group, vendorId);
       const stillAutomatic = terms.rate === '' || String(terms.rate) === String(terms.autoRate);
-      return [group.request.id, {
+      return [keyOf(group), {
         ...terms, rate: stillAutomatic ? nextAutoRate : terms.rate, autoRate: nextAutoRate,
       }];
     })));
@@ -263,9 +284,9 @@ function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
   const commercialLines = groups.map(group => ({
     material_id: group.components[0]?.plate_master_id || group.request.id,
     qty: group.components.length,
-    rate: Number(lineTerms[group.request.id]?.rate) || 0,
-    gst_rate: Number(lineTerms[group.request.id]?.gst_rate) || 0,
-    discount_pct: Number(lineTerms[group.request.id]?.discount_pct) || 0,
+    rate: Number(lineTerms[keyOf(group)]?.rate) || 0,
+    gst_rate: Number(lineTerms[keyOf(group)]?.gst_rate) || 0,
+    discount_pct: Number(lineTerms[keyOf(group)]?.discount_pct) || 0,
   }));
   const totals = poTotals(commercialLines, {
     freight: form.freight, taxKind: form.tax_kind, round_off: form.round_off,
@@ -282,9 +303,9 @@ function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
         tax_kind: form.tax_kind, freight: totals.freight, round_off: totals.round_off,
         groups: groups.map(group => ({
           request_id: group.request.id, component_ids: group.components.map(row => row.id),
-          rate: lineTerms[group.request.id]?.rate === '' ? undefined : +lineTerms[group.request.id]?.rate,
-          gst_rate: +lineTerms[group.request.id]?.gst_rate || 0,
-          discount_pct: +lineTerms[group.request.id]?.discount_pct || 0,
+          rate: lineTerms[keyOf(group)]?.rate === '' ? undefined : +lineTerms[keyOf(group)]?.rate,
+          gst_rate: +lineTerms[keyOf(group)]?.gst_rate || 0,
+          discount_pct: +lineTerms[keyOf(group)]?.discount_pct || 0,
         })),
       });
       toast.success(`${po.po_number} created for ${groups.length} Plate PR${groups.length === 1 ? '' : 's'}`);
@@ -319,19 +340,19 @@ function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
             <th className="w-[110px] px-2 py-2 text-right">Line Total</th>
           </tr></thead>
           <tbody>{groups.map((group,index) => {
-            const terms = lineTerms[group.request.id];
+            const terms = lineTerms[keyOf(group)];
             const plateSize = group.components[0]?.plate_size || group.request.suggested_plate_size || '—';
             const commercial = commercialLines[index];
-            return <tr key={group.request.id} className="border-b border-slate-100 align-top last:border-0">
+            return <tr key={keyOf(group)} className="border-b border-slate-100 align-top last:border-0">
               <td className="px-2 py-3"><b className="block text-sm text-slate-800">{group.request.product_name}</b><span className="block text-[11px] text-slate-400">{group.request.request_number} · {group.request.jc_number}</span></td>
               <td className="px-2 py-3 font-mono text-xs font-semibold text-slate-700">{group.request.output_number || '—'}</td>
               <td className="px-2 py-3"><ComponentStrip components={group.components} compact /></td>
               <td className="px-2 py-3 font-mono text-xs font-semibold text-slate-700">{plateSize}</td>
               <td className="px-2 py-3 font-mono text-xs text-slate-600">{group.components[0]?.plate_hsn_code || '—'}</td>
               <td className="px-2 py-3 text-right text-sm font-bold tabular-nums text-slate-800">{group.components.length}</td>
-              <td className="px-2 py-2"><Input aria-label={`Rate per plate for ${group.request.request_number}`} type="number" min="0" value={terms.rate} onChange={event => patchLine(group.request.id, { rate: event.target.value })} /><span className="mt-1 block text-[10px] text-slate-400">{terms.autoRate === '' ? 'No master rate' : `Master Rs ${Number(terms.autoRate).toFixed(2)}`}</span></td>
-              <td className="px-2 py-2"><Input aria-label={`GST for ${group.request.request_number}`} type="number" min="0" value={terms.gst_rate} onChange={event => patchLine(group.request.id, { gst_rate: event.target.value })} /></td>
-              <td className="px-2 py-2"><Input aria-label={`Discount for ${group.request.request_number}`} type="number" min="0" value={terms.discount_pct} onChange={event => patchLine(group.request.id, { discount_pct: event.target.value })} /></td>
+              <td className="px-2 py-2"><Input aria-label={`Rate per plate for ${group.request.request_number}`} type="number" min="0" value={terms.rate} onChange={event => patchLine(keyOf(group), { rate: event.target.value })} /><span className="mt-1 block text-[10px] text-slate-400">{terms.autoRate === '' ? 'No master rate' : `Master Rs ${Number(terms.autoRate).toFixed(2)}`}</span></td>
+              <td className="px-2 py-2"><Input aria-label={`GST for ${group.request.request_number}`} type="number" min="0" value={terms.gst_rate} onChange={event => patchLine(keyOf(group), { gst_rate: event.target.value })} /></td>
+              <td className="px-2 py-2"><Input aria-label={`Discount for ${group.request.request_number}`} type="number" min="0" value={terms.discount_pct} onChange={event => patchLine(keyOf(group), { discount_pct: event.target.value })} /></td>
               <td className="px-2 py-3 text-right text-xs font-semibold tabular-nums text-slate-700">{fmt.inr(lineTaxable(commercial))}</td>
               <td className="px-2 py-3 text-right text-xs font-bold tabular-nums text-slate-900">{fmt.inr(lineAmount(commercial))}</td>
             </tr>;
@@ -809,6 +830,12 @@ function rackEntryRows(components = []) {
       component_type: 'pantone', component_label: row.component_label,
       pantone_code: row.pantone_code, qty: Number(row.qty) || 1,
     })),
+    // Offered on every entry, pre-filled to 1 when the product's coating is
+    // Drip Off (the suggestion arrives from the server's own derivation).
+    {
+      component_type: DRIPOFF_TYPE, component_label: DRIPOFF_LABEL, pantone_code: null,
+      qty: byType.get(DRIPOFF_TYPE)?.qty || 0,
+    },
   ];
 }
 
@@ -1113,6 +1140,7 @@ function AddPlatesModal({ masters, defaultRack, onClose, onSaved }) {
               <div>
                 <b className="text-sm">{row.component_label}</b>
                 {row.component_type === 'pantone' && <span className="block text-[11px] text-slate-400">Pantone identity kept on every physical plate</span>}
+                {isDripOff(row) && <span className="block text-[11px] text-slate-400">Drip-off coating plate — single use, usually {DRIP_OFF_PLATE_SIZE}</span>}
               </div>
               <QuantityControl row={row} onChange={qty => updateQty(componentKey(row), qty)} />
             </div>
@@ -1693,12 +1721,24 @@ export default function PlatesLifecycle() {
   const openPlatePo = async requests => {
     try {
       const fresh = await Promise.all(requests.map(request => api.get(`/plates/requirements/${request.id}`)));
-      const groups = fresh.map(request => ({
-        request, components: request.components.filter(component => component.status === 'approved'),
-      }));
-      if (!groups.length || groups.some(group => !group.components.length)) {
+      if (!fresh.length || fresh.some(request => !request.components.some(component => component.status === 'approved'))) {
         return toast.error('One or more selected Plate PRs no longer have approved plates');
       }
+      // One PO line is one plate SIZE (the server refuses mixed sizes on a
+      // grouped line), so a PR whose DRIP OFF mask sits at 560 x 670 beside a
+      // 600 x 730 ink set becomes two groups — two lines on the same PO.
+      const groups = fresh.flatMap(request => {
+        const approved = request.components.filter(component => component.status === 'approved');
+        const bySize = new Map();
+        for (const component of approved) {
+          const key = String(component.plate_master_id || '');
+          if (!bySize.has(key)) bySize.set(key, []);
+          bySize.get(key).push(component);
+        }
+        return [...bySize.entries()].map(([masterKey, components]) => ({
+          request, components, group_key: `${request.id}:${masterKey}`,
+        }));
+      });
       setPoModal({ groups });
     } catch (error) { toast.error(error.message || 'Could not fetch finalized Plate PR rows'); }
   };
@@ -1713,6 +1753,12 @@ export default function PlatesLifecycle() {
   const updateDraftQty = (key,qty) => setEditForm(current=>({
     ...current,
     components:current.components.map(row=>componentKey(row)===key?{...row,qty}:row),
+  }));
+  // Only the DRIP OFF row carries a size of its own — the server resolves the
+  // Plate Master from this string, defaulting 560 x 670 when none is sent.
+  const updateDraftSize = (key,plate_size) => setEditForm(current=>({
+    ...current,
+    components:current.components.map(row=>componentKey(row)===key?{...row,plate_size}:row),
   }));
   const addPantone = () => {
     const identity = newPantone.trim();
@@ -2545,7 +2591,18 @@ export default function PlatesLifecycle() {
             // Retire plate). At 150px they wrapped to two lines each, so a row of
             // four colours read as a wall of stacked words.
             return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(150px,1fr)_130px_minmax(230px,auto)_132px]">
-              <div><b className="text-sm">{row.component_label}</b>{row.component_type==='pantone'&&<span className="block text-[11px] text-slate-400">Pantone identity retained on every physical plate</span>}</div>
+              <div><b className="text-sm">{row.component_label}</b>{row.component_type==='pantone'&&<span className="block text-[11px] text-slate-400">Pantone identity retained on every physical plate</span>}
+                {isDripOff(row)&&<>
+                  <span className="block text-[11px] text-slate-400">Coating plate — issued at coating start, single use, never returns to the rack</span>
+                  {/* Its own size, apart from the ink set's: 560 x 670 by default
+                      even when the colours run 600 x 730. */}
+                  <Select value={row.plate_size||DRIP_OFF_PLATE_SIZE} disabled={!detailEditable}
+                    aria-label="DRIP OFF plate size" className="mt-1 h-8 w-40 text-xs"
+                    onChange={event=>updateDraftSize(componentKey(row),event.target.value)}>
+                    {masters.filter(m=>m.active).map(m=><option key={m.id} value={m.plate_size}>{m.plate_size}</option>)}
+                  </Select>
+                </>}
+              </div>
               <div>{lifecycle ? <StatusChip value={lifecycle.status}/> : <span className="text-xs text-slate-400">Not required</span>}</div>
               {/* One cell, three states: a line the rack can still fill offers Use, a
                   line already holding a rack plate offers Change and Undo, and a line

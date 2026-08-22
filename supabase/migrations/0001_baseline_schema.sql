@@ -617,6 +617,16 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip_date TEXT;
 -- short-close paths write — a coordination remark must not be overwritten by a
 -- machine.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS remarks TEXT;
+-- The planner's own short note on a line, typed at order entry and carried on
+-- the row for the whole journey: planning, job card, press, cutting, dispatch.
+-- Mostly a batch number, so it is capped at 20 characters and rendered as a
+-- badge beside the product everywhere ProductIdentity appears.
+--
+-- Deliberately NOT the remarks column above. That one is a SYSTEM field holding
+-- unbounded prose (the shortage wiring writes whole sentences into it), and a
+-- 20-character badge printed on every production screen cannot share a column
+-- with paragraphs.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS line_remark TEXT;
 -- EDD per PRODUCT, as an override of the order's own delivery date.
 --
 -- orders.delivery_date is one date for the whole PO, and 79% of the lines on
@@ -1660,6 +1670,16 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS inspected_at TIMESTAMPTZ;
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS box_number TEXT;
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'fg_excess';
 ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS dispatch_id INTEGER REFERENCES dispatches(id);
+-- Retiring a box takes it OUT OF CIRCULATION without destroying it: planning
+-- stops offering it against any line, but the cartons stay on the books, in the
+-- warehouse and in every report. Deliberately NOT a status value — status
+-- already means "where this lot is in its own lifecycle" (awaiting check,
+-- checked, written off, used up), and a retired box can be any of those. It is
+-- also reversible, which a status transition would not be.
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_reason TEXT;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_by TEXT;
+ALTER TABLE fg_lots ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ;
 -- Widen the source enum so a box can be created straight off the FG list.
 ALTER TABLE fg_lots DROP CONSTRAINT IF EXISTS fg_lots_source_check;
 ALTER TABLE fg_lots ADD CONSTRAINT fg_lots_source_check

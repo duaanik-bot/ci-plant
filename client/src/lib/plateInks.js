@@ -9,10 +9,49 @@ export const PROCESS_PLATES = [
   ['cyan', 'Cyan'], ['magenta', 'Magenta'], ['yellow', 'Yellow'], ['black', 'Black'],
 ];
 
+// ── The DRIP OFF plate ────────────────────────────────────────────────────
+// A drip-off coated carton needs one plate that is not an ink: the varnish
+// mask the coating line prints the drip-off pattern with. ONE spelling of its
+// name and type, shared by the server (plates.js imports from here, the same
+// direction plateRack.js already travels) and every screen — a coating plate
+// that reads as a Pantone is exactly the ambiguity the plant asked to end.
+//
+// Its own default size is 560 x 670 even when the ink set runs 600 x 730, it
+// is issued when COATING starts (never printing), and it never returns to the
+// rack — one run and it is consumed.
+export const DRIPOFF_TYPE = 'dripoff';
+export const DRIPOFF_LABEL = 'DRIP OFF';
+export const DRIP_OFF_PLATE_SIZE = '560 x 670';
+export const isDripOff = component => component?.component_type === DRIPOFF_TYPE;
+
+// The coating labels are free text off the product master ("Drip Off",
+// "DRIP-OFF UV", "Drip off + Spot UV") — match the word, not a spelling.
+export const hasDripOffCoating = spec => /drip/i.test(String(spec?.coating ?? ''));
+
+// The drip plate's state as the PAPERS say it — the printed traveler and the
+// Status Sheet share this one vocabulary. Two deliberate departures from the
+// component-status labels the Plates module itself uses:
+//   • 'scrapped' reads "Consumed" — scrap is the mask's NORMAL end (single
+//     use, no return), and "Scrapped" on a status report raises an alarm
+//     about a plate that simply did its one job;
+//   • the buying states collapse to what a planner acts on, not the
+//     procurement mechanics.
+export function dripPlateStateLabel(status) {
+  if (!status) return null;
+  if (status === 'scrapped') return 'Consumed';
+  if (status === 'issued') return 'Issued to coating';
+  if (['verified_existing', 'available', 'reserved'].includes(status)) return 'Ready on rack';
+  if (['approved', 'po_created', 'ordered', 'grn_received'].includes(status)) return 'On order';
+  if (status === 'verification_required') return 'Verify rack plate';
+  if (['pr_required', 'replacement_required', 'not_found'].includes(status)) return 'To buy';
+  return String(status).replace(/_/g, ' ');
+}
+
 // One letter in a dense column, because five words would wrap the row. Spelled
 // out rather than taken from the label's first letter: that gives Black a 'B'
-// under a column headed CMYK+P, and the press calls it K.
-export const SHORT_COMPONENT = { cyan: 'C', magenta: 'M', yellow: 'Y', black: 'K', pantone: 'P' };
+// under a column headed CMYK+P, and the press calls it K. DRIP OFF gets two
+// letters — a bare D beside CMYK letters reads as another ink.
+export const SHORT_COMPONENT = { cyan: 'C', magenta: 'M', yellow: 'Y', black: 'K', pantone: 'P', [DRIPOFF_TYPE]: 'DO' };
 export const shortComponent = component => SHORT_COMPONENT[component.component_type]
   || String(component.component_label || component.component_type || '?').charAt(0).toUpperCase();
 
@@ -42,14 +81,17 @@ export function groupedComponents(components = []) {
   }));
 }
 
-// CMYK in press order, then spot colours alphabetically. A vendor reading a PO
-// and a warehouse ticking a delivery both expect the process set first and in
-// the order the press lays it down — not in whatever order the rows were keyed.
+// CMYK in press order, then spot colours alphabetically, and the DRIP OFF mask
+// dead last — it is the coating line's plate, laid down after every ink. A
+// vendor reading a PO and a warehouse ticking a delivery both expect the
+// process set first and in the order the press lays it down — not in whatever
+// order the rows were keyed.
 const INK_RANK = new Map(PROCESS_PLATES.map(([type], index) => [type, index]));
+const inkRank = type => (INK_RANK.has(type) ? INK_RANK.get(type) : type === DRIPOFF_TYPE ? 500 : 99);
 export function inkOrder(rows = []) {
   return [...rows].sort((a, b) => {
-    const left = INK_RANK.has(a.component_type) ? INK_RANK.get(a.component_type) : 99;
-    const right = INK_RANK.has(b.component_type) ? INK_RANK.get(b.component_type) : 99;
+    const left = inkRank(a.component_type);
+    const right = inkRank(b.component_type);
     if (left !== right) return left - right;
     return String(a.component_label || '').localeCompare(String(b.component_label || ''));
   });
@@ -74,9 +116,14 @@ const sharedStatus = rows => {
 // letters (CMYK when all four are there) and a count of the spots. One place,
 // because a whole-set summary and a per-state one must not word it differently.
 function buildParts(groups) {
-  const process = groups.filter(row => row.component_type !== 'pantone');
+  // Process is the NAMED ink set, not "everything that is not a Pantone" — the
+  // DRIP OFF mask is neither an ink nor a spot, and folding it into the process
+  // letters would print builds like CMYKDO.
+  const process = groups.filter(row => PROCESS_PLATES.some(([type]) => type === row.component_type));
   const spots = groups.filter(row => row.component_type === 'pantone');
+  const drip = groups.filter(isDripOff);
   const spotQty = spots.reduce((sum, row) => sum + row.qty, 0);
+  const dripQty = drip.reduce((sum, row) => sum + row.qty, 0);
   const parts = [];
   if (process.length) {
     const full = PROCESS_PLATES.every(([type]) => process.some(row => row.component_type === type));
@@ -95,6 +142,16 @@ function buildParts(groups) {
       label: `${spotQty} Pantone`,
       title: spots.map(row => `${row.component_label}${row.qty > 1 ? ` x${row.qty}` : ''}`).join(' · '),
       rows: spots,
+    });
+  }
+  if (dripQty) {
+    parts.push({
+      key: 'dripoff',
+      // Named in full, always — the whole point of the plate is that nobody
+      // has to ask what it is.
+      label: dripQty > 1 ? `${DRIPOFF_LABEL} x${dripQty}` : DRIPOFF_LABEL,
+      title: 'Drip-off coating plate — issued at coating start, single use',
+      rows: drip,
     });
   }
   return parts;

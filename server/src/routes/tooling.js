@@ -197,6 +197,9 @@ function requestSpec(target) {
     metallic_colours: target.metallic_colours ?? null,
     metallic_details: target.metallic_details || null,
     plate_size: target.plate_size || null,
+    // The coating rides with the spec so a Drip Off carton's Plate PR derives
+    // its DRIP OFF mask (plateComponentsFromSpec reads it).
+    coating: target.coating || null,
     ups: target.ups ?? null,
     size: target.size || null,
     child_l: target.child_l ?? null,

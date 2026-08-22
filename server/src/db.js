@@ -2583,11 +2583,25 @@ ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
   // same additive migration as Supabase without duplicating a large schema
   // block in this already-long bootstrap file. The migration is role-safe for
   // embedded Postgres and does not require the Realtime schema to exist.
-  const toolingProcurementSql = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'supabase', 'migrations', '0035_tooling_procurement_warehouses.sql'),
-    'utf8',
-  );
-  await pool.query(toolingProcurementSql);
+  //
+  // Guarded on the chain's existence, like plate_rates below, because unlike
+  // the plate lifecycle files this one is NOT replay-safe over live data: it
+  // re-ADDs the ORIGINAL tooling_requests approval_status CHECK
+  // ('pending'…'closed'), while 20260808071000 both widened that list with
+  // 'draft'/'saved' and backfills rows to 'saved'. Replaying it on a database
+  // holding a draft or saved Plate PR fails the ADD's validation and the boot
+  // dies before the widening ever runs. A shipped migration is never edited to
+  // suit the bootstrap; it is simply applied once per database, as Supabase's
+  // own history does.
+  const [{ has_tooling_procurement: hasToolingProcurement }] = (await pool.query(
+    `SELECT to_regclass('public.tooling_purchase_orders') IS NOT NULL AS has_tooling_procurement`)).rows;
+  if (!hasToolingProcurement) {
+    const toolingProcurementSql = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'supabase', 'migrations', '0035_tooling_procurement_warehouses.sql'),
+      'utf8',
+    );
+    await pool.query(toolingProcurementSql);
+  }
 
   // The individual-plate lifecycle sits on top of that chain and landed as its
   // own migrations, which were never added here. A fresh database therefore came
@@ -2611,6 +2625,9 @@ ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
     '20260808054658_plate_asset_lifecycle.sql',
     '20260808061141_plate_asset_lifecycle_indexes.sql',
     '20260808071000_plate_workflow_reversibility.sql',
+    // The DRIP OFF component and issued_to_coating status — DROP-then-ADD
+    // constraint swaps and a guarded UPDATE, so replaying is a no-op.
+    '20260822090000_plate_dripoff_component.sql',
   ]) {
     await pool.query(migration(file));
   }

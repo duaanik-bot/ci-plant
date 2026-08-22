@@ -808,6 +808,10 @@ r.get('/status-sheet', async (_req, res, next) => {
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
              p.party_item_code, p.size,
+             -- The coating says whether this carton NEEDS a drip plate at all,
+             -- so a drip job with no Plate PR yet can read "required — not
+             -- raised" instead of a blank.
+             COALESCE(ol.spec_override->>'coating', p.coating) AS coating,
              ol.qty, ol.dispatched_qty, GREATEST(0, ol.qty - ol.dispatched_qty) AS pending_qty,
              ol.wip, ol.wip_date, ol.printed_override, ol.remarks,
              -- The line's OWN planning status, beside the commercial one below.
@@ -873,6 +877,24 @@ r.get('/status-sheet', async (_req, res, next) => {
         l.stages = byLine.get(l.line_id) || [];
         l.job_cards = [...(cardsByLine.get(l.line_id) || [])];
       }
+      // The line's DRIP OFF plate, resolved through the same card a line
+      // answers to (its own, or the gang parent's) — one batched query, like
+      // the stage chips above. Newest component per line wins: an edited PR
+      // rebuilds its components and the sheet must read the live row.
+      const dripRows = await q(`
+        SELECT DISTINCT ON (ol.id) ol.id AS line_id, prc.status, pm.plate_size
+        FROM order_lines ol
+        JOIN job_cards jc ON (jc.order_line_id = ol.id
+             OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+                 AND jc.order_line_id IS NULL))
+        JOIN tooling_requests tr ON tr.job_card_id = jc.id AND tr.family='plate'
+        JOIN plate_request_components prc ON prc.tooling_request_id = tr.id
+          AND prc.component_type = 'dripoff' AND prc.status <> 'cancelled'
+        LEFT JOIN plate_masters pm ON pm.id = prc.plate_master_id
+        WHERE ol.id = ANY($1::int[])
+        ORDER BY ol.id, prc.id DESC`, [ids]);
+      const dripByLine = new Map(dripRows.map(row => [row.line_id, { status: row.status, plate_size: row.plate_size }]));
+      for (const l of rows) l.dripoff_plate = dripByLine.get(l.line_id) || null;
     }
     res.json({ lines: rows });
   } catch (e) { next(e); }

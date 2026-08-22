@@ -36,6 +36,7 @@ import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
+import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../lib/plateInks.js';
 
 const STATUS_KPI_ROWS = {
   overdue: r => +r.overdue_days > 0,
@@ -657,6 +658,36 @@ export default function StatusSheet() {
   const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
   const perMember = (r, f, sep = ' · ') => (r._gang ? r._gang.map(f).join(sep) : f(r));
 
+  // The DRIP OFF plate a drip-coated line answers for. Structure carries the
+  // identity, colour the severity: a required mask with NO paperwork is the
+  // red — it is the one state somebody has to act on before coating can run.
+  // Non-drip cartons stay a dash, so the column reads as a drip register.
+  const dripPlateText = m => {
+    if (m.dripoff_plate) {
+      return `${m.dripoff_plate.plate_size || DRIP_OFF_PLATE_SIZE} · ${dripPlateStateLabel(m.dripoff_plate.status)}`;
+    }
+    return hasDripOffCoating(m) ? 'Required — not raised' : '—';
+  };
+  const DRIP_TONE = {
+    'Issued to coating': 'bg-violet-50 text-violet-700',
+    Consumed: 'bg-slate-100 text-slate-500',
+    'Ready on rack': 'bg-emerald-50 text-emerald-700',
+    'On order': 'bg-cyan-50 text-cyan-700',
+    'Verify rack plate': 'bg-amber-50 text-amber-700',
+    'To buy': 'bg-orange-50 text-orange-700',
+  };
+  const DripPlateCell = m => {
+    if (!m.dripoff_plate && !hasDripOffCoating(m)) return <span className="text-slate-300">—</span>;
+    const state = m.dripoff_plate ? dripPlateStateLabel(m.dripoff_plate.status) : null;
+    const tone = state ? (DRIP_TONE[state] || 'bg-slate-100 text-slate-600') : 'bg-red-50 text-red-700';
+    return (
+      <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-bold ${tone}`}
+        title={m.dripoff_plate ? `DRIP OFF plate · ${m.dripoff_plate.plate_size || DRIP_OFF_PLATE_SIZE}` : 'Drip-off coating — no DRIP OFF plate on a Plate PR yet'}>
+        {state || 'Plate not raised'}
+      </span>
+    );
+  };
+
   const columns = [
     { key: 'po_number', label: 'Order #', render: r => r._gang
       ? (<div>{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}<div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className={`text-[10px] font-bold uppercase tracking-wide ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>{r.run_kind === 'merge' ? `${r._gang.length} orders · one pile` : `${r._gang.length} cartons · one run`}</div></div>)
@@ -755,6 +786,15 @@ export default function StatusSheet() {
     { key: 'printed', label: 'Print Status', sortable: false,
       export: r => perMember(r, m => printState(m)[0]),
       render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
+    // The drip-off varnish mask, for every drip-coated carton: which size,
+    // where it stands (issued at coating start, consumed at completion — the
+    // plate module's lifecycle), red when the coating demands one and no Plate
+    // PR carries it yet. A chip renders as '' in the workbook, so the export
+    // spells the same fact out in words.
+    { key: 'dripoff_plate', colClass: 'ci-p3', label: 'Drip Plate', card: 'detail', sortable: false,
+      searchValue: r => perMember(r, dripPlateText),
+      export: r => perMember(r, dripPlateText),
+      render: r => r._gang ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'} render={DripPlateCell} /> : DripPlateCell(r) },
     { key: 'delivery_date', label: 'EDD',
       export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
       // Per LINE now, so a gang always shows one control per member — the

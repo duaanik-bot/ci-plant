@@ -16,8 +16,8 @@ import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { printingEligibility, codeMatch } from '../shade-flow.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import {
-  applyPlateDispositions, createPlateComponents, gangPlateSpecification,
-  issuePlateAssetsForJob, plateReadinessForPrinting, plateSpecification,
+  applyPlateDispositions, consumeDripOffPlatesForStage, createPlateComponents, gangPlateSpecification,
+  issueDripOffPlatesForJob, issuePlateAssetsForJob, plateReadinessForPrinting, plateSpecification,
 } from '../plate-lifecycle.js';
 import { plateComponentsFromSpec } from '../plates.js';
 // Which runs bank an offcut is ONE rule, and the cutting confirm must read the
@@ -267,6 +267,19 @@ async function attachTools(jc) {
   jc.tools = await q(`
     SELECT family, code, title, shade_ref, output_no, cylinder_no, emboss_type, colors, zone, condition, location, creation_date
     FROM tools WHERE product_id=$1 AND active=1 ORDER BY family, id`, [jc.product_id]);
+  // The DRIP OFF plate this JOB's plate paperwork carries, for the printed
+  // traveler: its size (560 x 670 by default), where it stands, and which
+  // physical plate holds the line. Newest component wins — an edited PR
+  // rebuilds its components, and the paper must read the live row.
+  jc.dripoff_plate = await one(`
+    SELECT prc.status, pm.plate_size, pa.asset_number, tr.request_number
+    FROM tooling_requests tr
+    JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
+      AND prc.component_type='dripoff' AND prc.status<>'cancelled'
+    LEFT JOIN plate_masters pm ON pm.id=prc.plate_master_id
+    LEFT JOIN plate_assets pa ON pa.id=prc.matched_asset_id
+    WHERE tr.job_card_id=$1 AND tr.family='plate'
+    ORDER BY prc.id DESC LIMIT 1`, [jc.id]);
   jc.shade_card = await one(`
     SELECT sc.id, sc.sc_number, sc.title, sc.status, sc.revision_no, sc.colour_system,
            sc.num_colours, sc.colour_details, sc.print_reference, sc.artwork_no, sc.artwork_rev,
@@ -1230,6 +1243,25 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
         }
         await issuePlateAssetsForJob(qc, oc, jc, machineId, req.user.name);
       }
+      if (st.stage === 'coating') {
+        // The DRIP OFF mask issues itself from the rack the moment coating
+        // starts — it has nothing to do with the printing stage. Same law as
+        // the press: plates inform, they never refuse a start, so an empty
+        // rack is audited and coating runs anyway.
+        const drip = await issueDripOffPlatesForJob(qc, oc, jc, machineId, req.user.name);
+        if (drip.issued.length) {
+          await audit('job_stage', st.id, 'dripoff_plates_issued',
+            `${jc.jc_number}: DRIP OFF plate ${drip.issued.map(row => row.asset_number).join(', ')} issued to coating${
+              drip.issued.some(row => row.auto_picked) ? ' (auto-picked from the rack)' : ''
+            }`, qc, req.user.name);
+        }
+        if (drip.missing.length) {
+          await audit('job_stage', st.id, 'dripoff_plate_short_at_start',
+            `${jc.jc_number}: coating started without its DRIP OFF plate — no matching plate on the rack (${
+              drip.missing.map(row => row.request_number).join(', ')
+            })`, qc, req.user.name);
+        }
+      }
       // Operator preference: explicit pick → the press operator already on the
       // stage (set by Print Planning) → the signed-in user.
       await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, machine_id=$3, line_clearance=$4, started_at=now() WHERE id=$5`,
@@ -1969,6 +2001,12 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
         // left unaccounted for — the run is finished either way, and a count is
         // worth more than a form.
         await applyPlateDispositions(qc, oc, st.id, req.body.plate_dispositions, req.user.name);
+      }
+      if (st.stage === 'coating') {
+        // The DRIP OFF mask is single use: coating completion consumes it.
+        // Nothing asks the operator — there is no return and no reuse, so
+        // there is no decision — and nothing refuses the completion.
+        await consumeDripOffPlatesForStage(qc, oc, st.id, req.user.name);
       }
 
       // Stations are independent: a stage may close against whatever the

@@ -26,12 +26,14 @@ import {
   PROCESS_PLATES, SHORT_COMPONENT, shortComponent, componentKey, groupedComponents,
   inkOrder, inkSummary, inkSummaryByStatus, componentTickLabel, gangMemberNames,
   plateLineRefs, plateLineSpec, plateLinePrintSpec,
+  DRIPOFF_TYPE, DRIPOFF_LABEL, DRIP_OFF_PLATE_SIZE, isDripOff, hasDripOffCoating,
 } from '../lib/plateInks.js';
 
 export {
   PROCESS_PLATES, SHORT_COMPONENT, shortComponent, componentKey, groupedComponents,
   inkOrder, inkSummary, inkSummaryByStatus, componentTickLabel, gangMemberNames,
   plateLineRefs, plateLineSpec, plateLinePrintSpec,
+  DRIPOFF_TYPE, DRIPOFF_LABEL, DRIP_OFF_PLATE_SIZE, isDripOff, hasDripOffCoating,
 };
 
 export const PLATE_TONE = {
@@ -47,6 +49,7 @@ export const PLATE_TONE = {
   available: 'bg-emerald-50 text-emerald-700',
   reserved: 'bg-emerald-50 text-emerald-700',
   issued: 'bg-violet-50 text-violet-700',
+  issued_to_coating: 'bg-violet-50 text-violet-700',
   returned_pending_verification: 'bg-amber-50 text-amber-700',
   damaged: 'bg-red-50 text-red-700',
   scrapped: 'bg-slate-200 text-slate-600',
@@ -68,6 +71,7 @@ export const plateStatusLabel = value => ({
   pr_required: 'PR required', replacement_required: 'Replacement required',
   po_created: 'PO raised', grn_received: 'GRN received',
   returned_pending_verification: 'Verify return', issued_to_printing: 'Issued to printing',
+  issued_to_coating: 'Issued to coating',
   reversed: 'Reversed', mixed: 'Mixed status',
 }[value] || fmt.title(value || 'pending'));
 

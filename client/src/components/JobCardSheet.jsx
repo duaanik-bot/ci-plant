@@ -25,6 +25,7 @@ import { boardUsed, pktText } from '../lib/boardUsed.js';
 import { packets } from '../lib/boardMath.js';
 import { colourDetailLines } from './PrintColour.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
+import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../lib/plateInks.js';
 
 // One group inside the single spec block: a faint full-width caption, then its
 // fields on the shared 4-column grid. Captions keep the merged block scannable
@@ -145,6 +146,19 @@ export default function JobCardSheet({ jc }) {
   // identity, not a separate fact — so it is deliberately absent here.
   const sheet = [
     ['Coating / Lamination', jc.coating && jc.coating !== 'none' ? fmt.title(jc.coating) : 'None'],
+    // The drip-off varnish mask, for the coating line reading this paper: its
+    // size (own default 560 x 670, whatever the ink set runs), where it stands,
+    // and the physical plate once one is matched. A drip carton with no plate
+    // paperwork yet still says the mask is REQUIRED — the paper walks the floor,
+    // and coating cannot run without it. Single use; it never returns to the rack.
+    ...(jc.dripoff_plate || hasDripOffCoating(jc) ? [[
+      'DRIP OFF Plate',
+      jc.dripoff_plate
+        ? [jc.dripoff_plate.plate_size || DRIP_OFF_PLATE_SIZE,
+          dripPlateStateLabel(jc.dripoff_plate.status),
+          jc.dripoff_plate.asset_number || null].filter(Boolean).join(' · ')
+        : `Required · ${DRIP_OFF_PLATE_SIZE} — not on a Plate PR yet`,
+    ]] : []),
     ['Print Sheet', jc.child_l ? `${jc.child_l}×${jc.child_w}"` : '—'],
     ['Ups / Print Sheet', jc.ups],
     ['Print Sheets / Parent', yieldTxt],

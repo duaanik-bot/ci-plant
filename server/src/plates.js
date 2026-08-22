@@ -1,5 +1,13 @@
 import { derivedCounts } from './print-colour.js';
 import { masterOutputSync, PLATE_SET_ASIDE_REASONS } from '../../client/src/lib/plateRack.js';
+// The DRIP OFF vocabulary has ONE home, beside the other ink naming rules —
+// same import direction plateRack.js already travels. Re-exported so server
+// modules keep importing plate words from plates.js.
+import {
+  DRIP_OFF_PLATE_SIZE, DRIPOFF_LABEL, DRIPOFF_TYPE, hasDripOffCoating, isDripOff,
+} from '../../client/src/lib/plateInks.js';
+
+export { DRIP_OFF_PLATE_SIZE, DRIPOFF_LABEL, DRIPOFF_TYPE, hasDripOffCoating, isDripOff };
 
 const PROCESS_COMPONENTS = [
   ['cyan', 'Cyan'],
@@ -180,6 +188,17 @@ export function plateComponentsFromSpec(spec = {}) {
       pantone_code: `Pantone ${number}`,
     });
   }
+  // The DRIP OFF mask rides AFTER the colour build and outside it: it is a
+  // coating plate, not an ink, so it must never absorb a slot the legacy total
+  // was keeping for an unnamed Pantone — which is why it is appended only once
+  // the backfill above has settled the colours.
+  if (hasDripOffCoating(spec)) {
+    components.push({
+      component_type: DRIPOFF_TYPE,
+      component_label: DRIPOFF_LABEL,
+      pantone_code: null,
+    });
+  }
   return components.map((component, index) => ({ ...component, sequence_no: index + 1 }));
 }
 
@@ -282,12 +301,13 @@ export function expandPlateQuantities(entries = [], { emptyMessage = 'A Plate Re
   const expanded = [];
   for (const entry of entries) {
     const componentType = clean(entry.component_type).toLowerCase();
-    if (!PROCESS_LABELS[componentType] && componentType !== 'pantone') {
+    if (!PROCESS_LABELS[componentType] && componentType !== 'pantone' && componentType !== DRIPOFF_TYPE) {
       throw Object.assign(new Error(`Unknown plate colour/type: ${entry.component_type || 'blank'}`), { status: 400 });
     }
+    const entryName = PROCESS_LABELS[componentType] || (componentType === DRIPOFF_TYPE ? DRIPOFF_LABEL : 'Pantone');
     const rawQty = Number(entry.qty);
     if (!Number.isInteger(rawQty) || rawQty < 0 || rawQty > 99) {
-      throw Object.assign(new Error(`${PROCESS_LABELS[componentType] || 'Pantone'} quantity must be a whole number from 0 to 99`), { status: 400 });
+      throw Object.assign(new Error(`${entryName} quantity must be a whole number from 0 to 99`), { status: 400 });
     }
     if (rawQty === 0) continue;
     const identity = componentType === 'pantone'
@@ -299,13 +319,19 @@ export function expandPlateQuantities(entries = [], { emptyMessage = 'A Plate Re
     const prefix = /^Metallic\s*-/i.test(clean(entry.component_label)) ? 'Metallic' : 'Pantone';
     const componentLabel = componentType === 'pantone'
       ? `${prefix} - ${identity}`
-      : PROCESS_LABELS[componentType];
+      : componentType === DRIPOFF_TYPE ? DRIPOFF_LABEL : PROCESS_LABELS[componentType];
     for (let index = 0; index < rawQty; index += 1) {
       expanded.push({
         component_type: componentType,
         component_label: componentLabel,
         pantone_code: componentType === 'pantone' ? identity : null,
         sequence_no: expanded.length + 1,
+        // Only the DRIP OFF row carries its own size — 560 x 670 unless the
+        // form said otherwise. Ink rows keep using the requirement-level
+        // Plate Master, exactly as before, so their shape does not change.
+        ...(componentType === DRIPOFF_TYPE
+          ? { plate_size: clean(entry.plate_size) || DRIP_OFF_PLATE_SIZE }
+          : {}),
       });
     }
   }
@@ -600,7 +626,13 @@ export function componentPlate(component = {}) {
 // brand-new stock the plant does not own.
 export function plateWearSummary(components = []) {
   const rows = (Array.isArray(components) ? components : [])
-    .filter(row => row && row.status !== 'cancelled');
+    // A consumed DRIP OFF leaves the wear picture the way a cancelled colour
+    // does: it is neither owed nor held. The mask is single use, so its scrap
+    // is the normal end of its life — leaving it in put a permanent
+    // "Replace DRIP OFF (Scrapped)" on every drip job the moment coating
+    // finished, an instruction to pull a plate that no longer exists.
+    .filter(row => row && row.status !== 'cancelled'
+      && !(isDripOff(row) && row.status === 'scrapped'));
   const held = rows.map(row => ({ row, plate: componentPlate(row) })).filter(entry => entry.plate);
   if (!held.length) return null;
   const detail = held.map(({ row, plate }) => ({
