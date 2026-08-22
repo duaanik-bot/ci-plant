@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, consumeDrawnHolds, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE, outputNumberSql, stageReceipt } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
+import { gateSubstitution, judge, rankOptions } from '../xs-board-options.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
 import {
@@ -190,8 +191,25 @@ const XS_VIEW = `
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS run_parent,
          grn.gang_number AS run_number, grn.kind AS run_kind,
          (SELECT COUNT(*)::int FROM order_lines rm WHERE rm.gang_run_id = jc.gang_run_id) AS run_members,
-         COALESCE(x.board_material_id, bm.id) AS board_material_id, bm.name AS board_name,
-         bm.gsm AS board_gsm, bm.sheet_l AS parent_l, bm.sheet_w AS parent_w, bm.sheets_per_packet,
+         -- THE EFFECTIVE BOARD. bm is what the job was PLANNED on; xbm is
+         -- what this request will actually eat, once the plant head has
+         -- approved it onto something else. board_material_id has always
+         -- coalesced — every descriptive column beside it did not, so a
+         -- substituted request handed Cutting a slip naming the board that was
+         -- NOT consumed, and the stock strip beside it counted the wrong pile.
+         -- The planned board stays on the row under its own name: "substituted
+         -- FROM" is the whole story, and half of it is not worth telling.
+         COALESCE(x.board_material_id, bm.id) AS board_material_id,
+         COALESCE(xbm.name, bm.name) AS board_name,
+         COALESCE(xbm.gsm, bm.gsm) AS board_gsm,
+         COALESCE(xbm.sheet_l, bm.sheet_l) AS parent_l,
+         COALESCE(xbm.sheet_w, bm.sheet_w) AS parent_w,
+         COALESCE(xbm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
+         COALESCE(xbm.grade, bm.grade) AS board_grade,
+         bm.id AS planned_board_id, bm.name AS planned_board_name,
+         bm.gsm AS planned_board_gsm, bm.grade AS planned_board_grade,
+         bm.sheet_l AS planned_parent_l, bm.sheet_w AS planned_parent_w,
+         (x.board_material_id IS NOT NULL AND x.board_material_id <> bm.id) AS board_substituted,
          COALESCE(sm.name, pm.name) AS printing_machine_name,
          COALESCE(x.cuts_per_parent, pcut.cuts, jc.children_per_parent, 1)::int AS effective_cuts,
          (SELECT COUNT(*)::int FROM extra_sheet_requests xr WHERE xr.job_card_id = x.job_card_id AND xr.id <= x.id) AS request_no,
@@ -234,6 +252,7 @@ const XS_VIEW = `
   LEFT JOIN machines pm ON pm.id = jc.machine_id
   LEFT JOIN machines sm ON sm.id = js.machine_id
   JOIN materials bm ON bm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
+  LEFT JOIN materials xbm ON xbm.id = x.board_material_id
   LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(COALESCE(xi.cutting_actual_qty, xi.qty)),0)::int AS qty,
            COALESCE(SUM(COALESCE(xi.issued_stage_qty,
@@ -243,17 +262,17 @@ const XS_VIEW = `
     WHERE xi.job_card_id = jc.id AND xi.status='issued') xsum ON true
   LEFT JOIN LATERAL (
     SELECT SUM(sb.qty) AS qty FROM stock_batches sb
-    WHERE sb.material_id = bm.id AND sb.status='available') av ON true
+    WHERE sb.material_id = COALESCE(x.board_material_id, bm.id) AND sb.status='available') av ON true
   -- Board already committed to jobs on this material — the SAME definition the
   -- warehouse strip reports. Extra sheets must come out of what is genuinely
   -- free, never out of board already promised: gating on gross lets one job
   -- quietly eat another's, and the shortage surfaces days later elsewhere.
   LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(d.q), 0) AS qty FROM (${COMMITTED_DEMAND_SQL}) d
-    WHERE d.material_id = bm.id) lk ON true
+    WHERE d.material_id = COALESCE(x.board_material_id, bm.id)) lk ON true
   LEFT JOIN LATERAL (
     SELECT SUM(ba.qty) AS qty FROM board_allocations ba
-    WHERE ba.material_id = bm.id AND ba.status = 'active' AND ba.source = 'stock'
+    WHERE ba.material_id = COALESCE(x.board_material_id, bm.id) AND ba.status = 'active' AND ba.source = 'stock'
       AND ba.order_line_id IS DISTINCT FROM jc.order_line_id
       AND (jc.gang_run_id IS NULL
            OR ba.order_line_id NOT IN (SELECT rol.id FROM order_lines rol
@@ -328,6 +347,93 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── The warehouse pick ─────────────────────────────────────────────────────
+//
+// One SQL, one shape, used by BOTH the picker and the approval. The dialog
+// cannot show a board on terms the transaction would not honour, because the
+// transaction re-runs the same judge() over the same row it rendered.
+//
+// `shelf` is what is physically there. `free` is what is genuinely unpromised —
+// shelf less COMMITTED_DEMAND_SQL, the identical definition the warehouse strip
+// and the existing approval gate already use, so no third spelling of "free"
+// enters the app. The gap between them is board booked to other jobs, and it is
+// reported rather than hidden: it is exactly the stock the plant head is asking
+// about when he says "it is frozen for another job but I only need fifty".
+const boardCandidatesSql = `
+  WITH shelf AS (
+    SELECT sb.material_id, SUM(sb.qty)::int AS qty
+    FROM stock_batches sb WHERE sb.status='available' GROUP BY 1
+  ), committed AS (
+    SELECT d.material_id, COALESCE(SUM(d.q), 0)::int AS qty
+    FROM (${COMMITTED_DEMAND_SQL}) d GROUP BY 1
+  )
+  SELECT m.id, m.name, m.code, m.category, m.active, m.leftover,
+         m.grade, m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet,
+         COALESCE(s.qty, 0) AS shelf,
+         GREATEST(COALESCE(s.qty, 0) - COALESCE(c.qty, 0), 0) AS free
+  FROM materials m
+  LEFT JOIN shelf s ON s.material_id = m.id
+  LEFT JOIN committed c ON c.material_id = m.id
+  -- The planned board is listed even when the shelf is bare: the approver has
+  -- to see WHY he is being offered alternatives before he sees them.
+  WHERE m.category = 'board' AND (COALESCE(s.qty, 0) > 0 OR m.id = $1::int)`;
+
+// Everything the substitution decision needs, resolved once.
+//
+// Deliberately NOT built on XS_VIEW. This runs inside the approval's own
+// transaction, and XS_VIEW carries COMMITTED_DEMAND_SQL twice in laterals — a
+// third and fourth execution of the plant's most expensive query, to fetch a
+// cut count plannedCutsForJob already answers in one indexed read. The
+// candidates query runs COMMITTED_DEMAND_SQL exactly once, grouped, for every
+// board at the same time.
+async function substitutionContext(oc, qc, xsId) {
+  const x = await oc(`
+    SELECT x.*, jc.jc_number, jc.product_id, jc.children_per_parent, jc.order_line_id, jc.gang_run_id
+    FROM extra_sheet_requests x JOIN job_cards jc ON jc.id = x.job_card_id
+    WHERE x.id=$1`, [xsId]);
+  if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
+  const eff = await effectiveBoardForJob(oc, x.job_card_id);
+  const plannedId = eff?.board_material_id;
+  if (!plannedId)
+    throw Object.assign(new Error('This job card has no board on it — set the board on the job before approving extra sheets'), { status: 409 });
+  const product = await oc(
+    'SELECT id, name, code, child_l, child_w, parent_l, parent_w, ups FROM products WHERE id=$1', [x.product_id]);
+  const rows = await qc(boardCandidatesSql, [plannedId]);
+  const planned = rows.find(m => Number(m.id) === Number(plannedId))
+    || await oc(`SELECT id, name, code, category, active, leftover, grade, gsm, sheet_l, sheet_w,
+                        sheets_per_packet, 0 AS shelf, 0 AS free FROM materials WHERE id=$1`, [plannedId]);
+  // The planned board's CHOSEN cuts under a mix, else the legacy cpp — the same
+  // precedence XS_VIEW's planned_cuts and the create dialog already read.
+  const plannedCuts = Math.max(1, await plannedCutsForJob(oc, x, plannedId));
+  return { x, product, planned, rows, plannedId, plannedCuts };
+}
+
+// The plant head opens the picker. Read-only; the same flag guards it as the
+// decision it feeds, because the free/committed position of every board in the
+// warehouse is not a thing an operator needs off a request row.
+r.get('/extra-sheets/:id/board-options', canApprove, async (req, res, next) => {
+  try {
+    const { x, product, planned, rows, plannedCuts } = await substitutionContext(one, q, req.params.id);
+    const needed = Math.max(0, Math.round(+req.query.qty || +x.qty || 0));
+    const options = rankOptions(
+      rows.map(m => judge(m, { planned, product, needed, plannedCuts, stage: x.stage })),
+      needed);
+    res.json({
+      xs_number: x.xs_number, jc_number: x.jc_number, stage: x.stage,
+      requested_qty: x.qty, needed,
+      planned_cuts: plannedCuts,
+      planned_yield: x.stage === 'cutting' ? needed : needed * plannedCuts,
+      product: {
+        name: product?.name, code: product?.code,
+        child_l: product?.child_l, child_w: product?.child_w,
+        parent_l: product?.parent_l, parent_w: product?.parent_w,
+      },
+      planned_board_id: Number(planned.id),
+      options,
+    });
+  } catch (e) { next(e); }
+});
+
 // Operator raises a request from the running stage.
 r.post('/extra-sheets', canRequest, async (req, res, next) => {
   try {
@@ -399,47 +505,104 @@ r.post('/extra-sheets/:id/approve', canApprove, async (req, res, next) => {
         if (qty <= 0 || qty > x.qty)
           throw Object.assign(new Error(`Approved quantity must be between 1 and the requested ${x.qty}`), { status: 400 });
       }
-      const eff = await effectiveBoardForJob(oc, jc.id);
-      if (!eff?.board_material_id)
-        throw Object.assign(new Error('This job card has no board on it — set the board on the job before approving extra sheets'), { status: 409 });
-      const pos = await oc(`
-        SELECT COALESCE(av.qty, 0) AS gross, COALESCE(lk.qty, 0) AS locked
-        FROM (SELECT 1) _
-        LEFT JOIN LATERAL (SELECT SUM(sb.qty) AS qty FROM stock_batches sb
-          WHERE sb.material_id=$1 AND sb.status='available') av ON true
-        LEFT JOIN LATERAL (SELECT COALESCE(SUM(d.q),0) AS qty
-          FROM (${COMMITTED_DEMAND_SQL}) d WHERE d.material_id=$1) lk ON true`,
-        [eff.board_material_id]);
-      const free = Math.max(0, Number(pos.gross) - Number(pos.locked));
-      if (free < qty) {
-        const board = await oc('SELECT name FROM materials WHERE id=$1', [eff.board_material_id]);
-        throw Object.assign(new Error(
-          `${board?.name || 'Board'} has only ${Math.round(free)} uncommitted parent sheets free; ${qty} are needed for ${x.xs_number}.`
-        ), { status: 409 });
+      // ── Which board ──────────────────────────────────────────────────────
+      //
+      // The default has not moved: no board named, and this is byte-for-byte
+      // the approval it always was, on the job's planned board. Naming one is
+      // the plant head reaching into the warehouse for something else — a
+      // lighter sheet of the same grade, a bigger one he can trim down, or the
+      // pile that is booked to another job and only fifty sheets deep.
+      //
+      // The dialog already rendered a verdict for that board. It is not
+      // trusted: the SAME pure judge() runs here, on rows read inside this
+      // transaction, so a stale picker or a hand-rolled POST cannot approve
+      // terms nobody saw. Physics (nothing on the shelf, a sheet too small to
+      // yield one print sheet) refuses whatever anyone ticks. Consequence —
+      // grade, caliper, size, a changed cut count, board booked elsewhere — is
+      // the plant head's to accept, and every one of them costs him a reason.
+      const ctx = await substitutionContext(oc, qc, x.id);
+      const chosenId = req.body.board_material_id != null
+        ? Math.round(+req.body.board_material_id)
+        : Number(ctx.plannedId);
+      const substituting = Number(chosenId) !== Number(ctx.plannedId);
+      const chosen = ctx.rows.find(m => Number(m.id) === Number(chosenId))
+        || (substituting
+          ? await oc(`SELECT id, name, code, category, active, leftover, grade, gsm, sheet_l, sheet_w,
+                             sheets_per_packet, 0 AS shelf, 0 AS free FROM materials WHERE id=$1`, [chosenId])
+          : ctx.planned);
+      if (!chosen)
+        throw Object.assign(new Error('That board is not on the material master'), { status: 404 });
+
+      const subReason = String(req.body.substitute_reason || '').trim();
+      const plannedCuts = ctx.plannedCuts;
+      const gate = gateSubstitution({
+        candidate: chosen, planned: ctx.planned, product: ctx.product,
+        needed: qty, plannedCuts, stage: x.stage,
+        reason: subReason, override: req.body.allow_committed === true,
+      });
+      if (!gate.ok) {
+        throw Object.assign(new Error(gate.blockers[0]), {
+          status: 409,
+          body: { code: 'XS_BOARD_UNAVAILABLE', blockers: gate.blockers, board: gate.verdict },
+        });
       }
-      const cuts = await plannedCutsForJob(oc, jc, eff.board_material_id);
+
+      // A substitute has no row in job_board_mix — nobody planned it — so its
+      // cuts are geometry, and they are STORED. effective_cuts reads
+      // x.cuts_per_parent first, which is what keeps every later parent →
+      // print-sheet conversion (the row, the Cutting slip, the receipt) on the
+      // board that is actually being cut rather than the one that was planned.
+      const cuts = substituting
+        ? Math.max(1, gate.verdict.cuts)
+        : await plannedCutsForJob(oc, jc, chosenId);
       await qc(`UPDATE extra_sheet_requests
                 SET status='sent_to_cutting', qty=$1, approved_by=$2, approved_at=now(), approval_note=$3,
                     board_material_id=$4, cuts_per_parent=$5, sent_to_cutting_at=now()
                 WHERE id=$6`,
-        [qty, req.user.name, req.body.note || null, eff.board_material_id, cuts, x.id]);
+        [qty, req.user.name, req.body.note || null, chosenId, cuts, x.id]);
       await audit('extra_sheet', x.id, 'approve',
-        `${x.xs_number} — ${qty} parent sheets approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}; re-fired to Cutting`, qc, req.user.name);
+        `${x.xs_number} — ${qty} parent sheets approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}; re-fired to Cutting`
+        + (substituting ? ` on ${chosen.name} (NOT the planned ${ctx.planned.name})` : ''), qc, req.user.name);
+      if (substituting) {
+        // Loud, on both books, and never a silent column change: the board a
+        // job ran on is the first thing anyone asks when a carton comes back.
+        const detail = `${x.xs_number} — board substituted: ${ctx.planned.name} → ${chosen.name}`
+          + ` (${qty} parent sheets, ${cuts} print sheets per parent`
+          + (cuts !== plannedCuts ? ` — the planned board cuts ${plannedCuts}` : '')
+          + `) — ${subReason}`
+          + (gate.verdict.short ? ` [TAKEN AGAINST BOARD BOOKED TO OTHER JOBS: ${gate.verdict.free} free of ${gate.verdict.shelf} on the shelf]` : '')
+          + (gate.verdict.cautions.length ? ` — accepted: ${gate.verdict.cautions.map(c => c.axis).join(', ')}` : '');
+        await audit('extra_sheet', x.id, 'extra_sheet_board_substituted', detail, qc, req.user.name);
+        await audit('job_card', x.job_card_id, 'extra_sheet_board_substituted', detail, qc, req.user.name);
+        await audit('materials', chosenId, 'extra_sheet_board_substituted',
+          `${qty} parent sheets committed to ${jc.jc_number} via ${x.xs_number} in place of ${ctx.planned.name} — ${subReason}`,
+          qc, req.user.name);
+      }
       await audit('job_card', x.job_card_id, 'extra_sheet_refire',
         `${x.xs_number} — EXTRA SHEETS re-cut required: ${qty} parent sheets`, qc, req.user.name);
       await clearRequestBells(qc, x.id);
       await notify([x.requested_by_id], {
         kind: 'xs_decision',
         title: `${x.xs_number} approved — sent to Cutting`,
-        body: `${req.user.name} approved ${qty} parent sheets${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}. Cutting must prepare them before Printing receives stock.`,
+        body: `${req.user.name} approved ${qty} parent sheets${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}`
+          + (substituting ? ` on ${chosen.name} instead of ${ctx.planned.name} — ${subReason}` : '')
+          + `. Cutting must prepare them before Printing receives stock.`,
         link: '/extra-sheets',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
       const users = await qc('SELECT id, role, active, sections FROM users');
       await notify(cuttingRecipients(users, req.user.id), {
         kind: 'xs_cutting',
-        title: `Extra Sheets Approved — ${jc.jc_number}`,
-        body: `${qty} extra parent sheets require Cutting for ${jc.jc_number}. Open the Extra Sheets Requirements queue.`,
+        title: substituting
+          ? `Extra Sheets Approved on a DIFFERENT BOARD — ${jc.jc_number}`
+          : `Extra Sheets Approved — ${jc.jc_number}`,
+        body: `${qty} extra parent sheets require Cutting for ${jc.jc_number}`
+          + (substituting
+            ? ` — take them off ${chosen.name}, NOT the planned ${ctx.planned.name}`
+              + (cuts !== plannedCuts ? `; this sheet cuts ${cuts} up, not ${plannedCuts}` : '')
+              + ` (${subReason})`
+            : '')
+          + `. Open the Extra Sheets Requirements queue.`,
         link: '/floor/cutting?xs=1',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
