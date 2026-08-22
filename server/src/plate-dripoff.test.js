@@ -270,6 +270,51 @@ test('init() replays 0035 for FRESH databases only — its old approval CHECK ki
     'the 0035 replay is unguarded — restarting a server over a saved/draft Plate PR fails its old approval_status CHECK');
 });
 
+test('a re-ADDed CHECK never NARROWS the one it replaces — every earlier value survives', () => {
+  // The 0035 boot failure in reverse, and the reason this file carries both:
+  // a DROP-then-ADD is replay-safe but it REPLACES, so re-adding a constraint
+  // from an older spelling silently deletes every value a later migration
+  // added. Prod's plate_assets_status_check carried 'replaced' and 'reversed'
+  // (20260808071000, the reversibility wave — routes/plates.js:1470 writes
+  // 'reversed' when a plate GRN is reversed). The drip migration re-added the
+  // status CHECK from the ORIGINAL lifecycle list, so applying it would have
+  // dropped both and broken GRN reversal — locally too, since init() replays
+  // the drip file last.
+  //
+  // Asserted as a SUPERSET rule over the migration text rather than as one
+  // hand-written list, so it keeps holding for whatever the next wave adds.
+  const dir = new URL('../../supabase/migrations/', import.meta.url);
+  const valuesOf = (sql, constraint) => {
+    const at = sql.indexOf(`ADD CONSTRAINT ${constraint}`);
+    if (at < 0) return null;
+    const body = sql.slice(at, sql.indexOf(');', at));
+    return new Set([...body.matchAll(/'([a-z_]+)'/g)].map(m => m[1]));
+  };
+  const files = readdirSync(dir).filter(f => f.endsWith('.sql') && !/baseline/i.test(f)).sort();
+  const CONSTRAINTS = [
+    'plate_assets_status_check',
+    'plate_assets_component_type_check',
+    'plate_request_components_component_type_check',
+  ];
+  for (const constraint of CONSTRAINTS) {
+    let established = null;
+    let from = null;
+    for (const file of files) {
+      const values = valuesOf(readFileSync(new URL(file, dir), 'utf8'), constraint);
+      if (!values) continue;
+      if (established) {
+        const lost = [...established].filter(value => !values.has(value));
+        assert.deepEqual(lost, [],
+          `${file} re-adds ${constraint} without ${lost.join(', ')} — values ${from} established. `
+          + 'A DROP-then-ADD REPLACES the constraint, so every earlier value must be carried forward.');
+      }
+      established = values;
+      from = file;
+    }
+    assert.ok(established, `no migration defines ${constraint}`);
+  }
+});
+
 test('the schema learns dripoff and issued_to_coating through a replayable migration', () => {
   const dir = new URL('../../supabase/migrations/', import.meta.url);
   const file = readdirSync(dir).find(name => /plate.*dripoff/.test(name));

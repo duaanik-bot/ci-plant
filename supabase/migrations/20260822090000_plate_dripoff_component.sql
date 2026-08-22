@@ -19,10 +19,16 @@ ALTER TABLE plate_request_components DROP CONSTRAINT IF EXISTS plate_request_com
 ALTER TABLE plate_request_components ADD CONSTRAINT plate_request_components_component_type_check
   CHECK (component_type IN ('cyan','magenta','yellow','black','pantone','dripoff'));
 
+-- CARRY EVERY EARLIER VALUE FORWARD. A DROP-then-ADD replaces the constraint,
+-- so this list must be the reversibility wave's (20260808071000 — which added
+-- 'replaced' and 'reversed', the latter written by routes/plates.js when a
+-- plate GRN is reversed) plus the one value this migration exists to add.
+-- Re-adding the ORIGINAL lifecycle list here would silently delete both and
+-- break GRN reversal. plate-dripoff.test.js enforces the superset rule.
 ALTER TABLE plate_assets DROP CONSTRAINT IF EXISTS plate_assets_status_check;
 ALTER TABLE plate_assets ADD CONSTRAINT plate_assets_status_check CHECK (status IN (
   'available','awaiting_verification','reserved','issued_to_printing','issued_to_coating',
-  'returned_pending_verification','damaged','scrapped','lost'
+  'returned_pending_verification','damaged','scrapped','lost','replaced','reversed'
 ));
 
 -- Both controlled sizes may cut a drip mask — its DEFAULT is 560 x 670, but a
