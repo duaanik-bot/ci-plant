@@ -139,6 +139,39 @@ export function removedLineDetail(line, product) {
   return `${what} · qty ${line?.qty ?? '?'} — removed by order edit${was}`;
 }
 
+// ─── Optional free text: a reason nobody gave ───────────────────────────────
+//
+// `String(req.body.reason)` on an absent field yields the nine-character string
+// 'undefined', and that is not a theoretical hazard: JSON.stringify DROPS a key
+// whose value is undefined, so the ordinary client idiom
+//   reason: typed.trim() || undefined
+// sends no key at all and the server stringifies the absence. The result
+// survives everywhere a missing reason should have disappeared — COALESCE($1,
+// remarks) reads it as a real value and overwrites the remark, and
+// `... — ${reason}` stamps it into the movement note. Plate CI-PL-A-1491 carries
+// remarks 'undefined' and a movement note reading 'Retired after 1 run(s) —
+// undefined' because of exactly this.
+//
+// Returns the trimmed text or null: null is what a nullable column and COALESCE
+// both actually want. The literal 'undefined'/'null' are refused too — those
+// come from `${maybeUndefined}` interpolation on the client, the same bug
+// through a different door, and neither is ever a phrase a human typed. A
+// reason that merely contains the word ('undefined edge on the cyan') is real
+// text and survives.
+export function optionalText(value) {
+  const text = String(value ?? '').trim();
+  if (!text || text === 'undefined' || text === 'null') return null;
+  return text;
+}
+
+// Append a reason to a note only when there is one. Building the suffix with a
+// bare template literal is what leaves either 'note — undefined' or a dangling
+// em-dash; a missing reason must read as a finished sentence.
+export function withReason(base, value) {
+  const text = optionalText(value);
+  return text ? `${base} — ${text}` : String(base);
+}
+
 // In-app notification fan-out — one row per recipient, surfaced by the bell in
 // the app shell. userIds may contain duplicates or nulls; both are dropped so
 // callers can pass "everyone who should hear this" without pre-cleaning.

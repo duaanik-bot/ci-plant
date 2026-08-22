@@ -57,10 +57,12 @@ test('Retire releases the plate BEFORE it scraps it', () => {
 });
 
 test('a one-click retire still writes a real reason', () => {
-  // The endpoint does String(req.body.reason).trim() with no emptiness check, so
-  // sending nothing stamps the literal text "undefined" into the plate's remarks
-  // AND its movement note — and that remark is the only surviving record of why
-  // a physical plate was scrapped.
+  // The endpoint no longer writes junk when nothing is sent — it reads the reason
+  // through optionalText() and leaves remarks NULL (see plate-retire-reason.test.js;
+  // it used to stamp the literal text "undefined"). This call site still has to say
+  // something true regardless: it is ONE CLICK with no input field anywhere, so a
+  // reason it does not send is a reason nobody will ever be able to supply — and
+  // that remark is the only surviving record of why a physical plate was scrapped.
   const body = handler(page(), 'retireHeldPlate');
   assert.match(body, /reason:/, 'retire must send a reason');
   assert.doesNotMatch(body, /reason:\s*(undefined|''|""|null)/,

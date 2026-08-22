@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, notify, outputNumberSql } from '../helpers.js';
+import { audit, nextNumber, notify, optionalText, outputNumberSql, withReason } from '../helpers.js';
 import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
@@ -1975,7 +1975,12 @@ r.post('/plates/assets/retire', canVerify, async (req, res, next) => {
       const rackAssets = await qc(
         `SELECT * FROM plate_assets WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids]);
       const picked = pickAvailableRackPlates({ rackAssets, assetIds: ids });
-      const reason = String(req.body.reason).trim();
+      // The reason is optional here by design: the warehouse retires a plate from
+      // four doors and two of them send nothing. optionalText keeps that absence
+      // NULL — so COALESCE leaves whatever remark the plate already carried
+      // standing, instead of overwriting it with the word "undefined" — and
+      // withReason drops the em-dash along with the missing text.
+      const reason = optionalText(req.body.reason);
       for (const asset of picked) {
         await qc(`UPDATE plate_assets SET status='scrapped',condition='Scrapped',
           rack_location='Scrap',active=0,remarks=COALESCE($1,remarks),updated_at=now() WHERE id=$2`,
@@ -1984,9 +1989,10 @@ r.post('/plates/assets/retire', canVerify, async (req, res, next) => {
           (plate_asset_id,action,from_status,to_status,from_location,to_location,condition,note,user_name)
           VALUES ($1,'scrapped',$2,'scrapped',$3,'Scrap','Scrapped',$4,$5)`,
         [asset.id, asset.status, asset.rack_location,
-         `Retired after ${asset.use_count || 0} run(s) — ${reason}`, req.user.name]);
+         withReason(`Retired after ${asset.use_count || 0} run(s)`, reason), req.user.name]);
         await audit('plate_asset', asset.id, 'retire',
-          `${asset.asset_number} retired after ${asset.use_count || 0} run(s) — ${reason}`, qc, req.user.name);
+          withReason(`${asset.asset_number} retired after ${asset.use_count || 0} run(s)`, reason),
+          qc, req.user.name);
       }
       return { retired: picked.length, plates: picked.map(row => row.asset_number) };
     });

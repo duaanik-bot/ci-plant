@@ -1666,7 +1666,7 @@ export default function PlatesLifecycle() {
       released = true;
       // One click, so the reason is written rather than typed. It still has to say
       // something true — the endpoint stamps it into the plate's remarks and its
-      // movement note, and `undefined` would be stamped there literally.
+      // movement note, and this door offers no field for anyone to fill in later.
       const out = await api.post('/plates/assets/retire', {
         asset_ids: assetIds,
         reason: `Retired from ${row.request_number || 'Plate PR'} — not fit to reprint`,
@@ -1694,7 +1694,7 @@ export default function PlatesLifecycle() {
   // always used — this is a second door onto it, not a second implementation.
   //
   // The LABEL travels, not a key: /plates/assets/retire reads a free-text reason
-  // (String(req.body.reason).trim()) and writes it to the plate's remarks, where
+  // (optionalText(req.body.reason)) and writes it to the plate's remarks, where
   // "Worn out — dot loss" is the point. Set aside is the opposite — keyed, because
   // its reason resolves to a status.
   const retireFromPicker = async (assetId, reason) => {
