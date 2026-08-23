@@ -2628,6 +2628,10 @@ ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
     // The DRIP OFF component and issued_to_coating status — DROP-then-ADD
     // constraint swaps and a guarded UPDATE, so replaying is a no-op.
     '20260822090000_plate_dripoff_component.sql',
+    // One job card may hold two plate PRs — the ink set and the drip-off mask —
+    // so the old UNIQUE(job, product, family) becomes an expression index that
+    // carries the plate kind. Non-plate families are unaffected.
+    '20260822140000_tooling_request_plate_kind_unique.sql',
   ]) {
     await pool.query(migration(file));
   }

@@ -23,6 +23,9 @@ import {
   toolingRequirementQty,
 } from '../tooling-procurement.js';
 import { createPlateComponents, gangPlateSpecification, plateMasterForSize } from '../plate-lifecycle.js';
+import {
+  expandPlateQuantities, plateQuantityBreakdown, plateRequestPlan, DRIPOFF_LABEL,
+} from '../plates.js';
 import { artworkVersionOf } from '../plates.js';
 
 const r = Router();
@@ -213,6 +216,33 @@ function requestSpec(target) {
   return { ...spec, artwork_version: artworkVersionOf(spec) };
 }
 
+// Which plates the FIRE DIALOG asked for, if it asked at all.
+//
+// Keyed per target so a multi-product run can be told apart, and a gang — one
+// shared sheet, one plate set — answers to the single key 'gang'. An absent or
+// unparseable entry means "nobody chose", and the caller falls back to the
+// product master's own colour build, which is what every older client and the
+// Artwork door do.
+//
+// The rows are validated by expandPlateQuantities, the SAME expander the Plate
+// PR form and the manual rack entry use, so a colour typed here obeys the rules
+// a colour typed anywhere else does.
+export function platePickKey(target = {}) {
+  return target.gang_plate ? 'gang' : String(target.product_id ?? '');
+}
+
+function platePick(body = {}, target = {}) {
+  const picks = body && typeof body.plate_components === 'object' && body.plate_components
+    ? body.plate_components
+    : null;
+  if (!picks) return null;
+  const rows = picks[platePickKey(target)];
+  if (!Array.isArray(rows) || !rows.length) return null;
+  return expandPlateQuantities(rows, {
+    emptyMessage: 'Tick at least one plate, or clear the selection to use the product master',
+  });
+}
+
 async function logRequestEvent(qc, request, action, toStatus, req, note = null) {
   await qc(`INSERT INTO tooling_request_events
     (tooling_request_id, action, from_status, to_status, source, tool_id, vendor_id, note, user_name)
@@ -318,7 +348,7 @@ r.get('/tooling/requirements/:id/events', async (req, res, next) => {
 
 r.get('/job-cards/:id/tooling-preview', async (req, res, next) => {
   try {
-    const { jc, targets, stages } = await requestTargets(req.params.id);
+    const { jc, gang, targets, stages } = await requestTargets(req.params.id);
     const defaults = defaultToolingFamilies({ stages, products: targets });
     const existing = await q(`SELECT family, product_id, status, id
                               FROM tooling_requests WHERE job_card_id=$1`, [jc.id]);
@@ -328,9 +358,32 @@ r.get('/job-cards/:id/tooling-preview', async (req, res, next) => {
       block: defaults.includes('block') ? 'Embossing or foil work requires a block' : 'No embossing or foil in the current route',
       shade_card: stages.includes('printing') ? 'Printing requires a released shade standard' : 'Available by manual selection',
     };
+    // What the plate fire WOULD raise, so the dialog can show the colours and let
+    // them be changed before anything is created. One entry per target (a gang
+    // answers to 'gang'), each already split into the PRs it will become — the
+    // operator sees that a drip-off carton raises two before he fires it.
+    const plateTargets = gang && targets.length
+      ? [{ ...targets[0], gang_plate: true, specification: gangPlateSpecification(gang, targets) }]
+      : targets;
+    const plate_plan = plateTargets.map(target => {
+      const spec = target.specification || requestSpec(target);
+      return {
+        key: platePickKey(target),
+        product_id: target.product_id,
+        label: target.gang_plate ? (gang.gang_number || 'Gang plate') : target.name,
+        is_gang: !!target.gang_plate,
+        plate_size: spec.plate_size || null,
+        requests: plateRequestPlan(spec).map(entry => ({
+          kind: entry.kind,
+          plate_size: entry.plate_size,
+          components: plateQuantityBreakdown(entry.components),
+        })),
+      };
+    });
     res.json({
       job_card: { id: jc.id, jc_number: jc.jc_number, finalised_at: jc.finalised_at, status: jc.status },
       defaults,
+      plate_plan,
       targets: targets.map(t => ({
         order_line_id: t.order_line_id, product_id: t.product_id,
         product_name: t.name, product_code: t.code,
@@ -366,33 +419,65 @@ r.post('/job-cards/:id/tooling-requirements', canManage, async (req, res, next) 
             }]
           : targets;
         for (const target of familyTargets) {
-          const have = await oc(`SELECT * FROM tooling_requests
-                                 WHERE job_card_id=$1 AND family=$3
-                                   AND ($4::boolean OR product_id=$2)`,
-          [jc.id, target.product_id, family, !!target.gang_plate]);
-          if (have) { existing.push(have); continue; }
-          const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
-          const specification = target.specification || requestSpec(target);
-          const inventoryItem = await ensureInventoryItem(qc, oc, family, target, specification);
-          const requiredQty = toolingRequirementQty(family, specification);
-          let shadeCard = null;
-          if (family === 'shade_card') {
-            shadeCard = await oc(`SELECT id, status FROM shade_cards
-              WHERE active=1 AND product_id=$1
-              ORDER BY (order_line_id=$2) DESC, (status='approved') DESC, id DESC LIMIT 1`,
-            [target.product_id, target.order_line_id]);
+          const baseSpec = target.specification || requestSpec(target);
+          // A plate fire raises one PR PER KIND — the ink set and the drip-off
+          // mask are separate requirements (see plateRequestPlan). Every other
+          // family raises exactly one, expressed as a single ink-less entry so
+          // this loop has one shape.
+          //
+          // The colours come from the dialog when it sent a selection, and from
+          // the product master when it did not: an older client, and the Artwork
+          // door, both keep working untouched.
+          const picked = family === 'plate' ? platePick(req.body, target) : null;
+          const plan = family === 'plate'
+            ? plateRequestPlan(baseSpec, picked)
+            : [{ kind: null, components: null, plate_size: baseSpec.plate_size || null }];
+          if (family === 'plate' && !plan.length) continue;
+          for (const entry of plan) {
+            // Per KIND, or refiring a job whose inks already exist would match
+            // the ink PR and silently drop the mask.
+            const have = await oc(`SELECT * FROM tooling_requests
+                                   WHERE job_card_id=$1 AND family=$3
+                                     AND ($4::boolean OR product_id=$2)
+                                     AND ($5::text IS NULL
+                                          OR COALESCE(specification->>'plate_kind','ink')=$5)`,
+            [jc.id, target.product_id, family, !!target.gang_plate, entry.kind]);
+            if (have) { existing.push(have); continue; }
+            const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
+            // The mask's own size travels on its spec, so ensureInventoryItem
+            // resolves the 560 x 670 master rather than the ink set's.
+            const specification = entry.kind
+              ? { ...baseSpec, plate_kind: entry.kind,
+                  ...(entry.plate_size ? { plate_size: entry.plate_size } : {}) }
+              : baseSpec;
+            const inventoryItem = await ensureInventoryItem(qc, oc, family, target, specification);
+            const requiredQty = entry.components
+              ? entry.components.length
+              : toolingRequirementQty(family, specification);
+            let shadeCard = null;
+            if (family === 'shade_card') {
+              shadeCard = await oc(`SELECT id, status FROM shade_cards
+                WHERE active=1 AND product_id=$1
+                ORDER BY (order_line_id=$2) DESC, (status='approved') DESC, id DESC LIMIT 1`,
+              [target.product_id, target.order_line_id]);
+            }
+            const [row] = await qc(`INSERT INTO tooling_requests
+              (request_number, job_card_id, order_line_id, product_id, family,
+               shade_card_id, inventory_item_id, qty, needed_by, specification, created_by, approval_status)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+            [requestNumber, jc.id, target.order_line_id, target.product_id, family,
+             shadeCard?.id || null, inventoryItem?.id || null, requiredQty,
+             target.delivery_date || null, specification, req.user.name, family === 'plate' ? 'draft' : 'pending']);
+            await logRequestEvent(qc, row, 'forwarded_from_job_card', family === 'plate' ? 'draft' : 'pending', req,
+              `${jc.jc_number} forwarded to ${FAMILY_LABEL[family]}${
+                entry.kind === 'dripoff' ? ` — ${DRIPOFF_LABEL} plate` : ''
+              }${target.gang_plate ? ` as ${gang.gang_number}` : ''}`);
+            if (family === 'plate') {
+              await createPlateComponents(qc, oc, row,
+                entry.components ? { components: entry.components } : {});
+            }
+            created.push(row);
           }
-          const [row] = await qc(`INSERT INTO tooling_requests
-            (request_number, job_card_id, order_line_id, product_id, family,
-             shade_card_id, inventory_item_id, qty, needed_by, specification, created_by, approval_status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-          [requestNumber, jc.id, target.order_line_id, target.product_id, family,
-           shadeCard?.id || null, inventoryItem?.id || null, requiredQty,
-           target.delivery_date || null, specification, req.user.name, family === 'plate' ? 'draft' : 'pending']);
-          await logRequestEvent(qc, row, 'forwarded_from_job_card', family === 'plate' ? 'draft' : 'pending', req,
-            `${jc.jc_number} forwarded to ${FAMILY_LABEL[family]}${target.gang_plate ? ` as ${gang.gang_number}` : ''}`);
-          if (family === 'plate') await createPlateComponents(qc, oc, row);
-          created.push(row);
         }
       }
       return { created, existing, modules: wanted, target_count: targets.length };

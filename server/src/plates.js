@@ -221,6 +221,38 @@ export function plateComponentsFromSpec(spec = {}) {
   return components.map((component, index) => ({ ...component, sequence_no: index + 1 }));
 }
 
+// ── ONE JOB, TWO PLATE PRs ────────────────────────────────────────────────
+// The ink set and the drip-off mask live on different clocks: the inks go to
+// the press and come back to the rack, the mask goes to the coating line and is
+// destroyed there. One requirement carrying both meant a single approval, a
+// single PO grouping and a single status describing two different lives — and a
+// PO line may hold only one plate size, which these two never share.
+//
+// So a fire PLANS one PR per kind. Each entry carries its own components,
+// renumbered from 1 (sequence_no is UNIQUE per request), and its own size: the
+// mask is born at 560 x 670 whatever the ink set runs, so the requirement
+// resolves the right Plate Master from birth.
+//
+// `components` is optional and is how a HAND-PICKED selection reaches the same
+// rule: the fire dialog now asks which plates to raise, and whatever it sends is
+// one flat list — the split is the server's, never the form's, so no client can
+// put a mask on an ink PR. A selection with no mask raises no mask PR, because a
+// coating master that says Drip Off is a default and not a compulsion.
+export function plateRequestPlan(spec = {}, components = null) {
+  const rows = Array.isArray(components) ? components : plateComponentsFromSpec(spec);
+  const renumber = list => list.map((row, index) => ({ ...row, sequence_no: index + 1 }));
+  const ink = rows.filter(row => !isDripOff(row));
+  const drip = rows.filter(isDripOff);
+  const plan = [];
+  if (ink.length) {
+    plan.push({ kind: 'ink', components: renumber(ink), plate_size: spec.plate_size || null });
+  }
+  if (drip.length) {
+    plan.push({ kind: 'dripoff', components: renumber(drip), plate_size: DRIP_OFF_PLATE_SIZE });
+  }
+  return plan;
+}
+
 // The newest of a set of timestamps. db.js overrides only the numeric parsers, so a
 // timestamptz arrives as a JS Date — and a bare `.sort()` stringifies its arguments.
 // Date.toString() begins with the WEEKDAY, so sorting Dates that way ranks them

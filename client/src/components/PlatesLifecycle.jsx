@@ -1350,6 +1350,10 @@ export default function PlatesLifecycle() {
   // every view — a converted PR is exactly where "what did we actually spend"
   // gets asked, so hiding it there would hide it where it matters most.
   const [wearView, setWearView] = useState('all');
+  // Ink set or drip-off mask. A drip-off carton raises one of each, and they are
+  // different work — different size, different section, different end — so the
+  // queue can be narrowed to either.
+  const [kindView, setKindView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
   const [addingPlates, setAddingPlates] = useState(false);
   const [newGrn, setNewGrn] = useState(false);
@@ -1456,10 +1460,22 @@ export default function PlatesLifecycle() {
   // A row with no plate in hand belongs to NEITHER Fresh nor Used — there is no
   // plate yet to be either. It is dropped by both chips and only "All" shows it,
   // which is the same answer the Quality column gives it: a dash.
-  const wearRows = {
-    fresh: approvalRows.filter(row => row.plate_wear?.wear === 'fresh'),
-    used: approvalRows.filter(row => row.plate_wear?.wear === 'used'),
+  // Filtered on what a requirement HOLDS rather than on its stamp, so a PR
+  // raised before the split — which carries inks and a mask together — answers
+  // both chips honestly instead of hiding from the DRIP OFF one.
+  const carriesDrip = row => row.has_dripoff
+    || (row.components || []).some(component => component.component_type === 'dripoff');
+  const carriesInk = row => (row.components || []).some(component => component.component_type !== 'dripoff');
+  const kindRows = {
     all: approvalRows,
+    ink: approvalRows.filter(carriesInk),
+    dripoff: approvalRows.filter(carriesDrip),
+  };
+  const kindScoped = kindRows[kindView] || kindRows.all;
+  const wearRows = {
+    fresh: kindScoped.filter(row => row.plate_wear?.wear === 'fresh'),
+    used: kindScoped.filter(row => row.plate_wear?.wear === 'used'),
+    all: kindScoped,
   };
   const reqRows = wearRows[wearView] || wearRows.all;
   const selectedRequirements = requirements.filter(row => selectedIds.includes(row.id));
@@ -1819,7 +1835,16 @@ export default function PlatesLifecycle() {
   };
 
   const requestColumns = [
-    { key: 'request_number', label: 'Requirement', render: row => <span><b>{row.request_number}</b><span className="block text-[11px] text-slate-400">{row.jc_number}</span></span> },
+    // A drip-off job has TWO requirements on the same job card and product, so
+    // the number alone cannot tell them apart — the badge is what says which one
+    // you are looking at.
+    { key: 'request_number', label: 'Requirement', render: row => <span>
+      <b>{row.request_number}</b>
+      {(row.has_dripoff || row.plate_kind === 'dripoff') && <span
+        title="Drip-off coating plate — issued at coating, single use"
+        className="ml-1.5 inline-flex whitespace-nowrap rounded-full bg-teal-50 px-1.5 py-0.5 text-[9px] font-bold text-teal-700">{DRIPOFF_LABEL}</span>}
+      <span className="block text-[11px] text-slate-400">{row.jc_number}</span>
+    </span> },
     { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
     { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     // The build once per STATE, not the roll-call.
@@ -2289,6 +2314,29 @@ export default function PlatesLifecycle() {
             })}
           </div>
         )}
+        {/* The KIND axis: ink set or drip-off mask. Offered in every view, and
+            counted on what each requirement actually holds — a PR raised before
+            the split carries both and is counted in both, which is the truth
+            about it rather than a tidier fiction. */}
+        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
+          {[
+            { key: 'all', label: 'All kinds', count: kindRows.all.length,
+              title: 'Every plate requirement' },
+            { key: 'ink', label: 'Ink', count: kindRows.ink.length,
+              title: 'Requirements carrying printing plates' },
+            { key: 'dripoff', label: DRIPOFF_LABEL, count: kindRows.dripoff.length,
+              title: 'Requirements carrying a drip-off coating plate' },
+          ].map(option => {
+            const on = kindView === option.key;
+            return (
+              <button key={option.key} type="button" title={option.title} aria-pressed={on}
+                onClick={()=>{setKindView(option.key);setSelectedIds([]);}}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                {option.label}<span className={`ml-1 tabular-nums ${on ? 'text-white/70' : 'text-slate-400'}`}>{option.count}</span>
+              </button>
+            );
+          })}
+        </div>
         {/* The wear axis. Same quiet weight as the approval chips — it narrows the
             stage you have already chosen rather than replacing it — but offered in
             every view, including Converted. */}

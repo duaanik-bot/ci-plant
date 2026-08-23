@@ -378,6 +378,16 @@ async function requirementRows(id = null) {
     return {
       ...row,
       is_gang: isGang,
+      // Which PR this is: the ink set or the drip-off mask. The stamp is
+      // authoritative for anything raised since the split; a requirement raised
+      // BEFORE it carries no stamp and is read from what it actually holds, so
+      // a legacy PR that has a mask on it still answers the DRIP OFF chip
+      // rather than hiding behind a missing field.
+      plate_kind: row.specification?.plate_kind
+        || (requestComponents.length
+          && requestComponents.every(component => component.component_type === 'dripoff')
+          ? 'dripoff' : 'ink'),
+      has_dripoff: requestComponents.some(component => component.component_type === 'dripoff'),
       lead_product_name: isGang ? row.product_name : null,
       lead_product_code: isGang ? row.product_code : null,
       product_name: isGang ? (row.gang_number || row.specification?.gang_number || 'Gang Plate') : row.product_name,
