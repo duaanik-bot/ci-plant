@@ -445,7 +445,10 @@ function ToolingOperations({ family = 'shade_card' }) {
         selectedIds={[...selected]} onToggleRow={toggleRow} onToggleAll={toggleAll}
         searchValue={query} onSearchChange={setQuery} searchPlaceholder={`Search ${meta.plural.toLowerCase()}, Job Card, product, PO or code…`}
         onRowClick={setDetail} empty={`No ${meta.plural.toLowerCase()} requirements in this queue`}
-        defaultSort={{ key: 'needed_by', dir: 'asc' }} exportName={`${meta.plural} Requirements`}
+        // NEWEST FIRST. This used to lead with needed_by ascending, which put a
+        // requirement just pushed wherever its due date fell — the queue is read
+        // straight after a push, so what was pushed has to be the first row.
+        defaultSort={{ key: 'id', dir: 'desc' }} exportName={`${meta.plural} Requirements`}
         exportSubtitle={`Tooling Hub · ${meta.plural} job queue`} />}
 
       {view === 'rack' && (family === 'shade_card'

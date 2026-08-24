@@ -332,9 +332,15 @@ async function requirementRows(id = null) {
     LEFT JOIN order_lines ol ON ol.id=tr.order_line_id
     LEFT JOIN orders o ON o.id=ol.order_id
     WHERE tr.family='plate' ${idWhere}
-    ORDER BY CASE tr.status WHEN 'pending' THEN 0 WHEN 'rack_reserved' THEN 1
+    -- NEWEST FIRST. A Plate PR that was just raised is the one being looked
+    -- for, so it leads. The status buckets and the delivery date stay on as
+    -- tie-breakers rather than as the primary key: they sorted a new PR into
+    -- the middle of the list by its status, which from the floor reads as the
+    -- thing you just fired going missing.
+    ORDER BY tr.id DESC,
+      CASE tr.status WHEN 'pending' THEN 0 WHEN 'rack_reserved' THEN 1
       WHEN 'procurement' THEN 2 WHEN 'ready' THEN 4 ELSE 3 END,
-      o.delivery_date NULLS LAST,tr.id DESC`, values);
+      o.delivery_date NULLS LAST`, values);
   if (!rows.length) return rows;
   let components = await componentRows('WHERE prc.tooling_request_id=ANY($1::int[])', [rows.map(row => row.id)]);
   const have = new Set(components.map(row => row.tooling_request_id));

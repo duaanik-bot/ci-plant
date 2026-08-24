@@ -290,10 +290,14 @@ r.get('/tooling/requirements', async (req, res, next) => {
     }
     const rows = await q(`${REQUEST_VIEW}
       ${wh.length ? `WHERE ${wh.join(' AND ')}` : ''}
-      ORDER BY CASE tr.status
+      -- NEWEST FIRST, for the same reason the plate queue is: the requirement
+      -- just pushed is the one being looked for. Status and delivery date stay
+      -- as tie-breakers.
+      ORDER BY tr.id DESC,
+        CASE tr.status
         WHEN 'pending' THEN 0 WHEN 'lost_damaged' THEN 1 WHEN 'procurement' THEN 2
         WHEN 'vendor_assigned' THEN 3 WHEN 'sent_to_vendor' THEN 4 WHEN 'in_house' THEN 5 ELSE 6 END,
-        o.delivery_date NULLS LAST, tr.id DESC`, params);
+        o.delivery_date NULLS LAST`, params);
     res.json(rows);
   } catch (e) { next(e); }
 });

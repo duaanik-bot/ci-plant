@@ -2364,7 +2364,11 @@ export default function PlatesLifecycle() {
           })}
         </div>
       </div>
+      {/* NEWEST FIRST. DataTable always sorts, and with nothing declared it
+          takes the first sortable column ascending — which sorted this
+          queue by request number and buried the PR just raised. */}
       <DataTable searchable selectable rows={reqRows} columns={requestColumns}
+      defaultSort={{ key: 'id', dir: 'desc' }}
       // A used set tints the WHOLE row, not just its Quality cell: on a register of
       // thirty requirements the question "which of these are reprints off old
       // plates" has to survive a scan, and a chip three columns in does not.

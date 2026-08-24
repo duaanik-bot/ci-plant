@@ -704,7 +704,10 @@ function GenericToolingProcurement({ family }) {
           { key: 'converted', label: 'Converted', count: reqGroups.converted.length },
           { key: 'closed', label: 'Closed', count: reqGroups.closed.length },
         ]} />
+        {/* NEWEST FIRST — see the Plate queue: an undeclared sort is not
+            "server order", it is first-column-ascending. */}
         <DataTable searchable selectable rows={reqGroups[reqView]} columns={requestColumns}
+          defaultSort={{ key: 'id', dir: 'desc' }}
           selectedIds={selectedIds} onToggleRow={(row, checked) => setSelectedIds(current => checked ? [...new Set([...current, row.id])] : current.filter(id => id !== row.id))}
           onToggleAll={(rows, checked) => { const ids = rows.map(row => row.id); setSelectedIds(current => checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }}
           onRowClick={setDetail} searchPlaceholder={`Search ${meta.plural.toLowerCase()}, Job Card, product or code…`}
