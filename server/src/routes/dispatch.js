@@ -4,6 +4,7 @@ import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, fgMove, boxLeftoverFromFg } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { cascadeAllocate, annotateReadyLines } from '../tolerance-cascade.js';
+import { toleranceCeiling, ceilingForWire, toleranceRoom, exceedsTolerance, toleranceLabel } from '../tolerance.js';
 import { boxBreakdown } from '../box-math.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { isShortage, shortfallOf, productionOver } from '../shortage.js';
@@ -238,6 +239,10 @@ r.get('/dispatches/:id', async (req, res, next) => {
 // tolerance snapshot on the line. Beyond that, a structured 409 comes back so
 // the UI can offer: dispatch as entered (override) / trim to tolerance /
 // edit manually / move the excess to the FG warehouse.
+//
+// A NO-LIMIT customer (tolerance -1 — Galpha, Fluence, Pureflix) has no
+// ceiling, so that 409 never fires and nothing needs overriding. Physical FG
+// stock is still the real gate, and fgIssue() enforces it.
 r.post('/dispatches', canDispatch, async (req, res, next) => {
   try {
     const { order_id, vehicle, driver, notes, lines, tolerance_override } = req.body;
@@ -263,28 +268,30 @@ r.post('/dispatches', canDispatch, async (req, res, next) => {
         const qty = +l.qty;
         if (!qty || qty <= 0) throw Object.assign(new Error('Dispatch quantity must be positive'), { status: 400 });
 
-        const allowedMax = Math.floor(ol.qty * (1 + ol.eff_tolerance / 100));
+        const allowedMax = toleranceCeiling(ol.qty, ol.eff_tolerance);
         const total = ol.dispatched_qty + qty;
-        if (total > allowedMax && !tolerance_override) {
+        const over = exceedsTolerance(total, ol.qty, ol.eff_tolerance);
+        if (over && !tolerance_override) {
           const e = new Error(
             `This dispatch exceeds the customer tolerance against this PO for ${ol.product_name} — ` +
             `ordered ${ol.qty}, already dispatched ${ol.dispatched_qty}, proposed ${qty}, ` +
-            `total ${total} vs allowed ${allowedMax} (±${ol.eff_tolerance}%).`);
+            `total ${total} vs allowed ${allowedMax} (${toleranceLabel(ol.eff_tolerance)}).`);
           e.status = 409;
           e.body = {
             code: 'TOLERANCE_EXCEEDED',
             line: {
               order_line_id: ol.id, product_name: ol.product_name,
               ordered: ol.qty, dispatched: ol.dispatched_qty, proposed: qty,
-              total, allowed_max: allowedMax, tolerance_pct: ol.eff_tolerance,
-              tolerance_room: Math.max(0, allowedMax - ol.dispatched_qty),
+              total, allowed_max: ceilingForWire(ol.qty, ol.eff_tolerance),
+              tolerance_pct: ol.eff_tolerance,
+              tolerance_room: toleranceRoom(ol.qty, ol.dispatched_qty, ol.eff_tolerance),
             },
           };
           throw e;
         }
-        if (total > allowedMax) {
+        if (over) {
           await audit('order_line', ol.id, 'tolerance_override',
-            `dispatch ${qty} → total ${total} vs allowed ${allowedMax} (±${ol.eff_tolerance}% of ${ol.qty})`,
+            `dispatch ${qty} → total ${total} vs allowed ${allowedMax} (${toleranceLabel(ol.eff_tolerance)} of ${ol.qty})`,
             qc, req.user.name);
         }
         if (qty !== (ol.qty - ol.dispatched_qty)) {
@@ -352,26 +359,28 @@ r.put('/dispatches/:id', canDispatch, async (req, res, next) => {
         const totalAfter = dl.dispatched_qty + delta;
 
         if (delta > 0) {
-          const allowedMax = Math.floor(dl.ordered * (1 + dl.eff_tolerance / 100));
-          if (totalAfter > allowedMax && !tolerance_override) {
+          const allowedMax = toleranceCeiling(dl.ordered, dl.eff_tolerance);
+          const overEdit = exceedsTolerance(totalAfter, dl.ordered, dl.eff_tolerance);
+          if (overEdit && !tolerance_override) {
             const e = new Error(
               `This edit takes ${dl.product_name} beyond the customer tolerance — ` +
-              `total ${totalAfter} vs allowed ${allowedMax} (±${dl.eff_tolerance}%).`);
+              `total ${totalAfter} vs allowed ${allowedMax} (${toleranceLabel(dl.eff_tolerance)}).`);
             e.status = 409;
             e.body = {
               code: 'TOLERANCE_EXCEEDED',
               line: {
                 order_line_id: dl.order_line_id, dispatch_line_id: dl.id, product_name: dl.product_name,
                 ordered: dl.ordered, dispatched: dl.dispatched_qty - dl.qty, proposed: newQty,
-                total: totalAfter, allowed_max: allowedMax, tolerance_pct: dl.eff_tolerance,
-                tolerance_room: Math.max(0, allowedMax - (dl.dispatched_qty - dl.qty)),
+                total: totalAfter, allowed_max: ceilingForWire(dl.ordered, dl.eff_tolerance),
+                tolerance_pct: dl.eff_tolerance,
+                tolerance_room: toleranceRoom(dl.ordered, dl.dispatched_qty - dl.qty, dl.eff_tolerance),
               },
             };
             throw e;
           }
-          if (totalAfter > allowedMax) {
+          if (overEdit) {
             await audit('order_line', dl.order_line_id, 'tolerance_override',
-              `challan edit +${delta} → total ${totalAfter} vs allowed ${allowedMax} (±${dl.eff_tolerance}% of ${dl.ordered})`,
+              `challan edit +${delta} → total ${totalAfter} vs allowed ${allowedMax} (${toleranceLabel(dl.eff_tolerance)} of ${dl.ordered})`,
               qc, req.user.name);
           }
           await fgIssue(dl.product_id, delta, 'dispatch_edit', d.id, qc, oc);
@@ -458,9 +467,8 @@ export async function applyFgMove({ product_id, mode, allocations = [], leftover
         if (!ol || ol.status !== 'produced') throw Object.assign(new Error('A selected line is no longer ready for dispatch'), { status: 409 });
         if (ol.product_id !== +product_id) throw Object.assign(new Error('All lines must be for the same product'), { status: 409 });
         const qty = Math.floor(+a.qty);
-        const allowedMax = Math.floor(ol.qty * (1 + ol.eff_tolerance / 100));
-        if (ol.dispatched_qty + qty > allowedMax)
-          throw Object.assign(new Error(`${ol.product_name}: ${qty} exceeds the ±${ol.eff_tolerance}% tolerance on ${ol.id}`), { status: 409 });
+        if (exceedsTolerance(ol.dispatched_qty + qty, ol.qty, ol.eff_tolerance))
+          throw Object.assign(new Error(`${ol.product_name}: ${qty} exceeds the ${toleranceLabel(ol.eff_tolerance)} tolerance on ${ol.id}`), { status: 409 });
         (byOrder[ol.order_id] ||= []).push({ ol, qty });
       }
       for (const [orderId, items] of Object.entries(byOrder)) {
@@ -643,8 +651,15 @@ export async function resolveShortage({ lineId, action, reason, vehicle, driver 
     }
 
     // close — ship what exists (within tolerance), then close the gap.
-    const room = Math.max(0, Math.floor(ol.qty * (1 + ol.eff_tolerance / 100)) - ol.dispatched_qty);
-    const send = Math.max(0, Math.min(ol.fg_qty, room));
+    //
+    // Under a no-limit customer the ceiling is Infinity, and `min(fg, room)`
+    // would push the product's ENTIRE FG pool onto this one line — stock other
+    // orders are still waiting on. Closing a line SHORT never wants more than
+    // the line is owed, so no-limit caps here at the outstanding need. The gate
+    // is lifted for a dispatch the operator asks for, not for an automatic one.
+    const room = toleranceRoom(ol.qty, ol.dispatched_qty, ol.eff_tolerance);
+    const cap = Number.isFinite(room) ? room : Math.max(0, ol.qty - ol.dispatched_qty);
+    const send = Math.max(0, Math.min(ol.fg_qty, cap));
     let challan = null;
     if (send > 0) {
       const r1 = await applyFgMove({ product_id: ol.product_id, mode: 'dispatch',

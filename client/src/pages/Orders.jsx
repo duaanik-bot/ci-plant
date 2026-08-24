@@ -8,6 +8,7 @@ import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { incompleteOrderLine, payloadLines } from '../lib/orderLines.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { nextCodeForRows } from '../lib/productCode.js';
+import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
 
@@ -920,11 +921,11 @@ export default function Orders() {
               <Field label="Customer" required
                 hint={(() => {
                   const c = customers.find(x => String(x.id) === String(form.customer_id));
-                  return c ? `Dispatch tolerance ±${c.tolerance_pct || 0}% — snapshotted on this order` : undefined;
+                  return c ? `Dispatch tolerance ${toleranceLabel(c.tolerance_pct || 0)} — snapshotted on this order` : undefined;
                 })()}>
                 <Select value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value, lines: [{ ...emptyLine }] })}>
                   <option value="">Select customer…</option>
-                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}{c.tolerance_pct ? ` (±${c.tolerance_pct}%)` : ''}</option>)}
+                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}{hasTolerance(c.tolerance_pct) ? ` (${toleranceLabel(c.tolerance_pct)})` : ''}</option>)}
                 </Select>
               </Field>
               <Field label="PO Date"><Input type="date" value={form.po_date} onChange={e => setForm({ ...form, po_date: e.target.value })} /></Field>
@@ -1024,10 +1025,10 @@ export default function Orders() {
             <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-600">
               <span>PO date: <b>{fmt.date(detail.po_date)}</b></span>
               <span>Delivery: <b>{fmt.date(detail.delivery_date)}</b></span>
-              {detail.lines?.[0]?.eff_tolerance_pct > 0 && (
-                <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-bold text-brand-700"
+              {hasTolerance(detail.lines?.[0]?.eff_tolerance_pct) && (
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${isNoLimit(detail.lines[0].eff_tolerance_pct) ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'}`}
                   title="Dispatch tolerance snapshotted when this order was created">
-                  Dispatch tolerance ±{detail.lines[0].eff_tolerance_pct}%
+                  Dispatch tolerance {toleranceLabel(detail.lines[0].eff_tolerance_pct)}
                 </span>
               )}
               <StatusBadge status={detail.status} />

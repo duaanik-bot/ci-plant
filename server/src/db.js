@@ -806,6 +806,16 @@ ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_type_check
 -- creation so later master edits never silently change old orders.
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION;
+-- -1 is the plant's spelling of NO LIMIT — the customer takes whatever comes,
+-- over or short, so there is no ceiling and no dispatch block. See
+-- server/src/tolerance.js for why the sentinel lives in this column instead of
+-- a parallel boolean. The CHECK pins it: -1 or a real percentage, never -5.
+ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_tolerance_pct_check;
+ALTER TABLE customers ADD CONSTRAINT customers_tolerance_pct_check
+  CHECK (tolerance_pct >= 0 OR tolerance_pct = -1);
+ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_tolerance_pct_check;
+ALTER TABLE order_lines ADD CONSTRAINT order_lines_tolerance_pct_check
+  CHECK (tolerance_pct IS NULL OR tolerance_pct >= 0 OR tolerance_pct = -1);
 -- Verified FG consumed against the line — production plans the balance.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS fg_consumed_qty INTEGER NOT NULL DEFAULT 0;
 -- Planning wastage captured in absolute child sheets (plant default 200);

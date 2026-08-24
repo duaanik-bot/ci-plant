@@ -9,6 +9,7 @@ import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { nextCodeForRows } from '../lib/productCode.js';
+import { NO_LIMIT, isNoLimit, toleranceLabel } from '../lib/tolerance.js';
 import {
   PRODUCT_MASTER_DEFAULTS,
   PRODUCT_MASTER_FIELDS,
@@ -51,7 +52,7 @@ const CONFIGS = {
       { key: 'segment', label: 'Segment', type: 'select', options: ['pharma', 'fmcg'], required: true },
       { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
       { key: 'gstin', label: 'GSTIN' }, { key: 'contact', label: 'Contact Person' }, { key: 'phone', label: 'Phone' },
-      { key: 'tolerance_pct', label: 'Dispatch Tolerance %', type: 'number', hint: 'Allowed excess/short dispatch vs ordered qty — snapshotted on each new sales order' },
+      { key: 'tolerance_pct', label: 'Dispatch Tolerance', type: 'tolerance', hint: 'How far a dispatch may run over or under the ordered qty. "No limit" means this customer takes whatever comes — no block, either way. Snapshotted onto each NEW sales order; open orders keep the figure they were raised with.' },
       // Shade Approval Control removed: the shade module has ONE rule now — the
       // customer has approved and the approval is in date. There is no 'internal
       // sufficient' path any more, so a select offering it changed nothing while
@@ -632,7 +633,10 @@ export default function Masters() {
             ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span>
             : <span className="text-gray-300">—</span>;
           if (k === 'product_count') return v ? `${v} product${v > 1 ? 's' : ''}` : <span className="text-gray-300">—</span>;
-          if (k === 'tolerance_pct') return v ? <span className="font-semibold tabular-nums text-slate-700">±{v}%</span> : <span className="text-gray-300">—</span>;
+          if (k === 'tolerance_pct') {
+            if (isNoLimit(v)) return <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">No limit</span>;
+            return v ? <span className="font-semibold tabular-nums text-slate-700">{toleranceLabel(v)}</span> : <span className="text-gray-300">—</span>;
+          }
           if (k === 'operators') {
             const ops = r.operators || [];
             return ops.length
@@ -786,7 +790,7 @@ export default function Masters() {
       if (f.type === 'password' && !v) continue;              // blank = unchanged
       if (f.type === 'number' || f.type === 'ref') v = v === '' || v == null ? null : +v;
       if (f.key === 'active' && (v == null || v === '')) v = 1;        // default: active
-      if (f.key === 'tolerance_pct' && v == null) v = 0;               // blank = no tolerance
+      if (f.key === 'tolerance_pct') v = (v == null || v === '') ? 0 : +v;   // blank = no tolerance; -1 = no limit
       if (f.key === 'spec_incomplete' && (v == null || v === '')) v = 0; // blank = spec complete
       if ((f.key === 'emboss' || f.key === 'leafing') && (v == null || v === '')) v = 0; // blank = No
       if (f.key === 'leafing_colour' && String(editing.leafing ?? '') !== '1') v = null; // colour only when leafing = Yes
@@ -981,6 +985,38 @@ export default function Masters() {
                         : (f.key === 'condition' || f.key === 'coating' || f.key === 'pasting_type' ? o : fmt.title(String(o)))
                     }</option>)}
                   </Select>
+                ) : f.type === 'tolerance' ? (
+                  // Two answers in one control: is there a ceiling at all, and
+                  // if so what is it. A bare number field could not say "no
+                  // limit" — the plant's answer for Galpha, Fluence and
+                  // Pureflix — and typing the -1 sentinel by hand is not a UI.
+                  (() => {
+                    const noLimit = isNoLimit(editing[f.key]);
+                    return (
+                      <div className="space-y-2">
+                        <Select value={noLimit ? 'none' : 'limited'}
+                          onChange={e => setEditing({ ...editing,
+                            [f.key]: e.target.value === 'none' ? NO_LIMIT : 0 })}>
+                          <option value="limited">Limited — block beyond a %</option>
+                          <option value="none">No limit — accept any quantity</option>
+                        </Select>
+                        {noLimit ? (
+                          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700">
+                            Dispatch is never blocked for this customer, over or short.
+                          </p>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Input type="number" min="0" step="0.5" className="w-28"
+                              value={editing[f.key] ?? ''}
+                              onChange={e => setEditing({ ...editing, [f.key]: e.target.value === '' ? '' : +e.target.value })} />
+                            <span className="text-xs font-semibold text-slate-500">
+                              % over or under the ordered qty
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
                 ) : f.type === 'platecomponents' ? (
                   <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-5">
                     {f.options.map(component => {

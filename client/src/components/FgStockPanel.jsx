@@ -4,6 +4,7 @@ import { Plus, Minus, PackagePlus, SlidersHorizontal, Trash2 } from 'lucide-reac
 import { api, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { isNoLimit, toleranceLabel } from '../lib/tolerance.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, Select, Textarea, useToast } from './ui.jsx';
 import ProductIdentity, { productExport, productSearchText } from './ProductIdentity.jsx';
 
@@ -877,14 +878,23 @@ export default function FgStockPanel({ onCountsChange }) {
                           <td className="px-3 py-1.5 text-slate-500">{a.customer_name}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{fmt.num(a.ordered)}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{fmt.num(a.dispatched)}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{a.tolerance_pct}%</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{fmt.num(a.allowed_max)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{toleranceLabel(a.tolerance_pct)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{isNoLimit(a.tolerance_pct) ? '—' : fmt.num(a.allowed_max)}</td>
                           <td className="px-3 py-1.5 text-right">
-                            <input type="number" min="0" max={a.tolerance_room}
+                            {/* A no-limit customer has no ceiling to clamp to —
+                                capping the input at tolerance_room (which is the
+                                CASCADE room, i.e. the outstanding need) would
+                                refuse over-dispatch the customer plainly allows.
+                                Physical FG stock is still the gate on save. */}
+                            <input type="number" min="0" max={isNoLimit(a.tolerance_pct) ? undefined : a.tolerance_room}
                               className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right tabular-nums"
                               value={move.alloc[a.order_line_id] ?? 0}
-                              onChange={e => setMove(m => ({ ...m, alloc: { ...m.alloc, [a.order_line_id]: Math.min(a.tolerance_room, Math.max(0, Math.floor(+e.target.value || 0))) } }))} />
-                            <div className="text-[9px] text-slate-400">room {fmt.num(a.tolerance_room)}</div>
+                              onChange={e => setMove(m => {
+                                const typed = Math.max(0, Math.floor(+e.target.value || 0));
+                                const next = isNoLimit(a.tolerance_pct) ? typed : Math.min(a.tolerance_room, typed);
+                                return { ...m, alloc: { ...m.alloc, [a.order_line_id]: next } };
+                              })} />
+                            <div className="text-[9px] text-slate-400">{isNoLimit(a.tolerance_pct) ? 'no limit' : `room ${fmt.num(a.tolerance_room)}`}</div>
                           </td>
                         </tr>
                       ))}

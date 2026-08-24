@@ -12,6 +12,7 @@ import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, Kp
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
+import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote, AlertTriangle, FileText, CalendarDays } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
@@ -188,11 +189,14 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
     return { dispatch, leftover, boxing, products: byProduct.size, over };
   })();
 
-  // Per line: never offer more than the tolerance ceiling allows.
+  // Per line: never offer more than the tolerance ceiling allows. A no-limit
+  // customer has no ceiling, so the only gate left is physical stock — which
+  // bulkTotals.over already enforces per product pool.
   const bulkLineError = l => {
     const n = Math.floor(+l.dispatch_now) || 0;
     if (n < 0) return 'negative';
-    if (n > l.tolerance_room) return `over ±${l.tolerance_pct}% (max ${fmt.num(l.tolerance_room)})`;
+    if (isNoLimit(l.tolerance_pct)) return null;
+    if (n > l.tolerance_room) return `over ${toleranceLabel(l.tolerance_pct)} (max ${fmt.num(l.tolerance_room)})`;
     return null;
   };
   const bulkBlocked = !bulk || bulkTotals.over.length > 0
@@ -552,11 +556,11 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
               render: l => (
                 <span className="whitespace-nowrap">
                   {fmt.date(l.delivery_date)}
-                  {l.tolerance_pct > 0 && (
-                    <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-700">±{l.tolerance_pct}%</span>
+                  {hasTolerance(l.tolerance_pct) && (
+                    <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${isNoLimit(l.tolerance_pct) ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'}`}>{toleranceLabel(l.tolerance_pct)}</span>
                   )}
                 </span>),
-              export: l => `${fmt.date(l.delivery_date)}${l.tolerance_pct > 0 ? ` (±${l.tolerance_pct}%)` : ''}` },
+              export: l => `${fmt.date(l.delivery_date)}${hasTolerance(l.tolerance_pct) ? ` (${toleranceLabel(l.tolerance_pct)})` : ''}` },
             { key: 'product_name', label: 'Product', card: 'subtitle',
               render: l => <ProductIdentity row={l} compact={false} />,
               searchValue: productSearchText,
@@ -1011,7 +1015,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                       <tr key={l.order_line_id} className="border-b border-slate-100 last:border-0 align-top">
                         <td className="px-3 py-2">
                           <ProductIdentity row={l} compact />
-                          <div className="text-xs text-slate-500">{l.po_number} · {l.customer_name} · ordered {fmt.num(l.ordered)} · ±{l.tolerance_pct}%</div>
+                          <div className="text-xs text-slate-500">{l.po_number} · {l.customer_name} · ordered {fmt.num(l.ordered)} · {toleranceLabel(l.tolerance_pct)}</div>
                           {err && <div className="text-xs font-semibold text-red-600">{err}</div>}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-slate-600">{fmt.num(l.fg_qty)}</td>
@@ -1111,7 +1115,11 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                   <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">No open sales order needs this product — box the FG as leftover.</td></tr>
                 )}
                 {moving.allocations.map(a => {
-                  const room = Math.max(0, a.allowed_max - a.dispatched);
+                  // allowed_max is null under a no-limit customer — there is no
+                  // ceiling to subtract from, and `null - dispatched` would read
+                  // as zero room and paint every entry as a breach.
+                  const noLimit = isNoLimit(a.tolerance_pct);
+                  const room = noLimit ? Infinity : Math.max(0, a.allowed_max - a.dispatched);
                   const val = Math.floor(+a.dispatch_now) || 0;
                   const over = val > room;
                   const b = boxBreakdown(val, moving.qty_per_box);
@@ -1121,15 +1129,15 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                       <td className="px-3 py-2 text-xs text-slate-500">{a.customer_name}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(a.ordered)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(a.dispatched)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">±{a.tolerance_pct}%</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{fmt.num(a.allowed_max)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{toleranceLabel(a.tolerance_pct)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{noLimit ? '—' : fmt.num(a.allowed_max)}</td>
                       <td className="px-3 py-2 text-right">
                         <input type="number" min="0"
                           value={a.dispatch_now}
                           onChange={e => setAllocQty(a.order_line_id, e.target.value)}
                           className={`w-32 rounded-lg border px-2 py-1 text-right text-sm focus:outline-none ${over ? 'border-amber-400 bg-amber-50 focus:border-amber-500' : 'border-gray-300 focus:border-brand-500'}`} />
                         <div className={`mt-0.5 text-[10px] font-semibold ${over ? 'text-amber-600' : 'text-slate-400'}`}>
-                          {over ? `beyond tolerance — room ${fmt.num(room)}` : `room ${fmt.num(room)}`}
+                          {noLimit ? 'no limit' : over ? `beyond tolerance — room ${fmt.num(room)}` : `room ${fmt.num(room)}`}
                         </div>
                         {val > 0 && (
                           <div className="mt-0.5 text-[11px] font-semibold text-emerald-600">

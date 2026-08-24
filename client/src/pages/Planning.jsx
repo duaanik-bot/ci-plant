@@ -46,6 +46,7 @@ import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { CustomerDot } from '../components/CustomerDot.jsx';
 import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
 import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
+import { toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { canPlan } from '../modules.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
@@ -3902,7 +3903,7 @@ export default function Planning() {
               <Stat small wrap label="PO" value={planLine.po_number} />
               <div className="rounded-2xl border border-brand-200/70 bg-brand-50/40 px-2.5 py-1.5">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-brand-500">
-                  Order Qty{planLine.eff_tolerance_pct > 0 ? ` (±${planLine.eff_tolerance_pct}%)` : ''}
+                  Order Qty{hasTolerance(planLine.eff_tolerance_pct) ? ` (${toleranceLabel(planLine.eff_tolerance_pct)})` : ''}
                   {form.qty !== '' && +form.qty !== planLine.qty && <span className="ml-1 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700">edited</span>}
                 </div>
                 <input type="number" min="1" value={form.qty}

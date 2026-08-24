@@ -1,3 +1,5 @@
+import { NO_LIMIT, isNoLimit, toleranceCeiling, ceilingForWire } from './tolerance.js';
+
 // Multi-order tolerance cascade allocation.
 //
 // Given a pool of available finished goods for ONE product and the open order
@@ -10,24 +12,35 @@
 //
 // line: { order_line_id, order_id, ordered, dispatched, tolerance_pct, ... }
 // returns {
-//   allocations: [{ ...line, need, allowed_max, tolerance_room, dispatch_qty, fills_order, uses_tolerance }],
+//   allocations: [{ ...line, need, allowed_max, tolerance_room, tolerance_no_limit,
+//                   dispatch_qty, fills_order, uses_tolerance }],
 //   dispatched_total, leftover
 // }
+//
+// `allowed_max` is null under a no-limit customer — there is no ceiling, and
+// Infinity does not survive JSON. `tolerance_room` is the CASCADE room: how
+// much this line will be offered, which under a finite tolerance is
+// ceiling - dispatched and under no-limit is the outstanding need.
 export function cascadeAllocate(available, lines = []) {
   let pool = Math.max(0, Math.floor(+available || 0));
   const allocations = lines.map(line => {
     const ordered = Math.max(0, +line.ordered || 0);
     const dispatched = Math.max(0, +line.dispatched || 0);
-    const tol = Math.max(0, +line.tolerance_pct || 0);
-    const allowedMax = Math.floor(ordered * (1 + tol / 100));
+    const noLimit = isNoLimit(line.tolerance_pct);
+    const tol = noLimit ? NO_LIMIT : Math.max(0, +line.tolerance_pct || 0);
     const need = Math.max(0, ordered - dispatched);          // still owed on the order
-    const room = Math.max(0, allowedMax - dispatched);       // dispatchable within tolerance
+    // A no-limit customer has no ceiling — but the SUGGESTION still stops at
+    // what the order actually wants. Otherwise the first line in cascade order
+    // swallows the whole product pool and every later order reads as short.
+    // No limit lifts the GATE; it does not redirect the stock.
+    const room = noLimit ? need : Math.max(0, toleranceCeiling(ordered, tol) - dispatched);
     const give = Math.min(pool, room);
     pool -= give;
     return {
       ...line,
       ordered, dispatched, tolerance_pct: tol,
-      need, allowed_max: allowedMax, tolerance_room: room,
+      tolerance_no_limit: noLimit,
+      need, allowed_max: ceilingForWire(ordered, tol), tolerance_room: room,
       dispatch_qty: give,
       fills_order: give >= need && need > 0,
       uses_tolerance: dispatched + give > ordered,           // dipped into tolerance band
@@ -67,6 +80,8 @@ export function annotateReadyLines(rows = [], perBox = new Map()) {
       const a = plan.allocations.find(x => x.order_line_id === l.order_line_id);
       l.suggested_dispatch = a?.dispatch_qty ?? 0;
       l.tolerance_room = a?.tolerance_room ?? 0;
+      l.tolerance_no_limit = a?.tolerance_no_limit ?? false;
+      l.allowed_max = a?.allowed_max ?? null;
       l.uses_tolerance = a?.uses_tolerance ?? false;
       l.leftover_qty = 0;
       l.qty_per_box = per;
