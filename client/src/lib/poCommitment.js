@@ -19,27 +19,40 @@ export const OPEN_ORDER = 'Open Order';
 // only when the server could prove the move; anything unknown counts as on.
 export const isLiveClaim = job => job?.on_board !== false;
 
-// The short label a cell shows without opening anything. One product names
-// itself; several are counted, because a cell that lists five carton names is a
-// cell nobody reads. `moved` is surfaced in the label only when EVERY claim has
-// moved off — a purchase now committed to nothing in practice, which is the one
-// case where the headline would otherwise lie.
+// What one job is CALLED in a cell: its code, which is what the plant says out
+// loud ("SW-368"), falling back to the carton name and then to the line id, so
+// a job is never nameless.
+const nameOf = job =>
+  job?.product_code || job?.product_name || `Line ${job?.order_line_id}`;
+
+// Every product a purchase is committed to, named. This deliberately does NOT
+// collapse to "N products": a count tells the buyer that an answer exists
+// without telling them the answer, so the cell has to be opened to learn the one
+// thing it was added to say. Codes are short — the live worst case is six on a
+// line — so the whole list fits and the row stays readable.
+//
+// Live claims lead; a claim whose job has since moved to another board sorts
+// last and carries `on_board:false` so the cell can mute it. `label` is the same
+// list as one string, for a title attribute.
 export function commitmentSummary(commitments = []) {
   const jobs = Array.isArray(commitments) ? commitments.filter(Boolean) : [];
-  if (!jobs.length) return { kind: 'open', count: 0, moved: 0, label: OPEN_ORDER, jobs: [] };
+  if (!jobs.length) return { kind: 'open', count: 0, moved: 0, names: [], label: OPEN_ORDER, jobs: [] };
 
   const live = jobs.filter(isLiveClaim);
   const moved = jobs.length - live.length;
-  const named = live.length ? live : jobs;
-  const label = named.length === 1
-    ? (named[0].product_code || named[0].product_name || `Line ${named[0].order_line_id}`)
-    : `${named.length} products`;
+  const names = [...live, ...jobs.filter(j => !isLiveClaim(j))].map(j => ({
+    key: j.order_line_id,
+    name: nameOf(j),
+    product_name: j.product_name || null,
+    on_board: j.on_board !== false,
+  }));
 
   return {
     kind: live.length ? 'committed' : 'moved',
     count: jobs.length,
     moved,
-    label,
+    names,
+    label: names.map(n => n.name).join(' · '),
     jobs,
   };
 }
