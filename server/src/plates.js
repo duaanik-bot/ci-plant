@@ -531,7 +531,13 @@ export function rackReusePlan({ components = [], available = [] } = {}) {
   const free = new Map();
   for (const row of Array.isArray(available) ? available : []) {
     const key = plateComponentKey(row);
-    free.set(key, (free.get(key) || 0) + Math.max(0, Number(row.available) || 0));
+    const entry = free.get(key) || { count: 0, candidates: [] };
+    entry.count += Math.max(0, Number(row.available) || 0);
+    // Candidates arrive already in pick order (PLATE_CANDIDATE_ORDER_SQL); a
+    // caller that supplies only a count still gets a working plan — it just
+    // cannot say WHICH plates, so `taking` stays empty.
+    if (Array.isArray(row.candidates)) entry.candidates.push(...row.candidates);
+    free.set(key, entry);
   }
   const lines = new Map();
   for (const component of Array.isArray(components) ? components : []) {
@@ -545,7 +551,7 @@ export function rackReusePlan({ components = [], available = [] } = {}) {
       needed: 0,
       // The rack figure is reported as it stands, so the form can say "1 of 5 on
       // rack" rather than silently hiding the four this PR has no use for.
-      available: free.get(key) || 0,
+      available: free.get(key)?.count || 0,
       usable: 0,
       component_ids: [],
     };
@@ -553,7 +559,14 @@ export function rackReusePlan({ components = [], available = [] } = {}) {
     line.component_ids.push(component.id);
     lines.set(key, line);
   }
-  const rows = [...lines.values()].map(line => ({ ...line, usable: Math.min(line.needed, line.available) }));
+  const rows = [...lines.values()].map(line => ({
+    ...line,
+    usable: Math.min(line.needed, line.available),
+    // PARITY, extended to identity: not just how many the click takes, but
+    // which. plateWearSummary reads this — never the shelf directly — so the
+    // wear a row reports is the wear of the plates the button would spend.
+    taking: (free.get(line.key)?.candidates || []).slice(0, Math.min(line.needed, line.available)),
+  }));
   return {
     needed: rows.reduce((sum, line) => sum + line.needed, 0),
     total: rows.reduce((sum, line) => sum + line.usable, 0),
@@ -688,10 +701,18 @@ export function componentPlate(component = {}) {
 // press. Cancelled colours leave the set for the same reason they leave
 // plateCountsOf — they are neither owed nor held.
 //
-// null, not an empty summary, when no colour has a plate: a requirement waiting on
-// plates to be BOUGHT has no wear to report, and a zero-run set would render as
-// brand-new stock the plant does not own.
-export function plateWearSummary(components = []) {
+// null, not an empty summary, when no colour has a plate AND the rack offers
+// none: a requirement waiting on plates to be BOUGHT has no wear to report, and
+// a zero-run set would render as brand-new stock the plant does not own.
+//
+// The reuse plan is the second reader. A colour that holds nothing but that the
+// Use-from-Rack click would cover IS about to print off those plates — hiding
+// their wear made two rows telling the same story look different: the set
+// proposed at creation warned "Used ×1" while the set the rack only learned to
+// cover later sat unmarked beside a "5 of 5 on rack" offer. The plates counted
+// here are the plan's own `taking`, never a fresh read of the shelf, so the
+// warning and the button can never disagree about which aluminium is meant.
+export function plateWearSummary(components = [], reuse = null) {
   const rows = (Array.isArray(components) ? components : [])
     // A consumed DRIP OFF leaves the wear picture the way a cancelled colour
     // does: it is neither owed nor held. The mask is single use, so its scrap
@@ -701,8 +722,7 @@ export function plateWearSummary(components = []) {
     .filter(row => row && row.status !== 'cancelled'
       && !(isDripOff(row) && row.status === 'scrapped'));
   const held = rows.map(row => ({ row, plate: componentPlate(row) })).filter(entry => entry.plate);
-  if (!held.length) return null;
-  const detail = held.map(({ row, plate }) => ({
+  const plateRow = (row, plate, source) => ({
     component_type: row.component_type || null,
     component_label: row.component_label || row.component_type || 'Plate',
     pantone_code: row.pantone_code || null,
@@ -712,18 +732,46 @@ export function plateWearSummary(components = []) {
     last_used_at: plate.last_used_at,
     wear: plate.runs > 0 ? 'used' : 'fresh',
     replace: PLATE_REPLACE_CONDITIONS.has(plate.condition),
-  }));
-  const runs = detail.map(row => row.runs);
+    source,
+  });
+  const detail = held.map(({ row, plate }) => plateRow(row, plate, plate.source));
+  // A plate a sibling colour already holds must not be offered again here — the
+  // shelf still lists it as available, but counting it twice would report five
+  // plates on a four-colour job.
+  const heldIds = new Set(held
+    .map(({ row }) => row.matched_asset_id || row.proposed_asset_id)
+    .filter(Boolean));
+  const offered = [];
+  for (const line of reuse?.lines || []) {
+    if (!line?.taking?.length) continue;
+    const bare = rows.filter(row => !componentPlate(row)
+      && RACK_CLAIMABLE_COMPONENT_STATUSES.includes(row.status)
+      && plateComponentKey(row) === line.key);
+    const pool = line.taking.filter(plate => plate && !heldIds.has(plate.id));
+    bare.slice(0, pool.length).forEach((row, index) => {
+      const plate = pool[index];
+      offered.push(plateRow(row, {
+        asset_number: plate.asset_number || null,
+        runs: Math.max(0, Number(plate.use_count) || 0),
+        condition: clean(plate.condition) || 'Good',
+        last_used_at: plate.last_used_at || null,
+      }, 'offer'));
+    });
+  }
+  const all = [...detail, ...offered];
+  if (!all.length) return null;
+  const runs = all.map(row => row.runs);
   return {
-    wear: detail.some(row => row.wear === 'used') ? 'used' : 'fresh',
-    plates: detail.length,
-    fresh: detail.filter(row => row.wear === 'fresh').length,
-    used: detail.filter(row => row.wear === 'used').length,
+    wear: all.some(row => row.wear === 'used') ? 'used' : 'fresh',
+    plates: all.length,
+    fresh: all.filter(row => row.wear === 'fresh').length,
+    used: all.filter(row => row.wear === 'used').length,
+    offered: offered.length,
     max_runs: Math.max(...runs),
     min_runs: Math.min(...runs),
     total_runs: runs.reduce((sum, n) => sum + n, 0),
-    replace: detail.filter(row => row.replace),
-    components: detail,
+    replace: all.filter(row => row.replace),
+    components: all,
   };
 }
 

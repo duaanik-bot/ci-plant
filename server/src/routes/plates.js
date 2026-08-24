@@ -19,7 +19,7 @@ import {
 } from '../plates.js';
 import {
   bestPlateCandidate, createPlateComponents, issuedPlatesForStage,
-  PLATE_ALREADY_CLAIMED_SQL, plateCandidates, syncPlateRequest,
+  PLATE_ALREADY_CLAIMED_SQL, PLATE_CANDIDATE_ORDER_SQL, plateCandidates, syncPlateRequest,
 } from '../plate-lifecycle.js';
 // One home for the Sync Master? rule, shared with the form that offers it.
 import { masterOutputSync } from '../../../client/src/lib/plateRack.js';
@@ -263,8 +263,18 @@ async function rackAvailabilityByRequest(requests = []) {
   const wanted = requests.filter(row => row.product_id);
   if (!wanted.length) return new Map();
   const versions = wanted.map(row => artworkVersionOf(row.specification || {}));
+  // Per plate rather than a count, ranked by the picker's own order — the same
+  // PLATE_CANDIDATE_ORDER_SQL bestPlateCandidate runs — so the wear the row
+  // reports (use_count, condition, asset_number) belongs to exactly the plates
+  // the Use-from-Rack click would take, never to whichever corner of the shelf
+  // happened to aggregate first.
   const rows = await q(`SELECT want.request_id, pa.component_type,
-      COALESCE(pa.pantone_code,'') AS pantone_code, COUNT(*)::int AS available
+      COALESCE(pa.pantone_code,'') AS pantone_code,
+      pa.id, pa.asset_number, pa.use_count, pa.condition,
+      pa.last_used_at, pa.plate_created_on,
+      row_number() OVER (
+        PARTITION BY want.request_id, pa.component_type, COALESCE(pa.pantone_code,'')
+        ORDER BY ${PLATE_CANDIDATE_ORDER_SQL}) AS pick_rank
     FROM unnest($1::int[],$2::int[],$3::text[],$4::bool[],$5::int[])
       AS want(request_id,product_id,artwork_key,artwork_is_revision,plate_master_id)
     JOIN plate_assets pa ON pa.product_id=want.product_id
@@ -272,14 +282,24 @@ async function rackAvailabilityByRequest(requests = []) {
       AND (want.plate_master_id IS NULL OR pa.plate_master_id=want.plate_master_id)
       AND pa.status='available' AND pa.active=1 AND pa.condition IN ('Good','Fair')
       AND NOT ${PLATE_ALREADY_CLAIMED_SQL}
-    GROUP BY 1,2,3`,
+    ORDER BY want.request_id, pa.component_type, pantone_code, pick_rank`,
   [wanted.map(row => Number(row.id)), wanted.map(row => Number(row.product_id)),
    versions.map(plateArtworkKey), versions.map(isBareArtworkRevision),
    wanted.map(row => requestPlateMasterId(row.components) || null)]);
   const byRequest = new Map();
   for (const row of rows) {
     const list = byRequest.get(row.request_id) || [];
-    list.push({ component_type: row.component_type, pantone_code: row.pantone_code || null, available: row.available });
+    let entry = list.find(item => item.component_type === row.component_type
+      && (item.pantone_code || '') === (row.pantone_code || ''));
+    if (!entry) {
+      entry = { component_type: row.component_type, pantone_code: row.pantone_code || null, available: 0, candidates: [] };
+      list.push(entry);
+    }
+    entry.available += 1;
+    entry.candidates.push({
+      id: row.id, asset_number: row.asset_number, use_count: row.use_count,
+      condition: row.condition, last_used_at: row.last_used_at, plate_created_on: row.plate_created_on,
+    });
     byRequest.set(row.request_id, list);
   }
   return byRequest;
@@ -365,7 +385,12 @@ async function requirementRows(id = null) {
   const shaped = rows.map(row => {
     const requestComponents = grouped.get(row.id) || [];
     const suggestedSize = defaultPlateSize(row.specification || {}, requestComponents);
-    const wear = plateWearSummary(requestComponents);
+    // The offer feeds the wear: a colour the click would cover is about to
+    // print off those very plates, so their wear belongs on the row.
+    const rackReuse = rackReusePlan({
+      components: requestComponents, available: rackFree.get(row.id) || [],
+    });
+    const wear = plateWearSummary(requestComponents, rackReuse);
     const productMasterComponents = plateComponentsFromSpec({
       colors: row.master_colors,
       colour_type: row.master_colour_type,
@@ -411,9 +436,7 @@ async function requirementRows(id = null) {
       plate_wear_remark: plateWearRemark(wear),
       // The live warehouse answer, per colour and as one headline. The screen
       // prints it and the Use-from-Rack button spends exactly it.
-      rack_reuse: rackReusePlan({
-        components: requestComponents, available: rackFree.get(row.id) || [],
-      }),
+      rack_reuse: rackReuse,
       product_master_components: productMasterComponents,
       product_master_colour_count: productMasterComponents.length,
       suggested_plate_size: suggestedSize,

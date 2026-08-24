@@ -11,6 +11,7 @@ import {
   canApproveExtraSheets, canDecideManagement, mgtDecisionError, notificationRecipients,
 } from '../approvals.js';
 import { CATEGORIES, KNOWN_KINDS, OTHER, categoryOf, isCategory, kindsFor } from '../notify-categories.js';
+import { publicKey, pushConfigured, pushPayload, pushToUsers } from '../push.js';
 
 const r = Router();
 
@@ -167,6 +168,73 @@ r.post('/notifications/read', async (req, res, next) => {
       }
     }
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ── Web push — the phone in the reader's pocket ─────────────────────────────
+// The bell only speaks to somebody already looking at the app. These three
+// routes are how a device asks to be reachable when nobody is.
+
+// The VAPID public key the browser needs to subscribe, plus whether the server
+// can push at all. `enabled: false` is a real answer, not an error: without
+// keys the app runs exactly as it did, and the client uses this to say so
+// plainly instead of offering a button that could never work.
+r.get('/push/key', (_req, res) => {
+  res.json({ enabled: pushConfigured, key: pushConfigured ? publicKey() : null });
+});
+
+r.post('/push/subscribe', async (req, res, next) => {
+  try {
+    const sub = req.body?.subscription || req.body || {};
+    const endpoint = typeof sub.endpoint === 'string' ? sub.endpoint.trim() : '';
+    const p256dh = typeof sub.keys?.p256dh === 'string' ? sub.keys.p256dh : '';
+    const auth = typeof sub.keys?.auth === 'string' ? sub.keys.auth : '';
+    if (!endpoint || !p256dh || !auth) {
+      return res.status(400).json({ error: 'A push subscription needs an endpoint and both keys' });
+    }
+    // ON CONFLICT on the ENDPOINT, moving it to this user. The endpoint is the
+    // device: when the plant login and the MD both use the same tablet, the
+    // subscription must follow whoever is signed in, or one of them would be
+    // buzzed for the other's approvals long after they signed out.
+    await q(`
+      INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent, last_ok_at)
+      VALUES ($1,$2,$3,$4,$5,NULL)
+      ON CONFLICT (endpoint) DO UPDATE
+        SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh,
+            auth = EXCLUDED.auth, user_agent = EXCLUDED.user_agent, failures = 0`,
+      [req.user.id, endpoint, p256dh, auth, String(req.headers['user-agent'] || '').slice(0, 300)]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+r.post('/push/unsubscribe', async (req, res, next) => {
+  try {
+    const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint.trim() : '';
+    if (!endpoint) return res.status(400).json({ error: 'Which device? The endpoint is required' });
+    // Scoped to the caller: an endpoint is not a secret worth trusting from a
+    // stranger, and nobody may silence somebody else's phone.
+    await q('DELETE FROM push_subscriptions WHERE endpoint=$1 AND user_id=$2', [endpoint, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// "Did it actually work?" — answered by buzzing the asker's own devices and
+// reporting what the push services said. Sent inline (not deferred) precisely
+// because the tally IS the answer; every other push in the app is fire-and-
+// forget. Nobody else can be buzzed by this: the recipient is always req.user.
+r.post('/push/test', async (req, res, next) => {
+  try {
+    if (!pushConfigured) return res.status(400).json({ error: 'Push is not configured on this server' });
+    const out = await pushToUsers([req.user.id], pushPayload({
+      kind: 'note',
+      title: 'Colour Impressions — notifications are on',
+      body: 'This device will now buzz for approvals and messages.',
+      link: '/',
+    }));
+    if (!out.devices) {
+      return res.status(400).json({ error: 'This login has no device registered yet — turn notifications on first' });
+    }
+    res.json(out);
   } catch (e) { next(e); }
 });
 
