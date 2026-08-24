@@ -1334,7 +1334,8 @@ function AssetHistoryModal({ asset, onClose, onChanged }) {
       )}
       <div>
         <div className="mb-2 text-xs font-bold uppercase text-slate-500">Movements — every plate in this set</div>
-        <DataTable rows={detail.movements || []} columns={columns} empty="No movements recorded" />
+        <DataTable rows={detail.movements || []} columns={columns} defaultSort={{ key: 'id', dir: 'desc' }}
+          empty="No movements recorded" />
       </div>
     </div>}
   </Modal>;
@@ -2532,7 +2533,7 @@ export default function PlatesLifecycle() {
           placeholder="Why these are going out without a PR (optional)" /></Field>
       </div>
     </Modal>}
-    {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
+    {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
     {tab==='grns' && <>
       {/* Receiving starts here as well as on the PO row. The PO register is where
           you go when you already know the order; this is where you go when what
@@ -2541,7 +2542,7 @@ export default function PlatesLifecycle() {
         <Button size="sm" variant="success" onClick={()=>setNewGrn(true)}><PackagePlus size={13}/> Create GRN</Button>
         <span className="text-[11px] text-slate-400">Against a purchase order, or direct for plates that arrived without one.</span>
       </div>}
-      <DataTable searchable rows={grns} columns={grnColumns} empty="No Plate GRNs" exportName="Plate GRN Register" />
+      <DataTable searchable rows={grns} columns={grnColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No Plate GRNs" exportName="Plate GRN Register" />
     </>}
     {tab==='warehouse' && <>
       {/* Rack switch sits with the selection bar rather than on a band of its own —
@@ -2594,7 +2595,7 @@ export default function PlatesLifecycle() {
           </Button>}
         </div>}
       </div>
-      <DataTable searchable selectable rows={warehouseRows} columns={warehouseColumns}
+      <DataTable searchable selectable rows={warehouseRows} columns={warehouseColumns} defaultSort={{ key: 'id', dir: 'desc' }}
         selectedIds={rackPicked}
         onToggleRow={(row,checked)=>setRackPicked(current=>checked?[...current,row.id]:current.filter(id=>id!==row.id))}
         onToggleAll={(rows,checked)=>{ const ids=rows.map(row=>row.id); setRackPicked(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}
@@ -2602,8 +2603,8 @@ export default function PlatesLifecycle() {
         empty={warehouseView === 'aside' ? 'Nothing is set aside — every plate is on a rack or on a press' : 'No available plate sets in this rack'}
         exportName={warehouseView === 'aside' ? 'Plates Set Aside' : 'Plates Warehouse'} />
     </>}
-    {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} empty="No plates awaiting return verification" exportName="Plate Returns" />}
-    {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} empty="No plate movements" exportName="Plate Movement History" />}
+    {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plates awaiting return verification" exportName="Plate Returns" />}
+    {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plate movements" exportName="Plate Movement History" />}
 
     {detail && editForm && <Modal open onClose={() => {setDetail(null);setEditForm(null);}} title={`${detail.request_number} · ${detail.jc_number}`} wide
       footer={<>

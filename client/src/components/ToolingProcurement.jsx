@@ -719,7 +719,7 @@ function GenericToolingProcurement({ family }) {
           { key: 'pending', label: 'Pending', count: pos.filter(po => !['received','closed'].includes(po.status)).length },
           { key: 'completed', label: 'Completed', count: pos.filter(po => ['received','closed'].includes(po.status)).length },
         ]} />
-        <DataTable searchable rows={poRows} columns={poColumns} empty="No purchase orders in this view" exportName={`${meta.plural} Purchase Orders`} />
+        <DataTable searchable rows={poRows} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No purchase orders in this view" exportName={`${meta.plural} Purchase Orders`} />
       </>}
 
       {tab === 'grns' && <>
@@ -727,7 +727,7 @@ function GenericToolingProcurement({ family }) {
           { key: 'pending', label: 'Pending QC', count: grns.filter(row => row.status === 'quarantine').length },
           { key: 'completed', label: 'Completed', count: grns.filter(row => row.status !== 'quarantine').length },
         ]} />
-        <DataTable searchable rows={grnRows} columns={grnColumns} empty="No GRNs in this view" exportName={`${meta.plural} GRN Register`} />
+        <DataTable searchable rows={grnRows} columns={grnColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No GRNs in this view" exportName={`${meta.plural} GRN Register`} />
       </>}
 
       {tab === 'warehouse' && <>
@@ -737,10 +737,11 @@ function GenericToolingProcurement({ family }) {
           { key: 'movements', label: 'Movements', count: movements.length },
           { key: 'history', label: 'Purchase History', count: history.length },
         ]} />
-        {warehouseView === 'stock' && <DataTable searchable rows={inventory} columns={inventoryColumns} onRowClick={setItemModal} empty={`No ${meta.singular.toLowerCase()} masters`} exportName={`${meta.plural} Warehouse`} />}
-        {warehouseView === 'batches' && <DataTable searchable rows={batches.map(row => ({ ...row, free: num(row.qty) - num(row.reserved_qty) }))} columns={batchColumns} empty="No warehouse batches" exportName={`${meta.plural} Batches`} />}
-        {warehouseView === 'movements' && <DataTable searchable rows={movements} columns={movementColumns} empty="No stock movements" exportName={`${meta.plural} Movement Ledger`} />}
-        {warehouseView === 'history' && <DataTable searchable rows={history} columns={historyColumns} empty="No purchase history" exportName={`${meta.plural} Purchase History`} />}
+        {warehouseView === 'stock' && <DataTable searchable rows={inventory} columns={inventoryColumns} defaultSort={{ key: 'code', dir: 'asc' }} onRowClick={setItemModal} empty={`No ${meta.singular.toLowerCase()} masters`} exportName={`${meta.plural} Warehouse`} />}
+        {warehouseView === 'batches' && <DataTable searchable rows={batches.map(row => ({ ...row, free: num(row.qty) - num(row.reserved_qty) }))} columns={batchColumns}
+          defaultSort={{ key: 'id', dir: 'desc' }} empty="No warehouse batches" exportName={`${meta.plural} Batches`} />}
+        {warehouseView === 'movements' && <DataTable searchable rows={movements} columns={movementColumns} defaultSort={{ key: 'at', dir: 'desc' }} empty="No stock movements" exportName={`${meta.plural} Movement Ledger`} />}
+        {warehouseView === 'history' && <DataTable searchable rows={history} columns={historyColumns} defaultSort={{ key: 'created_at', dir: 'desc' }} empty="No purchase history" exportName={`${meta.plural} Purchase History`} />}
       </>}
 
       {tab === 'pendency' && <>
@@ -749,7 +750,8 @@ function GenericToolingProcurement({ family }) {
           { key: 'items', label: meta.plural, count: pendency.items.length },
           { key: 'parties', label: 'Vendors', count: pendency.parties.length },
         ]} />
-        <DataTable searchable rows={pendency[pendencyView] || []} columns={pendencyColumns} empty="Nothing is pending" exportName={`${meta.plural} Pendency`} />
+        <DataTable searchable rows={pendency[pendencyView] || []} columns={pendencyColumns}
+          defaultSort={{ key: 'expected_date', dir: 'asc' }} empty="Nothing is pending" exportName={`${meta.plural} Pendency`} />
       </>}
 
       {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={async () => { setSelectedIds([]); await load(); }} />}

@@ -452,8 +452,8 @@ function ToolingOperations({ family = 'shade_card' }) {
         exportSubtitle={`Tooling Hub · ${meta.plural} job queue`} />}
 
       {view === 'rack' && (family === 'shade_card'
-        ? <DataTable searchable dense rows={shadeCards} columns={cardColumns} onRowClick={r => { window.location.href = `/shade-cards?q=${encodeURIComponent(r.sc_number)}`; }} empty="No shade cards in the register" exportName="Shade Card Register" />
-        : <DataTable searchable dense rows={tools} columns={rackColumns} onRowClick={setToolForm} empty={`No ${meta.plural.toLowerCase()} in rack inventory`} exportName={`${meta.plural} Rack Inventory`} />)}
+        ? <DataTable searchable dense rows={shadeCards} columns={cardColumns} defaultSort={{ key: 'id', dir: 'desc' }} onRowClick={r => { window.location.href = `/shade-cards?q=${encodeURIComponent(r.sc_number)}`; }} empty="No shade cards in the register" exportName="Shade Card Register" />
+        : <DataTable searchable dense rows={tools} columns={rackColumns} defaultSort={{ key: 'code', dir: 'asc' }} onRowClick={setToolForm} empty={`No ${meta.plural.toLowerCase()} in rack inventory`} exportName={`${meta.plural} Rack Inventory`} />)}
 
       {view === 'movements' && <DataTable searchable dense rows={events} columns={eventColumns}
         empty="No movements recorded" defaultSort={{ key: 'at', dir: 'desc' }} exportName={`${meta.plural} Movement Ledger`} />}

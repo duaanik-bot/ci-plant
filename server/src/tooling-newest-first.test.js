@@ -71,3 +71,69 @@ test('DataTable really does fall back to first-column-ascending — the reason t
   assert.match(ui, /dir: 'asc'/,
     'DataTable no longer defaults to ascending — re-check every requirement table');
 });
+
+// ── EVERY tooling table declares its order ────────────────────────────────
+//
+// The registers had the same defect as the queues, and in places a worse one:
+// the plate Movement History and the tooling Movement Ledger both lead with a
+// date column, so first-column-ascending showed the OLDEST movement first — a
+// ledger opened to page one of ancient history.
+//
+// The durable rule is not "these particular tables are desc". It is that an
+// undeclared sort is a latent bug: DataTable silently invents one, the call
+// site reads as if it were deferring to the server, and nobody can see the
+// difference in review. So every table in the tooling surfaces must SAY what
+// it sorts by — including the catalogues, whose alphabetical order is right
+// but was equally accidental.
+const TABLE_FILES = [
+  '../../client/src/components/PlatesLifecycle.jsx',
+  '../../client/src/components/ToolingProcurement.jsx',
+  '../../client/src/pages/Tooling.jsx',
+];
+
+function dataTableBlocks(source) {
+  const blocks = [];
+  let at = source.indexOf('<DataTable');
+  while (at >= 0) {
+    const end = source.indexOf('/>', at);
+    blocks.push(source.slice(at, end < 0 ? at + 900 : end + 2));
+    at = source.indexOf('<DataTable', at + 1);
+  }
+  return blocks;
+}
+
+for (const file of TABLE_FILES) {
+  test(`every DataTable in ${file.split('/').pop()} declares a defaultSort`, () => {
+    const blocks = dataTableBlocks(read(file));
+    assert.ok(blocks.length >= 4, `expected several tables in ${file}, found ${blocks.length}`);
+    const undeclared = blocks
+      .filter(block => !/defaultSort=/.test(block))
+      .map(block => (block.match(/rows=\{[^}]*\}?/) || ['<unknown rows>'])[0]);
+    assert.deepEqual(undeclared, [],
+      `these tables declare no defaultSort, so DataTable sorts them by their first column `
+      + `ascending — which for a dated ledger means oldest-first: ${undeclared.join(', ')}`);
+  });
+}
+
+test('the chronological registers are newest-first, not oldest-first', () => {
+  // Named individually because "has a defaultSort" would be satisfied by an
+  // ascending one, and ascending is precisely the bug on these.
+  const CHRONOLOGICAL = [
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={pos}', 'Plate PO register'],
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={grns}', 'Plate GRN register'],
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={warehouseRows}', 'Plates Warehouse'],
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={returns}', 'Plate Returns'],
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={history}', 'Plate Movement History'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={poRows}', 'Tooling PO register'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={grnRows}', 'Tooling GRN register'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={movements}', 'Tooling Movement Ledger'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={history}', 'Tooling Purchase History'],
+    ['../../client/src/pages/Tooling.jsx', 'rows={shadeCards}', 'Shade Card register'],
+  ];
+  for (const [file, anchor, what] of CHRONOLOGICAL) {
+    const block = sliceOf(read(file), anchor, 700);
+    const sort = (block.match(/defaultSort=\{\{[^}]*\}\}/) || [''])[0];
+    assert.match(sort, /dir:\s*'desc'/,
+      `${what} must open newest-first — it reads "${sort || 'no defaultSort'}"`);
+  }
+});
