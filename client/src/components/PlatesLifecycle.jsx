@@ -2146,7 +2146,14 @@ export default function PlatesLifecycle() {
       </span>;
     } },
     { key: 'returned_by', label: 'Returned By' },
-    { key: 'return_date', label: 'Returned', render: row => fmt.dt(row.return_date) },
+    // return_date comes from a LEFT JOIN LATERAL and can be missing. Sorted
+    // ascending for the FIFO queue, a null would normalise to '' and compare
+    // BELOW every real timestamp — floating an undated return to the head of
+    // the queue as though it had waited longest. Unknown sorts LAST instead,
+    // which is also what the route's ORDER BY m.at does (Postgres puts NULLs
+    // last ascending), so the screen and the query agree.
+    { key: 'return_date', label: 'Returned', render: row => fmt.dt(row.return_date),
+      sortValue: row => (row.return_date ? Date.parse(row.return_date) : Infinity) },
     { key: 'previous_location', label: 'Previous Rack', render: row => row.previous_location || row.rack_location || '—' },
     { key: 'actions', label: '', sortable: false, render: row => canVerify() ? <Button size="sm" variant="success" onClick={event => { event.stopPropagation(); setReturnModal(row); }}><FileCheck2 size={12} /> Verify</Button> : null },
   ];
@@ -2603,7 +2610,12 @@ export default function PlatesLifecycle() {
         empty={warehouseView === 'aside' ? 'Nothing is set aside — every plate is on a rack or on a press' : 'No available plate sets in this rack'}
         exportName={warehouseView === 'aside' ? 'Plates Set Aside' : 'Plates Warehouse'} />
     </>}
-    {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plates awaiting return verification" exportName="Plate Returns" />}
+    {/* FIFO, not newest-first. This is a WORK QUEUE, not a register: the
+        warehouse verifies the plate that has waited longest, so the oldest
+        return leads. Same order the route returns (ORDER BY m.at). */}
+    {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns}
+      defaultSort={{ key: 'return_date', dir: 'asc' }}
+      empty="No plates awaiting return verification" exportName="Plate Returns" />}
     {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plate movements" exportName="Plate Movement History" />}
 
     {detail && editForm && <Modal open onClose={() => {setDetail(null);setEditForm(null);}} title={`${detail.request_number} · ${detail.jc_number}`} wide

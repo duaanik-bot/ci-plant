@@ -122,7 +122,6 @@ test('the chronological registers are newest-first, not oldest-first', () => {
     ['../../client/src/components/PlatesLifecycle.jsx', 'rows={pos}', 'Plate PO register'],
     ['../../client/src/components/PlatesLifecycle.jsx', 'rows={grns}', 'Plate GRN register'],
     ['../../client/src/components/PlatesLifecycle.jsx', 'rows={warehouseRows}', 'Plates Warehouse'],
-    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={returns}', 'Plate Returns'],
     ['../../client/src/components/PlatesLifecycle.jsx', 'rows={history}', 'Plate Movement History'],
     ['../../client/src/components/ToolingProcurement.jsx', 'rows={poRows}', 'Tooling PO register'],
     ['../../client/src/components/ToolingProcurement.jsx', 'rows={grnRows}', 'Tooling GRN register'],
@@ -136,4 +135,43 @@ test('the chronological registers are newest-first, not oldest-first', () => {
     assert.match(sort, /dir:\s*'desc'/,
       `${what} must open newest-first — it reads "${sort || 'no defaultSort'}"`);
   }
+});
+
+// ── The queues that are deliberately NOT newest-first ─────────────────────
+//
+// Pinned individually, because each looks like an oversight next to a dozen
+// desc declarations and would be "tidied up" by the next person through here.
+// Every one of them is a decision, and the reason is what makes it reviewable.
+test('the work queues and catalogues stay ascending on purpose', () => {
+  const DELIBERATELY_ASCENDING = [
+    ['../../client/src/components/PlatesLifecycle.jsx', 'rows={returns}', 'return_date',
+      'Plate Returns is FIFO: the plate that has waited longest is verified first'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={pendency[pendencyView] || []}', 'expected_date',
+      'Pendency answers "what is overdue", so the oldest promise leads'],
+    ['../../client/src/components/ToolingProcurement.jsx', 'rows={inventory}', 'code',
+      'The inventory masters are a catalogue — you arrive knowing the code'],
+    ['../../client/src/pages/Tooling.jsx', 'rows={tools}', 'code',
+      'The rack inventory is a catalogue — same reason'],
+  ];
+  for (const [file, anchor, key, why] of DELIBERATELY_ASCENDING) {
+    const block = sliceOf(read(file), anchor, 700);
+    const sort = (block.match(/defaultSort=\{\{[^}]*\}\}/) || [''])[0];
+    assert.match(sort, new RegExp(`key:\\s*'${key}'`), `${why} — expected key '${key}', got "${sort}"`);
+    assert.match(sort, /dir:\s*'asc'/, `${why} — it reads "${sort}"`);
+  }
+});
+
+test('a return with no recorded time cannot jump the FIFO queue', () => {
+  // return_date comes from a LEFT JOIN LATERAL, so it can be null — and
+  // normalizeSortValue turns null into '', which compares BELOW every
+  // timestamp. Ascending, that floats an undated return to the head of the
+  // queue and it reads as the one that has waited longest. The column supplies
+  // its own sortValue so a missing time sorts LAST, matching the route's
+  // ORDER BY m.at (Postgres puts NULLs last ascending).
+  const src = read('../../client/src/components/PlatesLifecycle.jsx');
+  const at = src.indexOf("key: 'return_date'");
+  assert.ok(at > 0, "the returns table has no return_date column");
+  const col = src.slice(at, at + 400);
+  assert.match(col, /sortValue:/,
+    'return_date declares no sortValue, so an undated return sorts to the top of the FIFO queue');
 });
