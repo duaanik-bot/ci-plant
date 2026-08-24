@@ -7,7 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ConfirmDialog, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, ResetFilters, rowMatches, searchText, SearchInput, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
 // One chip shape for every filter rail in the ERP — see FilterChip.jsx.
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
@@ -15,11 +15,13 @@ import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
+import { OrderedForCell, OrderedForModal } from '../components/OrderedFor.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { clubSuggestions } from '../lib/prClubbing.js';
+import { commitmentText } from '../lib/poCommitment.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle } from 'lucide-react';
 
@@ -209,6 +211,15 @@ export default function Procurement() {
   const [poReceipt, setPoReceipt] = useState(null);  // null | 'none' | 'part'   (pending view)
   const [poStage, setPoStage] = useState(null);      // null | 'received' | 'closed' (completed view)
   const [poOverdue, setPoOverdue] = useState(false); // pending view
+  // One search box per register, owned by the page so the KPI strip, the
+  // footer total and the export all count the SAME rows the table shows.
+  // Matching runs through rowMatches → squash(), which is blind to spaces,
+  // hyphens and the x in a size: 'cipo21', 'CI-PO-21' and '20 x 38' all land.
+  const [poQ, setPoQ] = useState('');
+  const [pendQ, setPendQ] = useState('');
+  // The board line whose committed products are being read — the modal behind
+  // the Ordered For cell on both registers.
+  const [orderedFor, setOrderedFor] = useState(null);
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
 
   // Build the requisition payload from the multi-line form.
@@ -887,15 +898,20 @@ export default function Procurement() {
   const poPending = poView === 'pending';
   // Each axis is offered on ONE view and must stop filtering on the other —
   // a chip left lit but off screen empties the list with nothing to point at.
+  // A PO card carries its lines, and each line carries the jobs it was bought
+  // for, so rowMatches' whole-record haystack already reaches the product code,
+  // the customer and the sales PO nested two levels down. Nothing to add.
   const poList = poScope
     .filter(po => !poReceipt || !poPending || poReceiptOf(po) === poReceipt)
     .filter(po => !poOverdue || !poPending || poIsOverdue(po))
-    .filter(po => !poStage || poPending || po.status === poStage);
+    .filter(po => !poStage || poPending || po.status === poStage)
+    .filter(po => rowMatches(po, poQ));
   const poChipCount = fn => poScope.filter(fn).length;
   const poFilters = useFilterReset([
     [poReceipt, setPoReceipt, null, 'receipt'],
     [poStage, setPoStage, null, 'stage'],
     [poOverdue, setPoOverdue, false, 'overdue'],
+    [poQ, setPoQ, '', 'search'],
   ]);
   const grnRows = grns.filter(g => (grnView === 'completed' ? g.status !== 'quarantine' : g.status === 'quarantine'));
   const prCount = k => prs.filter(p => PR_GROUPS[k].includes(p.status)).length;
@@ -1251,6 +1267,8 @@ export default function Procurement() {
                 { key: 'pending', label: 'Pending', count: pos.filter(p => !poIsDone(p)).length },
                 { key: 'completed', label: 'Completed', count: pos.filter(poIsDone).length },
               ]} />
+              <SearchInput value={poQ} onChange={setPoQ}
+                placeholder="PO, vendor, board, product, customer, sales PO…" />
             </div>
             {/* The same rail as the requisition register — FilterChip.jsx, group
                 caption for identity, colour only where somebody has to act. Late
@@ -1300,9 +1318,10 @@ export default function Procurement() {
                 title: 'Purchase Orders',
                 subtitle: 'Procurement · PO register with line-wise receipt status',
                 summary: [
-                  { label: 'POs', value: pos.length },
-                  { label: 'Open', value: pos.filter(p => p.status !== 'closed').length },
-                  { label: 'Lines pending', value: pos.reduce((s, p) => s + p.lines.filter(l => l.received_qty < l.qty).length, 0) },
+                  { label: 'POs', value: poList.length },
+                  { label: 'Open', value: poList.filter(p => p.status !== 'closed').length },
+                  { label: 'Lines pending', value: poList.reduce((s, p) => s + p.lines.filter(l => l.received_qty < l.qty).length, 0) },
+                  { label: 'Open-order lines', value: poList.reduce((s, p) => s + p.lines.filter(l => !l.commitments?.length).length, 0) },
                 ],
                 columns: [
                   { key: 'po_number', label: 'PO' },
@@ -1310,17 +1329,21 @@ export default function Procurement() {
                   { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
                   { key: 'expected_date', label: 'Expected', export: r => (r.expected_date ? fmt.date(r.expected_date) : '—') },
                   { key: 'material_name', label: 'Board' },
+                  { key: 'ordered_for', label: 'Ordered For', export: r => commitmentText(r.commitments) },
                   { key: 'qty', label: 'Ordered', align: 'right', export: r => `${fmt.num(r.qty)} ${r.unit}` },
                   { key: 'received_qty', label: 'Received', align: 'right', export: r => fmt.num(r.received_qty) },
                   { key: 'pending', label: 'Pending', align: 'right', export: r => fmt.num(Math.max(0, r.qty - r.received_qty)) },
                   { key: 'rate', label: 'Rate', align: 'right', export: r => `Rs ${r.rate}` },
                 ],
-                rows: pos.flatMap(po => po.lines.map(l => ({ ...l, po_number: po.po_number, vendor_name: po.vendor_name, status: po.status, expected_date: po.expected_date }))),
+                // The register as it stands on screen — a filtered view whose
+                // export ignored the filter would be a different document.
+                rows: poList.flatMap(po => po.lines.map(l => ({ ...l, po_number: po.po_number, vendor_name: po.vendor_name, status: po.status, expected_date: po.expected_date }))),
               })} />
             </div>
           )}
           {poList.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">
-            {poFilters.dirty ? 'Nothing matches those filters — Reset filters brings the register back'
+            {poQ ? `Nothing on this register matches “${poQ}”`
+              : poFilters.dirty ? 'Nothing matches those filters — Reset filters brings the register back'
               : poView === 'completed' ? 'No completed purchase orders yet.' : 'No pending purchase orders — every order is fully received.'}</p>}
           {poList.map(po => {
             const pendingLines = po.lines.filter(l => l.received_qty < l.qty);
@@ -1365,7 +1388,9 @@ export default function Procurement() {
               </div>
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                  <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Ordered</th>
+                  <th className="px-3 py-1.5">Board</th>
+                  <th className="px-3 py-1.5">Ordered For</th>
+                  <th className="px-3 py-1.5 text-right">Ordered</th>
                   <th className="px-3 py-1.5 text-right">Received</th><th className="px-3 py-1.5 text-right">Pending</th>
                   <th className="px-3 py-1.5 text-center">Fulfillment</th>
                   <th className="px-3 py-1.5 text-right">Rate</th><th className="px-3 py-1.5 text-right"></th>
@@ -1380,8 +1405,15 @@ export default function Procurement() {
                     const pk = packets(mat, +l.qty);
                     const rpk = ratePerKgFromSheet(mat, l.rate);
                     const pRate = rpk == null ? null : packetRate(mat, rpk);
+                    const lineCtx = { ...l, po_number: po.po_number, vendor_name: po.vendor_name };
                     return (
-                    <tr key={l.id} className="border-b border-gray-50 last:border-0">
+                    <tr key={l.id}
+                      // The row is a door to the order it belongs to; the board
+                      // cell is a door to the jobs it was bought for. Two
+                      // destinations, so the inner one stops the bubble.
+                      onClick={() => navigate(`/procurement/po/${po.id}`)}
+                      title={`Open ${po.po_number}`}
+                      className="cursor-pointer border-b border-gray-50 transition-colors last:border-0 hover:bg-brand-50/40">
                       <td className="px-3 py-2">
                         {l.material_name}
                         {/* A consolidated line names what fed it, and how much each
@@ -1392,6 +1424,9 @@ export default function Procurement() {
                             {l.source_prs.map(s => `${s.pr_number} ${fmt.num(s.qty)}`).join(' · ')}
                           </div>
                         )}
+                      </td>
+                      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                        <OrderedForCell commitments={l.commitments} onOpen={() => setOrderedFor(lineCtx)} />
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         <div>{fmt.num(l.qty)} {l.unit}</div>
@@ -1406,7 +1441,7 @@ export default function Procurement() {
                           {pRate != null && <div className="text-[10px] text-slate-400">₹{pRate.toFixed(2)}/pkt</div>}
                         </> : `₹${(+l.rate || 0).toFixed(2)}`}
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-2 text-right" onClick={e => e.stopPropagation()}>
                         {l.received_qty < l.qty && po.status !== 'closed' && (
                           <Button size="sm" variant="secondary" onClick={() => setReceivePo({ po, line: l, qty: '', batch_no: '', ...GRN_META() })}>Receive</Button>
                         )}
@@ -1499,9 +1534,46 @@ export default function Procurement() {
           {!pendency ? <p className="py-10 text-center text-sm text-slate-400">Loading pendency…</p> : pendency.lines.length === 0 ? (
             <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">Nothing pending — every open PO is fully received.</p>
           ) : (() => {
-            const t = pendency.totals || {};
-            const ordered = pendency.lines.reduce((s, l) => s + +l.qty, 0);
-            const received = pendency.lines.reduce((s, l) => s + +l.received_qty, 0);
+            // Everything below counts the SEARCHED set — the KPI strip, the
+            // footer total, the roll-ups and the export alike. A search that
+            // narrowed the table while the headline kept quoting the whole
+            // register would make the two disagree on screen, which is how a
+            // KPI stops being believed.
+            const lines = pendency.lines.filter(l => rowMatches(l, pendQ));
+            const sum = (rows, f) => rows.reduce((s, r0) => s + (+f(r0) || 0), 0);
+            const t = {
+              lines: lines.length,
+              items: new Set(lines.map(l => l.material_id)).size,
+              parties: new Set(lines.map(l => l.vendor_id)).size,
+              pending_qty: sum(lines, l => l.pending_qty),
+              pending_value: sum(lines, l => l.pending_value),
+              pending_weight: sum(lines, l => l.pending_weight) || null,
+            };
+            const ordered = sum(lines, l => l.qty);
+            const received = sum(lines, l => l.received_qty);
+            // The server's own roll-up rule, re-run over the searched rows. Same
+            // grouping, same sort — it exists here only so a search reaches the
+            // Item / Vendor / Grade views too.
+            const rollup = (key, label) => {
+              const map = {};
+              for (const l of lines) {
+                const k = l[key];
+                (map[k] ||= { key: k, label: l[label], pending_qty: 0, pending_value: 0, pending_weight: 0, po_count: new Set(), lines: 0, max_age: 0, overdue: 0 });
+                map[k].pending_qty += +l.pending_qty || 0;
+                map[k].pending_value += +l.pending_value || 0;
+                map[k].pending_weight += +l.pending_weight || 0;
+                map[k].po_count.add(l.po_id);
+                map[k].lines += 1;
+                map[k].max_age = Math.max(map[k].max_age, l.age_days);
+                map[k].overdue = Math.max(map[k].overdue, l.overdue_days);
+              }
+              return Object.values(map)
+                .map(v0 => ({ ...v0, po_count: v0.po_count.size, pending_weight: v0.pending_weight || null }))
+                .sort((a, b) => b.pending_value - a.pending_value || b.pending_qty - a.pending_qty);
+            };
+            const byMaterial = rollup('material_id', 'material_name');
+            const byVendor = rollup('vendor_id', 'vendor_name');
+            const byGrade = rollup('grade', 'grade').filter(g => g.key);
             const views = [['lines', 'PO Lines'], ['items', 'Item-wise Pendency'], ['parties', 'Vendor-wise Pendency'], ['grades', 'Grade-wise Pendency']];
             const kpi = (label, value, tone) => (
               <div key={label} className={`rounded-xl px-3 py-1.5 text-right ${tone === 'amber' ? 'bg-amber-50' : tone === 'brand' ? 'bg-brand-50' : 'bg-slate-100/70'}`}>
@@ -1513,8 +1585,12 @@ export default function Procurement() {
             <>
               {/* Summary bar: sub-view tabs + live KPIs */}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-3 py-2.5 shadow-card backdrop-blur-xl">
-                <SubTabs active={pendencyView} onChange={setPendencyView}
-                  views={views.map(([key, label]) => ({ key, label }))} />
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <SubTabs active={pendencyView} onChange={setPendencyView}
+                    views={views.map(([key, label]) => ({ key, label }))} />
+                  <SearchInput value={pendQ} onChange={setPendQ}
+                    placeholder="PO, supplier, board, product, customer, sales PO…" />
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {kpi('Lines', fmt.num(t.lines))}
                   {kpi('Items', fmt.num(t.items))}
@@ -1545,6 +1621,7 @@ export default function Procurement() {
                         { key: 'po_number', label: 'PO' },
                         { key: 'vendor_name', label: 'Supplier' },
                         { key: 'material_name', label: 'Board' },
+                        { key: 'ordered_for', label: 'Ordered For', export: l => commitmentText(l.commitments) },
                         { key: 'qty', label: 'Ordered', align: 'right', export: l => `${fmt.num(l.qty)} ${l.unit}` },
                         { key: 'received_qty', label: 'Received', align: 'right', export: l => fmt.num(l.received_qty) },
                         { key: 'pending_qty', label: 'Pending', align: 'right', export: l => fmt.num(l.pending_qty) },
@@ -1556,24 +1633,35 @@ export default function Procurement() {
                         { key: 'last_grn_at', label: 'Last GRN', export: l => (l.last_grn_at ? fmt.date(l.last_grn_at) : '—') },
                         { key: 'overdue_days', label: 'Ageing', align: 'right', export: l => (l.overdue_days > 0 ? `${l.overdue_days}d overdue` : `${l.age_days}d old`) },
                       ],
-                      rows: pendency.lines,
+                      rows: lines,
                     })} />
                   </div>
+                  {lines.length === 0 ? (
+                    <p className="py-12 text-center text-sm text-gray-400">Nothing pending matches “{pendQ}”</p>
+                  ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead><tr className="ci-table-head">
-                        <th className={th}>PO Number</th><th className={th}>Supplier</th><th className={th}>Board</th><th className={th}>Type</th>
+                        <th className={th}>PO Number</th><th className={th}>Supplier</th><th className={th}>Board</th><th className={th}>Ordered For</th><th className={th}>Type</th>
                         <th className={`${th} text-right`}>Ordered</th><th className={`${th} text-right`}>Received</th><th className={`${th} text-right`}>Pending</th>
                         <th className={`${th} text-right`}>Pending kg</th>
                         <th className={`${th} text-right`}>Rate</th><th className={`${th} text-right`}>Pending Value</th>
                         <th className={th}>Age</th><th className={th}>PO Date</th><th className={th}>Expected</th><th className={th}>Last GRN</th><th className={th}>Status</th><th className={`${th} text-right`}>Actions</th>
                       </tr></thead>
                       <tbody>
-                        {pendency.lines.map((l, i) => (
-                          <tr key={`${l.po_line_id}-${i}`} className={`ci-table-row ${l.overdue_days > 0 ? 'bg-red-50/70' : ''}`}>
-                            <td className={`${td} font-semibold`}><Link to={`/procurement/po/${l.po_id}`} className="text-brand-600 hover:underline">{l.po_number}</Link></td>
+                        {lines.map((l, i) => (
+                          <tr key={`${l.po_line_id}-${i}`}
+                            // Same two doors as the PO queue: the row opens the
+                            // order, the Ordered For cell opens the jobs.
+                            onClick={() => navigate(`/procurement/po/${l.po_id}`)}
+                            title={`Open ${l.po_number}`}
+                            className={`ci-table-row cursor-pointer ${l.overdue_days > 0 ? 'bg-red-50/70' : ''}`}>
+                            <td className={`${td} font-semibold`}><Link to={`/procurement/po/${l.po_id}`} onClick={e => e.stopPropagation()} className="text-brand-600 hover:underline">{l.po_number}</Link></td>
                             <td className={td}>{l.vendor_name}</td>
                             <td className={td}>{l.material_name}</td>
+                            <td className={td} onClick={e => e.stopPropagation()}>
+                              <OrderedForCell commitments={l.commitments} onOpen={() => setOrderedFor(l)} />
+                            </td>
                             <td className={`${td} text-xs capitalize text-slate-500`}>{fmt.title(l.category)}</td>
                             <td className={`${td} text-right tabular-nums`}>{fmt.num(l.qty)}</td>
                             <td className={`${td} text-right tabular-nums text-slate-500`}>{fmt.num(l.received_qty)}</td>
@@ -1600,7 +1688,7 @@ export default function Procurement() {
                       </tbody>
                       <tfoot>
                         <tr className="border-t border-slate-200 bg-slate-50/70 font-bold">
-                          <td className={`${td} text-brand-600`} colSpan={4}>Filtered Total</td>
+                          <td className={`${td} text-brand-600`} colSpan={5}>Filtered Total</td>
                           <td className={`${td} text-right tabular-nums`}>{fmt.num(ordered)}</td>
                           <td className={`${td} text-right tabular-nums`}>{fmt.num(received)}</td>
                           <td className={`${td} text-right tabular-nums text-amber-600`}>{fmt.num(t.pending_qty)}</td>
@@ -1612,17 +1700,20 @@ export default function Procurement() {
                       </tfoot>
                     </table>
                   </div>
+                  )}
                 </div>
               )}
 
               {/* ── Item-wise / Party-wise / Grade-wise roll-ups ── */}
               {pendencyView !== 'lines' && (() => {
-                const kind = pendencyView === 'items' ? { rows: pendency.by_material, head: 'Item' }
-                  : pendencyView === 'grades' ? { rows: pendency.by_grade, head: 'Grade' }
-                  : { rows: pendency.by_vendor, head: 'Party' };
+                const kind = pendencyView === 'items' ? { rows: byMaterial, head: 'Item' }
+                  : pendencyView === 'grades' ? { rows: byGrade, head: 'Grade' }
+                  : { rows: byVendor, head: 'Party' };
                 const rows = kind.rows || [];
-                if (pendencyView === 'grades' && rows.length === 0)
-                  return <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">No board (graded) material is pending.</p>;
+                if (rows.length === 0)
+                  return <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">
+                    {pendQ ? `Nothing pending matches “${pendQ}”`
+                      : 'No board (graded) material is pending.'}</p>;
                 return (
                   <div className="ci-data-panel">
                     <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.05] bg-white/30 px-4 py-2.5">
@@ -2559,6 +2650,9 @@ export default function Procurement() {
         materialId={boardPanel?.materialId}
         prContext={boardPanel?.pr}
         onChanged={load} />
+
+      {/* The jobs behind an Ordered For cell — one panel serving both registers */}
+      <OrderedForModal line={orderedFor} onClose={() => setOrderedFor(null)} />
     </div>
   );
 }

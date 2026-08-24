@@ -227,6 +227,74 @@ async function poLineSourcePrs(poId = null) {
   return by;
 }
 
+// What a purchase is COMMITTED to — the jobs whose shortage put each board on
+// the order, per (purchase order, material). A buy reaches a job through the
+// requisition that named it: `requisitions.purchase_order_id` says which order
+// swallowed the ask, `requisition_lines.material_id` says which line of that
+// order it fed, and `requisitions.order_line_id` is the job it was raised for.
+//
+// A line no requisition anchors to a job is an OPEN ORDER — board bought to the
+// shelf, not against anybody's commitment. That is a real and ordinary thing to
+// do, so it gets a plain word rather than an empty cell; the caller renders it.
+//
+// The anchor is deliberately the requisition, NOT `board_allocations`: a
+// requisition-source allocation is RELEASED the moment its PR closes, so a
+// received PO would forget every job it was bought for exactly when the buyer
+// looks back at it. The PR anchor outlives the receipt.
+//
+// `on_board` is the one caveat this can carry honestly. A PR's material is a
+// snapshot of what was short the day it was raised — re-anchor the job to a
+// different board afterwards and the buy is no longer against THIS board. The
+// job is still named (the order was genuinely raised for it) but flagged, the
+// same fact mirrorTargets() acts on when it books the allocation.
+//
+// Batched: two queries for the whole register, never one per row.
+export async function poLineCommitments(poId = null) {
+  const srcs = await q(`
+    SELECT DISTINCT r.purchase_order_id, rl.material_id, r.id AS requisition_id, r.pr_number
+    FROM requisitions r JOIN requisition_lines rl ON rl.requisition_id = r.id
+    WHERE r.purchase_order_id IS NOT NULL
+      AND ($1::int IS NULL OR r.purchase_order_id = $1::int)
+    ORDER BY r.pr_number`, [poId]);
+  const by = new Map();
+  if (!srcs.length) return by;
+
+  const jobRows = await requisitionJobRows(srcs.map(s => s.requisition_id));
+  const byReq = new Map();
+  for (const j of jobRows) {
+    if (!byReq.has(j.requisition_id)) byReq.set(j.requisition_id, []);
+    byReq.get(j.requisition_id).push(j);
+  }
+
+  for (const s of srcs) {
+    const k = `${s.purchase_order_id}:${s.material_id}`;
+    if (!by.has(k)) by.set(k, []);
+    const seen = new Set(by.get(k).map(j => j.order_line_id));
+    for (const j of byReq.get(s.requisition_id) || []) {
+      // Two requisitions on one order can name the same job — a gang whose
+      // members were topped up separately. It is one commitment, listed once.
+      if (seen.has(j.id)) continue;
+      seen.add(j.id);
+      by.get(k).push({
+        order_line_id: j.id,
+        product_id: j.product_id,
+        product_code: j.product_code,
+        product_name: j.product_name,
+        customer_name: j.customer_name,
+        sales_po: j.po_number,
+        delivery_date: j.delivery_date,
+        status: j.status,
+        sheets: j.parent_sheets_required == null ? null : +j.parent_sheets_required,
+        order_qty: j.qty == null ? null : +j.qty,
+        gang_number: j.gang_number || null,
+        pr_number: s.pr_number,
+        on_board: Number(j.eff_board) === Number(s.material_id),
+      });
+    }
+  }
+  return by;
+}
+
 // One PO line per material, quantities summed — see po-consolidate.js. A line
 // that actually merged is repriced off the rate master for this vendor, because
 // two requisition estimates that disagree cannot both be right and the master is
@@ -540,12 +608,16 @@ r.post('/requisitions', canRaisePr, async (req, res, next) => {
 // swallow CI-GANG-00010 the day the series passes four digits.
 // Batched, because the register renders this for every row at once: three
 // queries regardless of how many requisitions are on screen, never one per row.
-async function jobsForPrs(prs = []) {
-  const out = new Map();
-  const ids = prs.map(p => p.id).filter(Boolean);
-  if (!ids.length) return out;
-
-  const rows = await q(`
+// The order lines a requisition was raised FOR — its anchor line, and every
+// member of the gang when that line prints in one. ONE spelling, shared by the
+// PR register (jobsForPrs) and by the commitment column on the PO queue and the
+// pendency register, because those three must never disagree about which jobs a
+// purchase is committed to. `product_id` and `eff_board` ride along for the
+// callers that need to link the job or check it is still on this board.
+async function requisitionJobRows(reqIds = []) {
+  const ids = [...new Set(reqIds.map(Number).filter(Boolean))];
+  if (!ids.length) return [];
+  return q(`
     WITH scope AS (
       SELECT r.id, r.order_line_id,
              COALESCE(
@@ -559,7 +631,8 @@ async function jobsForPrs(prs = []) {
     SELECT s.id AS requisition_id, g.gang_number,
            ol.id, ol.qty, ol.status,
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
-           p.name AS product_name, p.code AS product_code,
+           ${EFF_BOARD_ID} AS eff_board,
+           p.id AS product_id, p.name AS product_name, p.code AS product_code,
            c.name AS customer_name, o.po_number, o.delivery_date
     FROM scope s
     LEFT JOIN gang_runs g ON g.id = s.gang_run_id
@@ -570,6 +643,14 @@ async function jobsForPrs(prs = []) {
     JOIN orders o ON o.id = ol.order_id
     JOIN customers c ON c.id = o.customer_id
     ORDER BY s.id, ol.id`, [ids]);
+}
+
+async function jobsForPrs(prs = []) {
+  const out = new Map();
+  const ids = prs.map(p => p.id).filter(Boolean);
+  if (!ids.length) return out;
+
+  const rows = await requisitionJobRows(ids);
 
   const byPr = {};
   for (const r of rows) (byPr[r.requisition_id] ||= []).push(r);
@@ -848,7 +929,11 @@ r.get('/purchase-orders', async (_req, res, next) => {
     const byPo = {};
     for (const l of lines) (byPo[l.purchase_order_id] ||= []).push(l);
     const sourcePrs = await poLineSourcePrs();
-    for (const l of lines) l.source_prs = sourcePrs.get(`${l.purchase_order_id}:${l.material_id}`) || [];
+    const commitments = await poLineCommitments();
+    for (const l of lines) {
+      l.source_prs = sourcePrs.get(`${l.purchase_order_id}:${l.material_id}`) || [];
+      l.commitments = commitments.get(`${l.purchase_order_id}:${l.material_id}`) || [];
+    }
     res.json(pos.map(po => ({ ...po, lines: byPo[po.id] || [] })));
   } catch (e) { next(e); }
 });
@@ -870,7 +955,11 @@ r.get('/purchase-orders/:id', async (req, res, next) => {
              m.grade, m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet
       FROM po_lines pl JOIN materials m ON m.id=pl.material_id WHERE pl.purchase_order_id=$1 ORDER BY pl.id`, [po.id]);
     const sourcePrs = await poLineSourcePrs(po.id);
-    for (const l of po.lines) l.source_prs = sourcePrs.get(`${po.id}:${l.material_id}`) || [];
+    const commitments = await poLineCommitments(po.id);
+    for (const l of po.lines) {
+      l.source_prs = sourcePrs.get(`${po.id}:${l.material_id}`) || [];
+      l.commitments = commitments.get(`${po.id}:${l.material_id}`) || [];
+    }
     po.company = await one('SELECT * FROM company_profile ORDER BY id LIMIT 1') || {};
     res.json(po);
   } catch (e) { next(e); }
@@ -1767,8 +1856,12 @@ r.get('/procurement/pendency', async (_req, res, next) => {
     // Board is bought by weight — surface how many kg are still due per line so
     // the buyer sees tonnage pressure, not just sheet counts. Non-board lines
     // (or boards with an incomplete master) stay null → the UI shows "—".
+    // The jobs each pending line is owed TO — same anchor as the PO queue, so a
+    // line reads the same on both screens. An unanchored line is an open order.
+    const commitments = await poLineCommitments();
     for (const r0 of rows) {
       r0.pending_weight = r0.category === 'board' ? totalWeight(r0, r0.pending_qty) : null;
+      r0.commitments = commitments.get(`${r0.po_id}:${r0.material_id}`) || [];
     }
 
     const rollup = (key, label) => {
