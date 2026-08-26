@@ -34,7 +34,20 @@ async function get(path, { method = 'GET' } = {}) {
 }
 
 // Each check returns null when it passes, or a sentence saying what is wrong.
+//
+// Wrapped, because this whole script is built on retrying while a production
+// alias moves — and a moving alias is exactly when a connection times out. Every
+// fetch below used to sit outside any catch, so `UND_ERR_CONNECT_TIMEOUT` threw
+// straight out of here and killed the process before the retry loop could run.
+// A deployment that was serving perfectly reported a raw Node stack trace, and
+// on the `smoke` job that is a red build on a good deploy. Unreachable is just
+// another failed check: say so, and let the loop decide whether it persists.
 async function runAll() {
+  try { return await checkAll(); }
+  catch (e) { return [`could not reach ${BASE}: ${e.message}`]; }
+}
+
+async function checkAll() {
   const failures = [];
   const fail = m => failures.push(m);
 
