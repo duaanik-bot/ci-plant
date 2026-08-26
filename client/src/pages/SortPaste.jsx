@@ -914,7 +914,7 @@ export default function SortPaste() {
                           anyway, so a third line of product costs no height.
                           The width now comes from the colgroup, not from the
                           cell, so the name reflows with the table. */}
-                      <ProductIdentity row={r} compact nameClassName="!text-[13px] leading-[17px]" />
+                      <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]" />
                       {/* Sorting and Pasting are the FIRST stations a gang's
                           cartons reach on their own cards, so this is where the
                           run it printed in would otherwise disappear. */}

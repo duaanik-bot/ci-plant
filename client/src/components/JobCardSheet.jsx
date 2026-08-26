@@ -235,12 +235,12 @@ export default function JobCardSheet({ jc }) {
               ? jc.run_kind === 'merge'
                 ? (
                   <div>
-                    <ProductIdentity row={jc} compact nameClassName="!text-[20px] leading-tight" codesClassName="max-w-[320px]" />
+                    <ProductIdentity row={jc} compact nameClassName="text-[20px] leading-tight" codesClassName="max-w-[320px]" />
                     <span>{jc.gang_number} · {jc.gang_members.length} sales orders as one run (no split)</span>
                   </div>
                 )
                 : `${jc.gang_number} — ${jc.gang_members.length} jobs on one run (until die cutting)`
-              : <ProductIdentity row={jc} compact nameClassName="!text-[20px] leading-tight" codesClassName="max-w-[320px]" />}
+              : <ProductIdentity row={jc} compact nameClassName="text-[20px] leading-tight" codesClassName="max-w-[320px]" />}
           </div>
         </div>
         <div className="jc-head-right text-right text-xs text-gray-600">

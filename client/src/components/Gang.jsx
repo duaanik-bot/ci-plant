@@ -64,7 +64,7 @@ export function GangMemberList({ members = [], showOrder = true, showOutput = fa
               beneath it. Setting the figure alongside cost the name a third of
               its column and clamped a 52-character carton at "ONDEM…", which is
               the one thing on the row an operator has to read. */}
-          <ProductIdentity row={m} compact nameClassName="!text-[13px] leading-[17px]" />
+          <ProductIdentity row={m} compact nameClassName="text-[13px] leading-[17px]" />
           <div className="truncate text-[10px] text-slate-400">
             {showOutput && m.output_number ? <span className="font-bold text-slate-500">Out {m.output_number}</span> : null}
             {m.lines > 1 ? <span className="font-semibold text-violet-500">{showOutput && m.output_number ? ' · ' : ''}{m.lines} POs</span> : null}
@@ -203,7 +203,7 @@ export function GangCreatedSheet({ gang, onClose, onPlan }) {
             {gang.members.map((m, i) => (
               <div key={m.id} className={`flex items-center justify-between gap-3 py-2.5 ${i ? 'border-t border-dashed border-slate-200' : ''}`}>
                 <div className="min-w-0">
-                  <ProductIdentity row={m} compact nameClassName="!text-[13px] text-slate-800" />
+                  <ProductIdentity row={m} compact nameClassName="text-[13px] text-slate-800" />
                   <div className="truncate text-[11px] text-slate-400">PO {m.po_number} · {m.customer_name}</div>
                 </div>
                 <div className="shrink-0 text-right text-[13px] font-bold tabular-nums text-slate-800">

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import MasterHistory from './MasterHistory.jsx';
 import { api, fmt } from '../api.js';
 import { canOpenProductHistory } from '../lib/productHistoryAccess.js';
+import { declaresFontSize } from '../lib/fontSizeClass.js';
 
 const CODE_META = [
   { key: 'internal', label: 'INT', tone: 'bg-slate-100 text-slate-600 ring-slate-200/70' },
@@ -111,12 +112,8 @@ export default function ProductIdentity({
   // a decorative dot has nothing to say to a screen reader or a tooltip.
   metaPrefix,
   className = '',
-  // A font size passed here MUST carry the `!` prefix when `compact` is also set
-  // — `!text-[13px]`, not `text-[13px]`. `compact` appends `text-xs` to the name
-  // below, and Tailwind emits `.text-xs` AFTER arbitrary sizes in the built
-  // stylesheet, so the plain form loses however you order the string. Six call
-  // sites asked for 13px and silently rendered 12px for months before anyone
-  // noticed, because one pixel does not look like a bug.
+  // A font size here wins over `compact`'s own — see `compactSize` below. Any
+  // other `text-*` utility (colour, alignment, wrapping) is left alone.
   nameClassName = '',
   codesClassName = '',
   compact = false,
@@ -166,6 +163,16 @@ export default function ProductIdentity({
     meta,
   ].filter(Boolean).join(' · ');
 
+  // `compact` sets a DEFAULT size, and steps aside when the caller names its
+  // own. It has to: both strings land in one class attribute, and a class
+  // attribute has no say in which rule wins — Tailwind emits `text-xs` AFTER the
+  // arbitrary sizes these call sites pass, so at equal specificity the later
+  // rule won and a screen asking for 13px silently rendered 12px. One pixel is
+  // small enough to survive years of review unnoticed. Marking the size
+  // important at every call site fixes today's screens and leaves the next one
+  // to fall in. Only the SIZE yields: `compact` still sizes the code chips.
+  const compactSize = compact && !declaresFontSize(nameClassName) ? 'text-xs' : '';
+
   const onClick = e => {
     if (stopPropagation) e.stopPropagation();
     if (canOpen) setOpen(true);
@@ -176,12 +183,11 @@ export default function ProductIdentity({
       <div className={`min-w-0 ${className}`} title={title}>
         {canOpen ? (
           <button type="button" onClick={onClick}
-            /* `text-xs` here out-ranks a plain size in nameClassName — see the prop. */
-            className={`block max-w-full text-left font-semibold leading-snug text-slate-800 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35 ${compact ? 'text-xs' : ''} ${nameClassName}`}>
+            className={`block max-w-full text-left font-semibold leading-snug text-slate-800 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35 ${compactSize} ${nameClassName}`}>
             <span className="line-clamp-2 break-words">{enriched.name}</span>
           </button>
         ) : (
-          <div className={`font-semibold leading-snug text-slate-800 ${compact ? 'text-xs' : ''} ${nameClassName}`}>
+          <div className={`font-semibold leading-snug text-slate-800 ${compactSize} ${nameClassName}`}>
             <span className="line-clamp-2 break-words">{enriched.name || '—'}</span>
           </div>
         )}

@@ -1915,7 +1915,7 @@ export default function PrintPlanning() {
                   {gang && <span className="rounded bg-violet-100 px-1 py-px text-[9px] font-bold text-violet-700">{group.gang_number}</span>}
                 </span>
                 <ProductIdentity row={card} compact className="mt-0.5 max-w-[340px]"
-                  nameClassName="!text-[11.5px] font-bold text-slate-700" />
+                  nameClassName="text-[11.5px] font-bold text-slate-700" />
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <span className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
