@@ -27,29 +27,69 @@
 
          A plant tablet sits on one page for a whole shift. When a deploy lands,
          that page is still asking for the previous build's hashed assets, and
-         they are gone. What the reader got was the Live Floor with real figures
-         and no stylesheet at all — unreadable, and easy to mistake for the app
-         having died. If the app module is the file that is missing instead, the
-         screen simply stays blank.
+         they are gone. The reader got Live Floor with real figures and no
+         stylesheet at all — unreadable, and easy to mistake for the app having
+         died. If the app module is the file that is missing instead, the screen
+         simply stays blank.
 
          Resource load failures do not bubble, so this listens in the CAPTURE
          phase; `vite:preloadError` covers the lazily-imported route chunks,
-         which fail as a rejected promise rather than an element error. The
-         reload happens ONCE per session — the document is served
-         must-revalidate, so one reload is enough to pick up the current build,
-         and a genuinely broken deploy must not put the floor in a reload loop.
-         main.jsx clears the flag once the app boots, so the next deploy is
-         recovered the same way. -->
+         which fail as a rejected promise rather than an element error.
+
+         The attempt budget is the whole safety argument, and the first version
+         of it was WRONG in a way that took down a Printing tablet. It used a
+         single "already tried" flag that main.jsx cleared on every successful
+         boot — but the shell booting is not the app working. A shell that boots
+         and THEN fails to fetch a route chunk cleared the flag, reloaded, booted,
+         cleared the flag again, and reloaded roughly seventy times a second.
+         Nothing clears the budget now: a fixed number of attempts inside a time
+         window, which lapses on its own so the next deploy is recovered the same
+         way. Two reloads and a broken screen is a bad outcome; an endless reload
+         is a worse one, and the floor cannot tell you which it is looking at.
+
+         `sessionStorage` throws outright on a device with site data restricted,
+         and the first version treated that as "do nothing" — a guard that is
+         silently inert on exactly the locked-down tablets a plant hands out.
+         Navigation Timing needs no permission and still bounds us to one retry. -->
     <script>
       (function () {
         var KEY = 'ci:stale-build-reload';
-        function recover() {
+        var WINDOW_MS = 60000;   // one incident's worth of time
+        var MAX_TRIES = 2;       // reloads allowed inside it
+
+        // null means storage is unusable — a different, weaker path below.
+        function budget() {
           try {
-            if (sessionStorage.getItem(KEY)) return;
-            sessionStorage.setItem(KEY, '1');
-          } catch (e) { return; }
+            var raw = sessionStorage.getItem(KEY);
+            if (!raw) return { n: 0, t: 0 };
+            var r = JSON.parse(raw);
+            return { n: Number(r.n) || 0, t: Number(r.t) || 0 };
+          } catch (e) { return null; }
+        }
+
+        function recover() {
+          var now = Date.now();
+          var b = budget();
+
+          if (b === null) {
+            // No way to record an attempt. Navigation Timing still knows whether
+            // THIS document is itself a reload, which allows exactly one retry
+            // and can never loop.
+            try {
+              var nav = performance.getEntriesByType('navigation')[0];
+              if (nav && nav.type === 'reload') return;
+            } catch (e) { return; }
+            location.reload();
+            return;
+          }
+
+          if (!b.t || now - b.t > WINDOW_MS) b = { n: 0, t: now };
+          if (b.n >= MAX_TRIES) return;
+          b.n += 1;
+          try { sessionStorage.setItem(KEY, JSON.stringify(b)); } catch (e) { return; }
           location.reload();
         }
+
         window.addEventListener('error', function (e) {
           var el = e.target;
           if (!el || el === window) return;

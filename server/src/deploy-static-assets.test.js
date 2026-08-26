@@ -99,15 +99,41 @@ test('index.html recovers from a stale build, in the head, before Vite injects',
     'a lazily-imported route chunk fails as a rejected promise, not an element error; '
     + 'without this a stale tablet recovers the shell and then dies on the first route');
   assert.match(head, /location\.reload\(\)/, 'the guard must actually reload');
-  assert.match(head, /sessionStorage/,
-    'the one-shot flag is what stops a genuinely broken deploy from putting the floor '
-    + 'into a reload loop');
 });
 
-test('a successful boot re-arms the recovery for the next deploy', () => {
-  assert.match(mainJsx, /removeItem\('ci:stale-build-reload'\)/,
-    'main.jsx must clear the flag once the app is up. Left set, a tablet self-heals '
-    + 'exactly once and every deploy after that leaves it unstyled again.');
+// The Printing tablet, 2026-08-26. The shell booted, the app then failed to
+// fetch the Section route chunk, and the guard reloaded — about seventy times a
+// second, because the budget was a single flag that main.jsx cleared on every
+// successful boot. A shell that boots is not an app that works, and anything
+// that refills the budget on a boot restores that loop exactly.
+test('the reload budget is bounded and nothing refills it on boot', () => {
+  const head = indexHtml.slice(0, indexHtml.indexOf('</head>'));
+
+  assert.match(head, /MAX_TRIES\s*=\s*[1-3]\b/,
+    'the guard needs a hard cap on reloads. Two reloads and a broken screen is a bad '
+    + 'outcome; an endless reload is a worse one, and the floor cannot tell them apart');
+  assert.match(head, /n\s*>=\s*MAX_TRIES/, 'the cap has to actually be enforced');
+  assert.match(head, /WINDOW_MS/,
+    'the budget must lapse on TIME, so the next deploy is recovered without anything '
+    + 'having to declare success');
+
+  assert.doesNotMatch(mainJsx, /removeItem\(['\"]ci:stale-build-reload/,
+    'main.jsx must NOT clear the recovery budget. That single line turned a bounded '
+    + 'retry into an infinite reload loop on any screen whose route chunk was missing.');
+  assert.doesNotMatch(indexHtml, /removeItem\(['\"]ci:stale-build-reload/,
+    'nothing may clear the budget — it expires on its own');
+});
+
+// A plant hands out locked-down tablets. On a device with site data blocked,
+// every sessionStorage access throws, and the first version of this guard
+// treated that as "do nothing" — silently inert on exactly those devices.
+test('the guard still works where sessionStorage throws', () => {
+  const head = indexHtml.slice(0, indexHtml.indexOf('</head>'));
+  assert.match(head, /getEntriesByType\(['\"]navigation/,
+    'with no storage to record an attempt in, Navigation Timing still says whether this '
+    + 'document is itself a reload — which allows exactly one retry and can never loop');
+  assert.match(head, /catch[\s\S]{0,80}?return null/,
+    'an unusable sessionStorage must route to the storage-free path, not abort recovery');
 });
 
 test('hashed assets are still served immutable', () => {

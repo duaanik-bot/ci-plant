@@ -9,10 +9,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 );
 
-// The app booted, so whatever the recovery reload in index.html was there for
-// is over. Clearing the flag re-arms it for the NEXT deploy — left set, a tablet
-// gets exactly one self-heal and then goes back to showing an unstyled screen.
-try { sessionStorage.removeItem('ci:stale-build-reload'); } catch { /* private mode */ }
+// NOTHING clears the recovery budget in index.html from here. It used to, on the
+// reasoning that a boot meant the trouble was over — but the shell booting is not
+// the app working. A shell that boots and then fails to fetch a lazily-imported
+// route chunk cleared the budget, reloaded, booted, and cleared it again: a
+// Printing tablet reloaded itself about seventy times a second. The budget lapses
+// on time instead, so it re-arms without anything having to declare success.
 
 // Keep the push worker current on every boot. Registering an ALREADY-registered
 // worker is a no-op that also picks up a new sw.js after a deploy, so a phone
