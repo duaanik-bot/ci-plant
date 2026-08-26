@@ -17,6 +17,7 @@ import { api, auth, fmt } from '../api.js';
 import { MODULES, canAccess, moduleForPath } from '../modules.js';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
 import { SEARCH_FX, Select } from './ui.jsx';
+import { storage } from '../lib/safeStorage.js';
 
 // Icon + tint per audit entity — same colour language as the rest of the app.
 const ENTITY_META = {
@@ -98,7 +99,7 @@ export default function Timeline() {
   // Range — restored from the last session; preset 'custom' keeps raw dates.
   const [range, setRange] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('ci_timeline_range'));
+      const saved = JSON.parse(storage.getItem('ci_timeline_range'));
       if (saved?.preset === 'custom' && saved.from && saved.to) return saved;
       if (saved?.preset) return { preset: saved.preset, ...presetRange(saved.preset) };
     } catch { /* fall through */ }
@@ -133,7 +134,7 @@ export default function Timeline() {
   }, [location.pathname]);
 
   useEffect(() => {
-    localStorage.setItem('ci_timeline_range', JSON.stringify(range));
+    storage.setItem('ci_timeline_range', JSON.stringify(range));
   }, [range]);
 
   // Debounced search.

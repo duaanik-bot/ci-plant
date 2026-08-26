@@ -22,6 +22,8 @@
 //     that toasts e.message. A generic catch is a real handler; the code simply
 //     never appears by name. The test then also demands that endpoint appear in
 //     the server file that throws, so the screen is provably on that route.
+import { storage } from './lib/safeStorage.js';
+
 export const HANDLED_BY = {
   SHADE_CARD_NOT_ELIGIBLE: {
     at: ['pages/Section.jsx', 'pages/Floor.jsx', 'pages/Production.jsx'], says: 'SHADE_CARD_NOT_ELIGIBLE' },
@@ -70,15 +72,15 @@ export function setErrorHandler(fn) { onError = fn; }
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
 export const auth = {
-  get token() { return localStorage.getItem('ci_token'); },
-  get user() { try { return JSON.parse(localStorage.getItem('ci_user')); } catch { return null; } },
+  get token() { return storage.getItem('ci_token'); },
+  get user() { try { return JSON.parse(storage.getItem('ci_user')); } catch { return null; } },
   set(session) {
-    localStorage.setItem('ci_token', session.token);
-    localStorage.setItem('ci_user', JSON.stringify(session.user));
+    storage.setItem('ci_token', session.token);
+    storage.setItem('ci_user', JSON.stringify(session.user));
   },
   clear() {
-    localStorage.removeItem('ci_token');
-    localStorage.removeItem('ci_user');
+    storage.removeItem('ci_token');
+    storage.removeItem('ci_user');
   },
 };
 

@@ -179,9 +179,12 @@ test('the nudge is aimed at approvers, and asked for once', () => {
   assert.match(layout, /const approver = pend\.can_xs \|\| pend\.can_mgt/);
   assert.match(layout, /const nudging = approver && !push\.on && !nudgeOff && push\.support\.can/);
   // Dismissal is remembered on the device — a prompt returning every session is
-  // nagging, not helping.
-  assert.match(layout, /localStorage\.setItem\('ci_push_nudge_dismissed', '1'\)/);
-  assert.match(layout, /localStorage\.getItem\('ci_push_nudge_dismissed'\) === '1'/);
+  // nagging, not helping. It goes through lib/safeStorage.js rather than naming
+  // localStorage: on a tablet with site data blocked the property access itself
+  // throws, and one such read at module scope left a Printing tablet on a blank
+  // screen. See server/src/client-storage-safety.test.js.
+  assert.match(layout, /storage\.setItem\('ci_push_nudge_dismissed', '1'\)/);
+  assert.match(layout, /storage\.getItem\('ci_push_nudge_dismissed'\) === '1'/);
 });
 
 test('an approver on an iPhone is told the fix, not nudged at a toggle that cannot work', () => {

@@ -38,6 +38,8 @@
 // AUTO_ASSIGN_SECTIONS applies in runAssignment.js.
 // 'sort-paste' is the PASTING station: /floor/pasting redirects there, because
 // sorting and pasting were merged into one operator screen.
+import { storage } from './safeStorage.js';
+
 export const OPERATOR_PICKER = {
   printing: 'machine',
   coating: 'pool',
@@ -237,12 +239,11 @@ export function kpisFor(queue, completed, now = new Date()) {
 export const storeKey = section => `ci.floor.${section}.operator`;
 const dayStamp = (now) => now.toDateString();
 
-// localStorage is absent in the test runner and can throw in a locked-down
-// browser, so every touch goes through here and a failure is simply "no pick".
+// Storage is absent in the test runner and throws outright in a locked-down
+// browser, so every touch goes through the app's one safe door. A failure there
+// is simply "no pick" — never an exception reaching the floor screen.
 function safeStore() {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch { return null; }
+  return storage;
 }
 
 // Read back a pick and RESOLVE it against the chips that exist right now. A

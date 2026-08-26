@@ -15,6 +15,7 @@
 // different tree for touch devices while desktop falls through to the same
 // JSX it rendered before this file existed.
 import { useSyncExternalStore } from 'react';
+import { storage } from './safeStorage.js';
 
 const QUERIES = {
   phone: '(max-width: 767.98px)',
@@ -34,7 +35,7 @@ function current() {
   // Escape hatch — `localStorage.ci_tier_force = 'tabl'` pins the tier on a
   // device that misreports its pointer (and lets a desktop browser preview the
   // touch shells). Inert unless someone deliberately sets it.
-  const forced = localStorage.getItem('ci_tier_force');
+  const forced = storage.getItem('ci_tier_force');
   if (forced === 'phone' || forced === 'tabp' || forced === 'tabl' || forced === 'desktop') return forced;
   if (lists.phone.matches) return 'phone';
   if (lists.tabp.matches) return 'tabp';

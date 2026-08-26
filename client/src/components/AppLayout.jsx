@@ -22,6 +22,7 @@ import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
 import { useTier } from '../lib/tier.js';
+import { storage } from '../lib/safeStorage.js';
 
 // Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin,
 // where Supply carries the chain to its end — Procurement, Warehouse, Dispatch, Accounts.
@@ -139,11 +140,11 @@ function NotificationBell() {
   // they happen to open the bell. Dismissing it is remembered on the device — a
   // prompt that came back every session would be nagging, not helping.
   const [nudgeOff, setNudgeOff] = useState(() => {
-    try { return localStorage.getItem('ci_push_nudge_dismissed') === '1'; } catch { return false; }
+    return storage.getItem('ci_push_nudge_dismissed') === '1';
   });
   const dismissNudge = () => {
     setNudgeOff(true);
-    try { localStorage.setItem('ci_push_nudge_dismissed', '1'); } catch { /* private mode; the nudge simply returns next session */ }
+    storage.setItem('ci_push_nudge_dismissed', '1');
   };
 
   // What this device can do, and whether it is already doing it. Asked once on
@@ -435,7 +436,7 @@ function NotificationBell() {
 function FloorNav() {
   const location = useLocation();
   const onFloor = location.pathname.startsWith('/floor');
-  const [open, setOpen] = useState(() => localStorage.getItem('ci_floor_nav') !== '0');
+  const [open, setOpen] = useState(() => storage.getItem('ci_floor_nav') !== '0');
   const [counts, setCounts] = useState({});
   // /floor/counts, not /floor: the badge needs ten integers, and /floor ships
   // ~730 KB of cards to supply them on a 120 s timer on every page.
@@ -444,7 +445,7 @@ function FloorNav() {
   useFallbackRefresh(refreshCounts, { intervalMs: 120000 });
   useRealtimeRefresh(refreshCounts, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
 
-  const toggle = () => setOpen(o => { localStorage.setItem('ci_floor_nav', o ? '0' : '1'); return !o; });
+  const toggle = () => setOpen(o => { storage.setItem('ci_floor_nav', o ? '0' : '1'); return !o; });
   const total = Object.values(counts).reduce((s, n) => s + n, 0);
   const expanded = open || onFloor;
 
@@ -504,13 +505,13 @@ const TOOLING_NAV = [
 function ToolingNav() {
   const location = useLocation();
   const onTooling = location.pathname.startsWith('/tooling');
-  const [open, setOpen] = useState(() => localStorage.getItem('ci_tooling_nav') !== '0');
+  const [open, setOpen] = useState(() => storage.getItem('ci_tooling_nav') !== '0');
   const [counts, setCounts] = useState({});
   const refresh = () => api.get('/tooling/requirements/summary').then(setCounts).catch(() => {});
   useFallbackRefresh(refresh, { intervalMs: 120000 });
   useRealtimeRefresh(refresh, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   const toggle = () => setOpen(current => {
-    localStorage.setItem('ci_tooling_nav', current ? '0' : '1');
+    storage.setItem('ci_tooling_nav', current ? '0' : '1');
     return !current;
   });
   const expanded = open || onTooling;
@@ -777,8 +778,8 @@ export default function AppLayout() {
   const floorTotal = useFloorTotal(tier !== 'desktop');
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
   // Desktop sidebar open/close — persisted like a macOS window state.
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ci_sidebar_collapsed') === '1');
-  const toggleSidebar = () => setCollapsed(c => { localStorage.setItem('ci_sidebar_collapsed', c ? '0' : '1'); return !c; });
+  const [collapsed, setCollapsed] = useState(() => storage.getItem('ci_sidebar_collapsed') === '1');
+  const toggleSidebar = () => setCollapsed(c => { storage.setItem('ci_sidebar_collapsed', c ? '0' : '1'); return !c; });
   // First-paint entrance for the rail: one unified liquid pop for the whole
   // panel (nav labels ride along in place — no per-row cascade). The class is
   // dropped the moment the animation ends so its filled transform can never
