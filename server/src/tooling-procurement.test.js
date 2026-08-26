@@ -46,6 +46,25 @@ test('purchase order status follows receipt totals', () => {
   assert.equal(toolingPoStatus([{ qty: 4, received_qty: 4 }]), 'received');
 });
 
+test('a line closed short is DONE, and the finished order reads closed, never received', () => {
+  // The waived balance is not owed, so the other line completing finishes the
+  // order — but "received" would claim a delivery that never happened.
+  assert.equal(toolingPoStatus([
+    { qty: 4, received_qty: 4 },
+    { qty: 3, received_qty: 1, closed_short: true },
+  ]), 'closed');
+  // Everything waived with nothing received is still a finished order.
+  assert.equal(toolingPoStatus([{ qty: 3, received_qty: 0, closed_short: true }]), 'closed');
+  // A fully received order stays 'received' — closing nothing changes nothing.
+  assert.equal(toolingPoStatus([{ qty: 4, received_qty: 4, closed_short: false }]), 'received');
+  // A closed line must not hold an order OPEN either: the sibling still owing
+  // keeps it partial on its own receipts.
+  assert.equal(toolingPoStatus([
+    { qty: 4, received_qty: 2 },
+    { qty: 3, received_qty: 0, closed_short: true },
+  ]), 'partially_received');
+});
+
 test('requirement is ready only when allocation covers demand', () => {
   assert.equal(toolingRequirementReady(5, 4), false);
   assert.equal(toolingRequirementReady(5, 5), true);

@@ -15,7 +15,7 @@ function stub({ poStatus = 'open', poLine = { id: 90, qty: 50, received_qty: 0 }
   const qc = async (sql, params = []) => {
     if (/FROM requisition_lines/.test(sql)) return prLines;
     if (/^\s*UPDATE po_lines SET qty/.test(sql)) { poUpdates.push({ qty: params[0], id: params[1] }); return []; }
-    if (/SELECT qty, received_qty FROM po_lines/.test(sql)) return [{ qty: poUpdates.length ? poUpdates[0].qty : poLine.qty, received_qty: poLine.received_qty }];
+    if (/SELECT qty, received_qty, closed_short FROM po_lines/.test(sql)) return [{ qty: poUpdates.length ? poUpdates[0].qty : poLine.qty, received_qty: poLine.received_qty, closed_short: !!poLine.closed_short }];
     if (/^\s*UPDATE purchase_orders SET status/.test(sql)) { statusUpdates.push(params[0]); return []; }
     if (/INSERT INTO audit_log/.test(sql)) { audits.push(params[3]); return []; }
     throw new Error(`stub qc got an unexpected statement: ${sql}`);

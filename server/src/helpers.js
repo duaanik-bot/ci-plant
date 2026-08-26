@@ -2379,6 +2379,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
         LEFT JOIN (SELECT pl.material_id, SUM(GREATEST(0, pl.qty - COALESCE(pl.received_qty,0))) AS qty
                    FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
                    WHERE pl.material_id = ANY($1) AND po.status IN ('open','partially_received')
+                     AND NOT pl.closed_short
                    GROUP BY pl.material_id) po ON po.material_id = m.id`, [materialIds]),
     qc(`SELECT p.id AS product_id,
                COALESCE(SUM(fl.qty - fl.consumed_qty),0)::int AS qty
@@ -2559,7 +2560,8 @@ export async function readiness(line, oc = one, ctx = null) {
                      WHERE material_id=$1 AND status IN ('pending','approved')),0)::int
          + COALESCE((SELECT SUM(GREATEST(0, pl.qty - COALESCE(pl.received_qty,0)))
                      FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
-                     WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')),0)::int AS qty`,
+                     WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')
+                       AND NOT pl.closed_short),0)::int AS qty`,
     [product.board_material_id]);
   // Multi-board: when the line carries a mix, its requirement is met by the mix
   // rows rather than by this one board. Balanced is not enough — every row's own
@@ -3020,6 +3022,7 @@ export async function openPrLineIds(lineIds = [], qc = q) {
                        JOIN purchase_orders po ON po.id = pl.purchase_order_id
                        WHERE pl.purchase_order_id = r.purchase_order_id
                          AND po.status IN ('open','partially_received')
+                         AND NOT pl.closed_short
                          AND pl.qty > COALESCE(pl.received_qty, 0))))
         )
         OR EXISTS (

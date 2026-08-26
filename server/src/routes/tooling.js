@@ -141,6 +141,7 @@ const REQUEST_VIEW = `
     FROM tooling_po_lines tpl
     JOIN tooling_purchase_orders tpo ON tpo.id=tpl.purchase_order_id
     WHERE tpl.inventory_item_id=tr.inventory_item_id AND tpo.status IN ('open','partially_received')
+      AND NOT tpl.closed_short
   ) oo ON true
   LEFT JOIN LATERAL (
     SELECT COUNT(*)::int AS available_count FROM tools at

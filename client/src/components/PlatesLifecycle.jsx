@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ClipboardCheck, Eye, FileCheck2, History,
+  AlertTriangle, Ban, CheckCircle2, ClipboardCheck, Eye, FileCheck2, History,
   Minus, PackagePlus, Plus, Printer, RotateCcw, Save, Send, ShoppingBag,
   Layers3 as Layers, Pencil, Trash2, Truck, Warehouse,
 } from 'lucide-react';
@@ -37,6 +37,7 @@ import {
   receivableLines, initialSelection, selectedOf, selectedTotal, outstandingTotal,
   lineTickState, toggleLine, toggleComponent, selectAll, deselectAll, toBulkLines,
 } from '../lib/plateGrnSelection.js';
+import ClosePoLinesModal from './ClosePoLines.jsx';
 
 const canManage = () => ['admin', 'planner'].includes(auth.user?.role);
 const canVerify = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
@@ -1356,6 +1357,9 @@ export default function PlatesLifecycle() {
   // queue can be narrowed to either.
   const [kindView, setKindView] = useState('all');
   const [warehouseView, setWarehouseView] = useState('fresh');
+  // Pendency — the same three cuts as every other buying register: each open PO
+  // line, the totals per plate size, the totals per vendor.
+  const [pendencyView, setPendencyView] = useState('lines');
   const [addingPlates, setAddingPlates] = useState(false);
   const [newGrn, setNewGrn] = useState(false);
   // Rack selection + the ad-hoc issue dialog: plates handed straight to a job with
@@ -1379,6 +1383,7 @@ export default function PlatesLifecycle() {
   const [returns, setReturns] = useState([]);
   const [history, setHistory] = useState([]);
   const [masters, setMasters] = useState([]);
+  const [pendency, setPendency] = useState({ lines: [], items: [], parties: [] });
   const [vendors, setVendors] = useState([]);
   const [plateRates, setPlateRates] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -1392,18 +1397,23 @@ export default function PlatesLifecycle() {
   const [poModal, setPoModal] = useState(null);
   const [grnModal, setGrnModal] = useState(null);
   const [editPo, setEditPo] = useState(null);
+  // Line-level "no more receipts" — { po, preselectId? }, from the PO row's
+  // menu or a Pendency row with that line pre-ticked.
+  const [closeLines, setCloseLines] = useState(null);
   const [returnModal, setReturnModal] = useState(null);
   const [assetHistory, setAssetHistory] = useState(null);
   const [reasonAction, setReasonAction] = useState(null);
 
   const load = async () => {
-    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistory,nextMasters,nextVendors,nextPlateRates] = await Promise.all([
+    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistory,nextMasters,nextVendors,nextPlateRates,nextPendency] = await Promise.all([
       api.get('/plates/requirements'), api.get('/plates/purchase-orders'), api.get('/plates/grns'),
       api.get('/plates/warehouse'), api.get('/plates/returns'), api.get('/plates/history'),
       api.get('/plate-masters'), api.get('/vendors'), api.get('/plate-rates'),
+      api.get('/tooling/procurement/plate/pendency'),
     ]);
     setRequirements(nextRequirements); setPos(nextPos); setGrns(nextGrns); setWarehouse(nextWarehouse);
     setReturns(nextReturns); setHistory(nextHistory); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
+    setPendency(nextPendency);
     setSelectedIds(current => current.filter(id => nextRequirements.some(row => row.id === id)));
     setRackPicked(current => current.filter(id => nextWarehouse.some(row => row.id === id)));
     if (detail) setDetail(nextRequirements.find(row => row.id === detail.id) || null);
@@ -1444,7 +1454,8 @@ export default function PlatesLifecycle() {
   const counts = useMemo(() => ({
     verify: requirements.reduce((sum,row) => sum + row.components.filter(component => component.status === 'verification_required').length, 0),
     approval: requirements.reduce((sum,row) => sum + row.components.filter(component => ['pr_required','replacement_required'].includes(component.status)).length, 0),
-    ordered: pos.reduce((sum,po) => sum + po.lines.reduce((lineSum,line) => lineSum + Math.max(0, Number(line.qty)-Number(line.received_qty)), 0), 0),
+    // A closed-short line's balance is waived and must not read as on order.
+    ordered: pos.reduce((sum,po) => sum + po.lines.reduce((lineSum,line) => lineSum + (line.closed_short ? 0 : Math.max(0, Number(line.qty)-Number(line.received_qty))), 0), 0),
     ready: requirements.filter(row => row.plate_summary?.is_ready).length,
   }), [requirements,pos]);
   const isConvertedPr = row => row.approval_status === 'converted' || !!row.po_number;
@@ -1501,7 +1512,9 @@ export default function PlatesLifecycle() {
   const canApproveBulk = canManage() && approvableSelection.length > 0;
   const allViewSelected = reqRows.length > 0 && reqRows.every(row => selectedIds.includes(row.id));
   // Buying a plate is one job in three steps; the rail above keeps them together.
-  const PROCUREMENT_TABS = ['requirements', 'pos', 'grns'];
+  // Pendency is the fourth face of the same job: what has been ordered and has
+  // not landed yet.
+  const PROCUREMENT_TABS = ['requirements', 'pos', 'grns', 'pendency'];
   const PLATE_STAGES = [
     { key: 'buy', label: 'Requirement → PO → GRN', tabs: PROCUREMENT_TABS,
       dot: 'bg-violet-500', on: 'border-violet-200 bg-violet-50 text-violet-800',
@@ -1987,6 +2000,8 @@ export default function PlatesLifecycle() {
               <span className="truncate text-xs font-bold text-slate-700">{line.product_name || '—'}</span>
               <span className="shrink-0 font-mono text-[10px] text-slate-400">{line.plate_size || ''}</span>
               <InkSummary components={line.components} />
+              {line.closed_short && <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500"
+                title={`Closed short — ${line.closed_reason || 'no more receipts'}${line.closed_by ? ` (${line.closed_by})` : ''}`}>closed short</span>}
             </div>
             {members && <span className="block truncate text-[10px] text-slate-400" title={members}>{members}</span>}
           </div>
@@ -2006,11 +2021,19 @@ export default function PlatesLifecycle() {
       return <span className="font-mono text-xs font-bold">{outputs[0]}
         {outputs.length > 1 && <span className="block text-[10px] font-semibold text-slate-400">+{outputs.length - 1} more</span>}</span>;
     } },
+    // The date the PO was raised. A plate PO is born in this screen, so
+    // created_at IS its PO date — the same field the Procurement pendency
+    // prints under the same name. card:'detail' keeps classifyColumns from
+    // promoting a date to the phone card's subtitle.
+    { key: 'created_at', label: 'PO Date', card: 'detail', export: row => fmt.date(row.created_at),
+      render: row => <span className="whitespace-nowrap tabular-nums">{fmt.date(row.created_at)}</span> },
     { key: 'expected_date', label: 'Expected', render: row => fmt.date(row.expected_date) },
     { key: 'total', label: 'Total', align: 'right', sortable: false, render: row => fmt.inr(poTotals(row.lines.map(line => ({
       ...line, material_id: line.inventory_item_id,
     })), { freight: row.freight, taxKind: row.tax_kind, round_off: row.round_off }).grand) },
-    { key: 'fulfilment', label: 'Fulfilment', sortable: false, render: row => { const total=row.lines.reduce((sum,line)=>sum+Number(line.qty),0); const done=row.lines.reduce((sum,line)=>sum+Number(line.received_qty),0); return <FulfillmentBar pct={total ? done/total*100 : 0} done={done} total={total} />; } },
+    // Waived balances are not owed: a closed-short line counts only what
+    // actually arrived, so an order with a waived set can read complete.
+    { key: 'fulfilment', label: 'Fulfilment', sortable: false, render: row => { const total=row.lines.reduce((sum,line)=>sum+(line.closed_short?Math.min(Number(line.received_qty),Number(line.qty)):Number(line.qty)),0); const done=row.lines.reduce((sum,line)=>sum+Math.min(Number(line.received_qty),Number(line.qty)),0); return <FulfillmentBar pct={total ? done/total*100 : 0} done={done} total={total} />; } },
     { key: 'status', label: 'Status', render: row => <StatusChip value={row.status} /> },
     // The GRN button opens the whole PO, not one line the row picked for the
     // warehouse. It shows while ANY line still has plates outstanding.
@@ -2024,6 +2047,9 @@ export default function PlatesLifecycle() {
       <ActionMenu label={`${row.po_number} actions`} items={[
         ...(canEditPo(row) ? [{key:'edit',label:'Edit PO',icon:Pencil,onClick:()=>setEditPo(row)}] : []),
         ...(!row.sent_at && !['reversed','closed','received'].includes(row.status) ? [{key:'send',label:'Mark sent to vendor',icon:Send,onClick:async()=>{await api.post(`/plates/purchase-orders/${row.id}/send`);toast.success(`${row.po_number} marked sent`);load();}}] : []),
+        // Close individual sets instead of reversing the whole document — the
+        // per-item "no more receipts". Unreceived plates go back to Approved.
+        ...(!['reversed','closed'].includes(row.status) ? [{key:'close_lines',label:'Close lines — no more receipts…',icon:Ban,onClick:()=>setCloseLines({po:row})}] : []),
         ...(row.status!=='reversed' ? [{key:'reverse',label:'Reverse PO',icon:RotateCcw,danger:true,onClick:()=>setReasonAction({
           kind:'reverse_po',row,title:`Reverse ${row.po_number}?`,confirmLabel:'Reverse PO',icon:RotateCcw,danger:true,requireReason:true,
           description:row.sent_at?'This PO has already been issued to the vendor. Confirm vendor cancellation before reversing it. Any active GRN must be reversed first.':'This returns its Plate components to Approved. Any active GRN must be reversed first.',
@@ -2054,6 +2080,59 @@ export default function PlatesLifecycle() {
         description:'Received plate assets will be retained as reversed history and the quantities will return to the active Plate PO. Plates already used in production cannot be reversed.',
       }),
     }]}/></div> : null },
+  ];
+  // Outstanding PO quantities, the same three cuts as Procurement's Pendency.
+  // Age tones match ToolingProcurement's — the two registers must read alike.
+  const PENDENCY_AGE_TONE = {
+    '0-7': 'bg-emerald-50 text-emerald-700',
+    '8-15': 'bg-amber-50 text-amber-700',
+    '16-30': 'bg-orange-100 text-orange-700',
+    '30+': 'bg-red-100 text-red-700',
+  };
+  const pendencyColumns = pendencyView === 'lines' ? [
+    { key: 'po_number', label: 'PO', render: row => <b>{row.po_number}</b> },
+    // The product leads: "whose plates are we waiting on" is the question this
+    // register answers. The size master identifies a direct PO with no job.
+    { key: 'product_name', label: 'Plates For',
+      export: row => row.product_name || row.item_name,
+      render: row => <span>{row.product_name || row.item_name}
+        <span className="block text-[11px] text-slate-400">
+          {[row.request_number, row.jc_number].filter(Boolean).join(' · ') || 'Direct PO'}
+        </span></span> },
+    { key: 'item_name', label: 'Plate Size', render: row => <span className="whitespace-nowrap font-mono text-xs">{row.item_name}</span> },
+    { key: 'vendor_name', label: 'Vendor' },
+    { key: 'pending_qty', label: 'Pending', align: 'right',
+      export: row => fmt.num(row.pending_qty),
+      render: row => <span className="font-semibold tabular-nums">{fmt.num(row.pending_qty)}<span className="block text-[10px] font-normal text-slate-400">of {fmt.num(row.qty)} plates</span></span> },
+    { key: 'created_at', label: 'PO Date', card: 'detail', export: row => fmt.date(row.created_at),
+      render: row => <span className="whitespace-nowrap tabular-nums">{fmt.date(row.created_at)}</span> },
+    // Undated promises sort LAST on the ascending open — '' compares below every
+    // date and would float "no expected date" to the head as the most overdue.
+    { key: 'expected_date', label: 'Expected', export: row => row.expected_date ? fmt.date(row.expected_date) : '—',
+      sortValue: row => (row.expected_date ? Date.parse(row.expected_date) : Infinity),
+      render: row => fmt.date(row.expected_date) },
+    { key: 'age_bucket', label: 'Age', export: row => `${row.age_bucket} days`,
+      render: row => <span className={`whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-bold ${PENDENCY_AGE_TONE[row.age_bucket]}`}>{row.age_bucket} days</span> },
+    // Row-level "no more receipts": closes THIS line only, through the same
+    // modal as the PO register so both doors carry one policy. For plates the
+    // close also releases the line's unreceived components back to Approved —
+    // a waived plate left in 'po_created' would block its job at printing.
+    { key: 'actions', label: '', sortable: false, render: row => canManage() ? <div className="flex justify-end" onClick={event => event.stopPropagation()}>
+      <Button size="sm" variant="ghost" title="No more receipts — close this line" onClick={() => {
+        const po = pos.find(p => p.id === row.purchase_order_id);
+        if (!po) return toast.error('Reload — this order is not in the register yet');
+        setCloseLines({ po, preselectId: row.id });
+      }}><Ban size={12} /> No more</Button>
+    </div> : null },
+  ] : pendencyView === 'items' ? [
+    { key: 'item_code', label: 'Code', render: row => <b>{row.item_code}</b> },
+    { key: 'item_name', label: 'Plate Size' },
+    { key: 'lines', label: 'PO Lines', align: 'right' },
+    { key: 'pending_qty', label: 'Pending Plates', align: 'right', export: row => fmt.num(row.pending_qty), render: row => fmt.num(row.pending_qty) },
+  ] : [
+    { key: 'vendor_name', label: 'Vendor', render: row => <b>{row.vendor_name}</b> },
+    { key: 'lines', label: 'PO Lines', align: 'right' },
+    { key: 'pending_qty', label: 'Pending Plates', align: 'right', export: row => fmt.num(row.pending_qty), render: row => fmt.num(row.pending_qty) },
   ];
   const warehouseColumns = [
     { key: 'asset_number', label: 'Plate Set', render: row => <span><b className="font-mono text-xs">{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
@@ -2254,6 +2333,7 @@ export default function PlatesLifecycle() {
         { key:'requirements',label:'Requirement / PR',count:reqGroups.open.length },
         { key:'pos',label:'Purchase Orders',count:pos.filter(row=>!['received','closed','reversed'].includes(row.status)).length },
         { key:'grns',label:'GRN',count:grns.length },
+        { key:'pendency',label:'Pendency',count:pendency.lines.length },
       ]}/>
     )}
     {tab==='requirements' && <>
@@ -2540,7 +2620,22 @@ export default function PlatesLifecycle() {
           placeholder="Why these are going out without a PR (optional)" /></Field>
       </div>
     </Modal>}
-    {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
+    {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }}
+      searchPlaceholder="Search PO, vendor, product, output, JC or colour…"
+      empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
+    {tab==='pendency' && <>
+      <SubTabs active={pendencyView} onChange={setPendencyView} views={[
+        { key:'lines', label:'PO Lines', count:pendency.lines.length },
+        { key:'items', label:'Plate Sizes', count:pendency.items.length },
+        { key:'parties', label:'Vendors', count:pendency.parties.length },
+      ]}/>
+      {/* The list opens on the oldest promise; the roll-ups open on the biggest
+          debt. Both are declared — an inherited sort is first-column-ascending. */}
+      <DataTable searchable rows={pendency[pendencyView] || []} columns={pendencyColumns}
+        defaultSort={pendencyView === 'lines' ? { key: 'expected_date', dir: 'asc' } : { key: 'pending_qty', dir: 'desc' }}
+        searchPlaceholder="Search PO, product, plate size or vendor…"
+        empty="Nothing is pending — every ordered plate has landed" exportName="Plate Pendency" />
+    </>}
     {tab==='grns' && <>
       {/* Receiving starts here as well as on the PO row. The PO register is where
           you go when you already know the order; this is where you go when what
@@ -2749,6 +2844,32 @@ export default function PlatesLifecycle() {
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
     {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
     {grnModal && <PlateGrnModal po={grnModal} onClose={()=>setGrnModal(null)} onSaved={load}/>}
+    {closeLines && <ClosePoLinesModal
+      poNumber={closeLines.po.po_number} vendorName={closeLines.po.vendor_name} unitWord="plates"
+      note="Closing a plate set releases its unreceived plates back to Approved, so the job can reuse the rack or buy again — they are not re-attached on reopen."
+      impactEmptyText="No job requirement rides on the ticked lines — direct PO stock."
+      // The impact rows are informative, not optional: a plate left attached to
+      // a closed line would block its job at the printing gate for ever, so the
+      // release always happens and the panel says exactly what goes where.
+      loadImpact={lineIds => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/close-impact', { line_ids: lineIds })
+        .then(r => [...new Map((r.requirements || []).map(row => [row.requirement_id, {
+          id: row.requirement_id, selectable: false, qty: null,
+          order_line_id: row.order_line_id,
+          title: row.product_name || row.request_number, code: row.product_code,
+          sub: [row.request_number, row.jc_number].filter(Boolean).join(' · '),
+          message: `${row.release_plates} unreceived plate${row.release_plates === 1 ? '' : 's'}${row.release_labels ? ` (${row.release_labels})` : ''} return to Approved — reuse the rack or buy again.`,
+        }])).values()])}
+      lines={(closeLines.po.lines || []).map(line => ({
+        id: line.id, qty: Number(line.qty), received_qty: Number(line.received_qty), unit: 'plates',
+        closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by,
+        pending: Math.max(0, Number(line.qty) - Number(line.received_qty)),
+        preselected: line.id === closeLines.preselectId,
+        title: `${line.product_name || 'Plate set'}${line.plate_size ? ` · ${line.plate_size}` : ''}`,
+        sub: [line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
+      }))}
+      onCloseLines={(line_ids, reason) => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/close', { line_ids, reason })}
+      onReopenLines={line_ids => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/reopen', { line_ids })}
+      onDone={load} onClose={() => setCloseLines(null)}/>}
     {/* Both doors hand off to a form that already exists: the PO route to the
         whole-PO receipt, the direct route to Add Plates untouched. */}
     {newGrn && <NewPlateGrnModal pos={pos} onClose={()=>setNewGrn(false)}

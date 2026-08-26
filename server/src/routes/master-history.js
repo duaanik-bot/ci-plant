@@ -344,7 +344,7 @@ async function materialHistory(id, params) {
   const [{ on_order }] = await q(`
     SELECT COALESCE(SUM(GREATEST(0, pl.qty - pl.received_qty)),0)::double precision AS on_order
     FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
-    WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')`, [id]);
+    WHERE pl.material_id=$1 AND po.status IN ('open','partially_received') AND NOT pl.closed_short`, [id]);
   const [sums] = await q(`
     SELECT COALESCE(SUM(qty) FILTER (WHERE type='grn'),0)::double precision AS received,
            COALESCE(SUM(-qty) FILTER (WHERE type='consumption'),0)::double precision AS consumed

@@ -59,6 +59,11 @@ const OF_KIND = Object.freeze({
   // made upstream and this is the answer arriving. Same shape as
   // ready_override: somebody's decision changed what a station is doing next.
   stage_sent_back: 'decisions',
+  // A PO line closed short released a job's incoming board cover — the job
+  // re-reads as short and needs planning again NOW. Same shape as
+  // stage_sent_back: the buyer's decision changed what planning must do next,
+  // and the deep link lands on the job.
+  po_line_closed_replan: 'decisions',
   // Shade-card lifecycle, from the parallel shade-card wave. Every one of these
   // says "the colour the customer signed off may no longer be what we print",
   // which is a quality question and not an approval queue — including the two

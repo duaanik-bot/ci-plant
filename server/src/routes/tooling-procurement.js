@@ -3,7 +3,7 @@
 // follow the same guarded hand-offs as Procurement without sharing board stock.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, outputNumberSql } from '../helpers.js';
+import { audit, nextNumber, notify, outputNumberSql } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
   PHYSICAL_TOOLING_FAMILIES,
@@ -295,6 +295,7 @@ r.get('/tooling/procurement/:family/inventory', async (req, res, next) => {
         SELECT COALESCE(SUM(GREATEST(pl.qty-pl.received_qty,0)),0) AS ordered
         FROM tooling_po_lines pl JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
         WHERE pl.inventory_item_id=ti.id AND po.status IN ('open','partially_received')
+          AND NOT pl.closed_short
       ) oo ON true
       LEFT JOIN LATERAL (
         SELECT pl.rate AS last_rate, g.created_at AS last_purchase_at, v.name AS last_vendor_name,
@@ -505,6 +506,8 @@ r.post('/tooling/procurement/:family/grns', canBuy, async (req, res, next) => {
             JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
             WHERE pl.id=$1 AND po.family=$2 FOR UPDATE`, [input.po_line_id, family]);
           if (!poLine) throw Object.assign(new Error('Purchase order line not found'), { status: 404 });
+          if (poLine.closed_short) throw Object.assign(
+            new Error(`This ${poLine.po_number} line is closed short — no more receipts were asked for. Reopen it to receive.`), { status: 409 });
           const pending = Number(poLine.qty) - Number(poLine.received_qty);
           if (Number(input.qty) > pending) throw Object.assign(new Error(`Receipt exceeds ${poLine.po_number}'s pending quantity`), { status: 409 });
         }
@@ -533,7 +536,7 @@ r.post('/tooling/procurement/:family/grns', canBuy, async (req, res, next) => {
         created.push(grn);
       }
       if (poId) {
-        const poLines = await qc('SELECT qty,received_qty FROM tooling_po_lines WHERE purchase_order_id=$1', [poId]);
+        const poLines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [poId]);
         await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [toolingPoStatus(poLines), poId]);
       }
       for (const grn of created) await audit('tooling_grn', grn.id, 'create', grn.grn_number, qc, req.user.name);
@@ -599,13 +602,232 @@ r.post('/tooling/procurement/:family/grns/:id/qc', canQc, async (req, res, next)
   } catch (e) { next(e); }
 });
 
+// The jobs standing behind the given PO lines — one spelling for the impact
+// preview the close modal shows AND the close's own bookkeeping, mirroring the
+// board register's poLineAllocationImpact. A tooling line's job arrives
+// through its requirement; the plate lateral counts the unreceived components
+// that a close would release (empty for die/block, where a line is a plain
+// quantity).
+async function toolingLineImpact(family, poId, lineIds, dbq = q) {
+  if (!lineIds.length) return [];
+  return dbq(`
+    SELECT pl.id AS po_line_id, pl.qty, pl.received_qty, pl.closed_short,
+           tr.id AS requirement_id, tr.request_number, tr.approval_status, tr.order_line_id,
+           jc.jc_number,
+           COALESCE(NULLIF(tr.specification->>'product_name',''), p.name) AS product_name,
+           COALESCE(NULLIF(tr.specification->>'product_code',''), p.code) AS product_code,
+           COALESCE(rel.n, 0)::int AS release_plates, rel.labels AS release_labels
+      FROM tooling_po_lines pl
+      JOIN tooling_purchase_orders po ON po.id = pl.purchase_order_id
+      JOIN tooling_requests tr ON tr.id = pl.tooling_request_id
+      LEFT JOIN job_cards jc ON jc.id = tr.job_card_id
+      LEFT JOIN products p ON p.id = tr.product_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS n, string_agg(prc.component_label, ', ' ORDER BY prc.sequence_no) AS labels
+        FROM plate_request_components prc
+        WHERE prc.po_line_id = pl.id AND prc.status IN ('po_created','ordered')
+      ) rel ON true
+     WHERE po.id=$1 AND po.family=$2 AND pl.id=ANY($3::int[])
+     ORDER BY pl.id`, [poId, family, lineIds]);
+}
+
+const FAMILY_PAGE = { plate: '/tooling/plates', die: '/tooling/dies', block: '/tooling/blocks' };
+
+// Where "plan this again" lands: the job's Planning row when the requirement
+// knows its order line, the family's own hub otherwise — never a dead link.
+const replanLink = (family, row) =>
+  row.order_line_id ? `/planning?line=${row.order_line_id}` : FAMILY_PAGE[family];
+
+// The preview behind the close modal — which jobs are standing on these lines.
+// Informational, never a blocker: a direct PO with no requirement behind it
+// simply returns nothing and the close proceeds.
+r.post('/tooling/procurement/:family/purchase-orders/:id/lines/close-impact', canBuy, async (req, res, next) => {
+  try {
+    const family = familyOf(req);
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    const po = await one(`SELECT id FROM tooling_purchase_orders WHERE id=$1 AND family=$2`, [req.params.id, family]);
+    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    res.json({ requirements: await toolingLineImpact(family, po.id, lineIds) });
+  } catch (e) { next(e); }
+});
+
+// Close individual LINES short — the per-item "no more receipts", mirroring the
+// board register. The selected lines' unreceived balance is waived: they leave
+// Pendency and every on-order figure, and the GRN door refuses them until
+// reopened. Other lines on the order stay receivable.
+//
+// PLATE lines carry one extra obligation the die/block families do not: each
+// plate on the line is a named component, and an unreceived component left in
+// 'po_created' would block its job at the printing gate for ever, waiting on a
+// plate the buyer just waived. So closing a plate line releases its unreceived
+// components back to Approved (the same move the PO reverse makes, scoped to
+// the line) — the job can then reuse the rack or buy again. Components already
+// received stay exactly where they are.
+r.post('/tooling/procurement/:family/purchase-orders/:id/lines/close', canBuy, async (req, res, next) => {
+  try {
+    const family = familyOf(req);
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    const reason = String(req.body.reason || '').trim();
+    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to close' });
+    if (!reason) return res.status(400).json({ error: 'Record why no more receipts are expected on these lines' });
+    const result = await tx(async (qc, oc) => {
+      const po = await oc(`SELECT * FROM tooling_purchase_orders WHERE id=$1 AND family=$2 FOR UPDATE`,
+        [req.params.id, family]);
+      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      if (['closed', 'reversed'].includes(po.status)) {
+        throw Object.assign(new Error(`${po.po_number} is ${po.status} — nothing left to receive`), { status: 409 });
+      }
+      const lines = await qc(`SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[])
+        FOR UPDATE`, [po.id, lineIds]);
+      if (lines.length !== lineIds.length) {
+        throw Object.assign(new Error(`A selected line is not on ${po.po_number} — reload and reselect`), { status: 409 });
+      }
+      const inQc = await oc(`SELECT COUNT(*)::int AS n FROM tooling_grns
+        WHERE po_line_id=ANY($1::int[]) AND status='quarantine'`, [lineIds]);
+      if (inQc.n > 0) throw Object.assign(new Error('Decide pending GRN QC on these lines before closing them'), { status: 409 });
+      // Bulk NARROWS rather than refuses: already-received or already-closed
+      // lines are skipped and reported, same as the bulk-approve rule.
+      const closable = lines.filter(l => !l.closed_short && Number(l.received_qty) < Number(l.qty));
+      if (!closable.length) throw Object.assign(new Error('Nothing to close — every selected line is already received or closed'), { status: 409 });
+      const closableIds = closable.map(l => l.id);
+      // Snapshot the jobs standing on these lines BEFORE anything is released —
+      // the plate lateral counts components that the release below detaches,
+      // and the notification has to name what was actually let go.
+      const impact = await toolingLineImpact(family, po.id, closableIds, qc);
+      await qc(`UPDATE tooling_po_lines SET closed_short=TRUE, closed_reason=$1, closed_by=$2, closed_at=now()
+        WHERE id=ANY($3::int[])`, [reason, req.user.name, closableIds]);
+
+      let releasedPlates = 0;
+      if (family === 'plate') {
+        const released = await qc(`UPDATE plate_request_components SET status='approved', po_line_id=NULL,
+          updated_at=now() WHERE po_line_id=ANY($1::int[]) AND status IN ('po_created','ordered')
+          RETURNING tooling_request_id`, [closableIds]);
+        releasedPlates = released.length;
+        // Re-point each affected requirement the way the PO reverse does. A
+        // component still attached to a live PO line (received here, or being
+        // bought elsewhere) keeps the requirement converted against that order;
+        // a requirement whose every bought plate was just released goes back to
+        // Approved so it can be bought again or served from the rack.
+        const requestIds = [...new Set(released.map(row => row.tooling_request_id).filter(Boolean))];
+        for (const requestId of requestIds) {
+          const anchor = await oc(`SELECT po.po_number, po.vendor_id FROM plate_request_components prc
+            JOIN tooling_po_lines pl ON pl.id=prc.po_line_id
+            JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
+            WHERE prc.tooling_request_id=$1 AND po.status<>'reversed'
+            ORDER BY po.id DESC LIMIT 1`, [requestId]);
+          const request = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [requestId]);
+          if (!request) continue;
+          await qc(`UPDATE tooling_requests SET approval_status=$1, status='procurement',
+            po_number=$2, vendor_id=$3, updated_at=now() WHERE id=$4`,
+          [anchor ? 'converted' : 'approved', anchor?.po_number || null, anchor?.vendor_id || null, requestId]);
+          await requestEvent(qc, request, 'close_po_line', 'procurement', req.user.name,
+            `${po.po_number} line closed short · unreceived plates back to ${anchor ? 'converted' : 'approved'} · ${reason}`);
+        }
+      }
+
+      // Die/block only: the buyer's ticks from the impact panel. A requirement
+      // whose line received NOTHING goes back to Approved so it can be bought
+      // again or made in-house; one that already received part keeps its
+      // converted anchor (a quantity-family request cannot half-re-approve).
+      // Plates never come through here — their release above is not optional,
+      // because a stranded component blocks the job at the printing gate.
+      const wantedReqs = family === 'plate' ? []
+        : [...new Set((req.body.release_requirements || []).map(Number).filter(Boolean))];
+      const repointed = new Set();
+      if (wantedReqs.length) {
+        const eligible = new Map(impact
+          .filter(row => Number(row.received_qty) === 0)
+          .map(row => [row.requirement_id, row]));
+        for (const requirementId of wantedReqs) {
+          if (!eligible.has(requirementId)) {
+            throw Object.assign(new Error('A ticked requirement is no longer eligible for release — reload and reselect'), { status: 409 });
+          }
+          const request = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [requirementId]);
+          if (!request) continue;
+          await qc(`UPDATE tooling_requests SET approval_status='approved', status='procurement',
+            po_number=NULL, vendor_id=NULL, updated_at=now() WHERE id=$1`, [requirementId]);
+          await requestEvent(qc, request, 'close_po_line', 'procurement', req.user.name,
+            `${po.po_number} line closed short · requirement returned to Approved for re-sourcing · ${reason}`);
+          repointed.add(requirementId);
+        }
+      }
+
+      // Every job standing on a closing line gets the planners buzzed — the
+      // tool is not arriving from this order, whatever else was decided. One
+      // notification per requirement, deep-linked to the job where it has one.
+      const jobs = [...new Map(impact.map(row => [row.requirement_id, row])).values()];
+      if (jobs.length) {
+        const planners = await qc("SELECT id FROM users WHERE active=1 AND role IN ('planner','admin')");
+        for (const row of jobs) {
+          const outcome = family === 'plate'
+            ? `${row.release_plates} unreceived plate${row.release_plates === 1 ? '' : 's'}${row.release_labels ? ` (${row.release_labels})` : ''} released to Approved — reuse the rack or buy again`
+            : repointed.has(row.requirement_id)
+              ? `requirement ${row.request_number} returned to Approved for re-sourcing`
+              : `requirement ${row.request_number} stays converted (${Math.round(row.received_qty)} of ${Math.round(row.qty)} received)`;
+          await notify(planners.map(u => u.id), {
+            kind: 'po_line_closed_replan',
+            title: `${row.product_code || row.product_name || row.request_number} — plan again`,
+            body: `${po.po_number}: line closed short by ${req.user.name}; ${outcome} — ${reason}`,
+            link: replanLink(family, row), refTable: 'tooling_purchase_order', refId: po.id,
+          }, qc);
+        }
+      }
+
+      const poLines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [po.id]);
+      const status = toolingPoStatus(poLines);
+      await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [status, po.id]);
+      await audit('tooling_purchase_order', po.id, 'close_lines_short',
+        `${closable.length} line${closable.length === 1 ? '' : 's'} closed short`
+        + (releasedPlates ? ` · ${releasedPlates} unreceived plate${releasedPlates === 1 ? '' : 's'} released to Approved` : '')
+        + (repointed.size ? ` · ${repointed.size} requirement${repointed.size === 1 ? '' : 's'} returned to Approved` : '')
+        + ` · ${reason}`, qc, req.user.name);
+      return { closed: closable.length, skipped: lines.length - closable.length,
+        released_plates: releasedPlates, released_requirements: repointed.size,
+        impacted: jobs.length, status };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+// The escape hatch: the vendor ships anyway, or the waiver was a mistake. The
+// line takes receipts again and the PO status follows. NOTE for plates: the
+// components released at close time are NOT re-attached — they went back to
+// Approved and may already be reused or re-bought; raise a fresh PO for them.
+r.post('/tooling/procurement/:family/purchase-orders/:id/lines/reopen', canBuy, async (req, res, next) => {
+  try {
+    const family = familyOf(req);
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to reopen' });
+    const result = await tx(async (qc, oc) => {
+      const po = await oc(`SELECT * FROM tooling_purchase_orders WHERE id=$1 AND family=$2 FOR UPDATE`,
+        [req.params.id, family]);
+      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      if (po.status === 'reversed') throw Object.assign(new Error(`${po.po_number} is reversed`), { status: 409 });
+      const lines = await qc(`SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[])
+        AND closed_short FOR UPDATE`, [po.id, lineIds]);
+      if (!lines.length) throw Object.assign(new Error('None of the selected lines is closed short'), { status: 409 });
+      await qc(`UPDATE tooling_po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
+        WHERE id=ANY($1::int[])`, [lines.map(l => l.id)]);
+      const poLines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [po.id]);
+      const status = toolingPoStatus(poLines);
+      await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [status, po.id]);
+      await audit('tooling_purchase_order', po.id, 'reopen_lines',
+        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts`, qc, req.user.name);
+      return { reopened: lines.length, status };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 // Outstanding PO quantities, grouped in the same useful cuts as Procurement.
 r.get('/tooling/procurement/:family/pendency', async (req, res, next) => {
   try {
     const family = familyOf(req);
-    const lines = await q(`SELECT pl.id, po.po_number, po.created_at, po.expected_date,
+    const lines = await q(`SELECT pl.id, pl.purchase_order_id, po.po_number, po.created_at, po.expected_date,
         v.id AS vendor_id, v.name AS vendor_name, ti.id AS inventory_item_id,
         ti.code AS item_code, ti.name AS item_name, ti.unit,
+        tr.request_number, jc.jc_number,
+        COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
         pl.qty, pl.received_qty, GREATEST(pl.qty-pl.received_qty,0) AS pending_qty,
         CASE WHEN now()-po.created_at < interval '8 days' THEN '0-7'
              WHEN now()-po.created_at < interval '16 days' THEN '8-15'
@@ -614,7 +836,11 @@ r.get('/tooling/procurement/:family/pendency', async (req, res, next) => {
       JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
       JOIN tooling_inventory_items ti ON ti.id=pl.inventory_item_id
       JOIN vendors v ON v.id=po.vendor_id
+      LEFT JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
+      LEFT JOIN job_cards jc ON jc.id=tr.job_card_id
+      LEFT JOIN products p ON p.id=tr.product_id
       WHERE po.family=$1 AND po.status IN ('open','partially_received') AND pl.received_qty<pl.qty
+        AND NOT pl.closed_short
       ORDER BY po.created_at, pl.id`, [family]);
     const group = key => Object.values(lines.reduce((out, line) => {
       const id = line[key];

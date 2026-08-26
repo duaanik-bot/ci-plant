@@ -134,6 +134,7 @@ r.get('/board-verification/report', async (_req, res, next) => {
            FROM po_lines pl
            JOIN purchase_orders po ON po.id = pl.purchase_order_id
           WHERE pl.material_id = ANY($1) AND po.status IN ('open','partially_received')
+            AND NOT pl.closed_short
             AND pl.qty > COALESCE(pl.received_qty, 0)
           ORDER BY po.id`, [materialIds]),
       q(`SELECT material_id, COALESCE(SUM(qty),0) AS available

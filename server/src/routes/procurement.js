@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, notify, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -16,6 +16,20 @@ import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-subst
 import { consolidate, consolidateEdit } from '../po-consolidate.js';
 import { planPrQtyChange } from '../pr-qty-cascade.js';
 import { grnEditPlan } from '../grn-edit.js';
+
+// One spelling of "where does this order stand", used by every path that moves
+// a line balance — receive, QC correction, GRN reverse, the PO editor and the
+// requisition qty cascade. A line the buyer CLOSED SHORT counts as done: its
+// unreceived balance is waived, not owed. An order finished only because
+// something was waived reads 'closed', never 'received' — "received" would
+// claim a delivery that never happened.
+export function poCompletion(lines = []) {
+  const done = l => l.closed_short || Number(l.received_qty) >= Number(l.qty);
+  const some = lines.some(l => Number(l.received_qty) > 0);
+  if (!(lines.length > 0 && lines.every(done))) return { full: false, some, status: some ? 'partially_received' : 'open' };
+  return { full: true, some, status: lines.some(l => l.closed_short) ? 'closed' : 'received' };
+}
+const PO_LINE_STANDING = 'SELECT qty, received_qty, closed_short FROM po_lines WHERE purchase_order_id=$1';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -195,11 +209,8 @@ export async function cascadePrQtyToPo(qc, oc, pr, newLines, user = null) {
 
   // The order may have been fully received and is now short again, or the other
   // way round. Same derivation the PO editor uses.
-  const fresh = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [po.id]);
-  const full = fresh.length > 0 && fresh.every(l => l.received_qty >= l.qty);
-  const some = fresh.some(l => l.received_qty > 0);
-  await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-    [full ? 'received' : some ? 'partially_received' : 'open', po.id]);
+  const fresh = await qc(PO_LINE_STANDING, [po.id]);
+  await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2', [poCompletion(fresh).status, po.id]);
   await audit('purchase_order', po.id, 'update',
     `quantities followed ${pr.pr_number}: ${deltas.map(d => `${d.from}→${d.to}`).join(', ')}`, qc, user);
 }
@@ -1006,6 +1017,169 @@ r.post('/purchase-orders/:id/close', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The jobs whose incoming coverage rides on the given PO lines — one spelling,
+// used by BOTH the impact preview the modal shows before closing and the
+// validation inside the close itself, so what the buyer approved is exactly
+// what can be released. An allocation is tied to a line through the requisition
+// that fed it (rq.purchase_order_id) and the line's material — the same chain
+// the GRN acceptance walks when it shrinks coverage for board that landed.
+async function poLineAllocationImpact(poId, lineIds, dbq = q) {
+  if (!lineIds.length) return [];
+  return dbq(`
+    SELECT ba.id, ba.qty, ba.material_id, ba.order_line_id,
+           m.name AS material_name, rq.pr_number,
+           p.name AS product_name, p.code AS product_code,
+           c.name AS customer_name, o.po_number AS sales_po, jc.jc_number
+      FROM board_allocations ba
+      JOIN requisitions rq ON rq.id = ba.requisition_id
+      JOIN materials m ON m.id = ba.material_id
+      JOIN order_lines ol ON ol.id = ba.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN products p ON p.id = ol.product_id
+      JOIN customers c ON c.id = p.customer_id
+      LEFT JOIN job_cards jc ON jc.order_line_id = ol.id
+     WHERE ba.status='active' AND ba.source='requisition'
+       AND rq.purchase_order_id=$1
+       AND ba.material_id IN (SELECT material_id FROM po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[]))
+     ORDER BY ba.id`, [poId, lineIds]);
+}
+
+// The preview behind the close modal: which jobs lose incoming cover if these
+// lines close. Informational only — closing is never refused over coverage;
+// the buyer picks per job what to release, with the quantity editable.
+r.post('/purchase-orders/:id/lines/close-impact', canBuy, async (req, res, next) => {
+  try {
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    const po = await one('SELECT id FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!po) return res.status(404).json({ error: 'Purchase order not found' });
+    res.json({ allocations: await poLineAllocationImpact(po.id, lineIds) });
+  } catch (e) { next(e); }
+});
+
+// Close individual LINES short — the per-item form of "no more receipts". The
+// selected lines' unreceived balance is waived: they leave Pendency and every
+// on-order figure, and /grns refuses them until reopened. The order's OTHER
+// lines stay receivable, which is the whole point — before this the only way
+// to stop one board arriving was to close the entire order.
+//
+// `release_allocations` is the buyer's per-job decision from the impact panel:
+// each { id, qty } releases that much of a job's incoming cover (full amount →
+// the allocation is 'released'; less → it shrinks, the GRN-acceptance
+// spelling). Every release notifies the planners with a deep link to the job,
+// because a job that just lost its incoming board needs planning again NOW.
+//
+// Bulk NARROWS rather than refuses (the bulk-approve rule): lines already
+// received or already closed are skipped and reported, not made into an error
+// the buyer has to diagnose. Like the whole-PO close, a line with a receipt
+// still in QC quarantine must be decided first — closing above an undecided
+// delivery would waive board that is already on the dock.
+r.post('/purchase-orders/:id/lines/close', canBuy, async (req, res, next) => {
+  try {
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    const reason = String(req.body.reason || '').trim();
+    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to close' });
+    if (!reason) return res.status(400).json({ error: 'Record why no more board is expected on these lines' });
+    const result = await tx(async (qc, oc) => {
+      const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      if (po.status === 'closed') throw Object.assign(new Error(`${po.po_number} is already closed — nothing left to receive`), { status: 409 });
+      const lines = await qc('SELECT * FROM po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[]) FOR UPDATE',
+        [po.id, lineIds]);
+      if (lines.length !== lineIds.length) {
+        throw Object.assign(new Error(`A selected line is not on ${po.po_number} — reload and reselect`), { status: 409 });
+      }
+      const inQc = await oc(`SELECT COUNT(*)::int AS n FROM grns
+        WHERE po_line_id=ANY($1::int[]) AND status='quarantine'`, [lineIds]);
+      if (inQc.n > 0) throw Object.assign(new Error('Decide pending GRN QC on these lines before closing them'), { status: 409 });
+      const closable = lines.filter(l => !l.closed_short && Number(l.received_qty) < Number(l.qty));
+      if (!closable.length) throw Object.assign(new Error('Nothing to close — every selected line is already received or closed'), { status: 409 });
+      const closableIds = closable.map(l => l.id);
+      await qc(`UPDATE po_lines SET closed_short=TRUE, closed_reason=$1, closed_by=$2, closed_at=now()
+        WHERE id=ANY($3::int[])`, [reason, req.user.name, closableIds]);
+
+      // Release the jobs' incoming cover the buyer ticked in the impact panel.
+      // Validated against the SAME query the panel showed — an allocation that
+      // is not riding the lines closing right now cannot be released here.
+      const wanted = Array.isArray(req.body.release_allocations) ? req.body.release_allocations : [];
+      const released = [];
+      if (wanted.length) {
+        const EPS = 1e-6;
+        const impacted = new Map((await poLineAllocationImpact(po.id, closableIds, qc)).map(a => [a.id, a]));
+        for (const pick of wanted) {
+          const target = impacted.get(Number(pick.id));
+          if (!target) throw Object.assign(new Error('A ticked job is no longer riding these lines — reload and reselect'), { status: 409 });
+          const amount = Number(pick.qty);
+          if (!(amount > EPS) || amount > Number(target.qty) + EPS) {
+            throw Object.assign(new Error(`Release for ${target.product_code || target.product_name} must be between 1 and ${Math.round(target.qty)} sheets`), { status: 400 });
+          }
+          const alloc = await oc(`SELECT * FROM board_allocations WHERE id=$1 AND status='active' FOR UPDATE`, [target.id]);
+          if (!alloc) throw Object.assign(new Error('An allocation changed underneath — reload and reselect'), { status: 409 });
+          if (amount < Number(alloc.qty) - EPS) {
+            await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [Number(alloc.qty) - amount, alloc.id]);
+          } else {
+            await qc(`UPDATE board_allocations SET status='released', released_by=$1, released_at=now(),
+              release_reason=$2 WHERE id=$3`, [req.user.name, `${po.po_number} line closed short · ${reason}`, alloc.id]);
+          }
+          released.push({ ...target, released_qty: amount });
+        }
+        // One notification per JOB, not per allocation — the planner needs the
+        // job to re-plan, and the deep link lands on it (/planning?line= is
+        // read by Planning.jsx; never a link that opens nothing).
+        const planners = await qc("SELECT id FROM users WHERE active=1 AND role IN ('planner','admin')");
+        const byJob = new Map();
+        for (const row of released) {
+          const g = byJob.get(row.order_line_id) || { ...row, released_qty: 0 };
+          g.released_qty += row.released_qty;
+          byJob.set(row.order_line_id, g);
+        }
+        for (const g of byJob.values()) {
+          await notify(planners.map(u => u.id), {
+            kind: 'po_line_closed_replan',
+            title: `${g.product_code || g.product_name} — plan again`,
+            body: `${po.po_number}: ${Math.round(g.released_qty)} sheets of ${g.material_name} closed short by ${req.user.name}; the job's incoming cover is released — ${reason}`,
+            link: `/planning?line=${g.order_line_id}`, refTable: 'purchase_order', refId: po.id,
+          }, qc);
+        }
+      }
+
+      const status = poCompletion(await qc(PO_LINE_STANDING, [po.id])).status;
+      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2', [status, po.id]);
+      const waived = closable.map(l => `line ${l.id}: ${Math.max(0, l.qty - l.received_qty)} waived`).join(', ');
+      await audit('purchase_order', po.id, 'close_lines_short',
+        `${closable.length} line${closable.length === 1 ? '' : 's'} closed short (${waived})`
+        + (released.length ? ` · ${released.length} job cover${released.length === 1 ? '' : 's'} released (${released.map(r => `${r.product_code || r.product_name} ${Math.round(r.released_qty)}`).join(', ')})` : '')
+        + ` · ${reason}`, qc, req.user.name);
+      return { closed: closable.length, skipped: lines.length - closable.length,
+        released: released.length, released_sheets: released.reduce((s, r) => s + r.released_qty, 0), status };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+// The escape hatch: a vendor ships anyway, or the waiver was a mistake. The
+// line returns to Pendency and /grns accepts it again; the PO status follows.
+r.post('/purchase-orders/:id/lines/reopen', canBuy, async (req, res, next) => {
+  try {
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to reopen' });
+    const result = await tx(async (qc, oc) => {
+      const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+      const lines = await qc(`SELECT * FROM po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[])
+        AND closed_short FOR UPDATE`, [po.id, lineIds]);
+      if (!lines.length) throw Object.assign(new Error('None of the selected lines is closed short'), { status: 409 });
+      await qc(`UPDATE po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
+        WHERE id=ANY($1::int[])`, [lines.map(l => l.id)]);
+      const status = poCompletion(await qc(PO_LINE_STANDING, [po.id])).status;
+      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2', [status, po.id]);
+      await audit('purchase_order', po.id, 'reopen_lines',
+        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts`, qc, req.user.name);
+      return { reopened: lines.length, status };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 // Edit a PO — vendor, expected date, and lines. Lines already (partly) received
 // are locked: their material can't change and quantity can't drop below what has
 // arrived. Omitted existing lines are removed (only if nothing was received).
@@ -1036,14 +1210,12 @@ r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
 
       await applyPoLineEdit(qc, po.id, lines, existing, committedQty);
       // Re-derive status from the (possibly changed) lines.
-      const fresh = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [po.id]);
-      const full = fresh.length > 0 && fresh.every(l => l.received_qty >= l.qty);
-      const some = fresh.some(l => l.received_qty > 0);
+      const fresh = await qc(PO_LINE_STANDING, [po.id]);
       await qc(`UPDATE purchase_orders SET vendor_id=$1, expected_date=$2, status=$3,
                        vendor_notes=$4, payment_terms=$5, delivery_terms=$6, reference=$7,
                        tax_kind=$8, freight=$9, round_off=$10 WHERE id=$11`,
         [vendor_id ? +vendor_id : po.vendor_id, expected_date ?? po.expected_date,
-         full ? 'received' : some ? 'partially_received' : 'open',
+         poCompletion(fresh).status,
          vendor_notes ?? po.vendor_notes, payment_terms ?? po.payment_terms,
          delivery_terms ?? po.delivery_terms, reference ?? po.reference,
          tax_kind ?? po.tax_kind, freight != null ? +freight : po.freight,
@@ -1294,6 +1466,8 @@ r.post('/grns/substitute', canBuy, async (req, res, next) => {
 
     const out = await tx(async (qc, oc) => {
       const ctx = await substitutionContext(+po_line_id, +material_id, qc);
+      if (ctx.poLine?.closed_short) throw Object.assign(
+        new Error('This line is closed short — no more receipts were asked for. Reopen the line to receive against it.'), { status: 409 });
       // Re-planned INSIDE the transaction against freshly-read rows: the list
       // approved a minute ago must not be what executes if a job has since been
       // issued its board.
@@ -1398,6 +1572,8 @@ r.post('/grns', canBuy, async (req, res, next) => {
     const grnId = await tx(async (qc, oc) => {
       const pl = await oc('SELECT * FROM po_lines WHERE id=$1', [po_line_id]);
       if (!pl) throw Object.assign(new Error('PO line not found'), { status: 404 });
+      if (pl.closed_short) throw Object.assign(
+        new Error('This line is closed short — no more receipts were asked for. Reopen the line to receive against it.'), { status: 409 });
       const unit = (await oc('SELECT unit FROM materials WHERE id=$1', [pl.material_id])).unit;
       const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
       const bno = batch_no || `${grn_number}-B1`;
@@ -1473,6 +1649,8 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
       for (const l of receipts) {
         const pl = await oc('SELECT * FROM po_lines WHERE id=$1 AND purchase_order_id=$2', [l.po_line_id, po.id]);
         if (!pl) throw Object.assign(new Error('PO line not found on this PO'), { status: 404 });
+        if (pl.closed_short) throw Object.assign(
+          new Error('A selected line is closed short — no more receipts were asked for. Reopen it first.'), { status: 409 });
         const unit = (await oc('SELECT unit FROM materials WHERE id=$1', [pl.material_id])).unit;
         const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
         const bno = l.batch_no || `${grn_number}-B1`;
@@ -1555,12 +1733,9 @@ r.put('/grns/:id', canBuy, async (req, res, next) => {
           [plan.qty.delta, g.po_line_id]);
         const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
         if (po && po.status !== 'closed') {
-          const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1',
-            [g.purchase_order_id]);
-          const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
-          const some = lines.some(l => l.received_qty > 0);
+          const lines = await qc(PO_LINE_STANDING, [g.purchase_order_id]);
           await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-            [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+            [poCompletion(lines).status, g.purchase_order_id]);
         }
       }
 
@@ -1647,11 +1822,9 @@ async function reverseGrnRow(g, qc, oc, user, { action = 'delete' } = {}) {
     await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty - $1) WHERE id=$2', [g.qty, g.po_line_id]);
     const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
     if (po && po.status !== 'closed') {
-      const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
-      const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
-      const some = lines.some(l => l.received_qty > 0);
+      const lines = await qc(PO_LINE_STANDING, [g.purchase_order_id]);
       await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-        [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+        [poCompletion(lines).status, g.purchase_order_id]);
     }
   }
   // A "Cover board" hold earmarks THIS receipt's sheets for a job. When the
@@ -1851,6 +2024,7 @@ r.get('/procurement/pendency', async (_req, res, next) => {
       JOIN vendors v ON v.id=po.vendor_id
       JOIN materials m ON m.id=pl.material_id
       WHERE po.status IN ('open','partially_received') AND pl.qty > pl.received_qty
+        AND NOT pl.closed_short
       ORDER BY overdue_days DESC, age_days DESC`);
 
     // Board is bought by weight — surface how many kg are still due per line so
@@ -1935,11 +2109,9 @@ r.post('/grns/:id/qc', canQc, async (req, res, next) => {
               + `Stock is booked as received; check this is a real delivery and not a repeated GRN.`,
               qc, req.user.name);
           }
-          const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
-          const full = lines.every(l => l.received_qty >= l.qty);
-          const some = lines.some(l => l.received_qty > 0);
+          const lines = await qc(PO_LINE_STANDING, [g.purchase_order_id]);
           await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-            [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+            [poCompletion(lines).status, g.purchase_order_id]);
         }
         // The board is now real stock counted in `available`. Its requisition
         // allocation must shrink by the same amount or the job is credited

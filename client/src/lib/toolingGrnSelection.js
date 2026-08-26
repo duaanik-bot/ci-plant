@@ -11,7 +11,13 @@
 
 const num = value => Number(value) || 0;
 
-export const pendingOf = line => Math.max(0, num(line?.qty) - num(line?.received_qty));
+// A line the buyer closed short owes nothing: its unreceived balance is
+// waived, so it is not pending and can take no receipt. This is the ONE
+// spelling of a tooling line's pending — the GRN form, the register chips and
+// the On Order figures all read it, so a closed line drops out of all of them
+// at once.
+export const pendingOf = line =>
+  line?.closed_short ? 0 : Math.max(0, num(line?.qty) - num(line?.received_qty));
 
 // Every line on the PO, each saying whether it can still take a receipt. A
 // finished line is KEPT — it used to be filtered out of the form, so a
@@ -65,6 +71,9 @@ export function lineReceipt(line) {
   const ordered = num(line?.qty);
   const received = num(line?.received_qty);
   const unit = line?.unit || 'nos';
+  // Closed short says what arrived AND that the rest was waived — "2/4 closed"
+  // is a different fact from "2/4 pending", and the chip must not blur them.
+  if (line?.closed_short) return { state: 'closed', label: `${received}/${ordered} ${unit} · closed short` };
   if (received <= 0) return { state: 'open', label: `${ordered} ${unit}` };
   // Partial reads as a fraction: "2 nos" on a half-received line is the same
   // text as an untouched one, which is exactly the confusion to avoid.

@@ -43,7 +43,7 @@ r.get('/inventory/stock', async (_req, res, next) => {
       LEFT JOIN (
         SELECT pl.material_id, SUM(GREATEST(pl.qty - pl.received_qty, 0)) q
         FROM po_lines pl JOIN purchase_orders po ON po.id = pl.purchase_order_id
-        WHERE po.status IN ('open','partially_received')
+        WHERE po.status IN ('open','partially_received') AND NOT pl.closed_short
         GROUP BY pl.material_id
       ) inc ON inc.material_id = m.id
       ORDER BY m.category, m.name`);
@@ -414,7 +414,7 @@ r.get('/warehouse/paper', async (req, res, next) => {
                  GROUP BY 1) cm ON cm.mid=m.id
       LEFT JOIN (SELECT pl.material_id, SUM(GREATEST(0, pl.qty - pl.received_qty)) AS q
                  FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
-                 WHERE po.status IN ('open','partially_received') GROUP BY 1) inc ON inc.material_id=m.id
+                 WHERE po.status IN ('open','partially_received') AND NOT pl.closed_short GROUP BY 1) inc ON inc.material_id=m.id
       WHERE ${where.join(' AND ')}`;
 
     const [{ total }] = await q(`SELECT COUNT(*)::int AS total ${FROM}`, params);
@@ -527,7 +527,7 @@ r.get('/inventory/leftovers', async (_req, res, next) => {
       LEFT JOIN (
         SELECT pl.material_id, SUM(GREATEST(pl.qty - pl.received_qty, 0)) q
         FROM po_lines pl JOIN purchase_orders po ON po.id = pl.purchase_order_id
-        WHERE po.status IN ('open','partially_received')
+        WHERE po.status IN ('open','partially_received') AND NOT pl.closed_short
         GROUP BY pl.material_id
       ) inc ON inc.material_id = m.id
       WHERE m.leftover=1 ORDER BY m.name`);

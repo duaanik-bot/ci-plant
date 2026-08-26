@@ -29,22 +29,29 @@ export function OrderedForCell({ commitments, onOpen, className = '' }) {
     );
   }
 
-  // Every product is NAMED here, not counted. The codes wrap rather than
-  // truncate: this cell exists to be read at a glance, and a tail hidden behind
-  // "+2 more" puts the buyer back where they started — opening a panel to learn
-  // what the order is for.
+  // Every product is NAMED here, not counted — and "named" now means the full
+  // product name, not just its code. The plant says codes out loud but reads
+  // cartons by name, so the name leads and the code rides after it in a lighter
+  // weight. One product per row: long carton names wrap inside the cell's own
+  // width instead of weaving into each other, so a three-product order reads as
+  // three lines, never as a wall. Nothing hides behind a "+2 more".
   return (
     <button type="button" onClick={onOpen}
-      className={`group block w-full max-w-[260px] text-left touch:min-h-[38px] ${className}`}
-      title={`${s.label} — click for customer, sales PO and job status`}>
+      className={`group block w-full max-w-[280px] text-left touch:min-h-[38px] ${className}`}
+      title={`${s.names.map(n => [n.product_name, n.name].filter(Boolean).join(' — ')).join(' · ')} — click for customer, sales PO and job status`}>
       <span className="flex items-start gap-1">
         <PackageSearch size={12} className="mt-[3px] shrink-0 text-brand-600" />
-        <span className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
-          {s.names.map((n, i) => (
-            <span key={n.key} className={n.on_board
-              ? 'text-xs font-bold text-brand-600 underline-offset-2 group-hover:underline'
-              : 'text-xs font-bold text-slate-400 line-through decoration-slate-300'}>
-              {n.name}{i < s.names.length - 1 && <span className="font-normal text-slate-400"> ·</span>}
+        <span className="min-w-0 flex-1 space-y-0.5">
+          {s.names.map(n => (
+            <span key={n.key} className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className={n.on_board
+                ? 'text-xs font-bold leading-tight text-brand-600 underline-offset-2 group-hover:underline'
+                : 'text-xs font-bold leading-tight text-slate-400 line-through decoration-slate-300'}>
+                {n.product_name || n.name}
+              </span>
+              {n.product_name && n.name !== n.product_name && (
+                <span className={`whitespace-nowrap font-mono text-[10px] ${n.on_board ? 'text-slate-400' : 'text-slate-300 line-through'}`}>{n.name}</span>
+              )}
             </span>
           ))}
         </span>

@@ -2529,7 +2529,8 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       FROM po_lines pl
       JOIN purchase_orders po ON po.id=pl.purchase_order_id
       JOIN vendors v ON v.id=po.vendor_id
-      WHERE pl.material_id=$1 AND po.status IN ('open','partially_received') ORDER BY po.id DESC`, [matId]);
+      WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')
+        AND NOT pl.closed_short ORDER BY po.id DESC`, [matId]);
 
     const batches = await q(`
       SELECT batch_no, qty, created_at FROM stock_batches

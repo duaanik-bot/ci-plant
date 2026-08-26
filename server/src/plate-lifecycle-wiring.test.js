@@ -192,15 +192,16 @@ test('accepting a return preserves what the press declared', () => {
   assert.doesNotMatch(route, /const condition = action === 'verified_ok' \? 'Good' : 'Scrapped'/);
 });
 
-test('Plates still exposes all six operational views, grouped into four stages', () => {
+test('Plates still exposes all seven operational views, grouped into four stages', () => {
   const page = read('client/src/components/PlatesLifecycle.jsx');
-  // All six views survive — buying a plate is simply no longer three separate
-  // destinations, because raising the need, ordering it and receiving it are one
-  // job done by one person. The rack, the press returns and the archive stay apart.
-  for (const label of ['Requirement / PR','Purchase Orders','GRN','Plates Warehouse','Return from Printing','History']) {
+  // All seven views survive — buying a plate is simply no longer separate
+  // destinations, because raising the need, ordering it, receiving it and
+  // chasing what has not landed are one job done by one person. The rack, the
+  // press returns and the archive stay apart.
+  for (const label of ['Requirement / PR','Purchase Orders','GRN','Pendency','Plates Warehouse','Return from Printing','History']) {
     assert.ok(page.includes(label), `${label} is missing`);
   }
-  assert.match(page, /const PROCUREMENT_TABS = \['requirements', 'pos', 'grns'\]/);
+  assert.match(page, /const PROCUREMENT_TABS = \['requirements', 'pos', 'grns', 'pendency'\]/);
   assert.match(page, /PLATE_STAGES\.map\(stage =>/);
   // Each stage carries a tone, so the rail reads as four places rather than a row
   // of identical pills.

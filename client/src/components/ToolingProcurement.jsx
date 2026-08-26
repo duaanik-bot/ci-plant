@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Boxes, CheckCircle2, ClipboardCheck, Download, Eye,
+  AlertTriangle, Ban, Boxes, CheckCircle2, ClipboardCheck, Download, Eye,
   FileCheck2, History, PackageCheck, PackagePlus, Plus, Printer, RotateCcw,
   Send, ShoppingBag, Trash2, Truck, Warehouse,
 } from 'lucide-react';
@@ -9,7 +9,7 @@ import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import {
-  initialReceipt, lineTicked, lineReceipt, receiptTotals, toggleToolingLine,
+  initialReceipt, lineTicked, lineReceipt, pendingOf, receiptTotals, toggleToolingLine,
   fillAll, clearAll, toReceiptPayload,
 } from '../lib/toolingGrnSelection.js';
 import { stockPosition } from '../lib/toolingStock.js';
@@ -20,6 +20,7 @@ import {
 import ProductIdentity from './ProductIdentity.jsx';
 import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 import PlatesLifecycle from './PlatesLifecycle.jsx';
+import ClosePoLinesModal from './ClosePoLines.jsx';
 
 const FAMILY = {
   plate: { singular: 'Plate', plural: 'Plates', unit: 'plates', icon: Printer },
@@ -93,12 +94,14 @@ const num = value => Number(value) || 0;
 const canBuy = () => ['admin', 'planner'].includes(auth.user?.role);
 const canQc = () => ['admin', 'qc'].includes(auth.user?.role);
 
-// A PO line's receipt state, in the same three tones the rest of the module uses:
-// nothing yet, part landed, all in.
+// A PO line's receipt state, in the same tones the rest of the module uses:
+// nothing yet, part landed, all in — and closed short, where the balance was
+// waived rather than delivered.
 const RECEIPT_TONE = {
   open: 'bg-slate-100 text-slate-600',
   partial: 'bg-amber-50 text-amber-700',
   received: 'bg-emerald-50 text-emerald-700',
+  closed: 'bg-slate-200 text-slate-500',
 };
 
 const STOCK_TONE = {
@@ -322,7 +325,9 @@ function GrnModal({ family, form, setForm, pos, inventory, vendors, onClose, onC
                   <span className="block text-[11px] font-normal text-slate-400">
                     {line.receivable
                       ? `Pending ${fmt.num(line.pending)} of ${fmt.num(line.order_qty)} ${line.unit || 'nos'}`
-                      : `Fully received · ${fmt.num(line.order_qty)} ${line.unit || 'nos'}`}
+                      : line.closed_short
+                        ? `Closed short · ${fmt.num(line.received_qty)} of ${fmt.num(line.order_qty)} ${line.unit || 'nos'} received`
+                        : `Fully received · ${fmt.num(line.order_qty)} ${line.unit || 'nos'}`}
                   </span>
                 </div>
                 <Field label={`Receive / ${fmt.num(line.pending)}`}>
@@ -454,6 +459,9 @@ function GenericToolingProcurement({ family }) {
   const [qcModal, setQcModal] = useState(null);
   const [itemModal, setItemModal] = useState(null);
   const [detail, setDetail] = useState(null);
+  // Line-level "no more receipts" — { po, preselectId? }, from the PO row's
+  // menu or a Pendency row with that line pre-ticked.
+  const [closeLines, setCloseLines] = useState(null);
 
   const load = async () => {
     const base = `/tooling/procurement/${family}`;
@@ -490,7 +498,9 @@ function GenericToolingProcurement({ family }) {
   const counts = useMemo(() => ({
     pending: requests.filter(row => row.approval_status === 'pending').length,
     approved: requests.filter(row => row.approval_status === 'approved').length,
-    onOrder: pos.reduce((sum, po) => sum + po.lines.reduce((lineSum, line) => lineSum + Math.max(0, num(line.qty) - num(line.received_qty)), 0), 0),
+    // pendingOf, not qty-received: a closed-short line's balance is waived and
+    // must not read as still on order.
+    onOrder: pos.reduce((sum, po) => sum + po.lines.reduce((lineSum, line) => lineSum + pendingOf(line), 0), 0),
     quarantine: grns.filter(row => row.status === 'quarantine').reduce((sum, row) => sum + num(row.qty), 0),
     free: inventory.reduce((sum, row) => sum + num(row.stock_free), 0),
   }), [requests, pos, grns, inventory]);
@@ -581,8 +591,10 @@ function GenericToolingProcurement({ family }) {
     </div> },
     { key: 'expected_date', label: 'Expected', render: po => fmt.date(po.expected_date) },
     { key: 'fulfilment', label: 'Fulfilment', sortable: false, render: po => {
-      const ordered = po.lines.reduce((sum, line) => sum + num(line.qty), 0);
-      const received = po.lines.reduce((sum, line) => sum + num(line.received_qty), 0);
+      // Waived balances are not owed, so the bar measures against what can
+      // still arrive — an order with a closed line can then read complete.
+      const ordered = po.lines.reduce((sum, line) => sum + (line.closed_short ? Math.min(num(line.received_qty), num(line.qty)) : num(line.qty)), 0);
+      const received = po.lines.reduce((sum, line) => sum + Math.min(num(line.received_qty), num(line.qty)), 0);
       return <FulfillmentBar pct={ordered ? received / ordered * 100 : 0} done={received} total={ordered} />;
     } },
     { key: 'status', label: 'Status', render: po => <Chip value={po.status} map={PO_STATUS} /> },
@@ -592,6 +604,7 @@ function GenericToolingProcurement({ family }) {
       <ActionMenu items={[
         { label: 'Print / send PO', icon: Send, onClick: () => window.open(`/tooling/${meta.plural.toLowerCase()}/po/${po.id}`, '_self') },
         ...(canBuy() && !po.sent_at ? [{ label: 'Mark sent to vendor', icon: Truck, onClick: async () => { await api.post(`/tooling/procurement/${family}/purchase-orders/${po.id}/send`); toast.success(`${po.po_number} marked sent`); load(); } }] : []),
+        ...(canBuy() && !['closed', 'reversed'].includes(po.status) ? [{ label: 'Close lines — no more receipts…', icon: Ban, danger: true, onClick: () => setCloseLines({ po }) }] : []),
       ]} />
     </div> },
   ];
@@ -652,11 +665,22 @@ function GenericToolingProcurement({ family }) {
 
   const pendencyColumns = pendencyView === 'lines' ? [
     { key: 'po_number', label: 'PO', render: row => <b>{row.po_number}</b> },
-    { key: 'item_name', label: meta.singular, render: row => `${row.item_code} · ${row.item_name}` },
+    { key: 'item_name', label: meta.singular, render: row => <span>{row.product_name || `${row.item_code} · ${row.item_name}`}
+      <span className="block text-[11px] text-slate-400">{row.product_name ? `${row.item_code} · ${[row.request_number, row.jc_number].filter(Boolean).join(' · ')}` : 'Direct PO'}</span></span>,
+      export: row => [row.product_name, row.item_code, row.item_name].filter(Boolean).join(' · ') },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'pending_qty', label: 'Pending', align: 'right', render: row => `${fmt.num(row.pending_qty)} ${row.unit}` },
     { key: 'expected_date', label: 'Expected', render: row => fmt.date(row.expected_date) },
     { key: 'age_bucket', label: 'Age', render: row => <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${AGE_TONE[row.age_bucket]}`}>{row.age_bucket} days</span> },
+    // The row-level close: THIS line stops expecting receipts, the order's
+    // other lines stay live. Same modal as the PO row, this line pre-ticked.
+    { key: 'actions', label: '', sortable: false, render: row => canBuy() ? <div className="flex justify-end" onClick={event => event.stopPropagation()}>
+      <Button size="sm" variant="ghost" title="No more receipts — close this line" onClick={() => {
+        const po = pos.find(p => p.id === row.purchase_order_id);
+        if (!po) return toast.error('Reload — this order is not in the register yet');
+        setCloseLines({ po, preselectId: row.id });
+      }}><Ban size={12} /> No more</Button>
+    </div> : null },
   ] : pendencyView === 'items' ? [
     { key: 'item_code', label: 'Code', render: row => <b>{row.item_code}</b> }, { key: 'item_name', label: meta.singular },
     { key: 'lines', label: 'PO Lines', align: 'right' }, { key: 'pending_qty', label: 'Pending Qty', align: 'right', render: row => fmt.num(row.pending_qty) },
@@ -754,6 +778,38 @@ function GenericToolingProcurement({ family }) {
           defaultSort={{ key: 'expected_date', dir: 'asc' }} empty="Nothing is pending" exportName={`${meta.plural} Pendency`} />
       </>}
 
+      {closeLines && <ClosePoLinesModal
+        poNumber={closeLines.po.po_number} vendorName={closeLines.po.vendor_name} unitWord={meta.unit}
+        impactEmptyText="No job requirement rides on the ticked lines — direct PO stock."
+        lines={(closeLines.po.lines || []).map(line => ({
+          id: line.id, qty: num(line.qty), received_qty: num(line.received_qty), unit: line.unit,
+          closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by,
+          pending: Math.max(0, num(line.qty) - num(line.received_qty)),
+          preselected: line.id === closeLines.preselectId,
+          title: line.material_name || line.item_name,
+          sub: [line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
+        }))}
+        // The die/block impact: which requirement each closing line strands. A
+        // requirement with NOTHING received offers the checkbox — release it
+        // back to Approved for re-sourcing; a part-received one keeps its
+        // converted anchor and the row says so.
+        loadImpact={line_ids => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/close-impact`, { line_ids })
+          .then(r => [...new Map((r.requirements || []).map(row => {
+            const eligible = num(row.received_qty) === 0;
+            return [row.requirement_id, {
+              id: row.requirement_id, selectable: eligible, defaultOn: eligible, qty: null,
+              order_line_id: row.order_line_id,
+              title: row.product_name || row.request_number, code: row.product_code,
+              sub: [row.request_number, row.jc_number].filter(Boolean).join(' · '),
+              message: eligible
+                ? `Returns to Approved for re-sourcing — plan the ${meta.singular.toLowerCase()} again.`
+                : `${fmt.num(row.received_qty)} of ${fmt.num(row.qty)} received — stays converted; raise a fresh requirement for the shortfall.`,
+            }];
+          })).values()])}
+        onCloseLines={(line_ids, reason, releases) => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/close`,
+          { line_ids, reason, release_requirements: (releases || []).map(row => row.id) })}
+        onReopenLines={line_ids => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids })}
+        onDone={load} onClose={() => setCloseLines(null)} />}
       {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={async () => { setSelectedIds([]); await load(); }} />}
       {bulkDeleteRows && <BulkDeleteModal family={family} rows={bulkDeleteRows} onClose={() => setBulkDeleteRows(null)} onDeleted={async () => { setSelectedIds([]); await load(); }} />}
       {grnModal && <GrnModal family={family} form={grnModal} setForm={setGrnModal} pos={pos} inventory={inventory} vendors={vendors} onClose={() => setGrnModal(null)} onCreated={load} />}

@@ -1450,7 +1450,7 @@ export function DataTable({
           <div className="space-y-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-2.5">
             {onSearchChange
               ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full" />
-              : searchable && <SearchInput value={q} onChange={setQ} className="w-full" />}
+              : searchable && <SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} className="w-full" />}
             <div className="flex flex-wrap items-center gap-2">
               {sortItems.length > 0 && (
                 <ActionMenu items={sortItems} label="Sort" trigger={({ toggle: t, open: o }) => (
@@ -1621,7 +1621,7 @@ export function DataTable({
               clipping the word that says it searches remarks at all. */}
           {onSearchChange
             ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full max-w-xl" />
-            : searchable ? <SearchInput value={q} onChange={setQ} /> : <span />}
+            : searchable ? <SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} /> : <span />}
           {exportName && <ExportMenu build={buildExport} />}
         </div>
       )}

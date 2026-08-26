@@ -251,6 +251,13 @@ CREATE TABLE IF NOT EXISTS po_lines (
   qty DOUBLE PRECISION NOT NULL, rate DOUBLE PRECISION NOT NULL DEFAULT 0,
   received_qty DOUBLE PRECISION NOT NULL DEFAULT 0
 );
+-- A line the buyer has closed short: the unreceived balance is waived and no
+-- further GRN may land on it. The order's other lines stay receivable — this
+-- is the per-item form of "close the PO, no more receipts".
+ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS closed_short BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS closed_reason TEXT;
+ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS closed_by TEXT;
+ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS grns (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

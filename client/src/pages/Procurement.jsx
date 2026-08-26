@@ -16,6 +16,7 @@ import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../com
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { OrderedForCell, OrderedForModal } from '../components/OrderedFor.jsx';
+import ClosePoLinesModal from '../components/ClosePoLines.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
@@ -220,6 +221,9 @@ export default function Procurement() {
   // The board line whose committed products are being read — the modal behind
   // the Ordered For cell on both registers.
   const [orderedFor, setOrderedFor] = useState(null);
+  // Line-level "no more receipts" — { po, preselectId? }. Opened from the PO
+  // card's menu (pick several) or from a Pendency row (that line pre-ticked).
+  const [closeLines, setCloseLines] = useState(null);
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
 
   // Build the requisition payload from the multi-line form.
@@ -718,7 +722,9 @@ export default function Procurement() {
 
   const openGrnPo = po => setGrnPo({
     po, ...GRN_META(),
-    lines: po.lines.filter(l => l.received_qty < l.qty)
+    // A closed-short line's balance is waived, not pending — offering it here
+    // would invite a receipt the server is going to refuse.
+    lines: po.lines.filter(l => l.received_qty < l.qty && !l.closed_short)
       .map(l => ({ ...l, receive_qty: '', batch_no: '' })),
   });
 
@@ -1346,9 +1352,12 @@ export default function Procurement() {
               : poFilters.dirty ? 'Nothing matches those filters — Reset filters brings the register back'
               : poView === 'completed' ? 'No completed purchase orders yet.' : 'No pending purchase orders — every order is fully received.'}</p>}
           {poList.map(po => {
-            const pendingLines = po.lines.filter(l => l.received_qty < l.qty);
+            const pendingLines = po.lines.filter(l => l.received_qty < l.qty && !l.closed_short);
             const received = po.lines.some(l => +l.received_qty > 0) || po.grn_count > 0;
-            const orderedTotal = po.lines.reduce((s, l) => s + +l.qty, 0);
+            // A closed-short line's waived balance is not owed, so the bar
+            // measures against what can still arrive — otherwise an order with
+            // a waived line could never read complete.
+            const orderedTotal = po.lines.reduce((s, l) => s + (l.closed_short ? Math.min(+l.received_qty, +l.qty) : +l.qty), 0);
             const receivedTotal = po.lines.reduce((s, l) => s + Math.min(+l.received_qty, +l.qty), 0);
             const poFulfillment = orderedTotal > 0 ? (receivedTotal / orderedTotal) * 100 : 0;
             const hasSourcePr = !!po.pr_number || po.source_pr_count > 0;
@@ -1357,6 +1366,10 @@ export default function Procurement() {
               ...(po.status !== 'closed' ? [{ key: 'edit', label: 'Edit PO', icon: Pencil, onClick: () => openEditPo(po) }] : []),
               ...(hasSourcePr && !received ? [{ key: 'revert', label: 'Send back to requisition', icon: Undo2, tone: 'danger', onClick: () => revertPo(po) }] : []),
               { key: 'delete', label: 'Delete PO', icon: Trash2, tone: 'danger', onClick: () => confirmDelete('purchase_order', po, po.po_number) },
+              // Two grains of the same decision: the whole order, or just the
+              // items that will not arrive while the rest stays receivable.
+              ...(po.status !== 'closed' ? [{ key: 'close_lines', label: 'Close lines — pick items…', icon: Ban,
+                onClick: () => setCloseLines({ po }) }] : []),
               ...(po.status !== 'closed' ? [{ key: 'close', label: 'Close PO (no more receipts)', icon: Ban, tone: 'danger',
                 onClick: async () => { await api.post(`/purchase-orders/${po.id}/close`); toast.info(`${po.po_number} closed`); load(); } }] : []),
             ];
@@ -1433,7 +1446,18 @@ export default function Procurement() {
                         {pk != null && <div className="text-[10px] text-slate-400">{pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt</div>}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.received_qty)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${l.qty - l.received_qty > 0 ? 'font-semibold text-amber-600' : 'text-slate-300'}`}>{fmt.num(Math.max(0, l.qty - l.received_qty))}</td>
+                      {/* A waived balance is not pending — the amber figure is a
+                          promise the vendor still owes, and this line's was
+                          released. The chip says so instead of showing 0, which
+                          would read as fully received. */}
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {l.closed_short
+                          ? <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                              title={`${fmt.num(Math.max(0, l.qty - l.received_qty))} waived — closed short${l.closed_reason ? `: ${l.closed_reason}` : ''}${l.closed_by ? ` (${l.closed_by})` : ''}`}>
+                              {fmt.num(Math.max(0, l.qty - l.received_qty))} waived
+                            </span>
+                          : <span className={l.qty - l.received_qty > 0 ? 'font-semibold text-amber-600' : 'text-slate-300'}>{fmt.num(Math.max(0, l.qty - l.received_qty))}</span>}
+                      </td>
                       <td className="px-3 py-2"><FulfillmentBar className="mx-auto" pct={l.qty > 0 ? (Math.min(l.received_qty, l.qty) / l.qty) * 100 : 0} /></td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {rpk != null ? <>
@@ -1442,7 +1466,7 @@ export default function Procurement() {
                         </> : `₹${(+l.rate || 0).toFixed(2)}`}
                       </td>
                       <td className="px-3 py-2 text-right" onClick={e => e.stopPropagation()}>
-                        {l.received_qty < l.qty && po.status !== 'closed' && (
+                        {l.received_qty < l.qty && po.status !== 'closed' && !l.closed_short && (
                           <Button size="sm" variant="secondary" onClick={() => setReceivePo({ po, line: l, qty: '', batch_no: '', ...GRN_META() })}>Receive</Button>
                         )}
                       </td>
@@ -1680,6 +1704,15 @@ export default function Procurement() {
                                   po: { id: l.po_id, po_number: l.po_number },
                                   line: { id: l.po_line_id, material_name: l.material_name, qty: l.qty, received_qty: l.received_qty },
                                   qty: '', batch_no: '', ...GRN_META() }) },
+                                // The row-level "close the PO" Anik asked for: this
+                                // LINE stops expecting receipts; the order's other
+                                // lines stay live. Opens the same modal as the PO
+                                // card so both doors carry one policy.
+                                { key: 'close_line', label: 'No more receipts — close this line', icon: Ban, tone: 'danger', onClick: () => {
+                                  const po = pos.find(p => p.id === l.po_id);
+                                  if (!po) return toast.error('Reload — this order is not in the register yet');
+                                  setCloseLines({ po, preselectId: l.po_line_id });
+                                } },
                                 { key: 'open', label: 'Open PO', icon: Eye, onClick: () => navigate(`/procurement/po/${l.po_id}`) },
                               ]} />
                             </td>
@@ -2653,6 +2686,29 @@ export default function Procurement() {
 
       {/* The jobs behind an Ordered For cell — one panel serving both registers */}
       <OrderedForModal line={orderedFor} onClose={() => setOrderedFor(null)} />
+
+      {/* Line-level "no more receipts" — one modal behind the PO card menu and
+          the Pendency row, mapping board lines into the shared shape. */}
+      {closeLines && <ClosePoLinesModal
+        poNumber={closeLines.po.po_number} vendorName={closeLines.po.vendor_name} unitWord="sheets"
+        lines={(closeLines.po.lines || []).map(l => ({
+          id: l.id, qty: +l.qty, received_qty: +l.received_qty, unit: l.unit,
+          closed_short: !!l.closed_short, closed_reason: l.closed_reason, closed_by: l.closed_by,
+          pending: Math.max(0, +l.qty - +l.received_qty),
+          preselected: l.id === closeLines.preselectId,
+          title: l.material_name,
+          sub: commitmentText(l.commitments),
+        }))}
+        loadImpact={line_ids => api.post(`/purchase-orders/${closeLines.po.id}/lines/close-impact`, { line_ids })
+          .then(r => (r.allocations || []).map(a => ({
+            id: a.id, qty: Number(a.qty), selectable: true, defaultOn: true,
+            order_line_id: a.order_line_id,
+            title: a.product_name || a.product_code, code: a.product_code,
+            sub: [a.customer_name, a.sales_po && `PO ${a.sales_po}`, a.pr_number, a.jc_number].filter(Boolean).join(' · '),
+          })))}
+        onCloseLines={(line_ids, reason, release_allocations) => api.post(`/purchase-orders/${closeLines.po.id}/lines/close`, { line_ids, reason, release_allocations })}
+        onReopenLines={line_ids => api.post(`/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids })}
+        onDone={load} onClose={() => setCloseLines(null)} />}
     </div>
   );
 }

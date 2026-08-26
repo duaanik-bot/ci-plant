@@ -69,12 +69,17 @@ export function toolingMasterShape(family, { productId, productName, productCode
   };
 }
 
+// A line is DONE when everything ordered arrived — or when the buyer closed it
+// short, waiving the balance. A PO whose every line is done reads 'received'
+// only if nothing was waived; close a line short and the finished order reads
+// 'closed', because "received" would claim a delivery that never happened.
+const lineDone = line => line?.closed_short
+  || Math.max(0, Number(line?.received_qty) || 0) >= (positive(line?.qty) || 0);
+
 export function toolingPoStatus(lines = []) {
   if (!lines.length) return 'open';
-  const ordered = lines.reduce((sum, line) => sum + (positive(line.qty) || 0), 0);
-  const received = lines.reduce((sum, line) => sum + Math.max(0, Number(line.received_qty) || 0), 0);
-  if (ordered > 0 && received >= ordered) return 'received';
-  if (received > 0) return 'partially_received';
+  if (lines.every(lineDone)) return lines.some(line => line?.closed_short) ? 'closed' : 'received';
+  if (lines.some(line => Number(line?.received_qty) > 0)) return 'partially_received';
   return 'open';
 }
 

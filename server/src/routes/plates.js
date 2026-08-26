@@ -1376,6 +1376,8 @@ async function receivePlateLine(qc, oc, { poLineId, componentIds = [], body = {}
     JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
     WHERE pl.id=$1 AND po.family='plate' FOR UPDATE OF pl,po,tr`, [poLineId]);
   if (!poLine) throw Object.assign(new Error('Plate PO line not found'), { status: 404 });
+  if (poLine.closed_short) throw Object.assign(
+    new Error(`This ${poLine.po_number} line is closed short — no more receipts were asked for. Reopen it to receive.`), { status: 409 });
   const requested = [...new Set((componentIds || []).map(Number).filter(Boolean))];
   const values = [poLine.id];
   const chosen = requested.length ? (values.push(requested), 'AND prc.id=ANY($2::int[])') : '';
@@ -1423,7 +1425,7 @@ async function receivePlateLine(qc, oc, { poLineId, componentIds = [], body = {}
      assetStatus, asset.rack_location, asset.condition, grnNumber, userName]);
   }
   await qc('UPDATE tooling_po_lines SET received_qty=received_qty+$1 WHERE id=$2', [components.length, poLine.id]);
-  const poLines = await qc('SELECT qty,received_qty FROM tooling_po_lines WHERE purchase_order_id=$1', [poLine.purchase_order_id]);
+  const poLines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [poLine.purchase_order_id]);
   await qc('UPDATE tooling_purchase_orders SET status=$1,updated_at=now() WHERE id=$2',
     [toolingPoStatus(poLines), poLine.purchase_order_id]);
   await qc(`UPDATE tooling_requests SET received_at=now(),grn_number=$1,updated_at=now() WHERE id=$2`,
@@ -1522,7 +1524,7 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
       await qc(`UPDATE tooling_grns SET status='reversed',reversed_at=now(),reversed_by=$1,
         reversal_reason=$2 WHERE id=$3`, [req.user.name, reason, grn.id]);
       if (grn.purchase_order_id) {
-        const lines = await qc('SELECT qty,received_qty FROM tooling_po_lines WHERE purchase_order_id=$1', [grn.purchase_order_id]);
+        const lines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [grn.purchase_order_id]);
         await qc('UPDATE tooling_purchase_orders SET status=$1,updated_at=now() WHERE id=$2',
           [toolingPoStatus(lines), grn.purchase_order_id]);
       }
