@@ -21,6 +21,44 @@
     <meta name="apple-mobile-web-app-title" content="Colour Impressions" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
+    <!-- STALE-BUILD RECOVERY — must stay ABOVE the tags Vite injects below, so
+         the listener is attached before the stylesheet and the app module start
+         loading.
+
+         A plant tablet sits on one page for a whole shift. When a deploy lands,
+         that page is still asking for the previous build's hashed assets, and
+         they are gone. What the reader got was the Live Floor with real figures
+         and no stylesheet at all — unreadable, and easy to mistake for the app
+         having died. If the app module is the file that is missing instead, the
+         screen simply stays blank.
+
+         Resource load failures do not bubble, so this listens in the CAPTURE
+         phase; `vite:preloadError` covers the lazily-imported route chunks,
+         which fail as a rejected promise rather than an element error. The
+         reload happens ONCE per session — the document is served
+         must-revalidate, so one reload is enough to pick up the current build,
+         and a genuinely broken deploy must not put the floor in a reload loop.
+         main.jsx clears the flag once the app boots, so the next deploy is
+         recovered the same way. -->
+    <script>
+      (function () {
+        var KEY = 'ci:stale-build-reload';
+        function recover() {
+          try {
+            if (sessionStorage.getItem(KEY)) return;
+            sessionStorage.setItem(KEY, '1');
+          } catch (e) { return; }
+          location.reload();
+        }
+        window.addEventListener('error', function (e) {
+          var el = e.target;
+          if (!el || el === window) return;
+          if (el.tagName === 'SCRIPT' || (el.tagName === 'LINK' && el.rel === 'stylesheet')) recover();
+        }, true);
+        window.addEventListener('vite:preloadError', recover);
+      })();
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>

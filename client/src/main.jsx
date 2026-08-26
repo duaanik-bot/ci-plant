@@ -9,6 +9,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 );
 
+// The app booted, so whatever the recovery reload in index.html was there for
+// is over. Clearing the flag re-arms it for the NEXT deploy — left set, a tablet
+// gets exactly one self-heal and then goes back to showing an unstyled screen.
+try { sessionStorage.removeItem('ci:stale-build-reload'); } catch { /* private mode */ }
+
 // Keep the push worker current on every boot. Registering an ALREADY-registered
 // worker is a no-op that also picks up a new sw.js after a deploy, so a phone
 // that agreed to be buzzed months ago keeps working without being asked again.
