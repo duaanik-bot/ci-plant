@@ -6,7 +6,8 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, nextNumber, effectiveProduct } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { COMPANY } from './billing.js';
+import { billingEntity } from '../billing-entity.js';
+import { coaSpecRows, declaredGsm, applyGsmToParams } from '../coa-spec.js';
 
 const r = Router();
 const canCoa = requireRole('qc', 'dispatch', 'planner');
@@ -20,39 +21,9 @@ export const QUALITY_DECLARATION =
   + 'conform to the stated standards with no deviation observed. The batch is approved by Quality and '
   + 'released for dispatch.';
 
-const COATING_LABEL = {
-  aqueous: 'Aqueous coating', uv: 'UV coating',
-  matt_lam: 'Matt lamination', gloss_lam: 'Gloss lamination',
-};
-const SPECIAL_LABEL = {
-  foil: 'Hot foil stamping', emboss: 'Embossing',
-  foil_emboss: 'Hot foil stamping + embossing', window: 'Window patching',
-};
-
-// The industry-standard parameter grid for a printed-carton COA. Standard
-// values come from the effective product spec; observed defaults to
-// "Complies" and QC edits before issuing.
-function draftParams(product, board) {
-  const rows = [];
-  const add = (parameter, standard) =>
-    rows.push({ parameter, standard, observed: 'Complies', result: 'Pass' });
-
-  if (product.size) add('Product / carton size', product.size);
-  add('Board substrate', [board?.name, product.gsm ? `${product.gsm} GSM ± 5%` : null].filter(Boolean).join(' · ') || 'As per approved specification');
-  if (product.child_l && product.child_w) add('Print sheet size', `${product.child_l} × ${product.child_w} in`);
-  add('Printing colours', `${product.colors || '—'} colours as per approved artwork`);
-  add('Shade matching', 'As per approved shade card');
-  add('Text matter & artwork', 'As per approved artwork — no deviation');
-  add('Print quality', 'No misregister, scumming, set-off or hickies');
-  if (product.coating && product.coating !== 'none')
-    add('Coating / finish', COATING_LABEL[product.coating] || product.coating);
-  if (product.special && product.special !== 'none')
-    add('Special finish', SPECIAL_LABEL[product.special] || product.special);
-  add('Dimensions & creasing', 'Within ±1 mm of approved dimensions; crease lines sharp, no cracking');
-  add('Pasting / bonding', 'Firm side-seam bonding, no glue smear or warping');
-  add('Cleanliness', 'Free from dust, foreign matter and odour');
-  return rows;
-}
+// The parameter grid itself lives in coa-spec.js, alongside the GSM ladder, so
+// the draft, the printed sheet and the edit dialog cannot disagree about what
+// the plant certifies.
 
 // Display-ready COA with all reference fields joined in.
 async function fullCoa(id, oc = one) {
@@ -70,7 +41,12 @@ async function fullCoa(id, oc = one) {
     LEFT JOIN job_cards jc ON jc.id=co.job_card_id
     LEFT JOIN invoices i ON i.id=co.invoice_id
     WHERE co.id=$1`, [id]);
-  if (c) c.company = COMPANY;
+  if (c) {
+    // Galpha Laboratories' cartons certify as Darbi Print Pack. The entity
+    // frozen on the row wins, so reassigning a customer never rewrites a
+    // certificate already in the customer's hands.
+    c.company = await billingEntity({ entity_id: c.billing_entity_id, customer_id: c.customer_id }, oc);
+  }
   return c;
 }
 
@@ -150,18 +126,26 @@ r.post('/coas', canCoa, async (req, res, next) => {
         rejected: relStage ? (relStage.qty_rejected ?? relStage.qty_scrap) : null,
       };
 
+      // The GSM the certificate declares: the master's figure rounded up to the
+      // commercial grade the plant can claim (296 → 300, 380 → 400). Snapshotted
+      // onto the row so the sheet has one figure to print and Edit COA has one
+      // field to override — see coa-spec.js for why light stock is left alone.
+      const gsm = declaredGsm(product.gsm);
+      // The entity this certificate goes out under, frozen at draft time.
+      const entity = await billingEntity({ customer_id: dl.customer_id }, oc);
+
       const coa_number = await nextNumber('CI-COA-', 'coas', 'coa_number', oc);
       const [c] = await qc(`
         INSERT INTO coas (coa_number, dispatch_line_id, dispatch_id, order_line_id, job_card_id,
                           product_id, customer_id, invoice_id, qty, batch_no, mfg_date, po_number,
-                          params, sampling, remarks, inspected_by, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+                          params, sampling, remarks, inspected_by, created_by, gsm, billing_entity_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
         [coa_number, dl.id, dl.dispatch_id, dl.order_line_id, dl.job_card_id,
          dl.product_id, dl.customer_id, invoice_id || null, dl.qty, dl.jc_number || null,
          dl.closed_at ? String(dl.closed_at.toISOString?.() || dl.closed_at).slice(0, 10) : null,
          dl.po_number || null,
-         JSON.stringify(draftParams(product, board)), JSON.stringify(sampling),
-         QUALITY_DECLARATION, null, req.user.name]);
+         JSON.stringify(coaSpecRows(product, board)), JSON.stringify(sampling),
+         QUALITY_DECLARATION, null, req.user.name, gsm, entity.id ?? null]);
       await audit('coa', c.id, 'create', coa_number, qc, req.user.name);
       return c.id;
     });
@@ -180,18 +164,63 @@ r.put('/coas/:id', canCoa, async (req, res, next) => {
         throw Object.assign(new Error(`${c.coa_number} is issued and frozen — ask an admin to amend it`), { status: 409 });
 
       const b = req.body;
+      // A typed GSM is taken LITERALLY — the ladder runs when the draft is built
+      // from the master, and this field is the override. Laddering it again would
+      // make 296 untypeable, which defeats the point of an override.
+      const gsm = b.gsm == null || String(b.gsm).trim() === '' ? null : Math.round(Number(b.gsm));
+      if (gsm != null && (!Number.isFinite(gsm) || gsm <= 0))
+        throw Object.assign(new Error('GSM must be a positive number'), { status: 400 });
+      // Moving the GSM moves every *standard* that quotes it — the substrate
+      // line and the grammage row — so the sheet cannot contradict itself.
+      // Observed readings are measurements and are left exactly as QC wrote them.
+      const params = b.params ? applyGsmToParams(b.params, gsm ?? c.gsm)
+        : gsm != null && gsm !== c.gsm ? applyGsmToParams(c.params, gsm) : null;
+      if (gsm != null && gsm !== c.gsm)
+        await audit('coa', c.id, 'gsm', `${c.coa_number}: ${c.gsm ?? '—'} → ${gsm} GSM`, qc, req.user.name);
       await qc(`
         UPDATE coas SET
           qty=COALESCE($1,qty), batch_no=COALESCE($2,batch_no), mfg_date=COALESCE($3,mfg_date),
           po_number=COALESCE($4,po_number), params=COALESCE($5,params), sampling=COALESCE($6,sampling),
           remarks=COALESCE($7,remarks), inspected_by=COALESCE($8,inspected_by),
-          approved_by=COALESCE($9,approved_by), updated_at=now()
+          approved_by=COALESCE($9,approved_by), gsm=COALESCE($11,gsm), updated_at=now()
         WHERE id=$10`,
         [b.qty ?? null, b.batch_no ?? null, b.mfg_date ?? null, b.po_number ?? null,
-         b.params ? JSON.stringify(b.params) : null, b.sampling ? JSON.stringify(b.sampling) : null,
-         b.remarks ?? null, b.inspected_by ?? null, b.approved_by ?? null, c.id]);
+         params ? JSON.stringify(params) : null, b.sampling ? JSON.stringify(b.sampling) : null,
+         b.remarks ?? null, b.inspected_by ?? null, b.approved_by ?? null, c.id, gsm]);
       if (c.status === 'issued')
         await audit('coa', c.id, 'amend_issued', `${c.coa_number} amended after issue`, qc, req.user.name);
+      return c.id;
+    });
+    res.json(await fullCoa(coaId));
+  } catch (e) { next(e); }
+});
+
+// Re-read the product master onto a draft.
+//
+// A certificate is a snapshot, but a DRAFT is still being prepared — it is not
+// yet a document the customer holds. When the master is corrected (a shade card
+// number added, a coating fixed, a GSM changed) the draft must be able to catch
+// up without being deleted and re-made, which would burn a COA number.
+// An issued certificate refuses: that snapshot is the customer's copy.
+r.post('/coas/:id/refresh', canCoa, async (req, res, next) => {
+  try {
+    const coaId = await tx(async (qc, oc) => {
+      const c = await oc('SELECT * FROM coas WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!c) throw Object.assign(new Error('COA not found'), { status: 404 });
+      if (c.status === 'issued')
+        throw Object.assign(new Error(`${c.coa_number} is issued — reopen it before re-reading the master`), { status: 409 });
+
+      const ol = await oc('SELECT spec_override FROM order_lines WHERE id=$1', [c.order_line_id]);
+      const master = await oc('SELECT * FROM products WHERE id=$1', [c.product_id]);
+      if (!master) throw Object.assign(new Error('Product master not found'), { status: 404 });
+      const product = effectiveProduct(master, ol);
+      const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
+      const gsm = declaredGsm(product.gsm);
+      const entity = await billingEntity({ customer_id: c.customer_id }, oc);
+
+      await qc('UPDATE coas SET params=$1, gsm=$2, billing_entity_id=$3, updated_at=now() WHERE id=$4',
+        [JSON.stringify(coaSpecRows(product, board)), gsm, entity.id ?? null, c.id]);
+      await audit('coa', c.id, 'refresh', `${c.coa_number} re-read from the product master`, qc, req.user.name);
       return c.id;
     });
     res.json(await fullCoa(coaId));

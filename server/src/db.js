@@ -2612,6 +2612,95 @@ ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
   CHECK (loose_sheets IS NULL OR loose_sheets >= 0);
 `);
 
+  // Mirrors 20260826085713_billing_entities.sql.
+  //
+  // The plant sells under more than one name. Colour Impressions is the house
+  // entity; Galpha Laboratories' cartons invoice and certify as Darbi Print
+  // Pack, a separate registration. A customer points at the entity that bills
+  // it, and each document freezes the entity it was raised under so a later
+  // master edit cannot rewrite paperwork the customer already holds.
+  //
+  // Both GSTINs are recovered from the plant's own legacy party master (the same
+  // two firms this database already carries as vendors 10 and 11) and validated
+  // against the GSTIN check digit. The value that stood here before —
+  // 03AABCC1234D1Z5 — was not a valid GSTIN at all.
+  //
+  // CONFIRM BEFORE BILLING: they were recorded in Aug 2024, and the June 2026
+  // "GSTIN MISMATCH" / "GST CORRECTIONS" correspondence shows Darbi's number
+  // being re-issued to customers. Masters → Billing Entities is the door for
+  // correcting either. Both are Punjab (03), so a Galpha invoice stays IGST.
+  await pool.query(`
+CREATE TABLE IF NOT EXISTS billing_entities (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  tagline TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  state_code TEXT,
+  gstin TEXT,
+  hsn TEXT,
+  gst_rate INTEGER,
+  jurisdiction TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_entities_one_default
+  ON billing_entities (is_default) WHERE is_default = 1;
+
+INSERT INTO billing_entities (name, tagline, address, city, state, state_code, gstin, hsn, gst_rate, jurisdiction, is_default)
+SELECT 'Colour Impressions',
+       'Manufacturers of Printed Packaging Cartons — Pharma & FMCG',
+       'Vill Shamdo Road, Rajpura–Chandigarh Highway, Rajpura, Punjab 140401',
+       'Rajpura', 'Punjab', '03',
+       '03BCMPD4475P1Z7', '48192010', 18, 'Patiala', 1
+WHERE NOT EXISTS (SELECT 1 FROM billing_entities WHERE name = 'Colour Impressions');
+
+INSERT INTO billing_entities (name, tagline, address, city, state, state_code, gstin, hsn, gst_rate, jurisdiction, is_default)
+SELECT 'Darbi Print Pack',
+       'Manufacturers of Printed Packaging Cartons — Pharma & FMCG',
+       'Village Dhakansu, Near Vijay Soap Factory, Rajpura–Chandigarh Road, Rajpura, Punjab 140401',
+       'Rajpura', 'Punjab', '03',
+       '03AXRPD1246K2ZI', '48192010', 18, 'Patiala', 0
+WHERE NOT EXISTS (SELECT 1 FROM billing_entities WHERE name = 'Darbi Print Pack');
+
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS
+  billing_entity_id INTEGER REFERENCES billing_entities(id);
+
+CREATE INDEX IF NOT EXISTS idx_fk_customers_billing_entity_id
+  ON customers (billing_entity_id);
+
+UPDATE customers c SET billing_entity_id = (SELECT id FROM billing_entities WHERE name = 'Darbi Print Pack')
+WHERE c.billing_entity_id IS NULL AND c.name ILIKE 'galpha%';
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS
+  billing_entity_id INTEGER REFERENCES billing_entities(id);
+ALTER TABLE coas ADD COLUMN IF NOT EXISTS
+  billing_entity_id INTEGER REFERENCES billing_entities(id);
+
+CREATE INDEX IF NOT EXISTS idx_fk_invoices_billing_entity_id ON invoices (billing_entity_id);
+CREATE INDEX IF NOT EXISTS idx_fk_coas_billing_entity_id ON coas (billing_entity_id);
+
+-- Every document that already exists was raised under the house entity and went
+-- out on its letterhead, so that is what it is pinned to — including Galpha's
+-- five open CI-INV- invoices. Resolving them through the customer instead would
+-- restate the SELLER on tax invoices the customer already holds, which is a
+-- compliance decision and not something a schema migration gets to make
+-- silently. It would also contradict the freeze these columns exist for.
+--
+-- Pinning is required, not optional: a NULL here falls back to the customer's
+-- mapping at read time, so leaving history NULL would restate it just the same.
+--
+-- Restating them later, if that is genuinely wanted, is one deliberate UPDATE.
+UPDATE invoices SET billing_entity_id = (SELECT id FROM billing_entities WHERE is_default = 1)
+  WHERE billing_entity_id IS NULL;
+UPDATE coas SET billing_entity_id = (SELECT id FROM billing_entities WHERE is_default = 1)
+  WHERE billing_entity_id IS NULL;
+
+ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
+`);
+
   // Plates, Dies and Blocks each own a Procurement-style purchasing chain and
   // a Warehouse-style stock ledger. Keep the local embedded database on the
   // same additive migration as Supabase without duplicating a large schema

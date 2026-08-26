@@ -4,18 +4,25 @@ import { Link, useParams } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
-import { ArrowLeft, CheckCircle2, Printer, Save } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Printer, RefreshCw, Save } from 'lucide-react';
 
-function CoaSheet({ coa }) {
+// `leadPage` = this sheet is the first thing on the printout, so it must not
+// force a page break before itself. Stated explicitly rather than leaning on
+// the CSS rule that a break before the first box is ignored — when the invoice
+// above is display:none that rule is doing subtle work, and this makes the
+// intent legible instead.
+function CoaSheet({ coa, leadPage = false }) {
   const co = coa.company || {};
   const params = Array.isArray(coa.params) ? coa.params : [];
   const sampling = coa.sampling || {};
   return (
-    <div className="print-sheet rounded-xl border border-slate-200 bg-white p-8 shadow-card print:break-before-page print:p-0 print:border-0 print:shadow-none">
+    <div className={`print-sheet rounded-xl border border-slate-200 bg-white p-8 shadow-card print:p-0 print:border-0 print:shadow-none${leadPage ? '' : ' print:break-before-page'}`}>
       <div className="flex items-start justify-between border-b-2 border-ink-900 pb-4">
         <div>
+          {/* The entity frozen on this certificate — Galpha's cartons certify
+              as Darbi Print Pack, not Colour Impressions. */}
           <h1 className="text-xl font-extrabold tracking-wide text-ink-900">{(co.name || 'Colour Impressions').toUpperCase()}</h1>
-          <p className="text-xs text-gray-500">Manufacturers of Printed Packaging Cartons — Pharma & FMCG</p>
+          <p className="text-xs text-gray-500">{co.tagline || 'Manufacturers of Printed Packaging Cartons — Pharma & FMCG'}</p>
           <p className="mt-1 text-xs text-gray-600">{co.address}</p>
           {co.gstin && <p className="text-xs text-gray-600">GSTIN: <b>{co.gstin}</b></p>}
         </div>
@@ -36,6 +43,8 @@ function CoaSheet({ coa }) {
         <div className="text-right text-xs text-gray-600">
           <div className="flex justify-end"><ProductIdentity row={coa} compact className="max-w-[280px] text-right" /></div>
           <div>Batch / JC: <b>{coa.batch_no || coa.jc_number || '—'}</b></div>
+          {/* Declared GSM — read-only here, changed only through Edit COA. */}
+          {coa.gsm != null && <div>GSM: <b>{coa.gsm}</b></div>}
           <div>Qty: <b>{fmt.num(coa.qty)}</b></div>
           <div>Challan: <b>{coa.challan_number}</b>{coa.invoice_number ? ` · Invoice ${coa.invoice_number}` : ''}</div>
         </div>
@@ -103,6 +112,9 @@ export default function COA() {
       mfg_date: coa.mfg_date || null,
       po_number: coa.po_number || null,
       params: coa.params,
+      // The server moves every standard that quotes a GSM to this figure, so
+      // the sheet cannot end up declaring two different grammages.
+      gsm: coa.gsm === '' || coa.gsm == null ? null : +coa.gsm,
       sampling: coa.sampling,
       remarks: coa.remarks || null,
       inspected_by: coa.inspected_by || null,
@@ -111,6 +123,17 @@ export default function COA() {
     setCoa(saved);
     setEditing(false);
     toast.success('COA saved');
+  };
+
+  // Re-read the product master onto a draft. The master moves — a shade card
+  // number gets added, a coating corrected — and a draft that was cut before
+  // that would otherwise have to be deleted and re-made, burning a COA number.
+  const refresh = async () => {
+    try {
+      const saved = await api.post(`/coas/${coa.id}/refresh`, {});
+      setCoa(saved);
+      toast.success('Specifications re-read from the product master');
+    } catch (e) { toast.error(e.message || 'Could not re-read the master'); }
   };
 
   const issue = async () => {
@@ -130,6 +153,11 @@ export default function COA() {
           <Button variant="secondary"><ArrowLeft size={14} /> Back</Button>
         </Link>
         <div className="flex flex-wrap gap-2">
+          {coa.status !== 'issued' && (
+            <Button variant="secondary" onClick={refresh} title="Re-read specifications from the product master">
+              <RefreshCw size={14} /> Refresh from Master
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => setEditing(true)}><Save size={14} /> Edit COA</Button>
           {coa.status !== 'issued' && <Button variant="secondary" onClick={issue}><CheckCircle2 size={14} /> Issue</Button>}
           <Button onClick={() => window.print()}><Printer size={14} /> Export PDF</Button>
@@ -147,6 +175,9 @@ export default function COA() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="Quantity"><Input type="number" value={coa.qty || ''} onChange={e => setCoa({ ...coa, qty: e.target.value })} /></Field>
             <Field label="Batch / JC"><Input value={coa.batch_no || ''} onChange={e => setCoa({ ...coa, batch_no: e.target.value })} /></Field>
+            <Field label="GSM" hint="Declared grammage — drafted from the product master (296 → 300, 380 → 400). Typed here it is taken exactly as entered.">
+              <Input type="number" min="1" value={coa.gsm ?? ''} onChange={e => setCoa({ ...coa, gsm: e.target.value })} />
+            </Field>
             <Field label="Mfg Date"><Input type="date" value={coa.mfg_date || ''} onChange={e => setCoa({ ...coa, mfg_date: e.target.value })} /></Field>
             <Field label="PO Number"><Input value={coa.po_number || ''} onChange={e => setCoa({ ...coa, po_number: e.target.value })} /></Field>
             <Field label="Inspected By"><Input value={coa.inspected_by || ''} onChange={e => setCoa({ ...coa, inspected_by: e.target.value })} /></Field>

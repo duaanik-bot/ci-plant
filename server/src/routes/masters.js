@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { isValidGstin } from '../billing-entity.js';
 
 const r = Router();
 const canEdit = requireRole('planner'); // admin implied
@@ -38,7 +39,13 @@ function productCodeClash(table, e, req) {
 
 // Generic CRUD for the five master tables — same shape everywhere.
 const MASTERS = {
-  customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'tolerance_pct', 'shade_approval_requirement', 'active'],
+  customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'tolerance_pct', 'shade_approval_requirement', 'billing_entity_id', 'active'],
+  // The names the plant sells under. Galpha Laboratories' cartons invoice and
+  // certify as Darbi Print Pack, so the letterhead, GSTIN and place-of-supply
+  // state are a master, not a constant. is_default is deliberately NOT editable
+  // through here — a partial unique index allows exactly one, and letting the
+  // form set it would throw a raw 23505 at the user.
+  billing_entities: ['name', 'tagline', 'address', 'city', 'state', 'state_code', 'gstin', 'hsn', 'gst_rate', 'jurisdiction', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'gstin', 'address', 'state', 'state_code', 'email', 'active'],
   materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet'],
   machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active', 'is_default'],
@@ -90,6 +97,19 @@ async function keepOneDefaultMachine(row) {
     [row.type, row.id]);
 }
 
+// Our own registrations print on every tax invoice and COA, so a typo here is
+// a compliance problem rather than a cosmetic one — and a GSTIN carries its own
+// check digit, so it can be caught without asking anyone. Scoped to
+// billing_entities on purpose: a CUSTOMER's GSTIN is their claim to make, and
+// refusing to save one because it fails a checksum would block real work on
+// somebody else's data-entry error.
+function checkOwnGstin(table, body) {
+  if (table !== 'billing_entities') return;
+  const g = String(body.gstin ?? '').trim();
+  if (g && !isValidGstin(g))
+    throw Object.assign(new Error(`${g} is not a valid GSTIN — its check digit does not match. Check the registration certificate.`), { status: 400 });
+}
+
 for (const [table, cols] of Object.entries(MASTERS)) {
   r.get(`/${table}`, async (_req, res, next) => {
     try {
@@ -133,6 +153,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
 
   r.post(`/${table}`, canEdit, async (req, res, next) => {
     try {
+      checkOwnGstin(table, req.body);
       if (table === 'sections') await fillSectionDefaults(req.body);
       // Plant default: a new board carries 18% GST unless the buyer types another.
       if (table === 'materials' && String(req.body.category) === 'board'
@@ -192,6 +213,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
 
   r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
     try {
+      checkOwnGstin(table, req.body);
       // Before `sets` is taken — the sync adds board_name to the body, and a
       // column the body does not carry is not written.
       if (table === 'products') await syncProductBoardName(req.body, req.params.id);

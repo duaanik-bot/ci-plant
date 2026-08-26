@@ -56,6 +56,10 @@ export default function Invoices({ embedded = false }) {
   const [rec, setRec] = useState(null); // record-payment form
   const [completePrompt, setCompletePrompt] = useState(null); // { items, picked } after invoicing
   const [clashPrompt, setClashPrompt] = useState(null); // same-vehicle strength mix-up alarm
+  // The number this invoice will take. Pre-filled with the next in the CI-INV
+  // series and editable — a number you can see before saving is a number you
+  // can correct, which is the whole point of showing it here.
+  const [invoiceNumber, setInvoiceNumber] = useState('');
 
   const [threads, setThreads] = useState({});
 
@@ -121,12 +125,25 @@ export default function Invoices({ embedded = false }) {
     setRec(null); load();
   };
 
+  // Re-read the next number each time the dialog opens: another user may have
+  // billed in between, and a stale suggestion would collide on save.
+  const openCreate = () => {
+    setInvoiceNumber('');
+    api.get('/billing/next-invoice-number')
+      .then(r => setInvoiceNumber(r.invoice_number || ''))
+      .catch(() => {});
+    setCreating(true);
+  };
+
   const create = async (confirm = false) => {
     let inv;
     try {
       inv = await api.post('/invoices', {
         customer_id: +customerId,
         dispatch_line_ids: selected.map(l => l.dispatch_line_id),
+        // Blank falls through to the server's own next-in-sequence, so a failed
+        // pre-fill never blocks billing.
+        invoice_number: invoiceNumber.trim() || undefined,
         confirm_collision: confirm || undefined,
       });
     } catch (e) {
@@ -139,7 +156,7 @@ export default function Invoices({ embedded = false }) {
       return;
     }
     toast.success(`Invoice ${inv.invoice_number} created — ₹${fmt.num(inv.total)}`);
-    setClashPrompt(null); setCreating(false); setPicked({}); setCustomerId('');
+    setClashPrompt(null); setCreating(false); setPicked({}); setCustomerId(''); setInvoiceNumber('');
     load();
     // These invoiced items are fully fulfilled but not yet marked complete —
     // offer to push them into the order's Completed roll-up right now.
@@ -215,7 +232,7 @@ export default function Invoices({ embedded = false }) {
     <>
       <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
         disabled={!invoices.length}><Wallet size={15} /> Record Payment</Button>
-      <Button onClick={() => setCreating(true)} disabled={uninvoiced.length === 0}>
+      <Button onClick={openCreate} disabled={uninvoiced.length === 0}>
         <Plus size={15} /> New Invoice{uninvoiced.length > 0 && <span className="ml-1 rounded-full bg-white/25 px-1.5 text-xs">{uninvoiced.length} lines waiting</span>}
       </Button>
     </>
@@ -253,7 +270,7 @@ export default function Invoices({ embedded = false }) {
           tone={kpiBilling.unbilledLines ? 'warn' : 'good'}
           value={fmt.inrShort(kpiBilling.unbilledValue)} title={fmt.inr(kpiBilling.unbilledValue)}
           sub={kpiBilling.unbilledLines ? `${fmt.count(kpiBilling.unbilledLines, 'dispatched line')} to bill` : 'nothing waiting to be billed'}
-          onClick={uninvoiced.length ? () => setCreating(true) : undefined} />
+          onClick={uninvoiced.length ? openCreate : undefined} />
         <KpiCard compact icon={CalendarDays} tone="neutral" label="Billed This Month"
           value={fmt.inrShort(kpiBilling.mtdValue)} title={fmt.inr(kpiBilling.mtdValue)}
           sub={`${fmt.count(kpiBilling.mtdCount, 'invoice')} raised`}
@@ -322,12 +339,17 @@ export default function Invoices({ embedded = false }) {
               <span>Billing customer</span>
               <span>{uninvoiced.length} dispatch lines waiting</span>
             </div>
-            <Field label="Customer" required>
-              <Select value={customerId} onChange={e => { setCustomerId(e.target.value); setPicked({}); }}>
-                <option value="">Select customer with uninvoiced dispatches…</option>
-                {customers.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
-              </Select>
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Customer" required>
+                <Select value={customerId} onChange={e => { setCustomerId(e.target.value); setPicked({}); }}>
+                  <option value="">Select customer with uninvoiced dispatches…</option>
+                  {customers.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Invoice No" hint="Next in the series — type over it to use a different number.">
+                <Input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="CI-INV-…" />
+              </Field>
+            </div>
           </section>
 
           {customerId && (

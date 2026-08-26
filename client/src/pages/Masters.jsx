@@ -53,6 +53,8 @@ const CONFIGS = {
       { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
       { key: 'gstin', label: 'GSTIN' }, { key: 'contact', label: 'Contact Person' }, { key: 'phone', label: 'Phone' },
       { key: 'tolerance_pct', label: 'Dispatch Tolerance', type: 'tolerance', hint: 'How far a dispatch may run over or under the ordered qty. "No limit" means this customer takes whatever comes — no block, either way. Snapshotted onto each NEW sales order; open orders keep the figure they were raised with.' },
+      { key: 'billing_entity_id', label: 'Bills / Certifies As', type: 'ref', ref: 'billing_entities', newRow: true,
+        hint: 'Which of our registrations invoices this customer and signs its COAs. Blank = the default entity.' },
       // Shade Approval Control removed: the shade module has ONE rule now — the
       // customer has approved and the approval is in date. There is no 'internal
       // sufficient' path any more, so a select offering it changed nothing while
@@ -68,6 +70,26 @@ const CONFIGS = {
     fields: PRODUCT_MASTER_FIELDS,
     columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'printing', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
     validate: validateProductMaster,
+  },
+  // The names the plant sells under. Colour Impressions is the house entity;
+  // Galpha Laboratories' cartons invoice and certify as Darbi Print Pack. A
+  // blank GSTIN or address falls back to the house entity's on the document —
+  // better a borrowed identity than a blank one on a tax invoice — so the
+  // column shows what is still missing.
+  billing_entities: {
+    label: 'Billing Entities', endpoint: '/billing_entities',
+    fields: [
+      { key: 'name', label: 'Entity Name', required: true, hint: 'Printed as the letterhead on invoices and COAs' },
+      { key: 'tagline', label: 'Tagline', hint: 'The line under the name, e.g. Manufacturers of Printed Packaging Cartons' },
+      { key: 'gstin', label: 'GSTIN', newRow: true, hint: 'Blank borrows the default entity’s GSTIN — fill this before billing under this name' },
+      { key: 'address', label: 'Address' },
+      { key: 'city', label: 'City', newRow: true }, { key: 'state', label: 'State', hint: 'Decides CGST+SGST vs IGST on its invoices' },
+      { key: 'state_code', label: 'State Code (e.g. 03)' },
+      { key: 'hsn', label: 'Default HSN', newRow: true }, { key: 'gst_rate', label: 'Default GST %', type: 'number' },
+      { key: 'jurisdiction', label: 'Jurisdiction', hint: 'Printed in the invoice terms, e.g. Patiala' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], render: v => (v ? 'Yes' : 'No'), newRow: true },
+    ],
+    columns: ['name', 'gstin', 'city', 'state', 'state_code', 'active'],
   },
   gst_rates: {
     label: 'GST Rates', endpoint: '/gst_rates',
@@ -339,10 +361,15 @@ const BOARD_COL_LABELS = { last_rate: 'Last PO Rate' };
 // actually thinks in, rather than CONFIGS key order. Grouping is declared here
 // so adding a config can never silently land it at the end of the nav: a key
 // that appears in no group simply isn't reachable, which is loud in review.
+// "Customers" → "Customer" for the New button. Dropping the last character is
+// right for every master here except an -ies plural, which needs -y: the label
+// "Billing Entities" would otherwise read "New Billing Entitie".
+const singular = label => (/ies$/.test(label) ? label.replace(/ies$/, 'y') : label.replace(/s$/, ''));
+
 const MASTER_GROUPS = [
   { label: 'Products / Items We Supply', items: ['customers', 'products'] },
   { label: 'Procurement / Consumables', items: ['vendors', 'boards', 'plates', 'chemicals', 'blocks'] },
-  { label: 'Organisation & System', items: ['machines', 'sections', 'employees', 'gst_rates', 'users', 'company'] },
+  { label: 'Organisation & System', items: ['machines', 'sections', 'employees', 'gst_rates', 'billing_entities', 'users', 'company'] },
 ];
 
 // Boards is a container, not a single table. The board master and the rate master
@@ -444,6 +471,7 @@ export default function Masters() {
   ];
   useEffect(() => {
     api.get('/customers').then(c => setRefs(r => ({ ...r, customers: c })));
+    api.get('/billing_entities').then(b => setRefs(r => ({ ...r, billing_entities: b })));
     api.get('/materials').then(m => setRefs(r => ({ ...r, materials: m })));
     api.get('/tools?family=die').then(d => setRefs(r => ({ ...r, dies: d })));
     api.get('/gst_rates').then(g => setRefs(r => ({ ...r, gst_rates: g })));
@@ -851,7 +879,7 @@ export default function Masters() {
   return (
     <div>
       <PageHeader title="Masters" subtitle="Products we supply · materials we procure · organisation and system setup"
-        actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
+        actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {singular(cfg.label)}</Button>} />
       <GroupedTabs active={navKey} onChange={selectTab}
         groups={MASTER_GROUPS.map(g => ({
           label: g.label,

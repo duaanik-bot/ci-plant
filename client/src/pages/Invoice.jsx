@@ -15,6 +15,8 @@ export default function Invoice() {
   const [editing, setEditing] = useState(false);
   const [printPrompt, setPrintPrompt] = useState(false);
   const [printCoas, setPrintCoas] = useState([]);
+  // 'invoice' | 'both' | 'coa' — which sheets the next window.print() should carry.
+  const [printMode, setPrintMode] = useState('invoice');
   const load = () => api.get(`/invoices/${id}`).then(setInv);
   useEffect(() => { load(); }, [id]);
   if (!inv) return null;
@@ -48,33 +50,53 @@ export default function Invoice() {
     } catch (e) { toast.error(e.message || 'Could not update the invoice'); }
   };
 
+  // A renumber can collide with an existing invoice; the 409 must land in front
+  // of the user, not vanish into an unhandled rejection.
   const saveInvoice = async () => {
-    const saved = await api.put(`/invoices/${inv.id}`, {
-      invoice_date: inv.invoice_date,
-      notes: inv.notes || null,
-      lines: inv.lines.map(l => ({ id: l.id, qty: +l.qty, rate: +l.rate, gst_pct: +(l.gst_pct ?? 12) })),
-    });
-    toast.success(`${saved.invoice_number} updated`);
-    setEditing(false);
-    await load();
+    try {
+      const saved = await api.put(`/invoices/${inv.id}`, {
+        invoice_number: inv.invoice_number,
+        invoice_date: inv.invoice_date,
+        notes: inv.notes || null,
+        lines: inv.lines.map(l => ({ id: l.id, qty: +l.qty, rate: +l.rate, gst_pct: +(l.gst_pct ?? 12) })),
+      });
+      toast.success(`${saved.invoice_number} updated`);
+      setEditing(false);
+      await load();
+    } catch (e) {
+      // A duplicate number comes back 409 — show it and keep the dialog open so
+      // the number can be corrected without retyping the rest of the edit.
+      toast.error(e.message || 'Could not save the invoice');
+    }
   };
 
-  const exportInvoice = async (includeCoa) => {
-    if (!includeCoa) {
+  // mode: 'invoice' — the bill alone
+  //       'both'    — the bill followed by a certificate per line
+  //       'coa'     — the certificates alone, for a customer who already has
+  //                   the bill and is chasing the paperwork behind it
+  const exportInvoice = async (mode) => {
+    setPrintMode(mode);
+    if (mode === 'invoice') {
       setPrintCoas([]);
       setPrintPrompt(false);
       setTimeout(() => window.print(), 50);
       return;
     }
-    const coas = [];
-    for (const line of inv.lines) {
-      const c = await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id });
-      coas.push(c);
+    try {
+      const coas = [];
+      for (const line of inv.lines) {
+        coas.push(await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id }));
+      }
+      setPrintCoas(coas);
+      setPrintPrompt(false);
+      toast.success(`${coas.length} COA${coas.length === 1 ? '' : 's'} ready for export`);
+      setTimeout(() => window.print(), 100);
+    } catch (e) {
+      // Drafting a COA can refuse (no dispatch line, a frozen certificate).
+      // Say so rather than opening a print dialog on a half-built set.
+      setPrintMode('invoice');
+      toast.error(e.message || 'Could not prepare the certificates');
     }
-    setPrintCoas(coas);
-    setPrintPrompt(false);
-    toast.success(`${coas.length} COA${coas.length === 1 ? '' : 's'} attached for export`);
-    setTimeout(() => window.print(), 100);
   };
 
   return (
@@ -88,14 +110,14 @@ export default function Invoice() {
         </div>
       </div>
 
-      <div className="print-fit rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:p-0 print:border-0 print:shadow-none">
+      <div className={`print-fit rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:p-0 print:border-0 print:shadow-none${printMode === 'coa' ? ' print:hidden' : ''}`}>
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-ink-900 pb-4">
           <div>
             <h1 className="text-xl font-extrabold tracking-wide text-ink-900">{co.name.toUpperCase()}</h1>
-            <p className="text-xs text-gray-500">Manufacturers of Printed Packaging Cartons — Pharma & FMCG</p>
+            <p className="text-xs text-gray-500">{co.tagline || 'Manufacturers of Printed Packaging Cartons — Pharma & FMCG'}</p>
             <p className="mt-1 text-xs text-gray-600">{co.address}</p>
-            <p className="text-xs text-gray-600">GSTIN: <b>{co.gstin}</b> · State: {co.state} (03)</p>
+            <p className="text-xs text-gray-600">GSTIN: <b>{co.gstin}</b> · State: {co.state}{co.state_code ? ` (${co.state_code})` : ''}</p>
           </div>
           <div className="text-right">
             <div className="text-sm font-extrabold text-brand-600">TAX INVOICE</div>
@@ -120,8 +142,15 @@ export default function Invoice() {
           </div>
         </div>
 
-        {/* Lines */}
-        <table className="mt-6 w-full text-sm">
+        {/* Lines — the sheet is fixed-width paper (max-w-3xl, p-8 → a 704px
+            content box) while this table's min-content width is ~702px: eight
+            columns whose numeric ones will not wrap. On any narrower window the
+            table used to run straight off the right edge of the sheet, taking
+            GST and Amount with it, and with nothing to scroll it was simply
+            unreachable. Contained here instead; print restores the overflow so
+            the PDF is byte-for-byte what it was. */}
+        <div className="mt-6 overflow-x-auto print:overflow-x-visible">
+        <table className="w-full text-sm">
           <thead>
             <tr className="bg-ink-900 text-left text-xs font-bold uppercase tracking-wide text-white">
               <th className="px-3 py-2">#</th><th className="px-3 py-2">Description</th>
@@ -160,6 +189,7 @@ export default function Invoice() {
             ))}
           </tbody>
         </table>
+        </div>
 
         {/* Totals */}
         <div className="mt-4 flex justify-end">
@@ -189,7 +219,7 @@ export default function Invoice() {
         <div className="mt-12 grid grid-cols-2 gap-8 text-xs text-gray-500 print:mt-8">
           <div>
             <div className="font-bold uppercase tracking-wide text-gray-400">Terms</div>
-            <p className="mt-1">Goods once sold will not be taken back. Interest @18% p.a. on overdue payments. Subject to Patiala jurisdiction.</p>
+            <p className="mt-1">Goods once sold will not be taken back. Interest @18% p.a. on overdue payments. Subject to {co.jurisdiction || 'Patiala'} jurisdiction.</p>
           </div>
           <div className="text-center">
             <div className="mt-8 border-t border-gray-300 pt-2">For {co.name} — Authorised Signatory</div>
@@ -197,15 +227,20 @@ export default function Invoice() {
         </div>
       </div>
 
-      {printCoas.map(c => <CoaSheet key={c.id} coa={c} />)}
+      {printCoas.map((c, i) => (
+        <CoaSheet key={c.id} coa={c} leadPage={printMode === 'coa' && i === 0} />
+      ))}
 
       <Modal open={printPrompt} onClose={() => setPrintPrompt(false)} title="Export invoice PDF"
         footer={<>
-          <Button variant="secondary" onClick={() => exportInvoice(false)}>Invoice Only</Button>
-          <Button onClick={() => exportInvoice(true)}><FileCheck2 size={14} /> Invoice + COA</Button>
+          <Button variant="secondary" onClick={() => exportInvoice('invoice')}>Invoice Only</Button>
+          <Button variant="secondary" onClick={() => exportInvoice('coa')}><FileCheck2 size={14} /> COA Only</Button>
+          <Button onClick={() => exportInvoice('both')}><FileCheck2 size={14} /> Invoice + COA</Button>
         </>}>
         <p className="text-sm text-slate-600">
-          Do you want to include Certificates of Analysis for this invoice export? Missing COAs will be drafted automatically from the dispatch and QC data.
+          What should this export carry? <b>COA Only</b> prints the certificates without the
+          bill — for a customer who already has the invoice and is chasing the paperwork behind
+          it. Missing COAs are drafted automatically from the dispatch and release data.
         </p>
       </Modal>
 
@@ -216,6 +251,9 @@ export default function Invoice() {
         </>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
+            <Field label="Invoice No" hint="Editable — must stay unique. The change is audited under both numbers.">
+              <Input value={inv.invoice_number || ''} onChange={e => setInv({ ...inv, invoice_number: e.target.value })} />
+            </Field>
             <Field label="Invoice Date"><Input type="date" value={String(inv.invoice_date || '').slice(0, 10)} onChange={e => setInv({ ...inv, invoice_date: e.target.value })} /></Field>
             <Field label="Notes"><Textarea value={inv.notes || ''} onChange={e => setInv({ ...inv, notes: e.target.value })} /></Field>
           </div>

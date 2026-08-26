@@ -4,22 +4,57 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { plantDateStr } from '../plant-calendar.js';
-import { audit, nextNumber, shadeCardsFor, fgReceipt, fgMove, setLineStatus, forceLineStatus, boxLeftoverFromFg } from '../helpers.js';
+import { audit, nextNumber, shadeCardsFor, fgReceipt, fgMove, setLineStatus, forceLineStatus, boxLeftoverFromFg, optionalText } from '../helpers.js';
 import { clashes, familyKey } from '../product-family.js';
+import { billingEntity, isIntraState, HOUSE_FALLBACK } from '../billing-entity.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
 const canBill = requireRole('planner'); // admin implied
 
-// Colour Impressions, Patiala — place of supply logic reads this.
-export const COMPANY = {
-  name: 'Colour Impressions',
-  address: 'Focal Point, Patiala, Punjab 147004',
-  gstin: '03AABCC1234D1Z5',
-  state: 'Punjab',
-  hsn: '48192010', // folding cartons of non-corrugated paperboard
-  gst_rate: 18,
-};
+// The plant bills under more than one name — Galpha Laboratories' cartons go
+// out as Darbi Print Pack — so the letterhead, GSTIN and place-of-supply state
+// come from billing_entities, resolved per customer and frozen on the document.
+// This constant survives only as the last-resort letterhead for a database with
+// no entity rows at all.
+export const COMPANY = HOUSE_FALLBACK;
+
+// The number a new invoice would take. Exposed so the Create Invoice dialog can
+// PRE-FILL it and still let the user type over it — a number you can see before
+// saving is a number you can correct.
+r.get('/billing/next-invoice-number', async (_req, res, next) => {
+  try { res.json({ invoice_number: await nextNumber('CI-INV-', 'invoices', 'invoice_number') }); }
+  catch (e) { next(e); }
+});
+
+// An invoice number is typed by a human and must stay unique. Blank, or already
+// on another invoice, is refused loudly rather than silently renumbered.
+async function checkInvoiceNumber(number, oc, selfId = null) {
+  // optionalText, never a bare String(): an absent field would otherwise become
+  // the literal text 'undefined' and be stamped onto a tax invoice.
+  const n = optionalText(number);
+  if (!n) throw Object.assign(new Error('Invoice number cannot be blank'), { status: 400 });
+  const clash = await oc(
+    'SELECT id FROM invoices WHERE invoice_number=$1 AND ($2::int IS NULL OR id<>$2::int)', [n, selfId]);
+  if (clash) throw Object.assign(new Error(`Invoice ${n} already exists — pick another number`), { status: 409 });
+  return n;
+}
+
+// invoices.invoice_number is UNIQUE in the database, so checkInvoiceNumber is a
+// friendly pre-flight and Postgres is the real guard. Two people saving the same
+// number at the same moment still lose that race — translate the raw 23505 so
+// they read the same sentence as everyone else instead of a constraint name.
+function invoiceNumberClash(e, number) {
+  if (e?.code === '23505' && /invoice_number/.test(e.constraint || '')) {
+    e.status = 409;
+    e.message = `Invoice ${number} already exists — pick another number`;
+  }
+  return e;
+}
+
+// The entity a document prints under, for a row that already carries its id.
+const companyFor = (doc, oc = one) =>
+  billingEntity({ entity_id: doc.billing_entity_id ?? null, customer_id: doc.customer_id }, oc);
 
 // Dispatch lines that haven't been invoiced yet, grouped by customer.
 r.get('/billing/uninvoiced', async (_req, res, next) => {
@@ -92,7 +127,7 @@ r.get('/invoices/:id', async (req, res, next) => {
         WHERE jc.order_line_id=dl.order_line_id LIMIT 1) pk ON true
       WHERE il.invoice_id=$1 ORDER BY il.id`, [inv.id]);
     inv.payments = await q('SELECT * FROM payments WHERE invoice_id=$1 ORDER BY id', [inv.id]);
-    inv.company = COMPANY;
+    inv.company = await companyFor(inv);
     res.json(inv);
   } catch (e) { next(e); }
 });
@@ -175,8 +210,11 @@ r.post('/invoices', canBill, async (req, res, next) => {
         throw e;
       }
 
-      // Place of supply: same state → CGST+SGST split, otherwise IGST.
-      const intra = (customer.state || '').trim().toLowerCase() === COMPANY.state.toLowerCase();
+      // Place of supply reads the SELLING entity's state, not a hardcoded
+      // Punjab: a Darbi Print Pack invoice must split on where Darbi is
+      // registered, which is the point of separating the entities.
+      const entity = await billingEntity({ customer_id: customer.id }, oc);
+      const intra = isIntraState(entity, customer);
       const cgst = intra ? +(tax / 2).toFixed(2) : 0;
       const sgst = intra ? +(tax / 2).toFixed(2) : 0;
       const igst = intra ? 0 : tax;
@@ -184,12 +222,16 @@ r.post('/invoices', canBill, async (req, res, next) => {
       const total = Math.round(gross);
       const round_off = +(total - gross).toFixed(2);
 
-      const invoice_number = await nextNumber('CI-INV-', 'invoices', 'invoice_number', oc);
+      // The next number in sequence unless the user typed one over it.
+      const typedNumber = optionalText(req.body.invoice_number);
+      const invoice_number = typedNumber
+        ? await checkInvoiceNumber(typedNumber, oc)
+        : await nextNumber('CI-INV-', 'invoices', 'invoice_number', oc);
       const [inv] = await qc(`
-        INSERT INTO invoices (invoice_number, customer_id, invoice_date, subtotal, cgst, sgst, igst, round_off, total, notes)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        INSERT INTO invoices (invoice_number, customer_id, invoice_date, subtotal, cgst, sgst, igst, round_off, total, notes, billing_entity_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
         [invoice_number, customer.id, invoice_date || plantDateStr(),
-         subtotal, cgst, sgst, igst, round_off, total, notes || null]);
+         subtotal, cgst, sgst, igst, round_off, total, notes || null, entity.id ?? null]);
       for (const l of lines) {
         await qc('INSERT INTO invoice_lines (invoice_id, dispatch_line_id, product_id, qty, rate, amount, gst_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)',
           [inv.id, l.id, l.product_id, l.qty, l.rate, l.amount, l.gst_pct]);
@@ -232,7 +274,7 @@ r.post('/invoices', canBill, async (req, res, next) => {
       -- is already invoiced".
       GROUP BY ol.id, o.id, p.id`, [invId]);
     res.json(invoice);
-  } catch (e) { next(e); }
+  } catch (e) { next(invoiceNumberClash(e, req.body?.invoice_number)); }
 });
 
 // Edit an invoice. Header fields (date, notes) are always editable while the
@@ -240,7 +282,7 @@ r.post('/invoices', canBill, async (req, res, next) => {
 // billed-and-part-paid document must not drift under the customer's ledger.
 r.put('/invoices/:id', canBill, async (req, res, next) => {
   try {
-    const { invoice_date, notes, lines } = req.body;
+    const { invoice_date, notes, lines, invoice_number } = req.body;
     const invId = await tx(async (qc, oc) => {
       const inv = await oc('SELECT * FROM invoices WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!inv) throw Object.assign(new Error('Invoice not found'), { status: 404 });
@@ -278,7 +320,7 @@ r.put('/invoices/:id', canBill, async (req, res, next) => {
         let subtotal = 0, tax = 0;
         for (const l of all) { subtotal += l.amount; tax += l.amount * l.gst_pct / 100; }
         subtotal = +subtotal.toFixed(2); tax = +tax.toFixed(2);
-        const intra = (customer.state || '').trim().toLowerCase() === COMPANY.state.toLowerCase();
+        const intra = isIntraState(await companyFor(inv, oc), customer);
         const cgst = intra ? +(tax / 2).toFixed(2) : 0;
         const sgst = intra ? +(tax / 2).toFixed(2) : 0;
         const igst = intra ? 0 : tax;
@@ -289,9 +331,17 @@ r.put('/invoices/:id', canBill, async (req, res, next) => {
           [subtotal, cgst, sgst, igst, round_off, total, inv.id]);
       }
 
-      await qc('UPDATE invoices SET invoice_date=COALESCE($1,invoice_date), notes=COALESCE($2,notes) WHERE id=$3',
-        [invoice_date || null, notes ?? null, inv.id]);
-      await audit('invoice', inv.id, 'edit', inv.invoice_number, qc, req.user.name);
+      // Renumbering is audited under BOTH numbers — searching the log for the
+      // old one or the new one has to find the moment it moved.
+      let number = inv.invoice_number;
+      const typedNumber = optionalText(invoice_number);
+      if (typedNumber && typedNumber !== String(inv.invoice_number)) {
+        number = await checkInvoiceNumber(typedNumber, oc, inv.id);
+        await audit('invoice', inv.id, 'renumber', `${inv.invoice_number} → ${number}`, qc, req.user.name);
+      }
+      await qc('UPDATE invoices SET invoice_number=$1, invoice_date=COALESCE($2,invoice_date), notes=COALESCE($3,notes) WHERE id=$4',
+        [number, invoice_date || null, notes ?? null, inv.id]);
+      await audit('invoice', inv.id, 'edit', number, qc, req.user.name);
       return inv.id;
     });
     const inv = await one(`
@@ -299,7 +349,7 @@ r.put('/invoices/:id', canBill, async (req, res, next) => {
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=i.id),0) AS paid
       FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.id=$1`, [invId]);
     res.json(inv);
-  } catch (e) { next(e); }
+  } catch (e) { next(invoiceNumberClash(e, req.body?.invoice_number)); }
 });
 
 // Remove a line from an invoice, with a destination for the goods it billed:
@@ -364,7 +414,7 @@ r.post('/invoices/:id/lines/:lineId/remove', canBill, async (req, res, next) => 
       let subtotal = 0, tax = 0;
       for (const l of all) { subtotal += +l.amount; tax += l.amount * l.gst_pct / 100; }
       subtotal = +subtotal.toFixed(2); tax = +tax.toFixed(2);
-      const intra = (customer.state || '').trim().toLowerCase() === COMPANY.state.toLowerCase();
+      const intra = isIntraState(await companyFor(inv, oc), customer);
       const cgst = intra ? +(tax / 2).toFixed(2) : 0, sgst = intra ? +(tax / 2).toFixed(2) : 0, igst = intra ? 0 : tax;
       const gross = subtotal + cgst + sgst + igst, total = Math.round(gross);
       await qc('UPDATE invoices SET subtotal=$1, cgst=$2, sgst=$3, igst=$4, round_off=$5, total=$6 WHERE id=$7',

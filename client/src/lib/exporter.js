@@ -27,8 +27,8 @@ import { auth } from '../api.js';
 export const BRAND = {
   company: 'Colour Impressions',
   companyAccentWord: 'Impressions', // rendered in systemBlue in the wordmark
-  tagline: 'Pharma & FMCG Carton Plant · Patiala, Punjab',
-  gstin: 'GSTIN 03AABCC1234D1Z5',
+  tagline: 'Pharma & FMCG Carton Plant · Rajpura, Punjab',
+  gstin: 'GSTIN 03BCMPD4475P1Z7',
   app: 'CI ERP',
   accent: [0, 122, 255],      // #007AFF systemBlue
   accentDeep: [0, 100, 210],  // #0064D2

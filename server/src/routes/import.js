@@ -15,11 +15,16 @@ const canPlan = requireRole('planner');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const GSTIN_RE = /\b\d{2}[A-Z]{5}\d{4}[A-Z]\d[A-Z\d]{2}\b/g;
-const OWN_GSTIN = '03AABCC1234D1Z5'; // Colour Impressions — never "detect" ourselves
+// Our own registrations — a PO header carries the seller's GSTIN as well as the
+// buyer's, and detecting ourselves would name the plant as its own customer.
+// Both entities are listed: a Galpha PO is addressed to Darbi Print Pack.
+// The placeholder that sat here was not a valid GSTIN at all (its check digit
+// did not compute), so it never matched anything and never filtered anything.
+const OWN_GSTINS = new Set(['03BCMPD4475P1Z7', '03AXRPD1246K2ZI']);
 
 async function detectCustomer(headerText) {
   const customers = await q('SELECT id, name, gstin FROM customers WHERE active=1');
-  const gstins = (headerText.match(GSTIN_RE) || []).filter(g => g !== OWN_GSTIN);
+  const gstins = (headerText.match(GSTIN_RE) || []).filter(g => !OWN_GSTINS.has(g.toUpperCase()));
   const byGstin = customers.find(c => c.gstin && gstins.includes(c.gstin.toUpperCase()));
   if (byGstin) return { customer_id: byGstin.id, candidates: [{ id: byGstin.id, name: byGstin.name, confidence: 1 }] };
   const headTokens = new Set(normalize(headerText).split(' '));
