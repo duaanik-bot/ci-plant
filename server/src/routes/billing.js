@@ -220,7 +220,17 @@ r.post('/invoices', canBill, async (req, res, next) => {
       JOIN products p ON p.id = ol.product_id
       WHERE il.invoice_id = $1 AND ol.completed_at IS NULL
         AND ol.status <> 'cancelled' AND ol.dispatched_qty >= ol.qty
-      GROUP BY ol.id, o.id, p.name`, [invId]);
+      -- GROUP BY the product's KEY, not its name. Two invoice lines can share an
+      -- order line, so the de-duplication is real; but grouping on p.name leaves
+      -- p.code, p.party_item_code and the artwork COALESCE functionally
+      -- undetermined, and Postgres rejects the whole statement.
+      --
+      -- This runs AFTER tx() has committed, so the failure mode was silent and
+      -- expensive: the invoice was written and the request still answered 500.
+      -- The bill existed while the screen said it had failed, the "mark
+      -- complete?" prompt never fired, and clicking again hit "A selected line
+      -- is already invoiced".
+      GROUP BY ol.id, o.id, p.id`, [invId]);
     res.json(invoice);
   } catch (e) { next(e); }
 });
