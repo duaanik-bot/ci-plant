@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth } from '../api.js';
+import { storageIsPersistent } from '../lib/safeStorage.js';
 import { firstAllowedPath } from '../modules.js';
 import { Button, Field, Input, Checkbox } from '../components/ui.jsx';
 import { Package } from 'lucide-react';
@@ -22,6 +23,14 @@ export default function Login() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // A device that refuses BOTH DOM storage and cookies can still run the app,
+  // but it cannot hold a session: every reload lands back here. That is the one
+  // failure the floor cannot diagnose by looking at it — it reads as the app
+  // signing you out at random, and the Printing tablet reloads often enough to
+  // do it several times a shift. Say it plainly instead, next to the checkbox
+  // whose promise it breaks, and say what fixes it.
+  const forgetful = !storageIsPersistent;
 
   const submit = async e => {
     e.preventDefault();
@@ -63,6 +72,13 @@ export default function Login() {
               <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
             </Field>
             <Checkbox label="Keep me signed in" checked={remember} onChange={e => setRemember(e.target.checked)} />
+            {forgetful && (
+              <p className="rounded-xl bg-amber-50/90 px-3 py-2 text-xs font-semibold text-amber-800">
+                This device is blocking site data, so it cannot stay signed in — you will land
+                here again after every reload. Allow site data (cookies) for this site in the
+                browser settings to fix it.
+              </p>
+            )}
             {error && <p className="rounded-xl bg-red-50/90 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
             <Button size="lg" className="w-full" disabled={loading || !email || !password}>
               {loading ? 'Signing in…' : 'Sign In'}

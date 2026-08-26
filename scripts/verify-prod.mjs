@@ -52,11 +52,31 @@ async function runAll() {
   // Everything this document asks for must actually be there.
   const refs = [...index.body.matchAll(/(?:href|src)="(\/assets\/[^"]+)"/g)].map(m => m[1]);
   if (!refs.length) fail('the app shell references no /assets/ files at all — did the build emit?');
+  let entry = '';
   for (const ref of refs) {
     const a = await get(ref);
     const want = ref.endsWith('.css') ? /text\/css/ : /javascript/;
     if (a.status !== 200) fail(`${ref} answered ${a.status}`);
     else if (!want.test(a.type)) fail(`${ref} is being served as ${a.type}`);
+    if (ref.endsWith('.js') && a.status === 200) entry += a.body;
+  }
+
+  // The storage ladder, proved on the artifact the plant actually downloads.
+  //
+  // A Printing tablet with site data blocked showed nothing at all, because
+  // `window.localStorage` throws on the PROPERTY ACCESS and one such read sat at
+  // module scope. Both halves of the repair are invisible in the diff of any
+  // later change and silent when they regress — the first costs a blank screen,
+  // the second costs the login on every reload — so they are checked here, on
+  // the bytes, not in the repo. These are string literals; minification keeps
+  // them.
+  if (entry && !entry.includes('__ci_storage_probe__')) {
+    fail('safeStorage is not in the served bundle — a tablet with site data blocked '
+      + 'will throw while importing and render a blank screen');
+  }
+  if (entry && !entry.includes('__ci_cookie_probe__')) {
+    fail('the cookie fallback is not in the served bundle — a tablet with site data '
+      + 'blocked will boot, but be signed out again by every reload');
   }
 
   // THE regression check. A hash that was never built must 404 — never a
@@ -105,5 +125,5 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`✓ ${BASE} verified — shell, assets, stale-asset 404, deep link, API health `
+console.log(`✓ ${BASE} verified — shell, assets, storage ladder, stale-asset 404, deep link, API health `
   + `(${checks} requests, ${Math.round((Date.now() - started) / 1000)}s)`);
