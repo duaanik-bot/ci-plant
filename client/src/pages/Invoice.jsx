@@ -100,7 +100,10 @@ export default function Invoice() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl">
+    // max-w-4xl, not 3xl: the sheet reads BIGGER on screen (Anik: "increase the
+    // size of page on screen") while print stays governed by @page A4 + 12mm —
+    // the on-screen sheet is a preview, not the paper.
+    <div className="mx-auto max-w-4xl">
       <div className="no-print mb-4 flex justify-between">
         <Link to="/dispatch-invoice?tab=invoices"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
         <div className="flex flex-wrap gap-2">
@@ -142,30 +145,32 @@ export default function Invoice() {
           </div>
         </div>
 
-        {/* Lines — the sheet is fixed-width paper (max-w-3xl, p-8 → a 704px
-            content box) while this table's min-content width is ~702px: eight
-            columns whose numeric ones will not wrap. On any narrower window the
-            table used to run straight off the right edge of the sheet, taking
-            GST and Amount with it, and with nothing to scroll it was simply
-            unreachable. Contained here instead; print restores the overflow so
-            the PDF is byte-for-byte what it was. */}
+        {/* Lines — the hard budget is PRINT, not the screen: A4 minus the 12mm
+            @page margins is a 703px box, and the on-screen sheet must never
+            need a scrollbar either (Anik: "keep things fixed so that i dont
+            have to scroll"). So the table's incompressible width is kept
+            ~580px: 13px body type, px-2 cells, the identity in compact (its
+            chips wrap), and Description carrying w-full so every spare pixel
+            goes to the one column that can use it. The overflow container
+            stays as a last-resort rail for absurdly long unbreakable values —
+            with the budget honoured it never engages. */}
         <div className="mt-6 overflow-x-auto print:overflow-x-visible">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
-            <tr className="bg-ink-900 text-left text-xs font-bold uppercase tracking-wide text-white">
-              <th className="px-3 py-2">#</th><th className="px-3 py-2">Description</th>
-              <th className="px-3 py-2">Challan</th><th className="px-3 py-2">HSN</th>
-              <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Rate</th>
-              <th className="px-3 py-2 text-right">GST</th>
-              <th className="px-3 py-2 text-right">Amount</th>
+            <tr className="bg-ink-900 text-left text-[10px] font-bold uppercase tracking-wide text-white">
+              <th className="px-2 py-2">#</th><th className="w-full px-2 py-2">Description</th>
+              <th className="px-2 py-2">Challan</th><th className="px-2 py-2">HSN</th>
+              <th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Rate</th>
+              <th className="px-2 py-2 text-right">GST</th>
+              <th className="px-2 py-2 text-right">Amount</th>
             </tr>
           </thead>
           <tbody>
             {inv.lines.map((l, i) => (
               <tr key={l.id} className="border-b border-gray-100">
-                <td className="px-3 py-2.5 text-gray-500">{i + 1}</td>
-                <td className="px-3 py-2.5">
-                  <ProductIdentity row={l}
+                <td className="px-2 py-2 align-top text-gray-500">{i + 1}</td>
+                <td className="w-full min-w-[180px] px-2 py-2 align-top">
+                  <ProductIdentity row={l} compact
                     meta={`PO ${l.po_number}${l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes${l.pack_qty_per_box ? ` x ${fmt.num(l.pack_qty_per_box)}` : ''}` : ''}`} />
                   <div className="no-print mt-1">
                     {l.coa_id ? (
@@ -179,12 +184,12 @@ export default function Invoice() {
                     )}
                   </div>
                 </td>
-                <td className="px-3 py-2.5 text-xs text-gray-500">{l.challan_number}</td>
-                <td className="px-3 py-2.5 text-xs text-gray-500">{co.hsn}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmt.num(l.qty)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">₹{Number(l.rate || 0).toFixed(2)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{l.gst_pct ?? 12}%</td>
-                <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
+                <td className="whitespace-nowrap px-2 py-2 align-top text-[11px] text-gray-500">{l.challan_number}</td>
+                <td className="whitespace-nowrap px-2 py-2 align-top text-[11px] text-gray-500">{co.hsn}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums">{fmt.num(l.qty)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums">₹{Number(l.rate || 0).toFixed(2)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums text-gray-500">{l.gst_pct ?? 12}%</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
               </tr>
             ))}
           </tbody>
