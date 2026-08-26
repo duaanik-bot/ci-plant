@@ -111,6 +111,12 @@ export default function ProductIdentity({
   // a decorative dot has nothing to say to a screen reader or a tooltip.
   metaPrefix,
   className = '',
+  // A font size passed here MUST carry the `!` prefix when `compact` is also set
+  // — `!text-[13px]`, not `text-[13px]`. `compact` appends `text-xs` to the name
+  // below, and Tailwind emits `.text-xs` AFTER arbitrary sizes in the built
+  // stylesheet, so the plain form loses however you order the string. Six call
+  // sites asked for 13px and silently rendered 12px for months before anyone
+  // noticed, because one pixel does not look like a bug.
   nameClassName = '',
   codesClassName = '',
   compact = false,
@@ -170,6 +176,7 @@ export default function ProductIdentity({
       <div className={`min-w-0 ${className}`} title={title}>
         {canOpen ? (
           <button type="button" onClick={onClick}
+            /* `text-xs` here out-ranks a plain size in nameClassName — see the prop. */
             className={`block max-w-full text-left font-semibold leading-snug text-slate-800 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35 ${compact ? 'text-xs' : ''} ${nameClassName}`}>
             <span className="line-clamp-2 break-words">{enriched.name}</span>
           </button>

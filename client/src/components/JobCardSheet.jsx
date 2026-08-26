@@ -222,18 +222,25 @@ export default function JobCardSheet({ jc }) {
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-600">
             {jc.gang_parent ? (jc.run_kind === 'merge' ? 'Combined Run Job Card' : 'Gang Production Job Card') : 'Production Job Card'}
           </div>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{jc.jc_number}</h1>
+          {/* The number and the product name are read together on the floor, so
+              they carry the same weight of type: the number came down a step
+              from text-2xl and the name came up from ProductIdentity's compact
+              text-xs, meeting at 20px. The name's size is an arbitrary value
+              because `compact` also emits text-xs, and Tailwind emits .text-xs
+              AFTER .text-[20px] — so the size is marked important, or compact
+              silently wins and the name stays 12px. */}
+          <h1 className="mt-1 text-xl font-extrabold tracking-tight text-ink-900">{jc.jc_number}</h1>
           <div className="mt-0.5 text-sm text-gray-600">
             {jc.gang_parent && jc.gang_members?.length
               ? jc.run_kind === 'merge'
                 ? (
                   <div>
-                    <ProductIdentity row={jc} compact codesClassName="max-w-[320px]" />
+                    <ProductIdentity row={jc} compact nameClassName="!text-[20px] leading-tight" codesClassName="max-w-[320px]" />
                     <span>{jc.gang_number} · {jc.gang_members.length} sales orders as one run (no split)</span>
                   </div>
                 )
                 : `${jc.gang_number} — ${jc.gang_members.length} jobs on one run (until die cutting)`
-              : <ProductIdentity row={jc} compact codesClassName="max-w-[320px]" />}
+              : <ProductIdentity row={jc} compact nameClassName="!text-[20px] leading-tight" codesClassName="max-w-[320px]" />}
           </div>
         </div>
         <div className="jc-head-right text-right text-xs text-gray-600">

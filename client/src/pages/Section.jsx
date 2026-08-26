@@ -109,7 +109,7 @@ function ProductCell({ r }) {
   if (r.run_kind === 'merge' && r.gang_members?.length) {
     return (
       <div className="w-[300px] max-w-full">
-        <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]"
+        <ProductIdentity row={r} compact nameClassName="!text-[13px] leading-[17px]"
           meta={r.qty_planned > 0 ? `${fmt.num(r.qty_planned)} pcs` : ''} />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-teal-600">
           {r.gang_members.length} sales orders · one pile — no split
@@ -133,7 +133,7 @@ function ProductCell({ r }) {
           so the figure is in the same place whether one order or four paid for
           the run. This is the ORDER's pcs, not the station's received count,
           which has its own column and reads 0 until upstream delivers. */}
-      <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]"
+      <ProductIdentity row={r} compact nameClassName="!text-[13px] leading-[17px]"
         meta={r.qty_planned > 0 ? `${fmt.num(r.qty_planned)} pcs` : ''} />
       {/* A split gang child lands HERE, in the plain branch — it is one carton
           now. This keeps the run it came out of underneath the product. */}
