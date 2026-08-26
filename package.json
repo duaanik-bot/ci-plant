@@ -3,19 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Colour Impressions — Packaging Plant ERP",
-  "workspaces": ["server", "client"],
+  "description": "Colour Impressions \u2014 Packaging Plant ERP",
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "seed": "npm run seed -w server",
     "start": "npm run dev",
     "verify": "node scripts/build-baseline.mjs --check && npm test -w server && npm run build -w client",
+    "verify:prod": "node scripts/verify-prod.mjs",
     "db:baseline": "node scripts/build-baseline.mjs",
     "db:check": "node scripts/db-check.mjs",
     "check:holds": "node scripts/check-board-holds.mjs",
     "check:stock": "node scripts/check-stock.mjs",
     "db:backup": "node scripts/backup-prod.mjs",
-    "deploy:prod": "vercel deploy --prod --yes"
+    "deploy:prod": "vercel deploy --prod --yes && node scripts/verify-prod.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

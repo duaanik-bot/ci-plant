@@ -28,6 +28,26 @@ jobs:
       - name: Verify (baseline freshness + server tests + client build)
         run: npm run verify
 
+  # Vercel deploys `main` on its own, in parallel with this workflow — nothing
+  # here can gate that. What this CAN do is tell us within minutes that what
+  # went live is not serving, instead of waiting for someone on the floor to
+  # look up from an unreadable tablet. The check retries while the production
+  # alias moves to the new deployment.
+  smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Smoke-test motionci.in after the deploy
+        env:
+          VERIFY_PROD_DEADLINE_MS: '300000'
+        run: node scripts/verify-prod.mjs
+
   secrets:
     runs-on: ubuntu-latest
     steps:

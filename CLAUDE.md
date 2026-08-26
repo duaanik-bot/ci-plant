@@ -105,11 +105,19 @@ vercel deploy --prod --yes --token "$VERCEL_TOKEN"
 - After deployment, verify:
 
 ```bash
-curl -I -L https://motionci.in
-curl -sS https://motionci.in/api/health
+npm run verify:prod
 ```
 
-Expected health body includes `{"ok":true}`.
+This checks the app shell, every asset it references, the stale-asset 404, a
+deep link, and `/api/health` (expected `{"ok":true}`), retrying while the
+production alias moves. `npm run deploy:prod` runs it automatically; a Git
+auto-deploy is covered by the `smoke` job in CI instead.
+
+**Do not replace it with a bare `curl -I https://motionci.in`.** A 200 on the
+shell is not evidence the app works: on 2026-08-26 every response was a 200
+while the floor looked at Live Floor with real figures and no stylesheet at
+all — the SPA catch-all was answering missing `/assets/` files with index.html.
+`server/src/deploy-static-assets.test.js` pins the config that fixed it.
 
 ## Current Known State (updated 2026-07-26)
 
