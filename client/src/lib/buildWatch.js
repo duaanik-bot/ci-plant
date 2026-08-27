@@ -18,25 +18,61 @@
 // `must-revalidate`, so asking is usually a 304.
 import { sessionStore, storageIsPersistent } from './safeStorage.js';
 
-// Only Vite's own emitted files. Anything else on the page is not a build id.
-const ASSET_REF = /(?:src|href)="(\/assets\/[^"]+)"/g;
+// What counts as a file this document was BUILT FROM: the entry module and the
+// stylesheet — the two tags a Vite build writes into index.html. The icons, the
+// manifest and the font sheet are not build identity, and neither is a
+// modulepreload link.
+//
+// That last one is the whole reason this rule exists. Vite's own preload helper
+// appends `<link rel="modulepreload" href="/assets/…">` to <head> for every
+// dependency of a lazily-imported route — five of them for the Dashboard alone,
+// more on every navigation. Those are files the page FETCHED, not files it was
+// built from, and counting them made the live DOM a permanent superset of the
+// shell the server serves. The compare below then read "new build" on every
+// check, on every device, with nothing deployed: a bar across the top of the
+// app that reloading could not clear, because the reloaded document pollutes
+// its own DOM again within one render.
+//
+// The rule has to hold on BOTH sides. Applying it to the DOM alone would trade
+// that bug for its mirror image the day the shell itself carries a preload link
+// — the served list would name a file the document has no tag for, which reads
+// as a deploy just as permanently.
+function isBuildAsset(tag, rel, url) {
+  if (!url || !url.startsWith('/assets/')) return false;
+  if (tag === 'SCRIPT') return true;      // the preload helper only ever makes links
+  return tag === 'LINK' && rel === 'stylesheet';
+}
+
+const TAG = /<(script|link)\b([^>]*)>/gi;
+const ATTR = /([a-zA-Z-]+)\s*=\s*"([^"]*)"/g;
 
 export function assetsIn(html) {
   const found = new Set();
-  for (const m of String(html || '').matchAll(ASSET_REF)) found.add(m[1]);
+  for (const [, tag, attrs] of String(html || '').matchAll(TAG)) {
+    const a = {};
+    for (const [, name, value] of attrs.matchAll(ATTR)) a[name.toLowerCase()] = value;
+    const url = a.src || a.href;
+    if (isBuildAsset(tag.toUpperCase(), a.rel, url)) found.add(url);
+  }
   return [...found].sort();
 }
 
 export function ownAssets(doc) {
   const found = new Set();
-  for (const el of doc.querySelectorAll('script[src], link[href]')) {
-    const raw = el.getAttribute('src') || el.getAttribute('href') || '';
-    if (raw.startsWith('/assets/')) found.add(raw);
+  for (const el of doc.querySelectorAll('script, link')) {
+    const url = el.getAttribute('src') || el.getAttribute('href') || '';
+    if (isBuildAsset(el.tagName, el.getAttribute('rel'), url)) found.add(url);
   }
   return [...found].sort();
 }
 
-// Both lists arrive sorted, so this is an ordered compare.
+// Does the server name a file this document does not have?
+//
+// Not "are the two lists identical". A page that has been running collects tags
+// of its own — the preload links above are only today's example — and an
+// equality test hands every one of them the power to raise a banner nobody can
+// dismiss. Growth in the document is inert here; only a name the document has
+// never seen counts as a deploy.
 export function isNewBuild(mine, served) {
   // An empty `served` is a captive portal on plant wi-fi, a proxy error page, an
   // offline stub — NOT a deploy. Acting on one would reload a working screen
@@ -44,8 +80,8 @@ export function isNewBuild(mine, served) {
   // is happening. An empty `mine` means this document names no assets at all
   // and has no standing to judge.
   if (!mine?.length || !served?.length) return false;
-  if (mine.length !== served.length) return true;
-  return mine.some((a, i) => a !== served[i]);
+  const have = new Set(mine);
+  return served.some(a => !have.has(a));
 }
 
 // When may it reload BY ITSELF, with nobody asking?

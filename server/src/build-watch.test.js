@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assetsIn, isNewBuild, shouldAutoReload } from '../../client/src/lib/buildWatch.js';
+import { assetsIn, ownAssets, isNewBuild, shouldAutoReload } from '../../client/src/lib/buildWatch.js';
 
 const shell = (js, css) => `<!doctype html><html><head>
   <script type="module" crossorigin src="/assets/index-${js}.js"></script>
@@ -90,4 +90,73 @@ test('the app actually starts the watch, and offers a way to act on it', () => {
   const app = readFileSync(new URL('../../client/src/App.jsx', import.meta.url), 'utf8');
   assert.match(app, /startBuildWatch\(/, 'App must start the build watch');
   assert.match(app, /window\.location\.reload\(\)/, 'and give the reader a control that reloads');
+});
+
+// ── What the LIVE document actually looks like ──────────────────────────────
+//
+// Every test above compares one parsed shell against another — apples to
+// apples. Production never does that. `served` is the shell as the server
+// serves it; `mine` is read off the DOM of a page that has been running, and by
+// the time the watch starts, Vite's own preload helper has already appended a
+// <link rel="modulepreload" href="/assets/…"> for every dependency of the first
+// lazily-imported route. Five of them for the Dashboard alone, more on every
+// navigation. Counting those made the document a permanent SUPERSET of the
+// shell, so the compare said "new build" on every check, on every device, with
+// nothing deployed — and the bar it raised could not be cleared by reloading,
+// because the reloaded document pollutes its own DOM again within one render.
+
+// A stand-in for the document. It hands back every tag and lets ownAssets do
+// its own filtering, so the rule is tested rather than a CSS selector string.
+function documentOf(tags) {
+  const els = tags.map(t => ({
+    tagName: t.tag.toUpperCase(),
+    getAttribute: name => (name in t ? t[name] : null),
+  }));
+  return { querySelectorAll: () => els };
+}
+
+// The two tags a Vite build writes into index.html, plus the icons and manifest
+// that sit beside them.
+const shellTags = (js, css) => [
+  { tag: 'script', type: 'module', crossorigin: '', src: `/assets/index-${js}.js` },
+  { tag: 'link', rel: 'stylesheet', crossorigin: '', href: `/assets/index-${css}.css` },
+  { tag: 'link', rel: 'icon', href: '/icon.svg' },
+  { tag: 'link', rel: 'manifest', href: '/manifest.webmanifest' },
+];
+
+// What `__vitePreload` appends to <head> when React renders the first lazy
+// route. It creates <link> elements — never a <script>.
+const preloaded = [
+  { tag: 'link', rel: 'modulepreload', as: 'script', crossorigin: '', href: '/assets/Dashboard-Cg4ZiiVx.js' },
+  { tag: 'link', rel: 'modulepreload', as: 'script', crossorigin: '', href: '/assets/factory-CA91lVby.js' },
+  { tag: 'link', rel: 'modulepreload', as: 'script', crossorigin: '', href: '/assets/trending-up-C5IuocXO.js' },
+  { tag: 'link', rel: 'modulepreload', as: 'script', crossorigin: '', href: '/assets/percent-CPfzRiQ7.js' },
+  { tag: 'link', rel: 'modulepreload', as: 'script', crossorigin: '', href: '/assets/clock-BdCocA0F.js' },
+];
+
+test('a route chunk this page fetched is not a file this page was built from', () => {
+  assert.deepEqual(ownAssets(documentOf([...shellTags('AAA', 'BBB'), ...preloaded])),
+    ['/assets/index-AAA.js', '/assets/index-BBB.css']);
+});
+
+test('a page that has been RUNNING is still on the build it was served', () => {
+  // The whole bug in one line: same build, nothing deployed, banner anyway.
+  const mine = ownAssets(documentOf([...shellTags('AAA', 'BBB'), ...preloaded]));
+  assert.equal(isNewBuild(mine, assetsIn(shell('AAA', 'BBB'))), false);
+});
+
+test('and it still sees a real deploy from that same running page', () => {
+  const mine = ownAssets(documentOf([...shellTags('AAA', 'BBB'), ...preloaded]));
+  assert.equal(isNewBuild(mine, assetsIn(shell('ZZZ', 'BBB'))), true, 'the app module moved');
+  assert.equal(isNewBuild(mine, assetsIn(shell('AAA', 'ZZZ'))), true, 'the stylesheet moved');
+});
+
+test('the rule is the same on both sides, or the bug comes back mirrored', () => {
+  // Vite writes modulepreload links into index.html itself as soon as the entry
+  // has a static chunk to split off. Reading them on one side and not the other
+  // is this same permanent false positive, pointing the other way.
+  const withPreload = shell('AAA', 'BBB').replace('</head>',
+    '<link rel="modulepreload" crossorigin href="/assets/vendor-VVV.js"></head>');
+  const mine = ownAssets(documentOf([...shellTags('AAA', 'BBB'), ...preloaded]));
+  assert.equal(isNewBuild(mine, assetsIn(withPreload)), false);
 });
