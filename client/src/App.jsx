@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { lazy, Suspense, useEffect } from 'react';
+import { startBuildWatch } from './lib/buildWatch.js';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { canAccess, canAccessSection, moduleForPath, firstAllowedPath } from './modules.js';
 import AppLayout from './components/AppLayout.jsx';
 import { ToastProvider, useToast } from './components/ui.jsx';
@@ -75,9 +76,46 @@ function RequireAuth() {
   return <Outlet />;
 }
 
+// The way out, on a device that has no other one.
+//
+// A plant tablet runs as an installed PWA: no address bar, no reload button, no
+// pull-to-refresh. When a deploy pulled its files away it rendered Live Floor
+// with real figures and no stylesheet, said nothing about why, and could only be
+// recovered by closing the app from the recents switcher — which no one on a
+// floor knows to do. One Printing tablet sat like that for five hours.
+//
+// buildWatch reloads by itself while the page is HIDDEN, so most deploys are
+// picked up with nobody watching and this bar is never seen. It appears only
+// when the screen is in front of someone, because that is exactly when reloading
+// out from under them would be the wrong thing to do.
+function UpdateBar() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => startBuildWatch({ onNewBuild: () => setReady(true) }), []);
+  if (!ready) return null;
+  return (
+    <div
+      className="fixed inset-x-0 top-0 z-[300] flex items-center justify-between gap-3 bg-[#B45309] px-4 pb-2 text-white shadow-lift"
+      style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
+      role="status"
+    >
+      <span className="text-xs font-bold tracking-[-0.01em]">
+        A newer version of the app is ready.
+      </span>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-[#B45309]"
+      >
+        Reload
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ToastProvider>
+      <UpdateBar />
       <BrowserRouter>
         <Bridges>
           <Suspense fallback={<PageLoading />}>
