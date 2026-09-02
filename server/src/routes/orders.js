@@ -2763,11 +2763,25 @@ r.get('/artwork', async (_req, res, next) => {
     // artwork_locked earns its own clause: a plan can be discarded after the
     // designer has finished, and `parent_sheets_required` going NULL would then
     // yank completed work out of the Locked tab. Finished artwork stays visible.
+    // ── ol.id ENDS THE ORDER BY, AND IT IS LOAD-BEARING ─────────────────────
+    // The two terms before it do not resolve this queue: every line awaiting
+    // approval carries artwork_locked = 0 AND a NULL delivery_date, so all 28
+    // of them (200 in the Locked tab) sit in ONE tie group. An ORDER BY with no
+    // unique final term is not a TOTAL order, so Postgres may hand tied rows
+    // back in any order — and the order it picks tracks physical tuple state,
+    // which an UPDATE changes. Ticking one approval pill therefore re-wrote the
+    // row and the queue returned it at the BOTTOM of its tie group, which the
+    // designer sees as "the row I just touched ran away to the end".
+    //
+    // The client cannot repair this from its side: DataTable's comparator
+    // returns 0 on equal keys and Array#sort is stable, so whatever order
+    // arrives here is exactly what survives inside every group of equal sort
+    // keys. Pinned in artwork-row-stays-put.test.js.
     const rows = await q(`${LINE_VIEW}
       WHERE ol.status IN ('planned','ready','in_production')
          OR (ol.status = 'pending'
              AND (ol.parent_sheets_required IS NOT NULL OR ol.artwork_locked = 1))
-      ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
+      ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST, ol.id`);
     // Tooling chips: ONE query for every product on the page.
     const pids = [...new Set(rows.map(l => l.product_id))];
     const tools = pids.length ? await q(`

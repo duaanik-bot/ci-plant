@@ -621,7 +621,18 @@ export default function Artwork() {
         <ResetFilters filters={filters} className="ml-auto" />
       </FilterRail>
       <BulkWorkflowControls lines={selectedLines} context="artwork" onDone={load} onClear={clearSelection} />
+      {/* The sort is DECLARED, never inherited. Given no defaultSort DataTable
+          takes the first sortable column ascending (ui.jsx), so this queue's
+          order was an accident of which column happened to be first — and it
+          silently changed the day the leading column became the client instead
+          of the PO number: a PO number is all but unique, a client name is
+          shared by fifteen of these rows, and the server's own order decides
+          everything inside a tie. Naming it here keeps a column reshuffle from
+          ever moving the queue again. Client A→Z is what the page already
+          showed; the row order WITHIN a client is the server's, and now
+          deterministic (see the artwork route's ORDER BY). */}
       <DataTable searchable resetSignal={filters.token}
+        defaultSort={{ key: 'customer_name', dir: 'asc' }}
         selectable
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}
