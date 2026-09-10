@@ -48,9 +48,12 @@ export function overIssueRefusal({ required, issuing, ack, context = {} } = {}) 
 
 // The audit line a confirmed over-issue leaves. WHO is on the audit row itself;
 // this names the job, both figures, and how hard the planner was asked.
-export function overIssueAuditText({ ref, judged, action, via } = {}) {
+export function overIssueAuditText({ ref, judged, action, via, wastage, standard } = {}) {
   const how = judged?.level === 'double' ? 'confirmed twice, the number typed back' : 'confirmed';
-  const through = via === 'mix' ? ' (Board Mix total)' : '';
+  const through = via === 'mix' ? ' (Board Mix total)'
+    : via === 'wastage' && wastage != null
+      ? ` (wastage ${num(wastage)} against the standard ${num(standard)})`
+      : '';
   return `${ref ? `${ref}: ` : ''}issuing ${num(judged.issuing)} parent sheets${through} against the planning engine's `
     + `${num(judged.required)} (+${judged.pct}%, ${judged.ratio}×) — over-issue alarm ${how}`
     + (action ? ` · ${action}` : '');

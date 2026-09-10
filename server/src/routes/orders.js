@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
@@ -1687,6 +1687,40 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       // the lock starts from NULL and the mix block writes the real value.
       // No-mix saves store finalLeftover exactly as they always did.
       const storedLeftover = wantsMix ? null : finalLeftover;
+      // THE OVER-ISSUE ALARM (over-issue-gate.js) — ONE judgement per save. The
+      // yardstick is this plan at the plant's STANDARD wastage (Anik: "add the
+      // wastage edits to the alarm too"): wastage raised above the standard buys
+      // board exactly as an override does. A save with no Board Mix is judged
+      // right here, before a figure is written; a save carrying one is judged in
+      // the mix block below, once its rows are priced, on whichever is larger —
+      // the plan or the pile the mix adds up to.
+      const netQty = netProduceQty(line);
+      const engineParent = parentSheetsRequired(sheetsRequired(eff, netQty, DEFAULT_WASTAGE_SHEETS), fit.count);
+      const wastageUsed = Math.max(0, sheets - Math.ceil(netQty / Math.max(1, eff.ups)));
+      const judgePlan = async (issuing, via) => {
+        const ref = eff.name || product.name;
+        // Both yield columns on the STANDARD make-ready — what the extra board
+        // turns into if the press comes to colour as it usually does.
+        const yieldAt = parents => sheetYield({ parents, cpp: fit.count, ups: eff.ups, wastage: DEFAULT_WASTAGE_SHEETS });
+        const out = overIssueRefusal({
+          required: engineParent, issuing, ack: req.body.ack_over_issue,
+          context: {
+            where: 'line', ref, action: draft ? 'save' : 'lock', via,
+            child_sheets: sheets, cpp: fit.count,
+            wastage: wastageUsed, wastage_standard: DEFAULT_WASTAGE_SHEETS,
+            products: [{ name: ref, code: product.code, ordered: line.qty,
+              yield_required: yieldAt(engineParent), yield_issuing: yieldAt(issuing) }],
+          },
+        });
+        if (out.acked) {
+          await audit('order_line', line.id, 'over_issue_confirmed',
+            overIssueAuditText({ ref, judged: out.judged, via,
+              wastage: wastageUsed, standard: DEFAULT_WASTAGE_SHEETS,
+              action: draft ? 'plan saved' : 'plan locked' }),
+            qc, req.user.name);
+        }
+      };
+      if (!wantsMix) await judgePlan(parentSheets, 'wastage');
       // A draft has no planned date. The lock is what schedules a job, and
       // stamping today onto a job still sitting in To Plan would date work
       // nobody has committed to — the Print Planning board reads that column.
@@ -1867,32 +1901,14 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         if (!bal.sufficient) throw Object.assign(
           new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — allocate ${Math.ceil(bal.balance)} more`),
           { status: 409 });
-        // THE OVER-ISSUE ALARM (over-issue-gate.js). A mix row's sheet count is
-        // typed by hand and the rows ARE the pile the floor cuts, while the check
-        // above refuses only UNDER-coverage — so a mix adding up well past the
-        // cut plan is an over-issue however it was reached. Judged before any mix
-        // row is written; a refusal rolls the figures above back with it.
-        {
-          const made = Math.ceil(netProduceQty(line) / Math.max(1, eff.ups));
-          const wasteUsed = Math.max(0, sheets - made);
-          const yieldAt = parents => sheetYield({ parents, cpp: plannedUps, ups: eff.ups, wastage: wasteUsed });
-          const ref = eff.name || product.name;
-          const overIssue = overIssueRefusal({
-            required: parentSheets, issuing: Math.round(bal.covered), ack: req.body.ack_over_issue,
-            context: {
-              where: 'line', ref, action: draft ? 'save' : 'lock', via: 'mix',
-              child_sheets: sheets, cpp: plannedUps,
-              products: [{ name: ref, code: product.code, ordered: line.qty,
-                yield_required: yieldAt(parentSheets), yield_issuing: yieldAt(bal.covered) }],
-            },
-          });
-          if (overIssue.acked) {
-            await audit('order_line', line.id, 'over_issue_confirmed',
-              overIssueAuditText({ ref, judged: overIssue.judged, via: 'mix',
-                action: draft ? 'plan saved' : 'plan locked' }),
-              qc, req.user.name);
-          }
-        }
+        // THE OVER-ISSUE ALARM — this save's one judgement (judgePlan, above the
+        // plan's UPDATE), taken here because only now is the pile priced: the
+        // check just above refuses UNDER-coverage only, and a mix row's sheets
+        // are typed by hand. Judged on whichever is larger, the plan at the
+        // typed wastage or the pile the mix adds up to — before any mix row is
+        // written; a refusal rolls the figures above back with it.
+        await judgePlan(Math.max(parentSheets, Math.round(bal.covered)),
+          Math.round(bal.covered) > parentSheets ? 'mix' : 'wastage');
 
         // ── Per-row leftover choices (v2) ─────────────────────────────────
         // req.body.mix_leftovers: [{material_id, bank}] — banking is opt-in

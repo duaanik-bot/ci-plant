@@ -5,11 +5,11 @@
 // typed (the print-sheet count), and the run was saved, locked, cut and
 // printed at three times its board without anything ever saying so. The
 // server now refuses such a figure with OVER_ISSUE (server/src/over-issue-gate.js)
-// until someone answers, and this is where they answer:
-//
-//   • more than 15% over — one "Are you sure?", Yes or No;
-//   • double or more    — Yes, then a second step that asks for the number to
-//                         be typed back before the final Yes is live.
+// until someone answers, and this is where they answer. Anything MORE than 15%
+// over the engine's figure takes the full two-step form: Yes, then the number
+// typed back before the final Yes is live. The engine's figure is the plan at
+// the plant's standard wastage, so a wastage raised above the standard is
+// weighed exactly like a typed override.
 //
 // Never a block: Yes always gets through, for anyone who holds the planning
 // module. No is the default — it has the focus, and Escape or a click outside
@@ -23,17 +23,29 @@ import { useCallback, useRef, useState } from 'react';
 import { AlertTriangle, ShieldAlert } from 'lucide-react';
 import { fmt } from '../api.js';
 import { Button, Input, Modal } from './ui.jsx';
-import { overIssueVerdict } from '../lib/overIssue.js';
+import { OVER_ISSUE_DOUBLE_PCT, overIssueVerdict } from '../lib/overIssue.js';
+
+const noun = a => (a.where === 'run' ? 'run' : 'job');
+const wastageRaised = a => a.wastage != null && a.wastage_standard != null && +a.wastage > +a.wastage_standard;
 
 // Where the figure came from, in the planner's words.
 const viaSentence = a => {
-  if (a.via === 'mix') {
-    return `The Board Mix rows add up to ${fmt.num(a.issuing)} parent sheets against the cut plan's ${fmt.num(a.required)}.`;
-  }
   if (a.where === 'job_card') {
     return `Planning locked this job at ${fmt.num(a.required)} parent sheets; the job card now says ${fmt.num(a.issuing)}.`;
   }
-  return `Typed into "Parent sheets to issue" — the engine worked this ${a.where === 'run' ? 'run' : 'job'} out at ${fmt.num(a.required)}.`;
+  if (a.via === 'wastage') {
+    return `Wastage is set to ${fmt.num(a.wastage)} print sheets against the plant standard of `
+      + `${fmt.num(a.wastage_standard)}. At the standard, the engine works this ${noun(a)} out at `
+      + `${fmt.num(a.required)} parent sheets.`;
+  }
+  const also = wastageRaised(a)
+    ? ` Wastage is raised too — ${fmt.num(a.wastage)} against the standard ${fmt.num(a.wastage_standard)} — `
+      + `and the engine's ${fmt.num(a.required)} is priced at the standard.`
+    : '';
+  if (a.via === 'mix') {
+    return `The Board Mix rows add up to ${fmt.num(a.issuing)} parent sheets against the engine's ${fmt.num(a.required)}.${also}`;
+  }
+  return `Typed into "Parent sheets to issue" — the engine works this ${noun(a)} out at ${fmt.num(a.required)}.${also}`;
 };
 
 function Tile({ label, value, sub, tone }) {
@@ -111,40 +123,48 @@ export default function OverIssueAlarm({ alarm, busy = false, onCancel, onConfir
         <p className="text-xs text-slate-600">{viaSentence(alarm)}</p>
 
         {products.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="w-full min-w-[520px] text-xs">
-              <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-3 py-2 text-left">Product</th>
-                  <th className="px-3 py-2 text-right">Order qty</th>
-                  <th className="px-3 py-2 text-right">Yield at {fmt.num(alarm.required)}</th>
-                  <th className="px-3 py-2 text-right">Yield at {fmt.num(alarm.issuing)}</th>
-                  <th className="px-3 py-2 text-right">Extra cartons</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((p, i) => (
-                  <tr key={`${p.code || p.name}-${i}`} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">
-                      {p.name}{p.code ? <span className="ml-1 font-normal text-slate-400">{p.code}</span> : null}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt.num(p.ordered)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt.num(p.yield_required)}</td>
-                    <td className={`px-3 py-2 text-right font-bold tabular-nums ${double ? 'text-red-700' : 'text-amber-700'}`}>{fmt.num(p.yield_issuing)}</td>
-                    <td className={`px-3 py-2 text-right font-bold tabular-nums ${double ? 'text-red-700' : 'text-amber-700'}`}>
-                      +{fmt.num(Math.max(0, (p.yield_issuing || 0) - (p.yield_required || 0)))}
-                    </td>
+          <div>
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+              <table className="w-full min-w-[520px] text-xs">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Product</th>
+                    <th className="px-3 py-2 text-right">Order qty</th>
+                    <th className="px-3 py-2 text-right">Yield at {fmt.num(alarm.required)}</th>
+                    <th className="px-3 py-2 text-right">Yield at {fmt.num(alarm.issuing)}</th>
+                    <th className="px-3 py-2 text-right">Extra cartons</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {products.map((p, i) => (
+                    <tr key={`${p.code || p.name}-${i}`} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-semibold text-slate-800">
+                        {p.name}{p.code ? <span className="ml-1 font-normal text-slate-400">{p.code}</span> : null}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt.num(p.ordered)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmt.num(p.yield_required)}</td>
+                      <td className={`px-3 py-2 text-right font-bold tabular-nums ${double ? 'text-red-700' : 'text-amber-700'}`}>{fmt.num(p.yield_issuing)}</td>
+                      <td className={`px-3 py-2 text-right font-bold tabular-nums ${double ? 'text-red-700' : 'text-amber-700'}`}>
+                        +{fmt.num(Math.max(0, (p.yield_issuing || 0) - (p.yield_required || 0)))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {alarm.wastage_standard != null && (
+              <p className="mt-1 text-[10px] text-slate-400">
+                Yields assume the standard {fmt.num(alarm.wastage_standard)}-sheet make-ready.
+              </p>
+            )}
           </div>
         )}
 
         {step === 2 ? (
           <div className="rounded-2xl border-2 border-red-300 bg-red-50/70 px-4 py-3">
             <p className="text-[13px] font-bold text-red-700">
-              This is double the requirement or more. To confirm, type the number of parent sheets you are issuing.
+              This is more than {OVER_ISSUE_DOUBLE_PCT}% over the requirement. To confirm, type the number of parent
+              sheets you are issuing.
             </p>
             <Input autoFocus inputMode="numeric" value={typed}
               onChange={e => setTyped(e.target.value)}
@@ -159,7 +179,7 @@ export default function OverIssueAlarm({ alarm, busy = false, onCancel, onConfir
           </div>
         ) : (
           <p className="text-[11px] text-slate-500">
-            {double ? 'Double or more — you will be asked once more, and asked to type the number. ' : ''}
+            {double ? `More than ${OVER_ISSUE_DOUBLE_PCT}% over — you will be asked once more, and asked to type the number. ` : ''}
             Your answer is recorded against {ref} with your name.
           </p>
         )}
@@ -170,18 +190,21 @@ export default function OverIssueAlarm({ alarm, busy = false, onCancel, onConfir
 
 // Live, while the planner is still typing — the same verdict the save will
 // reach (lib/overIssue.js is the server rule's twin), said before anyone
-// presses anything. Renders nothing inside the rule.
-export function OverIssueHint({ required, issuing, childSheets, cpp }) {
+// presses anything. `required` is the engine's figure at the STANDARD wastage;
+// pass `wastage`/`standard` and a raised wastage is named as the cause.
+// Renders nothing inside the rule.
+export function OverIssueHint({ required, issuing, childSheets, cpp, wastage = null, standard = null }) {
   const j = overIssueVerdict({ required, issuing, childSheets, cpp });
   if (j.level === 'none') return null;
-  const slip = j.slip;
   const double = j.level === 'double';
+  const raised = wastage != null && standard != null && +wastage > +standard;
   return (
     <div className={`mt-1.5 flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold leading-snug ${double ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
       <AlertTriangle size={13} className="mt-px shrink-0" />
       <span>
-        {slip && <>{fmt.num(j.issuing)} is this run's <b>print</b>-sheet count — {fmt.num(childSheets)} print sheets
+        {j.slip && <>{fmt.num(j.issuing)} is this run's <b>print</b>-sheet count — {fmt.num(childSheets)} print sheets
           ÷ {cpp} per parent = {fmt.num(j.required)} parent sheets. </>}
+        {raised && <>Wastage {fmt.num(wastage)} is above the standard {fmt.num(standard)}. </>}
         +{j.pct}% over the engine's {fmt.num(j.required)}{j.ratio >= 2 ? ` (${j.ratio}×)` : ''} —
         {double ? ' saving or locking will ask you to confirm twice.' : ' saving or locking will ask you to confirm.'}
       </span>

@@ -12,6 +12,7 @@ import {
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, leftoverStrips, bankRunLeftover, unbankRunLeftover,
   bankPlanningLeftover, unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
+  DEFAULT_WASTAGE_SHEETS,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
@@ -1410,18 +1411,35 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       }
       // 2b) THE OVER-ISSUE ALARM (over-issue-gate.js). Judged here — after the
       // maths, before a single figure is written — so a refusal leaves nothing
-      // behind but the planner's screen. CI-GANG-0051 is why: `natural` was
+      // behind but the planner's screen. CI-GANG-0051 is why: the engine said
       // 400, 1,200 was typed, and it went to the floor without a word.
       //
-      // What is judged is what the floor will actually cut. Usually that is the
-      // typed override, but a Board Mix IS the pile — step 4 only asks that it
-      // cover the issue, never that it stop there — so a mix adding up past the
-      // override is judged instead. A gang's rows cover sheet for sheet (a
-      // differing cut is refused below); a merge row carries its chosen cuts and
-      // is priced the way step 4 prices it.
+      // The yardstick is the engine's own figure at the plant's STANDARD
+      // wastage (Anik: "add the wastage edits to the alarm too"). A wastage
+      // raised above the standard buys board exactly as an override does, and
+      // judged against the typed wastage the yardstick would move with the very
+      // figure it measures. Step 1's arithmetic re-run with the standard
+      // allowance on the lead: the one shared run when co-printed, else member
+      // by member.
       const coPrinted = gang.kind !== 'merge' && gang.layout_mode === 'shared';
+      const stdParents = plan.map((p, idx) => parentSheetsRequired(
+        sheetsRequired(p.eff, netProduceQty(p.line), idx === 0 ? DEFAULT_WASTAGE_SHEETS : 0), p.fit.count));
+      const natStd = !plan.length ? 0
+        : coPrinted
+          ? parentSheetsRequired(sharedLayoutRun(
+              plan.map(p => ({ id: p.line.id, net: netProduceQty(p.line), ups: p.eff.ups })),
+              { wastage: DEFAULT_WASTAGE_SHEETS }).run_child, plan[0].fit.count)
+          : stdParents.reduce((s, x) => s + x, 0);
+      //
+      // What is judged is what the floor will actually cut: the typed override,
+      // else the plan at the typed wastage — but a Board Mix IS the pile (step 4
+      // only asks that it cover the issue, never that it stop there), so a mix
+      // adding up past that is judged instead. A gang's rows cover sheet for
+      // sheet (a differing cut is refused below); a merge row carries its chosen
+      // cuts and is priced the way step 4 prices it.
       let issuing = issued.reduce((s, x) => s + x, 0);
-      let via = issueOverride != null && issueOverride !== natural ? 'override' : null;
+      let via = issueOverride != null && issueOverride !== natural ? 'override'
+        : natural > natStd ? 'wastage' : null;
       if (Array.isArray(req.body.mix) && req.body.mix.length && plan[0]?.fit?.count > 0) {
         const runUps = plan[0].fit.count;
         const covered = req.body.mix.reduce((s, r) => {
@@ -1432,31 +1450,35 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         }, 0);
         if (Math.round(covered) > issuing) { issuing = Math.round(covered); via = 'mix'; }
       }
-      // The loss in cartons, product by product. A co-printed sheet carries
-      // every member, so each yield runs off the WHOLE run; separate
-      // impositions each run off their own share of it.
+      // The loss in cartons, product by product, both columns on the STANDARD
+      // make-ready — what the extra board turns into if the press comes to
+      // colour as it usually does. A co-printed sheet carries every member, so
+      // each yield runs off the WHOLE run; separate impositions off their share.
       const yieldAt = (idx, runParents) => {
         const p = plan[idx];
-        const parents = coPrinted ? runParents : (natural > 0 ? runParents * p.parentSheets / natural : 0);
+        const parents = coPrinted ? runParents : (natStd > 0 ? runParents * stdParents[idx] / natStd : 0);
         return sheetYield({ parents, cpp: p.fit.count, ups: p.eff.ups,
-          wastage: coPrinted ? plan[0].wastage : p.wastage });
+          wastage: coPrinted || idx === 0 ? DEFAULT_WASTAGE_SHEETS : 0 });
       };
       const cpps = [...new Set(plan.map(p => p.fit.count))];
+      const wastageTyped = plan[0]?.wastage ?? null;
       const overIssue = overIssueRefusal({
-        required: natural, issuing, ack: req.body.ack_over_issue,
+        required: natStd, issuing, ack: req.body.ack_over_issue,
         context: {
           where: 'run', ref: gang.gang_number, action: draft ? 'save' : 'lock', via,
           child_sheets: plan.reduce((s, p) => s + p.sheets, 0),
           cpp: cpps.length === 1 ? cpps[0] : null,
+          wastage: wastageTyped, wastage_standard: DEFAULT_WASTAGE_SHEETS,
           products: plan.map((p, idx) => ({
             name: p.eff.name, code: p.eff.code, ordered: p.line.qty,
-            yield_required: yieldAt(idx, natural), yield_issuing: yieldAt(idx, issuing),
+            yield_required: yieldAt(idx, natStd), yield_issuing: yieldAt(idx, issuing),
           })),
         },
       });
       if (overIssue.acked) {
         await audit('gang_run', gang.id, 'over_issue_confirmed',
           overIssueAuditText({ ref: gang.gang_number, judged: overIssue.judged, via,
+            wastage: wastageTyped, standard: DEFAULT_WASTAGE_SHEETS,
             action: draft ? 'run plan saved' : 'run plan locked' }),
           qc, req.user.name);
       }

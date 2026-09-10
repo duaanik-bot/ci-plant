@@ -1248,6 +1248,10 @@ export default function Planning() {
       wastagePctEq: base > 0 ? +((wastage / base) * 100).toFixed(1) : 0,
       sized: !!fit, cpp, waste: fit?.cpp > 0 ? fit.waste : null, util: fit?.cpp > 0 ? fit.util : null,
       parent: Math.ceil(total / cpp),
+      // The same plan at the plant's STANDARD wastage — the engine figure the
+      // over-issue alarm judges by, so wastage raised well past it warns here
+      // before the save has to ask.
+      engineParent: Math.ceil((base + DEFAULT_WASTAGE_SHEETS) / cpp),
       parentSize: fit ? `${parentL}×${parentW}"` : null,
       parentTrimmed, parentOversize,
       childSize: fit ? `${childL}×${childW}"` : null,
@@ -1318,21 +1322,26 @@ export default function Planning() {
     // `cpp` — print sheets per parent, which the over-issue hint needs to name a
     // print count typed into the parent box. One figure only when every member
     // cuts the same way; separate impositions that differ have no single cut.
+    // `engineParent` — the run at the plant's STANDARD wastage: the engine figure
+    // the over-issue alarm judges by (server: gangs.js step 2b), so a wastage
+    // raised past the standard warns like any other extra board.
     const sum = { baseChild, wastageTotal: w, childSheets, parent, per, members: gangView.members.length,
-      cpp: per.length && per.every(p => p.cpp === per[0].cpp) ? per[0].cpp : null };
+      cpp: per.length && per.every(p => p.cpp === per[0].cpp) ? per[0].cpp : null,
+      engineParent: per.reduce((s, p, i) => s + Math.ceil((p.base + (i === 0 ? DEFAULT_WASTAGE_SHEETS : 0)) / p.cpp), 0) };
     if (gangView.kind === 'merge' || gangView.layout_mode !== 'shared') return sum;
     // cpp: the server's settled-layout figure when it has one, else the same
     // anchor fit the reference column just used — never a third geometry.
     const anchorFit = clientFit(anchor?.sheet_l, anchor?.sheet_w, +anchor?.child_l, +anchor?.child_w);
     const runCpp = gangView.layout_run?.cpp ?? (anchorFit?.cpp > 0 ? anchorFit.cpp : null);
-    const run = sharedRunFigures(
-      gangView.members.map(m => ({ id: m.id, net: netOf(m), ups: +m.ups })),
-      { wastage: w, cpp: runCpp });
+    const runMembers = gangView.members.map(m => ({ id: m.id, net: netOf(m), ups: +m.ups }));
+    const run = sharedRunFigures(runMembers, { wastage: w, cpp: runCpp });
     if (!run) return sum;   // a member without ups — degrade to the sum + the pending banner
+    const runStd = sharedRunFigures(runMembers, { wastage: DEFAULT_WASTAGE_SHEETS, cpp: runCpp });
     return {
       ...sum,
       sharedMode: true,
       cpp: runCpp,
+      engineParent: runStd.runParent,
       parent: run.runParent,
       childSheets: run.runChild,
       naturalParent: sum.parent,
@@ -4209,6 +4218,14 @@ export default function Planning() {
                       <Stat label="Total Sheets" value={fmt.num(calc.total)} accent="text-brand-600" />
                     </div>
                   )}
+                  {/* The over-issue alarm's verdict, live: wastage raised well past
+                      the plant standard buys board like any override, and the save
+                      will ask (the same rule, lib/overIssue.js, the server judges by). */}
+                  {calc && (
+                    <OverIssueHint required={calc.engineParent} issuing={calc.parent}
+                      childSheets={calc.total} cpp={calc.cpp}
+                      wastage={calc.wastage} standard={DEFAULT_WASTAGE_SHEETS} />
+                  )}
                   {/* Parent → child conversion band */}
                   {calc && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs">
@@ -5782,10 +5799,14 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                     {/* The alarm's verdict while the planner is still typing — the
                         rule the save will apply (lib/overIssue.js), said before
                         anyone presses anything. CI-GANG-0051's 1,200 was this
-                        run's print count typed into this very box. */}
-                    <OverIssueHint required={gangCalc?.parent}
-                      issuing={gangIssue === '' || isNaN(+gangIssue) ? null : Math.round(+gangIssue)}
-                      childSheets={gangCalc?.childSheets} cpp={gangCalc?.cpp} />
+                        run's print count typed into this very box. Judged
+                        against the run at the STANDARD wastage, on what will
+                        actually issue — the typed figure, else the plan — so a
+                        wastage raised well past the standard warns here too. */}
+                    <OverIssueHint required={gangCalc?.engineParent}
+                      issuing={gangIssue === '' || isNaN(+gangIssue) ? gangCalc?.parent : Math.round(+gangIssue)}
+                      childSheets={gangCalc?.childSheets} cpp={gangCalc?.cpp}
+                      wastage={Math.max(0, Math.round(+gangWastage || 0))} standard={DEFAULT_WASTAGE_SHEETS} />
                   </div>
                 </Card>
 

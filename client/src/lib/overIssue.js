@@ -1,11 +1,13 @@
 // Client twin of server/src/over-issue.js — the over-issue alarm's rule. PURE:
-// figures in, verdict out. The run engine uses it to warn while the planner is
-// still typing; the server uses its twin to refuse the save until they answer.
-// server/src/over-issue.test.js holds the two to identical output, so change
-// both or neither. The why lives in the server file.
+// figures in, verdict out. The planning engine uses it to warn while the
+// planner is still typing; the server uses its twin to refuse the save until
+// they answer. server/src/over-issue.test.js holds the two to identical output,
+// so change both or neither. The why lives in the server file.
 
-export const OVER_ISSUE_CONFIRM_PCT = 15;   // MORE than this over → one confirmation
-export const OVER_ISSUE_DOUBLE_PCT = 100;   // this much over (double) OR MORE → two, the second typed
+// MORE than DOUBLE → the two-step form; MORE than CONFIRM (not past the other)
+// → one "Are you sure?". Level today: every alarm is the two-step form.
+export const OVER_ISSUE_CONFIRM_PCT = 15;
+export const OVER_ISSUE_DOUBLE_PCT = 15;
 
 const int = v => {
   if (v === null || v === undefined || v === '') return NaN;
@@ -22,17 +24,17 @@ export function overIssueLevel({ required, issuing } = {}) {
     return { level: 'none', required: r, issuing: i, excess: 0, pct: 0, ratio: null };
   }
   const excess = Math.max(0, i - r);
-  const level = excess * 100 >= r * OVER_ISSUE_DOUBLE_PCT ? 'double'
+  const level = excess * 100 > r * OVER_ISSUE_DOUBLE_PCT ? 'double'
     : excess * 100 > r * OVER_ISSUE_CONFIRM_PCT ? 'confirm'
       : 'none';
-  const pct = Math.round(excess * 1000 / r) / 10;
-  const ratio = Math.round(i * 100 / r) / 100;
-  // Never rounded UP into a threshold the figure did not reach.
-  const below = level !== 'double';
+  // An alarm never shows its figure rounded DOWN onto the line it crossed.
+  const crossed = level === 'double' ? OVER_ISSUE_DOUBLE_PCT
+    : level === 'confirm' ? OVER_ISSUE_CONFIRM_PCT : null;
+  const rounded = Math.round(excess * 1000 / r) / 10;
   return {
     level, required: r, issuing: i, excess,
-    pct: below ? Math.min(pct, 99.9) : pct,
-    ratio: below ? Math.min(ratio, 1.99) : ratio,
+    pct: crossed == null ? rounded : Math.max(rounded, crossed + 0.1),
+    ratio: Math.round(i * 100 / r) / 100,
   };
 }
 

@@ -55,6 +55,27 @@ test('every route that saves a hand-typed parent-sheet figure judges it', () => 
   }
 });
 
+test('both plan saves judge against the plan at the STANDARD wastage, never the typed one', () => {
+  // Anik, 2026-09-10: "Add the wastage edits to the alarm too." Wastage raised
+  // above the plant standard buys board exactly as an override does, so the
+  // engine figure the alarm judges by is the plan re-priced at
+  // DEFAULT_WASTAGE_SHEETS. Judged against the typed wastage instead, raising
+  // it would move the yardstick with the figure and never trip at all.
+  // `natStd` / `engineParent` are the standard-wastage re-pricings; `natural`
+  // / `parentSheets` are the plan at the TYPED wastage. Pin both halves: the
+  // yardstick is priced at the standard, and it is what the refusal is handed.
+  for (const [file, verb, path, yardstick] of [['gangs.js', 'post', '/gang-runs/:id/plan', 'natStd'],
+    ['orders.js', 'post', '/order-lines/:id/plan', 'engineParent']]) {
+    const body = handler(file, verb, path);
+    assert.ok(new RegExp(`const ${yardstick} = [\\s\\S]{0,500}?DEFAULT_WASTAGE_SHEETS`).test(body),
+      `${verb.toUpperCase()} ${path}: ${yardstick} is no longer priced at the standard wastage`);
+    assert.ok(new RegExp(`overIssueRefusal\\(\\{\\s*required: ${yardstick},`).test(body),
+      `${verb.toUpperCase()} ${path} judges against something other than ${yardstick} — a raised wastage would move the yardstick with it and slip past the alarm`);
+    assert.ok(/'wastage'/.test(body),
+      `${verb.toUpperCase()} ${path} never names a wastage-driven over-issue as one`);
+  }
+});
+
 test("production.js's shared job-card judge really judges, and records the answer", () => {
   const src = read(join(SRC, 'routes', 'production.js'));
   const start = src.indexOf('async function judgeParentSheets(');

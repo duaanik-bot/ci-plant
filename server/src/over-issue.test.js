@@ -6,21 +6,6 @@ import { OVER_ISSUE, ackMatches, overIssueAuditText, overIssueRefusal } from './
 
 const { overIssueLevel, overIssueVerdict, childCountSlip, sheetYield, OVER_ISSUE_CONFIRM_PCT, OVER_ISSUE_DOUBLE_PCT } = rule;
 
-test('a print count typed as parents always asks twice — even one sheet short of double', () => {
-  // A 6,867-sheet run at 2 per parent is 3,434 parents (the odd sheet rounds a
-  // parent up), so its print count typed as parents is double LESS ONE: 99.97%.
-  // Once by the percentage; the exact CI-GANG-0051 slip by every other measure.
-  // Caught on the first end-to-end run of this alarm, which asked only once.
-  assert.equal(overIssueLevel({ required: 3434, issuing: 6867 }).level, 'confirm', 'the percentage alone says once');
-  const v = overIssueVerdict({ required: 3434, issuing: 6867, childSheets: 6867, cpp: 2 });
-  assert.equal(v.slip, true);
-  assert.equal(v.level, 'double', 'the slip escalates it to the two-step form');
-  assert.ok(v.pct < 100, `the sentence must not round up into a threshold it never reached (got ${v.pct})`);
-  assert.equal(overIssueVerdict(QMET).level, 'double');
-  assert.equal(overIssueVerdict({ ...QMET, issuing: 400 }).level, 'none', 'inside the rule stays inside');
-  assert.equal(overIssueVerdict({ required: 400, issuing: 500 }).slip, false, 'no print count known, no slip');
-});
-
 // ── The job this was built for ────────────────────────────────────────────
 // CI-GANG-0051: METGAIN-G2 (2,000 @ 4 up) + Q MET 500 (1,000 @ 1 up), co-printed
 // on one 12.66×25" print sheet, cut 3 to a 25×38" parent. The run needed
@@ -52,16 +37,22 @@ test('CI-GANG-0051 — the yields say the loss in cartons', () => {
   assert.equal(sheetYield({ parents: 1200, cpp: 3, ups: 4, wastage: 200 }), 13600);
 });
 
-test('thresholds: more than 15% over asks once, double or more asks twice', () => {
+test('thresholds: anything more than 15% over asks twice — the second time by typing the number', () => {
+  // Anik's second pass (2026-09-10): "instead of 100%, we should reduce that to
+  // 15%". The full two-step form now starts where the alarm starts, so the
+  // one-step tier is retired — the dial for it stays, set level with the other.
   assert.equal(OVER_ISSUE_CONFIRM_PCT, 15);
-  assert.equal(OVER_ISSUE_DOUBLE_PCT, 100);
+  assert.equal(OVER_ISSUE_DOUBLE_PCT, 15);
   const at = issuing => overIssueLevel({ required: 400, issuing }).level;
   assert.equal(at(400), 'none', 'exactly the engine figure');
   assert.equal(at(460), 'none', 'exactly 15% over is inside the rule');
-  assert.equal(at(461), 'confirm', 'past 15%');
-  assert.equal(at(799), 'confirm', 'just short of double');
-  assert.equal(at(800), 'double', 'double — what a print count typed at 2 per parent looks like');
+  assert.equal(at(461), 'double', 'past 15% — the full two-step form');
+  assert.equal(at(799), 'double');
+  assert.equal(at(800), 'double');
   assert.equal(at(5000), 'double');
+  let n = 0;
+  for (let i = 401; i <= 5000; i += 7, n++) assert.notEqual(at(i), 'confirm', `no one-step alarm is left (${i} vs 400)`);
+  assert.ok(n > 600, 'the sweep must actually run');
 });
 
 test('exactly 15% over never trips on floating-point dust', () => {
@@ -70,8 +61,18 @@ test('exactly 15% over never trips on floating-point dust', () => {
     const edge = r * 115 / 100;
     assert.ok(Number.isInteger(edge), `test setup: ${r} must have an integer 15% edge`);
     assert.equal(overIssueLevel({ required: r, issuing: edge }).level, 'none', `${edge} against ${r}`);
-    assert.equal(overIssueLevel({ required: r, issuing: edge + 1 }).level, 'confirm', `${edge + 1} against ${r}`);
+    assert.equal(overIssueLevel({ required: r, issuing: edge + 1 }).level, 'double', `${edge + 1} against ${r}`);
   }
+});
+
+test('an alarm never shows its figure rounded DOWN onto the line it crossed', () => {
+  // 11,501 against 10,000 is 15.01% — "+15%" beside "more than 15%" reads as
+  // inside the rule, on the very dialog saying it is not.
+  const j = overIssueLevel({ required: 10000, issuing: 11501 });
+  assert.equal(j.level, 'double');
+  assert.ok(j.pct > 15, `shown as ${j.pct}%`);
+  assert.equal(overIssueLevel({ required: 400, issuing: 500 }).pct, 25, 'an ordinary figure is left alone');
+  assert.equal(overIssueLevel({ required: 400, issuing: 1200 }).pct, 200);
 });
 
 test('under, equal, or nothing to judge against — never an alarm', () => {
@@ -85,6 +86,19 @@ test('under, equal, or nothing to judge against — never an alarm', () => {
 test('numeric strings and fractions are rounded the way the routes round them', () => {
   assert.equal(overIssueLevel({ required: '400', issuing: '1200' }).level, 'double');
   assert.equal(overIssueLevel({ required: 399.6, issuing: 460.4 }).level, 'none');   // 400 vs 460
+});
+
+test('a print count typed as parents is named as one, and always takes the two-step form', () => {
+  // A 6,867-sheet run at 2 per parent is 3,434 parents (the odd sheet rounds a
+  // parent up), so its print count typed as parents is double LESS ONE. Under
+  // the first rule (two steps only at double) the percentage alone asked once;
+  // the slip escalates, so it asks twice whatever the dials are set to.
+  const v = overIssueVerdict({ required: 3434, issuing: 6867, childSheets: 6867, cpp: 2 });
+  assert.equal(v.slip, true);
+  assert.equal(v.level, 'double');
+  assert.equal(overIssueVerdict(QMET).level, 'double');
+  assert.equal(overIssueVerdict({ ...QMET, issuing: 400 }).level, 'none', 'inside the rule stays inside');
+  assert.equal(overIssueVerdict({ required: 400, issuing: 500 }).slip, false, 'no print count known, no slip');
 });
 
 test('the print-sheet slip is only named when it means something', () => {
@@ -109,9 +123,11 @@ test('yield never goes negative and shrugs off garbage', () => {
 // would promise one thing and the save do another.
 test('client twin: the planning screen judges by the same rule as the server', () => {
   assert.deepEqual(Object.keys(client).sort(), Object.keys(rule).sort());
+  assert.equal(client.OVER_ISSUE_CONFIRM_PCT, rule.OVER_ISSUE_CONFIRM_PCT);
+  assert.equal(client.OVER_ISSUE_DOUBLE_PCT, rule.OVER_ISSUE_DOUBLE_PCT);
   let n = 0;
-  for (const required of [0, 1, 7, 100, 400, 725, 2600, 10626]) {
-    for (const f of [0, 0.5, 1, 1.15, 1.151, 1.5, 1.99, 2, 3, 4.33]) {
+  for (const required of [0, 1, 7, 100, 400, 725, 2600, 10000, 10626]) {
+    for (const f of [0, 0.5, 1, 1.15, 1.1501, 1.151, 1.5, 1.99, 2, 3, 4.33]) {
       const c = { required, issuing: Math.round(required * f) };
       assert.deepEqual(client.overIssueLevel(c), rule.overIssueLevel(c), JSON.stringify(c));
       for (const cpp of [1, 2, 3, 4]) {
@@ -124,7 +140,7 @@ test('client twin: the planning screen judges by the same rule as the server', (
       n++;
     }
   }
-  assert.ok(n >= 80, 'the spread must actually run');
+  assert.ok(n >= 90, 'the spread must actually run');
   for (const y of [{ parents: 400, cpp: 3, ups: 1, wastage: 200 }, { parents: 0, cpp: 2, ups: 4 },
     { parents: 77.5, cpp: 2, ups: 3, wastage: 5 }, { parents: 'x' }]) {
     assert.equal(client.sheetYield(y), rule.sheetYield(y), JSON.stringify(y));
@@ -162,6 +178,11 @@ test('gate: over the line with no answer — a structured 409 that carries the f
   assert.match(err.message, /200%/);
 });
 
+test('gate: 16% over is refused too — the alarm now starts at the two-step form', () => {
+  assert.throws(() => overIssueRefusal({ required: 400, issuing: 464 }),
+    e => e.status === 409 && e.body?.over_issue?.level === 'double');
+});
+
 test('gate: an answer is bound to the exact figures it was given for', () => {
   const ok = overIssueRefusal({ required: 400, issuing: 1200, ack: { required: 400, issuing: 1200 } });
   assert.equal(ok.acked, true);
@@ -180,17 +201,20 @@ test('ackMatches rounds the way the routes round', () => {
   assert.equal(ackMatches({ required: 400, issuing: 1201 }, 400, 1200), false);
 });
 
-test('audit text: one confirmation reads as one, the typed-back double as twice', () => {
-  const one = overIssueRefusal({ required: 400, issuing: 500, ack: { required: 400, issuing: 500 } });
+test('audit text: the two-step answer reads as twice, and a raised wastage is named', () => {
   const two = overIssueRefusal({ required: 400, issuing: 1200, ack: { required: 400, issuing: 1200 } });
-  const t1 = overIssueAuditText({ ref: 'CI-JC-0001', judged: one.judged, action: 'plan locked' });
   const t2 = overIssueAuditText({ ref: 'CI-GANG-0051', judged: two.judged, action: 'plan locked' });
-  assert.match(t1, /CI-JC-0001/);
-  assert.match(t1, /500/);
-  assert.match(t1, /\+25%/);
-  assert.doesNotMatch(t1, /twice/);
   assert.match(t2, /CI-GANG-0051/);
   assert.match(t2, /1,200/);
   assert.match(t2, /400/);
   assert.match(t2, /twice/);
+  // The one-step tier is only a dial now, but the sentence still tells them apart.
+  const t1 = overIssueAuditText({ ref: 'CI-JC-0001', action: 'plan locked',
+    judged: { ...two.judged, level: 'confirm', issuing: 500, excess: 100, pct: 25, ratio: 1.25 } });
+  assert.match(t1, /\+25%/);
+  assert.doesNotMatch(t1, /twice/);
+  const tw = overIssueAuditText({ ref: 'CI-JC-0002', judged: two.judged, action: 'plan saved',
+    via: 'wastage', wastage: 800, standard: 200 });
+  assert.match(tw, /wastage 800/);
+  assert.match(tw, /standard 200/);
 });
