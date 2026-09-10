@@ -7,7 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, ConfirmDialog, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, ResetFilters, rowMatches, searchText, SearchInput, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, ResetFilters, rowMatches, searchText, SearchInput, Select, SelectionDock, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useToast } from '../components/ui.jsx';
 // One chip shape for every filter rail in the ERP — see FilterChip.jsx.
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
@@ -17,14 +17,16 @@ import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { OrderedForCell, OrderedForModal } from '../components/OrderedFor.jsx';
 import ClosePoLinesModal from '../components/ClosePoLines.jsx';
+import ReopenPoLinesModal from '../components/ReopenPoLines.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { clubSuggestions } from '../lib/prClubbing.js';
 import { commitmentText } from '../lib/poCommitment.js';
+import { closedLineRows, closedLinesOf, openLinesOf, reopenSummary } from '../lib/closedPoLines.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
-import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle, RotateCcw } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
 // The extra fact a club pill carries past its headline. Amber when there is
@@ -204,7 +206,7 @@ export default function Procurement() {
   const [prOverdue, setPrOverdue] = useState(false);
   const [prUrgent, setPrUrgent] = useState(false);
   const [clubHidden, setClubHidden] = useState(false); // the club strip is a suggestion, not a nag
-  const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed
+  const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed | closed (lines closed short)
   // The order register's own axes, same shape as the requisition rail above.
   // "Pending" holds two different chases — an order the vendor has not started
   // and one part-delivered — and "Completed" holds an order still waiting to be
@@ -224,6 +226,15 @@ export default function Procurement() {
   // Line-level "no more receipts" — { po, preselectId? }. Opened from the PO
   // card's menu (pick several) or from a Pendency row (that line pre-ticked).
   const [closeLines, setCloseLines] = useState(null);
+  // Purchase Orders → Closed lines. A closed line leaves its PO card; this view
+  // is where it is read and brought back. `closedOrder` splits lines whose
+  // order is still receiving from those on a finished order; `closedPo` is the
+  // one order a card's "N closed" chip focused; `closedSel` is the pile the
+  // dock reopens; `reopenLines` holds the rows the reopen form is showing.
+  const [closedOrder, setClosedOrder] = useState(null); // null | 'live' | 'finished'
+  const [closedPo, setClosedPo] = useState(null);       // { id, po_number } | null
+  const [closedSel, setClosedSel] = useState([]);
+  const [reopenLines, setReopenLines] = useState(null);
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
 
   // Build the requisition payload from the multi-line form.
@@ -748,10 +759,12 @@ export default function Procurement() {
     material_id: '', qty: '', batch_no: '', vendor_id: '', ...GRN_META() });
 
   // Selecting a PO inside the modal pulls in its still-pending lines to receive.
+  // A closed-short line owes nothing — offering it would invite a receipt the
+  // server refuses, the same reason openGrnPo leaves it out.
   const pickNewGrnPo = poId => {
     const po = pos.find(p => String(p.id) === String(poId));
     setNewGrn(s => ({ ...s, po_id: poId,
-      lines: po ? po.lines.filter(l => l.received_qty < l.qty).map(l => ({ ...l, receive_qty: '', batch_no: '' })) : [] }));
+      lines: po ? po.lines.filter(l => l.received_qty < l.qty && !l.closed_short).map(l => ({ ...l, receive_qty: '', batch_no: '' })) : [] }));
   };
 
   const createNewGrn = async () => {
@@ -913,10 +926,95 @@ export default function Procurement() {
     .filter(po => !poStage || poPending || po.status === poStage)
     .filter(po => rowMatches(po, poQ));
   const poChipCount = fn => poScope.filter(fn).length;
+  // Closed lines — every line closed short, off its card and into its own
+  // view. The one search box reaches them too; the order axis and a card's
+  // focused PO filter only here, and stop filtering on the other views.
+  const poClosedView = poView === 'closed';
+  const closedRows = useMemo(() => closedLineRows(pos), [pos]);
+  const closedOrderOf = row => (poIsDone({ status: row.po_status }) ? 'finished' : 'live');
+  const closedList = closedRows
+    .filter(row => !closedOrder || !poClosedView || closedOrderOf(row) === closedOrder)
+    .filter(row => !closedPo || !poClosedView || row.po_id === closedPo.id)
+    .filter(row => rowMatches(row, poQ));
+  const closedChipCount = kind => closedRows.filter(row => closedOrderOf(row) === kind).length;
+  // The dock reopens the pile as ticked — a selection outlives a filter, the
+  // same way select-all and export act on every match, not the mounted window.
+  const closedPicked = closedRows.filter(row => closedSel.includes(row.id));
+  const closedPile = reopenSummary(closedPicked);
+  const focusClosed = po => { setPoView('closed'); setClosedPo({ id: po.id, po_number: po.po_number }); };
+  const closedColumns = [
+    { key: 'po_number', label: 'PO', card: 'title',
+      render: row => (
+        <div>
+          <Link to={`/procurement/po/${row.po_id}`} onClick={event => event.stopPropagation()}
+            className="font-extrabold text-brand-600 hover:underline">{row.po_number}</Link>
+          <div className="text-[11px] text-slate-400">{row.vendor_name}</div>
+        </div>
+      ) },
+    { key: 'material_name', label: 'Board', card: 'subtitle',
+      render: row => (
+        <div>
+          {row.material_name}
+          {row.source_prs?.length > 0 && (
+            <div className="text-[10px] text-slate-400">{row.source_prs.map(s => `${s.pr_number} ${fmt.num(s.qty)}`).join(' · ')}</div>
+          )}
+        </div>
+      ) },
+    { key: 'ordered_for', label: 'Ordered For', sortable: false, card: 'detail',
+      searchValue: row => commitmentText(row.commitments),
+      render: row => (
+        <span onClick={event => event.stopPropagation()}>
+          <OrderedForCell commitments={row.commitments} onOpen={() => setOrderedFor(row)} />
+        </span>
+      ) },
+    { key: 'qty', label: 'Ordered', align: 'right', render: row => `${fmt.num(row.qty)} ${row.unit || ''}` },
+    { key: 'received_qty', label: 'Received', align: 'right', render: row => fmt.num(row.received_qty) },
+    // The balance that stopped being owed — said as "waived", never a bare 0,
+    // which would read as fully received.
+    { key: 'waived', label: 'Waived', align: 'right',
+      render: row => (
+        <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          {fmt.num(row.waived)} waived
+        </span>
+      ) },
+    { key: 'closed_reason', label: 'Why closed', card: 'detail',
+      render: row => (row.closed_reason
+        ? <span className="text-xs italic text-slate-500">“{row.closed_reason}”</span>
+        : <span className="text-slate-300">—</span>) },
+    { key: 'closed_at', label: 'Closed', sortValue: row => (row.closed_at ? Date.parse(row.closed_at) : -Infinity),
+      render: row => (
+        <div className="whitespace-nowrap text-xs">
+          <div className="font-semibold text-slate-600">{fmt.date(row.closed_at)}</div>
+          {row.closed_by && <div className="text-[11px] text-slate-400">{row.closed_by}</div>}
+        </div>
+      ) },
+    { key: '_reopen', label: '', sortable: false, card: 'actions',
+      render: row => (
+        <Button size="sm" variant="secondary" onClick={event => { event.stopPropagation(); setReopenLines([row]); }}>
+          <RotateCcw size={12} /> Reopen…
+        </Button>
+      ) },
+  ];
+  // The export spells every fact in its own column — the screen folds the
+  // vendor under the PO and the closer under the date.
+  const closedExportColumns = [
+    { key: 'po_number', label: 'PO' },
+    { key: 'vendor_name', label: 'Vendor' },
+    { key: 'material_name', label: 'Board' },
+    { key: 'ordered_for', label: 'Ordered For', export: row => commitmentText(row.commitments) },
+    { key: 'qty', label: 'Ordered', align: 'right', export: row => `${fmt.num(row.qty)} ${row.unit || ''}`.trim() },
+    { key: 'received_qty', label: 'Received', align: 'right', export: row => fmt.num(row.received_qty) },
+    { key: 'waived', label: 'Waived', align: 'right', export: row => fmt.num(row.waived) },
+    { key: 'closed_reason', label: 'Why closed', export: row => row.closed_reason || '—' },
+    { key: 'closed_by', label: 'Closed by', export: row => row.closed_by || '—' },
+    { key: 'closed_at', label: 'Closed on', export: row => fmt.date(row.closed_at) },
+  ];
   const poFilters = useFilterReset([
     [poReceipt, setPoReceipt, null, 'receipt'],
     [poStage, setPoStage, null, 'stage'],
     [poOverdue, setPoOverdue, false, 'overdue'],
+    [closedOrder, setClosedOrder, null, 'closed-order'],
+    [closedPo, setClosedPo, null, 'closed-po'],
     [poQ, setPoQ, '', 'search'],
   ]);
   const grnRows = grns.filter(g => (grnView === 'completed' ? g.status !== 'quarantine' : g.status === 'quarantine'));
@@ -1272,9 +1370,12 @@ export default function Procurement() {
               <SubTabs active={poView} onChange={setPoView} views={[
                 { key: 'pending', label: 'Pending', count: pos.filter(p => !poIsDone(p)).length },
                 { key: 'completed', label: 'Completed', count: pos.filter(poIsDone).length },
+                // Lines closed short leave their cards and gather here — to read
+                // what was given up, and to bring any of it back.
+                { key: 'closed', label: 'Closed lines', count: closedRows.length },
               ]} />
               <SearchInput value={poQ} onChange={setPoQ}
-                placeholder="PO, vendor, board, product, customer, sales PO…" />
+                placeholder={poClosedView ? 'PO, vendor, board, product, reason…' : 'PO, vendor, board, product, customer, sales PO…'} />
             </div>
             {/* The same rail as the requisition register — FilterChip.jsx, group
                 caption for identity, colour only where somebody has to act. Late
@@ -1299,6 +1400,30 @@ export default function Procurement() {
                       onClick={() => setPoOverdue(!poOverdue)} />
                   </FilterGroup>
                 </>
+              ) : poClosedView ? (
+                // Whether the order is still receiving decides what a reopen
+                // means: on a live order the line simply takes receipts again;
+                // on a finished one it puts the order back on.
+                <>
+                  <FilterGroup label="Order" divider={false}>
+                    <FilterChip label="Still receiving" count={closedChipCount('live')}
+                      on={closedOrder === 'live'}
+                      title="The order is live — its other lines are still being received"
+                      onClick={() => setClosedOrder(closedOrder === 'live' ? null : 'live')} />
+                    <FilterChip label="Order finished" count={closedChipCount('finished')}
+                      on={closedOrder === 'finished'}
+                      title="Nothing else is coming on the order — reopening a line puts it back on"
+                      onClick={() => setClosedOrder(closedOrder === 'finished' ? null : 'finished')} />
+                  </FilterGroup>
+                  {closedPo && (
+                    <FilterGroup label="PO">
+                      <FilterChip label={closedPo.po_number} on
+                        count={closedRows.filter(row => row.po_id === closedPo.id).length}
+                        title="Opened from the order's card — tap to see every order's closed lines"
+                        onClick={() => setClosedPo(null)} />
+                    </FilterGroup>
+                  )}
+                </>
               ) : (
                 // A fully received order that nobody has closed is still a job —
                 // it sits in Completed looking finished while the register keeps
@@ -1317,7 +1442,9 @@ export default function Procurement() {
               <ResetFilters filters={poFilters} className="ml-auto" />
             </FilterRail>
           </div>
-          {pos.length > 0 && (
+          {/* Closed lines export from their own table — this register exports
+              what its cards show: the lines still in play. */}
+          {pos.length > 0 && !poClosedView && (
             <div className="flex justify-end">
               <ExportMenu build={() => ({
                 name: 'Purchase Orders',
@@ -1326,8 +1453,8 @@ export default function Procurement() {
                 summary: [
                   { label: 'POs', value: poList.length },
                   { label: 'Open', value: poList.filter(p => p.status !== 'closed').length },
-                  { label: 'Lines pending', value: poList.reduce((s, p) => s + p.lines.filter(l => l.received_qty < l.qty).length, 0) },
-                  { label: 'Open-order lines', value: poList.reduce((s, p) => s + p.lines.filter(l => !l.commitments?.length).length, 0) },
+                  { label: 'Lines pending', value: poList.reduce((s, p) => s + p.lines.filter(l => l.received_qty < l.qty && !l.closed_short).length, 0) },
+                  { label: 'Open-order lines', value: poList.reduce((s, p) => s + openLinesOf(p).filter(l => !l.commitments?.length).length, 0) },
                 ],
                 columns: [
                   { key: 'po_number', label: 'PO' },
@@ -1343,16 +1470,19 @@ export default function Procurement() {
                 ],
                 // The register as it stands on screen — a filtered view whose
                 // export ignored the filter would be a different document.
-                rows: poList.flatMap(po => po.lines.map(l => ({ ...l, po_number: po.po_number, vendor_name: po.vendor_name, status: po.status, expected_date: po.expected_date }))),
+                rows: poList.flatMap(po => openLinesOf(po).map(l => ({ ...l, po_number: po.po_number, vendor_name: po.vendor_name, status: po.status, expected_date: po.expected_date }))),
               })} />
             </div>
           )}
-          {poList.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">
+          {!poClosedView && poList.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">
             {poQ ? `Nothing on this register matches “${poQ}”`
               : poFilters.dirty ? 'Nothing matches those filters — Reset filters brings the register back'
               : poView === 'completed' ? 'No completed purchase orders yet.' : 'No pending purchase orders — every order is fully received.'}</p>}
-          {poList.map(po => {
+          {!poClosedView && poList.map(po => {
             const pendingLines = po.lines.filter(l => l.received_qty < l.qty && !l.closed_short);
+            // Closed-short lines are off the card (Purchase Orders → Closed
+            // lines); the card only says how many, and that chip is the door.
+            const closedHere = closedLinesOf(po);
             const received = po.lines.some(l => +l.received_qty > 0) || po.grn_count > 0;
             // A closed-short line's waived balance is not owed, so the bar
             // measures against what can still arrive — otherwise an order with
@@ -1380,6 +1510,13 @@ export default function Procurement() {
                   <Link to={`/procurement/po/${po.id}`} className="text-sm font-extrabold text-brand-600 hover:underline">{po.po_number}</Link>
                   <span className="ml-2 text-xs text-gray-500">{po.vendor_name}{po.pr_number ? ` · from ${po.pr_number}` : ''}</span>
                   {po.expected_date && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">expected {fmt.date(po.expected_date)}</span>}
+                  {closedHere.length > 0 && (
+                    <button type="button" onClick={() => focusClosed(po)}
+                      title="Closed short — no more receipts asked for. Open them in Closed lines to read or reopen."
+                      className="ml-2 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700">
+                      <Ban size={11} /> {closedHere.length} line{closedHere.length === 1 ? '' : 's'} closed
+                    </button>
+                  )}
                   {(po.payment_terms || po.delivery_terms || po.reference) && (
                     <span className="ml-2 text-[11px] text-slate-400">
                       {[po.reference && `ref ${po.reference}`, po.payment_terms, po.delivery_terms].filter(Boolean).join(' · ')}
@@ -1409,7 +1546,16 @@ export default function Procurement() {
                   <th className="px-3 py-1.5 text-right">Rate</th><th className="px-3 py-1.5 text-right"></th>
                 </tr></thead>
                 <tbody>
-                  {po.lines.map(l => {
+                  {openLinesOf(po).length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-4 text-center text-xs text-slate-400">
+                        Every line on this order was closed short —{' '}
+                        <button type="button" onClick={() => focusClosed(po)}
+                          className="font-semibold text-brand-600 hover:underline">see them in Closed lines</button>
+                      </td>
+                    </tr>
+                  )}
+                  {openLinesOf(po).map(l => {
                     // The list endpoint returns no board dimensions, so weight and
                     // packets come off the material master — the same lookup the
                     // totals panel makes. Boards read in ₹/kg and packets like the
@@ -1446,17 +1592,12 @@ export default function Procurement() {
                         {pk != null && <div className="text-[10px] text-slate-400">{pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt</div>}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.received_qty)}</td>
-                      {/* A waived balance is not pending — the amber figure is a
-                          promise the vendor still owes, and this line's was
-                          released. The chip says so instead of showing 0, which
-                          would read as fully received. */}
+                      {/* Only lines still in play reach the card, so Pending is
+                          always a promise the vendor still owes. A waived
+                          balance reads in Closed lines — never here as a 0,
+                          which would look fully received. */}
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {l.closed_short
-                          ? <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500"
-                              title={`${fmt.num(Math.max(0, l.qty - l.received_qty))} waived — closed short${l.closed_reason ? `: ${l.closed_reason}` : ''}${l.closed_by ? ` (${l.closed_by})` : ''}`}>
-                              {fmt.num(Math.max(0, l.qty - l.received_qty))} waived
-                            </span>
-                          : <span className={l.qty - l.received_qty > 0 ? 'font-semibold text-amber-600' : 'text-slate-300'}>{fmt.num(Math.max(0, l.qty - l.received_qty))}</span>}
+                        <span className={l.qty - l.received_qty > 0 ? 'font-semibold text-amber-600' : 'text-slate-300'}>{fmt.num(Math.max(0, l.qty - l.received_qty))}</span>
                       </td>
                       <td className="px-3 py-2"><FulfillmentBar className="mx-auto" pct={l.qty > 0 ? (Math.min(l.received_qty, l.qty) / l.qty) * 100 : 0} /></td>
                       <td className="px-3 py-2 text-right tabular-nums">
@@ -1478,8 +1619,40 @@ export default function Procurement() {
             </div>
             );
           })}
+
+          {/* Closed lines — every line closed short, with its order, the
+              balance that was waived, why, and who closed it. Tick a pile and
+              reopen it from the dock, or one line from its own button; both
+              open the reopen form, which asks why. */}
+          {poClosedView && (
+            <DataTable selectable
+              rows={closedList}
+              selectedIds={closedSel}
+              onToggleRow={(row, checked) => setClosedSel(ids => (checked ? [...new Set([...ids, row.id])] : ids.filter(id => id !== row.id)))}
+              onToggleAll={(rows, checked) => {
+                const ids = rows.map(row => row.id);
+                setClosedSel(current => (checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))));
+              }}
+              defaultSort={{ key: 'closed_at', dir: 'desc' }}
+              empty={closedRows.length
+                ? 'Nothing matches — Reset filters brings every closed line back'
+                : 'No closed lines. A line closed short from a PO card or Pendency lands here — and can be reopened.'}
+              exportName="Closed PO Lines"
+              exportSubtitle="Procurement · lines closed short — waived balance, reason and who closed them"
+              exportColumns={closedExportColumns}
+              columns={closedColumns} />
+          )}
         </div>
       )}
+
+      <SelectionDock open={tab === 'pos' && poClosedView && closedPicked.length > 0}
+        count={closedPicked.length}
+        summary={`${closedPile.orders} order${closedPile.orders === 1 ? '' : 's'} · ${fmt.num(closedPile.waived)} sheets back to pending`}
+        onClear={() => setClosedSel([])}>
+        <Button size="sm" onClick={() => setReopenLines(closedPicked)}>
+          <RotateCcw size={13} /> Reopen {closedPicked.length} line{closedPicked.length === 1 ? '' : 's'}…
+        </Button>
+      </SelectionDock>
 
       {tab === 'grns' && (
         <div className="mb-3">
@@ -2707,8 +2880,26 @@ export default function Procurement() {
             sub: [a.customer_name, a.sales_po && `PO ${a.sales_po}`, a.pr_number, a.jc_number].filter(Boolean).join(' · '),
           })))}
         onCloseLines={(line_ids, reason, release_allocations) => api.post(`/purchase-orders/${closeLines.po.id}/lines/close`, { line_ids, reason, release_allocations })}
-        onReopenLines={line_ids => api.post(`/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids })}
+        reopenNote="Job covers released when a line closed are not restored — the balance is back on order, and the planners plan against it again."
+        onReopenLines={(line_ids, reason) => api.post(`/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids, reason })}
         onDone={load} onClose={() => setCloseLines(null)} />}
+
+      {/* The reopen form behind Closed lines — one line from its own button or
+          the docked pile, across as many orders as were ticked. */}
+      {reopenLines && <ReopenPoLinesModal unitWord="sheets"
+        note="Job covers released when a line closed are not restored — the balance is back on order, and the planners plan against it again."
+        lines={reopenLines.map(row => ({
+          id: row.id, po_number: row.po_number, title: row.material_name,
+          sub: [row.po_number, row.vendor_name, commitmentText(row.commitments)].filter(Boolean).join(' · '),
+          qty: +row.qty, received_qty: +row.received_qty, unit: row.unit, waived: row.waived,
+          closed_reason: row.closed_reason, closed_by: row.closed_by, closed_at: row.closed_at,
+          warning: row.whole_closed
+            ? `${row.po_number} was closed as a whole — it comes back for the lines you reopen; its ${row.others_owing} other unreceived line${row.others_owing === 1 ? '' : 's'} stay${row.others_owing === 1 ? 's' : ''} closed and join${row.others_owing === 1 ? 's' : ''} Closed lines.`
+            : null,
+        }))}
+        onReopen={(line_ids, reason) => api.post('/po-lines/reopen', { line_ids, reason })}
+        onDone={() => { setClosedSel([]); load(); }}
+        onClose={() => setReopenLines(null)} />}
     </div>
   );
 }

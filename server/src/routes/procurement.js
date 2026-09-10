@@ -1156,27 +1156,82 @@ r.post('/purchase-orders/:id/lines/close', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// The escape hatch: a vendor ships anyway, or the waiver was a mistake. The
-// line returns to Pendency and /grns accepts it again; the PO status follows.
+// The escape hatch: a vendor ships anyway, or the waiver was a mistake. ONE
+// spelling behind both doors — the close modal (one order) and Purchase Orders
+// → Closed lines (any number of orders at once). Each line returns to Pendency
+// and every on-order figure, /grns accepts it again, and each order re-reads
+// its own status. The reason is required, as it is on the close: a waiver
+// undone with no word on record is the one decision the audit cannot explain.
+//
+// An order closed AS A WHOLE (Close PO) still carries lines nobody waived.
+// Pulling one line back flips the order open, which would resurrect those too —
+// board the buyer gave up on would count as on-order again, silently. So they
+// are kept closed as line waivers, credited to whoever closed the order, and
+// the order comes back for the reopened lines alone.
+//
+// Orders lock in id order, so two buyers reopening overlapping piles cannot
+// deadlock; a pick that is not closed short narrows (skipped, reported) rather
+// than failing the batch — the bulk-approve rule.
+export async function reopenPoLines(qc, oc, { lineIds, reason, user, poId = null }) {
+  const ids = [...new Set((lineIds || []).map(Number).filter(Boolean))];
+  const why = String(reason || '').trim();
+  if (!ids.length) throw Object.assign(new Error('Choose at least one line to reopen'), { status: 400 });
+  if (!why) throw Object.assign(new Error('Record why these lines are being reopened'), { status: 400 });
+  const found = await qc('SELECT id, purchase_order_id, closed_short FROM po_lines WHERE id=ANY($1::int[])', [ids]);
+  if (found.length !== ids.length || (poId != null && found.some(l => l.purchase_order_id !== Number(poId)))) {
+    throw Object.assign(new Error('A selected line is no longer on its order — reload and reselect'), { status: 409 });
+  }
+  const orders = [];
+  for (const id of [...new Set(found.map(l => l.purchase_order_id))].sort((a, b) => a - b)) {
+    const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [id]);
+    if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+    const lines = await qc('SELECT * FROM po_lines WHERE purchase_order_id=$1 ORDER BY id FOR UPDATE', [id]);
+    const picked = lines.filter(l => ids.includes(l.id) && l.closed_short);
+    if (!picked.length) continue;
+    let kept = [];
+    if (po.status === 'closed' && !poCompletion(lines).full) {
+      kept = lines.filter(l => !l.closed_short && Number(l.received_qty) < Number(l.qty));
+      const closedBy = await oc(`SELECT user_name, created_at, detail FROM audit_log
+        WHERE entity='purchase_order' AND entity_id=$1 AND action='close' ORDER BY id DESC LIMIT 1`, [id]);
+      await qc(`UPDATE po_lines SET closed_short=TRUE, closed_reason=$1, closed_by=$2,
+        closed_at=COALESCE($3::timestamptz, now()) WHERE id=ANY($4::int[])`,
+      [`Closed with the whole order${closedBy?.detail ? ` — ${closedBy.detail}` : ''}`,
+        closedBy?.user_name || user, closedBy?.created_at || null, kept.map(l => l.id)]);
+    }
+    await qc(`UPDATE po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
+      WHERE id=ANY($1::int[])`, [picked.map(l => l.id)]);
+    const status = poCompletion(await qc(PO_LINE_STANDING, [id])).status;
+    await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2', [status, id]);
+    const back = picked.map(l => `line ${l.id}: ${Math.max(0, Number(l.qty) - Number(l.received_qty))} back to pending`).join(', ');
+    await audit('purchase_order', id, 'reopen_lines',
+      `${picked.length} line${picked.length === 1 ? '' : 's'} reopened for receipts (${back})`
+      + (kept.length ? ` · ${kept.length} other unreceived line${kept.length === 1 ? '' : 's'} kept closed — the order was closed as a whole` : '')
+      + ` · ${why}`, qc, user);
+    orders.push({ po_id: id, po_number: po.po_number, reopened: picked.length, kept_closed: kept.length, status });
+  }
+  const reopened = orders.reduce((sum, o) => sum + o.reopened, 0);
+  if (!reopened) {
+    throw Object.assign(new Error('None of the selected lines is closed short any more — reload the register'), { status: 409 });
+  }
+  return { reopened, skipped: ids.length - reopened, orders };
+}
+
+// One order's door — the close modal's "Review & reopen".
 r.post('/purchase-orders/:id/lines/reopen', canBuy, async (req, res, next) => {
   try {
-    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
-    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to reopen' });
-    const result = await tx(async (qc, oc) => {
-      const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
-      const lines = await qc(`SELECT * FROM po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[])
-        AND closed_short FOR UPDATE`, [po.id, lineIds]);
-      if (!lines.length) throw Object.assign(new Error('None of the selected lines is closed short'), { status: 409 });
-      await qc(`UPDATE po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
-        WHERE id=ANY($1::int[])`, [lines.map(l => l.id)]);
-      const status = poCompletion(await qc(PO_LINE_STANDING, [po.id])).status;
-      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2', [status, po.id]);
-      await audit('purchase_order', po.id, 'reopen_lines',
-        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts`, qc, req.user.name);
-      return { reopened: lines.length, status };
-    });
-    res.json(result);
+    res.json(await tx((qc, oc) => reopenPoLines(qc, oc, {
+      lineIds: req.body.line_ids, reason: req.body.reason, user: req.user.name, poId: Number(req.params.id),
+    })));
+  } catch (e) { next(e); }
+});
+
+// Across orders — Purchase Orders → Closed lines: one pile, one form, one
+// transaction.
+r.post('/po-lines/reopen', canBuy, async (req, res, next) => {
+  try {
+    res.json(await tx((qc, oc) => reopenPoLines(qc, oc, {
+      lineIds: req.body.line_ids, reason: req.body.reason, user: req.user.name,
+    })));
   } catch (e) { next(e); }
 });
 

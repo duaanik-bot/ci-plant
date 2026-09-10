@@ -130,7 +130,9 @@ test('the board queue neither offers Receive nor pre-fills a GRN for a waived li
     'the row Receive button must hide on a closed line');
   assert.match(page, /l\.received_qty < l\.qty && !l\.closed_short/,
     'the bulk GRN prefill must not offer a closed line');
-  assert.match(page, /waived/, 'the Pending cell must say waived, not 0 — 0 reads as fully received');
+  // A closed line is off its card now (Purchase Orders → Closed lines), and
+  // that view carries the waived balance — never a 0 that reads as received.
+  assert.match(page, /waived/, 'the waived balance must be said out loud, not shown as 0 — 0 reads as fully received');
 });
 
 // ── Releasing the jobs' incoming cover, with the buyer's approval ─────────

@@ -2868,7 +2868,8 @@ export default function PlatesLifecycle() {
         sub: [line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
       }))}
       onCloseLines={(line_ids, reason) => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/close', { line_ids, reason })}
-      onReopenLines={line_ids => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/reopen', { line_ids })}
+      reopenNote="Plates released when the line closed went back to their requirement — reopening takes receipts again but does not re-attach them."
+      onReopenLines={(line_ids, reason) => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/reopen', { line_ids, reason })}
       onDone={load} onClose={() => setCloseLines(null)}/>}
     {/* Both doors hand off to a form that already exists: the PO route to the
         whole-PO receipt, the direct route to Add Plates untouched. */}

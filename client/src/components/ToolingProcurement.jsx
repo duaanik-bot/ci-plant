@@ -808,7 +808,8 @@ function GenericToolingProcurement({ family }) {
           })).values()])}
         onCloseLines={(line_ids, reason, releases) => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/close`,
           { line_ids, reason, release_requirements: (releases || []).map(row => row.id) })}
-        onReopenLines={line_ids => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids })}
+        reopenNote="A requirement released back to Approved when the line closed stays there — reopening takes receipts again but does not re-link it."
+        onReopenLines={(line_ids, reason) => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids, reason })}
         onDone={load} onClose={() => setCloseLines(null)} />}
       {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={async () => { setSelectedIds([]); await load(); }} />}
       {bulkDeleteRows && <BulkDeleteModal family={family} rows={bulkDeleteRows} onClose={() => setBulkDeleteRows(null)} onDeleted={async () => { setSelectedIds([]); await load(); }} />}

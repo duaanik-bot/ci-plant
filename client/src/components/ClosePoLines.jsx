@@ -4,17 +4,21 @@
 // each maps its own lines into { id, title, sub, qty, received_qty, unit,
 // closed_short, closed_reason, closed_by, pending } and says what closing
 // means in its own words. The modal itself only knows the shape of the
-// decision: pick the items that will not arrive, say why once, and see what
-// was already waived — with the way back (Reopen) on the same screen, because
-// a decision that can only be made in one direction gets made too carefully
-// or not at all.
+// decision: pick the items that will not arrive, say why once. Lines already
+// closed stay out of the list, with the way back (Review & reopen — a form that
+// asks why, ReopenPoLines.jsx) on the same screen, because a decision that
+// can only be made in one direction gets made too carefully or not at all.
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, Ban, RotateCcw } from 'lucide-react';
 import { fmt } from '../api.js';
 import { Button, Field, Modal, Textarea, useToast } from './ui.jsx';
+import ReopenPoLinesModal from './ReopenPoLines.jsx';
 
 export default function ClosePoLinesModal({
   poNumber, vendorName, lines = [], unitWord = 'nos', note = null,
+  // What the reopen form warns about, in this register's words — what a reopen
+  // does NOT undo (a released job cover, plates gone back to their requirement).
+  reopenNote = null,
   // Board only: fetches the jobs whose incoming cover rides on the ticked
   // lines, so the buyer approves the close KNOWING what needs planning again —
   // and picks, per job, whether (and how much) cover to release. Never a
@@ -26,6 +30,7 @@ export default function ClosePoLinesModal({
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reopening, setReopening] = useState(false);
   // Rows are offered pre-partitioned: only a line still owing something can be
   // closed, and only a closed line can be reopened. A fully received line is
   // shown in neither list — there is no decision left on it.
@@ -94,15 +99,6 @@ export default function ClosePoLinesModal({
     } catch (error) { toast.error(error.message || 'Could not close the selected lines'); }
     finally { setBusy(false); }
   };
-  const reopen = async line => {
-    setBusy(true);
-    try {
-      await onReopenLines([line.id]);
-      toast.success('Line reopened for receipts');
-      await onDone?.(); onClose();
-    } catch (error) { toast.error(error.message || 'Could not reopen the line'); }
-    finally { setBusy(false); }
-  };
 
   return (
     <Modal open onClose={onClose} title={`Close lines · ${poNumber}`} wide
@@ -117,7 +113,7 @@ export default function ClosePoLinesModal({
         <p className="text-xs text-slate-500">
           {vendorName ? `${vendorName} · ` : ''}Closing a line waives its unreceived balance: it leaves
           Pendency and every on-order figure, and receipts against it are refused. The rest of the
-          order stays receivable. A closed line can be reopened from here if the vendor ships anyway.
+          order stays receivable. A closed line leaves this list — Review &amp; reopen brings it back if the vendor ships anyway.
           {note ? <span className="mt-1 block font-semibold text-slate-600">{note}</span> : null}
         </p>
 
@@ -204,27 +200,24 @@ export default function ClosePoLinesModal({
           </section>
         )}
 
-        {closed.length > 0 && (
-          <section className="ci-form-panel">
-            <div className="ci-form-panel-title"><span>Closed short</span><span>no more receipts asked for</span></div>
-            <div className="space-y-1.5">
-              {closed.map(line => (
-                <div key={line.id} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-500">{line.title}</span>
-                    <span className="block text-[11px] text-slate-400">
-                      {fmt.num(line.received_qty)} of {fmt.num(line.qty)} {line.unit || unitWord} received · {fmt.num(Math.max(0, line.qty - line.received_qty))} waived
-                    </span>
-                    {line.closed_reason && <span className="block text-[11px] italic text-slate-400">“{line.closed_reason}”{line.closed_by ? ` — ${line.closed_by}` : ''}</span>}
-                  </span>
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => reopen(line)}>
-                    <RotateCcw size={12} /> Reopen
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </section>
+        {/* Already-closed lines are counted, not listed — they are decided. The
+            way back is the reopen form, which names each line and asks why.
+            It portals over this modal, so it can live in its children. */}
+        {closed.length > 0 && onReopenLines && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <span className="text-xs text-slate-500">
+              <b className="text-slate-700">{closed.length}</b> line{closed.length === 1 ? '' : 's'} on this order already closed short — kept out of this list.
+            </span>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setReopening(true)}>
+              <RotateCcw size={12} /> Review &amp; reopen…
+            </Button>
+          </div>
         )}
+        {reopening && <ReopenPoLinesModal layer="nested" preselected={false} unitWord={unitWord} note={reopenNote}
+          lines={closed.map(line => ({ ...line, po_number: poNumber, waived: Math.max(0, line.qty - line.received_qty) }))}
+          onReopen={onReopenLines}
+          onDone={async () => { await onDone?.(); onClose(); }}
+          onClose={() => setReopening(false)} />}
       </div>
     </Modal>
   );

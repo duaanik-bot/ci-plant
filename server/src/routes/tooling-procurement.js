@@ -790,14 +790,18 @@ r.post('/tooling/procurement/:family/purchase-orders/:id/lines/close', canBuy, a
 });
 
 // The escape hatch: the vendor ships anyway, or the waiver was a mistake. The
-// line takes receipts again and the PO status follows. NOTE for plates: the
-// components released at close time are NOT re-attached — they went back to
-// Approved and may already be reused or re-bought; raise a fresh PO for them.
+// line takes receipts again and the PO status follows. The reason is required,
+// as it is on the close — the reopen form asks for it and the audit keeps it.
+// NOTE for plates: the components released at close time are NOT re-attached —
+// they went back to Approved and may already be reused or re-bought; raise a
+// fresh PO for them.
 r.post('/tooling/procurement/:family/purchase-orders/:id/lines/reopen', canBuy, async (req, res, next) => {
   try {
     const family = familyOf(req);
     const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    const reason = String(req.body.reason || '').trim();
     if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to reopen' });
+    if (!reason) return res.status(400).json({ error: 'Record why these lines are being reopened' });
     const result = await tx(async (qc, oc) => {
       const po = await oc(`SELECT * FROM tooling_purchase_orders WHERE id=$1 AND family=$2 FOR UPDATE`,
         [req.params.id, family]);
@@ -812,7 +816,7 @@ r.post('/tooling/procurement/:family/purchase-orders/:id/lines/reopen', canBuy, 
       const status = toolingPoStatus(poLines);
       await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [status, po.id]);
       await audit('tooling_purchase_order', po.id, 'reopen_lines',
-        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts`, qc, req.user.name);
+        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts · ${reason}`, qc, req.user.name);
       return { reopened: lines.length, status };
     });
     res.json(result);
