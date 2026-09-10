@@ -24,7 +24,7 @@ import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { clubSuggestions } from '../lib/prClubbing.js';
 import { commitmentText } from '../lib/poCommitment.js';
-import { closedLineRows, closedLinesOf, openLinesOf, reopenSummary } from '../lib/closedPoLines.js';
+import { closedLineRows, closedLinesOf, openLinesOf, reopenSummary, unitLabel } from '../lib/closedPoLines.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle, RotateCcw } from 'lucide-react';
 
@@ -1647,7 +1647,7 @@ export default function Procurement() {
 
       <SelectionDock open={tab === 'pos' && poClosedView && closedPicked.length > 0}
         count={closedPicked.length}
-        summary={`${closedPile.orders} order${closedPile.orders === 1 ? '' : 's'} · ${fmt.num(closedPile.waived)} sheets back to pending`}
+        summary={`${closedPile.orders} order${closedPile.orders === 1 ? '' : 's'} · ${fmt.num(closedPile.waived)} ${unitLabel(closedPile.waived, 'sheets')} back to pending`}
         onClear={() => setClosedSel([])}>
         <Button size="sm" onClick={() => setReopenLines(closedPicked)}>
           <RotateCcw size={13} /> Reopen {closedPicked.length} line{closedPicked.length === 1 ? '' : 's'}…
@@ -2866,7 +2866,7 @@ export default function Procurement() {
         poNumber={closeLines.po.po_number} vendorName={closeLines.po.vendor_name} unitWord="sheets"
         lines={(closeLines.po.lines || []).map(l => ({
           id: l.id, qty: +l.qty, received_qty: +l.received_qty, unit: l.unit,
-          closed_short: !!l.closed_short, closed_reason: l.closed_reason, closed_by: l.closed_by,
+          closed_short: !!l.closed_short, closed_reason: l.closed_reason, closed_by: l.closed_by, closed_at: l.closed_at,
           pending: Math.max(0, +l.qty - +l.received_qty),
           preselected: l.id === closeLines.preselectId,
           title: l.material_name,

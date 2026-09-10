@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { fmt } from '../api.js';
+import { unitLabel } from '../lib/closedPoLines.js';
 import { Button, Field, Modal, Textarea, useToast } from './ui.jsx';
 
 export default function ReopenPoLinesModal({
@@ -39,8 +40,13 @@ export default function ReopenPoLinesModal({
       const result = await onReopen([...picked], reason.trim());
       const reopened = result?.reopened ?? picked.size;
       const kept = (result?.orders || []).reduce((sum, order) => sum + (order.kept_closed || 0), 0);
+      // Tooling reopens put back what the close took — say how much.
+      const reattached = result?.reattached_plates || 0;
+      const relinked = result?.relinked_requirements || 0;
       toast.success(`${reopened} line${reopened === 1 ? '' : 's'} reopened — back in Pendency and open for receipts`
-        + (kept ? ` · ${kept} other line${kept === 1 ? '' : 's'} of a closed order kept closed` : ''));
+        + (kept ? ` · ${kept} other line${kept === 1 ? '' : 's'} of a closed order kept closed` : '')
+        + (reattached ? ` · ${reattached} plate${reattached === 1 ? '' : 's'} back on their set` : '')
+        + (relinked ? ` · ${relinked} requirement${relinked === 1 ? '' : 's'} back on its order` : ''));
       await onDone?.();
       onClose();
     } catch (error) { toast.error(error.message || 'Could not reopen the selected lines'); }
@@ -87,7 +93,7 @@ export default function ReopenPoLinesModal({
                 </span>
                 <span className="shrink-0 text-right text-xs tabular-nums">
                   <b className="text-amber-600">{fmt.num(line.waived)}</b>
-                  <span className="text-slate-400"> {line.unit || unitWord} back to pending</span>
+                  <span className="text-slate-400"> {unitLabel(line.waived, line.unit || unitWord)} back to pending</span>
                   <span className="block text-[10px] text-slate-400">{fmt.num(line.received_qty)} of {fmt.num(line.qty)} received</span>
                 </span>
               </label>
@@ -101,7 +107,7 @@ export default function ReopenPoLinesModal({
         </Field>
         {picked.size > 0 && (
           <p className="text-[11px] font-semibold text-slate-500">
-            {fmt.num(back)} {unitWord} go back to Pendency across {picked.size} line{picked.size === 1 ? '' : 's'}.
+            {fmt.num(back)} {unitLabel(back, unitWord)} {back === 1 ? 'goes' : 'go'} back to Pendency across {picked.size} line{picked.size === 1 ? '' : 's'}.
           </p>
         )}
       </div>

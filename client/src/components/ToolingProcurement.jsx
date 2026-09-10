@@ -21,6 +21,8 @@ import ProductIdentity from './ProductIdentity.jsx';
 import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 import PlatesLifecycle from './PlatesLifecycle.jsx';
 import ClosePoLinesModal from './ClosePoLines.jsx';
+import ClosedPoLinesView from './ClosedPoLinesView.jsx';
+import { closedLinesOf, openLinesOf } from '../lib/closedPoLines.js';
 
 const FAMILY = {
   plate: { singular: 'Plate', plural: 'Plates', unit: 'plates', icon: Printer },
@@ -462,6 +464,9 @@ function GenericToolingProcurement({ family }) {
   // Line-level "no more receipts" — { po, preselectId? }, from the PO row's
   // menu or a Pendency row with that line pre-ticked.
   const [closeLines, setCloseLines] = useState(null);
+  // Purchase Orders → Closed lines, focused on one order by its row's
+  // "N closed" chip — { id, po_number } | null.
+  const [closedPo, setClosedPo] = useState(null);
 
   const load = async () => {
     const base = `/tooling/procurement/${family}`;
@@ -475,7 +480,7 @@ function GenericToolingProcurement({ family }) {
     setSelectedIds(current => current.filter(id => nextRequests.some(row => row.id === id)));
   };
   useEffect(() => {
-    setTab('requirements'); setSelectedIds([]);
+    setTab('requirements'); setSelectedIds([]); setClosedPo(null);
     load().catch(() => {});
     api.get('/vendors').then(setVendors);
     api.get('/products').then(setProducts);
@@ -488,6 +493,10 @@ function GenericToolingProcurement({ family }) {
     closed: requests.filter(row => ['closed','rejected'].includes(row.approval_status)),
   };
   const poRows = pos.filter(po => poView === 'completed' ? ['received','closed'].includes(po.status) : !['received','closed'].includes(po.status));
+  // Lines closed short across every order still standing — spelled the way the
+  // Closed lines view filters (a reversed order is void).
+  const closedLineCount = pos.filter(po => po.status !== 'reversed').reduce((sum, po) => sum + closedLinesOf(po).length, 0);
+  const focusClosed = po => { setPoView('closed'); setClosedPo({ id: po.id, po_number: po.po_number }); };
   const grnRows = grns.filter(grn => grnView === 'completed' ? grn.status !== 'quarantine' : grn.status === 'quarantine');
   const selected = requests.filter(row => selectedIds.includes(row.id));
   const poSelectable = selected.length > 0 && selected.every(row => row.approval_status === 'approved');
@@ -568,7 +577,7 @@ function GenericToolingProcurement({ family }) {
     // family's version of the plate build: a die is a quantity, so what a line
     // has to say is how much of it has landed.
     { key: 'lines', label: meta.plural, sortable: false, render: po => <div className="space-y-0.5">
-      {po.lines.map((line, index) => {
+      {openLinesOf(po).map((line, index) => {
         const receipt = lineReceipt(line);
         const refs = [line.request_number, line.jc_number].filter(Boolean).join(' · ');
         return <div key={line.id ?? index} className="flex min-w-0 items-start gap-2">
@@ -583,10 +592,17 @@ function GenericToolingProcurement({ family }) {
           </div>
         </div>;
       })}
-      {!po.lines.length && <span className="text-xs text-slate-400">—</span>}
-      <span className="block pl-6 pt-0.5 text-[11px] text-slate-400">
-        {po.lines.length} {po.lines.length === 1 ? meta.singular.toLowerCase() : meta.plural.toLowerCase()}
+      {!openLinesOf(po).length && <span className="text-xs text-slate-400">{closedLinesOf(po).length ? 'Every line on this order was closed short' : '—'}</span>}
+      <span className="flex flex-wrap items-center gap-1.5 pl-6 pt-0.5 text-[11px] text-slate-400">
+        {openLinesOf(po).length} {openLinesOf(po).length === 1 ? meta.singular.toLowerCase() : meta.plural.toLowerCase()}
         {po.lines.some(line => line.request_number) ? '' : ' · Direct PO'}
+        {/* Lines closed short are off the row; the chip says how many and is
+            the door to them in Closed lines. */}
+        {closedLinesOf(po).length > 0 && <button type="button" onClick={event => { event.stopPropagation(); focusClosed(po); }}
+          title="Closed short — no more receipts asked for. Open them in Closed lines to read or reopen."
+          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-px text-[10px] font-semibold text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700">
+          <Ban size={10} /> {closedLinesOf(po).length} closed
+        </button>}
       </span>
     </div> },
     { key: 'expected_date', label: 'Expected', render: po => fmt.date(po.expected_date) },
@@ -742,8 +758,21 @@ function GenericToolingProcurement({ family }) {
         <SubTabs active={poView} onChange={setPoView} views={[
           { key: 'pending', label: 'Pending', count: pos.filter(po => !['received','closed'].includes(po.status)).length },
           { key: 'completed', label: 'Completed', count: pos.filter(po => ['received','closed'].includes(po.status)).length },
+          // Lines closed short leave their order's row and gather here — to
+          // read what was given up, and to bring any of it back.
+          { key: 'closed', label: 'Closed lines', count: closedLineCount },
         ]} />
-        <DataTable searchable rows={poRows} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No purchase orders in this view" exportName={`${meta.plural} Purchase Orders`} />
+        {poView !== 'closed' && <DataTable searchable rows={poRows} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No purchase orders in this view" exportName={`${meta.plural} Purchase Orders`} />}
+        {poView === 'closed' && <ClosedPoLinesView family={family} pos={pos} unitWord={meta.unit} canReopen={canBuy()}
+          describe={line => ({
+            title: line.material_name || line.item_name || meta.singular,
+            sub: [line.size || line.spec, line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
+          })}
+          poHref={row => `/tooling/${meta.plural.toLowerCase()}/po/${row.po_id}`}
+          focusPo={closedPo} onFocusPo={setClosedPo}
+          reopenNote={`Reopening puts a requirement released at close back on its order while it is still unassigned — one bought elsewhere since stays there, and the line brings ${meta.unit} to stock.`}
+          onDone={load} exportName={`${meta.plural} Closed Lines`}
+          searchPlaceholder={`Search PO, vendor, ${meta.singular.toLowerCase()}, JC or reason…`} />}
       </>}
 
       {tab === 'grns' && <>
@@ -783,7 +812,7 @@ function GenericToolingProcurement({ family }) {
         impactEmptyText="No job requirement rides on the ticked lines — direct PO stock."
         lines={(closeLines.po.lines || []).map(line => ({
           id: line.id, qty: num(line.qty), received_qty: num(line.received_qty), unit: line.unit,
-          closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by,
+          closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by, closed_at: line.closed_at,
           pending: Math.max(0, num(line.qty) - num(line.received_qty)),
           preselected: line.id === closeLines.preselectId,
           title: line.material_name || line.item_name,
@@ -808,7 +837,7 @@ function GenericToolingProcurement({ family }) {
           })).values()])}
         onCloseLines={(line_ids, reason, releases) => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/close`,
           { line_ids, reason, release_requirements: (releases || []).map(row => row.id) })}
-        reopenNote="A requirement released back to Approved when the line closed stays there — reopening takes receipts again but does not re-link it."
+        reopenNote="Reopening puts a requirement released at close back on this order while it is still unassigned — one bought elsewhere since stays there."
         onReopenLines={(line_ids, reason) => api.post(`/tooling/procurement/${family}/purchase-orders/${closeLines.po.id}/lines/reopen`, { line_ids, reason })}
         onDone={load} onClose={() => setCloseLines(null)} />}
       {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={async () => { setSelectedIds([]); await load(); }} />}

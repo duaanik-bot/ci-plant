@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  openLinesOf, closedLinesOf, closedAsWhole, closedLineRows, reopenSummary,
+  openLinesOf, closedLinesOf, closedAsWhole, closedLineRows, reopenSummary, unitLabel,
 } from '../../client/src/lib/closedPoLines.js';
 import { reopenPoLines } from './routes/procurement.js';
 
@@ -83,6 +83,21 @@ test('the reopen dock names the pile — lines, orders and the balance coming ba
   ]);
   assert.deepEqual(reopenSummary(rows), { lines: 3, orders: 2, waived: 6780 });
   assert.deepEqual(reopenSummary([]), { lines: 0, orders: 0, waived: 0 });
+});
+
+test('one of a unit reads singular — "1 die", never "1 dies"', () => {
+  assert.equal(unitLabel(1, 'dies'), 'die');
+  assert.equal(unitLabel(1, 'plates'), 'plate');
+  assert.equal(unitLabel(1, 'sheets'), 'sheet');
+  assert.equal(unitLabel(2, 'dies'), 'dies');
+  assert.equal(unitLabel(0, 'plates'), 'plates', 'none of them is still plural');
+  assert.equal(unitLabel(1, 'nos'), 'nos', 'an abbreviation is not a plural');
+  assert.equal(unitLabel(1, ''), '');
+});
+
+test('the closed-lines view and the reopen form count units in words that agree', () => {
+  assert.match(read('client/src/components/ClosedPoLinesView.jsx'), /unitLabel\(/);
+  assert.match(read('client/src/components/ReopenPoLines.jsx'), /unitLabel\(/);
 });
 
 // ── the server spelling, against an in-memory stand-in ─────────────────────
@@ -265,12 +280,14 @@ test('one spelling: every board reopen door runs reopenPoLines, and only it clea
 });
 
 test('the tooling reopen asks why too, and keeps it on record', () => {
+  // Both tooling doors now run reopenToolingPoLines (see
+  // tooling-closed-lines.test.js), so the rule lives in the helper.
   const route = read('server/src/routes/tooling-procurement.js');
-  const from = route.indexOf("'/tooling/procurement/:family/purchase-orders/:id/lines/reopen'");
-  assert.ok(from > 0, 'the tooling reopen door is missing');
-  const door = route.slice(from, route.indexOf('\nr.', from));
-  assert.match(door, /Record why these lines are being reopened/);
-  assert.match(door, /reopened for receipts[^\n]*\$\{reason\}/, 'the audit row must carry the reason');
+  const from = route.indexOf('export async function reopenToolingPoLines');
+  assert.ok(from > 0, 'the tooling reopen helper is missing');
+  const helper = route.slice(from, route.indexOf('\nr.', from));
+  assert.match(helper, /Record why these lines are being reopened/);
+  assert.match(helper, /'reopen_lines',[\s\S]*?\$\{why\}/, 'the audit row must carry the reason');
 });
 
 test('the PO register hides closed lines and gives them their own view', () => {

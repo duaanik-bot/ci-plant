@@ -638,6 +638,28 @@ const FAMILY_PAGE = { plate: '/tooling/plates', die: '/tooling/dies', block: '/t
 const replanLink = (family, row) =>
   row.order_line_id ? `/planning?line=${row.order_line_id}` : FAMILY_PAGE[family];
 
+// Where a plate requirement stands once its plates have moved — the way the PO
+// reverse re-points it. A plate still attached to a live PO line (received
+// there, or being bought) keeps the requirement converted against the newest
+// such order; a requirement with no bought plate left goes back to Approved, to
+// be bought again or served from the rack. The line close and the line reopen
+// both land here, so the two moves can never disagree about what "back" means.
+// Returns the locked request and its new state, or null when it is gone.
+async function repointPlateRequirement(qc, oc, requestId) {
+  const anchor = await oc(`SELECT po.po_number, po.vendor_id FROM plate_request_components prc
+    JOIN tooling_po_lines pl ON pl.id=prc.po_line_id
+    JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
+    WHERE prc.tooling_request_id=$1 AND po.status<>'reversed'
+    ORDER BY po.id DESC LIMIT 1`, [requestId]);
+  const request = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [requestId]);
+  if (!request) return null;
+  const state = anchor ? 'converted' : 'approved';
+  await qc(`UPDATE tooling_requests SET approval_status=$1, status='procurement',
+    po_number=$2, vendor_id=$3, updated_at=now() WHERE id=$4`,
+  [state, anchor?.po_number || null, anchor?.vendor_id || null, requestId]);
+  return { request, state };
+}
+
 // The preview behind the close modal — which jobs are standing on these lines.
 // Informational, never a blocker: a direct PO with no requirement behind it
 // simply returns nothing and the close proceeds.
@@ -703,25 +725,15 @@ r.post('/tooling/procurement/:family/purchase-orders/:id/lines/close', canBuy, a
           updated_at=now() WHERE po_line_id=ANY($1::int[]) AND status IN ('po_created','ordered')
           RETURNING tooling_request_id`, [closableIds]);
         releasedPlates = released.length;
-        // Re-point each affected requirement the way the PO reverse does. A
-        // component still attached to a live PO line (received here, or being
-        // bought elsewhere) keeps the requirement converted against that order;
-        // a requirement whose every bought plate was just released goes back to
-        // Approved so it can be bought again or served from the rack.
+        // Re-point each affected requirement — converted while a live order
+        // still holds any of its plates, Approved otherwise (see
+        // repointPlateRequirement, which the reopen shares).
         const requestIds = [...new Set(released.map(row => row.tooling_request_id).filter(Boolean))];
         for (const requestId of requestIds) {
-          const anchor = await oc(`SELECT po.po_number, po.vendor_id FROM plate_request_components prc
-            JOIN tooling_po_lines pl ON pl.id=prc.po_line_id
-            JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
-            WHERE prc.tooling_request_id=$1 AND po.status<>'reversed'
-            ORDER BY po.id DESC LIMIT 1`, [requestId]);
-          const request = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [requestId]);
-          if (!request) continue;
-          await qc(`UPDATE tooling_requests SET approval_status=$1, status='procurement',
-            po_number=$2, vendor_id=$3, updated_at=now() WHERE id=$4`,
-          [anchor ? 'converted' : 'approved', anchor?.po_number || null, anchor?.vendor_id || null, requestId]);
-          await requestEvent(qc, request, 'close_po_line', 'procurement', req.user.name,
-            `${po.po_number} line closed short · unreceived plates back to ${anchor ? 'converted' : 'approved'} · ${reason}`);
+          const moved = await repointPlateRequirement(qc, oc, requestId);
+          if (!moved) continue;
+          await requestEvent(qc, moved.request, 'close_po_line', 'procurement', req.user.name,
+            `${po.po_number} line closed short · unreceived plates back to ${moved.state} · ${reason}`);
         }
       }
 
@@ -789,37 +801,126 @@ r.post('/tooling/procurement/:family/purchase-orders/:id/lines/close', canBuy, a
   } catch (e) { next(e); }
 });
 
-// The escape hatch: the vendor ships anyway, or the waiver was a mistake. The
-// line takes receipts again and the PO status follows. The reason is required,
-// as it is on the close — the reopen form asks for it and the audit keeps it.
-// NOTE for plates: the components released at close time are NOT re-attached —
-// they went back to Approved and may already be reused or re-bought; raise a
-// fresh PO for them.
+// The escape hatch: the vendor ships anyway, or the waiver was a mistake. ONE
+// spelling behind both doors — the close modal's "Review & reopen" (one order)
+// and <family> → Purchase Orders → Closed lines (any number of the family's
+// orders at once). The line takes receipts again and each order re-reads its
+// own status; the reason is required and audited, as it is on the close.
+//
+// A reopen puts back what the close took, where it safely can:
+//   - PLATES: the close detached the set's unreceived plates (back to Approved,
+//     on no line), and the plate GRN only receives plates still ON the line — a
+//     bare reopen owed plates that nothing could receive. So the reopen
+//     re-attaches them, but only while the job holds exactly that many
+//     Approved, unassigned plates of the set's size. Fewer means some were
+//     re-sourced since; more means they can no longer be told apart. Either
+//     way it refuses rather than guess.
+//   - DIES/BLOCKS: a requirement the close released back to Approved goes back
+//     on this order while it is still unassigned, or the reopened line and a
+//     fresh PO would both buy it. One bought elsewhere since is left alone —
+//     the reopened line then brings stock, not that job's tool.
+// A reversed order is void, and one closed as a whole still carries lines
+// nobody waived — pulling one line back would revive them too — so neither lets
+// a line come back. Orders lock in id order; a pick not closed short narrows.
+export async function reopenToolingPoLines(qc, oc, { family, lineIds, reason, user, poId = null }) {
+  const ids = [...new Set((lineIds || []).map(Number).filter(Boolean))];
+  const why = String(reason || '').trim();
+  if (!ids.length) throw Object.assign(new Error('Choose at least one line to reopen'), { status: 400 });
+  if (!why) throw Object.assign(new Error('Record why these lines are being reopened'), { status: 400 });
+  const found = await qc(`SELECT pl.id, pl.purchase_order_id, po.family FROM tooling_po_lines pl
+    JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id WHERE pl.id=ANY($1::int[])`, [ids]);
+  if (found.length !== ids.length || found.some(l => l.family !== family)
+    || (poId != null && found.some(l => l.purchase_order_id !== Number(poId)))) {
+    throw Object.assign(new Error('A selected line is no longer on its order — reload and reselect'), { status: 409 });
+  }
+  const orders = [];
+  for (const id of [...new Set(found.map(l => l.purchase_order_id))].sort((a, b) => a - b)) {
+    const po = await oc('SELECT * FROM tooling_purchase_orders WHERE id=$1 AND family=$2 FOR UPDATE', [id, family]);
+    if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
+    if (po.status === 'reversed') {
+      throw Object.assign(new Error(`${po.po_number} is reversed — its lines cannot come back`), { status: 409 });
+    }
+    const lines = await qc('SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 ORDER BY id FOR UPDATE', [id]);
+    if (po.status === 'closed' && toolingPoStatus(lines) !== 'closed') {
+      throw Object.assign(new Error(`${po.po_number} was closed as a whole — its lines cannot be reopened one by one`), { status: 409 });
+    }
+    const picked = lines.filter(l => ids.includes(l.id) && l.closed_short);
+    if (!picked.length) continue;
+    let reattached = 0;
+    let relinked = 0;
+    for (const line of picked) {
+      if (!line.tooling_request_id) continue; // a direct PO line — nothing hangs off it
+      if (family === 'plate') {
+        const owed = Math.max(0, Number(line.qty) - Number(line.received_qty));
+        const free = await qc(`SELECT prc.id FROM plate_request_components prc
+          JOIN plate_masters pm ON pm.id=prc.plate_master_id
+          WHERE prc.tooling_request_id=$1 AND prc.status='approved' AND prc.po_line_id IS NULL
+            AND pm.inventory_item_id=$2
+          ORDER BY prc.sequence_no FOR UPDATE OF prc`, [line.tooling_request_id, line.inventory_item_id]);
+        if (free.length < owed) {
+          throw Object.assign(new Error(`${po.po_number}: ${owed - free.length} of the ${owed} plates on this set were re-sourced after it closed — reopening would owe plates nothing can receive. Raise a fresh PO for what is still needed.`), { status: 409 });
+        }
+        if (free.length > owed) {
+          throw Object.assign(new Error(`${po.po_number}: the job holds ${free.length} unassigned plates of this size but the set owes ${owed} — which ones were on it can no longer be told apart. Raise a fresh PO instead.`), { status: 409 });
+        }
+        if (!owed) continue;
+        await qc(`UPDATE plate_request_components SET status='po_created', po_line_id=$1, updated_at=now()
+          WHERE id=ANY($2::int[])`, [line.id, free.map(row => row.id)]);
+        reattached += owed;
+        const moved = await repointPlateRequirement(qc, oc, line.tooling_request_id);
+        if (moved) {
+          await requestEvent(qc, moved.request, 'reopen_po_line', 'procurement', user,
+            `${po.po_number} line reopened · ${owed} plate${owed === 1 ? '' : 's'} back on the set · ${why}`);
+        }
+      } else {
+        const request = await oc('SELECT * FROM tooling_requests WHERE id=$1 FOR UPDATE', [line.tooling_request_id]);
+        if (!request || request.approval_status !== 'approved' || request.po_number) continue;
+        await qc(`UPDATE tooling_requests SET approval_status='converted', status='procurement',
+          po_number=$1, vendor_id=$2, updated_at=now() WHERE id=$3`, [po.po_number, po.vendor_id, request.id]);
+        await requestEvent(qc, request, 'reopen_po_line', 'procurement', user,
+          `${po.po_number} line reopened · requirement back on this order · ${why}`);
+        relinked += 1;
+      }
+    }
+    await qc(`UPDATE tooling_po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
+      WHERE id=ANY($1::int[])`, [picked.map(l => l.id)]);
+    const status = toolingPoStatus(await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [id]));
+    await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [status, id]);
+    const back = picked.map(l => `line ${l.id}: ${Math.max(0, Number(l.qty) - Number(l.received_qty))} back to pending`).join(', ');
+    await audit('tooling_purchase_order', id, 'reopen_lines',
+      `${picked.length} line${picked.length === 1 ? '' : 's'} reopened for receipts (${back})`
+      + (reattached ? ` · ${reattached} plate${reattached === 1 ? '' : 's'} back on their set` : '')
+      + (relinked ? ` · ${relinked} requirement${relinked === 1 ? '' : 's'} back on this order` : '')
+      + ` · ${why}`, qc, user);
+    orders.push({ po_id: id, po_number: po.po_number, reopened: picked.length,
+      reattached_plates: reattached, relinked_requirements: relinked, status });
+  }
+  const total = key => orders.reduce((sum, order) => sum + order[key], 0);
+  if (!total('reopened')) {
+    throw Object.assign(new Error('None of the selected lines is closed short any more — reload the register'), { status: 409 });
+  }
+  return { reopened: total('reopened'), skipped: ids.length - total('reopened'), orders,
+    reattached_plates: total('reattached_plates'), relinked_requirements: total('relinked_requirements') };
+}
+
+// One order's door — the close modal's "Review & reopen".
 r.post('/tooling/procurement/:family/purchase-orders/:id/lines/reopen', canBuy, async (req, res, next) => {
   try {
     const family = familyOf(req);
-    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
-    const reason = String(req.body.reason || '').trim();
-    if (!lineIds.length) return res.status(400).json({ error: 'Choose at least one line to reopen' });
-    if (!reason) return res.status(400).json({ error: 'Record why these lines are being reopened' });
-    const result = await tx(async (qc, oc) => {
-      const po = await oc(`SELECT * FROM tooling_purchase_orders WHERE id=$1 AND family=$2 FOR UPDATE`,
-        [req.params.id, family]);
-      if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 });
-      if (po.status === 'reversed') throw Object.assign(new Error(`${po.po_number} is reversed`), { status: 409 });
-      const lines = await qc(`SELECT * FROM tooling_po_lines WHERE purchase_order_id=$1 AND id=ANY($2::int[])
-        AND closed_short FOR UPDATE`, [po.id, lineIds]);
-      if (!lines.length) throw Object.assign(new Error('None of the selected lines is closed short'), { status: 409 });
-      await qc(`UPDATE tooling_po_lines SET closed_short=FALSE, closed_reason=NULL, closed_by=NULL, closed_at=NULL
-        WHERE id=ANY($1::int[])`, [lines.map(l => l.id)]);
-      const poLines = await qc('SELECT qty,received_qty,closed_short FROM tooling_po_lines WHERE purchase_order_id=$1', [po.id]);
-      const status = toolingPoStatus(poLines);
-      await qc('UPDATE tooling_purchase_orders SET status=$1, updated_at=now() WHERE id=$2', [status, po.id]);
-      await audit('tooling_purchase_order', po.id, 'reopen_lines',
-        `${lines.length} line${lines.length === 1 ? '' : 's'} reopened for receipts · ${reason}`, qc, req.user.name);
-      return { reopened: lines.length, status };
-    });
-    res.json(result);
+    res.json(await tx((qc, oc) => reopenToolingPoLines(qc, oc, {
+      family, lineIds: req.body.line_ids, reason: req.body.reason, user: req.user.name, poId: Number(req.params.id),
+    })));
+  } catch (e) { next(e); }
+});
+
+// Across orders — <family> → Purchase Orders → Closed lines: one pile, one
+// form, one transaction.
+r.post('/tooling/procurement/:family/po-lines/reopen', canBuy, async (req, res, next) => {
+  try {
+    const family = familyOf(req);
+    res.json(await tx((qc, oc) => reopenToolingPoLines(qc, oc, {
+      family, lineIds: req.body.line_ids, reason: req.body.reason, user: req.user.name,
+    })));
   } catch (e) { next(e); }
 });
 

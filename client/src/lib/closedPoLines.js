@@ -50,6 +50,13 @@ export function closedLineRows(pos = []) {
   return rows.sort((a, b) => (at(b) - at(a)) || (b.id - a.id));
 }
 
+/** A unit spoken for a count — one die, two dies. An abbreviation (nos) stays as it is. */
+export function unitLabel(count, unit = '') {
+  const word = String(unit || '');
+  if (Number(count) !== 1 || word === 'nos' || !/[^s]s$/.test(word)) return word;
+  return word.slice(0, -1);
+}
+
 /** What the reopen dock says about a selection: lines, orders, balance returning. */
 export function reopenSummary(rows = []) {
   return {

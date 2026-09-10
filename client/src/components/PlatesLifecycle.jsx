@@ -38,6 +38,8 @@ import {
   lineTickState, toggleLine, toggleComponent, selectAll, deselectAll, toBulkLines,
 } from '../lib/plateGrnSelection.js';
 import ClosePoLinesModal from './ClosePoLines.jsx';
+import ClosedPoLinesView from './ClosedPoLinesView.jsx';
+import { closedLinesOf, openLinesOf } from '../lib/closedPoLines.js';
 
 const canManage = () => ['admin', 'planner'].includes(auth.user?.role);
 const canVerify = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
@@ -1400,6 +1402,10 @@ export default function PlatesLifecycle() {
   // Line-level "no more receipts" — { po, preselectId? }, from the PO row's
   // menu or a Pendency row with that line pre-ticked.
   const [closeLines, setCloseLines] = useState(null);
+  // Purchase Orders → Orders | Closed lines. A set closed short leaves its PO
+  // row; the row's "N sets closed" chip opens Closed lines focused on it.
+  const [poView, setPoView] = useState('orders');
+  const [closedPo, setClosedPo] = useState(null); // { id, po_number } | null
   const [returnModal, setReturnModal] = useState(null);
   const [assetHistory, setAssetHistory] = useState(null);
   const [reasonAction, setReasonAction] = useState(null);
@@ -1978,6 +1984,10 @@ export default function PlatesLifecycle() {
       }]}/>}
     </div> },
   ];
+  // Sets closed short across every order still standing — the Closed lines
+  // count, spelled the way the view itself filters (a reversed order is void).
+  const closedLineCount = pos.filter(po => po.status !== 'reversed').reduce((sum, po) => sum + closedLinesOf(po).length, 0);
+  const focusClosed = po => { setPoView('closed'); setClosedPo({ id: po.id, po_number: po.po_number }); };
   const poColumns = [
     { key: 'po_number', label: 'PO No', render: row => <b>{row.po_number}</b> },
     { key: 'vendor_name', label: 'Vendor' },
@@ -1991,7 +2001,7 @@ export default function PlatesLifecycle() {
     // hover, and a gang names the cartons on its sheet: the run number alone is
     // exactly what does not answer "what is on it".
     { key: 'lines', label: 'Plate Sets', sortable: false, render: row => <div className="space-y-0.5">
-      {row.lines.map((line, index) => {
+      {openLinesOf(row).map((line, index) => {
         const members = gangMemberNames(line);
         return <div key={line.id} className="flex min-w-0 items-start gap-2">
           <span className="mt-px w-4 shrink-0 text-right text-[10px] font-semibold tabular-nums text-slate-400">{index + 1}</span>
@@ -2000,14 +2010,22 @@ export default function PlatesLifecycle() {
               <span className="truncate text-xs font-bold text-slate-700">{line.product_name || '—'}</span>
               <span className="shrink-0 font-mono text-[10px] text-slate-400">{line.plate_size || ''}</span>
               <InkSummary components={line.components} />
-              {line.closed_short && <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500"
-                title={`Closed short — ${line.closed_reason || 'no more receipts'}${line.closed_by ? ` (${line.closed_by})` : ''}`}>closed short</span>}
             </div>
             {members && <span className="block truncate text-[10px] text-slate-400" title={members}>{members}</span>}
           </div>
         </div>;
       })}
-      <span className="block pl-6 pt-0.5 text-[11px] text-slate-400">{row.lines.reduce((sum,line) => sum + Number(line.qty),0)} individual plates</span>
+      {!openLinesOf(row).length && <span className="block pl-6 text-[11px] text-slate-400">Every set on this order was closed short</span>}
+      <span className="flex flex-wrap items-center gap-1.5 pl-6 pt-0.5 text-[11px] text-slate-400">
+        {openLinesOf(row).reduce((sum,line) => sum + Number(line.qty),0)} individual plates
+        {/* Sets closed short are off the row; the chip says how many and is
+            the door to them in Closed lines. */}
+        {closedLinesOf(row).length > 0 && <button type="button" onClick={event => { event.stopPropagation(); focusClosed(row); }}
+          title="Closed short — no more receipts asked for. Open them in Closed lines to read or reopen."
+          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-px text-[10px] font-semibold text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700">
+          <Ban size={10} /> {closedLinesOf(row).length} set{closedLinesOf(row).length === 1 ? '' : 's'} closed
+        </button>}
+      </span>
     </div> },
     // A PO can carry several plate sets, so its Output is a SET of numbers. It
     // sorts on the first of them via sortValue rather than on the rendered join,
@@ -2620,9 +2638,24 @@ export default function PlatesLifecycle() {
           placeholder="Why these are going out without a PR (optional)" /></Field>
       </div>
     </Modal>}
-    {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }}
+    {tab==='pos' && <SubTabs active={poView} onChange={setPoView} views={[
+      { key:'orders', label:'Orders', count:pos.length },
+      // Sets closed short leave their order's row and gather here — to read
+      // what was given up, and to bring any of it back.
+      { key:'closed', label:'Closed lines', count:closedLineCount },
+    ]}/>}
+    {tab==='pos' && poView==='orders' && <DataTable searchable rows={pos} columns={poColumns} defaultSort={{ key: 'id', dir: 'desc' }}
       searchPlaceholder="Search PO, vendor, product, output, JC or colour…"
       empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
+    {tab==='pos' && poView==='closed' && <ClosedPoLinesView family="plate" pos={pos} unitWord="plates" canReopen={canManage()}
+      describe={line => ({
+        title: `${line.product_name || 'Plate set'}${line.plate_size ? ` · ${line.plate_size}` : ''}`,
+        sub: [line.output_number, line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
+      })}
+      poHref={row => `/tooling/plates/po/${row.po_id}`}
+      focusPo={closedPo} onFocusPo={setClosedPo}
+      reopenNote="Reopening puts a set's released plates back on it, so its GRN can receive them — refused if the job re-sourced them since; raise a fresh PO then."
+      onDone={load} exportName="Plate Closed Lines" searchPlaceholder="Search PO, vendor, product, output, JC or reason…" />}
     {tab==='pendency' && <>
       <SubTabs active={pendencyView} onChange={setPendencyView} views={[
         { key:'lines', label:'PO Lines', count:pendency.lines.length },
@@ -2846,7 +2879,7 @@ export default function PlatesLifecycle() {
     {grnModal && <PlateGrnModal po={grnModal} onClose={()=>setGrnModal(null)} onSaved={load}/>}
     {closeLines && <ClosePoLinesModal
       poNumber={closeLines.po.po_number} vendorName={closeLines.po.vendor_name} unitWord="plates"
-      note="Closing a plate set releases its unreceived plates back to Approved, so the job can reuse the rack or buy again — they are not re-attached on reopen."
+      note="Closing a plate set releases its unreceived plates back to Approved, so the job can reuse the rack or buy again. Reopening puts them back on the set while the job still holds them."
       impactEmptyText="No job requirement rides on the ticked lines — direct PO stock."
       // The impact rows are informative, not optional: a plate left attached to
       // a closed line would block its job at the printing gate for ever, so the
@@ -2861,14 +2894,14 @@ export default function PlatesLifecycle() {
         }])).values()])}
       lines={(closeLines.po.lines || []).map(line => ({
         id: line.id, qty: Number(line.qty), received_qty: Number(line.received_qty), unit: 'plates',
-        closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by,
+        closed_short: !!line.closed_short, closed_reason: line.closed_reason, closed_by: line.closed_by, closed_at: line.closed_at,
         pending: Math.max(0, Number(line.qty) - Number(line.received_qty)),
         preselected: line.id === closeLines.preselectId,
         title: `${line.product_name || 'Plate set'}${line.plate_size ? ` · ${line.plate_size}` : ''}`,
         sub: [line.request_number, line.jc_number].filter(Boolean).join(' · ') || 'Direct PO',
       }))}
       onCloseLines={(line_ids, reason) => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/close', { line_ids, reason })}
-      reopenNote="Plates released when the line closed went back to their requirement — reopening takes receipts again but does not re-attach them."
+      reopenNote="Reopening puts a set's released plates back on it, so its GRN can receive them — refused if the job re-sourced them since; raise a fresh PO then."
       onReopenLines={(line_ids, reason) => api.post('/tooling/procurement/plate/purchase-orders/' + closeLines.po.id + '/lines/reopen', { line_ids, reason })}
       onDone={load} onClose={() => setCloseLines(null)}/>}
     {/* Both doors hand off to a form that already exists: the PO route to the
