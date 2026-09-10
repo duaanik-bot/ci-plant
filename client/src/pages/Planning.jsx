@@ -22,6 +22,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
+import { OverIssueHint, useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
 import { gangShortView } from '../lib/gangShort.js';
 import { boardPositionView } from '../lib/boardPositionView.js';
@@ -538,6 +539,9 @@ export default function Planning() {
   const [gangEdits, setGangEdits] = useState({});   // per-member draft { [lineId]: { qty, ups } } in the gang engine
   const [gangWastage, setGangWastage] = useState(String(DEFAULT_WASTAGE_SHEETS)); // shared wastage in the gang engine
   const [gangIssue, setGangIssue] = useState(''); // planner's manual "sheets to issue" override ('' = follow the calc)
+  // The over-issue alarm (OverIssueAlarm.jsx) for every save here that sends a
+  // parent-sheet figure — the run engine's Save and Lock, and a line's own plan.
+  const overIssue = useOverIssueGuard();
   const [gangMixRows, setGangMixRows] = useState([]); // the RUN's Board Mix draft — one row per board, run-level sheets
   // Per-row leftover toggles for a banking run's MIX — {[material_id]: bool},
   // seeded from the live LO-PLAN-RUN batches (the batches ARE the record; no
@@ -1311,18 +1315,24 @@ export default function Planning() {
       baseChild += base; childSheets += child; parent += p;
       return { id: m.id, base, child, cpp, parent: p };
     });
-    const sum = { baseChild, wastageTotal: w, childSheets, parent, per, members: gangView.members.length };
+    // `cpp` — print sheets per parent, which the over-issue hint needs to name a
+    // print count typed into the parent box. One figure only when every member
+    // cuts the same way; separate impositions that differ have no single cut.
+    const sum = { baseChild, wastageTotal: w, childSheets, parent, per, members: gangView.members.length,
+      cpp: per.length && per.every(p => p.cpp === per[0].cpp) ? per[0].cpp : null };
     if (gangView.kind === 'merge' || gangView.layout_mode !== 'shared') return sum;
     // cpp: the server's settled-layout figure when it has one, else the same
     // anchor fit the reference column just used — never a third geometry.
     const anchorFit = clientFit(anchor?.sheet_l, anchor?.sheet_w, +anchor?.child_l, +anchor?.child_w);
+    const runCpp = gangView.layout_run?.cpp ?? (anchorFit?.cpp > 0 ? anchorFit.cpp : null);
     const run = sharedRunFigures(
       gangView.members.map(m => ({ id: m.id, net: netOf(m), ups: +m.ups })),
-      { wastage: w, cpp: gangView.layout_run?.cpp ?? (anchorFit?.cpp > 0 ? anchorFit.cpp : null) });
+      { wastage: w, cpp: runCpp });
     if (!run) return sum;   // a member without ups — degrade to the sum + the pending banner
     return {
       ...sum,
       sharedMode: true,
+      cpp: runCpp,
       parent: run.runParent,
       childSheets: run.runChild,
       naturalParent: sum.parent,
@@ -1873,7 +1883,7 @@ export default function Planning() {
     // orders.js's own comment says so — but the payload shouldn't carry noise
     // the reader then has to know is inert.)
     const activeMix = mixRows.filter(r => Number(r.sheets) > 0);
-    const updated = await api.post(`/order-lines/${planLine.id}/plan`, {
+    const planBody = {
       wastage_sheets: +form.wastage_sheets || 0, notes: form.notes,
       spec, update_master, draft,
       // Which of the edited fields the planner ticked for the master. null =
@@ -1920,7 +1930,13 @@ export default function Planning() {
             .map(r => ({ material_id: +r.material_id, bank: true })),
         } : {}),
       }),
-    });
+    };
+    // Through the over-issue guard: a Board Mix adding up well past the cut plan
+    // comes back OVER_ISSUE, the alarm asks, and a yes re-sends this body with
+    // the answer. A no leaves the engine open exactly as it was.
+    const updated = await overIssue.guard(ack => api.post(`/order-lines/${planLine.id}/plan`,
+      ack ? { ...planBody, ack_over_issue: ack } : planBody));
+    if (!updated) return;
     const masterNote = update_master
       ? (master_fields ? ` · ${master_fields.length} field${master_fields.length === 1 ? '' : 's'} to the Product Master` : ' · Product Master updated')
       : Object.keys(spec || {}).length ? ' · saved for this job' : '';
@@ -2363,7 +2379,10 @@ export default function Planning() {
     }
     setGangBusyLock(true);
     try {
-      const d = await api.post(`/gang-runs/${gangView.id}/plan`, gangPlanPayload());
+      const body = gangPlanPayload();
+      const d = await overIssue.guard(ack => api.post(`/gang-runs/${gangView.id}/plan`,
+        ack ? { ...body, ack_over_issue: ack } : body));
+      if (!d) return;   // No to the over-issue alarm — the run stays exactly as it was
       toast.success(`${d.gang_number} planned as one job — issuing ${fmt.num(d.total_parent_sheets)} parent sheets`);
       sayBoardShortfalls(d);
       setGangView(null); load();
@@ -2383,7 +2402,10 @@ export default function Planning() {
   const saveGangPlan = async () => {
     setGangBusySave(true);
     try {
-      const d = await api.post(`/gang-runs/${gangView.id}/plan`, { ...gangPlanPayload({ draft: true }), draft: true });
+      const body = { ...gangPlanPayload({ draft: true }), draft: true };
+      const d = await overIssue.guard(ack => api.post(`/gang-runs/${gangView.id}/plan`,
+        ack ? { ...body, ack_over_issue: ack } : body));
+      if (!d) return;   // No to the over-issue alarm — nothing was saved
       toast.success(`${d.gang_number} plan saved — ${fmt.num(d.total_parent_sheets)} parent sheets held, lock still pending`);
       sayBoardShortfalls(d);
       setGangView(d); load();
@@ -3811,7 +3833,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || lockShortConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || lockShortConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt || overIssue.dialog) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -5137,7 +5159,7 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
           landing on the backdrop would otherwise close the engine out from under
           the question it is asking (the single engine's own onClose guards the
           same way, against its own list). */}
-      <Modal wide open={!!gangView} onClose={() => { if (gangDiscardAsk || gangSheetPrompt) return; setGangView(null); }}
+      <Modal wide open={!!gangView} onClose={() => { if (gangDiscardAsk || gangSheetPrompt || overIssue.dialog) return; setGangView(null); }}
         title={gangView
           ? gangView.kind === 'merge'
             ? `Combined Run — ${gangView.gang_number} · ${gangView.members.length} sales orders, one pile`
@@ -5757,6 +5779,13 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                         ? <>Leave blank to issue the calculated <b className="text-slate-500">{fmt.num(gangCalc?.parent || 0)}</b>. Type a number to overrule it.</>
                         : <span className="font-semibold text-amber-600">Manual override — issuing {fmt.num(Math.round(+gangIssue))} vs calculated {fmt.num(gangCalc?.parent)} ({+gangIssue >= gangCalc?.parent ? '+' : ''}{fmt.num(Math.round(+gangIssue) - (gangCalc?.parent || 0))}), split across the {gangCalc?.members} products on Lock.</span>}
                     </p>
+                    {/* The alarm's verdict while the planner is still typing — the
+                        rule the save will apply (lib/overIssue.js), said before
+                        anyone presses anything. CI-GANG-0051's 1,200 was this
+                        run's print count typed into this very box. */}
+                    <OverIssueHint required={gangCalc?.parent}
+                      issuing={gangIssue === '' || isNaN(+gangIssue) ? null : Math.round(+gangIssue)}
+                      childSheets={gangCalc?.childSheets} cpp={gangCalc?.cpp} />
                   </div>
                 </Card>
 
@@ -6863,6 +6892,9 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
           if (moved) setLastMove({ ...moved, material_id: boardSel?.id });
           if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
         }} />
+
+      {/* The over-issue alarm — above every engine on this page, drawn by the guard. */}
+      {overIssue.dialog}
     </div>
   );
 }

@@ -14,6 +14,8 @@ import {
   bankPlanningLeftover, unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
+import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
+import { sheetYield } from '../over-issue.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
@@ -1405,6 +1407,58 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         let rem = issueOverride - issued.reduce((s, x) => s + x, 0);
         const byFrac = raw.map((x, i) => ({ i, f: x - Math.floor(x) })).sort((a, b) => b.f - a.f);
         for (let k = 0; k < byFrac.length && rem > 0; k++) { issued[byFrac[k].i]++; rem--; }
+      }
+      // 2b) THE OVER-ISSUE ALARM (over-issue-gate.js). Judged here — after the
+      // maths, before a single figure is written — so a refusal leaves nothing
+      // behind but the planner's screen. CI-GANG-0051 is why: `natural` was
+      // 400, 1,200 was typed, and it went to the floor without a word.
+      //
+      // What is judged is what the floor will actually cut. Usually that is the
+      // typed override, but a Board Mix IS the pile — step 4 only asks that it
+      // cover the issue, never that it stop there — so a mix adding up past the
+      // override is judged instead. A gang's rows cover sheet for sheet (a
+      // differing cut is refused below); a merge row carries its chosen cuts and
+      // is priced the way step 4 prices it.
+      const coPrinted = gang.kind !== 'merge' && gang.layout_mode === 'shared';
+      let issuing = issued.reduce((s, x) => s + x, 0);
+      let via = issueOverride != null && issueOverride !== natural ? 'override' : null;
+      if (Array.isArray(req.body.mix) && req.body.mix.length && plan[0]?.fit?.count > 0) {
+        const runUps = plan[0].fit.count;
+        const covered = req.body.mix.reduce((s, r) => {
+          const sh = Number(r.sheets);
+          if (!Number.isFinite(sh) || !(sh > 0)) return s;
+          const u = gang.kind === 'merge' && Number(r.ups) > 0 ? Number(r.ups) : runUps;
+          return s + rowCovers({ sheets: sh, ups: u, plannedUps: runUps });
+        }, 0);
+        if (Math.round(covered) > issuing) { issuing = Math.round(covered); via = 'mix'; }
+      }
+      // The loss in cartons, product by product. A co-printed sheet carries
+      // every member, so each yield runs off the WHOLE run; separate
+      // impositions each run off their own share of it.
+      const yieldAt = (idx, runParents) => {
+        const p = plan[idx];
+        const parents = coPrinted ? runParents : (natural > 0 ? runParents * p.parentSheets / natural : 0);
+        return sheetYield({ parents, cpp: p.fit.count, ups: p.eff.ups,
+          wastage: coPrinted ? plan[0].wastage : p.wastage });
+      };
+      const cpps = [...new Set(plan.map(p => p.fit.count))];
+      const overIssue = overIssueRefusal({
+        required: natural, issuing, ack: req.body.ack_over_issue,
+        context: {
+          where: 'run', ref: gang.gang_number, action: draft ? 'save' : 'lock', via,
+          child_sheets: plan.reduce((s, p) => s + p.sheets, 0),
+          cpp: cpps.length === 1 ? cpps[0] : null,
+          products: plan.map((p, idx) => ({
+            name: p.eff.name, code: p.eff.code, ordered: p.line.qty,
+            yield_required: yieldAt(idx, natural), yield_issuing: yieldAt(idx, issuing),
+          })),
+        },
+      });
+      if (overIssue.acked) {
+        await audit('gang_run', gang.id, 'over_issue_confirmed',
+          overIssueAuditText({ ref: gang.gang_number, judged: overIssue.judged, via,
+            action: draft ? 'run plan saved' : 'run plan locked' }),
+          qc, req.user.name);
       }
       // 3) Persist.
       for (let idx = 0; idx < plan.length; idx++) {

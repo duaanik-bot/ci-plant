@@ -8,6 +8,9 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
+import { effectiveProduct } from '../helpers.js';
+import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
+import { overIssueLevel, sheetYield } from '../over-issue.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance, mixCuttingVariance, distributeActualAcrossMembers } from '../production-variance.js';
@@ -450,6 +453,48 @@ r.get('/job-cards/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// THE OVER-ISSUE ALARM for a job card's hand-typed sheets_issued
+// (over-issue-gate.js). Three doors can retype it before cutting — the detail
+// form below, Amend, and the Print Planning queue edit — and each is judged
+// here against what Planning locked: a single job's own line, or a run card's
+// members together (their parent_sheets_required already carry any override
+// that was itself confirmed at the run's lock). A card split off a run after
+// die cutting counts cartons in that column, not parent sheets, so it is never
+// judged. Returns null inside the rule, throws the structured 409 until the
+// planner answers, and records the answer when it comes.
+async function judgeParentSheets({ jc, issuing, required = null, ack, action, qc, oc, user }) {
+  if (jc.parent_job_card_id || (!jc.order_line_id && !jc.gang_run_id)) return null;
+  const plan = jc.order_line_id
+    ? await oc('SELECT * FROM order_lines WHERE id=$1', [jc.order_line_id])
+    : await oc(`SELECT SUM(parent_sheets_required)::int AS parent_sheets_required,
+                       SUM(sheets_required)::int AS sheets_required
+                  FROM order_lines WHERE gang_run_id=$1`, [jc.gang_run_id]);
+  const need = required ?? plan?.parent_sheets_required ?? null;
+  if (overIssueLevel({ required: need, issuing }).level === 'none') return null;
+  const products = [];
+  if (jc.order_line_id && plan) {
+    const master = await oc('SELECT * FROM products WHERE id=$1', [plan.product_id]);
+    if (master) {
+      const eff = effectiveProduct(master, plan);
+      const made = Math.ceil(netProduceQty(plan) / Math.max(1, eff.ups));
+      const wastage = Math.max(0, (Number(plan.sheets_required) || 0) - made);
+      const at = parents => sheetYield({ parents, cpp: jc.children_per_parent, ups: eff.ups, wastage });
+      products.push({ name: eff.name, code: master.code, ordered: plan.qty,
+        yield_required: at(need), yield_issuing: at(issuing) });
+    }
+  }
+  const out = overIssueRefusal({
+    required: need, issuing, ack,
+    context: { where: 'job_card', ref: jc.jc_number, action, via: 'job_card',
+      child_sheets: plan?.sheets_required ?? null, cpp: jc.children_per_parent, products },
+  });
+  if (out.acked) {
+    await audit('job_card', jc.id, 'over_issue_confirmed',
+      overIssueAuditText({ ref: jc.jc_number, judged: out.judged, action }), qc, user);
+  }
+  return out;
+}
+
 r.put('/job-cards/:id', canPlan, async (req, res, next) => {
   try {
     const { qty_planned, sheets_issued, machine_id } = req.body;
@@ -475,6 +520,11 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
       if (sheets_issued !== undefined) {
         const n = Number(sheets_issued);
         if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error('Issued sheets cannot be negative'), { status: 400 });
+        // Only a CHANGED figure is a decision — the form sends the field on every save.
+        if (Math.round(n) !== jc.sheets_issued) {
+          await judgeParentSheets({ jc, issuing: Math.round(n), ack: req.body.ack_over_issue,
+            action: 'job card detail form saved', qc, oc, user: req.user.name });
+        }
         add('sheets_issued', Math.round(n));
       }
       if (machine_id !== undefined) add('machine_id', machine_id || null);
@@ -708,6 +758,11 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
           if (!cuttingPending) {
             throw Object.assign(new Error('Cutting has already started/completed — the board is consumed. Use Adjust on the cutting stage instead.'), { status: 409 });
           }
+          // Judged against the plan this very amendment may just have re-derived
+          // (a new order qty). An auto-followed figure IS that plan, so only a
+          // hand-typed one can ever raise the alarm.
+          await judgeParentSheets({ jc, issuing: nextSheets, required: derived?.parentSheets ?? null,
+            ack: req.body.ack_over_issue, action: 'job card amended', qc, oc, user: req.user.name });
           jcChanges.push(['sheets_issued', jc.sheets_issued, nextSheets]);
         }
       }
@@ -1720,6 +1775,12 @@ r.put('/print-planning/:jobCardId', canPlan, async (req, res, next) => {
       if (sheets_issued !== undefined) {
         const n = Number(sheets_issued);
         if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error('Issued sheets cannot be negative'), { status: 400 });
+        // The queue form sends every field on every save — only a CHANGED
+        // figure is a decision worth the alarm.
+        if (Math.round(n) !== jc.sheets_issued) {
+          await judgeParentSheets({ jc, issuing: Math.round(n), ack: req.body.ack_over_issue,
+            action: 'print queue entry edited', qc, oc, user: req.user.name });
+        }
         await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [Math.round(n), id]);
       }
       if (operator !== undefined)

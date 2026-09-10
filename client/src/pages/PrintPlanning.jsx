@@ -36,6 +36,7 @@ import { HOLD_REASONS } from '../sections.js';
 import { SET_TYPE_META, SetTypeChip, cardSetType, isMergeRun } from '../components/SetType.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { plannedChildSheets } from '../lib/received.js';
+import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 
 const TRIAGE = 'triage';
 
@@ -480,6 +481,8 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Retyping "Sheets issued" well past the plan raises the over-issue alarm.
+  const overIssue = useOverIssueGuard();
 
   const save = async () => {
     setBusy(true);
@@ -505,12 +508,19 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
       const dest = (lanes[newMachine ?? 'triage'] || []).map(c => c.id).filter(i => !movingIds.includes(i));
       body.ordered_ids = [...dest, ...movingIds];
     }
-    try { await api.put(`/print-planning/${card.id}`, body); onSaved(); }
+    // Answers accumulate across retries. The over-issue alarm is judged before
+    // the press moves, so a strength collision can still follow a yes — and
+    // that retry must carry the yes too, or the alarm would ask all over again.
+    const answers = {};
+    const send = extra => overIssue.guard(ack => {
+      if (ack) answers.ack_over_issue = ack;
+      return api.put(`/print-planning/${card.id}`, { ...body, ...answers, ...extra });
+    });
+    try { if (await send({}) !== null) onSaved(); }
     catch (e) {
       if (e.data?.code === 'PRODUCT_STRENGTH_COLLISION') {
         onClash(e.data.collision, async () => {
-          await api.put(`/print-planning/${card.id}`, { ...body, confirm_collision: true });
-          onSaved();
+          if (await send({ confirm_collision: true }) !== null) onSaved();
         });
       } else alert(e?.message || 'Could not save changes');
     }
@@ -558,6 +568,10 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
             {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
+        {/* Inside the card: its stopPropagation keeps a click in the alarm from
+            bubbling (React bubbles through portals) to the backdrop that closes
+            this form. */}
+        {overIssue.dialog}
       </div>
     </div>
   );

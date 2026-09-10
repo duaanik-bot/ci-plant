@@ -267,10 +267,13 @@ test('Save and Lock send ONE payload, differing only by the draft flag', () => {
   // saved plan locks as something other than what was saved.
   assert.match(planning, /const gangPlanPayload = \(\{ draft = false \} = \{\}\) =>/,
     'the run payload must be built in ONE place');
-  assert.match(planning, /api\.post\(`\/gang-runs\/\$\{gangView\.id\}\/plan`, gangPlanPayload\(\)\)/,
+  // Both go through the over-issue guard, whose answer (ack_over_issue) is the
+  // ONLY thing ever added on top of the shared body.
+  const sent = String.raw`\s*\n\s*const d = await overIssue\.guard\(ack => api\.post\(\`\/gang-runs\/\$\{gangView\.id\}\/plan\`,\s*\n\s*ack \? \{ \.\.\.body, ack_over_issue: ack \} : body\)\)`;
+  assert.match(planning, new RegExp(String.raw`const body = gangPlanPayload\(\);` + sent),
     'Lock must use the shared builder');
   assert.match(planning,
-    /api\.post\(`\/gang-runs\/\$\{gangView\.id\}\/plan`, \{ \.\.\.gangPlanPayload\(\{ draft: true \}\), draft: true \}\)/,
+    new RegExp(String.raw`const body = \{ \.\.\.gangPlanPayload\(\{ draft: true \}\), draft: true \};` + sent),
     'Save must use the shared builder and send draft: true');
 });
 

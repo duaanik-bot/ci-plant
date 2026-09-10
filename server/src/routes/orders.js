@@ -12,6 +12,8 @@ import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
+import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
+import { sheetYield } from '../over-issue.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { splitMasterFields } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -1865,6 +1867,32 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         if (!bal.sufficient) throw Object.assign(
           new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — allocate ${Math.ceil(bal.balance)} more`),
           { status: 409 });
+        // THE OVER-ISSUE ALARM (over-issue-gate.js). A mix row's sheet count is
+        // typed by hand and the rows ARE the pile the floor cuts, while the check
+        // above refuses only UNDER-coverage — so a mix adding up well past the
+        // cut plan is an over-issue however it was reached. Judged before any mix
+        // row is written; a refusal rolls the figures above back with it.
+        {
+          const made = Math.ceil(netProduceQty(line) / Math.max(1, eff.ups));
+          const wasteUsed = Math.max(0, sheets - made);
+          const yieldAt = parents => sheetYield({ parents, cpp: plannedUps, ups: eff.ups, wastage: wasteUsed });
+          const ref = eff.name || product.name;
+          const overIssue = overIssueRefusal({
+            required: parentSheets, issuing: Math.round(bal.covered), ack: req.body.ack_over_issue,
+            context: {
+              where: 'line', ref, action: draft ? 'save' : 'lock', via: 'mix',
+              child_sheets: sheets, cpp: plannedUps,
+              products: [{ name: ref, code: product.code, ordered: line.qty,
+                yield_required: yieldAt(parentSheets), yield_issuing: yieldAt(bal.covered) }],
+            },
+          });
+          if (overIssue.acked) {
+            await audit('order_line', line.id, 'over_issue_confirmed',
+              overIssueAuditText({ ref, judged: overIssue.judged, via: 'mix',
+                action: draft ? 'plan saved' : 'plan locked' }),
+              qc, req.user.name);
+          }
+        }
 
         // ── Per-row leftover choices (v2) ─────────────────────────────────
         // req.body.mix_leftovers: [{material_id, bank}] — banking is opt-in

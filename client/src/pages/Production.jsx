@@ -9,6 +9,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
+import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
 // PLANNED date. The rule and the presets live in one lib so the chip counts and
 // the filtered list can never disagree; see its header for why planned_date.
@@ -249,6 +250,9 @@ export default function Production() {
   const [editing, setEditing] = useState(null);
   const [toolingForward, setToolingForward] = useState(null);
   const [jobForm, setJobForm] = useState({ qty_planned: '', sheets_issued: '', machine_id: '' });
+  // The over-issue alarm (OverIssueAlarm.jsx) for the two doors here that
+  // retype a job card's parent sheets — the detail form and Amend.
+  const overIssue = useOverIssueGuard();
   // Inherited-spec editor (pre-finalise): output/shade/die/block/emboss/leafing
   // are editable on the card and fire the same "update the master?" question
   // Planning and Artwork use. jcSyncPrompt = { changed } while it asks.
@@ -573,7 +577,9 @@ export default function Production() {
   };
   const saveJobForm = async () => {
     if (!editing) return;
-    await api.put(`/job-cards/${editing.id}`, jobForm);
+    const saved = await overIssue.guard(ack => api.put(`/job-cards/${editing.id}`,
+      ack ? { ...jobForm, ack_over_issue: ack } : jobForm));
+    if (!saved) return;   // No to the over-issue alarm — the form stays open, as typed
     toast.success(`${editing.jc_number} updated`);
     setEditing(null);
     load();
@@ -595,7 +601,9 @@ export default function Production() {
       if (!amending.gang_parent && amendForm.order_qty !== '' && +amendForm.order_qty !== +amending.line_qty) body.order_qty = amendForm.order_qty;
       if (amendForm.qty_planned !== '' && +amendForm.qty_planned !== +amending.qty_planned) body.qty_planned = amendForm.qty_planned;
       if (amendForm.sheets_issued !== '' && +amendForm.sheets_issued !== +amending.sheets_issued) body.sheets_issued = amendForm.sheets_issued;
-      const updated = await api.post(`/job-cards/${amending.id}/amend`, body);
+      const updated = await overIssue.guard(ack => api.post(`/job-cards/${amending.id}/amend`,
+        ack ? { ...body, ack_over_issue: ack } : body));
+      if (!updated) return;   // No to the over-issue alarm — the amendment stays open, as typed
       toast.success(`${updated.jc_number} amended — trail recorded`);
       setAmending(null);
       if (editing?.id === updated.id) { setEditing(updated); setJobForm(f => ({ ...f, qty_planned: updated.qty_planned ?? '', sheets_issued: updated.sheets_issued ?? '' })); }
@@ -1026,7 +1034,7 @@ export default function Production() {
         )}
       </Modal>
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing ? `Job Card Form — ${editing.jc_number}` : ''} wide
+      <Modal open={!!editing} onClose={() => { if (overIssue.dialog) return; setEditing(null); }} title={editing ? `Job Card Form — ${editing.jc_number}` : ''} wide
         footer={<>
           <Button variant="secondary" onClick={() => setEditing(null)}>Close</Button>
           {editing && !editing.finalised_at && canEditJobCard &&
@@ -1361,7 +1369,7 @@ export default function Production() {
       {/* Amend — qty/sheets change after finalise, reason mandatory. Order qty
           flows back to the sales line and re-derives the plan; the trail lands
           in the universal timeline as order_line/qty_amended + job_card/amended. */}
-      <Modal open={!!amending} onClose={() => setAmending(null)}
+      <Modal open={!!amending} onClose={() => { if (overIssue.dialog) return; setAmending(null); }}
         title={amending ? `Amend — ${amending.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setAmending(null)}>Cancel</Button>
@@ -1475,6 +1483,9 @@ export default function Production() {
       {/* Soft shade-card / plate alarms — named, overridable, audited. */}
       <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
         onAcknowledge={kind => doStart(alarm.jc, alarm.st, alarm.lc, { ...alarm.ack, [kind]: true })} />
+
+      {/* Over-issue alarm — a job card's parent sheets retyped well past the plan. */}
+      {overIssue.dialog}
     </div>
   );
 }

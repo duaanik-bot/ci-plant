@@ -62,6 +62,11 @@ export const HANDLED_BY = {
   COMMIT_EXCEEDS_FREE: { at: ['pages/Planning.jsx'], says: '/board/commit' },
   NOTHING_COMMITTED: { at: ['pages/Planning.jsx'], says: '/board/uncommit' },
   scanned: { at: ['components/ImportPOWizard.jsx'], says: 'scanned' },
+  // The over-issue alarm. Every call that can raise it goes through
+  // useOverIssueGuard, which is where the code is branched on and the dialog
+  // drawn — so the guard is what is named. over-issue-wiring.test.js holds each
+  // call site to going through it.
+  OVER_ISSUE: { at: ['components/OverIssueAlarm.jsx'], says: 'OVER_ISSUE' },
 };
 
 export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));

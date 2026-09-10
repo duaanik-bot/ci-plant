@@ -23,7 +23,9 @@ const slice = (src, from, len = 6000) => {
 
 // ── The plan route ──────────────────────────────────────────────────────────
 
-const planRoute = slice(gangs, "r.post('/gang-runs/:id/plan'", 48000);
+// Wide enough to reach the route's last arm — it grew past 48,000 characters
+// when the over-issue alarm (step 2b) joined it.
+const planRoute = slice(gangs, "r.post('/gang-runs/:id/plan'", 60000);
 
 test('the basis is captured by the branch that computed the run’s fit', () => {
   // Co-printed: the SAME (board, child) childFit was struck on, one line apart.

@@ -374,7 +374,9 @@ export function Checkbox({ label, ...props }) {
 // again, for the few forms that are genuinely a workspace rather than a dialog —
 // the Sort & Paste run, where a row carries three chip rails and a quantity and
 // the old width forced every one of them onto its own line.
-const MODAL_WIDTH = { default: 'max-w-xl', wide: 'max-w-5xl', xl: 'max-w-[1400px]' };
+// `alarm` is the over-issue alarm (OverIssueAlarm.jsx) — wider than a confirm on
+// purpose, so it reads as a stop rather than one more "OK?".
+const MODAL_WIDTH = { default: 'max-w-xl', alarm: 'max-w-3xl', wide: 'max-w-5xl', xl: 'max-w-[1400px]' };
 export function Modal({ open, onClose, title, children, footer, wide, size, layer }) {
   const tier = useTier();
   const phone = tier === 'phone';
