@@ -425,3 +425,26 @@ test('the floor code travels with the verdict — materials.code is on NO board,
     'a refused board keeps its code too, or a search for it returns nothing at all');
   assert.match(page, /\{opt\.spec &&/, 'and the row prints it, the way the warehouse table does');
 });
+
+// ── The page that owns the picker, on a phone ─────────────────────────────
+//
+// Checked at 375×812 on the phone tier. The picker itself is clean: nothing
+// overflows, the board rows and chips wrap, the search box's placeholder floor
+// resolves to min(272px, 100%) so the longer "…, code…" placeholder cannot pan
+// the page, and the whole substitute + frozen-board override flow is reachable.
+//
+// Its TOOLBAR was not. The filter rail measured 436px inside a 375px screen with
+// no flex-wrap, and documentElement.scrollWidth stayed at 375 — so the page did
+// not pan and Export was simply CLIPPED OFF the screen, unreachable on every
+// phone. Same shape as the Section.jsx rail in the placeholder-floor sweep: the
+// search box is the only shrinkable child, and shrinking it to nothing is the
+// failure that floor exists to prevent. The rail wraps instead.
+//
+// Lives here because this file already holds the Extra Sheets page's assertions;
+// there is no responsive suite to put it in.
+test('the Extra Sheets filter rail wraps rather than clipping Export off a phone', () => {
+  assert.match(page, /className="mb-4 flex flex-wrap items-center gap-2"/,
+    'the rail must wrap — a nowrap rail clips its last child with no way to scroll to it');
+  assert.match(page, /<SearchInput className="w-80 max-w-full"/,
+    'and w-80 is a preferred width, never one that may exceed the screen');
+});

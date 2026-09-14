@@ -356,8 +356,13 @@ export default function ExtraSheets() {
           { key: 'closed', label: 'Rejected / Reversed', count: rows.filter(r => ['rejected', 'cancelled', 'reversed'].includes(r.status)).length },
           { key: 'all', label: 'All', count: rows.length },
         ]} />
-        <div className="mb-4 flex items-center gap-2">
-          <SearchInput className="w-80" value={q} onChange={setQ} placeholder="XS, JC, product, board, operator…" />
+        {/* flex-wrap, not a narrower box: on a 375px phone this rail measured
+            436px and the page does not pan, so Export was simply clipped off
+            the screen and unreachable. The search box is the only shrinkable
+            child, and shrinking it to nothing is the failure the placeholder
+            floor exists to prevent — so the rail wraps instead. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <SearchInput className="w-80 max-w-full" value={q} onChange={setQ} placeholder="XS, JC, product, board, operator…" />
           <ResetFilters filters={filters} />
           <ExportMenu build={() => ({
             name: `Extra Sheets ${fmt.title(tab)}`,
