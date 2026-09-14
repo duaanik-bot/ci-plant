@@ -98,19 +98,40 @@ const LOCKED_LINES = `
 // The trigger condition, straight from the geometry: a declared parent the
 // board cannot yield. Orientation-free and equal-is-fine, exactly as
 // parentFitsBoard judges it — expressed in SQL so the scan stays one query.
-const ARMED_MASTERS = `
-  SELECT p.id, p.code, p.name, p.parent_l, p.parent_w, p.child_l, p.child_w,
-         m.name AS board, m.sheet_l AS board_l, m.sheet_w AS board_w,
-         (SELECT count(*) FROM order_lines ol WHERE ol.product_id = p.id
-            AND ol.status IN ('pending','planned','ready','in_production')) AS open_lines
-  FROM products p
-  JOIN materials m ON m.id = p.board_material_id
-  WHERE p.active = 1
+//
+// SCANNED ON THE EFFECTIVE PAIR, NOT THE MASTER. The first cut of this script
+// compared each master's parent against its OWN board and reported clean the
+// same afternoon 47 products were sitting on an impossible pair — because the
+// master is innocent in every one of them. `spec_override.board_material_id`
+// moves a JOB to a different board (the whole FP-* metallic family was moved
+// from Met Saffire 340 20x38 to the 20x36 sheet) and nothing moves the parent
+// with it, so the impossible pair exists only at the effective spec — which is
+// exactly what planLockParent judges. A checker narrower than the guard it
+// backs reports silence the guard would refuse.
+//
+// `reachable` is the column that matters operationally: a line still short of
+// in_production can reach a plan lock, so the guard WILL refuse it. Everything
+// already in production is locked and correct — it is listed so the exposure
+// is legible, not because anything is wrong with it today.
+const ARMED_PAIRS = `
+  SELECT p.id, p.code, p.name, p.parent_l, p.parent_w,
+         eff.name AS board, eff.sheet_l AS board_l, eff.sheet_w AS board_w,
+         (ol.spec_override->>'board_material_id') IS NOT NULL AS board_is_job_override,
+         count(*)::int AS lines,
+         count(*) FILTER (WHERE ol.status IN ('pending','planned','ready'))::int AS reachable,
+         string_agg(DISTINCT COALESCE(gr.gang_number, '(single)'), ' ') AS runs
+  FROM order_lines ol
+  JOIN products p ON p.id = ol.product_id
+  JOIN materials eff ON eff.id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
+  LEFT JOIN gang_runs gr ON gr.id = ol.gang_run_id
+  WHERE ol.status IN ('pending','planned','ready','in_production')
     AND p.parent_l IS NOT NULL AND p.parent_w IS NOT NULL
-    AND m.sheet_l > 0 AND m.sheet_w > 0
-    AND ( GREATEST(p.parent_l, p.parent_w) > GREATEST(m.sheet_l, m.sheet_w) + 1e-6
-       OR LEAST(p.parent_l, p.parent_w)    > LEAST(m.sheet_l, m.sheet_w)    + 1e-6 )
-  ORDER BY open_lines DESC, p.code`;
+    AND eff.sheet_l > 0 AND eff.sheet_w > 0
+    AND ( GREATEST(p.parent_l, p.parent_w) > GREATEST(eff.sheet_l, eff.sheet_w) + 1e-6
+       OR LEAST(p.parent_l, p.parent_w)    > LEAST(eff.sheet_l, eff.sheet_w)    + 1e-6 )
+  GROUP BY p.id, p.code, p.name, p.parent_l, p.parent_w,
+           eff.name, eff.sheet_l, eff.sheet_w, board_is_job_override
+  ORDER BY reachable DESC, p.code`;
 
 const c = new pg.Client({
   connectionString: url,
@@ -118,7 +139,7 @@ const c = new pg.Client({
 });
 await c.connect();
 const locked = (await c.query(LOCKED_LINES)).rows;
-const armed = (await c.query(ARMED_MASTERS)).rows;
+const armed = (await c.query(ARMED_PAIRS)).rows;
 await c.end();
 
 const n = x => Number(x).toLocaleString('en-IN');
@@ -158,15 +179,24 @@ if (wrong.length) {
 
 // ── CHECK 2 — masters that can arm it again ─────────────────────────────────
 if (armed.length) {
-  const live = armed.filter(r => +r.open_lines > 0);
-  console.error(`\n${strict ? '✗' : '!'} ${armed.length} active product(s) declare a parent their board cannot yield`
-    + ` (${live.length} with open lines)`);
-  console.error('  planLockParent() now refuses these at both plan locks, so a planner is told to');
-  console.error('  fix the master — which is the outcome wanted. Until each master is corrected,');
-  console.error('  every one of these is a job that cannot be planned.\n');
+  const reach = armed.filter(r => r.reachable > 0);
+  const lines = armed.reduce((s, r) => s + r.lines, 0);
+  console.error(`\n${strict ? '✗' : '!'} ${armed.length} product(s) on ${lines} open line(s) plan on a board their parent cannot yield`);
+  if (reach.length) {
+    console.error(`  ${reach.length} of them can still REACH A PLAN LOCK — planLockParent will refuse those,`);
+    console.error('  naming the member. The planner clears it by correcting the parent in the cut plan');
+    console.error("  (parent_l/parent_w are job-overridable) or on the Product Master.");
+  } else {
+    console.error('  All of them are already in production: their plans are locked and correct, and');
+    console.error('  nothing can re-plan them. Listed so the exposure is legible, not as a defect.');
+  }
+  console.error('');
   for (const r of armed) {
-    console.error(`  ${r.code.padEnd(9)} parent ${r.parent_l}×${r.parent_w}" vs board ${r.board_l}×${r.board_w}"`
-      + `   ${r.open_lines} open line(s)   ${r.board}`);
+    console.error(`  ${r.reachable > 0 ? '→' : ' '} ${r.code.padEnd(9)} parent ${r.parent_l}×${r.parent_w}"`
+      + ` vs ${r.board_l}×${r.board_w}"  ${r.board}`);
+    console.error(`      ${r.lines} line(s)${r.reachable ? `, ${r.reachable} still plannable` : ''}`
+      + `${r.board_is_job_override ? ' · board is a JOB OVERRIDE, the master itself is fine' : ' · the MASTER declares this pair'}`
+      + `   ${r.runs}`);
   }
 }
 
