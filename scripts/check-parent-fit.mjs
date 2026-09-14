@@ -114,23 +114,32 @@ const LOCKED_LINES = `
 // already in production is locked and correct — it is listed so the exposure
 // is legible, not because anything is wrong with it today.
 const ARMED_PAIRS = `
-  SELECT p.id, p.code, p.name, p.parent_l, p.parent_w,
-         eff.name AS board, eff.sheet_l AS board_l, eff.sheet_w AS board_w,
-         (ol.spec_override->>'board_material_id') IS NOT NULL AS board_is_job_override,
+  WITH e AS (
+    SELECT ol.id, ol.status, ol.product_id, ol.gang_run_id,
+           COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l) AS parent_l,
+           COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w) AS parent_w,
+           (ol.spec_override->>'parent_l') IS NOT NULL AS parent_is_job_override,
+           (ol.spec_override->>'board_material_id') IS NOT NULL AS board_is_job_override,
+           COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_id
+    FROM order_lines ol JOIN products p ON p.id = ol.product_id
+    WHERE ol.status IN ('pending','planned','ready','in_production'))
+  SELECT p.id, p.code, p.name, e.parent_l, e.parent_w,
+         b.name AS board, b.sheet_l AS board_l, b.sheet_w AS board_w,
+         e.board_is_job_override, e.parent_is_job_override,
+         bool_or(gr.layout_mode = 'shared' AND gr.kind <> 'merge') AS shared_layout,
          count(*)::int AS lines,
-         count(*) FILTER (WHERE ol.status IN ('pending','planned','ready'))::int AS reachable,
+         count(*) FILTER (WHERE e.status IN ('pending','planned','ready'))::int AS reachable,
          string_agg(DISTINCT COALESCE(gr.gang_number, '(single)'), ' ') AS runs
-  FROM order_lines ol
-  JOIN products p ON p.id = ol.product_id
-  JOIN materials eff ON eff.id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
-  LEFT JOIN gang_runs gr ON gr.id = ol.gang_run_id
-  WHERE ol.status IN ('pending','planned','ready','in_production')
-    AND p.parent_l IS NOT NULL AND p.parent_w IS NOT NULL
-    AND eff.sheet_l > 0 AND eff.sheet_w > 0
-    AND ( GREATEST(p.parent_l, p.parent_w) > GREATEST(eff.sheet_l, eff.sheet_w) + 1e-6
-       OR LEAST(p.parent_l, p.parent_w)    > LEAST(eff.sheet_l, eff.sheet_w)    + 1e-6 )
-  GROUP BY p.id, p.code, p.name, p.parent_l, p.parent_w,
-           eff.name, eff.sheet_l, eff.sheet_w, board_is_job_override
+  FROM e
+  JOIN products p ON p.id = e.product_id
+  JOIN materials b ON b.id = e.board_id
+  LEFT JOIN gang_runs gr ON gr.id = e.gang_run_id
+  WHERE e.parent_l IS NOT NULL AND e.parent_w IS NOT NULL
+    AND b.sheet_l > 0 AND b.sheet_w > 0
+    AND ( GREATEST(e.parent_l, e.parent_w) > GREATEST(b.sheet_l, b.sheet_w) + 1e-6
+       OR LEAST(e.parent_l, e.parent_w)    > LEAST(b.sheet_l, b.sheet_w)    + 1e-6 )
+  GROUP BY p.id, p.code, p.name, e.parent_l, e.parent_w,
+           b.name, b.sheet_l, b.sheet_w, e.board_is_job_override, e.parent_is_job_override
   ORDER BY reachable DESC, p.code`;
 
 const c = new pg.Client({
@@ -183,9 +192,15 @@ if (armed.length) {
   const lines = armed.reduce((s, r) => s + r.lines, 0);
   console.error(`\n${strict ? '✗' : '!'} ${armed.length} product(s) on ${lines} open line(s) plan on a board their parent cannot yield`);
   if (reach.length) {
-    console.error(`  ${reach.length} of them can still REACH A PLAN LOCK — planLockParent will refuse those,`);
-    console.error('  naming the member. The planner clears it by correcting the parent in the cut plan');
-    console.error("  (parent_l/parent_w are job-overridable) or on the Product Master.");
+    const runLock = reach.filter(r => !r.shared_layout);
+    console.error(`  ${reach.length} can still reach a plan lock. ${runLock.length} of those would be REFUSED`);
+    console.error('  outright by planLockParent, naming the member. The planner clears it by setting the');
+    console.error('  parent in the cut plan (parent_l/parent_w are job-overridable) or on the Product Master.');
+    if (reach.length - runLock.length) {
+      console.error(`  The other ${reach.length - runLock.length} sit on a SHARED layout, whose lock measures`);
+      console.error('  childFit(board, child) and never reads the parent (gangs.js) — so the run itself plans');
+      console.error('  fine and only a member planned as a SINGLE is refused. Latent, not blocking.');
+    }
   } else {
     console.error('  All of them are already in production: their plans are locked and correct, and');
     console.error('  nothing can re-plan them. Listed so the exposure is legible, not as a defect.');
