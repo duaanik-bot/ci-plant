@@ -265,3 +265,75 @@ test('the row converts parents to print sheets on the board that will be CUT', (
   assert.match(page, /r\.effective_cuts \|\| r\.planned_cuts \|\| r\.children_per_parent/);
   assert.match(page, /board_substituted/, 'a substituted board must be visible on the row, not only in the audit');
 });
+
+// ── The empty rack — the case the whole picker exists for ──────────────────
+//
+// CI-XS-0013 on CI-JC-0295, live plant 2026-09-14: the planned board (FBB 290
+// GSM 23×36, id 86) had ZERO on the shelf while 109 other boards did. The
+// refusal is right — no sheets means no sheets — but blocked() used to hard-set
+// planned:false, so the dialog's `options.find(o => o.planned)` came back
+// undefined, no board was selected, and the whole Board panel (the warehouse
+// button with it) rendered as an empty grey bar. The one approval that HAD to
+// substitute was the one with no door to the shelf.
+const EMPTY_PLANNED = B(86, 'FBB · 290 GSM · 23x36', 'FBB', 290, 23, 36, 0, 0);
+
+test('a planned board with nothing on the shelf is refused but still reads as PLANNED', () => {
+  const v = judge(EMPTY_PLANNED, { planned: EMPTY_PLANNED, product: PRODUCT, needed: 150, plannedCuts: 4 });
+  assert.equal(v.blocked, true, 'no sheets is no sheets — physics, not a consequence');
+  assert.match(v.block_reason, /Nothing on the shelf/);
+  assert.equal(v.planned, true,
+    'the picker finds the planned board by this flag alone — drop it and the panel renders blank');
+});
+
+test('the empty planned board still ranks first, so the approver reads WHY before the alternatives', () => {
+  const opts = rankOptions([CROSS, LIGHTER, EMPTY_PLANNED, SMALLER].map(
+    b => judge(b, { planned: EMPTY_PLANNED, product: PRODUCT, needed: 150, plannedCuts: 4 })), 150);
+  assert.equal(opts[0].planned, true);
+  assert.equal(opts[0].blocked, true);
+  assert.ok(opts.slice(1).every(o => !o.blocked), 'every real alternative is still offered behind it');
+});
+
+test('a substitute is still judged on its own terms when the planned board is bare', () => {
+  const v = judge(LIGHTER, { planned: EMPTY_PLANNED, product: PRODUCT, needed: 150, plannedCuts: 4 });
+  assert.equal(v.planned, false);
+  assert.equal(v.blocked, false);
+  const g = gateSubstitution({
+    candidate: LIGHTER, planned: EMPTY_PLANNED, product: PRODUCT, needed: 150, plannedCuts: 4,
+    reason: 'planned board empty, press waiting',
+  });
+  assert.equal(g.ok, true, 'an empty planned board must not poison the boards that CAN run');
+});
+
+test('the dialog never hides the warehouse behind having a board', () => {
+  // The button that opens the shelf used to live inside `approving.board && (…)`,
+  // so a planned board that came back blocked took the door down with it.
+  assert.match(page, /\{picker && picker !== 'loading' && \(/,
+    'the shelf renders on the READ succeeding, not on a board being selected');
+  assert.match(page, /\{!approving\.board && \(/, 'no board selected still offers Pick from warehouse');
+  assert.match(page, /browsing: !planned \|\| !!planned\.blocked \|\| planned\.free < r\.qty/,
+    'an empty rack opens the warehouse unprompted — it is the reason he is here');
+  assert.match(page, /const boardBlocked/, 'a board that cannot be cut shows its reason, not a yield of zero');
+  assert.match(page, /picker === null && \(/, 'a failed warehouse read offers a retry, never a blank panel');
+});
+
+// ── Board frozen for another product is not free board ─────────────────────
+//
+// Saving a plan writes a board_allocations hold with origin='plan_lock'. That
+// hold is the plant's promise that those sheets belong to that product, and the
+// XS picker's `free` must honour it — otherwise the approver is offered a whole
+// frozen rack with no warning and no override to tick.
+//
+// COMMITTED_DEMAND_SQL reaches allocations only through order lines in
+// ('planned','ready','in_production'). On the live plant 2026-09-14 two lines
+// sat at 'pending' holding plan_lock freezes over their boards' ENTIRE stock —
+// 454 of 454 sheets of Duplex WB 350 22×28, and 200 of 200 of Saffire 340
+// 23×36 — and the picker reported both as fully free.
+test('the XS shelf read fences plan-lock freezes committed demand cannot see', () => {
+  assert.match(route, /frozen AS \(/, 'the freeze is a named CTE, not folded into committed demand');
+  assert.match(route, /ba\.status = 'active' AND ba\.origin = 'plan_lock'/,
+    "only live freezes — released and consumed holds have already left the shelf");
+  assert.match(route, /ol\.status NOT IN \('planned','ready','in_production'\)/,
+    'exactly the statuses committed demand has NOT charged, or the sheets are deducted twice');
+  assert.match(route, /- COALESCE\(f\.qty, 0\), 0\) AS free/,
+    'and it comes off free, so the default approval cannot touch frozen board');
+});

@@ -87,17 +87,17 @@ export function judge(candidate, {
   const want = Math.max(0, Math.round(num(needed)));
 
   // ── Physics: refusals no reason can buy out of ──────────────────────────
-  if (!c.id) return blocked(c, 'That board is not on the material master.');
+  if (!c.id) return blocked(c, 'That board is not on the material master.', isPlanned);
   if (c.category && c.category !== 'board')
-    return blocked(c, `${c.name || 'That material'} is not a board.`);
+    return blocked(c, `${c.name || 'That material'} is not a board.`, isPlanned);
   if (c.active != null && Number(c.active) === 0 && !isPlanned)
     return blocked(c, `${c.name || 'That board'} is retired from the master.`);
-  if (!shelf) return blocked(c, 'Nothing on the shelf — this board has no available stock.');
+  if (!shelf) return blocked(c, 'Nothing on the shelf — this board has no available stock.', isPlanned);
 
   const cuts = cutsOn(product, c);
   if (!(cuts > 0)) {
     return blocked(c, `A ${dim(product?.child_l)}×${dim(product?.child_w)}″ print sheet cannot be cut `
-      + `from a ${sheetOf(c)} sheet — no guillotine enlarges board.`);
+      + `from a ${sheetOf(c)} sheet — no guillotine enlarges board.`, isPlanned);
   }
 
   // ── Consequences: the plant head's to accept, one named reason each ─────
@@ -186,7 +186,10 @@ export function judge(candidate, {
   };
 }
 
-const blocked = (c, reason) => ({
+// A refusal keeps the `planned` flag. The picker finds the planned board by that
+// flag alone, and an empty rack is EXACTLY when the approver needs the warehouse:
+// dropping it hid the planned board, and the only door to the shelf hung off it.
+const blocked = (c, reason, planned = false) => ({
   id: c.id != null ? Number(c.id) : null,
   name: c.name || c.code || (c.id != null ? `Material #${c.id}` : 'Unknown material'),
   code: c.code || null,
@@ -195,7 +198,8 @@ const blocked = (c, reason) => ({
   sheet_l: c.sheet_l ?? null,
   sheet_w: c.sheet_w ?? null,
   size_label: sheetOf(c),
-  planned: false,
+  leftover: Number(c.leftover) === 1,
+  planned: !!planned,
   free: Math.max(0, Math.round(num(c.free))),
   shelf: Math.max(0, Math.round(num(c.shelf))),
   committed_elsewhere: 0,

@@ -366,14 +366,38 @@ const boardCandidatesSql = `
   ), committed AS (
     SELECT d.material_id, COALESCE(SUM(d.q), 0)::int AS qty
     FROM (${COMMITTED_DEMAND_SQL}) d GROUP BY 1
+  ), frozen AS (
+    -- THE FREEZE COMMITTED DEMAND CANNOT SEE. Saving a plan writes a
+    -- board_allocations hold with origin='plan_lock', and that hold is the
+    -- plant's promise that those sheets belong to that product. But
+    -- COMMITTED_DEMAND_SQL reaches allocations only through its ln CTE,
+    -- which is fenced to order lines in ('planned','ready','in_production').
+    -- A live plan_lock hold on a line in any OTHER status is therefore
+    -- invisible to the free figure, and on the live plant that is not
+    -- hypothetical: two pending lines freeze 454 of the 454 sheets of
+    -- Duplex WB 350 22x28 and 200 of the 200 of Saffire 340 23x36 — whole
+    -- racks the picker offered as fully free, with no booked-elsewhere note
+    -- and no override to tick. Extra sheets ate a frozen rack in one click.
+    --
+    -- Only 'active' rows count: the freeze is RELEASED on cancel/re-plan/
+    -- discard and CONSUMED at cutting start, so an active hold means still
+    -- frozen, never yet drawn. And only the statuses committed demand has
+    -- NOT already charged, or the same sheets would be deducted twice.
+    SELECT ba.material_id, SUM(ba.qty)::int AS qty
+    FROM board_allocations ba
+    JOIN order_lines ol ON ol.id = ba.order_line_id
+    WHERE ba.status = 'active' AND ba.origin = 'plan_lock'
+      AND ol.status NOT IN ('planned','ready','in_production')
+    GROUP BY 1
   )
   SELECT m.id, m.name, m.code, m.category, m.active, m.leftover,
          m.grade, m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet,
          COALESCE(s.qty, 0) AS shelf,
-         GREATEST(COALESCE(s.qty, 0) - COALESCE(c.qty, 0), 0) AS free
+         GREATEST(COALESCE(s.qty, 0) - COALESCE(c.qty, 0) - COALESCE(f.qty, 0), 0) AS free
   FROM materials m
   LEFT JOIN shelf s ON s.material_id = m.id
   LEFT JOIN committed c ON c.material_id = m.id
+  LEFT JOIN frozen f ON f.material_id = m.id
   -- The planned board is listed even when the shelf is bare: the approver has
   -- to see WHY he is being offered alternatives before he sees them.
   WHERE m.category = 'board' AND (COALESCE(s.qty, 0) > 0 OR m.id = $1::int)`;

@@ -226,21 +226,30 @@ export default function ExtraSheets() {
   // Opening the approval loads the warehouse with it. The plant head should not
   // have to guess whether an alternative exists before he goes looking for one —
   // if the planned board is short, the answer is already on the screen.
-  const openApprove = async r => {
-    setApproving({ req: r, qty: String(r.qty), note: '', board: null, substitute_reason: '', allow_committed: false, browsing: false });
-    setPickQ('');
+  // The warehouse read, lifted out so the dialog can ask for it again. A failed
+  // read used to leave the Board panel blank, and the board is CHOSEN in that
+  // panel — a blank one is an approval nobody can make and no way back to it.
+  const loadBoardOptions = async r => {
     setPicker('loading');
     try {
       const p = await api.get(`/extra-sheets/${r.id}/board-options?qty=${r.qty}`);
       setPicker(p);
       const planned = p.options.find(o => o.planned);
       // Pre-select the planned board so the dialog opens on exactly the
-      // approval it has always been, and open the shelf unprompted only when
-      // that board cannot cover the request.
+      // approval it has always been, and open the shelf unprompted the moment
+      // that board cannot cover the request — an EMPTY rack most of all. The
+      // planned board being bare is the reason he is here, not a reason to
+      // hide the alternatives.
       setApproving(a => a && a.req.id === r.id
-        ? { ...a, board: planned || null, browsing: !!planned && planned.free < r.qty }
+        ? { ...a, board: planned || null, browsing: !planned || !!planned.blocked || planned.free < r.qty }
         : a);
     } catch { setPicker(null); }
+  };
+
+  const openApprove = async r => {
+    setApproving({ req: r, qty: String(r.qty), note: '', board: null, substitute_reason: '', allow_committed: false, browsing: false });
+    setPickQ('');
+    await loadBoardOptions(r);
   };
 
   const pickBoard = opt => setApproving(a => ({
@@ -261,9 +270,13 @@ export default function ExtraSheets() {
   // in the quantity box right now, so the yield moves as the plant head trims.
   const approveQty = Math.max(0, Math.round(+approving?.qty || 0));
   const substituting = !!(approving?.board && !approving.board.planned);
+  // Physics refused this board. Its cuts are 0 and its yield is 0, so every
+  // figure derived from it is noise — the approver needs the reason and the
+  // shelf, not "150 sheets × 0 up".
+  const boardBlocked = !!approving?.board?.blocked;
   const boardShort = !!(approving?.board && approving.board.free < approveQty);
   const approveYield = approving?.board ? yieldOf(approving.board, approveQty, approving.req.stage) : 0;
-  const cutsMoved = !!(picker && picker !== 'loading' && approving?.board
+  const cutsMoved = !!(picker && picker !== 'loading' && approving?.board && !approving.board.blocked
     && approving.board.cuts !== picker.planned_cuts);
   // "I was short 200 print sheets and this sheet only cuts 2 up" — how many
   // parents of THIS board buy what the request was actually asking for.
@@ -586,10 +599,37 @@ export default function ExtraSheets() {
 
               {picker === 'loading' && <p className="py-3 text-center text-xs text-slate-400">Reading the warehouse…</p>}
 
-              {picker && picker !== 'loading' && approving.board && (
+              {picker === null && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold text-red-700">
+                    The warehouse could not be read, so there is no board to approve these sheets onto.
+                  </p>
+                  <Button size="sm" variant="secondary" onClick={() => loadBoardOptions(approving.req)}>
+                    <Warehouse size={13} /> Read the warehouse again
+                  </Button>
+                </div>
+              )}
+
+              {picker && picker !== 'loading' && (
                 <>
-                  <div className={`rounded-xl border px-3 py-2.5 ${substituting
-                    ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-slate-50'}`}>
+                  {/* No board selected at all — the planned one is missing from
+                      the master, or the read came back without it. The warehouse
+                      is still one click away; it is never the thing that goes. */}
+                  {!approving.board && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-slate-600">
+                        This job&rsquo;s planned board is not on the warehouse list. Pick the board these sheets will be cut from.
+                      </p>
+                      <Button size="sm" variant="secondary" onClick={() => setApproving({ ...approving, browsing: !approving.browsing })}>
+                        <Warehouse size={13} /> {approving.browsing ? 'Close warehouse' : 'Pick from warehouse'}
+                      </Button>
+                    </div>
+                  )}
+
+                  {approving.board && (
+                  <div className={`rounded-xl border px-3 py-2.5 ${boardBlocked
+                    ? 'border-red-200 bg-red-50/70'
+                    : substituting ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-slate-50'}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -613,6 +653,7 @@ export default function ExtraSheets() {
                     </div>
 
                     {/* The number the press actually cares about. */}
+                    {!boardBlocked && (
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200/70 pt-2 text-xs">
                       <span className="tabular-nums text-slate-600">
                         <b>{fmt.num(+approving.qty || 0)}</b> parent sheets × <b>{approving.board.cuts}</b> up ={' '}
@@ -633,7 +674,18 @@ export default function ExtraSheets() {
                         </button>
                       )}
                     </div>
+                    )}
+
+                    {/* Why this board cannot run, said once, next to the way out. */}
+                    {boardBlocked && (
+                      <p className="mt-2 flex items-start gap-1.5 border-t border-red-200/70 pt-2 text-[11px] font-semibold text-red-700">
+                        <Lock size={12} className="mt-0.5 shrink-0" />
+                        <span>{approving.board.block_reason}{' '}
+                          {approving.board.planned && 'Pick another board from the warehouse, or the sheets cannot be cut at all.'}</span>
+                      </p>
+                    )}
                   </div>
+                  )}
 
                   {/* What changes on the floor if he takes it. */}
                   {substituting && approving.board.cautions.length > 0 && (
