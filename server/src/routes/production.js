@@ -392,6 +392,44 @@ const loadStages = async jc => withReceipts(jc, await q(`
   ${STAGE_XS_LATERAL}
   WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]));
 
+// ── What the job-card register carries ──────────────────────────────────────
+// GET /job-cards hands Production.jsx every card with every stage — 2,020 stage
+// rows on live prod, 2.9 MB, and 1.96 MB of it is the stages. The register
+// draws a rail: the stage's name, its state, the counts on it and who ran it.
+// The bench detail belongs to the station screens (/floor/:section), which
+// fetch their own rows: the line clearance sheet alone was **772 KB** of this
+// payload and no line of client code reads it anywhere.
+//
+// So the rail carries what the rail draws. Keep-list, not a drop-list: a stage
+// gains columns as the plant gains steps, and a new one should have to be asked
+// for here rather than arriving on every register load forever.
+// job-cards-payload.test.js pins what Production.jsx and the plate warehouse
+// read off these rows.
+export const JOB_CARD_STAGE_FIELDS = Object.freeze([
+  'id', 'job_card_id', 'seq', 'stage', 'status', 'unit',
+  'qty_in', 'qty_out', 'qty_scrap',
+  'operator', 'machine_id', 'started_at', 'completed_at',
+  // withReceipts() adds these three, and receivedQty() on the client reads them
+  // in this order to decide what a stage has actually taken in.
+  'received', 'upstream_available', 'live', 'extra_issued',
+]);
+
+export const leanStage = stage => {
+  const out = {};
+  for (const k of JOB_CARD_STAGE_FIELDS) if (k in stage) out[k] = stage[k];
+  return out;
+};
+
+// Card columns the register never reads either — the queue position, the
+// readiness override the floor screens own, the split parentage, and the
+// board/FG figures that reach the client through their own endpoints. Verified
+// by grep across client/src: not one of these names is read anywhere.
+export const JOB_CARD_LIST_DROPS = Object.freeze([
+  'queue_pos', 'fg_location', 'parent_job_card_id', 'child_sheets_planned',
+  'ready_override', 'ready_override_by', 'ready_override_at', 'ready_override_reason',
+  'anchor_line_id', 'die_condition', 'board_short_sheets',
+]);
+
 r.get('/job-cards', async (_req, res, next) => {
   try {
     const rows = await q(`${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
@@ -429,7 +467,11 @@ r.get('/job-cards', async (_req, res, next) => {
       jobCardIdOf: jc => jc.id,
       gangIdOf: jc => jc.gang_run_id,
     });
-    res.json(rows.map(jc => ({ ...jc, stages: withReceipts(jc, byJc[jc.id] || []) })));
+    res.json(rows.map(jc => {
+      const card = { ...jc, stages: withReceipts(jc, byJc[jc.id] || []).map(leanStage) };
+      for (const k of JOB_CARD_LIST_DROPS) delete card[k];
+      return card;
+    }));
   } catch (e) { next(e); }
 });
 

@@ -1301,6 +1301,29 @@ r.patch('/planning/:id/set-type', canPlanWork, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The readiness gates a Planning row carries to the client. readiness() answers
+// a much larger question for the server — the cut arithmetic, the incoming
+// sheets, the mix rows — and all of it was riding to the browser on every one
+// of 356 lines. The planner's screen reads the three gates, the pending flag,
+// and the four numbers boardShortOf() needs to name a shortfall; the rest is
+// not read by ANY line of client code (verified by grep over client/src).
+// planning-payload.test.js pins the list against what Planning.jsx,
+// ReadinessCell and lib/boardShort.js actually touch.
+const PLANNING_READINESS_FIELDS = Object.freeze([
+  'artwork', 'tooling', 'die_number',
+  'material', 'material_pending', 'board_drawn',
+  'parent_needed', 'available_sheets', 'mix_active', 'mix_short',
+  'children_per_parent', 'parent_size', 'cut_waste_pct',
+  'stock_booking', 'board_material_id',
+]);
+
+export const leanReadiness = gates => {
+  if (!gates) return gates;
+  const out = {};
+  for (const k of PLANNING_READINESS_FIELDS) if (k in gates) out[k] = gates[k];
+  return out;
+};
+
 r.get('/planning', async (_req, res, next) => {
   try {
     // pending/planned/ready are the planner's live queue; in_production lines
@@ -1378,7 +1401,7 @@ r.get('/planning', async (_req, res, next) => {
       const sc = shadeCards[l.product_id];
       out.push({
         ...l,                       // carries board_state, stamped above
-        readiness: gates,
+        readiness: leanReadiness(gates),
         light: readinessLight({
           gates, ...lightExtras.get(-l.id),
           machineId: l.machine_id, finalisedAt: released.get(l.id)?.finalised_at ?? null, toolingOk: l.tooling_ok,

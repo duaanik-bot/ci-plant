@@ -21,7 +21,10 @@ function hasValue(v) {
 function loadProductMasterCache() {
   if (productMasterCache) return Promise.resolve(productMasterCache);
   if (!productMasterPromise) {
-    productMasterPromise = api.get('/products')
+    // The identity list, not the whole master: this cache exists to fill in
+    // missing codes and to open the history panel, and /products/identity
+    // carries exactly what those two render (1,854 KB → 1,068 on live prod).
+    productMasterPromise = api.get('/products/identity')
       .then(rows => {
         productMasterCache = new Map((Array.isArray(rows) ? rows : []).map(p => [Number(p.id), p]));
         return productMasterCache;

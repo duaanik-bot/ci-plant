@@ -269,6 +269,38 @@ for (const [table, cols] of Object.entries(MASTERS)) {
 // Single-row "us" record — the buyer block on every PO and the home state that
 // decides CGST/SGST (intra) vs IGST (inter) on purchases.
 const COMPANY_COLS = ['name', 'gstin', 'address', 'city', 'state', 'state_code', 'phone', 'email'];
+// ── The product master, as identity ─────────────────────────────────────────
+// ProductIdentity keeps ONE app-wide cache of the product master so a row that
+// arrives without its codes (a job card, a planning line, a dispatch row) can
+// still show INT / AW / PARTY beside the name, and so the history panel behind
+// that name has something to open with. It was pulling the whole master to do
+// it — **1,854 KB, 54 columns × 1,649 products, on nearly every module load**,
+// because almost every screen renders a product name.
+//
+// This is the same list rendered from it and nothing else: the five identity
+// codes, and the spec ProductBrief prints in the history panel. 1,854 KB → 1,068.
+// Not a general-purpose products endpoint — the Product Master screen, the order
+// form and the pickers keep reading GET /products, which is unchanged.
+// products-identity.test.js pins the column list against both readers.
+r.get('/products/identity', async (_req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT p.id, p.name, p.code, p.internal_carton_code, p.party_item_code, p.party_artwork_code,
+             p.output_number, p.shade_card_number, p.board_grade, p.gsm, p.size,
+             p.child_l, p.child_w, p.parent_l, p.parent_w, p.ups,
+             p.colors, p.colour_type, p.print_process, p.coating, p.special, p.pasting_type,
+             p.emboss, p.leafing, p.leafing_colour, p.die_number, p.block_number,
+             p.product_type, p.rate, p.mrp,
+             m.name AS board_material_name,
+             COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst
+      FROM products p
+      JOIN materials m ON m.id = p.board_material_id
+      LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
+      ORDER BY p.name`);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 r.get('/company-profile', async (_req, res, next) => {
   try { res.json(await one('SELECT * FROM company_profile ORDER BY id LIMIT 1') || {}); }
   catch (e) { next(e); }
