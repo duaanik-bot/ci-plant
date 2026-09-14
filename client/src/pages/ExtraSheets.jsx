@@ -79,6 +79,27 @@ const yieldOf = (opt, qty, stage) =>
 const parentsFor = (printSheets, cuts) =>
   (printSheets > 0 && cuts > 0) ? Math.ceil(printSheets / cuts) : null;
 
+// ── Searching the shelf, exactly as the warehouse searches it ──────────────
+//
+// BoardPickerModal — the warehouse browse table — filters with `rowMatches(m, q)`
+// over the MATERIAL row, so '2336290FBB' or a bare '2336' finds the board, and
+// the code it matched is printed on the row.
+//
+// This list was filtering the VERDICT object instead, and a verdict is mostly
+// prose ABOUT a board: every cross-grade candidate's caution reads "Saffire is
+// not FBB — ink lay-down, shade and stiffness all move", so typing FBB matched
+// every board that was NOT FBB. Typing the planned GSM matched every board that
+// differed from it. The refusal text, the kind, the block reason — all of it was
+// in the haystack.
+//
+// So the haystack is now the board's identity and nothing else: the same fields
+// a warehouse row carries, handed to the same matcher. `spec` is the floor's
+// short code, which the verdict now brings along.
+const boardIdentity = o => ({
+  name: o.name, spec: o.spec, code: o.code, grade: o.grade, gsm: o.gsm,
+  sheet_l: o.sheet_l, sheet_w: o.sheet_w,
+});
+
 const AXIS_CHIP = {
   grade: { label: 'different grade', cls: 'bg-red-50 text-red-600 ring-red-100' },
   gsm:   { label: 'GSM moves',       cls: 'bg-amber-50 text-amber-700 ring-amber-100' },
@@ -105,6 +126,7 @@ function BoardOption({ opt, qty, stage, selected, onPick }) {
         <span className="text-sm font-bold text-slate-800">{opt.name}</span>
         {opt.planned && <Chip cls="bg-brand-50 text-brand-700 ring-brand-100">planned board</Chip>}
         {!opt.planned && opt.kind === 'exact' && <Chip cls="bg-emerald-50 text-emerald-700 ring-emerald-100">identical spec</Chip>}
+        {opt.spec && <span className="font-mono text-[10px] font-semibold text-slate-400">{opt.spec}</span>}
         {opt.leftover && <Chip cls="bg-slate-100 text-slate-500 ring-slate-200">leftover</Chip>}
         {!opt.blocked && opt.cautions.map(c => (
           <Chip key={c.axis} cls={AXIS_CHIP[c.axis]?.cls || 'bg-slate-100 text-slate-500 ring-slate-200'}>
@@ -286,7 +308,7 @@ export default function ExtraSheets() {
   const visibleOptions = useMemo(() => {
     const all = (picker && picker !== 'loading' ? picker.options : []) || [];
     if (!pickQ.trim()) return all;
-    return all.filter(o => rowMatches(o, pickQ, `${o.size_label} ${o.grade || ''} ${o.gsm || ''}`));
+    return all.filter(o => rowMatches(boardIdentity(o), pickQ));
   }, [picker, pickQ]);
 
   // The same three conditions the server's gate enforces, so the button is dark
@@ -594,7 +616,8 @@ export default function ExtraSheets() {
               <div className="ci-form-panel-title">
                 <span>Board</span>
                 <span>{picker === 'loading' ? 'reading the warehouse…'
-                  : `${(picker?.options || []).filter(o => !o.blocked).length} boards on the shelf`}</span>
+                  : `${(picker?.options || []).filter(o => !o.blocked).length} `
+                    + `${picker?.grade_rule ? `${picker.grade_rule} ` : ''}boards on the shelf`}</span>
               </div>
 
               {picker === 'loading' && <p className="py-3 text-center text-xs text-slate-400">Reading the warehouse…</p>}
@@ -730,10 +753,25 @@ export default function ExtraSheets() {
                   {approving.browsing && (
                     <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
                       <SearchInput className="w-full" value={pickQ} onChange={setPickQ}
-                        placeholder="Board, grade, GSM, size…" />
+                        placeholder="Board, grade, GSM, size, code…" />
+
+                      {/* Say the shelf is filtered. 8 boards where the warehouse
+                          holds 109 reads as an empty plant unless the rule that
+                          hid the rest is on the screen beside them. */}
+                      {picker.grade_rule && (
+                        <p className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+                          Only <b className="text-slate-700">{picker.grade_rule}</b> is offered — a different grade changes
+                          ink lay-down, shade and stiffness, so the carton would not match the rest of the run.
+                          {picker.other_grade_hidden > 0
+                            && ` ${fmt.num(picker.other_grade_hidden)} boards of other grades are not shown.`}
+                        </p>
+                      )}
+
                       <div className="max-h-[42vh] space-y-1.5 overflow-y-auto pr-1">
                         {visibleOptions.length === 0 && (
-                          <p className="py-6 text-center text-xs text-slate-400">No board on the shelf matches that.</p>
+                          <p className="py-6 text-center text-xs text-slate-400">
+                            No {picker.grade_rule || ''} board on the shelf matches that — widen the search.
+                          </p>
                         )}
                         {visibleOptions.map(o => (
                           <BoardOption key={o.id} opt={o} qty={+approving.qty || 0} stage={approving.req.stage}

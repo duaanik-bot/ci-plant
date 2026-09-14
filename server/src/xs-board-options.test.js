@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cutsOn, gateSubstitution, judge, parentsFor, rankOptions } from './xs-board-options.js';
+import { cutsOn, gateSubstitution, judge, parentsFor, rankOptions, sameGrade } from './xs-board-options.js';
 
 // Real rows, live plant, 2026-08-22. CI-XS-0004 sits on CI-JC-0159 (FLORA ZN
 // SACHETS): a 15.75×20.75″ child off a 31.5×41.5″ parent — exactly 4 up — on
@@ -336,4 +336,92 @@ test('the XS shelf read fences plan-lock freezes committed demand cannot see', (
     'exactly the statuses committed demand has NOT charged, or the sheets are deducted twice');
   assert.match(route, /- COALESCE\(f\.qty, 0\), 0\) AS free/,
     'and it comes off free, so the default approval cannot touch frozen board');
+});
+
+// ── Best match first: closeness is MEASURED, not counted ───────────────────
+//
+// Anik, 2026-09-14: "you will show the best possible alternative matches first."
+// Ranking used to break ties on "fewest cautions, then most stock", which made
+// every same-grade board a near-tie the biggest pile won. The axes are now
+// ordered by what they cost the plant, caliper first: a GSM change is not
+// correctable, while a changed cut count is — the dialog hands back the parent
+// count that buys the print sheets.
+const LOWSTOCK  = { ...SMALLER, shelf: 120, free: 120 };   // same GSM, smaller sheet, cuts 4 → 2
+const BIGPILE   = { ...LIGHTER, shelf: 9550, free: 9550 }; // same sheet and cuts, 54 GSM lighter
+
+test('the same board in a smaller sheet beats a lighter one with eighty times the stock', () => {
+  const opts = rankOptions([BIGPILE, LOWSTOCK].map(
+    b => judge(b, { planned: PLANNED, product: PRODUCT, needed: 50, plannedCuts: 4 })), 50);
+  assert.equal(opts[0].name, LOWSTOCK.name,
+    'identical caliper makes an identical carton — the sheet size is a cutting-table problem');
+  assert.equal(opts[0].same_gsm, true);
+  assert.equal(opts[1].free, 9550, 'abundance still loses to closeness');
+});
+
+test('with the caliper equal, an unchanged cut count decides before trim', () => {
+  const SAME_CUTS = B(801, 'Duplex WB · 350 GSM · 32x42', 'Duplex WB', 350, 32, 42, 400);
+  const CUTS_MOVE = B(802, 'Duplex WB · 350 GSM · 25x36', 'Duplex WB', 350, 25, 36, 9000);
+  const opts = rankOptions([CUTS_MOVE, SAME_CUTS].map(
+    b => judge(b, { planned: PLANNED, product: PRODUCT, needed: 50, plannedCuts: 4 })), 50);
+  assert.equal(opts[0].id, 801);
+  assert.equal(opts[0].same_cuts, true, '4 up, exactly what was planned');
+  assert.equal(opts[1].same_cuts, false);
+});
+
+test('a board that cannot cover the need still loses to one that can', () => {
+  const PERFECT_BUT_EMPTY = { ...PLANNED, id: 803, name: 'Duplex WB · 350 GSM · 31.5x41.5 (rack B)', shelf: 10, free: 10 };
+  const opts = rankOptions([PERFECT_BUT_EMPTY, BIGPILE].map(
+    b => judge(b, { planned: PLANNED, product: PRODUCT, needed: 50, plannedCuts: 4 })), 50);
+  assert.equal(opts[0].id, BIGPILE.id, 'ten sheets do not solve a fifty-sheet problem');
+});
+
+test('a figure that is not on file sorts last in its tier, never as a tie', () => {
+  const NO_GSM = B(804, 'Duplex WB · unstated · 31.5x41.5', 'Duplex WB', null, 31.5, 41.5, 5000);
+  const opts = rankOptions([NO_GSM, BIGPILE].map(
+    b => judge(b, { planned: PLANNED, product: PRODUCT, needed: 50, plannedCuts: 4 })), 50);
+  assert.equal(opts[0].id, BIGPILE.id, 'a known 54 GSM gap beats an unknown one');
+});
+
+// ── One grade only ────────────────────────────────────────────────────────
+test('sameGrade is exported so the picker and the verdict cannot disagree', () => {
+  assert.equal(sameGrade('FBB', ' fbb '), true);
+  assert.equal(sameGrade('FBB', 'CFBB'), false, 'CFBB is its own grade, not a spelling of FBB');
+  assert.equal(sameGrade('Saffire', 'Met Saffire'), false);
+  assert.equal(sameGrade('FBB', null), false, 'an unstated grade is not a match for a known one');
+});
+
+test('the picker offers one grade, and says so instead of silently shrinking the shelf', () => {
+  assert.match(route, /sameGrade\(m\.grade, planned\.grade\)/,
+    'the offered set is filtered by the same grade test judge() uses');
+  assert.match(route, /Number\(m\.id\) === Number\(planned\.id\)/,
+    'the planned board is kept whatever its grade — it is the reason the list exists');
+  assert.match(route, /const gradeRule = !!String\(planned\.grade \|\| ''\)\.trim\(\)/,
+    'no rule can be applied when the planned board states no grade');
+  assert.match(route, /grade_rule:/);
+  assert.match(route, /other_grade_hidden:/, 'the count that was hidden goes on the wire');
+  assert.match(page, /picker\.grade_rule &&/, 'and the panel prints the rule beside the shortened list');
+  // The filter must NOT have become a refusal — the gate still judges whatever
+  // board it is handed, or the ERP stops recording substitutions it cannot stop.
+  assert.doesNotMatch(route, /blockers\.push\([^)]*grade/i);
+});
+
+// ── Searching the shelf exactly as the warehouse searches it ───────────────
+test('the picker searches the BOARD, not the verdict written about it', () => {
+  assert.match(page, /const boardIdentity = o => \(\{/);
+  assert.match(page, /rowMatches\(boardIdentity\(o\), pickQ\)/,
+    'the same matcher BoardPickerModal uses, over the same fields a material row carries');
+  assert.doesNotMatch(page, /rowMatches\(o, pickQ/,
+    'filtering the verdict put its own prose in the haystack — "Saffire is not FBB" matched FBB');
+  assert.match(page, /placeholder="Board, grade, GSM, size, code…"/,
+    "the warehouse's own placeholder, now that the code is actually searchable");
+});
+
+test('the floor code travels with the verdict — materials.code is on NO board, spec is on 354', () => {
+  assert.match(route, /SELECT m\.id, m\.name, m\.code, m\.spec,/);
+  const v = judge({ ...LIGHTER, spec: '3242296WB' },
+    { planned: PLANNED, product: PRODUCT, needed: 50, plannedCuts: 4 });
+  assert.equal(v.spec, '3242296WB');
+  assert.equal(judge({ id: 9, category: 'tool', spec: 'X1' }, { planned: PLANNED, product: PRODUCT }).spec, 'X1',
+    'a refused board keeps its code too, or a search for it returns nothing at all');
+  assert.match(page, /\{opt\.spec &&/, 'and the row prints it, the way the warehouse table does');
 });

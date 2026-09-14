@@ -42,6 +42,11 @@ const num = v => Number(v || 0);
 const dim = n => Math.round(num(n) * 100) / 100;
 const same = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 
+// ONE spelling of "same grade". judge() decides whether the grade moved and the
+// picker decides what it is allowed to offer; if those two ever disagree the
+// list shows a board the verdict then calls a different grade.
+export const sameGrade = (a, b) => same(a, b);
+
 export const sheetOf = b => (num(b?.sheet_l) > 0 && num(b?.sheet_w) > 0)
   ? `${dim(b.sheet_l)}×${dim(b.sheet_w)}″`
   : 'size not on file';
@@ -151,6 +156,11 @@ export function judge(candidate, {
     id: Number(c.id),
     name: c.name || c.code || `Material #${c.id}`,
     code: c.code || null,
+    // materials.spec is the floor's short code — '2336290FBB', size then GSM
+    // then grade. It is what the warehouse picker searches and prints, and it
+    // is on 354 of the 355 boards while `code` is on none of them. Without it
+    // the picker could not be searched the way every other board list is.
+    spec: c.spec || null,
     grade: c.grade || null,
     gsm: c.gsm ?? null,
     sheet_l: c.sheet_l ?? null,
@@ -169,6 +179,12 @@ export function judge(candidate, {
     same_grade: !gradeMoved,
     same_gsm: !gsmMoved,
     same_size: !sizeMoved,
+    // Closeness is ranked on these, so they travel WITH the verdict rather than
+    // being re-derived by whoever sorts it.
+    same_cuts: plannedCuts == null || cuts === Math.max(1, Math.round(num(plannedCuts))),
+    planned_gsm: planned?.gsm ?? null,
+    sheet_area: dim(num(c.sheet_l) * num(c.sheet_w)),
+    planned_area: dim(num(planned?.sheet_l) * num(planned?.sheet_w)),
     // exact  — indistinguishable from the planned board on every axis
     // grade  — same grade, sheet or caliper moved
     // cross  — a different grade of board entirely
@@ -193,6 +209,7 @@ const blocked = (c, reason, planned = false) => ({
   id: c.id != null ? Number(c.id) : null,
   name: c.name || c.code || (c.id != null ? `Material #${c.id}` : 'Unknown material'),
   code: c.code || null,
+  spec: c.spec || null,
   grade: c.grade || null,
   gsm: c.gsm ?? null,
   sheet_l: c.sheet_l ?? null,
@@ -206,6 +223,10 @@ const blocked = (c, reason, planned = false) => ({
   cuts: 0,
   yield_sheets: 0,
   parent_fits: false,
+  same_cuts: false,
+  planned_gsm: null,
+  sheet_area: 0,
+  planned_area: 0,
   kind: 'blocked',
   blocked: true,
   block_reason: reason,
@@ -224,18 +245,60 @@ const blocked = (c, reason, planned = false) => ({
 // changes the carton. Only within the same closeness does stock decide.
 const RANK = { planned: 0, exact: 1, grade: 2, cross: 3, blocked: 9 };
 
+// How far a candidate sits from the planned board on each axis that costs
+// something. `null` where the planned board cannot say (no GSM on file), so a
+// missing figure never sorts as "identical".
+const gsmGap = o => (num(o.gsm) > 0 && num(o.planned_gsm) > 0)
+  ? Math.abs(num(o.gsm) - num(o.planned_gsm)) : null;
+const areaGap = o => (o.sheet_area > 0 && o.planned_area > 0)
+  ? Math.abs(o.sheet_area - o.planned_area) : null;
+// A figure that is not on file sorts LAST within its tier — never as a tie.
+const byGap = (a, b, gap) => {
+  const ga = gap(a), gb = gap(b);
+  if (ga === gb) return 0;
+  if (ga == null) return 1;
+  if (gb == null) return -1;
+  return ga - gb;
+};
+
+// Rank: what a storeman would reach for, in order.
+//
+// The planned board is always first even when it is empty — the approver must
+// see WHY he is being offered alternatives before he sees the alternatives.
+//
+// After that, CLOSENESS BEATS ABUNDANCE, and closeness is now measured rather
+// than counted. Ranking by "fewest cautions, then most stock" made every
+// same-grade board a three-way tie the biggest pile won, so a 330 GSM sheet
+// with 3,165 on it out-ranked the 290 GSM the job was planned on. The axes, in
+// the order they cost the plant:
+//
+//   caliper  — a GSM change is not correctable. The carton feels different and
+//              creases differently, and no quantity edit fixes that.
+//   cuts     — a changed cut count IS correctable: the dialog offers the parent
+//              count that buys the print sheets back. Loud, but recoverable.
+//   the cut  — a parent that still trims out of the sheet keeps the cutting
+//              plan; one that does not gets re-planned at the table.
+//   size     — of two sheets equally close on everything else, the one nearest
+//              the planned sheet wastes least trim.
+//
+// Only when every one of those ties does stock decide.
 export function rankOptions(options, needed) {
   const want = Math.max(0, Math.round(num(needed)));
   return [...options].sort((a, b) => {
     if (a.planned !== b.planned) return a.planned ? -1 : 1;
     if (a.blocked !== b.blocked) return a.blocked ? 1 : -1;
-    // Covers the requirement outright, before anything that does not.
+    // Covers the requirement outright, before anything that does not: a board
+    // that cannot fill the order is not the best match however well it matches.
     const ca = a.free >= want, cb = b.free >= want;
     if (ca !== cb) return ca ? -1 : 1;
     const ra = RANK[a.kind] ?? 8, rb = RANK[b.kind] ?? 8;
     if (ra !== rb) return ra - rb;
-    // Same closeness, same coverage → fewest consequences, then most stock.
-    if (a.cautions.length !== b.cautions.length) return a.cautions.length - b.cautions.length;
+    const gsm = byGap(a, b, gsmGap);
+    if (gsm) return gsm;
+    if (a.same_cuts !== b.same_cuts) return a.same_cuts ? -1 : 1;
+    if (a.parent_fits !== b.parent_fits) return a.parent_fits ? -1 : 1;
+    const area = byGap(a, b, areaGap);
+    if (area) return area;
     if (a.free !== b.free) return b.free - a.free;
     return String(a.name).localeCompare(String(b.name));
   });

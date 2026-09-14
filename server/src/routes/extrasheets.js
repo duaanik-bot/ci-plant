@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, consumeDrawnHolds, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE, outputNumberSql, stageReceipt } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
-import { gateSubstitution, judge, rankOptions } from '../xs-board-options.js';
+import { gateSubstitution, judge, rankOptions, sameGrade } from '../xs-board-options.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
 import {
@@ -390,7 +390,7 @@ const boardCandidatesSql = `
       AND ol.status NOT IN ('planned','ready','in_production')
     GROUP BY 1
   )
-  SELECT m.id, m.name, m.code, m.category, m.active, m.leftover,
+  SELECT m.id, m.name, m.code, m.spec, m.category, m.active, m.leftover,
          m.grade, m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet,
          COALESCE(s.qty, 0) AS shelf,
          GREATEST(COALESCE(s.qty, 0) - COALESCE(c.qty, 0) - COALESCE(f.qty, 0), 0) AS free
@@ -424,7 +424,7 @@ async function substitutionContext(oc, qc, xsId) {
     'SELECT id, name, code, child_l, child_w, parent_l, parent_w, ups FROM products WHERE id=$1', [x.product_id]);
   const rows = await qc(boardCandidatesSql, [plannedId]);
   const planned = rows.find(m => Number(m.id) === Number(plannedId))
-    || await oc(`SELECT id, name, code, category, active, leftover, grade, gsm, sheet_l, sheet_w,
+    || await oc(`SELECT id, name, code, spec, category, active, leftover, grade, gsm, sheet_l, sheet_w,
                         sheets_per_packet, 0 AS shelf, 0 AS free FROM materials WHERE id=$1`, [plannedId]);
   // The planned board's CHOSEN cuts under a mix, else the legacy cpp — the same
   // precedence XS_VIEW's planned_cuts and the create dialog already read.
@@ -439,12 +439,37 @@ r.get('/extra-sheets/:id/board-options', canApprove, async (req, res, next) => {
   try {
     const { x, product, planned, rows, plannedCuts } = await substitutionContext(one, q, req.params.id);
     const needed = Math.max(0, Math.round(+req.query.qty || +x.qty || 0));
+
+    // ── ONE GRADE ONLY ───────────────────────────────────────────────────
+    //
+    // Anik, 2026-09-14: "don't give suggestions for a different board grade."
+    // A lighter or larger sheet of the SAME grade is a sheet the carton can
+    // survive; another grade is a different carton — ink lay-down, shade and
+    // stiffness all move, and the run no longer matches the cases already
+    // packed. It was offered before with a loud red caution, and a caution is
+    // the wrong instrument for something that is never the right answer.
+    //
+    // Filtered out of the SUGGESTIONS, not turned into a refusal: widening a
+    // consequence into a physics block is the one thing this module must not do
+    // (see the header). The gate still judges whatever board it is handed.
+    //
+    // Only when the planned board states a grade. If it does not, there is no
+    // rule to apply and an empty warehouse would be the worse answer.
+    const gradeRule = !!String(planned.grade || '').trim();
+    const offered = gradeRule
+      ? rows.filter(m => Number(m.id) === Number(planned.id) || sameGrade(m.grade, planned.grade))
+      : rows;
+
     const options = rankOptions(
-      rows.map(m => judge(m, { planned, product, needed, plannedCuts, stage: x.stage })),
+      offered.map(m => judge(m, { planned, product, needed, plannedCuts, stage: x.stage })),
       needed);
     res.json({
       xs_number: x.xs_number, jc_number: x.jc_number, stage: x.stage,
       requested_qty: x.qty, needed,
+      // What the rule cost, so the panel can say the shelf is filtered rather
+      // than let the approver read 8 boards as "the warehouse is nearly empty".
+      grade_rule: gradeRule ? String(planned.grade).trim() : null,
+      other_grade_hidden: rows.length - offered.length,
       planned_cuts: plannedCuts,
       planned_yield: x.stage === 'cutting' ? needed : needed * plannedCuts,
       product: {
@@ -551,7 +576,7 @@ r.post('/extra-sheets/:id/approve', canApprove, async (req, res, next) => {
       const substituting = Number(chosenId) !== Number(ctx.plannedId);
       const chosen = ctx.rows.find(m => Number(m.id) === Number(chosenId))
         || (substituting
-          ? await oc(`SELECT id, name, code, category, active, leftover, grade, gsm, sheet_l, sheet_w,
+          ? await oc(`SELECT id, name, code, spec, category, active, leftover, grade, gsm, sheet_l, sheet_w,
                              sheets_per_packet, 0 AS shelf, 0 AS free FROM materials WHERE id=$1`, [chosenId])
           : ctx.planned);
       if (!chosen)
