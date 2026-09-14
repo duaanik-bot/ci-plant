@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
@@ -1626,16 +1626,17 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       const sheets = sheetsRequired(eff, netProduceQty(line), wastage);
       const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
       // Parent sheet is the product's own finalised size when set, else the board's.
-      const parent = effectiveParent(eff, board);
       // …and a finalised size LARGER than the board it is trimmed from is
       // physically impossible — no guillotine enlarges a sheet — yet nothing
       // refused it, so a drifted master (a 25×38 parent filed against a
       // 23×26.5" board, straight off a live screenshot) locked plans whose
       // whole cut arithmetic ran on a sheet the warehouse cannot supply.
       // Orientation-aware (sorted axes) and equal-is-fine — see the helper.
-      if (!parentFitsBoard(parent, board)) throw Object.assign(
-        new Error(`Parent ${parent.sheet_l}×${parent.sheet_w}" cannot be trimmed from board ${board.sheet_l}×${board.sheet_w}" — fix the parent size in the cut plan or the Product Master`),
-        { status: 409 });
+      //
+      // The refusal itself now lives in planLockParent so the gang/merge lock
+      // asks the identical question; this line is unchanged in behaviour and
+      // in wording. See plan-lock-parent.test.js.
+      const parent = planLockParent(eff, board);
       const fit = childFit(parent, eff);
       const parentSheets = parentSheetsRequired(sheets, fit.count);
       // Leftover decision — validated against the effective board's real

@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { effectiveProduct } from '../helpers.js';
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
@@ -719,7 +719,12 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
             const eff = { ...product, ...override };
             const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id || product.board_material_id]);
             const sheets = sheetsRequired(eff, netProduceQty(line), line.wastage_sheets);
-            const fit = childFit(effectiveParent(eff, board), eff);
+            // cuttingParent, like readiness() and reDeriveMemberSheets: an
+            // amendment lands at any stage short of closed, with no planner to
+            // send anywhere, so it cannot refuse — but it rewrites
+            // parent_sheets_required, and that figure must be measured on the
+            // same sheet as the children_per_parent already stamped on the card.
+            const fit = childFit(cuttingParent(eff, board), eff);
             const parentSheets = parentSheetsRequired(sheets, fit.count);
             await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
               [sheets, parentSheets, line.id]);

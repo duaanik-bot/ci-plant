@@ -249,7 +249,11 @@ test('a member draws its boards from the STORED mix, not a re-derivation', () =>
 });
 
 test('re-deriving a member of a separate gang sweeps its own line bank', () => {
-  const fn = slice(gangs, 'async function reDeriveMemberSheets', 6000);
+  // 7000, not the default 6000: the block this pins sat 112 characters inside
+  // that window, so ANY line added anywhere earlier in the function failed this
+  // test on slice length rather than on the rule it is guarding (a four-line
+  // comment did exactly that). The assertion below is untouched.
+  const fn = slice(gangs, 'async function reDeriveMemberSheets', 7000);
   assert.match(fn, /\} else \{[\s\S]{0,600}?unbankPlanningLeftover\(line\.id[\s\S]{0,300}?leftover_plan=NULL/,
     'the run-level branch has an else for the member-level bank');
 });

@@ -273,6 +273,39 @@ export function cuttingParent(product, board) {
   return parentFitsBoard(declared, board) ? declared : (board || declared);
 }
 
+// The parent a PLAN LOCK measures on — and the one place either engine is
+// allowed to decide it.
+//
+// cuttingParent above quietly substitutes the board when the declared parent
+// is impossible, which is right for a read: readiness(), the mix panel and the
+// job-card amendment all run with no planner in front of them and must not
+// throw. A LOCK is the opposite situation. Someone is at the screen, the master
+// is wrong, and the only outcome that fixes anything is telling them so — the
+// single-line lock has refused exactly this since the CI-JC-0050 post-mortem,
+// and that refusal is what got SW-097's master corrected eleven minutes after
+// CI-MRG-0022 had already silently locked the bad figure (see
+// plan-lock-parent.test.js for the timeline).
+//
+// The gang/merge lock never asked. That is the entire bug, and this function
+// exists so the question can only ever be asked one way: two engines, one
+// sentence, and no third copy to drift. `ref` names the member on a run, where
+// "some job here is wrong" would send the planner hunting through eight lines.
+//
+// Unsized on either side answers "cannot judge" (parentFitsBoard's rule, not
+// ours) and locks exactly as it always did — this must refuse impossible
+// geometry, never incomplete data.
+export function planLockParent(product, board, ref = null) {
+  const parent = effectiveParent(product, board);
+  if (!parentFitsBoard(parent, board)) {
+    throw Object.assign(
+      new Error(`${ref ? `${ref}: ` : ''}Parent ${parent.sheet_l}×${parent.sheet_w}" cannot be `
+        + `trimmed from board ${board.sheet_l}×${board.sheet_w}" — fix the parent size in the `
+        + `cut plan or the Product Master`),
+      { status: 409 });
+  }
+  return parent;
+}
+
 const FIT_EPS = 1e-6;
 const fitDown = (span, edge) => Math.floor(span / edge + FIT_EPS);
 

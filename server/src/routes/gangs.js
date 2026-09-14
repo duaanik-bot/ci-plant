@@ -8,7 +8,7 @@ import { q, one, tx } from '../db.js';
 import {
   audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, sheetsRequired, netProduceQty,
   availableQty, memberParentSheets,
-  effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
+  effectiveProduct, effectiveParent, cuttingParent, planLockParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, leftoverStrips, bankRunLeftover, unbankRunLeftover,
   bankPlanningLeftover, unbankPlanningLeftover, boardHoldCaps, releasePlanLockHolds,
@@ -320,7 +320,13 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
   for (const m of members) {
     const master = await oc('SELECT * FROM products WHERE id=$1', [m.product_id]);
     const eff = effectiveProduct(master, m);
-    const plannedFit = childFit(effectiveParent(eff, board), eff);
+    // cuttingParent: the comment above promises "the panel and the gate can
+    // never quote a different cut for the same run", and the gate is
+    // readiness(), which measures on cuttingParent. On a product whose master
+    // parent the board cannot yield, effectiveParent here quoted the planner a
+    // cut the gate disagreed with — the panel saying 1-up over a job card
+    // stamped 2.
+    const plannedFit = childFit(cuttingParent(eff, board), eff);
     effs.push({ member: m, eff, plannedFit, plannedUps: plannedFit.count });
   }
   // The panel quotes ONE cuts figure, and a 'separate'-layout gang can hold
@@ -1380,7 +1386,15 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
         const eff = effectiveProduct(master, line);
         const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
-        const parent = effectiveParent(eff, board);
+        // THE SAME REFUSAL THE SINGLE-LINE LOCK HAS SPOKEN SINCE CI-JC-0050,
+        // finally asked here too. A master parent the board cannot yield makes
+        // childFit wrong by exactly the ratio of the two fits, and a run
+        // multiplies that across every member: CI-MRG-0022/23/24/25 each froze
+        // twice the board they needed, 4,218 sheets between them, because a
+        // 25×36 parent was measured against a 26.7×28 sheet. The member is
+        // named — a run refusal that says only "some parent is impossible"
+        // sends the planner hunting through eight lines.
+        const parent = planLockParent(eff, board, `line ${line.id}`);
         const fit = childFit(parent, eff);
         // A COMBINED run is one product, so the lead member's parent IS the
         // run's — the same effectiveParent the mix arm's runParent uses. A
@@ -2265,7 +2279,11 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const eff = effectiveProduct(master, line);
   const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
-  const parent = effectiveParent(eff, board);
+  // cuttingParent, not effectiveParent and not planLockParent: no planner is
+  // in front of this and `live` reaches a minted card, so it must not throw —
+  // but the parent figure it WRITES has to be measured on the same sheet as
+  // readiness()'s children_per_parent. Those two disagreeing IS CI-JC-0335.
+  const parent = cuttingParent(eff, board);
   const fit = childFit(parent, eff);
   // Gang wastage is a single allowance booked to the lead member; a non-lead
   // member never re-adds wastage of its own (keeps it counted once on edits).
