@@ -25,6 +25,51 @@ export const SECTIONS = ['cutting', 'printing', 'coating', 'lamination', 'foilin
 // pinned from Print Planning. Used to scope press-operator logins to their queue.
 const effectiveMachineId = row => row.machine_id ?? row.press_machine_id ?? null;
 
+// The cards a station's workspace has to load: the ones with live work AT that
+// station. Written once, used by the section route, and parameterised on $1 =
+// the section. `live` is any stage of the card that is not finished — the same
+// test the queue loop applies row by row further down.
+const LIVE_AT_SECTION = `EXISTS (SELECT 1 FROM job_stages live
+        WHERE live.job_card_id = jc.id AND live.stage = $1 AND live.status <> 'completed')`;
+
+// ── What a FINISHED run stops carrying ──────────────────────────────────────
+// The station workspace reads one row shape for two different questions. The
+// queue row answers "can this job run here now" — line clearance, the extra
+// sheets in flight, the hold, the place in the lane, the print spec the press
+// is about to set up. The Completed tab answers "what came off the machine":
+// job card, product, received, produced, wastage, yield, operator, time. It has
+// no cell for any of the first list, and it ships TWO HUNDRED rows of them —
+// 559 KB of a 658 KB cutting payload on live prod, re-read by every tablet on
+// every refresh and every realtime tick.
+//
+// So the finished row sheds exactly that working state. Nothing here is read
+// by the Completed tab, its export, its search, its KPI strip, or the Adjust /
+// Send back / Reverse actions on its rows — floor-section-payload.test.js pins
+// the fields those DO read, so a later addition to this list cannot quietly
+// blank a cell on the floor. Everything not named here still travels.
+export const COMPLETED_DROPS = Object.freeze([
+  // the live queue's own working state
+  'line_clearance', 'mix_cuts', 'floor_pos', 'queue_pos', 'hold_reason',
+  'open_xs', 'open_xs_status', 'open_xs_stage_qty',
+  'latest_xs', 'latest_xs_status', 'latest_xs_stage_qty',
+  'extra_issued_parents', 'extra_issued_units',
+  'ready_override', 'ready_override_by', 'ready_override_at', 'ready_override_reason',
+  // the print spec — set up before the run, read on the queue row and the card
+  'colors', 'colour_type', 'print_process', 'cmyk_colours', 'pantone_colours',
+  'pantone_codes', 'metallic_colours', 'metallic_details', 'print_instructions',
+  // sheet geometry, packing and the order's dates: the finished row is stamped
+  // by completed_at and names its board through board_name / board_grade
+  'sheet_l', 'sheet_w', 'sheets_per_packet', 'board_material_id',
+  'pack_boxes', 'pack_qty_per_box', 'coating', 'special', 'pasting_type',
+  'delivery_date', 'po_date', 'machine_model', 'gang_run_mates',
+]);
+
+export function leanCompletedRun(row) {
+  const out = { ...row };
+  for (const k of COMPLETED_DROPS) delete out[k];
+  return out;
+}
+
 // Machine-category order for the control board — same flow, but with prepress
 // (CTP plate-making) in its plant slot right after cutting. CTP is equipment,
 // not a routed production section, so it lives here rather than in SECTIONS.
@@ -1015,8 +1060,22 @@ r.get('/floor/:section', async (req, res, next) => {
     const pressKeep = (machineIds && section === 'printing') ? new Set(machineIds) : null;
 
     // Live queue for this section, with the same frontier logic as /floor.
+    //
+    // Only the cards with LIVE work at this station. The queue loop below keeps
+    // a row only when `s.stage === section && s.status !== 'completed'`, and
+    // every map built between here and there (the light, the board and plate
+    // verdicts, the frozen sheets) is keyed by job_card_id and read ONLY inside
+    // that loop — so a card with nothing live here contributed nothing to the
+    // response, after the whole readiness pass had been run for it. On live
+    // prod that was the difference between ~20 cards and every open card in the
+    // plant, on a screen every tablet re-reads all day.
+    //
+    // The filter picks CARDS, never stages: a selected card still arrives with
+    // its complete stage list, because prevStageOf() needs the row before this
+    // one to read the frontier, and that row belongs to another station.
     const open = await q(`${STAGE_VIEW} WHERE jc.status IN ('open','in_progress')
-      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
+      AND ${LIVE_AT_SECTION}
+      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`, [section]);
     const byJc = {};
     for (const s of open) (byJc[s.job_card_id] ||= []).push(s);
 
@@ -1140,11 +1199,13 @@ r.get('/floor/:section', async (req, res, next) => {
     }
 
     // Completed runs at this section (most recent first), yield per run.
+    // Same window, same order, same 200 — each row shed of the live queue's
+    // working state, which the Completed tab has no cell for (COMPLETED_DROPS).
     const completed = (await q(`${STAGE_VIEW}
       WHERE js.stage=$1 AND js.status='completed'
       ORDER BY js.completed_at DESC LIMIT 200`, [section]))
       .map(s => ({
-        ...s,
+        ...leanCompletedRun(s),
         yield_pct: s.qty_in > 0 ? +(100 * s.qty_out / s.qty_in).toFixed(1) : null,
         wastage_pct: s.qty_in > 0 ? +(100 * s.qty_scrap / s.qty_in).toFixed(1) : null,
         duration_min: s.started_at && s.completed_at
