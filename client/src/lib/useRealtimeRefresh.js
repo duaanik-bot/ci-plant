@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { subscribeToDbChanges } from './realtime.js';
+import { refreshDelay } from './refreshDelay.js';
 
 export default function useRealtimeRefresh(load, tables, { debounceMs = 350, enabled = true } = {}) {
   const loadRef = useRef(load);
@@ -16,9 +17,11 @@ export default function useRealtimeRefresh(load, tables, { debounceMs = 350, ena
     let pending = false;
 
     const isVisible = () => typeof document === 'undefined' || !document.hidden;
+    // Jittered, not fixed: every screen hears a change at the same instant, and a
+    // fixed wait made them all refetch in the same millisecond (see refreshDelay).
     const schedule = () => {
       clearTimeout(timer);
-      timer = setTimeout(run, debounceMs);
+      timer = setTimeout(run, refreshDelay(debounceMs));
     };
     const run = () => {
       if (!isVisible()) return;

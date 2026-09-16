@@ -676,6 +676,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_lines_status ON order_lines(status);
 CREATE INDEX IF NOT EXISTS idx_stages_jc ON job_stages(job_card_id);
 CREATE INDEX IF NOT EXISTS idx_moves_material ON stock_movements(material_id);
+-- Every job card reads the ledger by reference: has its board been drawn, what did
+-- it consume, what did a stage return. That join is ref_type='job_card' AND
+-- ref_id = jc.id, and without this index each check read the whole ledger once
+-- per order line - the single largest cost in the plant on 2026-09-16 (142 ms per
+-- Planning refresh, 2.9 ms with it, same answer). Mirrored in migration
+-- 20260916104556_stock_movements_ref_index.sql for production.
+CREATE INDEX IF NOT EXISTS idx_stock_movements_ref ON stock_movements (ref_type, ref_id);
 CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, status);
 -- Universal timeline reads the audit ledger by date and by entity.
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);

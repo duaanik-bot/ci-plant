@@ -1,0 +1,13 @@
+-- The ledger lookup every job card makes: stock_movements by (ref_type, ref_id).
+--
+-- BOARD_DRAWN_EXISTS ("has this job's board been drawn?"), a card's consumption and
+-- a stage's returns all join the ledger to the job card on ref_type='job_card' AND
+-- ref_id = jc.id. With no index, every such check scanned the whole ledger once per
+-- order line: 10.3 billion rows read over the database's life, and 50% of all
+-- database time while the plant's screens refreshed together (measured 2026-09-16).
+-- With it: Planning's check 142 ms -> 2.9 ms, identical 238 lines drawn.
+--
+-- APPLIED to colour-impressions-prod 2026-09-16 (version 20260916104556) after
+-- npm run db:backup. Additive and idempotent. stock_movements holds ~2,600 rows, so the build takes
+-- milliseconds and its brief write lock is not felt.
+CREATE INDEX IF NOT EXISTS idx_stock_movements_ref ON stock_movements (ref_type, ref_id);
