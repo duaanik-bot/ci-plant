@@ -1860,8 +1860,29 @@ r.get('/plates/returns', async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
-r.get('/plates/history', async (_req, res, next) => {
+// The History tab's gang member list, cut to what that tab reads. A plate
+// request's specification carries each member's ids, artwork version, customer
+// and output number (~100 KB across the ledger); the tab reads member.product_name
+// (gangMemberNames) and members.length (PlateProductIdentity), and its search box
+// stringifies the row — so the names and codes stay, each still an OBJECT.
+// A missing or non-list gang_members passes through as it was, and an empty list
+// stays [] (jsonb_agg over nothing would have made it NULL).
+export const HISTORY_GANG_MEMBERS_SLIM = `CASE WHEN jsonb_typeof(tr.specification->'gang_members') = 'array'
+          THEN COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                   'product_name', g.member->>'product_name', 'product_code', g.member->>'product_code',
+                   'party_item_code', g.member->>'party_item_code', 'party_artwork_code', g.member->>'party_artwork_code')
+                 ORDER BY g.ord)
+               FROM jsonb_array_elements(tr.specification->'gang_members') WITH ORDINALITY g(member, ord)), '[]'::jsonb)
+          ELSE tr.specification->'gang_members' END`;
+
+r.get('/plates/history', async (req, res, next) => {
   try {
+    // ?members=slim is the History tab's own ask. No parameter is what a plant
+    // tablet on an older bundle sends, and it gets the full list, unchanged —
+    // plates-history-on-tab.test.js pins that statement verbatim.
+    const gangMembers = req.query?.members === 'slim'
+      ? HISTORY_GANG_MEMBERS_SLIM
+      : "tr.specification->'gang_members'";
     // pa.product_id is what lets the screen render this row's product the way
     // every other plate register does. ProductIdentity resolves
     // `row.product_id ?? row.id`, and a movement row's own id is the MOVEMENT id
@@ -1874,13 +1895,29 @@ r.get('/plates/history', async (_req, res, next) => {
         COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
         ${ASSET_OUTPUT_NUMBER('tr')} AS output_number,
         COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
-        tr.specification->'gang_members' AS gang_members,
+        ${gangMembers} AS gang_members,
         jc.jc_number,m.name AS machine_name
       FROM plate_asset_movements pam JOIN plate_assets pa ON pa.id=pam.plate_asset_id
       JOIN plate_masters pm ON pm.id=pa.plate_master_id JOIN products p ON p.id=pa.product_id
       LEFT JOIN tooling_requests tr ON tr.id=pam.tooling_request_id
       LEFT JOIN job_cards jc ON jc.id=pam.job_card_id LEFT JOIN machines m ON m.id=pam.machine_id
       ORDER BY pam.id DESC LIMIT 2000`));
+  } catch (error) { next(error); }
+});
+
+// The History tab's badge, without the ledger. The screen used to count
+// history.length, which meant pulling ~1 MB on every refresh of every tab just to
+// print a number. Same joins as the ledger (the inner ones drop movements whose
+// plate, master or product is gone) and the same 2,000 cap, so the badge reads
+// exactly what it read before.
+r.get('/plates/history/count', async (_req, res, next) => {
+  try {
+    const row = await one(`SELECT LEAST(count(*), 2000)::int AS count
+      FROM plate_asset_movements pam JOIN plate_assets pa ON pa.id=pam.plate_asset_id
+      JOIN plate_masters pm ON pm.id=pa.plate_master_id JOIN products p ON p.id=pa.product_id
+      LEFT JOIN tooling_requests tr ON tr.id=pam.tooling_request_id
+      LEFT JOIN job_cards jc ON jc.id=pam.job_card_id LEFT JOIN machines m ON m.id=pam.machine_id`);
+    res.json({ count: row?.count ?? 0 });
   } catch (error) { next(error); }
 });
 

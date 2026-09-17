@@ -6,8 +6,11 @@
 // draws a rail (stage, state, counts, who ran it); the bench detail belongs to
 // the station screens, which fetch their own rows.
 //
-// This pins the keep-list against what Production.jsx, WorkflowControls,
-// JobCardSheet and the plate warehouse actually read off these rows.
+// This pins the keep-list against what Production.jsx, WorkflowControls and
+// JobCardSheet actually read off these rows. The plate warehouse no longer reads
+// this register: its issue picker has its own lean route (id, jc_number,
+// product_name, status) — see job-cards-open-picker.test.js — so nothing here
+// has to be kept on its account.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JOB_CARD_STAGE_FIELDS, JOB_CARD_LIST_DROPS, leanStage } from './routes/production.js';

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Ban, CheckCircle2, ClipboardCheck, Eye, FileCheck2, History,
   Minus, PackagePlus, Plus, Printer, RotateCcw, Save, Send, ShoppingBag,
@@ -15,6 +15,7 @@ import { masterOutputSync, plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_
 // so a fourth reason can never appear in one place and not the other.
 const UNDOABLE_SET_ASIDE_ACTIONS = PLATE_SET_ASIDE_REASONS.map(row => row.action);
 import { resolvePlateRate } from '../lib/plateRates.js';
+import { newestAnswerGate } from '../lib/newestAnswer.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
   KpiCard, Modal, PageHeader, SearchableSelect, searchText, Select, SelectionDock, SubTabs, Tabs,
@@ -1383,7 +1384,11 @@ export default function PlatesLifecycle() {
   const [grns, setGrns] = useState([]);
   const [warehouse, setWarehouse] = useState([]);
   const [returns, setReturns] = useState([]);
-  const [history, setHistory] = useState([]);
+  // The movement ledger (~1 MB) loads only while the History tab is open — null
+  // until it first has. The tab's badge reads its own count, so it is right from
+  // the moment the screen opens without the ledger ever being pulled for it.
+  const [history, setHistory] = useState(null);
+  const [historyCount, setHistoryCount] = useState(0);
   const [masters, setMasters] = useState([]);
   const [pendency, setPendency] = useState({ lines: [], items: [], parties: [] });
   const [vendors, setVendors] = useState([]);
@@ -1410,15 +1415,37 @@ export default function PlatesLifecycle() {
   const [assetHistory, setAssetHistory] = useState(null);
   const [reasonAction, setReasonAction] = useState(null);
 
+  // load() runs from a realtime event and after every write on this screen, and it
+  // is a closure from whichever render created it — so it reads the tab through a
+  // ref, never the `tab` it was born with.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  // Every History fetch takes a number. The tab's own open and a load() fired by a
+  // realtime event can overlap: an older answer arriving after a newer one has
+  // LANDED must not overwrite it — but a newer request that fails must not throw
+  // away an older answer that succeeded (see lib/newestAnswer.js).
+  const historyGate = useRef(null);
+  if (!historyGate.current) historyGate.current = newestAnswerGate();
+  const loadHistory = async () => {
+    const seq = historyGate.current.begin();
+    // members=slim: the tab reads each gang member's name and codes, not its ids,
+    // customer or artwork version. Without the parameter the route answers in
+    // full, which is what an older bundle still asks for.
+    const rows = await api.get('/plates/history?members=slim');
+    if (historyGate.current.accept(seq)) setHistory(rows);
+  };
   const load = async () => {
-    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistory,nextMasters,nextVendors,nextPlateRates,nextPendency] = await Promise.all([
+    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistoryCount,nextMasters,nextVendors,nextPlateRates,nextPendency] = await Promise.all([
       api.get('/plates/requirements'), api.get('/plates/purchase-orders'), api.get('/plates/grns'),
-      api.get('/plates/warehouse'), api.get('/plates/returns'), api.get('/plates/history'),
+      api.get('/plates/warehouse'), api.get('/plates/returns'), api.get('/plates/history/count'),
       api.get('/plate-masters'), api.get('/vendors'), api.get('/plate-rates'),
       api.get('/tooling/procurement/plate/pendency'),
+      // The ledger itself only while somebody is looking at it — then a realtime
+      // change or an issue/retire/verify on this screen refreshes it like the rest.
+      tabRef.current === 'history' ? loadHistory() : null,
     ]);
     setRequirements(nextRequirements); setPos(nextPos); setGrns(nextGrns); setWarehouse(nextWarehouse);
-    setReturns(nextReturns); setHistory(nextHistory); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
+    setReturns(nextReturns); setHistoryCount(nextHistoryCount.count); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
     setPendency(nextPendency);
     setSelectedIds(current => current.filter(id => nextRequirements.some(row => row.id === id)));
     setRackPicked(current => current.filter(id => nextWarehouse.some(row => row.id === id)));
@@ -1426,8 +1453,11 @@ export default function PlatesLifecycle() {
   };
   // Job cards for the ad-hoc issue picker. Fetched separately and tolerantly: the
   // warehouse must still open if Job Cards is unavailable to this login.
+  // Its own lean route, not the register: the picker reads id, jc_number and
+  // product_name, and /job-cards is ~1.6 MB of stages and readiness to get them.
+  // The status filter stays as a belt — the route already leaves closed cards out.
   useEffect(() => {
-    api.get('/job-cards')
+    api.get('/job-cards/open-picker')
       .then(rows => setOpenJobs(rows.filter(row => row.status !== 'closed')))
       .catch(() => setOpenJobs([]));
   }, []);
@@ -1455,6 +1485,11 @@ export default function PlatesLifecycle() {
     await load();
   };
   useEffect(() => { load().catch(error => toast.error(error.message || 'Could not load Plates')); }, []);
+  // Opening History fetches the ledger (and re-fetches it on every re-open, so
+  // what was loaded an hour ago is not what somebody reads).
+  useEffect(() => {
+    if (tab === 'history') loadHistory().catch(error => toast.error(error.message || 'Could not load plate history'));
+  }, [tab]);
   useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 650 });
 
   const counts = useMemo(() => ({
@@ -1540,7 +1575,7 @@ export default function PlatesLifecycle() {
     { key: 'history', label: 'History', tabs: ['history'],
       dot: 'bg-slate-400', on: 'border-slate-300 bg-slate-100 text-slate-800',
       badge: 'bg-slate-300/70 text-slate-800', hover: 'hover:text-slate-700',
-      count: () => history.length },
+      count: () => historyCount },
   ];
   // Everything that is off the rack but not in a job's hands. Fresh and Used are
   // both keyed on status === 'available', so without this list a set-aside plate
@@ -2744,7 +2779,9 @@ export default function PlatesLifecycle() {
     {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns}
       defaultSort={{ key: 'return_date', dir: 'asc' }}
       empty="No plates awaiting return verification" exportName="Plate Returns" />}
-    {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plate movements" exportName="Plate Movement History" />}
+    {tab==='history' && (history === null
+      ? <p className="py-8 text-center text-sm text-slate-400">Loading history…</p>
+      : <DataTable searchable rows={history} columns={historyColumns} defaultSort={{ key: 'id', dir: 'desc' }} empty="No plate movements" exportName="Plate Movement History" />)}
 
     {detail && editForm && <Modal open onClose={() => {setDetail(null);setEditForm(null);}} title={`${detail.request_number} · ${detail.jc_number}`} wide
       footer={<>

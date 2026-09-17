@@ -484,6 +484,32 @@ r.get('/job-cards', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The plate warehouse's "Issue to job card" picker: `jc_number · product_name`
+// for every card that is not closed. It used to read GET /job-cards — the whole
+// register, ~1.6 MB with every stage, the readiness pass and board/plate stamping
+// — once per warehouse open, for three fields off ~220 rows. ~25 KB here.
+//
+// WHICH cards appear is decided by JC_VIEW's inner joins alone (every other join
+// there is LEFT onto a key or a one-row LATERAL), so these are those joins,
+// verbatim. Split cards stay: plates still go out to one. Newest first, the
+// register's own order once closed cards are gone. See job-cards-open-picker.test.js.
+//
+// Registered BEFORE /job-cards/:id — after it, 'open-picker' would be taken for
+// a card id and the picker would silently come up empty.
+export const JOB_CARD_PICKER_SQL = `
+  SELECT jc.id, jc.jc_number, p.name AS product_name, jc.status
+  FROM job_cards jc
+  JOIN products p ON p.id = jc.product_id
+  JOIN materials bm ON bm.id = p.board_material_id
+  WHERE jc.status <> 'closed'
+  ORDER BY jc.id DESC`;
+
+r.get('/job-cards/open-picker', async (_req, res, next) => {
+  try {
+    res.json(await q(JOB_CARD_PICKER_SQL));
+  } catch (e) { next(e); }
+});
+
 r.get('/job-cards/:id', async (req, res, next) => {
   try {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
