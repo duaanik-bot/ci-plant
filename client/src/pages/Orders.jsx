@@ -11,6 +11,7 @@ import { nextCodeForRows } from '../lib/productCode.js';
 import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
+import { createOnDemandList, scheduleIdle } from '../lib/onDemandList.js';
 
 const emptyLine = { product_id: '', qty: '', rate: '', gst: '' };
 const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
@@ -209,6 +210,30 @@ function ProductSpec({ product }) {
   );
 }
 
+// The empty option of a line's product picker. Until the product list is
+// loaded it must not read "Select product…" over an empty menu — that looks
+// like a customer with no products and invites a duplicate quick-create.
+function productPlaceholder(customerId, status) {
+  if (!customerId) return 'Pick a customer first';
+  if (status === 'ready') return 'Select product…';
+  return status === 'error' ? 'Could not load products' : 'Loading products…';
+}
+
+// Said once above the lines while the product list is not ready, with a retry
+// when it failed — a failed load must read as a failure, not as no products.
+function ProductsLoadNote({ status, onRetry }) {
+  if (status === 'ready') return null;
+  if (status === 'error') {
+    return (
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+        <span>Could not load the product list — products cannot be picked until it loads.</span>
+        <Button variant="secondary" size="sm" onClick={onRetry}>Retry</Button>
+      </div>
+    );
+  }
+  return <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Loading products…</div>;
+}
+
 function OrderTotals({ lines }) {
   const t = orderTotals(lines);
   if (!t.taxable) return null;
@@ -225,7 +250,26 @@ export default function Orders() {
   const toast = useToast();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [products, setProducts] = useState([]);
+  // The product master (/products, ~1.8 MB) is read only inside the forms —
+  // New Order, Edit, Import PO and quick-create — so the list screen no longer
+  // pays for it before it paints. It loads when the browser is idle after the
+  // list is up, and on demand when a form opens. Until it is READY nothing may
+  // treat it as a real answer: an empty list would suggest a code another
+  // product owns, or offer a duplicate master (see onDemandList.js).
+  const [productsList] = useState(() => createOnDemandList(() => api.get('/products')));
+  const [productsState, setProductsState] = useState(productsList.state);
+  useEffect(() => {
+    setProductsState(productsList.state);
+    const unsubscribe = productsList.subscribe(setProductsState);
+    return () => { unsubscribe(); };
+  }, [productsList]);
+  const products = productsState.rows;
+  const productsReady = productsState.status === 'ready';
+  // Quick-create waits for a settled list too: its Internal Code suggestion is
+  // read off these rows, and a refresh on its way may carry a newer code.
+  const canQuickCreate = productsReady && !productsState.refreshing;
+  const ensureProducts = () => { productsList.ensure().catch(() => {}); };
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -253,6 +297,7 @@ export default function Orders() {
   const load = () => {
     api.get('/orders').then(os => {
       setOrders(os);
+      setOrdersLoaded(true);
       threadSummary('order', os.map(o => o.id)).then(setOrderThreads).catch(() => {});
     });
     loadPendency();
@@ -260,10 +305,18 @@ export default function Orders() {
   useEffect(() => {
     load();
     api.get('/customers').then(setCustomers);
-    api.get('/products').then(setProducts);
     api.get('/gst_rates').then(setGstRates);
   }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
+  // Prefetch once the list has painted, while the planner is still reading it,
+  // so a form opened a moment later usually finds the products already here.
+  useEffect(() => {
+    if (!ordersLoaded) return undefined;
+    return scheduleIdle(ensureProducts, { timeout: 2000, fallbackMs: 800 });
+  }, [ordersLoaded]);
+  // A product added or edited elsewhere: the next form that opens fetches a
+  // fresh copy. Nothing is fetched now — the list screen does not read it.
+  useRealtimeRefresh(() => productsList.markStale(), ['products'], { debounceMs: 700 });
   // Pendency reflects dispatches and floor moves made elsewhere — refresh on entry.
   useEffect(() => {
     if (tab === 'pendency') loadPendency();
@@ -340,8 +393,7 @@ export default function Orders() {
   // Quick-created product → refresh the master list and drop it onto the line
   // that asked for it, with rate + GST defaults filled the same as a pick.
   const handleProductCreated = async product => {
-    const ps = await api.get('/products');
-    setProducts(ps);
+    const ps = await productsList.refresh().catch(() => products);
     const enriched = ps.find(p => String(p.id) === String(product.id)) || product;
     const patch = { product_id: String(product.id), rate: enriched.rate ?? '', gst: gstOf(enriched) };
     if (quickProduct?.mode === 'edit') setEditLine(quickProduct.line, patch);
@@ -429,6 +481,7 @@ export default function Orders() {
   const startEdit = () => {
     setEditForm(detailToForm(detail));
     setEditing(true);
+    ensureProducts();
   };
   const editProducts = products.filter(p => String(p.customer_id) === String(editForm?.customer_id) && p.active);
   const setEditLine = (i, patch) => setEditForm(f => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
@@ -503,8 +556,8 @@ export default function Orders() {
     <div>
       <PageHeader title="Sales Orders" subtitle="Customer POs in — every line tracked to dispatch"
         actions={<div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setShowImport(true)}><FileUp size={15} /> Import PO</Button>
-          <Button onClick={() => setShowNew(true)}><Plus size={15} /> New Order</Button>
+          <Button variant="secondary" onClick={() => { setShowImport(true); ensureProducts(); }}><FileUp size={15} /> Import PO</Button>
+          <Button onClick={() => { setShowNew(true); ensureProducts(); }}><Plus size={15} /> New Order</Button>
         </div>} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'pending', label: 'Pending', count: ordersForTab.pending.length },
@@ -938,6 +991,7 @@ export default function Orders() {
               <span>Order Lines</span>
               <span>{form.lines.filter(l => l.product_id && l.qty).length} ready</span>
             </div>
+            <ProductsLoadNote status={productsState.status} onRetry={ensureProducts} />
             <div className="space-y-2">
               {form.lines.map((l, i) => {
                 const prod = products.find(p => String(p.id) === String(l.product_id));
@@ -954,12 +1008,12 @@ export default function Orders() {
                               const p = products.find(x => String(x.id) === String(e.target.value));
                               setLine(i, { product_id: e.target.value, rate: p?.rate ?? '', gst: gstOf(p) });
                             }}>
-                              <option value="">{form.customer_id ? 'Select product…' : 'Pick a customer first'}</option>
+                              <option value="">{productPlaceholder(form.customer_id, productsState.status)}</option>
                               {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           </div>
-                          <button type="button" disabled={!form.customer_id}
-                            title={form.customer_id ? 'Create a new product for this customer' : 'Pick a customer first'}
+                          <button type="button" disabled={!form.customer_id || !canQuickCreate}
+                            title={!form.customer_id ? 'Pick a customer first' : canQuickCreate ? 'Create a new product for this customer' : 'Loading products…'}
                             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
                             onClick={() => setQuickProduct({ line: i, mode: 'new' })}>
                             <Plus size={15} />
@@ -1010,7 +1064,7 @@ export default function Orders() {
       <Modal open={!!detail} onClose={() => { if (!quickProduct) closeDetail(); }} title={detail ? `${detail.po_number} — ${detail.customer_name}` : ''} wide
         footer={detail && (editing ? <>
           <Button variant="secondary" onClick={() => { setEditing(false); setEditForm(detailToForm(detail)); }}><X size={14} /> Cancel</Button>
-          <Button onClick={saveEdit} disabled={!editForm?.po_number || !editForm?.customer_id || !editForm?.lines.some(l => l.product_id && l.qty)}>
+          <Button onClick={saveEdit} disabled={!productsReady || !editForm?.po_number || !editForm?.customer_id || !editForm?.lines.some(l => l.product_id && l.qty)}>
             <Save size={14} /> Save Changes
           </Button>
         </> : <>
@@ -1126,6 +1180,7 @@ export default function Orders() {
 
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Order Lines</span><span>{editForm.lines.length} lines</span></div>
+              <ProductsLoadNote status={productsState.status} onRetry={ensureProducts} />
               <div className="space-y-2">
               {editForm.lines.map((l, i) => {
                 const prod = products.find(p => String(p.id) === String(l.product_id));
@@ -1142,12 +1197,12 @@ export default function Orders() {
                               const p = products.find(x => String(x.id) === String(e.target.value));
                               setEditLine(i, { product_id: e.target.value, rate: p?.rate ?? '', gst: gstOf(p) });
                             }}>
-                              <option value="">{editForm.customer_id ? 'Select product…' : 'Pick a customer first'}</option>
+                              <option value="">{productPlaceholder(editForm.customer_id, productsState.status)}</option>
                               {editProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           </div>
-                          <button type="button" disabled={!editForm.customer_id}
-                            title={editForm.customer_id ? 'Create a new product for this customer' : 'Pick a customer first'}
+                          <button type="button" disabled={!editForm.customer_id || !canQuickCreate}
+                            title={!editForm.customer_id ? 'Pick a customer first' : canQuickCreate ? 'Create a new product for this customer' : 'Loading products…'}
                             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
                             onClick={() => setQuickProduct({ line: i, mode: 'edit' })}>
                             <Plus size={15} />
@@ -1271,13 +1326,14 @@ export default function Orders() {
 
       <ImportPOWizard open={showImport} onClose={() => setShowImport(false)}
         customers={customers} products={products} gstRates={gstRates}
-        onCreated={() => { load(); api.get('/products').then(setProducts); }} />
+        productsStatus={productsState.status} onRetryProducts={ensureProducts}
+        onCreated={() => { load(); productsList.refresh().catch(() => {}); }} />
 
       {/* Quick-create product — stacks above whichever order modal opened it */}
       <ProductQuickCreate open={!!quickProduct} onClose={() => setQuickProduct(null)}
         customerId={quickCustomerId}
         customerName={customers.find(c => String(c.id) === String(quickCustomerId))?.name}
-        suggestedCode={quickCustomerId ? nextCodeForRows({
+        suggestedCode={quickCustomerId && productsReady ? nextCodeForRows({
           rows: products, customerId: quickCustomerId,
           customerName: customers.find(c => String(c.id) === String(quickCustomerId))?.name,
         }) : ''}

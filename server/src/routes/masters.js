@@ -3,6 +3,7 @@ import { q, one, tx } from '../db.js';
 import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { isValidGstin } from '../billing-entity.js';
+import { productIdentityRoute } from '../product-identity.js';
 
 const r = Router();
 const canEdit = requireRole('planner'); // admin implied
@@ -309,24 +310,11 @@ const COMPANY_COLS = ['name', 'gstin', 'address', 'city', 'state', 'state_code',
 // Not a general-purpose products endpoint — the Product Master screen, the order
 // form and the pickers keep reading GET /products, which is unchanged.
 // products-identity.test.js pins the column list against both readers.
-r.get('/products/identity', async (_req, res, next) => {
-  try {
-    const rows = await q(`
-      SELECT p.id, p.name, p.code, p.internal_carton_code, p.party_item_code, p.party_artwork_code,
-             p.output_number, p.shade_card_number, p.board_grade, p.gsm, p.size,
-             p.child_l, p.child_w, p.parent_l, p.parent_w, p.ups,
-             p.colors, p.colour_type, p.print_process, p.coating, p.special, p.pasting_type,
-             p.emboss, p.leafing, p.leafing_colour, p.die_number, p.block_number,
-             p.product_type, p.rate, p.mrp,
-             m.name AS board_material_name,
-             COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst
-      FROM products p
-      JOIN materials m ON m.id = p.board_material_id
-      LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
-      ORDER BY p.name`);
-    res.json(rows);
-  } catch (e) { next(e); }
-});
+//
+// The route itself lives in product-identity.js so its query can be pinned
+// without a database: the bare route (every product, what old tablet bundles
+// still ask for) is unchanged, and ?ids=1,2,3 returns only those products.
+r.get('/products/identity', productIdentityRoute(q));
 
 r.get('/company-profile', async (_req, res, next) => {
   try { res.json(await one('SELECT * FROM company_profile ORDER BY id LIMIT 1') || {}); }

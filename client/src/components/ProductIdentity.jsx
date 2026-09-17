@@ -4,6 +4,7 @@ import MasterHistory from './MasterHistory.jsx';
 import { api, fmt } from '../api.js';
 import { canOpenProductHistory } from '../lib/productHistoryAccess.js';
 import { declaresFontSize } from '../lib/fontSizeClass.js';
+import { createIdBatchLoader } from '../lib/idBatchLoader.js';
 
 const CODE_META = [
   { key: 'internal', label: 'INT', tone: 'bg-slate-100 text-slate-600 ring-slate-200/70' },
@@ -11,31 +12,21 @@ const CODE_META = [
   { key: 'party', label: 'PARTY', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200/70' },
 ];
 
-let productMasterCache = null;
-let productMasterPromise = null;
-
 function hasValue(v) {
   return v != null && String(v).trim() !== '';
 }
 
-function loadProductMasterCache() {
-  if (productMasterCache) return Promise.resolve(productMasterCache);
-  if (!productMasterPromise) {
-    // The identity list, not the whole master: this cache exists to fill in
-    // missing codes and to open the history panel, and /products/identity
-    // carries exactly what those two render (1,854 KB → 1,068 on live prod).
-    productMasterPromise = api.get('/products/identity')
-      .then(rows => {
-        productMasterCache = new Map((Array.isArray(rows) ? rows : []).map(p => [Number(p.id), p]));
-        return productMasterCache;
-      })
-      .catch(() => {
-        productMasterPromise = null;
-        return new Map();
-      });
-  }
-  return productMasterPromise;
-}
+// One app-wide lookup of master records, asked for by id. It used to download
+// the whole identity list (/products/identity, ~1,062 KB for 1,656 products) the
+// first time any row on any screen lacked a code — and parse it on the tablet —
+// to fill in the few products that screen names. Now each screen asks only for
+// the ids it is missing: every ProductIdentity that mounts in one render joins
+// one request, capped at 200 ids, and every answer (found or not) is kept for
+// the life of the page, as the old whole-list cache was. See idBatchLoader.js.
+const productMaster = createIdBatchLoader({
+  fetchBatch: ids => api.get(`/products/identity?ids=${ids.join(',')}`),
+  cap: 200,
+});
 
 function needsMasterLookup(row) {
   return row?.id && (!hasValue(row.party_item_code) || !hasValue(row.party_artwork_code) || !hasValue(row.internal_carton_code));
@@ -140,8 +131,8 @@ export default function ProductIdentity({
       setMaster(null);
       return () => { alive = false; };
     }
-    loadProductMasterCache().then(map => {
-      if (alive) setMaster(map.get(Number(r.id)) || null);
+    productMaster.load(r.id).then(record => {
+      if (alive) setMaster(record || null);
     });
     return () => { alive = false; };
   }, [detailKey]);

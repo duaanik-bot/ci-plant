@@ -42,7 +42,13 @@ const sameDims = (a, b, c, d) => {
     && Math.abs(x[0] - y[0]) < 0.01 && Math.abs(x[1] - y[1]) < 0.01;
 };
 
-export default function ImportPOWizard({ open, onClose, customers, products, gstRates, onCreated }) {
+// `productsStatus` is the caller's product list state (lib/onDemandList.js).
+// Orders loads that list after its own screen paints, so the wizard can open
+// before it lands — and matching a PO against an empty list shows every line
+// "No match" and offers to create masters that already exist. Until it is
+// 'ready' the upload step waits. Defaults to 'ready' for a caller that passes a
+// list it already holds.
+export default function ImportPOWizard({ open, onClose, customers, products, gstRates, onCreated, productsStatus = 'ready', onRetryProducts }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [ocr, setOcr] = useState(null);   // {page, pages, phase} while reading a scan
@@ -126,7 +132,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   };
 
   const handleFile = async file => {
-    if (!file) return;
+    if (!file || productsStatus !== 'ready') return;
     setBusy(true);
     try {
       let res = await api.upload('/orders/import/parse', file);
@@ -432,7 +438,23 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
           <Button onClick={createOrder} disabled={!ready || busy}><Sparkles size={14} /> Create Order</Button>
         </> : <Button variant="secondary" onClick={close}>Cancel</Button>}>
 
-        {!form && (
+        {!form && productsStatus !== 'ready' && (
+          <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-8 text-center">
+            {productsStatus === 'error'
+              ? <>
+                <div className="text-sm font-semibold text-red-700">Could not load the product list</div>
+                <div className="text-xs text-slate-400">A PO is matched against your product masters, so it cannot be read until the list loads.</div>
+                {onRetryProducts && <Button variant="secondary" size="sm" onClick={onRetryProducts}>Retry</Button>}
+              </>
+              : <>
+                <Loader2 size={28} className="animate-spin text-blue-500" />
+                <div className="text-sm font-semibold text-slate-600">Loading products…</div>
+                <div className="text-xs text-slate-400">The PO is matched against your product masters — ready in a moment</div>
+              </>}
+          </div>
+        )}
+
+        {!form && productsStatus === 'ready' && (
           <label className="flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-8 text-center hover:border-blue-300 hover:bg-blue-50/40"
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]); }}>
