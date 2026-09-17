@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -14,13 +15,7 @@ import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, 
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // Rows behind the clickable billing cards. The strip is book-level while the
 // tabs split open vs settled, so a card can select rows the ACTIVE TAB does not

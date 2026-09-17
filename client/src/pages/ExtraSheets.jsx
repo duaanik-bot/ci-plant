@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -17,13 +18,7 @@ import ProductIdentity, { productExport, productSearchText } from '../components
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // Which tab holds a request. An extra-sheet notification names a REQUEST, and
 // the request can be in any of the three — so a deep link that did not switch

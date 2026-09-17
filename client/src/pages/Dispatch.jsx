@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -24,13 +25,7 @@ const SCRAP_REASONS = ['Damaged in storage', 'Print/quality defect', 'Obsolete a
 const RETIRE_REASONS = ['Obsolete artwork', 'Customer on hold', 'Quality under review', 'Held for a specific order'];
 
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // Rows behind the clickable cards. Ready-view predicates take an order-line;
 // register predicates take a challan with its lines attached.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -21,13 +22,7 @@ const td = 'px-4 py-2.5';
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 function exportCsv(filename, header, rows) {
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;

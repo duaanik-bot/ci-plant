@@ -1,6 +1,7 @@
 // Inventory — one raw-material stock truth: position, batches and movement ledger.
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
@@ -19,13 +20,7 @@ import { leftoverSourceLabel } from '../lib/leftoverSource.js';
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // Board total weight for a stock row, from its own strip size × (inherited) gsm.
 // Non-board / missing-gsm masters → null so the cell shows "—", never a wrong 0.

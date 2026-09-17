@@ -6,6 +6,7 @@
 // causing it.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -24,13 +25,7 @@ import RetireZone from './shade-cards/RetireZone.jsx';
 import ToIssue from './shade-cards/ToIssue.jsx';
 
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 const canManage = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
 

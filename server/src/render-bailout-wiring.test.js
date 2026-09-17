@@ -8,7 +8,7 @@
 // and Live Floor stamping "board seen at" into state on every 30 s poll.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createThreadSummary } from '../../client/src/lib/threadSummary.js';
@@ -70,9 +70,15 @@ test('thread summary: no ids is one stable empty object, not a new {} per load',
   assert.equal(await summary('grn', []), a);
 });
 
-test('Artwork and Procurement use the shared helper, not a local merge that is new every load', () => {
-  for (const page of ['pages/Artwork.jsx', 'pages/Procurement.jsx']) {
-    const src = read(page);
+test('every list page with a thread column uses the shared helper, not a local merge that is new every load', () => {
+  const pages = readdirSync(new URL('../../client/src/pages/', import.meta.url))
+    .filter(f => f.endsWith('.jsx') && /\/threads\/summary|\bthreadSummary\b/.test(readFileSync(join(CLIENT, 'pages', f), 'utf8')))
+    .map(f => `pages/${f}`);
+  // Raw source, not read(): its comment stripper takes '/status-sheet/*' in a
+  // StatusSheet comment for the start of a block comment and hides the page's code.
+  assert.ok(pages.length >= 9, `found ${pages.length} pages asking for thread summaries`);
+  for (const page of pages) {
+    const src = readFileSync(join(CLIENT, page), 'utf8');
     assert.match(src, /createThreadSummary\(/, `${page} builds its summary with createThreadSummary`);
     assert.doesNotMatch(src, /Object\.assign\(\{\},\s*\.\.\.parts\)/, `${page} still merges chunks into a fresh object`);
   }
