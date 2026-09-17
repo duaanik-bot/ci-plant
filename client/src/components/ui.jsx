@@ -264,7 +264,7 @@ export function SearchableSelect({
           </span>
         </button>
         {open && !disabled && createPortal((
-          <div className="fixed inset-0 z-[200] flex items-end animate-fadeIn">
+          <div data-ci-overlay className="fixed inset-0 z-[200] flex items-end animate-fadeIn">
             <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[6px]" onClick={() => setOpen(false)} />
             {/* menuRef keeps the document-level outside-tap closer from firing
                 on taps INSIDE the sheet — the sheet is portalled, so contains()
@@ -272,7 +272,7 @@ export function SearchableSelect({
             <div ref={menuRef} className="relative flex max-h-[70dvh] w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/95 shadow-modal backdrop-blur-2xl">
               <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
               <div className="px-3 pb-2 pt-2">
-                <input
+                <input data-reload-safe
                   autoFocus
                   className={`${inputCls} h-11`}
                   value={query}
@@ -302,7 +302,7 @@ export function SearchableSelect({
   return (
     <div className="relative" ref={ref}>
       <input type="hidden" name={name} value={value ?? ''} readOnly required={required} />
-      <input
+      <input data-reload-safe
         className={`${inputCls} h-10 pr-16 ${className}`}
         value={query}
         disabled={disabled}
@@ -335,7 +335,7 @@ export function SearchableSelect({
         <ChevronDown size={14} />
       </div>
       {open && !disabled && rect && createPortal((
-        <div ref={menuRef} className="glass fixed z-[200] overflow-auto rounded-2xl py-1 shadow-modal"
+        <div data-ci-overlay ref={menuRef} className="glass fixed z-[200] overflow-auto rounded-2xl py-1 shadow-modal"
           style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}>
           {filtered.length ? filtered.map((item, i) => (
             <button key={`${item.value}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => choose(item)}
@@ -406,7 +406,7 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
   // ancestor's containing block, clipping the footer on short/mobile viewports.
   if (phone) {
     return createPortal(
-      <div className={`fixed inset-0 ${layerClass} flex items-end animate-fadeIn`}>
+      <div data-ci-overlay className={`fixed inset-0 ${layerClass} flex items-end animate-fadeIn`}>
         <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
         <div
           className="relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
@@ -433,7 +433,7 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
     );
   }
   return createPortal(
-    <div className={`fixed inset-0 ${layerClass} flex items-center justify-center p-4 animate-fadeIn`}>
+    <div data-ci-overlay className={`fixed inset-0 ${layerClass} flex items-center justify-center p-4 animate-fadeIn`}>
       <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
       {/* Height tracks the VISUAL viewport on touch so a raised keyboard never
           buries the footer; falls back to 92vh with a mouse, where there is no
@@ -680,7 +680,7 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
         </button>
       )}
       {open && rect && createPortal(
-        <div
+        <div data-ci-overlay
           ref={menuRef}
           className="fixed z-50 min-w-[190px] rounded-2xl border border-white/75 bg-white/75 p-1.5 shadow-lift backdrop-blur-2xl"
           // Rendered once off-screen to be measured, then placed. Hiding it for
@@ -1030,7 +1030,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
   return (
     <div className={`relative ${className || 'w-80'}`} style={{ minWidth: searchFloor(placeholder) }}>
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
-      <input
+      <input data-reload-safe
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className={`w-full rounded-full border py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] outline-none transition duration-200 ease-apple ${SEARCH_FX}`}
       />
@@ -1130,7 +1130,7 @@ export function ExportMenu({ build, size = 'sm', variant = 'secondary', label = 
         </Button>
       </span>
       {open && rect && createPortal(
-        <div
+        <div data-ci-overlay
           ref={menuRef}
           className="fixed z-[120] w-56 animate-scaleIn rounded-2xl border border-white/75 bg-white/95 p-1.5 shadow-lift backdrop-blur-xl"
           style={{ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }}
@@ -1469,7 +1469,7 @@ export function DataTable({
               )}
               {selectable && (
                 <label className="flex h-9 items-center gap-2 rounded-full border border-white/70 bg-white/60 px-3 text-xs font-semibold text-[#515154]">
-                  <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                  <input data-reload-safe type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
                     checked={allVisibleSelected}
                     onChange={e => onToggleAll?.(sorted, e.target.checked)} />
                   All{selectedIds.length > 0 ? ` · ${selectedIds.length}` : ''}
@@ -1518,7 +1518,7 @@ export function DataTable({
                 >
                   <div className="flex items-start gap-2.5">
                     {selectable && (
-                      <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                      <input data-reload-safe type="checkbox" className="mt-1 h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
                         checked={checked}
                         onClick={e => e.stopPropagation()}
                         onChange={e => onToggleRow?.(r, e.target.checked)} />
@@ -1636,7 +1636,7 @@ export function DataTable({
             <tr className="ci-table-head">
               {selectable && (
                 <th className={`w-8 ${cellPx} py-2.5`}>
-                  <input
+                  <input data-reload-safe
                     type="checkbox"
                     className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
                     checked={allVisibleSelected}
@@ -1767,7 +1767,7 @@ export function DataTable({
                   // read as a ragged column of their own. mt-0.5 optically
                   // centres the 16px box against the first line of text.
                   <td className={`${cellPx} py-3 align-top`} onClick={e => e.stopPropagation()}>
-                    <input
+                    <input data-reload-safe
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
                       checked={checked}
@@ -2121,7 +2121,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={toast}>
       {children}
-      <div className="ci-toast-stack fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+      <div data-ci-chrome className="ci-toast-stack fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
         {toasts.map(t => {
           const I = icons[t.type];
           return (
@@ -2186,7 +2186,7 @@ export function SelectionDock({ open, count, summary, title, onClear, clearLabel
   const ref = useDockTailRoom(open);
   if (!open) return null;
   return (
-    <div ref={ref} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
+    <div data-ci-overlay ref={ref} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
       <div className="ci-select-dock-panel mx-auto flex max-w-5xl flex-col gap-2 rounded-2xl px-3 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="shrink-0 text-sm font-bold text-[#1D1D1F]">

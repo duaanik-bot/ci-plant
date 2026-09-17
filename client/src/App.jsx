@@ -84,16 +84,18 @@ function RequireAuth() {
 // recovered by closing the app from the recents switcher — which no one on a
 // floor knows to do. One Printing tablet sat like that for five hours.
 //
-// buildWatch reloads by itself while the page is HIDDEN, so most deploys are
-// picked up with nobody watching and this bar is never seen. It appears only
-// when the screen is in front of someone, because that is exactly when reloading
-// out from under them would be the wrong thing to do.
+// buildWatch reloads by itself while the page is HIDDEN, and — since plant
+// tablets stay in front of someone all shift — also on a VISIBLE page once it
+// has sat untouched for 15 minutes with no dialog open, no save on the wire, no
+// caret in a field and no form holding unsaved edits. This bar is what a screen
+// that is in use gets instead: reloading out from under an operator is exactly
+// the wrong thing to do, so the choice stays theirs until the screen goes quiet.
 function UpdateBar() {
   const [ready, setReady] = useState(false);
   useEffect(() => startBuildWatch({ onNewBuild: () => setReady(true) }), []);
   if (!ready) return null;
   return (
-    <div
+    <div data-ci-chrome
       className="fixed inset-x-0 top-0 z-[300] flex items-center justify-between gap-3 bg-[#B45309] px-4 pb-2 text-white shadow-lift"
       style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
       role="status"

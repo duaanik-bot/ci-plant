@@ -589,7 +589,7 @@ export function BulkWorkflowControls({
 
   return (
     <>
-      <div ref={dockRef} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
+      <div data-ci-overlay ref={dockRef} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
         <div className="ci-select-dock-panel mx-auto flex max-w-5xl flex-col gap-2 rounded-2xl px-3 py-2.5">
           {/* WHAT is selected, and the one thing to do with it. */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">

@@ -273,7 +273,7 @@ function NotificationBell() {
   return (
     <div className="no-print relative shrink-0" ref={ref}>
       {open && createPortal(
-        <div ref={popRef} className="glass fixed right-3 top-[var(--ci-pop-top)] z-[60] w-[min(380px,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
+        <div data-ci-overlay ref={popRef} className="glass fixed right-3 top-[var(--ci-pop-top)] z-[60] w-[min(380px,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
           <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] px-4 py-3">
             <div>
               <p className="text-sm font-bold text-[#1D1D1F]">Notification Center</p>
@@ -618,7 +618,7 @@ function PhoneNav({ groups, floorTotal, onMore }) {
     // grey band across the bottom — the dock is one uniform tone from rim to
     // screen edge, so the safe-area reads as the same slab. The row is 56px
     // (the iOS tab-bar register), pills 48px — still past the 44pt floor.
-    <nav className="no-print fixed inset-x-0 bottom-0 z-40">
+    <nav data-ci-chrome className="no-print fixed inset-x-0 bottom-0 z-40">
       {/* Content dissolves into the dock instead of hard-stopping on its rim —
           the same trick the header scrim plays, mirrored. */}
       <div
@@ -669,7 +669,7 @@ function PhoneNav({ groups, floorTotal, onMore }) {
 function MoreSheet({ open, onClose, groups, floorTotal, user }) {
   if (!open) return null;
   return createPortal(
-    <div className="no-print fixed inset-0 z-[80] flex flex-col animate-fadeIn">
+    <div data-ci-overlay className="no-print fixed inset-0 z-[80] flex flex-col animate-fadeIn">
       <div className="absolute inset-0 bg-[#1D1D1F]/35 backdrop-blur-md" onClick={onClose} />
       <div className="glass relative mx-2 mb-2 mt-auto flex max-h-[88dvh] flex-col overflow-hidden rounded-[26px] animate-slideUp"
         style={{ paddingBottom: 'var(--sab)' }}>
@@ -736,7 +736,7 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
 function TabletRail({ groups, floorTotal }) {
   const flat = groups.flatMap(g => g.items);
   return (
-    <aside className="no-print fixed inset-y-0 left-0 z-40 w-[76px] py-3 pl-2"
+    <aside data-ci-chrome className="no-print fixed inset-y-0 left-0 z-40 w-[76px] py-3 pl-2"
       style={{ paddingLeft: 'max(0.5rem, var(--sal))' }}>
       <div className="glass flex h-full flex-col items-stretch gap-0.5 overflow-y-auto overscroll-contain rounded-[22px] px-1.5 py-2 scrollbar-none">
         {flat.map(i => {
@@ -855,7 +855,7 @@ export default function AppLayout() {
       <div className="flex min-h-screen">
         <TabletRail groups={groups} floorTotal={floorTotal} />
         {mobileOpen && (
-          <div className="no-print fixed inset-0 z-50">
+          <div data-ci-overlay className="no-print fixed inset-0 z-50">
             <div className="absolute inset-0 bg-[#1D1D1F]/30 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
             <aside className="absolute inset-y-0 left-0 w-[264px] origin-left animate-liquidIn py-3 pl-3">
               <div className="glass flex h-full flex-col rounded-[26px]">
@@ -939,7 +939,7 @@ export default function AppLayout() {
       {/* Hidden state is pop-dominant: shrunk to 0.6 at the left edge (origin-left)
           with only enough translate to clear the viewport — so revealing reads as
           the rail inflating out of the edge with a spring settle, not sliding in. */}
-      <aside className={`no-print fixed inset-y-0 left-0 z-40 hidden w-[264px] origin-left py-3 pl-3 transition-[transform,opacity] duration-[560ms] ease-spring lg:block ${entered ? '' : 'animate-liquidIn'} ${collapsed ? 'pointer-events-none -translate-x-[230px] scale-[0.6] opacity-0' : 'translate-x-0 scale-100 opacity-100'}`}>
+      <aside data-ci-chrome className={`no-print fixed inset-y-0 left-0 z-40 hidden w-[264px] origin-left py-3 pl-3 transition-[transform,opacity] duration-[560ms] ease-spring lg:block ${entered ? '' : 'animate-liquidIn'} ${collapsed ? 'pointer-events-none -translate-x-[230px] scale-[0.6] opacity-0' : 'translate-x-0 scale-100 opacity-100'}`}>
         {/* Backdrop behind the glass — the desktop rail has no page content
             underneath it, so we float achromatic light blooms for the Liquid
             Glass to lens and refract. No hue: just soft white highlights and one
@@ -957,7 +957,7 @@ export default function AppLayout() {
 
       {/* Reopen tab — a centered arrow on the left edge when the sidebar is hidden */}
       {collapsed && (
-        <button onClick={toggleSidebar} title="Show sidebar" aria-label="Show sidebar"
+        <button data-ci-chrome onClick={toggleSidebar} title="Show sidebar" aria-label="Show sidebar"
           className="no-print glass fixed left-0 top-1/2 z-40 hidden h-14 w-6 -translate-y-1/2 animate-fadeIn items-center justify-center rounded-l-none rounded-r-2xl text-[#515154] transition-colors duration-150 hover:text-[#007AFF] lg:flex">
           <ChevronRight size={18} />
         </button>
@@ -965,7 +965,7 @@ export default function AppLayout() {
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="no-print fixed inset-0 z-50 lg:hidden">
+        <div data-ci-overlay className="no-print fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-[#1D1D1F]/30 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 w-[264px] origin-left animate-liquidIn py-3 pl-3">{sidebar}</aside>
         </div>

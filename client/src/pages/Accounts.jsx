@@ -133,9 +133,9 @@ export default function Accounts() {
           </Button>
         ))}
         <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
-          <Input type="date" className="h-9 w-36" value={from || ''} onChange={e => setCustom('from', e.target.value)} />
+          <Input data-reload-safe type="date" className="h-9 w-36" value={from || ''} onChange={e => setCustom('from', e.target.value)} />
           <span>to</span>
-          <Input type="date" className="h-9 w-36" value={to || ''} onChange={e => setCustom('to', e.target.value)} />
+          <Input data-reload-safe type="date" className="h-9 w-36" value={to || ''} onChange={e => setCustom('to', e.target.value)} />
         </div>
       </div>
 

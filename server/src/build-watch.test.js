@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assetsIn, ownAssets, isNewBuild, shouldAutoReload } from '../../client/src/lib/buildWatch.js';
+import { assetsIn, ownAssets, isNewBuild, shouldAutoReload, IDLE_MS } from '../../client/src/lib/buildWatch.js';
 
 const shell = (js, css) => `<!doctype html><html><head>
   <script type="module" crossorigin src="/assets/index-${js}.js"></script>
@@ -53,15 +53,75 @@ test('a document that names no assets of its own cannot judge anything', () => {
 });
 
 // ── When may it reload BY ITSELF ────────────────────────────────────────────
-// Only while nobody is looking. An operator keying production figures must
-// never have the page pulled out from under them.
-const base = { stale: true, hidden: true, servedSig: 'sig-new', reloadedFor: null, wasReload: false, persistent: true };
+// It used to be "only while hidden", full stop. That was safe and it left the
+// fleet behind: a plant tablet is an installed PWA that stays VISIBLE all shift,
+// so it kept an old bundle for days and never received a client-side fix. So a
+// visible page may now reload too — but only once nobody has touched it for
+// IDLE_MS and nothing on it could be lost: no dialog, sheet or popover open, no
+// request in flight, no field focused for typing, no form holding edits it has
+// not saved. The same busy checks guard the hidden path, which used to reload
+// with no look at what the page was holding at all.
+const quiet = { idleMs: IDLE_MS, overlayOpen: false, inFlight: 0, editingFocused: false, dirty: false };
+const base = { stale: true, hidden: true, servedSig: 'sig-new', reloadedFor: null, wasReload: false, persistent: true, ...quiet };
 
-test('it reloads itself only while the page is hidden', () => {
+test('a hidden page reloads by itself; a visible one only once it has sat idle', () => {
+  // Rewritten ON PURPOSE (was: "it reloads itself only while the page is
+  // hidden", asserting hidden:false → false). The visible path is new policy.
   assert.equal(shouldAutoReload({ ...base }), true, 'hidden and stale — the tablet is down, take it');
-  assert.equal(shouldAutoReload({ ...base, hidden: false }), false,
-    'somebody is looking at this screen and may be typing into it');
+  assert.equal(shouldAutoReload({ ...base, hidden: true, idleMs: 0 }), true,
+    'nobody is looking at a hidden page, so it does not wait out the idle clock');
+  assert.equal(shouldAutoReload({ ...base, hidden: false }), true,
+    'visible, untouched for the whole idle window, nothing open or half-typed');
+  assert.equal(shouldAutoReload({ ...base, hidden: false, idleMs: IDLE_MS - 1 }), false,
+    'somebody touched this screen inside the idle window and may still be at it');
+  assert.equal(shouldAutoReload({ ...base, hidden: false, idleMs: undefined }), false,
+    'no idle reading is no permission');
   assert.equal(shouldAutoReload({ ...base, stale: false }), false);
+});
+
+test('the idle window is fifteen minutes', () => {
+  // Long enough that a floor operator stepping away to the press comes back to
+  // the screen they left; short enough that a deploy reaches an idle wall screen
+  // inside the same shift.
+  assert.equal(IDLE_MS, 15 * 60 * 1000);
+});
+
+test('an open dialog, sheet or popover stops the reload — on either path', () => {
+  for (const hidden of [true, false]) {
+    assert.equal(shouldAutoReload({ ...base, hidden, overlayOpen: true }), false,
+      `hidden=${hidden}: a dialog is open — what is in it is not saved anywhere`);
+  }
+});
+
+test('a request in flight stops the reload — on either path', () => {
+  for (const hidden of [true, false]) {
+    assert.equal(shouldAutoReload({ ...base, hidden, inFlight: 1 }), false,
+      `hidden=${hidden}: a save may be half-way; reloading now leaves the operator not knowing if it landed`);
+  }
+});
+
+test('a field focused for typing stops the reload — on either path', () => {
+  for (const hidden of [true, false]) {
+    assert.equal(shouldAutoReload({ ...base, hidden, editingFocused: true }), false,
+      `hidden=${hidden}: the caret is in a field; the operator switched to WhatsApp mid-entry`);
+  }
+});
+
+test('a form holding unsaved edits stops the reload — on either path', () => {
+  for (const hidden of [true, false]) {
+    assert.equal(shouldAutoReload({ ...base, hidden, dirty: true }), false,
+      `hidden=${hidden}: a form holds figures that were typed and never saved`);
+  }
+});
+
+test('a caller that does not say whether the page is busy is treated as busy', () => {
+  // The vetoes are opt-OUT by stating "not busy". A future caller that forgets
+  // one must get a page that stays put, never one that reloads over a form.
+  for (const key of ['overlayOpen', 'inFlight', 'editingFocused', 'dirty']) {
+    const args = { ...base };
+    delete args[key];
+    assert.equal(shouldAutoReload(args), false, `${key} missing must veto`);
+  }
 });
 
 test('it will not reload twice for the same build', () => {

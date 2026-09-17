@@ -25,6 +25,7 @@
 import { storage } from './lib/safeStorage.js';
 import { responseCache } from './lib/responseCache.js';
 import { cachedGet } from './lib/cachedGet.js';
+import { tracked } from './lib/inFlight.js';
 
 export const HANDLED_BY = {
   SHADE_CARD_NOT_ELIGIBLE: {
@@ -92,7 +93,16 @@ export const auth = {
   },
 };
 
-async function request(method, url, body) {
+// Every write is counted while it is on the wire (lib/inFlight.js): the build
+// watch will not reload a screen by itself while a save may be half-way. A GET
+// is not counted — the screens' own 30 s data polls would otherwise hold a wall
+// screen on an old build. Only a write that SUCCEEDS can mark a form as saved —
+// a GET never does, and neither does a refusal.
+function request(method, url, body) {
+  return tracked(method !== 'GET', () => send(method, url, body));
+}
+
+async function send(method, url, body) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
   const token = auth.token;
@@ -142,37 +152,39 @@ export const api = {
   del: (url, body) => request('DELETE', url, body),
   // Multipart upload — same auth/error handling as request(), no JSON header.
   // `extra` = additional form fields riding along with the file (doc_type…).
-  async upload(url, file, extra = {}) {
-    const fd = new FormData();
-    fd.append('file', file);
-    for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') fd.append(k, v);
-    let res;
-    let data;
-    try {
-      res = await fetch(`/api${url}`, {
-        method: 'POST',
-        headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
-        body: fd,
-      });
-      data = await res.json().catch(() => ({}));
-    } finally {
-      responseCache.noteMutation();
-    }
-    if (res.status === 401) {
-      auth.clear();
-      responseCache.clear();
-      onUnauthorized();
-      throw new Error(data.error || 'Signed out');
-    }
-    if (!res.ok) {
-      const msg = data.error || `Upload failed (${res.status})`;
-      if (!HANDLED_CODES.has(data.code)) onError(msg);
-      const err = new Error(msg);
-      err.status = res.status;
-      err.data = data;
-      throw err;
-    }
-    return data;
+  upload(url, file, extra = {}) {
+    return tracked(true, async () => {
+      const fd = new FormData();
+      fd.append('file', file);
+      for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') fd.append(k, v);
+      let res;
+      let data;
+      try {
+        res = await fetch(`/api${url}`, {
+          method: 'POST',
+          headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+          body: fd,
+        });
+        data = await res.json().catch(() => ({}));
+      } finally {
+        responseCache.noteMutation();
+      }
+      if (res.status === 401) {
+        auth.clear();
+        responseCache.clear();
+        onUnauthorized();
+        throw new Error(data.error || 'Signed out');
+      }
+      if (!res.ok) {
+        const msg = data.error || `Upload failed (${res.status})`;
+        if (!HANDLED_CODES.has(data.code)) onError(msg);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    });
   },
 };
 

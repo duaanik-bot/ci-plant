@@ -210,7 +210,7 @@ export function ReadinessPopover({ light, children, className = '' }) {
         {children}
       </button>
       {rect && createPortal(
-        <div ref={panelRef} style={placement(rect)}
+        <div data-ci-overlay ref={panelRef} style={placement(rect)}
           className="no-print glass fixed z-50 animate-liquidPop overflow-y-auto rounded-[18px] p-3 shadow-modal">
           <ReadinessChecklist light={light} />
         </div>,

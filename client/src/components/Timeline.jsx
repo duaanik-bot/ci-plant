@@ -228,13 +228,13 @@ export default function Timeline() {
     <>
       {/* Floating trigger — third slot in the bottom-right stack on every page:
           bell owns bottom-4, the chat dock bottom-[68px], history sits above both. */}
-      <button onClick={openDrawer} title="Timeline"
+      <button data-ci-chrome onClick={openDrawer} title="Timeline"
         className="ci-timeline-fab no-print glass fixed bottom-[120px] right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
         <History size={17} />
       </button>
 
       {open && createPortal(
-        <div className="no-print fixed inset-0 z-[70]">
+        <div data-ci-overlay className="no-print fixed inset-0 z-[70]">
           <div className="absolute inset-0 bg-[#1D1D1F]/25 backdrop-blur-[3px] animate-fadeIn" onClick={() => setOpen(false)} />
           <aside className="absolute inset-y-0 right-0 w-full max-w-[460px] p-3">
             <div className="glass flex h-full flex-col overflow-hidden rounded-[26px] animate-scaleIn">
@@ -272,10 +272,10 @@ export default function Timeline() {
                 </div>
                 <div className="flex items-center gap-2">
                   <CalendarDays size={14} className="shrink-0 text-[#86868B]" />
-                  <input type="date" className={dateInputCls} value={range.from} max={range.to}
+                  <input data-reload-safe type="date" className={dateInputCls} value={range.from} max={range.to}
                     onChange={e => e.target.value && setCustom({ from: e.target.value })} />
                   <span className="text-xs text-[#86868B]">to</span>
-                  <input type="date" className={dateInputCls} value={range.to} min={range.from}
+                  <input data-reload-safe type="date" className={dateInputCls} value={range.to} min={range.from}
                     onChange={e => e.target.value && setCustom({ to: e.target.value })} />
                 </div>
                 <div className={`grid gap-2 ${showSection ? 'grid-cols-2' : 'grid-cols-1'}`}>

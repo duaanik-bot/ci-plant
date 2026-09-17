@@ -566,7 +566,7 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
 
   return createPortal(
     <>
-    <div className="no-print fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6">
+    <div data-ci-overlay className="no-print fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-[#1D1D1F]/25 backdrop-blur-[3px] animate-fadeIn" onClick={onClose} />
       <div className="glass relative flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[26px] animate-scaleIn">
 
@@ -613,10 +613,10 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
               ))}
               <span className="mx-1 h-4 w-px bg-[#1D1D1F]/10" />
               <CalendarDays size={13} className="shrink-0 text-[#86868B]" />
-              <input type="date" className={`${dateInputCls} !w-[130px]`} value={range.from} max={range.to}
+              <input data-reload-safe type="date" className={`${dateInputCls} !w-[130px]`} value={range.from} max={range.to}
                 onChange={e => e.target.value && setCustom({ from: e.target.value })} />
               <span className="text-[11px] text-[#86868B]">to</span>
-              <input type="date" className={`${dateInputCls} !w-[130px]`} value={range.to} min={range.from}
+              <input data-reload-safe type="date" className={`${dateInputCls} !w-[130px]`} value={range.to} min={range.from}
                 onChange={e => e.target.value && setCustom({ to: e.target.value })} />
             </div>
             {/* KPI strip */}

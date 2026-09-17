@@ -72,7 +72,7 @@ export function MergeCreatedSheet({ run, onClose, onPlan }) {
   if (!run) return null;
   const totalQty = run.members.reduce((s, m) => s + (+m.qty || 0), 0);
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
+    <div data-ci-overlay className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
       <div className="absolute inset-0 bg-[#1D1D1F]/[0.38] backdrop-blur-[10px] backdrop-saturate-150" onClick={onClose} />
       <div className="relative w-full max-w-sm animate-liquidPop overflow-hidden rounded-[30px] border border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl">
         <div className="flex flex-col items-center px-6 pt-9">

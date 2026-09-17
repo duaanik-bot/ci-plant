@@ -288,8 +288,8 @@ export default function Logbook() {
                 </div>
                 {preset === 'custom' && (
                   <div className="mt-3 flex flex-wrap items-end gap-3">
-                    <Field label="From"><Input type="date" value={range?.from || ''} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} /></Field>
-                    <Field label="To"><Input type="date" value={range?.to || ''} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} /></Field>
+                    <Field label="From"><Input data-reload-safe type="date" value={range?.from || ''} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} /></Field>
+                    <Field label="To"><Input data-reload-safe type="date" value={range?.to || ''} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} /></Field>
                   </div>
                 )}
               </div>

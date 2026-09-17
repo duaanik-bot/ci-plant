@@ -135,7 +135,7 @@ function LaneSearch({ value, onChange, placeholder }) {
   return (
     <div className="relative min-w-0 flex-1">
       <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
-      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      <input data-reload-safe value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className={`h-[30px] w-full rounded-full border pl-7 pr-7 text-[12px] font-medium text-slate-700 outline-none transition duration-200 ${SEARCH_FX}`} />
       {value && (
         <button onClick={() => onChange('')} title="Clear"
@@ -530,7 +530,7 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
 
   const field = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none';
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+    <div data-ci-overlay className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <span className="text-sm font-extrabold text-slate-900">Edit — {card.jc_number}</span>
@@ -2060,7 +2060,7 @@ export default function PrintPlanning() {
           );
         };
         return (
-          <div data-drop-scope className={`fixed inset-0 z-40 flex flex-col border-t-4 bg-gradient-to-b from-slate-50 to-slate-100 ${rail}`}>
+          <div data-ci-overlay data-drop-scope className={`fixed inset-0 z-40 flex flex-col border-t-4 bg-gradient-to-b from-slate-50 to-slate-100 ${rail}`}>
             {/* Toolbar — same identity as the lane header, plus this view's own search */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200/80 bg-white/80 px-5 py-3 backdrop-blur-xl">
               <span className="flex items-center gap-2 text-[15px] font-extrabold tracking-tight text-slate-900">
@@ -2306,7 +2306,7 @@ export default function PrintPlanning() {
           </div>
         );
         return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setChooser(null)}>
+        <div data-ci-overlay className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setChooser(null)}>
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between gap-2">
               <span className="flex min-w-0 items-center gap-2 text-sm font-extrabold text-slate-900">
@@ -2442,7 +2442,7 @@ export default function PrintPlanning() {
 
       {/* Hold — reason required; the card and the station queue both turn red. */}
       {holding && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setHolding(null)}>
+        <div data-ci-overlay className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setHolding(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
               <span className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
@@ -2485,7 +2485,7 @@ export default function PrintPlanning() {
 
       {/* Undo bar — every move leaves a ten-second window to take it back. */}
       {undo && (
-        <div className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2">
+        <div data-ci-overlay className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2">
           <div className="flex animate-slideUp items-center gap-3 rounded-full border border-slate-700 bg-slate-900/95 py-2 pl-4 pr-2 text-sm font-semibold text-white shadow-2xl backdrop-blur">
             <span className="tabular-nums">{undo.msg}</span>
             <button onClick={runUndo}
@@ -2504,7 +2504,7 @@ export default function PrintPlanning() {
 // plan. Never blocks: "Plan Anyway" proceeds (and is audited), "Cancel" reverts.
 function StrengthClashModal({ collision, onConfirm, onCancel }) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+    <div data-ci-overlay className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3">
           <div className="rounded-xl bg-amber-100 p-2 text-amber-600"><AlertTriangle size={22} /></div>

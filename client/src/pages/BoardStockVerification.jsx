@@ -457,9 +457,9 @@ export default function BoardStockVerification() {
           </div>
           <div className="inline-flex shrink-0 items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Cutting by</span>
-            <div className="w-36 shrink-0"><Input type="date" className="h-9" value={cutBefore} onChange={e => setCutBefore(e.target.value)} /></div>
+            <div className="w-36 shrink-0"><Input data-reload-safe type="date" className="h-9" value={cutBefore} onChange={e => setCutBefore(e.target.value)} /></div>
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Dispatch by</span>
-            <div className="w-36 shrink-0"><Input type="date" className="h-9" value={dispBefore} onChange={e => setDispBefore(e.target.value)} /></div>
+            <div className="w-36 shrink-0"><Input data-reload-safe type="date" className="h-9" value={dispBefore} onChange={e => setDispBefore(e.target.value)} /></div>
           </div>
           <div className="inline-flex shrink-0 items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Sort</span>

@@ -762,9 +762,9 @@ export default function Production() {
         </div>
         {timeline === 'custom' && (
           <div className="flex flex-wrap items-end gap-2">
-            <Field label="From"><Input type="date" value={customRange.from}
+            <Field label="From"><Input data-reload-safe type="date" value={customRange.from}
               onChange={e => setCustomRange(r => ({ ...r, from: e.target.value }))} /></Field>
-            <Field label="To"><Input type="date" value={customRange.to}
+            <Field label="To"><Input data-reload-safe type="date" value={customRange.to}
               onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))} /></Field>
           </div>
         )}
@@ -872,7 +872,7 @@ export default function Production() {
                       picking a card never also opens its form. */}
                   <label className="-my-1 flex cursor-pointer items-center py-1 pr-0.5"
                     title={`${picked.has(jc.id) ? 'Remove from' : 'Add to'} the PDF print run`}>
-                    <input type="checkbox" checked={picked.has(jc.id)} onChange={() => toggle(jc.id)}
+                    <input data-reload-safe type="checkbox" checked={picked.has(jc.id)} onChange={() => toggle(jc.id)}
                       className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
                   </label>
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>

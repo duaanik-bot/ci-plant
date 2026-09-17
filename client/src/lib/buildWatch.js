@@ -17,6 +17,8 @@
 // server change — the document already names its own files, and `/` is served
 // `must-revalidate`, so asking is usually a 304.
 import { sessionStore, storageIsPersistent } from './safeStorage.js';
+import { createReloadSafety } from './reloadSafety.js';
+import { writesInFlight, onWrite } from './inFlight.js';
 
 // What counts as a file this document was BUILT FROM: the entry module and the
 // stylesheet — the two tags a Vite build writes into index.html. The icons, the
@@ -85,26 +87,55 @@ export function isNewBuild(mine, served) {
 }
 
 // When may it reload BY ITSELF, with nobody asking?
-export function shouldAutoReload({ stale, hidden, servedSig, reloadedFor, wasReload, persistent }) {
+//
+// It used to be only while HIDDEN. That was safe and it left the fleet behind:
+// a plant tablet is an installed PWA that sits in front of an operator all
+// shift, so it kept an old bundle for days and never received a client-side
+// fix. So a visible page may reload too — once it has had no pointer, key,
+// touch or wheel input for IDLE_MS, and only if nothing on it could be lost.
+// The busy readings (lib/reloadSafety.js) veto BOTH paths: the hidden path used
+// to reload with no look at what the page held, and an operator who switched to
+// WhatsApp mid-entry while a deploy landed lost the entry.
+//
+// Every busy flag must be stated as not-busy. A caller that forgets one gets a
+// page that stays put, never one that reloads over an open form.
+export const IDLE_MS = 15 * 60 * 1000;
+
+export function shouldAutoReload({
+  stale, hidden, servedSig, reloadedFor, wasReload, persistent,
+  idleMs, overlayOpen, inFlight, editingFocused, dirty,
+}) {
   if (!stale) return false;
-  // Only while nobody is looking. An operator keying production figures must
-  // never have the page pulled out from under them; visible staleness is the
-  // banner's job, not this one's.
-  if (!hidden) return false;
   // Already reloaded for THIS build and still stale: reloading again cannot
-  // help, and an unattended loop on a hidden page is invisible until the
-  // battery is flat. One attempt per distinct build, ever.
+  // help, and an unattended loop is invisible until the battery is flat. One
+  // attempt per distinct build, ever.
   if (reloadedFor && reloadedFor === servedSig) return false;
   // On a device that remembers nothing, the record above cannot survive the
   // reload it is meant to bound. Navigation Timing needs no permission and
   // still cannot loop: a reloaded document refuses to reload again.
   if (!persistent && wasReload) return false;
-  return true;
+  // A dialog, sheet or popover is open — what is in it is saved nowhere.
+  if (overlayOpen !== false) return false;
+  // A save may be half-way; reloading now leaves nobody knowing if it landed.
+  if (inFlight !== 0) return false;
+  // The caret is in a field.
+  if (editingFocused !== false) return false;
+  // A form holds figures that were typed and never saved.
+  if (dirty !== false) return false;
+  // Nobody is looking at a hidden page, so it need not wait out the idle clock.
+  if (hidden) return true;
+  // An operator keying production figures must never have the page pulled out
+  // from under them: in front of someone, it waits for real idleness.
+  return idleMs >= IDLE_MS;
 }
 
 const KEY = 'ci:build-reloaded-for';
 const POLL_MS = 5 * 60 * 1000;
 const MIN_GAP_MS = 30 * 1000;      // visibility flaps; do not hammer the origin
+// Once a new build is known, how often to look again at whether the page has
+// gone quiet. It re-reads the page, not the server — the served build from the
+// last poll stands until the next one.
+const RECHECK_MS = 60 * 1000;
 
 export function startBuildWatch({ onNewBuild } = {}) {
   if (typeof document === 'undefined' || typeof fetch !== 'function') return () => {};
@@ -114,11 +145,32 @@ export function startBuildWatch({ onNewBuild } = {}) {
   let stopped = false;
   let announced = false;
   let lastCheck = 0;
+  // The build the server was serving at the last successful ask, while it is
+  // one this document is not on. Null means "nothing newer is known".
+  let pendingSig = null;
 
   const wasReload = (() => {
     try { return performance.getEntriesByType('navigation')[0]?.type === 'reload'; }
     catch { return false; }
   })();
+
+  const safety = createReloadSafety({ doc: document, win: window, inFlightCount: writesInFlight, onWrite });
+
+  function decide() {
+    if (stopped || !pendingSig) return;
+    if (shouldAutoReload({
+      stale: true,
+      hidden: document.hidden,
+      servedSig: pendingSig,
+      reloadedFor: sessionStore.getItem(KEY),
+      wasReload,
+      persistent: storageIsPersistent,
+      ...safety.state(),
+    })) {
+      sessionStore.setItem(KEY, pendingSig);
+      location.reload();
+    }
+  }
 
   async function check(force = false) {
     if (stopped) return;
@@ -134,25 +186,19 @@ export function startBuildWatch({ onNewBuild } = {}) {
     } catch { return; }                    // offline, or a blip: never act on a failed ask
 
     const served = assetsIn(html);
-    if (!isNewBuild(mine, served)) return;
+    // A good answer naming this document's own build (a rolled-back deploy)
+    // withdraws the pending reload; the bar, once offered, stays.
+    if (!isNewBuild(mine, served)) { pendingSig = null; return; }
 
-    const servedSig = served.join('|');
+    pendingSig = served.join('|');
     if (!announced) { announced = true; onNewBuild?.(); }
-
-    if (shouldAutoReload({
-      stale: true,
-      hidden: document.hidden,
-      servedSig,
-      reloadedFor: sessionStore.getItem(KEY),
-      wasReload,
-      persistent: storageIsPersistent,
-    })) {
-      sessionStore.setItem(KEY, servedSig);
-      location.reload();
-    }
+    decide();
   }
 
   const timer = setInterval(() => check(true), POLL_MS);
+  // A busy page is not refused for good: once a new build is known, look again
+  // every minute for the moment it goes quiet, rather than waiting out a poll.
+  const recheck = setInterval(decide, RECHECK_MS);
   const onVisibility = () => check();
   // A tab restored from the back/forward cache is replaying an OLD document —
   // precisely the one whose files may be gone.
@@ -163,6 +209,8 @@ export function startBuildWatch({ onNewBuild } = {}) {
   return () => {
     stopped = true;
     clearInterval(timer);
+    clearInterval(recheck);
+    safety.stop();
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pageshow', onPageShow);
   };

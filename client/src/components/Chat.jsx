@@ -933,7 +933,7 @@ export default function ChatDock() {
     // The bell owns bottom-4 — the dock floats one slot above it.
     <div className="no-print relative shrink-0" ref={panelRef}>
       {open && createPortal(
-        <div ref={popRef} className="glass fixed inset-0 z-[60] flex origin-top-right animate-liquidPop flex-col overflow-hidden rounded-none shadow-modal sm:inset-auto sm:top-[58px] sm:right-3 sm:h-[min(600px,78vh)] sm:max-h-[78vh] sm:w-[420px] sm:rounded-[22px]">
+        <div data-ci-overlay ref={popRef} className="glass fixed inset-0 z-[60] flex origin-top-right animate-liquidPop flex-col overflow-hidden rounded-none shadow-modal sm:inset-auto sm:top-[58px] sm:right-3 sm:h-[min(600px,78vh)] sm:max-h-[78vh] sm:w-[420px] sm:rounded-[22px]">
 
           {/* ── List view ─────────────────────────────────────────────── */}
           {view === 'list' && (
@@ -1330,7 +1330,7 @@ export default function ChatDock() {
 
       {/* Image lightbox — tap-to-full for photo attachments */}
       {zoom && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#1D1D1F]/80 p-4 backdrop-blur-sm" onClick={() => setZoom(null)}>
+        <div data-ci-overlay className="fixed inset-0 z-[70] flex items-center justify-center bg-[#1D1D1F]/80 p-4 backdrop-blur-sm" onClick={() => setZoom(null)}>
           <img src={zoom} alt="attachment" className="max-h-[90vh] max-w-[92vw] rounded-2xl object-contain shadow-modal" />
         </div>
       )}
