@@ -412,8 +412,8 @@ const loadStages = async jc => withReceipts(jc, await q(`
 // So the rail carries what the rail draws. Keep-list, not a drop-list: a stage
 // gains columns as the plant gains steps, and a new one should have to be asked
 // for here rather than arriving on every register load forever.
-// job-cards-payload.test.js pins what Production.jsx and the plate warehouse
-// read off these rows.
+// job-cards-payload.test.js pins what Production.jsx reads off these rows. (The
+// plate warehouse used to read this register too; it asks /job-cards/open-picker.)
 export const JOB_CARD_STAGE_FIELDS = Object.freeze([
   'id', 'job_card_id', 'seq', 'stage', 'status', 'unit',
   'qty_in', 'qty_out', 'qty_scrap',
