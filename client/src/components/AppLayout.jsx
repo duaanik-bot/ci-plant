@@ -18,7 +18,8 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { notificationLink } from '../lib/notificationLink.js';
 import { currentSubscription, readEnvironment, registerWorker, subscribe } from '../lib/webPush.js';
 import { useToast } from './ui.jsx';
-import ChatDock from './Chat.jsx';
+// A lazy chunk behind a boundary and an open-request queue — see ChatDockLoader.jsx.
+import ChatDock from './ChatDockLoader.jsx';
 import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
 import { useTier } from '../lib/tier.js';

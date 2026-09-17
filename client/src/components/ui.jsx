@@ -2,7 +2,6 @@
 import { Children, Fragment, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, FilterX, Zap } from 'lucide-react';
-import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { filtersDirty, dirtyFilterLabels, applyFilterReset } from '../lib/filterReset.js';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
@@ -1093,6 +1092,10 @@ export function ExportMenu({ build, size = 'sm', variant = 'secondary', label = 
     setOpen(false);
     setBusy(kind);
     try {
+      // Loaded on the click, not at boot: ui.jsx is in the entry chunk every
+      // tablet parses cold, and the exporter is only ever needed right here.
+      // Inside the try so a failed fetch on plant Wi-Fi toasts and clears busy.
+      const { exportPDF, exportXLSX, specRowCount } = await import('../lib/exporter');
       const spec = await build();
       if (!spec || !specRowCount(spec)) { toast?.info('Nothing to export'); return; }
       if (kind === 'pdf') await exportPDF(spec); else await exportXLSX(spec);

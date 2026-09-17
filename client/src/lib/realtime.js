@@ -1,7 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
+// realtime-js alone, not supabase-js: `.channel()` is all the app uses, and the
+// full client dragged auth/storage/REST into the entry chunk. See realtimeEndpoint.js.
+import { RealtimeClient } from '@supabase/realtime-js';
 import { responseCache } from './responseCache.js';
 import { createStatusTracker } from './realtimeStatus.js';
 import { watchResume } from './resumeWatch.js';
+import { realtimeEndpoint, realtimeClientOptions } from './realtimeEndpoint.js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -74,13 +77,7 @@ export function getRealtimeStatus() {
 export function startRealtime() {
   if (!configured || channel || starting) return;
   starting = true;
-  client ||= createClient(supabaseUrl, supabaseKey, {
-    auth: {
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      persistSession: false,
-    },
-  });
+  client ||= new RealtimeClient(realtimeEndpoint(supabaseUrl), realtimeClientOptions(supabaseKey));
 
   channel = client
     // Database triggers send public invalidation broadcasts. State the channel
