@@ -183,6 +183,10 @@ const JC_VIEW = `
            MIN(ga.artwork_qa_ok) AS all_qa,
            MIN(ga.artwork_locked) AS all_locked
     FROM order_lines ga WHERE ga.gang_run_id = jc.gang_run_id
+      -- The ON gate, repeated inside so a solo card never opens this sub-select
+      -- (a One-Time Filter instead of a per-card scan thrown away by the join).
+      -- No GROUP BY: a false gate still yields one NULL row the ON clause drops.
+      AND jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   ) gagg ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
   LEFT JOIN LATERAL (
@@ -248,6 +252,11 @@ const JC_VIEW = `
       ORDER BY sc.id DESC LIMIT 1
     ) sc3 ON true
     WHERE ol3.gang_run_id = jc.gang_run_id
+      -- Gated inside as well as on the join, like gagg above. This is the
+      -- dearest lateral in the register — every member row runs a tools
+      -- sub-select and a shade-card lateral — so skipping it for the solo
+      -- cards (most of the plant) matters most here.
+      AND jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   ) gmm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   ${GANG_RUN_MATES_LATERAL}
   LEFT JOIN LATERAL (

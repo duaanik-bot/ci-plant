@@ -27,6 +27,7 @@ import { productSearchText } from '../components/ProductIdentity.jsx';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
 import { useTier } from '../lib/tier.js';
+import { rehydrateLights } from '../lib/floorLights.js';
 
 // One label for a gang parent job everywhere on the floor board — every member
 // product named, in gang order, so the chip reads as one unit.
@@ -109,9 +110,18 @@ export default function Floor() {
   // this screen while it works, so the last good picture stays up and only a
   // small "not refreshing" marker appears. Without the catch a first-load
   // failure stuck the floor on "Loading the floor…" forever.
-  const load = () => api.get('/floor')
-    .then(secs => {
-      seenAt.current = new Date(); setSections(secs); setFailed(null);
+  //
+  // Each distinct traffic light travels once (?lights=ref — about half the
+  // board's bytes) and is put back on every row HERE, before the board is set,
+  // so the bands, the machine tiles and search all see exactly today's rows.
+  // Rehydration builds new objects, so it is memoised on the response itself: an
+  // unchanged board comes back from api.get as the SAME object, and must reach
+  // setSections as the same array or the whole floor re-renders every 30 s.
+  const hydrated = useRef({ res: null, secs: null });
+  const load = () => api.get('/floor?lights=ref')
+    .then(res => {
+      if (hydrated.current.res !== res) hydrated.current = { res, secs: rehydrateLights(res) };
+      seenAt.current = new Date(); setSections(hydrated.current.secs); setFailed(null);
       fails.current = 0; skips.current = 0;
     })
     .catch(e => {

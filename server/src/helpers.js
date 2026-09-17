@@ -1873,6 +1873,12 @@ export const GANG_RUN_MATES_LATERAL = `
     JOIN products pm ON pm.id = olm.product_id
     WHERE olm.gang_run_id = jc.gang_run_id
       AND olm.id IS DISTINCT FROM jc.order_line_id
+      -- The ON gate, repeated inside: it names the outer card only, so Postgres
+      -- skips this sub-select for every card that is not a split child rather
+      -- than running it per row and discarding the answer. No GROUP BY — a
+      -- false gate still yields one NULL row the ON clause drops, as before
+      -- (gang-lateral-gates.test.js).
+      AND jc.parent_job_card_id IS NOT NULL AND jc.gang_run_id IS NOT NULL
   ) rmate ON jc.parent_job_card_id IS NOT NULL AND jc.gang_run_id IS NOT NULL`;
 
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →

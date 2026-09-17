@@ -40,6 +40,7 @@ import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
   showsMachineColumn, ownMachineName, shownOperator } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
+import { sectionFloorPath, hasCompletedRows, latestOnly } from '../lib/sectionCompleted.js';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
@@ -488,6 +489,12 @@ export default function Section() {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('queue');
+  // load() reads the tab through a ref: the realtime and fallback hooks call
+  // whichever load() they captured, and the tab decides what is asked for.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const loadGate = useRef(null);
+  if (!loadGate.current) loadGate.current = latestOnly();
   // Read-only job card opened from a queue row — the floor asks "what IS this
   // job?" constantly, and until now the answer meant leaving the station.
   const [cardId, setCardId] = useState(null);
@@ -603,13 +610,28 @@ export default function Section() {
   // cut — every row would read Stock OK, which is decoration, not signal.
   const showsBoard = section === 'cutting';
 
-  const load = () => api.get(`/floor/${section}`).then(setData);
+  // The 200 finished runs travel in full only while the Completed tab is open;
+  // every other tab gets them as the few fields its KPI strip and tab count
+  // read (lib/sectionCompleted.js) — ~290 KB less on each tablet refresh. A tab
+  // switch can leave two requests in flight, so an answer older than the one on
+  // screen is dropped rather than painted over it.
+  const load = () => {
+    const n = loadGate.current.begin();
+    return api.get(sectionFloorPath(section, tabRef.current))
+      .then(d => { if (loadGate.current.accept(n)) setData(d); });
+  };
   useEffect(() => {
-    setData(null); setTab(section === 'cutting' && searchParams.get('xs') === '1' ? 'extra_sheets' : 'queue'); setQ(searchParams.get('q') || ''); setState('all'); setPeriod('all');
+    const firstTab = section === 'cutting' && searchParams.get('xs') === '1' ? 'extra_sheets' : 'queue';
+    tabRef.current = firstTab; // load() below runs before the re-render that would set it
+    setData(null); setTab(firstTab); setQ(searchParams.get('q') || ''); setState('all'); setPeriod('all');
     setPick(null);
     if (meta) load();
   }, [section, searchParams]);
   useFallbackRefresh(load, { enabled: Boolean(meta), intervalMs: 30000, loadOnMount: false });
+  // Opening the Completed tab on a screen holding only the KPI projection
+  // fetches the full rows once; while it stays open every refresh asks for them.
+  const awaitingCompleted = tab === 'completed' && data != null && !hasCompletedRows(data);
+  useEffect(() => { if (awaitingCompleted) load(); }, [awaitingCompleted]);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250, enabled: Boolean(meta) });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
@@ -703,11 +725,14 @@ export default function Section() {
   }, [data?.extra_sheets, q]);
 
   const completed = useMemo(() => {
+    // A KPI projection has no product, job card or yield to draw — the table
+    // waits for the full rows instead of rendering blanks.
+    if (!hasCompletedRows(data)) return [];
     let rows = pressCompleted;
     if (period !== 'all') rows = rows.filter(r => inPeriod(r.completed_at, period));
     if (q) rows = rows.filter(r => rowMatches(r, q, (r.gang_members || [r]).map(productSearchText).join(' ')));
     return rows;
-  }, [pressCompleted, q, period]);
+  }, [data, pressCompleted, q, period]);
 
   if (!meta) return <Navigate to="/floor" replace />;
   const Icon = meta.icon;
@@ -1976,7 +2001,7 @@ export default function Section() {
       {tab === 'completed' && phone && (
         <div className="ci-card-grid grid grid-cols-1 gap-2.5">
           {completed.length === 0 && (
-            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
+            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">{hasCompletedRows(data) ? 'No completed runs yet.' : 'Loading completed runs…'}</div>
           )}
           {completed.map(r => (
             <div key={r.id} className={`glass rounded-2xl p-3 ${r.gang_members?.length ? 'border-l-[3px] border-violet-400' : ''}`}>
@@ -2045,7 +2070,7 @@ export default function Section() {
               </tr></thead>
               <tbody>
                 {completed.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">{hasCompletedRows(data) ? 'No completed runs yet.' : 'Loading completed runs…'}</td></tr>
                 )}
                 {completed.map(r => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? (r.run_kind === 'merge' ? 'border-l-[3px] border-teal-400 bg-teal-50/30' : 'border-l-[3px] border-violet-400 bg-violet-50/30') : ''}`}>

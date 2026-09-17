@@ -14,6 +14,8 @@ import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
+import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
+import { internLights } from '../../../client/src/lib/floorLights.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -69,6 +71,32 @@ export function leanCompletedRun(row) {
   for (const k of COMPLETED_DROPS) delete out[k];
   return out;
 }
+
+// The station workspace response. Without a param it is key for key, in order,
+// what it has always been: old bundles stay on plant tablets for days.
+//
+// `?completed=kpi` is what a new bundle sends while its tablet is NOT on the
+// Completed tab. The same runs still travel — the queue tab's KPI strip and the
+// Completed tab's count are kpisFor / runsForOperator over them — but each as
+// the few fields those read (client/src/lib/sectionCompleted.js), instead of
+// ~290 KB of rows nothing on that tab draws. `kpis` is computed from the full
+// rows before this, so the unpicked strip is untouched too.
+export function sectionPayload({ section, kpis, queue, completed, audit, extraSheets, machines }, query = {}) {
+  const kpiOnly = query?.completed === 'kpi';
+  return {
+    section, kpis, queue,
+    completed: kpiOnly ? completed.map(completedKpiRow) : completed,
+    audit, extra_sheets: extraSheets, machines,
+    ...(kpiOnly ? { completed_rows: 'kpi' } : {}),
+  };
+}
+
+// GET /floor's answer. Without a param: the bare section array, untouched — old
+// bundles stay on plant tablets for days. `?lights=ref` is the new bundle
+// asking for each distinct traffic light once, `{ sections, lights }`, with
+// rows pointing at them (client/src/lib/floorLights.js, which rehydrates).
+export const floorResponse = (payload, query = {}) =>
+  (query?.lights === 'ref' ? internLights(payload) : payload);
 
 // Machine-category order for the control board — same flow, but with prepress
 // (CTP plate-making) in its plant slot right after cutting. CTP is equipment,
@@ -198,7 +226,13 @@ const GANG_MEMBERS_LATERAL = `
     JOIN orders o3 ON o3.id = ol3.order_id
     JOIN customers c3 ON c3.id = o3.customer_id
     JOIN products p3 ON p3.id = ol3.product_id
+    -- The ON gate, repeated: it names the OUTER card only, so here Postgres
+    -- can skip this sub-select outright for a solo card or a split child
+    -- instead of running it per stage row and discarding the answer. No GROUP
+    -- BY, so a false gate still yields one NULL row the ON clause drops, the
+    -- same as before (gang-lateral-gates.test.js).
     WHERE ol3.gang_run_id = jc.gang_run_id
+      AND jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   ) gm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   LEFT JOIN LATERAL (
     -- A COMBINED RUN keeps its EARLIEST promise: queue priority is the soonest
@@ -207,7 +241,10 @@ const GANG_MEMBERS_LATERAL = `
     -- kind='merge' so every gang sorts exactly as it does today.
     SELECT MIN(o5.delivery_date) AS min_delivery
     FROM order_lines ol5 JOIN orders o5 ON o5.id = ol5.order_id
+    -- Gated inside as well as on the join, like gm above: only a merge
+    -- parent opens this sub-select (gg is joined first, so it is in scope).
     WHERE ol5.gang_run_id = jc.gang_run_id
+      AND jc.order_line_id IS NULL AND gg.kind = 'merge'
   ) runagg ON jc.order_line_id IS NULL AND gg.kind = 'merge'`;
 
 // The two halves of a run's identity on a card, and they are always added
@@ -621,7 +658,7 @@ r.get('/floor', async (req, res, next) => {
       };
     });
     if (allowSec) payload = payload.filter(s => allowSec.includes(s.section));
-    res.json(payload);
+    res.json(floorResponse(payload, req.query));
   } catch (e) { next(e); }
 });
 
@@ -1292,11 +1329,10 @@ r.get('/floor/:section', async (req, res, next) => {
         WHERE mo.machine_id=m.id AND e.active=1) ops ON true
       WHERE m.type=$1 AND COALESCE(m.active,1)=1 ORDER BY m.name`, [section]);
 
-    res.json({
-      section, kpis, queue, completed, audit,
-      extra_sheets: extraSheets,
+    res.json(sectionPayload({
+      section, kpis, queue, completed, audit, extraSheets,
       machines: pressKeep ? machines.filter(m => pressKeep.has(m.id)) : machines,
-    });
+    }, req.query));
   } catch (e) { next(e); }
 });
 
