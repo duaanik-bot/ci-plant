@@ -1,4 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
+import { responseCache } from './responseCache.js';
+import { createStatusTracker } from './realtimeStatus.js';
+import { watchResume } from './resumeWatch.js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -12,9 +15,17 @@ let starting = false;
 let status = configured ? 'idle' : 'disabled';
 const changeListeners = new Set();
 const statusListeners = new Set();
+const tracker = createStatusTracker();
 
 function setStatus(next) {
   status = next;
+  responseCache.noteStatus(next);
+  // Back after a break: nothing announced while the socket was down will ever
+  // arrive, so every cached answer is void and every live screen reloads once.
+  if (tracker.next(next).catchUp) {
+    responseCache.noteCatchUp();
+    for (const { listener } of changeListeners) listener({});
+  }
   for (const listener of statusListeners) listener(status);
 }
 
@@ -31,9 +42,25 @@ function tableMatches(payload, tables) {
 
 function emitChange(message) {
   const payload = normalisePayload(message);
+  // Before any listener refetches: the cache must already know this table changed.
+  responseCache.noteChange(payload?.table);
   for (const { listener, tables } of changeListeners) {
     if (tableMatches(payload, tables)) listener(payload);
   }
+}
+
+// The database's heartbeat (public.ci_erp_realtime_heartbeat): proof the feed is
+// alive end to end, and the list of tables whose changes it announces.
+function noteHeartbeat(message) {
+  const payload = normalisePayload(message);
+  responseCache.noteHeartbeat(Array.isArray(payload?.tracked) ? payload.tracked : null);
+}
+
+if (typeof window !== 'undefined') {
+  window.__ciResponseCacheStats = () => responseCache.stats();
+  // Slept, offline, frozen: the socket may have died unnoticed, so nothing cached
+  // is trusted until the database's next heartbeat arrives.
+  watchResume({ onResume: () => responseCache.noteResume() });
 }
 
 export function isRealtimeConfigured() {
@@ -61,6 +88,7 @@ export function startRealtime() {
     // sides silently incompatible after a library upgrade.
     .channel(topic, { config: { private: false } })
     .on('broadcast', { event: 'db-change' }, emitChange)
+    .on('broadcast', { event: 'db-heartbeat' }, noteHeartbeat)
     .subscribe(next => {
       starting = false;
       setStatus(next);

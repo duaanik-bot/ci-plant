@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
 import { q, one } from './db.js';
+import { withoutLedger } from './data-tables.js';
 import { audit } from './helpers.js';
 
 // This module previously fell back to a hardcoded literal when JWT_SECRET was
@@ -118,7 +119,9 @@ function stampActive(userId) {
   // Fire and forget: a failed heartbeat must never fail the request it rode in
   // on. The serverless case is safe too — a cold instance has an empty Map, so
   // it writes once and then throttles like any other.
-  q('UPDATE users SET last_active_at=now() WHERE id=$1', [userId]).catch(() => {});
+  // Outside the request's ledger: the stamp is not part of the answer, and a write
+  // inside it would mark every response that carried it as uncacheable.
+  withoutLedger(() => q('UPDATE users SET last_active_at=now() WHERE id=$1', [userId]).catch(() => {}));
 }
 
 // Attach req.user from Bearer token. Everything except /auth/login requires it.

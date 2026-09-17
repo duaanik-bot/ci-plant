@@ -8,6 +8,7 @@ import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { instrumentPool, setKnownTables } from './data-tables.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,6 +89,22 @@ export async function connect() {
     ssl: /supabase|amazonaws|render|neon/.test(url) ? { rejectUnauthorized: false } : undefined,
   });
   await pool.query('SELECT 1');
+  // Every statement a request runs is recorded against that request (data-tables.js),
+  // so a GET can say which tables its answer was built from. Tables and the names
+  // that hide tables (views, functions) come from the live catalogue; if it cannot
+  // be read, no table is ever recorded and no response is ever marked cacheable —
+  // the browser simply keeps asking.
+  try {
+    const { rows } = await pool.query(`
+      SELECT tablename AS name, 'table' AS kind FROM pg_tables WHERE schemaname = 'public'
+      UNION ALL SELECT viewname, 'opaque' FROM pg_views WHERE schemaname = 'public'
+      UNION ALL SELECT matviewname, 'opaque' FROM pg_matviews WHERE schemaname = 'public'
+      UNION ALL SELECT p.proname, 'opaque' FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'`);
+    setKnownTables(rows.filter(r => r.kind === 'table').map(r => r.name),
+      rows.filter(r => r.kind === 'opaque').map(r => r.name));
+  } catch { setKnownTables([]); }
+  instrumentPool(pool);
   return pool;
 }
 

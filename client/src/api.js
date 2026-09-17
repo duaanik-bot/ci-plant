@@ -23,6 +23,8 @@
 //     never appears by name. The test then also demands that endpoint appear in
 //     the server file that throws, so the screen is provably on that route.
 import { storage } from './lib/safeStorage.js';
+import { responseCache } from './lib/responseCache.js';
+import { cachedGet } from './lib/cachedGet.js';
 
 export const HANDLED_BY = {
   SHADE_CARD_NOT_ELIGIBLE: {
@@ -86,17 +88,37 @@ export const auth = {
   clear() {
     storage.removeItem('ci_token');
     storage.removeItem('ci_user');
+    responseCache.clear();
   },
 };
 
 async function request(method, url, body) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
-  if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`;
-  const res = await fetch(`/api${url}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json().catch(() => ({}));
+  const token = auth.token;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const doFetch = () => fetch(`/api${url}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let res;
+  let data;
+  if (method === 'GET') {
+    // A repeat GET is answered from memory when the change feed PROVES nothing it
+    // was built from has changed (lib/responseCache.js); otherwise it goes out.
+    const out = await cachedGet({ url, token, cache: responseCache, doFetch });
+    if (out.hit) return out.data;
+    ({ res, data } = out);
+  } else {
+    try {
+      res = await doFetch();
+      data = await res.json().catch(() => ({}));
+    } finally {
+      // Any write of ours — succeeded, refused or failed half-way — may have changed
+      // what every cached GET said, so none of them is trusted past this moment.
+      responseCache.noteMutation();
+    }
+  }
   if (res.status === 401 && !url.startsWith('/auth/')) {
     auth.clear();
+    responseCache.clear();
     onUnauthorized();
     throw new Error(data.error || 'Signed out');
   }
@@ -124,14 +146,21 @@ export const api = {
     const fd = new FormData();
     fd.append('file', file);
     for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') fd.append(k, v);
-    const res = await fetch(`/api${url}`, {
-      method: 'POST',
-      headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
-      body: fd,
-    });
-    const data = await res.json().catch(() => ({}));
+    let res;
+    let data;
+    try {
+      res = await fetch(`/api${url}`, {
+        method: 'POST',
+        headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+        body: fd,
+      });
+      data = await res.json().catch(() => ({}));
+    } finally {
+      responseCache.noteMutation();
+    }
     if (res.status === 401) {
       auth.clear();
+      responseCache.clear();
       onUnauthorized();
       throw new Error(data.error || 'Signed out');
     }

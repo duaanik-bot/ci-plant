@@ -33,9 +33,14 @@ import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
 import writeons from './routes/writeons.js';
 import verification from './routes/verification.js';
+import { dataTablesMiddleware } from './data-tables.js';
+import { heartbeatMiddleware } from './realtime-heartbeat.js';
 
 const app = express();
-app.use(cors());
+app.use(cors({ exposedHeaders: ['X-Data-Tables', 'X-Data-Wrote'] }));
+// Before everything else under /api, so the ledger sees every statement a request
+// runs and stamps X-Data-Tables / X-Data-Wrote as the body goes out (data-tables.js).
+app.use('/api', dataTablesMiddleware);
 
 // One route posts a whole document's OCR word boxes, which is legitimately far
 // larger than any other body here: a 3-page purchase order is already ~100KB of
@@ -52,6 +57,7 @@ app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson : standardJson)(req
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public
 app.use('/api', requireAuth);         // everything below needs a token
+app.use('/api', heartbeatMiddleware); // keeps the browsers' change feed provably alive
 app.use('/api', usersRouter);
 app.use('/api', masters);
 app.use('/api', boardRates);
