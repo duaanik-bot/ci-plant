@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import {
   SHADE_CARD_LIST_DROPS, SHADE_CARD_HUB_FIELDS, shapeCardList,
 } from './routes/shadecards.js';
+import { productIdentitySql } from './product-identity.js';
 
 const read = rel => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const word = f => new RegExp(`\\b${f}\\b`);
@@ -91,7 +92,9 @@ test('a column ProductIdentity overlays onto the master is never dropped', () =>
   // ToIssue renders <ProductIdentity row={card}>, which spreads the row OVER the
   // cached product master — so a null card column hides the master's value in
   // the history panel. Dropping one would change what that panel prints.
-  const identity = read('./routes/masters.js').split("r.get('/products/identity'")[1]?.split('});')[0] ?? '';
+  // The identity SELECT lives in product-identity.js (one source for the bare and
+  // the ?ids= forms); read it from there, both forms.
+  const identity = productIdentitySql(false) + '\n' + productIdentitySql(true);
   assert.ok(identity.includes('FROM products p'));
   const overlaid = SHADE_CARD_LIST_DROPS.filter(f => word(`p\\.${f}`).test(identity));
   assert.deepEqual(overlaid, []);
