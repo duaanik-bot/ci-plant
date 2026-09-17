@@ -1,5 +1,5 @@
 // Masters — one generic CRUD engine across business, procurement and plant setup.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
@@ -9,6 +9,7 @@ import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { nextCodeForRows } from '../lib/productCode.js';
+import { refsToLoad } from '../lib/masterRefs.js';
 import { NO_LIMIT, isNoLimit, toleranceLabel } from '../lib/tolerance.js';
 import {
   PRODUCT_MASTER_DEFAULTS,
@@ -473,19 +474,32 @@ export default function Masters() {
     api.get('/customers').then(c => setRefs(r => ({ ...r, customers: c })));
     api.get('/billing_entities').then(b => setRefs(r => ({ ...r, billing_entities: b })));
     api.get('/materials').then(m => setRefs(r => ({ ...r, materials: m })));
-    api.get('/tools?family=die').then(d => setRefs(r => ({ ...r, dies: d })));
     api.get('/gst_rates').then(g => setRefs(r => ({ ...r, gst_rates: g })));
     api.get('/employees').then(e => setRefs(r => ({ ...r, employees: e })));
     api.get('/sections').then(s => setRefs(r => ({ ...r, sections: s })));
     api.get('/machines').then(m => setRefs(r => ({ ...r, machines: m })));
     api.get('/vendors').then(v => setRefs(r => ({ ...r, vendors: v })));
-    api.get('/products').then(p => setRefs(r => ({ ...r, products: p })));
     // Boards tab: the grade picker and the live ₹/kg → ₹/sheet preview.
     api.get('/board-grades').then(g => setRefs(r => ({ ...r, board_grades: g })));
     api.get('/board-rates').then(b => setRefs(r => ({ ...r, board_rates: b })));
     api.get('/plate-masters').then(p => setRefs(r => ({ ...r, plate_masters: p })));
     api.get('/plate-rates').then(p => setRefs(r => ({ ...r, plate_rates: p })));
   }, []);
+  // The two heavy refs — the product master (1.8 MB) and the dies — load on
+  // entry to the ONE tab whose form picks from them (see lib/masterRefs.js), not
+  // on every tab. On tab entry rather than modal open, so the picker is filled
+  // by the time anyone can click New/Edit; a ?tab=blocks deep link is a tab
+  // entry too. Once per visit — a failed fetch is forgotten so the next entry
+  // retries it.
+  const requestedRefs = useRef(new Set());
+  useEffect(() => {
+    for (const { ref, endpoint } of refsToLoad(tab, requestedRefs.current)) {
+      requestedRefs.current.add(ref);
+      api.get(endpoint)
+        .then(rows => setRefs(r => ({ ...r, [ref]: rows })))
+        .catch(() => requestedRefs.current.delete(ref));
+    }
+  }, [tab]);
 
   // Codes already issued — excludes the row being edited and every leftover
   // offcut (which inherits its parent's spec), so an edit never re-suffixes an

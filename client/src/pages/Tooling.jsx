@@ -254,7 +254,7 @@ function RequirementModal({ request, tools, vendors, onClose, onChanged }) {
   );
 }
 
-function ToolForm({ family, products, initial, onClose, onSaved }) {
+function ToolForm({ family, products = [], initial, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState({
     title: initial?.title || '', code: initial?.code || '',
@@ -297,7 +297,6 @@ function ToolingOperations({ family = 'shade_card' }) {
   const [requests, setRequests] = useState([]);
   const [tools, setTools] = useState([]);
   const [vendors, setVendors] = useState([]);
-  const [products, setProducts] = useState([]);
   const [shadeCards, setShadeCards] = useState([]);
   const [events, setEvents] = useState([]);
   const [view, setView] = useState('queue');
@@ -320,10 +319,14 @@ function ToolingOperations({ family = 'shade_card' }) {
       api.get(`/tooling/requirements?family=${family}`).then(setRequests),
       api.get(`/tools?family=${family}`).then(setTools),
       api.get('/vendors').then(setVendors),
-      api.get('/products').then(setProducts),
       api.get(`/tooling/requirements/events?family=${family}`).then(setEvents),
     ];
-    if (family === 'shade_card') calls.push(api.get('/shade-cards?all=1').then(setShadeCards));
+    // This hub only ever mounts for shade cards (the plate, die and block hubs are
+    // ToolingProcurement), and nothing on it reads a product list — the old
+    // /products fetch here re-downloaded the 1.8 MB master on every realtime
+    // refresh for nothing. The Card Register draws seven columns, so it asks for
+    // the hub view of the cards, not the full register row (1.3 MB).
+    if (family === 'shade_card') calls.push(api.get('/shade-cards?all=1&view=hub').then(setShadeCards));
     await Promise.all(calls);
   };
   useEffect(() => { setSelected(new Set()); setKpi(null); setStatus('open'); setView('queue'); load().catch(() => {}); }, [family]);
@@ -459,7 +462,7 @@ function ToolingOperations({ family = 'shade_card' }) {
         empty="No movements recorded" defaultSort={{ key: 'at', dir: 'desc' }} exportName={`${meta.plural} Movement Ledger`} />}
 
       {detail && <RequirementModal request={detail} tools={tools} vendors={vendors} onClose={() => setDetail(null)} onChanged={load} />}
-      {toolForm && family !== 'shade_card' && <ToolForm family={family} products={products} initial={toolForm.id ? toolForm : null}
+      {toolForm && family !== 'shade_card' && <ToolForm family={family} initial={toolForm.id ? toolForm : null}
         onClose={() => setToolForm(null)} onSaved={load} />}
     </div>
   );

@@ -110,6 +110,33 @@ function checkOwnGstin(table, body) {
     throw Object.assign(new Error(`${g} is not a valid GSTIN — its check digit does not match. Check the registration certificate.`), { status: 400 });
 }
 
+// ── The product master, as a dropdown ─────────────────────────────────────────
+// The plate, die and block hubs and the FG stock panel each pulled the whole
+// master — GET /products, 54 columns × 1,656 products, 1,847 KB — to fill ONE
+// "name · code" picker, on every hub open and every family switch. This is the
+// same rows in the same order carrying only what those pickers draw (name, code)
+// and what FgStockPanel's data-search reads through productSearchText().
+//
+// Same inner joins as /products, so a product with no customer or no board is
+// missing from both or neither; the two LEFT JOINs /products adds (tools by
+// primary key, gst_rates by its unique product_type) never add or drop a row.
+// p.id breaks ties because product names repeat — without it the two lists can
+// disagree on which twin comes first. Registered BEFORE the masters loop so no
+// /products/:id route can ever swallow "picker" as an id.
+// products-picker.test.js pins the columns, the joins and the order.
+r.get('/products/picker', async (_req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT p.id, p.name, p.code, p.customer_id, c.name AS customer_name, p.active,
+             p.internal_carton_code, p.party_item_code, p.party_artwork_code,
+             p.output_number, p.size
+      FROM products p JOIN customers c ON c.id=p.customer_id
+      JOIN materials m ON m.id=p.board_material_id
+      ORDER BY p.name, p.id`);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 for (const [table, cols] of Object.entries(MASTERS)) {
   r.get(`/${table}`, async (_req, res, next) => {
     try {
@@ -122,7 +149,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
           FROM products p JOIN customers c ON c.id=p.customer_id
           JOIN materials m ON m.id=p.board_material_id
           LEFT JOIN tools d ON d.id=p.tool_id
-          LEFT JOIN gst_rates gr ON gr.product_type = p.product_type ORDER BY p.name`);
+          LEFT JOIN gst_rates gr ON gr.product_type = p.product_type ORDER BY p.name, p.id`);
       } else if (table === 'gst_rates') {
         rows = await q(`SELECT * FROM gst_rates ORDER BY rate, label`);
       } else if (table === 'sections') {

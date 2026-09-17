@@ -197,6 +197,61 @@ function decorate(card) {
   };
 }
 
+// ── What a LIST row carries ─────────────────────────────────────────────────
+// GET /shade-cards hands the register every sc.* column — 599 cards, 1,334 KB —
+// and a third of that is the approval, signature and custody detail only the
+// drawer shows. The drawer never reads it off the list row: it refetches
+// /shade-cards/:id. So a list may opt out of it. OPT-IN, never the default: a
+// plant tablet runs an old bundle for days, and that bundle reads the full row.
+//
+// Verified by grep across ShadeCards.jsx, ToIssue.jsx, lifecycle.js and
+// Tooling.jsx: none of these names is read off a list row. Deliberately KEPT:
+//   • created_by, approval_received_by — people's names. DataTable search
+//     stringifies every value on a row, so dropping them would make "who made
+//     it / who took the approval" a search that silently stops matching.
+//   • print_process — ToIssue renders <ProductIdentity row={card}>, which
+//     spreads the row OVER the product master; the card's own (null) value is
+//     what the history panel shows today, and dropping it would change that.
+// shade-cards-payload.test.js pins the list and the readers.
+export const SHADE_CARD_LIST_DROPS = Object.freeze([
+  'customer_contact_name', 'customer_designation', 'customer_company', 'customer_signature',
+  'customer_stamp', 'approval_method', 'approval_remarks', 'internal_signatory',
+  'internal_qc_stamp', 'internal_approval_date', 'issued_job_card_id', 'issued_machine_id',
+  'issued_operator', 'print_reference', 'colour_details', 'colour_system', 'num_colours',
+  'artwork_rev', 'legacy_tool_id', 'superseded_by', 'verified_at',
+]);
+
+// The Tooling shade hub's Card Register: the seven columns it draws, id (its
+// default sort), and the codes a storeman types into its search box to find a
+// card — the title, the artwork/output numbers and the sales order. A row click
+// sends the user to /shade-cards?q=<sc_number>, where the full card lives.
+export const SHADE_CARD_HUB_FIELDS = Object.freeze([
+  'id', 'sc_number', 'status', 'customer_name', 'product_name', 'product_code',
+  'location', 'updated_at',
+  'title', 'artwork_no', 'output_no', 'party_artwork_code', 'party_item_code', 'po_number',
+]);
+
+// ?view=list → the register row without the drawer-only columns.
+// ?view=hub  → the hub's fields only.
+// anything else (including no view) → the rows untouched.
+export function shapeCardList(rows, view) {
+  if (view === 'list') {
+    return rows.map(card => {
+      const out = { ...card };
+      for (const k of SHADE_CARD_LIST_DROPS) delete out[k];
+      return out;
+    });
+  }
+  if (view === 'hub') {
+    return rows.map(card => {
+      const out = {};
+      for (const k of SHADE_CARD_HUB_FIELDS) if (k in card) out[k] = card[k];
+      return out;
+    });
+  }
+  return rows;
+}
+
 // The three bands the To Issue worklist groups by, most urgent first. Exported
 // so the client names them identically — a band whose label drifts between the
 // two ends is a band nobody trusts.
@@ -278,7 +333,7 @@ r.get('/shade-cards', async (req, res, next) => {
     if (req.query.status) { params.push(req.query.status); wh.push(`sc.status = $${params.length}`); }
     const rows = await q(`${CARD_VIEW} ${wh.length ? 'WHERE ' + wh.join(' AND ') : ''}
                           ORDER BY sc.updated_at DESC, sc.id DESC`, params);
-    res.json(rows.map(decorate));
+    res.json(shapeCardList(rows.map(decorate), req.query.view));
   } catch (e) { next(e); }
 });
 

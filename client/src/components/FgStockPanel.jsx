@@ -96,7 +96,10 @@ export default function FgStockPanel({ onCountsChange }) {
   // The picker lists the whole Product Master, not just what is already in FG.
   // Seeding opening stock for a product the ERP has never produced is the point
   // of these two doors, and such a product has no fg_stock row to be found in.
-  useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
+  // /products/picker is the same rows in the same order carrying exactly what
+  // these dialogs read: name · code, the AW code and size under the pick, and
+  // everything productSearchText() matches on — not the 1.8 MB master.
+  useEffect(() => { api.get('/products/picker').then(setProducts).catch(() => {}); }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
 
   // ── Add a leftover box ──────────────────────────────────────────────────

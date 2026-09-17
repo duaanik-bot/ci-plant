@@ -122,7 +122,9 @@ export default function ShadeCards() {
   // A dead backend must never read as "no shade cards" — the page owns showing
   // the outage, and last-good rows survive a transient blip.
   const load = () => Promise.all([
-    api.get('/shade-cards?all=1').then(rs => {
+    // view=list: the register row without the approval/signature/custody detail
+    // only the drawer shows — the drawer loads its own card by id (~330 KB less).
+    api.get('/shade-cards?all=1&view=list').then(rs => {
       setRows(rs);
       threadSummary('shade_card', rs.map(r => r.id)).then(setThreads).catch(() => {});
     }),

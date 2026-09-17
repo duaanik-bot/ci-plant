@@ -483,7 +483,9 @@ function GenericToolingProcurement({ family }) {
     setTab('requirements'); setSelectedIds([]); setClosedPo(null);
     load().catch(() => {});
     api.get('/vendors').then(setVendors);
-    api.get('/products').then(setProducts);
+    // The Linked Product picker draws `name · code` and nothing else — the
+    // picker list, not the 1.8 MB master (54 columns × 1,656 products).
+    api.get('/products/picker').then(setProducts);
   }, [family]);
   useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 650 });
 
