@@ -29,18 +29,15 @@ import { MergeChip } from '../components/Merge.jsx';
 import { approvalExport, statusExport, toolingExport, toolingGaps, toolingLabel } from '../lib/artworkCells.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { canPlan } from '../modules.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
+// An unchanged answer comes back as the object the column already holds, so a
+// realtime wave that moved no badge does not re-render the list.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // A collapsed gang row carries a synthetic `gang-<run>` id and stands for
 // several order lines at once — there is no single record to discuss, so it

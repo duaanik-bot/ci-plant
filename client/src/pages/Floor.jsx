@@ -93,7 +93,11 @@ export default function Floor() {
   const [sheets, setSheets] = useState(null);      // job → extra sheet request
   const [sheetForm, setSheetForm] = useState({ qty: '', reason: '', note: '' });
   const [failed, setFailed] = useState(null);      // last refresh error, null while healthy
-  const [seenAt, setSeenAt] = useState(null);      // when the board on screen was true
+  // When the board on screen was last true. A ref, not state: stamping state on
+  // every successful poll re-rendered the whole floor every 30 s even when /floor
+  // came back byte-for-byte the same (and api.get handed back the same object).
+  // It is only read by the "couldn't refresh" line, which setFailed re-renders.
+  const seenAt = useRef(null);
   const fails = useRef(0);                         // consecutive failed refreshes
   const skips = useRef(0);                         // poll ticks to sit out after a failure
 
@@ -107,7 +111,7 @@ export default function Floor() {
   // failure stuck the floor on "Loading the floor…" forever.
   const load = () => api.get('/floor')
     .then(secs => {
-      setSections(secs); setFailed(null); setSeenAt(new Date());
+      seenAt.current = new Date(); setSections(secs); setFailed(null);
       fails.current = 0; skips.current = 0;
     })
     .catch(e => {
@@ -453,7 +457,7 @@ export default function Floor() {
       {failed && (
         <div className="mb-3 flex items-center gap-2 rounded-2xl border border-amber-200/70 bg-amber-50/70 px-3.5 py-2 text-[11px] font-semibold text-amber-800 backdrop-blur-xl">
           <WifiOff size={13} className="shrink-0" />
-          <span className="truncate">Couldn’t refresh — showing the floor as of {fmt.dt(seenAt)}</span>
+          <span className="truncate">Couldn’t refresh — showing the floor as of {fmt.dt(seenAt.current)}</span>
           <button onClick={load}
             className="ml-auto flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2.5 py-1 text-amber-800 transition hover:bg-white">
             <RefreshCw size={11} /> Retry

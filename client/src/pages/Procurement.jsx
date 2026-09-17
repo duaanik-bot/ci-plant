@@ -24,6 +24,7 @@ import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { consolidate, consolidateEdit, mergeSummary } from '../lib/poConsolidate.js';
 import { clubSuggestions } from '../lib/prClubbing.js';
 import { commitmentText } from '../lib/poCommitment.js';
+import { createThreadSummary } from '../lib/threadSummary.js';
 import { closedLineRows, closedLinesOf, openLinesOf, reopenSummary, unitLabel } from '../lib/closedPoLines.js';
 import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, AlertTriangle, RotateCcw } from 'lucide-react';
@@ -119,14 +120,10 @@ const td = 'px-4 py-2.5';
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
 // from "nobody has commented here" — so a long list is asked for in slices.
+// An unchanged answer comes back as the object the column already holds, so a
+// realtime wave that moved no badge does not re-render the list.
 const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
-};
+const threadSummary = createThreadSummary(url => api.get(url), THREAD_CHUNK);
 
 // Age of the pending line (days since PO raised), bucketed by the server. Cooler
 // buckets stay calm; the older it gets, the hotter the chip — a glance tells the

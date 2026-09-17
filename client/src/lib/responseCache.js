@@ -34,11 +34,29 @@
 // drops the entry it judged (a miss is always followed by a fetch that replaces it).
 //
 // Pure and clock-injected so every rule is a unit test (response-cache.test.js).
+//
+// Beside the entries sits a second, separate memo: the PARSED object of the last
+// 200 per URL, with the bytes it came from (recall/remember, used by cachedGet).
+// It answers a different question — not "may I skip the network?" but "is this
+// the very object the screen already holds?" — so no validity rule applies to it:
+// identical bytes are identical data whatever the clock or the feed says. It is
+// what lets React skip re-rendering a 1-2 MB board a refetch did not change.
+// Bounded by MEMO_MAX_ENTRIES and MEMO_MAX_CHARS, least recently used out first,
+// because a parsed payload costs several times its text in heap and a screen the
+// user has left must not keep one alive on a tablet. clear() forgets it with the
+// entries, so a sign-out leaves nothing parsed behind.
 export const MAX_AGE_MS = 10 * 60 * 1000;
 export const LIVE_WINDOW_MS = 150 * 1000;
 export const MAX_ENTRIES = 250;
 export const MAX_TEXT_CHARS = 2 * 1000 * 1000;
 export const MAX_TOTAL_CHARS = 16 * 1000 * 1000;
+// Sized to the busiest single refresh wave, not to "a few": the plates warehouse
+// fires 10 GETs per wave and the shell (floor counts, tooling summary, dashboard)
+// 3 more. A cap below that evicts part of every wave, and the evicted part
+// re-parses and re-renders each time. The character budget is the real bound —
+// about two of the heaviest payloads (/floor, /products, /job-cards).
+export const MEMO_MAX_ENTRIES = 16;
+export const MEMO_MAX_CHARS = 4 * 1000 * 1000;
 
 // A change to one of these voids EVERY entry, not just the ones that read it:
 // users carries roles, scopes and the active flag, so a deactivated or re-scoped
@@ -59,8 +77,12 @@ export function createResponseCache({
   maxEntries = MAX_ENTRIES,
   maxTextChars = MAX_TEXT_CHARS,
   maxTotalChars = MAX_TOTAL_CHARS,
+  memoMaxEntries = MEMO_MAX_ENTRIES,
+  memoMaxChars = MEMO_MAX_CHARS,
 } = {}) {
   const entries = new Map();
+  const memo = new Map();        // key → { token, text, data }, least recently used first
+  let memoChars = 0;
   const lastChangeAt = new Map();
   let chars = 0;
   let announced = null;          // Set of tables the latest heartbeat vouched for
@@ -70,7 +92,7 @@ export function createResponseCache({
   let lastCatchUpAt = -Infinity;
   let lastResumeAt = -Infinity;
   let lastNow = -Infinity;
-  const stats = { hits: 0, misses: 0, stored: 0, reasons: {} };
+  const stats = { hits: 0, misses: 0, stored: 0, memoHits: 0, reasons: {} };
 
   const drop = key => {
     const e = entries.get(key);
@@ -79,6 +101,12 @@ export function createResponseCache({
     entries.delete(key);
   };
   const dropAll = () => { entries.clear(); chars = 0; };
+  const forget = key => {
+    const m = memo.get(key);
+    if (!m) return;
+    memoChars -= m.text.length;
+    memo.delete(key);
+  };
 
   // The one clock. A step backwards invalidates everything stamped before it.
   function clock() {
@@ -163,10 +191,28 @@ export function createResponseCache({
       return e.text;
     },
 
-    clear() { dropAll(); },
+    // The object last parsed from exactly these bytes for this URL and login, or
+    // undefined. A hit moves it to the back of the eviction line.
+    recall(key, token, text) {
+      const m = memo.get(key);
+      if (!m || m.token !== token || m.text !== text) return undefined;
+      memo.delete(key); memo.set(key, m);
+      stats.memoHits++;
+      return m;
+    },
+    remember(key, token, text, data) {
+      forget(key);
+      if (typeof text !== 'string' || !text || text.length > memoMaxChars) return;
+      memo.set(key, { token, text, data });
+      memoChars += text.length;
+      while (memo.size > memoMaxEntries || memoChars > memoMaxChars) forget(memo.keys().next().value);
+    },
+
+    clear() { dropAll(); memo.clear(); memoChars = 0; },
     stats() {
       return { ...stats, reasons: { ...stats.reasons }, entries: entries.size, chars,
-        live: liveSince != null, announced: announced ? announced.size : 0 };
+        live: liveSince != null, announced: announced ? announced.size : 0,
+        memo: { entries: memo.size, chars: memoChars } };
     },
   };
 }
