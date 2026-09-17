@@ -47,6 +47,7 @@ import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { CustomerDot } from '../components/CustomerDot.jsx';
 import { CustomerFilterGroup } from '../components/CustomerFilterGroup.jsx';
 import { customerChipsFrom, filterByCustomers, toggleCustomer } from '../lib/customerChips.js';
+import { createDoneFreshness, mergePlanningScopes, planningFocusState, planningScopeOfRun, readPlanningScope } from '../lib/planningScope.js';
 import { toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { canPlan } from '../modules.js';
 
@@ -445,7 +446,24 @@ const CATEGORY_LABEL = { exact: 'Exact', near: 'Near', alternate: 'Off GSM' };
 
 export default function Planning() {
   const toast = useToast();
-  const [lines, setLines] = useState([]);
+  // The list arrives in two halves (GET /planning?scope=, lib/planningScope.js).
+  // The QUEUE — To Plan and Planned — loads on open and on every refresh. The
+  // COMPLETED half (in_production: 269 of 370 lines, 72% of the old 1.5 MB) is
+  // fetched only while the Completed or All tab, or a deep link to a pushed job,
+  // needs it; `doneLines` null means it has not been fetched yet. `lines` is the
+  // two merged back in the server's own order, so every list below reads one
+  // array exactly as it did when the server sent everything at once.
+  const [queueLines, setQueueLines] = useState([]);
+  const [queueLoaded, setQueueLoaded] = useState(false);
+  const [doneLines, setDoneLines] = useState(null);
+  // The tab badges as the server counted them off the WHOLE list, with the
+  // queue — so To Plan can say "Completed 269" without fetching the 269.
+  const [servedCounts, setServedCounts] = useState(null);
+  // Whether the completed half on hand is older than the list: judged by when
+  // each request STARTED (lib/planningScope.js createDoneFreshness), so a
+  // Completed click landing while a queue-only refresh is on the wire refetches.
+  const [doneFresh] = useState(createDoneFreshness);
+  const lines = useMemo(() => mergePlanningScopes(queueLines, doneLines), [queueLines, doneLines]);
   const [planLine, setPlanLine] = useState(null);
   const [ctx, setCtx] = useState(null);
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
@@ -591,6 +609,7 @@ export default function Planning() {
   const [focusNote, setFocusNote] = useState(''); // the decider's optional note
   const [focusBusy, setFocusBusy] = useState(false);
   const focusedOnce = useRef(null);               // the line already brought into view
+  const focusAbsent = useRef(null);               // the line this link already proved gone from planning
   const [askBusy, setAskBusy] = useState(false);
   const [specOpts, setSpecOpts] = useState({ coating: [], special: [], colour_type: [], pasting_type: [], leafing_colour: [] }); // distinct master values → engine pickers
   // Every board in the master, for the Board Identity picker. The Warehouse
@@ -650,13 +669,67 @@ export default function Planning() {
     return () => { live = false; };
   }, [arId]);
 
+  // A deep link naming a job the queue half does not hold: it may be a pushed
+  // job, so the completed half is asked for before the page says "left the queue".
+  const [doneAsked, setDoneAsked] = useState(false);
+  const wantDone = tab === 'completed' || tab === 'all' || doneAsked;
+  const applyQueue = (res, token) => {
+    const { lines: ls, counts, legacy } = readPlanningScope(res);
+    setQueueLines(ls);
+    setServedCounts(counts);
+    setQueueLoaded(true);
+    // A server that predates ?scope (mid-deploy) answered everything: there is
+    // no completed half left to fetch, and what it sent is as fresh as the ask.
+    if (legacy) { setDoneLines([]); doneFresh.doneFetchLanded(token); }
+    return legacy;
+  };
+  const applyDone = (res, token) => { setDoneLines(readPlanningScope(res).lines); doneFresh.doneFetchLanded(token); };
+  // Each half keeps only its NEWEST answer. The completed half is asked for from
+  // three places (a refresh, opening its tab, a deep link) and the queue from two
+  // (a refresh, the gang engine's lookup); a slow older response landing last
+  // would otherwise put an out-of-date list back on the planner's screen.
+  const queueSeq = useRef(0);
+  const doneSeq = useRef(0);
+  const fetchQueue = () => {
+    const seq = ++queueSeq.current;
+    const token = doneFresh.doneFetchStarting();
+    return api.get('/planning?scope=queue').then(res => {
+      if (seq === queueSeq.current) applyQueue(res, token);
+      return res;
+    });
+  };
+  const fetchDone = () => {
+    const seq = ++doneSeq.current;
+    const token = doneFresh.doneFetchStarting();
+    return api.get('/planning?scope=completed').then(res => {
+      if (seq === doneSeq.current) applyDone(res, token);
+      return res;
+    });
+  };
+  const loadLines = () => {
+    // Nobody is looking at Completed or All: refresh the queue only. The completed
+    // half on hand goes stale NOW, as this refresh starts — the change behind it
+    // may be the very job Completed is missing, and the planner can open that
+    // tab before the queue answers. (A pre-scope server's bare array sent it all,
+    // and applyQueue marks that fresh again.)
+    if (!wantDone) { doneFresh.queueOnlyRefreshStarting(); return fetchQueue(); }
+    // Both halves, but independently — a completed fetch that fails must not
+    // throw away a queue answer that arrived fine.
+    return Promise.all([fetchQueue(), fetchDone().catch(() => {})]);
+  };
   const load = () => Promise.all([
-    api.get('/planning').then(setLines),
+    loadLines(),
     api.get('/gang-suggestions').then(setSuggestions).catch(() => {}),
     api.get('/approvals/by-line').then(setApprovals).catch(() => {}),
   ]);
   useEffect(() => { load(); }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
+  // Opening Completed or All (or a deep link asking) fetches the completed half
+  // if it has never been fetched, or if refreshes since have skipped it.
+  useEffect(() => {
+    if (!wantDone || (doneLines && !doneFresh.isStale())) return;
+    fetchDone().catch(() => {});
+  }, [wantDone]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api.get('/spec-options').then(setSpecOpts).catch(() => {}); }, []);
   useEffect(() => {
     api.get('/materials')
@@ -668,7 +741,10 @@ export default function Planning() {
   // Completed = pushed onward to a job card (left the planner's active queue).
   const completed = lines.filter(l => l.status === 'in_production');
   // "All" shows every planning state at once (To Plan + Planned + Completed).
-  const tabLines = { pending, planned, completed, all: lines }[tab] || pending;
+  // Until the completed half lands, Completed and All show nothing rather than a
+  // half list — "All" missing 269 jobs would be a wrong answer, not a slow one.
+  const doneReady = doneLines != null;
+  const tabLines = { pending, planned, completed: doneReady ? completed : [], all: doneReady ? lines : [] }[tab] || pending;
   // A gang collapses into ONE row: the anchor line carries `_gang` (all member
   // lines, in id order) and a synthetic id so it never collides with a line id.
   const tabGrouped = (() => {
@@ -883,10 +959,22 @@ export default function Planning() {
     ? tabGrouped.find(r => r.id === focusLineId || (r._gang || []).some(m => m.id === focusLineId))
     : null;
   useEffect(() => {
-    if (!focusLineId || !lines.length) return;
+    if (!focusLineId) { setDoneAsked(false); return; }
+    if (!queueLoaded) return;
     if (focusedOnce.current === focusLineId) return;   // the planner's own filtering, once we are here, is theirs to keep
-    const line = lines.find(l => Number(l.id) === focusLineId);
-    if (!line) return;                                  // not in the queue at all — the card below says so
+    // Not in the queue half is not yet "not found": a pushed job lives in the
+    // completed half, which may not be here (or may predate the last refresh).
+    // 'wait' asks for that half and this effect runs again when it lands; a
+    // pushed job found early also waits, because its Completed tab lists nothing
+    // until then and the scroll below would look for a row not yet drawn.
+    // 'absent' is settled for this job: later refreshes leave the completed half
+    // stale again, and without this the link would re-ask for it on every one.
+    const { state, line } = planningFocusState(lines, focusLineId, {
+      doneLoaded: doneLines != null, doneStale: doneFresh.isStale(), absentOnce: focusAbsent.current,
+    });
+    if (state === 'absent') focusAbsent.current = focusLineId;
+    if (state !== 'found') { setDoneAsked(state === 'wait'); return; }
+    setDoneAsked(false);
     focusedOnce.current = focusLineId;
     // A zone chip, a customer chip, a KPI card or a word left in the search box
     // could each be hiding the very row the bell promised. Clearing them is the
@@ -903,7 +991,7 @@ export default function Planning() {
         if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       }
     }));
-  }, [focusLineId, lines]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusLineId, lines, queueLoaded, doneLines]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Decide it here, on the page, without opening anything. The server re-reads
   // the grant from the users table (the JWT carries only id/name/role), so this
@@ -926,7 +1014,7 @@ export default function Planning() {
   };
   // Leaving the review card up after the reader is done with it would make the
   // job look permanently "under review"; clearing the param puts Planning back.
-  const clearFocus = () => { setFocusAr(null); focusedOnce.current = null; setParams({}, { replace: true }); };
+  const clearFocus = () => { setFocusAr(null); focusedOnce.current = null; focusAbsent.current = null; setParams({}, { replace: true }); };
 
   // Selecting a gang row selects every member line (they act as one job).
   const rowIds = row => (row._gang ? [row.id, ...row._gang.map(m => m.id)] : [row.id]);
@@ -2231,7 +2319,20 @@ export default function Planning() {
   // straight back into Manage Gang ("both" — quick controls AND the full engine).
   const openGangEngine = async m => {
     let full = lines.find(x => x.id === m.id);
-    if (!full) { const fresh = await api.get('/planning'); setLines(fresh); full = fresh.find(x => x.id === m.id); }
+    if (!full) {
+      // Not in what the page holds. Ask the half this member's RUN lives in —
+      // the server's own rule, so a run straddling the two is found in the queue —
+      // and put it back in its own slot. Replacing the whole list with one half
+      // would empty the other half's tabs.
+      // The members' statuses are the modal's, and can be a push behind the
+      // server — so a miss in that half looks in the other before giving up.
+      const first = planningScopeOfRun(gangView?.members?.length ? gangView.members : [m]);
+      for (const scope of first === 'completed' ? ['completed', 'queue'] : ['queue', 'completed']) {
+        const res = await (scope === 'completed' ? fetchDone() : fetchQueue());
+        full = readPlanningScope(res).lines.find(x => x.id === m.id);
+        if (full || Array.isArray(res)) break;   // found — or a pre-scope server that sent it all
+      }
+    }
     if (!full) { toast.error('Could not load this job — refresh planning'); return; }
     setEngineFromGang(m.gang_run_id ?? gangView?.id ?? null);
     setGangView(null);
@@ -2931,7 +3032,12 @@ export default function Planning() {
         const tone = pending ? 'border-amber-300 bg-amber-50/80'
           : focusAr.status === 'approved' ? 'border-emerald-300 bg-emerald-50/80'
           : 'border-red-200 bg-red-50/80';
-        const inQueue = lines.some(l => Number(l.id) === focusLineId);
+        // "Left the queue" is only true once the completed half has been looked
+        // in too — until then a pushed job is simply not fetched yet.
+        // The settled verdict keeps the note steady through refreshes.
+        const inQueue = planningFocusState(lines, focusLineId, {
+          doneLoaded: doneReady, doneStale: doneFresh.isStale(), absentOnce: focusAbsent.current,
+        }).state !== 'absent';
         return (
           <div className={`mb-3 rounded-2xl border-2 p-3 shadow-[0_8px_22px_-12px_rgba(29,29,31,0.35)] ${tone}`}>
             <div className="flex items-start gap-2">
@@ -2999,8 +3105,11 @@ export default function Planning() {
       <Tabs active={tab} onChange={k => { setTab(k); clearSelection(); }} tabs={[
         { key: 'pending', label: 'To Plan', count: pending.length },
         { key: 'planned', label: 'Planned', count: planned.length },
-        { key: 'completed', label: 'Completed', count: completed.length },
-        { key: 'all', label: 'All', count: lines.length },
+        // Counted off the lists on screen once the completed half is here, so a
+        // badge never disagrees with the rows beside it; off the server's count
+        // of the whole list before that.
+        { key: 'completed', label: 'Completed', count: (wantDone && doneReady) || !servedCounts ? completed.length : servedCounts.completed },
+        { key: 'all', label: 'All', count: (wantDone && doneReady) || !servedCounts ? lines.length : servedCounts.all },
       ]} />
 
       {/* Set-type zones — the planner's triage of the tab above. One row of
@@ -3813,8 +3922,8 @@ export default function Planning() {
         }[subTab] : {
           pending: 'No lines waiting for planning',
           planned: 'No planned lines',
-          completed: 'Nothing pushed to a job card yet',
-          all: 'No lines in planning',
+          completed: doneReady ? 'Nothing pushed to a job card yet' : 'Loading completed jobs…',
+          all: doneReady ? 'No lines in planning' : 'Loading every planning line…',
         }[tab]}
         exportName="Planning Queue"
         exportSubtitle="Order lines · readiness gates and press assignment"
