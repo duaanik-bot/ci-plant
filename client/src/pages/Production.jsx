@@ -1,7 +1,7 @@
 // Production — job cards as cards, stages as a rail. One button per moment:
 // Start → Complete (with qty out + scrap). Final completion closes the job,
 // credits FG stock and feeds Dispatch automatically.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
@@ -38,6 +38,10 @@ import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
+// The register in two halves — live cards on every refresh, history when its
+// tab opens. The merge, the rung rule and the staleness check live in one lib
+// the server suite can hold to the legacy response.
+import { createRegisterLoader, jobCardRung, mergeRegister, printRunIds } from '../lib/jobCardRegister.js';
 import { GangChip, GangMemberList, GangBanner, GangOriginLine } from '../components/Gang.jsx';
 import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -175,7 +179,17 @@ const TAB_LABELS = {
 export default function Production() {
   const toast = useToast();
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState([]);
+  // The register arrives in two halves (lib/jobCardRegister.js). The live cards
+  // come with every load. The history — closed and split cards, 47% of the old
+  // 1.6 MB payload and growing with every job the plant finishes — is fetched
+  // only once a tab that shows it opens, then kept, so a batch print can still
+  // gather cards ticked under Completed and under Pending into one run.
+  // `counts` rides with either half: the Completed and All badges are right
+  // before the history has ever been fetched.
+  const [liveJobs, setLiveJobs] = useState([]);
+  const [historyJobs, setHistoryJobs] = useState(null); // null = never fetched
+  const [counts, setCounts] = useState(null);
+  const jobs = useMemo(() => mergeRegister(liveJobs, historyJobs), [liveJobs, historyJobs]);
   // Opens on the planner's queue — the cards still owing a finalise.
   const [tab, setTab] = useState('pending');
   const [q, setQ] = useState('');
@@ -264,8 +278,38 @@ export default function Production() {
   const [amending, setAmending] = useState(null); // the jc being amended
   const [amendForm, setAmendForm] = useState({ order_qty: '', qty_planned: '', sheets_issued: '', reason: '' });
 
-  const load = () => api.get('/job-cards').then(setJobs);
+  // Refs, not state, because load() runs from realtime and from a dozen action
+  // handlers whose closures were made before the latest tab click or tick. The
+  // fetch sequencing — which response may repaint the cards and the badges, and
+  // when a live refresh must pull the history back — lives in
+  // createRegisterLoader (lib/jobCardRegister.js), where the server suite drives
+  // it with responses landing out of order.
+  const showsHistory = t => t === 'closed' || t === 'all';
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  const loaderRef = useRef(null);
+  if (!loaderRef.current) {
+    loaderRef.current = createRegisterLoader({
+      get: path => api.get(path),
+      getTab: () => tabRef.current,
+      getPicked: () => pickedRef.current,
+      showsHistory,
+      onLive: setLiveJobs,
+      onHistory: setHistoryJobs,
+      onCounts: setCounts,
+    });
+  }
+  const { load, loadHistory } = loaderRef.current;
   useEffect(() => { load(); }, []);
+  // Opening Completed or All fetches the history fresh — never a copy from
+  // whenever the tab was last open.
+  useEffect(() => {
+    if (!showsHistory(tab)) return;
+    loadHistory().catch(e => toast.error(e.message || 'Could not load completed job cards'));
+  }, [tab]);
+  const historyLoading = showsHistory(tab) && historyJobs === null;
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
   useEffect(() => { api.get('/floor/machines').then(setMachines).catch(() => setMachines([])); }, []);
   const canEditJobCard = canPlan(auth.user);
@@ -279,11 +323,9 @@ export default function Production() {
   // unfinalised. Such a card belongs under In Progress — that is what it is —
   // and carries a "Not finalised" chip so the planner still sees the debt
   // instead of losing it behind a tab.
-  const rung = j => {
-    if (j.status === 'closed' || j.status === 'split') return 'closed';
-    if (j.status === 'in_progress') return 'running';
-    return j.finalised_at ? 'finalised' : 'pending';
-  };
+  // (jobCardRung — the rule lives in lib/jobCardRegister.js, twinned on the
+  // server, which counts the rungs for the badges.)
+  const rung = jobCardRung;
   const rungs = { pending: [], finalised: [], running: [], closed: [] };
   jobs.forEach(j => rungs[rung(j)].push(j));
   // Tab → timeline → customer → search, in that order, so each count means what
@@ -356,7 +398,7 @@ export default function Production() {
   // off the printer in the order the planner reads the screen. `jobs` is the
   // server's own ordering, so this holds even for cards picked across tabs.
   const exportPdf = () => {
-    const ids = jobs.filter(j => picked.has(j.id)).map(j => j.id);
+    const ids = printRunIds(jobs, picked);
     if (!ids.length) return;
     navigate(`/production/jobcards/print?ids=${ids.join(',')}`);
   };
@@ -694,8 +736,9 @@ export default function Production() {
         { key: 'pending', label: 'Pending Finalisation', count: rungs.pending.length },
         { key: 'finalised', label: 'Finalised', count: rungs.finalised.length },
         { key: 'running', label: 'In Progress', count: rungs.running.length },
-        { key: 'closed', label: 'Completed', count: rungs.closed.length },
-        { key: 'all', label: 'All', count: jobs.length },
+        // Served counts for the two tabs whose cards may not be loaded yet.
+        { key: 'closed', label: 'Completed', count: counts ? counts.closed : rungs.closed.length },
+        { key: 'all', label: 'All', count: counts ? counts.all : jobs.length },
       ]} />
 
       {/* Timeline — by PLANNED date, the day the job runs on the press. Sits
@@ -809,7 +852,8 @@ export default function Production() {
       )}
 
       {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">
-        {q.trim() ? `No job cards match “${q}”.`
+        {historyLoading ? `Loading ${TAB_LABELS[tab]} job cards…`
+          : q.trim() ? `No job cards match “${q}”.`
           : range ? `No job cards planned in this window under ${TAB_LABELS[tab]}.`
           : `No job cards under ${TAB_LABELS[tab]}.`}</p>}
 

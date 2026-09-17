@@ -439,48 +439,118 @@ export const JOB_CARD_LIST_DROPS = Object.freeze([
   'anchor_line_id', 'die_condition', 'board_short_sheets',
 ]);
 
-r.get('/job-cards', async (_req, res, next) => {
-  try {
-    const rows = await q(`${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
-    const stages = await q(`SELECT js.*,
+// ── Live cards and history, as two loads ────────────────────────────────────
+// The register carried every card since go-live on every load and every
+// realtime tick: 1,580 KB on live prod (2026-09-17), 47% of it closed and split
+// cards that only the Completed and All tabs show, and growing with every job
+// the plant finishes. Production.jsx now asks for `?scope=live` on its own and
+// `?scope=history` when a tab that shows history opens. No param is the legacy
+// answer, byte for byte — plant tablets run an old bundle for days.
+//
+// Which rung a card sits on. Twin of client/src/lib/jobCardRegister.js — the
+// counts served here are the register's tab badges, so the two must agree
+// (job-cards-scope.test.js holds them to each other).
+export const jobCardRung = j => {
+  if (j.status === 'closed' || j.status === 'split') return 'closed';
+  if (j.status === 'in_progress') return 'running';
+  return j.finalised_at ? 'finalised' : 'pending';
+};
+export const JOB_CARD_SCOPES = Object.freeze(['live', 'history']);
+
+// Badge counts for every rung. `closedNotLoaded` is the closed cards the live
+// scope counted in SQL instead of loading.
+export function jobCardCounts(rows, closedNotLoaded = 0) {
+  const counts = { pending: 0, finalised: 0, running: 0, closed: closedNotLoaded, all: closedNotLoaded };
+  for (const jc of rows) { counts[jobCardRung(jc)] += 1; counts.all += 1; }
+  return counts;
+}
+
+// The register, for one scope. `deps` exists for the test suite, which runs the
+// real board and plate stamping over a fixture with a fake query function.
+export async function jobCardRegister(scope, deps = {}) {
+  const { q: qq = q, one: oo = one, readiness: ready = readiness, readinessBatch: readyBatch = readinessBatch } = deps;
+  const scoped = JOB_CARD_SCOPES.includes(scope) ? scope : null;
+  // The live scope still loads SPLIT cards, though it does not return them: the
+  // board and plate verdicts below are computed over a SET of cards and collapse
+  // a gang run to its weakest member, and a split gang parent sits in that set
+  // beside its live children (8 runs on live prod, 2026-09-17). Leave it out
+  // and a running child's Board badge changes. Only closed cards were never in
+  // the set, so only they stay in the database.
+  const rows = await qq(scoped === 'live'
+    ? `${JC_VIEW} WHERE jc.status <> 'closed' ORDER BY (jc.status='closed'), jc.id DESC`
+    : `${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
+  const inScope = scoped === 'live' ? rows.filter(jc => jobCardRung(jc) !== 'closed')
+    : scoped === 'history' ? rows.filter(jc => jobCardRung(jc) === 'closed')
+    : rows;
+  // A card's receipts read only its own stages, so a scope asks only for the
+  // stages of the cards it returns — every stage ever written was 661 KB alone.
+  const stages = scoped
+    ? await qq(`SELECT js.*,
+                       COALESCE(xsq.parents, 0) AS extra_issued_parents,
+                       COALESCE(xsq.units, 0) AS extra_issued_units
+                FROM job_stages js ${STAGE_XS_LATERAL}
+                WHERE js.job_card_id = ANY($1)
+                ORDER BY js.job_card_id, js.seq`, [inScope.map(jc => jc.id)])
+    : await qq(`SELECT js.*,
                                    COALESCE(xsq.parents, 0) AS extra_issued_parents,
                                    COALESCE(xsq.units, 0) AS extra_issued_units
                             FROM job_stages js ${STAGE_XS_LATERAL} ORDER BY js.job_card_id, js.seq`);
-    const byJc = {};
-    for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
-    // The board verdict, in the SAME vocabulary Print Planning and Planning
-    // use. The view's own `board_pending` stays exactly as it was (exports and
-    // the traveler still read it) — this is the richer, mix-aware answer that
-    // knows the difference between "bought and coming" and "nobody ordered it",
-    // and it moves on its own the moment procurement receives the board.
-    // Only OPEN cards are worth the readiness pass: a closed job drew its board
-    // long ago and would read covered anyway.
-    const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null);
-    const jcAnchorIds = [...new Set(live.map(jc => jc.anchor_line_id))];
-    const jcAnchors = jcAnchorIds.length
-      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
-      : [];
-    const jcAnchorById = new Map(jcAnchors.map(l => [l.id, l]));
-    const jcRctx = await readinessBatch(jcAnchors);
-    const jcGates = new Map();
-    for (const jc of live) {
-      const line = jcAnchorById.get(jc.anchor_line_id);
-      if (line) jcGates.set(jc.id, await readiness(line, one, jcRctx));
-    }
-    await stampBoardState(live, {
-      lineIdOf: jc => jc.anchor_line_id,
-      gangIdOf: jc => jc.gang_run_id,
-      gatesOf: jc => jcGates.get(jc.id),
-    });
-    await stampPlateState(live, {
-      jobCardIdOf: jc => jc.id,
-      gangIdOf: jc => jc.gang_run_id,
-    });
-    res.json(rows.map(jc => {
-      const card = { ...jc, stages: withReceipts(jc, byJc[jc.id] || []).map(leanStage) };
-      for (const k of JOB_CARD_LIST_DROPS) delete card[k];
-      return card;
-    }));
+  const byJc = {};
+  for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
+  // The board verdict, in the SAME vocabulary Print Planning and Planning
+  // use. The view's own `board_pending` stays exactly as it was (exports and
+  // the traveler still read it) — this is the richer, mix-aware answer that
+  // knows the difference between "bought and coming" and "nobody ordered it",
+  // and it moves on its own the moment procurement receives the board.
+  // Only OPEN cards are worth the readiness pass: a closed job drew its board
+  // long ago and would read covered anyway.
+  const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null);
+  const jcAnchorIds = [...new Set(live.map(jc => jc.anchor_line_id))];
+  const jcAnchors = jcAnchorIds.length
+    ? await qq('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
+    : [];
+  const jcAnchorById = new Map(jcAnchors.map(l => [l.id, l]));
+  const jcRctx = await readyBatch(jcAnchors);
+  const jcGates = new Map();
+  for (const jc of live) {
+    const line = jcAnchorById.get(jc.anchor_line_id);
+    if (line) jcGates.set(jc.id, await ready(line, oo, jcRctx));
+  }
+  await stampBoardState(live, {
+    lineIdOf: jc => jc.anchor_line_id,
+    gangIdOf: jc => jc.gang_run_id,
+    gatesOf: jc => jcGates.get(jc.id),
+    qc: qq,
+  });
+  await stampPlateState(live, {
+    jobCardIdOf: jc => jc.id,
+    gangIdOf: jc => jc.gang_run_id,
+    qc: qq,
+  });
+  const cards = inScope.map(jc => {
+    const card = { ...jc, stages: withReceipts(jc, byJc[jc.id] || []).map(leanStage) };
+    for (const k of JOB_CARD_LIST_DROPS) delete card[k];
+    return card;
+  });
+  if (!scoped) return cards;
+  // Every rung's count rides with either half, so the tab badges are right
+  // before the history has ever been opened and stay right as cards close.
+  // The live scope never loaded the closed cards, so it counts them — over
+  // exactly JC_VIEW's inner joins, the only joins that can drop a card from the
+  // register (job-cards-scope.test.js pins that).
+  const closedNotLoaded = scoped === 'live'
+    ? Number((await qq(`SELECT COUNT(*)::int AS n
+                        FROM job_cards jc
+                        JOIN products p ON p.id = jc.product_id
+                        JOIN materials bm ON bm.id = p.board_material_id
+                        WHERE jc.status = 'closed'`))[0]?.n) || 0
+    : 0;
+  return { cards, counts: jobCardCounts(rows, closedNotLoaded) };
+}
+
+r.get('/job-cards', async (req, res, next) => {
+  try {
+    res.json(await jobCardRegister(req.query.scope));
   } catch (e) { next(e); }
 });
 
@@ -1523,8 +1593,75 @@ async function assignPressTx(qc, oc, { job_card_id, machine_id, ordered_ids, use
   return jc;
 }
 
+// ── Printed runs, by what the screen on hand reads ──────────────────────────
+// The printing stage completed within the last 60 days, grouped per press on the
+// client by the press it actually printed on. On live prod this list was 262 KB
+// of a 346 KB board payload (315 runs), and the Board tab reads it for one
+// thing: each lane's "N sh today". So:
+//   (no param)  the legacy 60-day list — the Completed tab, and every old bundle.
+//   today       the same query over the last 36 hours, plus `completed_count`
+//               (the 60-day count) for the Completed badge. The DAY is the
+//               browser's (PrintPlanning.jsx isToday), so the server never
+//               decides where it starts: local midnight is at most 24 h back on
+//               any clock, and 36 h covers it with room for skew.
+//   none        nothing — the Press Line-up reads only the live cards.
+export const PRINTED_RUN_SCOPES = Object.freeze(['today', 'none']);
+export async function printedRuns(scope, qc = q) {
+  if (scope === 'none') return {};
+  const today = scope === 'today';
+  const window = today ? '36 hours' : '60 days';
+  const completed = await qc(`
+      SELECT jc.id, jc.jc_number,
+             -- Same rule as the live board, from the same helper. Completed
+             -- cards had the opposite of the board's bug: no parent guard at
+             -- all, so a finished MIXED gang reported one member's master
+             -- number as the run's plate.
+             ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_no,
+             jc.order_line_id, jc.sheets_issued, jc.qty_planned,
+             jc.children_per_parent,
+             COALESCE(js.machine_id, jc.machine_id) AS machine_id,
+             js.status AS printing_status, js.operator AS printing_operator,
+             js.id AS printing_stage_id, js.qty_scrap AS print_waste_so_far,
+             js.qty_in AS print_qty_in, js.started_at AS printing_started_at,
+             js.qty_out AS printed_sheets, js.completed_at,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.coating,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
+             c.name AS customer_name, o.po_number, o.delivery_date,
+             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
+             -- Same mix-aware expected figure as the live board — the chooser
+             -- modal serves completed cards off this list too.
+             mxc.rows AS mix_cuts
+      FROM job_cards jc
+      JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
+      JOIN products p ON p.id = jc.product_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      ${GANG_ANCHOR_LINE}
+      LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+      LEFT JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
+      ${MIX_CUTS_LATERAL}
+      WHERE js.status='completed' AND js.completed_at > now() - interval '${window}'
+      ORDER BY COALESCE(js.machine_id, jc.machine_id) NULLS LAST, js.completed_at DESC, jc.id`);
+  if (!today) return { completed };
+  // The badge counts what the Completed tab will list: the same 60 days over
+  // the list's only inner joins (the laterals and LEFT joins never drop a run).
+  const [{ n } = {}] = await qc(`
+      SELECT COUNT(*)::int AS n
+      FROM job_cards jc
+      JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
+      JOIN products p ON p.id = jc.product_id
+      WHERE js.status='completed' AND js.completed_at > now() - interval '60 days'`);
+  return { completed, completed_count: Number(n) || 0 };
+}
+
 // Job cards whose printing stage is still open, grouped by press.
-r.get('/print-planning', async (_req, res, next) => {
+r.get('/print-planning', async (req, res, next) => {
   try {
     const cards = await q(`
       SELECT jc.id, jc.jc_number,
@@ -1721,48 +1858,7 @@ r.get('/print-planning', async (_req, res, next) => {
         FROM machine_operators mo JOIN employees e ON e.id=mo.employee_id
         WHERE mo.machine_id=m.id AND e.active=1) ops ON true
       WHERE m.type='printing' AND COALESCE(m.active,1)=1 ORDER BY m.name`);
-    // Printed runs — printing stage completed within the last 60 days. Grouped
-    // per press on the client (by the press it actually printed on). Feeds both
-    // the board's end-of-day green cards and the Completed tab.
-    const completed = await q(`
-      SELECT jc.id, jc.jc_number,
-             -- Same rule as the live board, from the same helper. Completed
-             -- cards had the opposite of the board's bug: no parent guard at
-             -- all, so a finished MIXED gang reported one member's master
-             -- number as the run's plate.
-             ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_no,
-             jc.order_line_id, jc.sheets_issued, jc.qty_planned,
-             jc.children_per_parent,
-             COALESCE(js.machine_id, jc.machine_id) AS machine_id,
-             js.status AS printing_status, js.operator AS printing_operator,
-             js.id AS printing_stage_id, js.qty_scrap AS print_waste_so_far,
-             js.qty_in AS print_qty_in, js.started_at AS printing_started_at,
-             js.qty_out AS printed_sheets, js.completed_at,
-             p.name AS product_name, p.code AS product_code, p.party_item_code, p.coating,
-             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
-             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
-             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
-             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
-             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
-             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
-             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
-             c.name AS customer_name, o.po_number, o.delivery_date,
-             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
-             -- Same mix-aware expected figure as the live board — the chooser
-             -- modal serves completed cards off this list too.
-             mxc.rows AS mix_cuts
-      FROM job_cards jc
-      JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
-      JOIN products p ON p.id = jc.product_id
-      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      ${GANG_ANCHOR_LINE}
-      LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
-      LEFT JOIN customers c ON c.id = o.customer_id
-      LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
-      ${MIX_CUTS_LATERAL}
-      WHERE js.status='completed' AND js.completed_at > now() - interval '60 days'
-      ORDER BY COALESCE(js.machine_id, jc.machine_id) NULLS LAST, js.completed_at DESC, jc.id`);
-    res.json({ cards, presses, completed });
+    res.json({ cards, presses, ...(await printedRuns(req.query.completed)) });
   } catch (e) { next(e); }
 });
 

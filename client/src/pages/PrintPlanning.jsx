@@ -37,6 +37,7 @@ import { SET_TYPE_META, SetTypeChip, cardSetType, isMergeRun } from '../componen
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { plannedChildSheets } from '../lib/received.js';
 import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
+import { completedBadgeCount, printPlanningPath } from '../lib/printPlanningScope.js';
 
 const TRIAGE = 'triage';
 
@@ -582,6 +583,10 @@ export default function PrintPlanning() {
   const [presses, setPresses] = useState([]);
   const [dragOverLane, setDragOverLane] = useState(null);
   const [completed, setCompleted] = useState([]);
+  // Which list `completed` holds: 'today' (the 36 h the board reads) or 'all'
+  // (the Completed tab's 60 days). The badge count is served with either.
+  const [completedScope, setCompletedScope] = useState(null);
+  const [completedCount, setCompletedCount] = useState(0);
   const [tab, setTab] = useState('board');        // 'board' | 'completed'
   const [chooser, setChooser] = useState(null);   // { card, done } | null
   const [editCard, setEditCard] = useState(null); // card being edited | null
@@ -681,14 +686,26 @@ export default function PrintPlanning() {
   // before a move must not resolve after the post-move reload and repaint the
   // pre-move order — with a live wall display polling every 5s that stale frame
   // would look real. Errors are swallowed; the next poll retries in 5s.
+  //
+  // The scope is chosen HERE, from the tab on screen at the moment the request
+  // leaves (lib/printPlanningScope.js): the board reads only today's printed
+  // runs, the Completed tab all 60 days. Every refresh — realtime, the fallback
+  // timer, a post-move reload — asks for what is on screen, under the same
+  // sequence, so the two lists can never take turns overwriting one another.
   const loadSeq = useRef(0);
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const load = () => {
     const n = ++loadSeq.current;
-    return api.get('/print-planning').then(d => {
+    const scope = tabRef.current === 'completed' ? 'all' : 'today';
+    return api.get(printPlanningPath(tabRef.current)).then(d => {
       if (n !== loadSeq.current) return;
       setCards(d.cards); setPresses(d.presses); setCompleted(d.completed || []);
+      setCompletedScope(scope); setCompletedCount(completedBadgeCount(d));
     }).catch(() => {});
   };
+  // Opening Completed needs the 60 days the board never fetched.
+  useEffect(() => { if (tab === 'completed') load(); }, [tab]);
   // Realtime moves the board; this timer is only a visible-tab safety net.
   useFallbackRefresh(load, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
@@ -818,16 +835,23 @@ export default function PrintPlanning() {
     return by;
   }, [completed]);
 
+  // The Completed tab's list — only once the 60 days have arrived. Until then
+  // `completed` holds the board's 36 hours, and listing those as "every printed
+  // run" for the moment the tab takes to load would be a wrong table, not a
+  // short one.
+  const completedRows = useMemo(() => (completedScope === 'all' ? completed : []), [completed, completedScope]);
+  const completedLoading = tab === 'completed' && completedScope !== 'all';
+
   // Completed runs grouped by the press they printed on (unassigned bucket last).
   const completedByPress = useMemo(() => {
     const by = { unassigned: [] };
     for (const p of presses) by[p.id] = [];
-    for (const c of completed) {
+    for (const c of completedRows) {
       const k = c.machine_id && by[c.machine_id] ? c.machine_id : 'unassigned';
       by[k].push(c);
     }
     return by;
-  }, [completed, presses]);
+  }, [completedRows, presses]);
 
   // Selection lives on triage GROUP keys (a gang selects as one). Prune keys
   // whenever the board reloads — a job that left triage drops out silently.
@@ -1380,7 +1404,7 @@ export default function PrintPlanning() {
             // Completed tab exports the green table exactly as filtered.
             if (tab === 'completed') {
               const pressName = id => presses.find(p => p.id === id)?.name || '—';
-              const rows = completed
+              const rows = completedRows
                 .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
                 .filter(c => !q || rowMatches(c, q, productSearchText(c)))
                 .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
@@ -1487,8 +1511,8 @@ export default function PrintPlanning() {
               className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-all ${
                 tab === key ? 'bg-white text-[#007AFF] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               <Icon size={14} /> {label}
-              {key === 'completed' && completed.length > 0 && (
-                <span className="ml-1 rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold text-emerald-700">{completed.length}</span>
+              {key === 'completed' && completedCount > 0 && (
+                <span className="ml-1 rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold text-emerald-700">{completedCount}</span>
               )}
             </button>
           ))}
@@ -2191,7 +2215,7 @@ export default function PrintPlanning() {
         // Table view of every printed run — a finished job leaves the board and
         // lives here, green, so the kanban stays pure "work to do".
         const pressName = id => presses.find(p => p.id === id)?.name || '—';
-        const rows = completed
+        const rows = completedRows
           .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
           .filter(c => !q || rowMatches(c, q, productSearchText(c)))
           .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
@@ -2200,7 +2224,7 @@ export default function PrintPlanning() {
         return (
           <div>
             <div className="mb-3 flex flex-wrap items-center gap-1 rounded-xl bg-slate-100/80 p-1 w-fit">
-              {[{ id: 'all', name: `All Presses (${completed.length})` },
+              {[{ id: 'all', name: `All Presses (${completedRows.length})` },
                 ...presses.map(p => ({ id: String(p.id), name: `${p.name} (${completedByPress[p.id]?.length || 0})` }))].map(p => (
                 <button key={p.id} onClick={() => setCompletedPress(p.id)}
                   className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
@@ -2219,7 +2243,7 @@ export default function PrintPlanning() {
                   </tr></thead>
                   <tbody>
                     {rows.length === 0 && (
-                      <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">No printed runs yet.</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">{completedLoading ? 'Loading printed runs…' : 'No printed runs yet.'}</td></tr>
                     )}
                     {rows.map(c => (
                       <tr key={c.id} onClick={() => setChooser({ card: c, done: true })}

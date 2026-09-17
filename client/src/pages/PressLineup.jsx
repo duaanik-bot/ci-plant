@@ -51,7 +51,9 @@ export default function PressLineup() {
   const sheetRef = useRef(null);
   const toast = useToast();
 
-  useEffect(() => { api.get('/print-planning').then(setData); }, []);
+  // The line-up prints only the live cards and the presses. `completed=none`
+  // spares it the 60-day list of printed runs (262 KB of 346 on live prod).
+  useEffect(() => { api.get('/print-planning?completed=none').then(setData); }, []);
   useEffect(() => {
     const old = document.title;
     document.title = `Press Line-up — ${fmt.date(new Date())}`;
