@@ -178,25 +178,30 @@ export function markFailed(ledger) {
 export function ledgerHeaders(ledger, { method = 'GET', status = 200 } = {}) {
   if (!ledger) return {};
   const h = {};
-  if (method === 'GET' && status === 200 && ledger.cacheable && ledger.read.size) {
+  if (method === 'GET' && (status === 200 || status === 304) && ledger.cacheable && ledger.read.size) {
     h['X-Data-Tables'] = [...ledger.read].sort().join(',');
   }
   if (ledger.wrote.size) h['X-Data-Wrote'] = [...ledger.wrote].sort().join(',');
   return h;
 }
 
-// Express middleware: one ledger per request, headers stamped as the body is sent
-// (res.json goes through res.send, and a 304 is decided inside res.send too, so
-// the header rides on 200s and 304s alike).
+// Express middleware: one ledger per request, headers stamped on res.end() — the one
+// call every way of sending a body makes. NOT on res.send: on Vercel, @vercel/node
+// attaches its own res.send/res.json as own properties of the response, and its
+// json() writes through an internal send() straight to res.end(), so a res.send hook
+// never ran in production (the headers were missing there and present locally).
+// A body already streamed (headers sent before end) makes no claim: its headers went
+// out before every query had run. A 304 carries the header too, refreshing the
+// dependency list the browser keeps with its stored copy.
 export function dataTablesMiddleware(req, res, next) {
   const ledger = newLedger();
-  const send = res.send;
-  res.send = function sendWithLedger(body) {
+  const end = res.end;
+  res.end = function endWithLedger(...args) {
     if (!this.headersSent) {
       const h = ledgerHeaders(ledger, { method: req.method, status: this.statusCode });
       for (const [k, v] of Object.entries(h)) this.setHeader(k, v);
     }
-    return send.call(this, body);
+    return end.apply(this, args);
   };
   als.run(ledger, next);
 }

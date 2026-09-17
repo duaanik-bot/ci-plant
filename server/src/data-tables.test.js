@@ -50,6 +50,7 @@ test('no header for a failed statement, a non-200, a non-GET, or a response that
   assert.deepEqual(ledgerHeaders(failed, { method: 'GET', status: 200 }), {});
   const ok = newLedger(); recordStatement(ok, 'SELECT * FROM orders');
   assert.deepEqual(ledgerHeaders(ok, { method: 'GET', status: 404 }), {});
+  assert.deepEqual(ledgerHeaders(ok, { method: 'GET', status: 304 }), { 'X-Data-Tables': 'orders' }, 'a 304 is the same body');
   assert.deepEqual(ledgerHeaders(ok, { method: 'POST', status: 200 }), {});
   assert.deepEqual(ledgerHeaders(newLedger(), { method: 'GET', status: 200 }), {});
   assert.deepEqual(ledgerHeaders(null), {});
@@ -67,11 +68,11 @@ test('instrumentQuery records into the caller\'s ledger even when it settles els
   const fakeQuery = function (text) { fired.push(text); return new Promise(r => setTimeout(() => r({ rows: [] }), 5)); };
   const q = instrumentQuery(fakeQuery, null);
   const req = (sql, delay) => new Promise(resolve => {
-    const res = { headersSent: false, statusCode: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, send() { resolve(this.headers); } };
+    const res = { headersSent: false, statusCode: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, end() { resolve(this.headers); } };
     dataTablesMiddleware({ method: 'GET' }, res, async () => {
       await new Promise(r => setTimeout(r, delay));
       await q(sql);
-      res.send('{}');
+      res.end('{}');
     });
   });
   const [a, b] = await Promise.all([req('SELECT * FROM orders', 3), req('SELECT * FROM job_stages', 1)]);
@@ -83,7 +84,7 @@ test('instrumentQuery records into the caller\'s ledger even when it settles els
 test('a rejected query spoils the ledger without swallowing the rejection', async () => {
   const q = instrumentQuery(() => Promise.reject(new Error('boom')), null);
   const l = await new Promise(resolve => {
-    const res = { headersSent: false, statusCode: 200, setHeader() {}, send() {} };
+    const res = { headersSent: false, statusCode: 200, setHeader() {}, end() {} };
     dataTablesMiddleware({ method: 'GET' }, res, async () => {
       const ledger = currentLedger();
       await assert.rejects(q('SELECT * FROM orders'), /boom/);
@@ -96,7 +97,7 @@ test('a rejected query spoils the ledger without swallowing the rejection', asyn
 test('a callback-style query error spoils the ledger and still reaches the callback', async () => {
   const q = instrumentQuery((text, values, cb) => cb(new Error('bad')), null);
   const l = await new Promise(resolve => {
-    const res = { headersSent: false, statusCode: 200, setHeader() {}, send() {} };
+    const res = { headersSent: false, statusCode: 200, setHeader() {}, end() {} };
     dataTablesMiddleware({ method: 'GET' }, res, () => {
       const ledger = currentLedger();
       q('SELECT * FROM orders', [], err => { assert.match(err.message, /bad/); resolve(ledger); });
@@ -151,5 +152,48 @@ test('a statement that goes through a view or a public function is never cacheab
     assert.deepEqual(ledgerHeaders(f, { method: 'GET', status: 200 }), {});
   } finally {
     setKnownTables(['job_cards', 'job_stages', 'orders', 'order_lines', 'audit_log', 'users', 'stock_movements', 'conversation_members']);
+  }
+});
+
+// On Vercel, @vercel/node attaches its own res.send/res.json helpers as OWN properties
+// of the response, shadowing Express's; its json() writes through an internal send()
+// straight to res.end(). A hook on res.send never runs there — the headers must be
+// stamped on the one call every path makes: res.end().
+test('headers are stamped however the body is sent — Express send, Vercel helpers, or a bare end', async () => {
+  const { default: express } = await import('express');
+  const http = await import('node:http');
+  const q = instrumentQuery(async () => ({ rows: [{ n: 1 }] }), null);
+  const app = express();
+  app.use(dataTablesMiddleware);
+  app.get('/express', async (_req, res) => { await q('SELECT * FROM orders'); res.json({ ok: 1 }); });
+  app.get('/vercel', async (_req, res) => { await q('SELECT * FROM orders'); res.json({ ok: 1 }); });
+  app.get('/bare', async (_req, res) => { await q('SELECT * FROM job_cards'); res.setHeader('Content-Type', 'application/json'); res.end('{}'); });
+  app.get('/stream', async (_req, res) => { await q('SELECT * FROM orders'); res.write('['); await q('SELECT * FROM job_cards'); res.end(']'); });
+  const server = http.createServer((req, res) => {
+    if (req.url === '/vercel') {
+      // what @vercel/node's addHelpers does: own-property json that never calls res.send
+      res.json = body => { res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(body)); };
+      res.send = body => { res.end(String(body)); };
+    }
+    app(req, res);
+  });
+  await new Promise(r => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const h = async p => (await fetch(base + p)).headers.get('x-data-tables');
+    assert.equal(await h('/express'), 'orders');
+    assert.equal(await h('/vercel'), 'orders', 'Vercel helper path');
+    assert.equal(await h('/bare'), 'job_cards');
+    assert.equal(await h('/stream'), null, 'a streamed body sent its headers before every query ran: no claim');
+    const etag = (await fetch(base + '/express')).headers.get('etag');
+    // raw http, not fetch: fetch adds Cache-Control: no-cache to a conditional request,
+    // which Express rightly answers with a full 200
+    const revalidated = await new Promise((resolve, reject) => {
+      http.get(base + '/express', { headers: { 'If-None-Match': etag } }, r => { r.resume(); resolve(r); }).on('error', reject);
+    });
+    assert.equal(revalidated.statusCode, 304);
+    assert.equal(revalidated.headers['x-data-tables'], 'orders', 'a 304 refreshes the stored dependency list');
+  } finally {
+    server.close();
   }
 });

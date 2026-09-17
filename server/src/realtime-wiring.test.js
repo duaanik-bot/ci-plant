@@ -112,6 +112,8 @@ test('server: every statement is ledgered, headers exposed, heartbeat after auth
   assert.match(db, /FROM pg_views WHERE schemaname = 'public'[\s\S]*FROM pg_matviews[\s\S]*FROM pg_proc/, 'views and functions are opaque');
   const dt = read('server/src/data-tables.js');
   assert.match(dt, /rest\[cbIndex\] = AsyncResource\.bind\(/, 'callbacks keep the caller\'s request');
+  assert.match(dt, /res\.end = function endWithLedger/, 'headers on res.end: Vercel\'s res.json never calls res.send');
+  assert.doesNotMatch(dt, /res\.send = function/, 'a res.send hook is dead code on Vercel');
   assert.match(dt, /const cb = AsyncResource\.bind\(args\[0\]\)/, 'pool.query\'s own checkout keeps the caller\'s request');
   assert.match(read('server/src/auth.js'), /withoutLedger\(\(\) => q\('UPDATE users SET last_active_at/);
 });
