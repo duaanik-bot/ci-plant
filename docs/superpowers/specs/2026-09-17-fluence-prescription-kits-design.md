@@ -237,6 +237,11 @@ Still without a prescription (29 Fluence cartons — no kit in the customer mast
 4. Kit master loaded: `DATABASE_URL=<prod> node scripts/import-fluence-kits.mjs --production --apply`.
    The switch refuses any remote database that is not `ylbfeptgefzimcqnwphy`, and moves the run
    to the session pooler (5432). Re-running it changes nothing: it never overwrites.
+5. `20260918120000_fluence_realtime_ping.sql` applied as `fluence_realtime_ping`: the eight
+   Fluence tables announce their changes on the realtime feed like every other table a screen
+   reads. Without it the heartbeat never vouched for them — every Fluence answer went back to
+   the server and an edit never refreshed anyone else's open screen. `fluence-realtime.test.js`
+   fails if a future Fluence table is left out.
 
 ## Open items for Anik
 
