@@ -20,6 +20,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, ResetFilters, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useFilterReset, useToast } from '../components/ui.jsx';
 import { GangOriginLine } from '../components/Gang.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { balanceWaste } from '../lib/pasteBalance.js';
 import { PackingRows, emptyPack, packLineTotal, packTotalOf } from '../components/PackingRows.jsx';
@@ -797,6 +798,7 @@ export default function SortPaste() {
               <div className="mt-1.5">
                 <ProductIdentity row={r} nameClassName="text-[14px] leading-snug" />
                 <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
+                <FluenceButton productId={r.product_id} context="sort_paste" className="mt-1" />
               </div>
               {/* The card has the width the table does not, so it keeps the full
                   customer name; the initials are a column-width remedy. */}
@@ -919,6 +921,7 @@ export default function SortPaste() {
                           cartons reach on their own cards, so this is where the
                           run it printed in would otherwise disappear. */}
                       <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
+                      <FluenceButton productId={r.product_id} context="sort_paste" className="mt-1" />
                     </td>
                     <td className={`${td} align-top pl-1 pr-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} align-top pl-1`}><PastingChip type={r.pasting_type} /></td>

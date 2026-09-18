@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
@@ -87,6 +87,9 @@ const NAV = [
     group: 'Admin',
     items: [
       { label: 'Masters', to: '/masters', icon: Settings2, roles: ['admin', 'planner'], module: 'masters' },
+      // Fluence-only master. The Fluence buttons in every module are the everyday
+      // door; this page is where kits are linked and inner products maintained.
+      { label: 'Fluence Master', to: '/fluence', icon: Pill, roles: ['admin', 'planner', 'production'], module: 'fluence' },
       { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
       { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],

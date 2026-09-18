@@ -1,0 +1,98 @@
+{
+ "confirmed_by": "Anik Dua (MD)",
+ "confirmed_on": "2026-09-17",
+ "note": "The 13 suggested matches from the customer kit list import, confirmed by Anik in the local review session ('link the 13 suggested kits').",
+ "links": [
+  {
+   "party_sl_no": 6,
+   "kit_name": "M2-02",
+   "product_code": "FP-063",
+   "product_name": "M2O2",
+   "reason": "zero typed for the letter O"
+  },
+  {
+   "party_sl_no": 217,
+   "kit_name": "SKINFACT PSORIASIS IMMU BOOSTER 2",
+   "product_code": "FP-234",
+   "product_name": "SKIN FACT PSORIASIS 2 IMMU BOOSTER",
+   "reason": "same words, different order"
+  },
+  {
+   "party_sl_no": 218,
+   "kit_name": "SKIN FACT PSORIASIS STRESS BUST 3",
+   "product_code": "FP-235",
+   "product_name": "SKIN FACT PSORIASIS 3 STRESS BUST",
+   "reason": "same words, different order"
+  },
+  {
+   "party_sl_no": 219,
+   "kit_name": "SKIN FACT PSORIASIS GOLD 4",
+   "product_code": "FP-236",
+   "product_name": "SKIN FACT PSORIASIS 4 GOLD",
+   "reason": "same words, different order"
+  },
+  {
+   "party_sl_no": 416,
+   "kit_name": "F 1 NEO D3",
+   "product_code": "FP-338",
+   "product_name": "F NEO 1D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 417,
+   "kit_name": "F2 NEO D3",
+   "product_code": "FP-339",
+   "product_name": "F NEO 2 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 418,
+   "kit_name": "F3 NEO D3",
+   "product_code": "FP-340",
+   "product_name": "F NEO 3 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 419,
+   "kit_name": "M1 NEO D3",
+   "product_code": "FP-341",
+   "product_name": "M NEO 1 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 420,
+   "kit_name": "M2 NEO D3",
+   "product_code": "FP-342",
+   "product_name": "M NEO 2 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 421,
+   "kit_name": "M3 NEO D3",
+   "product_code": "FP-343",
+   "product_name": "M NEO 3 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 422,
+   "kit_name": "V1 NEO D3",
+   "product_code": "FP-344",
+   "product_name": "V NEO 1 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 423,
+   "kit_name": "V2 NEO D3",
+   "product_code": "FP-345",
+   "product_name": "V NEO 2 D3",
+   "reason": "same characters, different spacing"
+  },
+  {
+   "party_sl_no": 424,
+   "kit_name": "V3 NEOD3",
+   "product_code": "FP-346",
+   "product_name": "V NEO 3 D3",
+   "reason": "same characters, different spacing"
+  }
+ ]
+}

@@ -26,6 +26,7 @@ import { packets } from '../lib/boardMath.js';
 import { colourDetailLines } from './PrintColour.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
 import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../lib/plateInks.js';
+import JobCardFluenceRx from './fluence/JobCardFluenceRx.jsx';
 
 // One group inside the single spec block: a faint full-width caption, then its
 // fields on the shared 4-column grid. Captions keep the merged block scannable
@@ -463,6 +464,10 @@ export default function JobCardSheet({ jc }) {
         <div className="border-t border-gray-300 pt-2">Finalised By</div>
         <div className="border-t border-gray-300 pt-2">QA Release</div>
       </div>
+
+      {/* Fluence only: the prescription page, product-wise, on its own printed
+          page. Renders nothing — and asks for nothing — on any other card. */}
+      <JobCardFluenceRx jc={jc} />
     </div>
   );
 }

@@ -2798,4 +2798,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
     await pool.query(migration('20260808085337_plate_rates_master.sql'));
     await pool.query(migration('20260808090012_plate_rates_vendor_index.sql'));
   }
+
+  // The Fluence prescription & kit master — Fluence-only, fully additive tables
+  // (fluence_*). Replayed like the plate lifecycle files above: every statement
+  // is IF NOT EXISTS / ON CONFLICT DO NOTHING, so this is a no-op once applied.
+  await pool.query(migration('20260917120000_fluence_prescription_kits.sql'));
 }

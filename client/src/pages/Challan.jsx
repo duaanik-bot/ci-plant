@@ -4,6 +4,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { Printer, ArrowLeft, FileCheck2, Save, Undo2 } from 'lucide-react';
 
 export default function Challan() {
@@ -50,6 +51,7 @@ export default function Challan() {
       <div className="no-print mb-4 flex justify-between">
         <Link to="/dispatch-invoice?tab=register"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
         <div className="flex flex-wrap gap-2">
+          <FluenceButton productIds={d.lines.map(l => l.product_id)} context="dispatch" label="Fluence verification" className="self-center" />
           <Button variant="ghost" onClick={cancelChallan}><Undo2 size={14} /> Cancel Challan</Button>
           <Button variant="secondary" onClick={() => setEditing(true)}><Save size={14} /> Edit Challan</Button>
           <Button onClick={() => window.print()}><Printer size={14} /> Print Challan</Button>
@@ -112,6 +114,7 @@ export default function Challan() {
                         <FileCheck2 size={12} /> Create COA
                       </button>
                     )}
+                    <FluenceButton productId={l.product_id} context="dispatch" className="ml-2" />
                   </div>
                 </td>
                 <td className="px-3 py-2.5 text-gray-500">{l.code}</td>

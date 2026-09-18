@@ -18,6 +18,7 @@ import { sharedRunFigures } from '../lib/gangRunMath.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
@@ -3558,6 +3559,7 @@ export default function Planning() {
                       onClick={e => { e.stopPropagation(); openPlan(m); }}>
                       <Wrench size={12} />
                     </button>
+                    <FluenceButton productId={m.product_id} context="planning" compact label="" title={`Fluence — prescription & kit for ${m.product_name}`} />
                   </div>
                 )} />
             // Capped, but NOT truncated: a carton name is how a planner
@@ -3566,7 +3568,8 @@ export default function Planning() {
             // already 900px too wide for the screen.
             : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1"
                 meta={[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')} />
-              {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div></div>)}<ColourScheme line={l} /></div>) },
+              {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div>
+              <FluenceButton productId={l.product_id} context="planning" className="mt-1" /></div>)}<ColourScheme line={l} /></div>) },
           // ── BOARD ─────────────────────────────────────────────────────────
           // What the job prints ON, and nothing else: grade, weight, and the
           // sheet actually being bought. Its own column because this is the
@@ -3829,6 +3832,7 @@ export default function Planning() {
                 // once every member is ready.
                 return (
                   <div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
+                    <FluenceButton productIds={l._gang.map(m => m.product_id)} context="planning" />
                     {allReady && <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l._gang[0])}>Job Card</Button>}
                     <Button size="sm" variant={allReady ? 'secondary' : 'primary'} className="whitespace-nowrap" onClick={() => openGang(l._gang[0])}>
                       <Link2 size={12} /> Gang Engine
@@ -4036,6 +4040,8 @@ export default function Planning() {
         </>}>
         {planLine && (
           <div className="space-y-4">
+            {/* Fluence only — nothing renders for any other customer. */}
+            <FluenceButton productId={planLine.product_id} context="planning" label="Fluence prescription & kit" bar />
             {/* Order ribbon — customer gets double width so long names never cut.
                 Order Qty is editable: the whole cut plan below recomputes live. */}
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">
@@ -5382,6 +5388,8 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
           const totalQty = gangView.members.reduce((s, m) => s + (+m.qty || 0), 0);
           return (
           <div className="space-y-4">
+            {/* Fluence only: every carton's own prescription, product-wise. */}
+            <FluenceButton productIds={gangView.members.map(m => m.product_id)} context="planning" label="Fluence prescriptions" bar />
             {/* Run ribbon */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat small label={gangView.kind === 'merge' ? 'Combined Run' : 'Gang'} value={gangView.gang_number} />

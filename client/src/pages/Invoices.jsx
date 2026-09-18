@@ -9,6 +9,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
@@ -302,6 +303,7 @@ export default function Invoices({ embedded = false }) {
           threadColumn({ entity: 'invoice', threads, idOf: i => i.id }),
           { key: '_view', label: '', render: i => (
             <div className="flex items-center justify-end gap-3">
+              <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="invoice" />
               <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-brand-600"><FileText size={13} /> View</Link>
               <button type="button" disabled={i.paid > 0}

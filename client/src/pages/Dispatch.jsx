@@ -12,6 +12,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
 import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote, AlertTriangle, FileText, CalendarDays } from 'lucide-react';
@@ -557,7 +558,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                 </span>),
               export: l => `${fmt.date(l.delivery_date)}${hasTolerance(l.tolerance_pct) ? ` (${toleranceLabel(l.tolerance_pct)})` : ''}` },
             { key: 'product_name', label: 'Product', card: 'subtitle',
-              render: l => <ProductIdentity row={l} compact={false} />,
+              render: l => <><ProductIdentity row={l} compact={false} /><FluenceButton productId={l.product_id} context="dispatch" className="mt-1" /></>,
               searchValue: productSearchText,
               export: productExport },
             { key: 'packing', label: 'Packing',
@@ -696,7 +697,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                 </div>),
               export: l => `${l.po_number} · ${l.customer_name}` },
             { key: 'product_name', label: 'Product', card: 'subtitle',
-              render: l => <ProductIdentity row={l} compact={false} />,
+              render: l => <><ProductIdentity row={l} compact={false} /><FluenceButton productId={l.product_id} context="dispatch" className="mt-1" /></>,
               searchValue: productSearchText,
               export: productExport },
             { key: 'jc_number', label: 'Batch',
@@ -790,6 +791,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
             threadColumn({ entity: 'dispatch', threads, idOf: d => d.id }),
             { key: 'actions', label: '', render: d => (
               <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+                <FluenceButton productIds={d.lines.map(l => l.product_id)} context="dispatch" className="self-center" />
                 <Button size="sm" variant="secondary" title="Edit vehicle, driver or line quantities" onClick={() => nav(`/dispatch/challan/${d.id}`)}><Pencil size={13} /> Edit</Button>
                 <Button size="sm" variant="ghost" title="Print delivery challan" onClick={() => nav(`/dispatch/challan/${d.id}`)}><Printer size={14} /> Print</Button>
                 <Button size="sm" variant="ghost" title="Cancel challan — return goods to FG" onClick={() => cancelDispatch(d)}><Undo2 size={13} /> Cancel</Button>

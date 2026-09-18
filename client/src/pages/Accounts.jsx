@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, DataTable, Input, KpiCard, PageHeader, StatusBadge, Tabs } from '../components/ui.jsx';
 import { ReceiptText, Package, ShoppingCart, Factory } from 'lucide-react';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 
 // Local-date ISO (no UTC shift) — period boundaries must match plant time.
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -233,7 +234,7 @@ export default function Accounts() {
       {tab === 'products' && (
         <DataTable searchable rows={data.sale_products} empty="No products sold in this period"
           columns={[
-            { key: 'name', label: 'Product', render: p => (<div><div className="font-semibold">{p.name}</div><div className="text-xs text-gray-400">{p.code}{p.size ? ` · ${p.size}` : ''}</div></div>) },
+            { key: 'name', label: 'Product', render: p => (<div><div className="font-semibold">{p.name}</div><div className="text-xs text-gray-400">{p.code}{p.size ? ` · ${p.size}` : ''}</div><FluenceButton productId={p.id} context="accounts" className="mt-1" /></div>) },
             { key: 'qty', label: 'Cartons Sold', align: 'right', render: p => <span className="font-bold tabular-nums">{fmt.num(p.qty)}</span> },
             { key: 'invoices', label: 'Invoices', align: 'right', render: p => <span className="tabular-nums">{p.invoices}</span> },
             { key: 'customers', label: 'Customers', align: 'right', render: p => <span className="tabular-nums">{p.customers}</span> },
@@ -251,7 +252,8 @@ export default function Accounts() {
         <DataTable searchable rows={data.sales} empty="No invoices in this period"
           columns={[
             { key: 'invoice_number', label: 'Invoice', render: i => (
-              <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>) },
+              <><Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>
+                <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="accounts" className="ml-2" /></>) },
             { key: 'invoice_date', label: 'Date', render: i => fmt.date(i.invoice_date) },
             { key: 'customer_name', label: 'Customer', render: i => (<div><div className="font-semibold">{i.customer_name}</div><div className="text-xs text-gray-400">{i.state}</div></div>) },
             { key: 'qty', label: 'Cartons', align: 'right', render: i => <span className="tabular-nums">{fmt.num(i.qty)}</span> },

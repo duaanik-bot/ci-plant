@@ -45,6 +45,8 @@ import { createRegisterLoader, jobCardRung, mergeRegister, printRunIds } from '.
 import { GangChip, GangMemberList, GangBanner, GangOriginLine } from '../components/Gang.jsx';
 import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import { jobCardProductIds } from '../components/fluence/JobCardFluenceRx.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
@@ -916,6 +918,7 @@ export default function Production() {
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
                     <MessageCircle size={13} />
                   </button>
+                  <FluenceButton productIds={jobCardProductIds(jc)} context="job_card" className="ml-1" />
                 </div>
                 {jc.gang_parent && jc.gang_members?.length ? (
                   <div className="mt-1.5 max-w-lg">
@@ -1102,6 +1105,7 @@ export default function Production() {
             : editing.children_per_parent > 1 ? `${editing.children_per_parent} print / parent` : '1:1';
           return (
           <div className="space-y-4">
+            <FluenceButton productIds={jobCardProductIds(editing)} context="job_card" label="Fluence prescription & kit" bar />
             <div className="ci-summary-panel text-xs">
               {editing.gang_parent && editing.gang_members?.length ? (
                 <>
@@ -1246,6 +1250,7 @@ export default function Production() {
                     <div key={m.line_id} className="rounded-xl border border-violet-100 bg-violet-50/30 p-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <ProductIdentity row={m} compact className="min-w-0 flex-1" />
+                        <FluenceButton productId={m.product_id} context="job_card" />
                       </div>
                       <div className="ci-form-grid">
                         <Spec label="Customer Approval">{m.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>

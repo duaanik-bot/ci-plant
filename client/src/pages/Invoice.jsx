@@ -5,6 +5,7 @@ import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
 import { CoaSheet } from './COA.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { Printer, ArrowLeft, FileCheck2, Save } from 'lucide-react';
 
@@ -107,6 +108,7 @@ export default function Invoice() {
       <div className="no-print mb-4 flex justify-between">
         <Link to="/dispatch-invoice?tab=invoices"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
         <div className="flex flex-wrap gap-2">
+          <FluenceButton productIds={inv.lines.map(l => l.product_id)} context="invoice" label="Fluence verification" className="self-center" />
           <Button variant="secondary" onClick={createAllCoas}><FileCheck2 size={14} /> Create COAs</Button>
           <Button variant="secondary" onClick={() => setEditing(true)}><Save size={14} /> Edit Invoice</Button>
           <Button onClick={() => setPrintPrompt(true)}><Printer size={14} /> Export Invoice PDF</Button>
@@ -182,6 +184,7 @@ export default function Invoice() {
                         <FileCheck2 size={12} /> Create COA
                       </button>
                     )}
+                    <FluenceButton productId={l.product_id} context="invoice" className="ml-2" />
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-2 py-2 align-top text-[11px] text-gray-500">{l.challan_number}</td>

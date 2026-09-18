@@ -93,6 +93,9 @@ export const LOOKUPS = {
   tools: `SELECT id, code || ' · ' || title AS label FROM tools WHERE id=ANY($1)`,
   tool: `SELECT id, code || ' · ' || title AS label FROM tools WHERE id=ANY($1)`,
   shade_card: `SELECT id, sc_number || ' · ' || title AS label FROM shade_cards WHERE id=ANY($1)`,
+  fluence_kit: `SELECT k.id, COALESCE(p.code || ' · ', '') || k.kit_name AS label
+                FROM fluence_kits k LEFT JOIN products p ON p.id=k.product_id WHERE k.id=ANY($1)`,
+  fluence_inner_product: `SELECT id, name AS label FROM fluence_inner_products WHERE id=ANY($1)`,
   user: `SELECT id, name AS label FROM users WHERE id=ANY($1)`,
 };
 

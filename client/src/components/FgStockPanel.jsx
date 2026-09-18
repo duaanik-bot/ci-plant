@@ -7,6 +7,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { isNoLimit, toleranceLabel } from '../lib/tolerance.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, Select, Textarea, useToast } from './ui.jsx';
 import ProductIdentity, { productExport, productSearchText } from './ProductIdentity.jsx';
+import FluenceButton from './fluence/FluenceButton.jsx';
 
 const AGE_BANDS = [['0-30d', 'bg-emerald-400'], ['31-60d', 'bg-amber-400'], ['61-90d', 'bg-orange-400'], ['90d+', 'bg-red-500']];
 const bandIdx = d => d <= 30 ? 0 : d <= 60 ? 1 : d <= 90 ? 2 : 3;
@@ -439,7 +440,7 @@ export default function FgStockPanel({ onCountsChange }) {
               <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={fgSel.has(f.product_id)}
                 onChange={e => setFgSel(s => { const n = new Set(s); e.target.checked ? n.add(f.product_id) : n.delete(f.product_id); return n; })} />) },
             { key: 'product_name', label: 'Product',
-              render: f => <ProductIdentity row={f} />,
+              render: f => <><ProductIdentity row={f} /><FluenceButton productId={f.product_id} context="warehouse" className="mt-1" /></>,
               searchValue: productSearchText,
               export: productExport },
             { key: 'customer_name', label: 'Customer' },
@@ -572,7 +573,7 @@ export default function FgStockPanel({ onCountsChange }) {
           columns={[
             { key: 'box_number', label: 'Box #', render: l => <span className="font-mono text-xs font-bold text-slate-800">{l.box_number || l.lot_number}</span> },
             { key: 'product_name', label: 'Product',
-              render: l => <ProductIdentity row={l} />,
+              render: l => <><ProductIdentity row={l} /><FluenceButton productId={l.product_id} context="warehouse" className="mt-1" /></>,
               searchValue: productSearchText,
               export: productExport },
             { key: 'customer_name', label: 'Customer' },

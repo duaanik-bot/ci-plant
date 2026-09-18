@@ -35,6 +35,7 @@ import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 import { SET_TYPE_META, SetTypeChip, cardSetType, isMergeRun } from '../components/SetType.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { plannedChildSheets } from '../lib/received.js';
 import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 import { completedBadgeCount, printPlanningPath } from '../lib/printPlanningScope.js';
@@ -388,6 +389,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
             </span>
           )}
           {card.wip && <WipChip on />}
+          <FluenceButton productId={card.product_id} jobCardId={card.gang_run_id ? card.id : undefined} context="print_planning" compact />
           {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
           {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
         </div>
@@ -1954,6 +1956,7 @@ export default function PrintPlanning() {
                 </span>
                 <ProductIdentity row={card} compact className="mt-0.5 max-w-[340px]"
                   nameClassName="text-[11.5px] font-bold text-slate-700" />
+                <FluenceButton productId={card.product_id} jobCardId={card.gang_run_id ? card.id : undefined} context="print_planning" compact className="mt-1" />
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <span className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
@@ -2254,6 +2257,7 @@ export default function PrintPlanning() {
                         </td>
                         <td className={td}>
                           <ProductIdentity row={c} compact />
+                          <FluenceButton jobCardId={c.id} context="print_planning" compact className="mt-1" />
                         </td>
                         <td className={`${td} text-slate-600`}><CustomerDot id={c.customer_id} />{c.customer_name}</td>
                         <td className={`${td} text-xs font-semibold text-slate-600`}>{pressName(c.machine_id)}</td>

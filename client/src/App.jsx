@@ -40,6 +40,8 @@ const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
 const POPrint = lazy(() => import('./pages/POPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
+// Fluence-only: the prescription & kit master.
+const FluenceMaster = lazy(() => import('./pages/FluenceMaster.jsx'));
 
 // Quiet placeholder while a route chunk downloads — matches the app's muted grey.
 function PageLoading() {
@@ -174,6 +176,7 @@ export default function App() {
                 <Route path="/tooling/shade-cards" element={<Tooling family="shade_card" />} />
                 <Route path="/tooling/:family/po/:id" element={<POPrint />} />
                 <Route path="/shade-cards" element={<ShadeCards />} />
+                <Route path="/fluence" element={<FluenceMaster />} />
               </Route>
             </Route>
           </Routes>

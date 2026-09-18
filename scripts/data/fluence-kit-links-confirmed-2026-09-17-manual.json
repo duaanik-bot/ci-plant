@@ -1,0 +1,141 @@
+{
+ "confirmed_by": "Anik Dua (MD)",
+ "confirmed_on": "2026-09-17",
+ "link_method": "manual",
+ "note": "Kits with no name match, matched by hand in the local review session on Anik's instruction ('link the 20 remaining kits by hand'), from Fluence's Product Status Sheet (code, family, MRP) and the MRP Kits price lists. 18 linked; 2 held back — F-D-STRIDE (not_linked) and HAIRFACT ANAGEN EXTENSION, which Anik confirmed on 2026-09-18 (fluence-kit-links-confirmed-2026-09-18.json). Every link can be undone in Fluence Master.",
+ "links": [
+  {
+   "party_sl_no": 336,
+   "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA KIT",
+   "product_code": "FP-263",
+   "product_name": "MILD TO MODERATE MELASMA 4710 | LARGE TOPICO KIT",
+   "reason": "Topico large kit carton for Mild to Moderate Melasma (Fluence Product Status Sheet 20251263, family Topico); its MRP ₹4,710 is the price on every line of this kit"
+  },
+  {
+   "party_sl_no": 337,
+   "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA KIT",
+   "product_code": "FP-282",
+   "product_name": "RESITANT MELASMA 5331 | LARGE TOPICO KIT",
+   "reason": "Topico large kit carton for Resistant Melasma (20251282; the carton name misspells RESISTANT); its MRP ₹5,331 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 338,
+   "kit_name": "SKIN FACT TOPICO POST ACNE HYPER - PIGMENTATION & PIH KIT",
+   "product_code": "FP-278",
+   "product_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE TOPIC",
+   "reason": "Topico large kit carton for Post Acne Hyperpigmentation & PIH (20251278); its MRP ₹4,755 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 339,
+   "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS KIT",
+   "product_code": "FP-267",
+   "product_name": "PERI ORAL MELANOSIS 6506 | LARGE TOPICO KIT",
+   "reason": "Topico large kit carton for Peri Oral Melanosis (20251267); its MRP ₹6,506 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 340,
+   "kit_name": "SKIN FACT TOPICO PERI ORBITAL MELANOSIS  KIT",
+   "product_code": "FP-274",
+   "product_name": "PERI ORBITAL MELANOSIS 5209 | LARGE TOPICO KIT",
+   "reason": "Topico large kit carton for Peri Orbital Melanosis (20251274); its MRP ₹5,209 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 341,
+   "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA - NIGHT ACTIVE",
+   "product_code": "FP-286",
+   "product_name": "MILD TO MODERATE MELASMA 3071 | TOPICO NIGHT ACTIVE",
+   "reason": "Topico Night Active carton for Mild to Moderate Melasma (20251286); its MRP ₹3,071 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 342,
+   "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA NIGHT ACTIVE",
+   "product_code": "FP-304",
+   "product_name": "RESISTANT MELASMA 3692 | TOPICO NIGHT ACTIVE",
+   "reason": "Topico Night Active carton for Resistant Melasma (20251304); its MRP ₹3,692 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 343,
+   "kit_name": "SKIN FACT TOPICO POST ACNE HYPER PIGMENTATION & PIH  NIGHT ACTIVE",
+   "product_code": "FP-300",
+   "product_name": "POST ACNE HYERPIGMENTATION&PIH 3116 | TOP NIGHT ACT",
+   "reason": "Topico Night Active carton for Post Acne Hyperpigmentation & PIH (20251300); its MRP ₹3,116 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 344,
+   "kit_name": "SKIN FACT PERI ORBITAL MELANOSIS NIGHT ACTIVE",
+   "product_code": "FP-295",
+   "product_name": "PERI ORBITAL MELANOSIS 3570|TOPICO NIGHT ACTIVE",
+   "reason": "Topico Night Active carton for Peri Orbital Melanosis (20251295); its MRP ₹3,570 is the price on every kit line"
+  },
+  {
+   "party_sl_no": 345,
+   "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS NIGHT ACTIVE",
+   "product_code": "FP-290",
+   "product_name": "PERI ORAL MELANOSIS 4867 |TOPICO NIGHT ACTIVE",
+   "reason": "the only Topico Night Active carton for Peri Oral Melanosis (20251290). PRICE DISAGREES: the kit list has ₹4,223 on every line, the carton and Fluence's Product Status Sheet say ₹4,867 — confirm the printed MRP with Fluence"
+  },
+  {
+   "party_sl_no": 302,
+   "kit_name": "LACTIHEALTH VEG-2",
+   "product_code": "FP-058",
+   "product_name": "LACTIHEALTH V2",
+   "reason": "the third LACTIHEALTH kit and the third LACTIHEALTH carton: LACTIHEALTH and LACTIHEALTH - V1 already hold FP-056 and FP-057 (Fluence codes 20251056-58, Hair Fact) and no other LACTIHEALTH carton exists; kit list ₹2,264 vs carton ₹2,168"
+  },
+  {
+   "party_sl_no": 362,
+   "kit_name": "HAIR FACT FPHL Pro",
+   "product_code": "FP-312",
+   "product_name": "FPHL PRO",
+   "reason": "the same name without the HAIR FACT family word (Fluence lists FPHL PRO under Hair Fact, 20251312); the only FPHL carton; kit list ₹3,495 vs carton ₹3,204"
+  },
+  {
+   "party_sl_no": 363,
+   "kit_name": "HAIR FACT MPHL Pro",
+   "product_code": "FP-311",
+   "product_name": "MPHL PRO",
+   "reason": "the same name without the HAIR FACT family word (Hair Fact, 20251311); the only MPHL carton; kit list ₹3,549 vs carton ₹3,252"
+  },
+  {
+   "party_sl_no": 365,
+   "kit_name": "SKIN FACT MALE ACNE 1",
+   "product_code": "FP-259",
+   "product_name": "MALE ACNE",
+   "reason": "Skin Fact male acne has three kits and three cartons (20251257-59); the prices pair them exactly, each kit ₹126 above its carton (₹3,067 vs ₹2,941)"
+  },
+  {
+   "party_sl_no": 366,
+   "kit_name": "SKIN FACT MALE ACNE GOLD (IMMUNITY AND GUT )",
+   "product_code": "FP-257",
+   "product_name": "MALE ACNE G",
+   "reason": "G = Gold (Skin Fact, 20251257); ₹3,405 vs carton ₹3,279, the same ₹126 gap as the other two male acne kits"
+  },
+  {
+   "party_sl_no": 367,
+   "kit_name": "SKIN FACT MALE ACNE GOLD PLUS (INFLAMMATION AND IMMUNITY)",
+   "product_code": "FP-258",
+   "product_name": "MALE ACNE PLUS",
+   "reason": "the Gold Plus kit (Skin Fact, 20251258); ₹3,864 vs carton ₹3,738, the same ₹126 gap as the other two male acne kits"
+  },
+  {
+   "party_sl_no": 370,
+   "kit_name": "HAIR FACT PRO IMMUNE GOLD PRO",
+   "product_code": "FP-313",
+   "product_name": "PRO IMMUNE GOLD PRO",
+   "reason": "the same name without HAIR FACT (Hair Fact, 20251313); PRO IMMUNE GOLD already holds FP-117; kit list ₹3,687 vs carton ₹3,388"
+  },
+  {
+   "party_sl_no": 371,
+   "kit_name": "PROFACT PENOTYPE MITOBOOST",
+   "product_code": "FP-314",
+   "product_name": "PHENOTYPE MITOBOOST",
+   "reason": "the kit list misspells PHENOTYPE; the only MITOBOOST carton (Pro Fact, 20251314); kit list ₹6,809 vs carton ₹6,590"
+  }
+ ],
+ "not_linked": [
+  {
+   "party_sl_no": 279,
+   "kit_name": "F-D-STRIDE",
+   "why": "no carton to link: the kit is three units of the item F-D-STRIDE, and neither the ERP nor Fluence's Product Status Sheet has a D-STRIDE carton"
+  }
+ ]
+}

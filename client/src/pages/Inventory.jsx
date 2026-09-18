@@ -14,6 +14,7 @@ import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, Tr
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { leftoverSourceLabel } from '../lib/leftoverSource.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
@@ -1044,7 +1045,7 @@ export default function Inventory() {
             { key: 'created_at', label: 'When', render: m => fmt.dt(m.created_at) },
             { key: 'type', label: 'Type', render: m => <StatusBadge status={m.type === 'consumption' || m.type === 'dispatch' ? 'cancelled' : m.type === 'grn' ? 'quarantine' : 'available'} /> && <span className="text-xs font-semibold capitalize">{m.type.replace('_', ' ')}</span> },
             { key: 'material_name', label: 'Item', render: m => m.product_name
-              ? <ProductIdentity row={m} compact />
+              ? <><ProductIdentity row={m} compact /><FluenceButton productId={m.product_id} context="warehouse" className="mt-1" /></>
               : (m.material_name || '—') },
             { key: 'qty', label: 'Qty', align: 'right', render: m => <span className={`font-bold tabular-nums ${m.qty < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{m.qty > 0 ? '+' : ''}{fmt.num(m.qty)}</span> },
             { key: 'note', label: 'Note', render: m => <span className="text-xs text-gray-500">{m.note || `${m.ref_type || ''} #${m.ref_id || ''}`}</span> },

@@ -1,0 +1,376 @@
+{
+ "confirmed_by": "Anik Dua (MD)",
+ "confirmed_on": "2026-09-18",
+ "note": "Topico part cartons show the outer kit's prescription — Anik, 2026-09-18 ('show the Topico part cartons the outer kit's prescription'). Each part begins with the same condition and price as its outer carton (e.g. 'MILD TO MODERATE MELASMA 4710 | …'), is in the same Topico run of Fluence item codes, and carries the same LARGE / NIGHT remark in Fluence's Product Status Sheet.",
+ "parts": [
+  {
+   "product_code": "FP-264",
+   "product_name": "MILD TO MODERATE MELASMA 4710 | LARGE FILLER",
+   "part": "filler",
+   "outer_code": "FP-263",
+   "outer_name": "MILD TO MODERATE MELASMA 4710 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 336,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-265",
+   "product_name": "MILD TO MODERATE MELASMA 4710 | LARGE INNER BOX",
+   "part": "inner box",
+   "outer_code": "FP-263",
+   "outer_name": "MILD TO MODERATE MELASMA 4710 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 336,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-266",
+   "product_name": "MILD TO MODERATE MELASMA 4710 | LARGE LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-263",
+   "outer_name": "MILD TO MODERATE MELASMA 4710 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 336,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-271",
+   "product_name": "PERI ORAL MELANOSIS 6506 | LARGE FILLER",
+   "part": "filler",
+   "outer_code": "FP-267",
+   "outer_name": "PERI ORAL MELANOSIS 6506 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 339,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS KIT"
+   }
+  },
+  {
+   "product_code": "FP-272",
+   "product_name": "PERI ORAL MELANOSIS 6506|LARGE INNER BOX",
+   "part": "inner box",
+   "outer_code": "FP-267",
+   "outer_name": "PERI ORAL MELANOSIS 6506 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 339,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS KIT"
+   }
+  },
+  {
+   "product_code": "FP-273",
+   "product_name": "PERI ORAL MELANOSIS 6506 | LARGE LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-267",
+   "outer_name": "PERI ORAL MELANOSIS 6506 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 339,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS KIT"
+   }
+  },
+  {
+   "product_code": "FP-275",
+   "product_name": "PERI ORBITAL MELANOSIS 5209| LARGE FILLER",
+   "part": "filler",
+   "outer_code": "FP-274",
+   "outer_name": "PERI ORBITAL MELANOSIS 5209 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 340,
+    "kit_name": "SKIN FACT TOPICO PERI ORBITAL MELANOSIS  KIT"
+   }
+  },
+  {
+   "product_code": "FP-276",
+   "product_name": "PERI ORBITAL MELANOSIS 5209|LARGE INNER BOX",
+   "part": "inner box",
+   "outer_code": "FP-274",
+   "outer_name": "PERI ORBITAL MELANOSIS 5209 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 340,
+    "kit_name": "SKIN FACT TOPICO PERI ORBITAL MELANOSIS  KIT"
+   }
+  },
+  {
+   "product_code": "FP-277",
+   "product_name": "PERI ORBITAL MELANOSIS 5209 | LARGE LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-274",
+   "outer_name": "PERI ORBITAL MELANOSIS 5209 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 340,
+    "kit_name": "SKIN FACT TOPICO PERI ORBITAL MELANOSIS  KIT"
+   }
+  },
+  {
+   "product_code": "FP-279",
+   "product_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE FILLER",
+   "part": "filler",
+   "outer_code": "FP-278",
+   "outer_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE TOPIC",
+   "kit": {
+    "party_sl_no": 338,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER - PIGMENTATION & PIH KIT"
+   }
+  },
+  {
+   "product_code": "FP-280",
+   "product_name": "POST ACNE HYERPIGMENTATION & PIH 4755| LARGE INNER BOX",
+   "part": "inner box",
+   "outer_code": "FP-278",
+   "outer_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE TOPIC",
+   "kit": {
+    "party_sl_no": 338,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER - PIGMENTATION & PIH KIT"
+   }
+  },
+  {
+   "product_code": "FP-281",
+   "product_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-278",
+   "outer_name": "POST ACNE HYERPIGMENTATION & PIH 4755 | LARGE TOPIC",
+   "kit": {
+    "party_sl_no": 338,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER - PIGMENTATION & PIH KIT"
+   }
+  },
+  {
+   "product_code": "FP-283",
+   "product_name": "RESITANT MELASMA 5331 | LARGE INNER BOX",
+   "part": "inner box",
+   "outer_code": "FP-282",
+   "outer_name": "RESITANT MELASMA 5331 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 337,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-284",
+   "product_name": "RESITANT MELASMA 5331|LARGE FILLER",
+   "part": "filler",
+   "outer_code": "FP-282",
+   "outer_name": "RESITANT MELASMA 5331 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 337,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-285",
+   "product_name": "RESITANT MELASMA 5331 |LARGE LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-282",
+   "outer_name": "RESITANT MELASMA 5331 | LARGE TOPICO KIT",
+   "kit": {
+    "party_sl_no": 337,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA KIT"
+   }
+  },
+  {
+   "product_code": "FP-287",
+   "product_name": "MILD TO MODERATE MELASMA 3071 |NIGHT SEPERATOR",
+   "part": "separator",
+   "outer_code": "FP-286",
+   "outer_name": "MILD TO MODERATE MELASMA 3071 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 341,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA - NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-288",
+   "product_name": "MILD TO MODERATE MELASMA 3071 |NIGHT TRAY",
+   "part": "tray",
+   "outer_code": "FP-286",
+   "outer_name": "MILD TO MODERATE MELASMA 3071 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 341,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA - NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-289",
+   "product_name": "MILD TO MODERATE MELASMA 3071 |NIGHT LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-286",
+   "outer_name": "MILD TO MODERATE MELASMA 3071 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 341,
+    "kit_name": "SKIN FACT TOPICO MILD TO MODERATE MELASMA - NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-291",
+   "product_name": "PERI ORAL MELANOSIS 4867 |NIGHT SEPERATOR",
+   "part": "separator",
+   "outer_code": "FP-290",
+   "outer_name": "PERI ORAL MELANOSIS 4867 |TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 345,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-292",
+   "product_name": "PERI ORAL MELANOSIS 4867 |NIGHT TRAY",
+   "part": "tray",
+   "outer_code": "FP-290",
+   "outer_name": "PERI ORAL MELANOSIS 4867 |TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 345,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-293",
+   "product_name": "PERI ORAL MELANOSIS 4867 |NIGHT LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-290",
+   "outer_name": "PERI ORAL MELANOSIS 4867 |TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 345,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-294",
+   "product_name": "PERI ORAL MELANOSIS 4867 |NIGHT FILLER",
+   "part": "filler",
+   "outer_code": "FP-290",
+   "outer_name": "PERI ORAL MELANOSIS 4867 |TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 345,
+    "kit_name": "SKIN FACT TOPICO PERI ORAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-296",
+   "product_name": "PERI ORBITAL MELANOSIS 3570|NIGHT TRAY",
+   "part": "tray",
+   "outer_code": "FP-295",
+   "outer_name": "PERI ORBITAL MELANOSIS 3570|TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 344,
+    "kit_name": "SKIN FACT PERI ORBITAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-297",
+   "product_name": "PERI ORBITAL MELANOSIS 3570|NIGHT SEPERATOR",
+   "part": "separator",
+   "outer_code": "FP-295",
+   "outer_name": "PERI ORBITAL MELANOSIS 3570|TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 344,
+    "kit_name": "SKIN FACT PERI ORBITAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-298",
+   "product_name": "PERI ORBITAL MELANOSIS 3570|NIGHT LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-295",
+   "outer_name": "PERI ORBITAL MELANOSIS 3570|TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 344,
+    "kit_name": "SKIN FACT PERI ORBITAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-299",
+   "product_name": "PERI ORBITAL MELANOSIS 3570|NIGHT FILLER",
+   "part": "filler",
+   "outer_code": "FP-295",
+   "outer_name": "PERI ORBITAL MELANOSIS 3570|TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 344,
+    "kit_name": "SKIN FACT PERI ORBITAL MELANOSIS NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-301",
+   "product_name": "POST ACNE HYERPIGMENTATION&PIH 3116 |NIGHT TRAY",
+   "part": "tray",
+   "outer_code": "FP-300",
+   "outer_name": "POST ACNE HYERPIGMENTATION&PIH 3116 | TOP NIGHT ACT",
+   "kit": {
+    "party_sl_no": 343,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER PIGMENTATION & PIH  NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-302",
+   "product_name": "POST ACNE HYERPIGMENTATION&PIH 3116 |NIGHT SEPERATOR",
+   "part": "separator",
+   "outer_code": "FP-300",
+   "outer_name": "POST ACNE HYERPIGMENTATION&PIH 3116 | TOP NIGHT ACT",
+   "kit": {
+    "party_sl_no": 343,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER PIGMENTATION & PIH  NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-303",
+   "product_name": "POST ACNE HYERPIGMENTATION&PIH 3116 |NIGHT LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-300",
+   "outer_name": "POST ACNE HYERPIGMENTATION&PIH 3116 | TOP NIGHT ACT",
+   "kit": {
+    "party_sl_no": 343,
+    "kit_name": "SKIN FACT TOPICO POST ACNE HYPER PIGMENTATION & PIH  NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-305",
+   "product_name": "RESISTANT MELASMA 3692 |NIGHT TRAY",
+   "part": "tray",
+   "outer_code": "FP-304",
+   "outer_name": "RESISTANT MELASMA 3692 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 342,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-306",
+   "product_name": "RESISTANT MELASMA 3692 |NIGHT SEPERATOR",
+   "part": "separator",
+   "outer_code": "FP-304",
+   "outer_name": "RESISTANT MELASMA 3692 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 342,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA NIGHT ACTIVE"
+   }
+  },
+  {
+   "product_code": "FP-307",
+   "product_name": "RESISTANT MELASMA 3692 | NIGHT LEAFLET",
+   "part": "leaflet",
+   "outer_code": "FP-304",
+   "outer_name": "RESISTANT MELASMA 3692 | TOPICO NIGHT ACTIVE",
+   "kit": {
+    "party_sl_no": 342,
+    "kit_name": "SKIN FACT TOPICO RESISTANT MELASMA NIGHT ACTIVE"
+   }
+  }
+ ],
+ "not_linked": [
+  {
+   "product_code": "FP-268",
+   "product_name": "SKIN FACT TOPICO LEAFLETS",
+   "why": "generic Topico carton, not one kit's — and Cancelled in Fluence's Product Status Sheet"
+  },
+  {
+   "product_code": "FP-269",
+   "product_name": "SKIN FACT TOPICO FILLER CARTON | FOR LARGE TOPICO",
+   "why": "generic Topico carton, not one kit's — and Cancelled in Fluence's Product Status Sheet"
+  },
+  {
+   "product_code": "FP-270",
+   "product_name": "SKIN FACT TOPICO INNER BOX | FOR LARGE TOPICO KITS",
+   "why": "generic Topico carton, not one kit's — and Cancelled in Fluence's Product Status Sheet"
+  }
+ ]
+}

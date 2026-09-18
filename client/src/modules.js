@@ -25,6 +25,9 @@ export const MODULES = [
   { key: 'masters', label: 'Masters', path: '/masters' },
   { key: 'tooling', label: 'Tooling Hub', path: '/tooling' },
   { key: 'shade_cards', label: 'Shade Cards', path: '/tooling/shade-cards', aliases: ['/shade-cards'] },
+  // Fluence-only: the prescription & kit master. Last, so no login's
+  // first-allowed module changes because it exists.
+  { key: 'fluence', label: 'Fluence Master', path: '/fluence' },
 ];
 
 // Live Floor sub-stations — the 10 production sections a Live-Floor login can be

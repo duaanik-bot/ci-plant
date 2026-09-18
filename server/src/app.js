@@ -33,6 +33,7 @@ import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
 import writeons from './routes/writeons.js';
 import verification from './routes/verification.js';
+import fluence from './routes/fluence.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
 
@@ -88,6 +89,8 @@ app.use('/api', notifications);
 app.use('/api', chat);
 app.use('/api', writeons);
 app.use('/api', verification);
+// Fluence-only: prescription & kit master. Reads and writes fluence_* tables only.
+app.use('/api', fluence);
 
 // Central error handler — business errors carry .status; structured errors
 // (e.g. tolerance decisions) carry .body so the UI can offer choices.

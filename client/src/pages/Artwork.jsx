@@ -28,6 +28,7 @@ import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import { approvalExport, statusExport, toolingExport, toolingGaps, toolingLabel } from '../lib/artworkCells.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { canPlan } from '../modules.js';
 import { createThreadSummary } from '../lib/threadSummary.js';
 
@@ -715,6 +716,7 @@ export default function Artwork() {
               <ProductIdentity row={l}
                 meta={[l.colors != null ? `${l.colors} colours` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null, l.size].filter(Boolean).join(' · ')} />
               <PrintColourChips row={l} compact className="mt-1.5" />
+              <FluenceButton productId={l.product_id} context="artwork" className="mt-1.5" />
             </div>) },
           // The studio's own column: what ink this job needs, before anyone
           // opens the form. Pantone codes and the metallic shade sit right
@@ -888,6 +890,7 @@ export default function Artwork() {
             // push tooling, send to job card) instead of per-carton buttons.
             if (l._gang) return (
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                <FluenceButton productIds={l._gang.map(m => m.product_id)} context="artwork" />
                 <Button size="sm" variant="secondary" onClick={() => setGangOpen(l.gang_run_id)}>
                   <FolderOpen size={13} /> Open
                 </Button>
@@ -936,6 +939,7 @@ export default function Artwork() {
         </>}>
         {editing && (
           <div className="space-y-4">
+            <FluenceButton productId={editing.product_id} context="artwork" label="Fluence prescription & kit" bar />
             <div className="ci-summary-panel text-xs">
               {editing.product_name} · {editing.customer_name} · {editing.product_code}
             </div>
@@ -1110,6 +1114,7 @@ export default function Artwork() {
           const lockedN = gangMembers.filter(m => m.artwork_locked).length;
           return (
             <div className="space-y-4">
+              <FluenceButton productIds={gangMembers.map(m => m.product_id)} context="artwork" label="Fluence prescriptions" bar />
               <div className="ci-summary-panel flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="inline-flex items-center gap-1 font-bold text-violet-700"><Link2 size={13} /> {anchor.gang_number}</span>
                 <span>{gangMembers.length} cartons · one press run</span>
@@ -1181,6 +1186,7 @@ export default function Artwork() {
                       {m.artwork_locked
                         ? <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-bold text-emerald-600"><Lock size={12} /> Locked</span>
                         : <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-400"><LockOpen size={12} /> Open</span>}
+                      <FluenceButton productId={m.product_id} context="artwork" />
                       <ToolingChip line={m} />
                       {canEditPlanning && <Button size="sm" variant="secondary" onClick={() => setEditing(m)}><Pencil size={12} /> Codes</Button>}
                     </div>

@@ -35,6 +35,8 @@ import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList, GangOriginLine } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import { jobCardProductIds } from '../components/fluence/JobCardFluenceRx.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
@@ -1505,6 +1507,7 @@ export default function Section() {
                 {r.plate_state && <PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact />}
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
+                {section === 'printing' && <FluenceButton productIds={jobCardProductIds({ ...r, gang_parent: r.gang_members?.length > 0 })} context="printing" />}
                 {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700" title={r.open_xs || r.latest_xs}>
                     {extraSheetStageLabel(r)}
@@ -1712,6 +1715,7 @@ export default function Section() {
                         className="block w-full rounded text-left transition-colors hover:bg-[#007AFF]/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35">
                         <ProductCell r={r} />
                       </button>
+                      {section === 'printing' && <FluenceButton productIds={jobCardProductIds({ ...r, gang_parent: r.gang_members?.length > 0 })} context="printing" className="mt-1" />}
                     </td>
                     <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} ci-p3 text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
