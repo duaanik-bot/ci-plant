@@ -802,3 +802,12 @@ div.ci-row-alarm-soft {
   /* A short single-sheet document (invoice / PO) is kept whole on one page. */
   .print-fit { break-inside: avoid; }
 }
+
+/* A control whose press is still on its way (lib/busyClick.js — Button,
+   PressButton, an ActionMenu trigger): visibly waiting, so a second press
+   is not tried. */
+button[aria-busy="true"],
+span[aria-busy="true"] {
+  opacity: 0.55;
+  cursor: wait;
+}

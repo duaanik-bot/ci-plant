@@ -14,7 +14,7 @@ import {
   Play, Pause, FileText, Download, Trash2, MoreHorizontal, UserPlus, Hash, AtSign,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Input, Textarea, Checkbox, SearchInput, searchText, useToast } from './ui.jsx';
+import { Button, Input, Textarea, Checkbox, PressButton, SearchInput, searchText, useToast } from './ui.jsx';
 import { CountButton, countOf, plural, rung } from './TopBar.jsx';
 
 // My messages ride the sidebar's active-pill recipe (ACTIVE_PILL in
@@ -315,10 +315,10 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
               that has already faded cannot tell you WHICH message was lost. */}
           <div className={`mt-0.5 text-right text-[9px] tabular-nums ${mine ? 'text-white/65' : 'text-[#B4B4B9]'}`}>
             {m.failed ? (
-              <button type="button" onClick={onRetry}
+              <PressButton type="button" onClick={onRetry}
                 className="font-bold text-white underline decoration-white/50 underline-offset-2">
                 Not sent — retry
-              </button>
+              </PressButton>
             ) : isPending(m) ? 'Sending…' : timeOnly(m.created_at)}
           </div>
         </div>
@@ -330,10 +330,10 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
         )}
         {menuOpen && (
           <div data-msgmenu className={`glass absolute top-6 z-10 ${mine ? 'right-full mr-1' : 'left-full ml-1'} animate-liquidPop whitespace-nowrap rounded-xl p-1 shadow-modal`}>
-            <button type="button" onClick={onRemove}
+            <PressButton type="button" onClick={onRemove}
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">
               <Trash2 size={12} /> Remove
-            </button>
+            </PressButton>
           </div>
         )}
         {seen && <div className="mt-0.5 pr-1 text-right text-[10px] font-semibold text-[#007AFF]">Seen</div>}
@@ -705,7 +705,8 @@ export default function ChatDock() {
       kind: 'text', body, created_at: new Date().toISOString(),
       attachments: [], job_tags: tags.map(t => ({ job_card_id: t.id, jc_number: t.jc_number })),
     }]));
-    api.post(`/chat/conversations/${convId}/messages`, { body, job_tags: tags.map(t => t.id) })
+    // Returned so Retry's press guard can wait on it; send() ignores it.
+    return api.post(`/chat/conversations/${convId}/messages`, { body, job_tags: tags.map(t => t.id) })
       .then(m => {
         // Landing a reply into a thread the reader has since left would resurrect
         // a closed conversation's state; the message is safely on the server.
@@ -1055,7 +1056,7 @@ export default function ChatDock() {
                       {users == null && <p className="px-2 py-3 text-xs text-[#86868B]">Loading people…</p>}
                       {users != null && filteredUsers.length === 0 && <p className="px-2 py-3 text-xs text-[#86868B]">No one matches</p>}
                       {filteredUsers.map(u => (
-                        <button key={u.id} onClick={() => startDm(u)}
+                        <PressButton key={u.id} onClick={() => startDm(u)}
                           className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-white/60">
                           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-b from-[#2E95FF] to-[#007AFF] text-xs font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]">
                             {(u.name || '?').slice(0, 1).toUpperCase()}
@@ -1064,7 +1065,7 @@ export default function ChatDock() {
                             <span className="block truncate text-[13px] font-semibold text-[#1D1D1F]">{u.name}</span>
                             <span className="block text-[11px] capitalize text-[#86868B]">{u.role}</span>
                           </span>
-                        </button>
+                        </PressButton>
                       ))}
                     </div>
                   </>
@@ -1134,10 +1135,10 @@ export default function ChatDock() {
                         <span className="block text-[10px] capitalize text-[#86868B]">{mm.role}</span>
                       </span>
                       {activeConv?.kind === 'group' && isGroupAdmin && mm.user_id !== me?.id && (
-                        <button onClick={() => editMembers({ add: [], remove: [mm.user_id] })} title={`Remove ${mm.name}`}
+                        <PressButton onClick={() => editMembers({ add: [], remove: [mm.user_id] })} title={`Remove ${mm.name}`}
                           className="flex h-6 w-6 items-center justify-center rounded-full text-[#86868B] hover:bg-red-50 hover:text-red-600">
                           <X size={13} />
-                        </button>
+                        </PressButton>
                       )}
                     </div>
                   ))}
@@ -1147,12 +1148,12 @@ export default function ChatDock() {
                       <SearchInput value={memberQ} onChange={setMemberQ} placeholder="Search people…" />
                       <div className="mt-1.5">
                         {filteredMemberPick.filter(u => !members.some(mm => mm.user_id === u.id)).slice(0, 8).map(u => (
-                          <button key={u.id} onClick={() => editMembers({ add: [u.id], remove: [] })}
+                          <PressButton key={u.id} onClick={() => editMembers({ add: [u.id], remove: [] })}
                             className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-white/60">
                             <UserPlus size={13} className="text-[#007AFF]" />
                             <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[#1D1D1F]">{u.name}</span>
                             <span className="text-[10px] capitalize text-[#86868B]">{u.role}</span>
-                          </button>
+                          </PressButton>
                         ))}
                       </div>
                     </div>

@@ -1,7 +1,7 @@
 // Masters — one generic CRUD engine across business, procurement and plant setup.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, PressButton, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
@@ -795,12 +795,12 @@ export default function Masters() {
             onClick={() => setViewing({ kind: cfg.history, record: r })}><History size={14} /></button>
         )}
         {cfg.activeToggle && (
-          <button
+          <PressButton
             className={`rounded p-1.5 ${r.active
               ? 'text-emerald-500 hover:bg-amber-50 hover:text-amber-600'
               : 'text-gray-300 hover:bg-emerald-50 hover:text-emerald-600'}`}
             title={r.active ? 'Deactivate' : 'Activate'}
-            onClick={() => toggleActive(r)}><Power size={14} /></button>
+            onClick={() => toggleActive(r)}><Power size={14} /></PressButton>
         )}
         <button className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={() => setEditing(r)}><Pencil size={14} /></button>
         {!cfg.noDelete && (
@@ -877,7 +877,6 @@ export default function Masters() {
 
   const remove = async () => {
     const row = deleting;
-    setDeleting(null);
     try {
       await api.del(`${cfg.endpoint}/${row.id}`);
       toast.success('Deleted'); load();

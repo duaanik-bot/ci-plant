@@ -13,6 +13,7 @@ import { MergeChip } from '../Merge.jsx';
 import ProductIdentity from '../ProductIdentity.jsx';
 import { TrafficLight, ReadinessPopover } from '../Readiness.jsx';
 import { receivedQty } from '../../lib/received.js';
+import { PressButton } from '../ui.jsx';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 // Hold/resume accepts planners too — pausing a queue is planning work as much
@@ -146,10 +147,10 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
       )}
 
       {canHold() && job.state === 'hold' && (
-        <button onClick={() => onResume(job)} title="Resume"
+        <PressButton onClick={() => onResume(job)} title="Resume"
           className={`${iconBtn} btn-brand`}>
           <Play size={13} />
-        </button>
+        </PressButton>
       )}
 
       {canOperate() && running && (
@@ -160,13 +161,13 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
       )}
 
       {canOperate() && queued && (
-        <button onClick={() => onStart(job)}
+        <PressButton onClick={() => onStart(job)}
           title={job.state === 'incoming'
             ? `Start ahead — ${fmt.stage(job.upstream?.stage || 'the previous stage')} hasn't finished; this stage can't be completed until it does`
             : 'Start'}
           className={`${iconBtn} ${job.state === 'queued' ? 'btn-brand' : 'border border-slate-300 bg-white text-slate-500 hover:border-brand-300 hover:text-brand-600'}`}>
           <Play size={13} />
-        </button>
+        </PressButton>
       )}
 
       <Link to={stageHref} title={`Open ${fmt.stage(job.stage)} — ${job.jc_number}`}

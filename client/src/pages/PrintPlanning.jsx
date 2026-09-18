@@ -11,7 +11,7 @@ import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, odDays, odExport, odTone, OverdueDays, PageHeader, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, odDays, odExport, odTone, OverdueDays, PageHeader, PressButton, ResetFilters, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Layers, SlidersHorizontal } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -184,10 +184,10 @@ function ReorderButtons({ onReorder, first, last, tone = 'text-slate-400 hover:t
   const btn = `rounded p-0.5 transition-colors disabled:opacity-25 disabled:pointer-events-none ${tone}`;
   return (
     <span className="flex items-center gap-px" onClick={e => e.stopPropagation()}>
-      <button className={btn} title="Move to top" disabled={first} onClick={() => onReorder('top')}><ArrowUpToLine size={12} /></button>
+      <PressButton className={btn} title="Move to top" disabled={first} onClick={() => onReorder('top')}><ArrowUpToLine size={12} /></PressButton>
       <button className={btn} title="Move up" disabled={first} onClick={() => onReorder('up')}><ChevronUp size={13} /></button>
       <button className={btn} title="Move down" disabled={last} onClick={() => onReorder('down')}><ChevronDown size={13} /></button>
-      <button className={btn} title="Move to end" disabled={last} onClick={() => onReorder('end')}><ArrowDownToLine size={12} /></button>
+      <PressButton className={btn} title="Move to end" disabled={last} onClick={() => onReorder('end')}><ArrowDownToLine size={12} /></PressButton>
     </span>
   );
 }
@@ -433,19 +433,19 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
             <span className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
               <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Send to</span>
               {presses.map((p, i) => (
-                <button key={p.id} title={p.name} onClick={() => onSend(p.id)}
+                <PressButton key={p.id} title={p.name} onClick={() => onSend(p.id)}
                   className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i).send}`}>
                   {shortPress(p.name).replace('Press ', 'P')}
-                </button>
+                </PressButton>
               ))}
             </span>
           )}
           {onSendBack && (
-            <button onClick={e => { e.stopPropagation(); onSendBack(); }}
+            <PressButton onClick={e => { e.stopPropagation(); return onSendBack(); }}
               title="Send back to Triage"
               className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700">
               <CornerUpLeft size={10} /> Triage
-            </button>
+            </PressButton>
           )}
         </div>
       </div>
@@ -566,10 +566,10 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
         <p className="mt-2 text-[11px] text-amber-600">Delivery date changes the whole order, not just this line.</p>
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-700">Cancel</button>
-          <button onClick={save} disabled={busy}
+          <PressButton onClick={save} disabled={busy}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
             {busy ? 'Saving…' : 'Save'}
-          </button>
+          </PressButton>
         </div>
         {/* Inside the card: its stopPropagation keeps a click in the alarm from
             bubbling (React bubbles through portals) to the backdrop that closes
@@ -1348,17 +1348,17 @@ export default function PrintPlanning() {
               {inTriage && (<>
                 <span className="text-[10px] font-bold uppercase tracking-wide text-violet-400">Send gang to</span>
                 {presses.map((p, i) => (
-                  <button key={p.id} title={p.name} onClick={() => sendGroups(p.id, [group])}
+                  <PressButton key={p.id} title={p.name} onClick={() => sendGroups(p.id, [group])}
                     className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm ${pressTheme(i).send}`}>
                     {shortPress(p.name).replace('Press ', 'P')}
-                  </button>
+                  </PressButton>
                 ))}
               </>)}
               {onPress && (
-                <button onClick={() => sendGroups(TRIAGE, [group])}
+                <PressButton onClick={() => sendGroups(TRIAGE, [group])}
                   className="flex items-center gap-1 rounded-md border border-violet-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-violet-600 hover:border-violet-300">
                   <CornerUpLeft size={10} /> Whole gang → Triage
-                </button>
+                </PressButton>
               )}
             </div>
           )}
@@ -1676,10 +1676,10 @@ export default function PrintPlanning() {
                   </span>
                   <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Send to</span>
                   {presses.map((p, i) => (
-                    <button key={p.id} title={p.name} onClick={() => sendGroups(p.id, selGroups)}
+                    <PressButton key={p.id} title={p.name} onClick={() => sendGroups(p.id, selGroups)}
                       className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i).send}`}>
                       {shortPress(p.name)}
-                    </button>
+                    </PressButton>
                   ))}
                 </span>
               )}
@@ -2037,16 +2037,16 @@ export default function PrintPlanning() {
                   <span className="flex items-center justify-end gap-1.5">
                     {reorder && <ReorderButtons onReorder={reorder} first={pos.first} last={pos.last} />}
                     {isT && canPlan() && presses.map((p2, i2) => (
-                      <button key={p2.id} title={`Send to ${p2.name}`} onClick={() => sendGroups(p2.id, [group])}
+                      <PressButton key={p2.id} title={`Send to ${p2.name}`} onClick={() => sendGroups(p2.id, [group])}
                         className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold text-white shadow-sm ${pressTheme(i2).send}`}>
                         {shortPress(p2.name)}
-                      </button>
+                      </PressButton>
                     ))}
                     {!isT && canPlan() && (
-                      <button title="Send back to Triage" onClick={() => sendGroups(TRIAGE, [group])}
+                      <PressButton title="Send back to Triage" onClick={() => sendGroups(TRIAGE, [group])}
                         className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:border-slate-300 hover:text-slate-800">
                         <CornerUpLeft size={10} /> Triage
-                      </button>
+                      </PressButton>
                     )}
                     <DangerZone jobCard={card} onDone={load} asMenu />
                     <ChevronRight size={13} className="text-slate-300 group-hover:text-blue-400" />
@@ -2110,10 +2110,10 @@ export default function PrintPlanning() {
                     </span>
                     <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Send to</span>
                     {presses.map((p2, i2) => (
-                      <button key={p2.id} title={p2.name} onClick={() => sendGroups(p2.id, selGroups)}
+                      <PressButton key={p2.id} title={p2.name} onClick={() => sendGroups(p2.id, selGroups)}
                         className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i2).send}`}>
                         {shortPress(p2.name)}
-                      </button>
+                      </PressButton>
                     ))}
                   </span>
                 )}
@@ -2404,14 +2404,14 @@ export default function PrintPlanning() {
                 </button>
               )}
               {!chooser.done && canPlan() && c.machine_id && (
-                <button onClick={() => {
+                <PressButton onClick={() => {
                   const g = groupLane(fullLanes[c.machine_id] || []).find(x => x.cards.some(cc => cc.id === c.id));
                   setChooser(null);
-                  if (g) sendGroups(TRIAGE, [g]);
+                  if (g) return sendGroups(TRIAGE, [g]);
                 }}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
                   <CornerUpLeft size={15} className="text-slate-400" /> Send back to Triage
-                </button>
+                </PressButton>
               )}
               {/* Queued (pending) holds too — parking a job nobody has started
                   is exactly what the Hold zone is for. Only a finished run
@@ -2427,16 +2427,16 @@ export default function PrintPlanning() {
                 // running, else back to queued) — the label reads the same
                 // evidence so the button never promises a press restart the
                 // resume won't perform.
-                <button onClick={() => resumeRun(chooser.card)}
+                <PressButton onClick={() => resumeRun(chooser.card)}
                   className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
                   <Play size={15} /> {chooser.card.printing_started_at || chooser.card.printed_so_far > 0 ? 'Resume Printing' : 'Release Hold'}
-                </button>
+                </PressButton>
               )}
               {chooser.done && canPlan() && (
-                <button onClick={() => reverseRun(chooser.card)}
+                <PressButton onClick={() => reverseRun(chooser.card)}
                   className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 hover:bg-amber-100">
                   <RotateCcw size={15} /> Reverse to Triage
-                </button>
+                </PressButton>
               )}
             </div>
           </div>
@@ -2492,10 +2492,10 @@ export default function PrintPlanning() {
         <div data-ci-overlay className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2">
           <div className="flex animate-slideUp items-center gap-3 rounded-full border border-slate-700 bg-slate-900/95 py-2 pl-4 pr-2 text-sm font-semibold text-white shadow-2xl backdrop-blur">
             <span className="tabular-nums">{undo.msg}</span>
-            <button onClick={runUndo}
+            <PressButton onClick={runUndo}
               className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[13px] font-extrabold text-slate-900 transition-colors hover:bg-blue-50 hover:text-blue-700">
               <Undo2 size={13} /> Undo
-            </button>
+            </PressButton>
             <button onClick={() => setUndo(null)} className="rounded-full p-1 text-slate-400 hover:text-white"><X size={14} /></button>
           </div>
         </div>

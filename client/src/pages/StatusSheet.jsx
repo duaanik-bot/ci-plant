@@ -436,6 +436,13 @@ export default function StatusSheet() {
     const names = [...new Set(clearable.map(r => r.customer_name).filter(Boolean))];
     return names.length === 1 ? names[0] : `${names.length} customers`;
   }, [clearable]);
+  // What the confirm says is frozen from the press until the save lands:
+  // clearAllWip empties the rows at once, and the dialog now stays up until
+  // the request settles — it must not read "Clear 0 lines" meanwhile. Before
+  // the press it stays live, so it always names what Confirm will clear.
+  const clearShownRef = useRef({ n: 0, scope: '' });
+  if (!bulkBusy) clearShownRef.current = { n: clearable.length, scope: clearScope };
+  const clearShown = clearShownRef.current;
   const clearAllWip = async () => {
     const line_ids = clearable.map(r => r.line_id);
     if (!line_ids.length) return;
@@ -1005,9 +1012,9 @@ export default function StatusSheet() {
           it acts on everything in view — so it asks first, and the question
           names the count and whose list it is rather than "are you sure?". */}
       <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={clearAllWip}
-        danger confirmLabel={`Clear ${clearable.length} line${clearable.length === 1 ? '' : 's'}`}
+        danger confirmLabel={`Clear ${clearShown.n} line${clearShown.n === 1 ? '' : 's'}`}
         title="Start the WIP list over?"
-        message={`This takes ${clearable.length} line${clearable.length === 1 ? '' : 's'} off the WIP list for ${clearScope} — every WIP and Non-WIP mark currently in view, and the dates with them. Nothing else about the orders changes, and you can import a fresh list straight after. Lines outside the current filters are untouched.`} />
+        message={`This takes ${clearShown.n} line${clearShown.n === 1 ? '' : 's'} off the WIP list for ${clearShown.scope} — every WIP and Non-WIP mark currently in view, and the dates with them. Nothing else about the orders changes, and you can import a fresh list straight after. Lines outside the current filters are untouched.`} />
 
       <SelectionDock open={selectedRows.length > 0} count={selectedLines.length}
         summary={`${selectedLines.length} line${selectedLines.length === 1 ? '' : 's'}`

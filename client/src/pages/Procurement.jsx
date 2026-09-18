@@ -2839,10 +2839,10 @@ export default function Procurement() {
       {/* ── Delete / send-back / reprice confirmation ── onCancel (when present)
           runs on dismissal so a cancelled vendor-reprice can roll everything
           back; a commit flag stops it firing after a real confirm. ── */}
-      <ConfirmDialog open={!!confirm} onClose={() => { if (confirm && !confirm._committed) confirm.onCancel?.(); setConfirm(null); }}
+      <ConfirmDialog open={!!confirm} onClose={() => { if (confirm && !confirm._committed) confirm.onCancel?.(); setConfirm(cur => (cur === confirm ? null : cur)); }}
         title={confirm?.title} message={confirm?.message}
         confirmLabel={confirm?.confirmLabel} danger={confirm?.danger} hideCancel={confirm?.hideCancel}
-        onConfirm={() => { if (confirm) confirm._committed = true; confirm?.onConfirm?.(); }} />
+        onConfirm={() => { if (confirm) confirm._committed = true; return confirm?.onConfirm?.(); }} />
 
       {/* Quick-create material — stacks above the PR / Direct PO modal that opened it */}
       <MaterialQuickCreate open={!!quickMat} onClose={() => setQuickMat(null)} onCreated={handleMaterialCreated} />

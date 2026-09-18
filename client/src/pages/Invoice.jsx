@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
+import { Button, Field, Input, Modal, PressButton, Textarea, useToast } from '../components/ui.jsx';
 import { CoaSheet } from './COA.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
@@ -180,9 +180,9 @@ export default function Invoice() {
                         <FileCheck2 size={12} /> {l.coa_number}
                       </Link>
                     ) : (
-                      <button onClick={() => createCoa(l)} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-brand-600">
+                      <PressButton onClick={() => createCoa(l)} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-brand-600">
                         <FileCheck2 size={12} /> Create COA
-                      </button>
+                      </PressButton>
                     )}
                     <FluenceButton productId={l.product_id} context="invoice" className="ml-2" />
                   </div>

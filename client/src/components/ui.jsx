@@ -1,14 +1,38 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
-import { Children, Fragment, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
+import { Children, Fragment, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, FilterX, Zap } from 'lucide-react';
 import { filtersDirty, dirtyFilterLabels, applyFilterReset } from '../lib/filterReset.js';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
 import { odDays, odExport, odTone, OD_BANDS } from '../lib/odDays.js';
+import { createBusyGuard } from '../lib/busyClick.js';
+
+// One press at a time (lib/busyClick.js): a press whose handler returns a
+// promise leaves the control busy until it settles, and a press while busy does
+// nothing. The guard is made in the effect, so StrictMode's mount → unmount →
+// mount rebuilds it rather than leaving a disposed guard behind.
+export function usePressGuard() {
+  const [busy, setBusy] = useState(false);
+  const [spin, setSpin] = useState(false);
+  const guard = useRef(null);
+  useEffect(() => {
+    guard.current = createBusyGuard({ onBusy: setBusy, onSpin: setSpin });
+    return () => { guard.current.dispose(); guard.current = null; };
+  }, []);
+  const press = (handler, e) => (guard.current ? guard.current.press(handler, e) : handler?.(e));
+  return { busy, spin, press };
+}
 
 // Button
-export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
+//
+// A button whose onClick returns a promise is busy until it settles: disabled,
+// aria-busy, a spinner if it takes a moment, and a second press does nothing
+// — a double-clicked Save must not save twice. `repeatable` opts a button out,
+// for the few whose second press mid-flight IS a second action.
+export function Button({ variant = 'primary', size = 'md', className = '', onClick, disabled, repeatable = false, children, ...props }) {
+  const { busy, spin, press } = usePressGuard();
+  const handleClick = onClick && !repeatable ? e => press(onClick, e) : onClick;
   const variants = {
     primary: 'btn-brand',
     secondary: 'border border-white/75 bg-white/65 text-[#1D1D1F] backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] hover:-translate-y-px hover:bg-white/90 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_2px_4px_rgba(29,29,31,0.06),0_10px_24px_rgba(29,29,31,0.09)] disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
@@ -31,13 +55,43 @@ export function Button({ variant = 'primary', size = 'md', className = '', ...pr
     md: 'px-4 py-2 text-sm touch:min-h-[44px]',
     lg: 'px-5 py-2.5 text-sm touch:min-h-[44px]',
   };
+  // The spinner sits OVER the label, which keeps its space, so a busy button
+  // never changes width in a tight row, and the hidden label still names the
+  // button for a screen reader (aria-labelledby reads hidden nodes). A button
+  // that already draws its own Loader2 gets no second one.
+  const labelId = useId();
+  const drawsOwnSpinner = Children.toArray(children).some(c => c?.type === Loader2);
+  const showSpin = spin && !drawsOwnSpinner;
+  const namedBy = showSpin && !props['aria-label'] && !props['aria-labelledby'] ? labelId : props['aria-labelledby'];
   return (
     <button
       className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full font-semibold leading-snug transition-all duration-200 ease-apple active:scale-[0.97]
-        disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${variants[variant]} ${sizes[size]} ${className}`}
+        disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${busy ? '!cursor-wait' : ''} ${showSpin ? 'relative' : ''} ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
-    />
+      onClick={handleClick}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
+      aria-labelledby={namedBy}
+    >
+      {showSpin ? (
+        <>
+          <span id={labelId} className="invisible contents">{children}</span>
+          <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true" data-busy-spinner="">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          </span>
+        </>
+      ) : children}
+    </button>
   );
+}
+
+// The same one-press-at-a-time guard for a plain <button> that draws itself —
+// the icon, chip and row buttons that write. No styling of its own; a busy one
+// is dimmed with a wait cursor by index.css ([aria-busy="true"]).
+export function PressButton({ onClick, disabled, repeatable = false, ...props }) {
+  const { busy, press } = usePressGuard();
+  const handleClick = onClick && !repeatable ? e => press(onClick, e) : onClick;
+  return <button {...props} onClick={handleClick} disabled={disabled || busy} aria-busy={busy || undefined} />;
 }
 
 // Form fields
@@ -459,14 +513,46 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
 // `hideCancel` is for the dialog that only reports something — a refusal with
 // its reason, say. There is no choice to make, so a Cancel beside the dismiss
 // button offers the same outcome twice and reads as if one of them undoes more.
+// Confirm waits for what it starts: while the action's promise is pending the
+// dialog stays up, its confirm button busy and Cancel / Esc held, so the page
+// behind cannot start the same action again. It closes when the action
+// succeeds; a refused action leaves it open (the refusal has its own toast) to
+// retry or cancel. An onConfirm that returns nothing closes at once, as before.
 export function ConfirmDialog({ open, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger, hideCancel }) {
+  // One press guard for the whole dialog: while the action runs, Cancel, Esc,
+  // the backdrop and the confirm button are all held, and all come back
+  // together — when it settles, or after BUSY_MAX_MS if it never does, so a
+  // stalled connection cannot leave a dialog whose only live control writes.
+  const { busy, press } = usePressGuard();
+  const confirm = () => press(() => {
+    const out = onConfirm();
+    if (!out || typeof out.then !== 'function') { onClose(); return undefined; }
+    return out.then(() => { onClose(); }, () => {});
+  });
+  // Esc while busy must not reach a modal underneath either (each open Modal
+  // listens on window) — swallowed before it gets there. But only while this
+  // dialog is the one on top: the action can open its own dialog ABOVE it (the
+  // over-issue alarm, where Esc means No), and that one's Esc is its own.
+  const msgRef = useRef(null);
+  useEffect(() => {
+    if (!busy || !open) return undefined;
+    const hold = e => {
+      if (e.key !== 'Escape') return;
+      const z = el => Number(getComputedStyle(el).zIndex) || 0;
+      const top = [...document.querySelectorAll('[data-ci-overlay]')].reduce((a, b) => (!a || z(b) >= z(a) ? b : a), null);
+      if (top && msgRef.current && !top.contains(msgRef.current)) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+    };
+    window.addEventListener('keydown', hold, true);
+    return () => window.removeEventListener('keydown', hold, true);
+  }, [busy, open]);
   return (
-    <Modal open={open} onClose={onClose} title={title}
+    <Modal open={open} onClose={busy ? () => {} : onClose} title={title}
       footer={<>
-        {!hideCancel && <Button variant="secondary" onClick={onClose}>Cancel</Button>}
-        <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
+        {!hideCancel && <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>}
+        <Button variant={danger ? 'danger' : 'primary'} onClick={confirm}>{confirmLabel}</Button>
       </>}>
-      <p className="text-sm text-gray-600">{message}</p>
+      <p ref={msgRef} className="text-sm text-gray-600">{message}</p>
     </Modal>
   );
 }
@@ -590,6 +676,10 @@ export function UpstreamChip({ upstream, available, unit }) {
 // trigger and renders exactly as before.
 export function ActionMenu({ items = [], label = 'More actions', trigger }) {
   const [open, setOpen] = useState(false);
+  // An item's action runs through the press guard: the menu closes at once,
+  // and until the action settles the ⋯ shows busy and cannot be reopened —
+  // so the same row action cannot be started twice.
+  const { busy, spin, press } = usePressGuard();
   const [rect, setRect] = useState(null);
   // Where the panel actually lands, once it has been measured. Null until then.
   const [pos, setPos] = useState(null);
@@ -657,6 +747,7 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
   if (!items.length) return null;
 
   const toggle = () => {
+    if (busy) return;
     setRect(btnRef.current.getBoundingClientRect());
     setOpen(o => !o);
   };
@@ -664,7 +755,7 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
   return (
     <>
       {trigger ? (
-        <span ref={btnRef} className="inline-flex">{trigger({ toggle, open })}</span>
+        <span ref={btnRef} className="inline-flex" aria-busy={busy || undefined}>{trigger({ toggle, open, busy })}</span>
       ) : (
         <button
           ref={btnRef}
@@ -672,11 +763,13 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
           title={label}
           aria-label={label}
           onClick={toggle}
+          disabled={busy}
+          aria-busy={busy || undefined}
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition duration-200 ease-apple touch:h-10 touch:w-10 ${
             open ? 'bg-[#1D1D1F]/[0.07] text-[#1D1D1F]' : 'text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F]'
           }`}
         >
-          <MoreHorizontal size={15} />
+          {spin ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <MoreHorizontal size={15} />}
         </button>
       )}
       {open && rect && createPortal(
@@ -701,7 +794,7 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
               )}
               <button
                 type="button"
-                onClick={() => { setOpen(false); item.onClick?.(); }}
+                onClick={() => { setOpen(false); press(() => item.onClick?.()); }}
                 className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 touch:min-h-[44px] touch:text-[13px] ${
                   item.tone === 'danger'
                     ? 'text-red-600 hover:bg-red-50'

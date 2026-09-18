@@ -16,7 +16,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, ShoppingBag } from 'lucide-react';
 import { defaultPickSelection, duplicatePickAssets, pickPayload, PLATE_SET_ASIDE_REASONS, PLATE_RETIRE_REASONS } from '../lib/plateRack.js';
-import { Button, Modal } from './ui.jsx';
+import { Button, Modal, PressButton } from './ui.jsx';
 
 // `lines` must be held in the caller's state, not rebuilt inline on each render:
 // the effect below re-seeds on its identity, so a fresh array every render would
@@ -159,11 +159,11 @@ export default function RackPickerModal({ open, requestNumber, lines = [], busy 
                         <div className="flex flex-wrap items-center gap-1 border-b border-slate-100 pb-2">
                           <span className="text-[10px] font-bold text-slate-500">Take {row.asset_number} off the rack —</span>
                           {PLATE_SET_ASIDE_REASONS.map(reason => (
-                            <button key={reason.key} type="button"
+                            <PressButton key={reason.key} type="button"
                               className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:border-slate-400"
-                              onClick={() => { setActing(null); onSetAside(row.id, reason.key); }}>
+                              onClick={() => { setActing(null); return onSetAside(row.id, reason.key); }}>
                               {reason.label}
-                            </button>
+                            </PressButton>
                           ))}
                           {/* The door to the permanent list — it REPLACES this strip
                               rather than extending it, so the two Damageds are never
@@ -181,11 +181,11 @@ export default function RackPickerModal({ open, requestNumber, lines = [], busy 
                             Retire {row.asset_number} — the plate is scrapped and this cannot be undone
                           </span>
                           {PLATE_RETIRE_REASONS.map(reason => (
-                            <button key={reason} type="button"
+                            <PressButton key={reason} type="button"
                               className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[10px] font-bold text-[#B81F16] hover:border-[#B81F16]"
-                              onClick={() => { setActing(null); onRetire(row.id, reason); }}>
+                              onClick={() => { setActing(null); return onRetire(row.id, reason); }}>
                               {reason}
-                            </button>
+                            </PressButton>
                           ))}
                           <button type="button"
                             className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100"

@@ -3,7 +3,7 @@ import { api, auth, fmt } from '../api.js';
 import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, PressButton, ResetFilters, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { incompleteOrderLine, payloadLines } from '../lib/orderLines.js';
@@ -1085,17 +1085,20 @@ export default function Orders() {
             {detail && (() => {
               const isAdmin = auth.user?.role === 'admin';
               const s = detail.status;
-              const B = ({ to, children, variant = 'secondary' }) => (
-                <Button size="sm" variant={variant} onClick={() => setOrderStatus(to)}>{children}</Button>
+              // A plain function, not a component defined in render: a new
+              // component type each render would remount the Button and drop
+              // its press guard mid-save.
+              const b = (to, label, variant = 'secondary') => (
+                <Button key={`${to}-${label}`} size="sm" variant={variant} onClick={() => setOrderStatus(to)}>{label}</Button>
               );
               return (
                 <div className="mb-3 flex flex-wrap gap-1.5">
-                  {s === 'hold' && <B to="pending" variant="primary">Resume (Pending)</B>}
-                  {s === 'pending' && <B to="hold">Hold</B>}
-                  {s === 'pending' && <B to="completed" variant="primary">Complete</B>}
-                  {(s === 'pending' || s === 'hold') && <B to="closed">Close</B>}
-                  {(s === 'pending' || s === 'hold') && <B to="cancelled" variant="danger">Cancel</B>}
-                  {['completed', 'closed', 'cancelled'].includes(s) && isAdmin && <B to="pending">Reopen</B>}
+                  {s === 'hold' && b('pending', 'Resume (Pending)', 'primary')}
+                  {s === 'pending' && b('hold', 'Hold')}
+                  {s === 'pending' && b('completed', 'Complete', 'primary')}
+                  {(s === 'pending' || s === 'hold') && b('closed', 'Close')}
+                  {(s === 'pending' || s === 'hold') && b('cancelled', 'Cancel', 'danger')}
+                  {['completed', 'closed', 'cancelled'].includes(s) && isAdmin && b('pending', 'Reopen')}
                 </div>
               );
             })()}
@@ -1123,10 +1126,10 @@ export default function Orders() {
                       {l.completed_at ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700"><CheckCircle2 size={12} /> Completed</span>
                       ) : (l.dispatched_qty >= l.qty && l.status !== 'cancelled') ? (
-                        <button type="button" onClick={() => markLineComplete(l.id)}
+                        <PressButton type="button" onClick={() => markLineComplete(l.id)}
                           className="inline-flex items-center gap-1 rounded-full border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-600 transition hover:bg-emerald-50" title="Item fulfilled — mark complete">
                           <CheckCircle2 size={12} /> Mark complete
-                        </button>
+                        </PressButton>
                       ) : <StatusBadge status={l.status} />}
                     </td>
                   </tr>

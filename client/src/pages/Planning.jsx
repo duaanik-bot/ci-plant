@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, PressButton, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -1873,7 +1873,7 @@ export default function Planning() {
     if (activeMix.length > 0) { setMixConfirm({ rows: activeMix }); return; }
     const changed = changedSpec();
     if (Object.keys(changed).length) setMasterPrompt({ changed, draft: false, picked: allPicked(changed) });
-    else savePlan({ spec: {}, update_master: false });
+    else return savePlan({ spec: {}, update_master: false });
   };
 
   // "Save" — the planner's own words: "sometimes I just want to save my work".
@@ -1887,7 +1887,7 @@ export default function Planning() {
   const onSave = () => {
     const changed = changedSpec();
     if (Object.keys(changed).length) setMasterPrompt({ changed, draft: true, picked: allPicked(changed) });
-    else savePlan({ spec: {}, update_master: false, draft: true });
+    else return savePlan({ spec: {}, update_master: false, draft: true });
   };
 
   // A single substitute row, on its own, that isn't the planned board and
@@ -1932,7 +1932,7 @@ export default function Planning() {
     const cand = (ctx?.mix?.candidates || []).find(c => c.id === row.material_id);
     if (cand) setBoardSel({ id: cand.id, name: cand.name, sheet_l: cand.sheet_l, sheet_w: cand.sheet_w });
     setMixRows([]); setMixLeftovers({}); setPacketChoice({});
-    savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
+    return savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
   };
 
   // The bank the save should request for one mix row — the same answer the
@@ -2881,7 +2881,7 @@ export default function Planning() {
       setDupPr({ existing: minePrs[0], count: minePrs.length, add_qty: String(position.short), reason: '' });
       return;
     }
-    raisePrInline();
+    return raisePrInline();
   };
 
   // Inline PR tracker — view/track a requisition without leaving the engine.
@@ -3360,13 +3360,13 @@ export default function Planning() {
             const m = SET_TYPE_META[b.key];
             const Icon = m.icon;
             return (
-              <button key={b.key} type="button"
+              <PressButton key={b.key} type="button"
                 onClick={() => (b.key === 'hold'
                   ? setHoldAsk({ rows: selectedRowAnchors, pick: PLANNING_HOLD_DEFAULT, reason: '' })
                   : saveSetTypes(selectedRowAnchors, b.key))}
                 className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all duration-200 ease-apple hover:brightness-[0.96] active:scale-[0.97] touch:min-h-[38px] touch:px-3 ${m.chip}`}>
                 <Icon size={12} /> {m.label}
-              </button>
+              </PressButton>
             );
           });
           return chips.length ? <>{chips}</> : null;
@@ -3692,11 +3692,11 @@ export default function Planning() {
                           a mis-clicked "Use FG Stock" could only be unpicked in
                           the database. */}
                       {['pending', 'planned', 'ready'].includes(m.status) && (
-                        <button type="button" onClick={e => { e.stopPropagation(); releaseFg(m); }}
+                        <PressButton type="button" onClick={e => { e.stopPropagation(); return releaseFg(m); }}
                           title="Give this FG back — the line goes back to making the full quantity"
                           className="ml-1 rounded border border-violet-200 px-1 text-[10px] font-bold text-violet-500 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700">
                           release
-                        </button>
+                        </PressButton>
                       )}
                     </div>
                   )}
@@ -4513,18 +4513,18 @@ export default function Planning() {
                       {!ctx.gang && (
                         <div className="mt-2">
                           <div className="flex rounded-xl bg-slate-100 p-1 text-[11px] font-semibold">
-                            <button type="button" disabled={!planEditable || sbBusy}
+                            <PressButton type="button" disabled={!planEditable || sbBusy}
                               onClick={() => setBookingMode('book')}
                               className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${stockBooking === 'book'
                                 ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                               Book warehouse stock
-                            </button>
-                            <button type="button" disabled={!planEditable || sbBusy || mixRows.length > 0}
+                            </PressButton>
+                            <PressButton type="button" disabled={!planEditable || sbBusy || mixRows.length > 0}
                               onClick={() => setBookingMode('fresh_pr')}
                               className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${stockBooking === 'fresh_pr'
                                 ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                               Fresh PR — leave stock free
-                            </button>
+                            </PressButton>
                           </div>
                           {stockBooking === 'fresh_pr' && mixRows.length > 0 ? (
                             <p className="mt-1 text-[10px] font-semibold text-amber-600">
@@ -5446,13 +5446,13 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                 co-printed MAX and who gains overs. */}
             {gangView.kind !== 'merge' && (
               <div className="-mt-2 flex justify-end">
-                <button type="button" onClick={flipLayoutMode}
+                <PressButton type="button" onClick={flipLayoutMode}
                   title={gangView.layout_mode === 'shared'
                     ? 'This gang plans as ONE co-printed die (run = the largest job). Switch to classic separate-children maths (run = sum of jobs).'
                     : 'This gang plans as separate children (run = sum of jobs). Switch to a co-printed die (run = the largest job, one layout).'}
                   className="text-[10px] font-semibold text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline">
                   die: {gangView.layout_mode === 'shared' ? 'co-printed (one layout)' : 'separate children'} — switch
-                </button>
+                </PressButton>
               </div>
             )}
             {gangView.layout_mode === 'shared' && (gangView.layout_pending ? (
@@ -5594,9 +5594,9 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                               {fmt.num(gangCalc?.per?.find(p => p.id === m.id)?.parent ?? m.parent_sheets)}</span>
                             <div className="flex items-center gap-0.5 pl-1">
                               {dirty
-                                ? <button type="button" title="Save qty / ups" className="rounded-lg bg-brand-500 p-1 text-white hover:bg-brand-600" onClick={() => saveGangMember(m)}><Check size={13} /></button>
+                                ? <PressButton type="button" title="Save qty / ups" className="rounded-lg bg-brand-500 p-1 text-white hover:bg-brand-600" onClick={() => saveGangMember(m)}><Check size={13} /></PressButton>
                                 : <span className="w-[25px]" />}
-                              {canPlanRole && <button type="button" title="Remove from gang" className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500" onClick={() => gangRemoveLine(m.id)}><X size={13} /></button>}
+                              {canPlanRole && <PressButton type="button" title="Remove from gang" className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500" onClick={() => gangRemoveLine(m.id)}><X size={13} /></PressButton>}
                             </div>
                           </div>
                           {/* Per-product master card. Parent · child · coating are
@@ -5796,7 +5796,7 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                       ) : (
                         <div className="max-h-48 space-y-1 overflow-y-auto">
                           {gangSmart.map(mm => (
-                            <button key={mm.material_id} type="button" onClick={() => pickSmartBoard(mm)}
+                            <PressButton key={mm.material_id} type="button" onClick={() => pickSmartBoard(mm)}
                               className={`flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-xs ring-1 ring-slate-100 ${tv('hover:bg-violet-50', 'hover:bg-teal-50')}`}>
                               <div className="min-w-0 flex-1">
                                 <div className="truncate font-semibold text-slate-800">{mm.name}</div>
@@ -5823,7 +5823,7 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                               <span className={`shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold ${mm.category === 'exact' ? 'bg-emerald-50 text-emerald-700' : mm.category === 'near' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`}>
                                 {fmt.title(mm.category || 'option')}
                               </span>
-                            </button>
+                            </PressButton>
                           ))}
                         </div>
                       )}
@@ -6185,18 +6185,18 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                       floor all read the same story. */}
                   <div className="mt-2.5">
                     <div className="flex rounded-xl bg-slate-100 p-1 text-[11px] font-semibold">
-                      <button type="button" disabled={gangSbBusy}
+                      <PressButton type="button" disabled={gangSbBusy}
                         onClick={() => setGangBookingMode('book')}
                         className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${!freshRun
                           ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                         Book warehouse stock
-                      </button>
-                      <button type="button" disabled={gangSbBusy || !!gangView.mix?.active || gangMixRows.length > 0}
+                      </PressButton>
+                      <PressButton type="button" disabled={gangSbBusy || !!gangView.mix?.active || gangMixRows.length > 0}
                         onClick={() => setGangBookingMode('fresh_pr')}
                         className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${freshRun
                           ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                         Fresh PR — leave stock free
-                      </button>
+                      </PressButton>
                     </div>
                     {freshRun && (
                       <p className="mt-1 text-[10px] text-slate-400">

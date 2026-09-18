@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, PressButton, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -163,13 +163,13 @@ function PlateFilterChips({ active, counts, onToggle, onClear }) {
 
 function Toggle({ on, onClick, label, disabled }) {
   return (
-    <button onClick={disabled ? undefined : onClick}
+    <PressButton onClick={disabled ? undefined : onClick}
       title={disabled ? 'Locked — unlock the artwork to change approvals' : undefined}
       className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
         on ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'} ${
         disabled ? 'cursor-not-allowed opacity-60' : ''}`}>
       {on ? '✓ ' : ''}{label}
-    </button>
+    </PressButton>
   );
 }
 
@@ -567,7 +567,7 @@ export default function Artwork() {
     if (!editing) return;
     const changed = canEditPlanning ? changedCodes() : {};
     if (Object.keys(changed).length) { setSyncPrompt({ changed }); return; }
-    doSave({});
+    return doSave({});
   };
   const doSave = async ({ spec, update_master }) => {
     await api.put(`/order-lines/${editing.id}/artwork`, {
@@ -830,18 +830,18 @@ export default function Artwork() {
               if (m.artwork_locked) {
                 return canApprove && !m.jc_number
                   ? (
-                    <button onClick={e => { e.stopPropagation(); unlockArtwork(m); }} title="Reverse — unlock this artwork"
+                    <PressButton onClick={e => { e.stopPropagation(); return unlockArtwork(m); }} title="Reverse — unlock this artwork"
                       className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-amber-100 hover:text-amber-700">
                       <Lock size={13} /> Locked
-                    </button>)
+                    </PressButton>)
                   : <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Lock size={13} /> Locked</span>;
               }
               if (canApprove && m.artwork_customer_ok && m.artwork_qa_ok) {
                 return (
-                  <button onClick={e => { e.stopPropagation(); lockArtwork(m); }} title="Lock this artwork for print"
+                  <PressButton onClick={e => { e.stopPropagation(); return lockArtwork(m); }} title="Lock this artwork for print"
                     className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-xs font-bold text-white transition-colors hover:bg-slate-700">
                     <Lock size={13} /> Lock
-                  </button>);
+                  </PressButton>);
               }
               return <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockOpen size={13} /> Open</span>;
             };
@@ -851,15 +851,15 @@ export default function Artwork() {
             return (
               <div onClick={e => e.stopPropagation()}>
                 {canApprove && allApproved && n < l._gang.length && (
-                  <button onClick={() => lockGang(l._gang)} title="Lock the whole gang for print"
+                  <PressButton onClick={() => lockGang(l._gang)} title="Lock the whole gang for print"
                     className="mb-1 inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-xs font-bold text-white transition-colors hover:bg-slate-700">
                     <Lock size={13} /> Lock gang
-                  </button>)}
+                  </PressButton>)}
                 {canApprove && n === l._gang.length && !l._gang.some(m => m.jc_number) && (
-                  <button onClick={() => unlockGang(l._gang)} title="Reverse — unlock the whole gang"
+                  <PressButton onClick={() => unlockGang(l._gang)} title="Reverse — unlock the whole gang"
                     className="mb-1 inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-amber-100 hover:text-amber-700">
                     <Lock size={13} /> {n}/{l._gang.length} locked
-                  </button>)}
+                  </PressButton>)}
                 {!(canApprove && ((allApproved && n < l._gang.length) || (n === l._gang.length && !l._gang.some(m => m.jc_number)))) && (
                   <span className={`text-xs font-bold ${n === l._gang.length ? 'text-emerald-600' : 'text-violet-700'}`}>{n}/{l._gang.length} locked</span>)}
               </div>);

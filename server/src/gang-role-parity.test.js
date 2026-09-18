@@ -124,7 +124,7 @@ test('every gang control still carries the role gate', () => {
   for (const [what, needle] of [
     ['bulk build / tag buttons', 'if (!canPlanRole) return null;'],
     ['dissolve the run', '{canPlanRole && <Button variant="ghost" className="!text-red-500" onClick={gangDissolve}>'],
-    ['remove a member', '{canPlanRole && <button type="button" title="Remove from gang"'],
+    ['remove a member', '{canPlanRole && <PressButton type="button" title="Remove from gang"'],
     ['consolidation suggestion chips', '{canPlanRole && !hideSuggest &&'],
     ['reverse a planned run', '{canPlanRole && gangView?.members?.some('],
   ]) {

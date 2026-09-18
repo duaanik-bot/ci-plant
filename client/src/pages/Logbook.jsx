@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
-import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, ResetFilters, searchText, Select, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, PressButton, ResetFilters, searchText, Select, Textarea, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { NotebookPen, Timer, Layers, AlertTriangle, Wrench, Plus, Trash2, Users } from 'lucide-react';
 
 const TYPE_BADGE = {
@@ -192,10 +192,10 @@ export default function Logbook() {
     {
       key: '_actions', label: '', sortable: false,
       render: r => (r.kind === 'manual' && canWrite ? (
-        <button type="button" onClick={() => removeEntry(r)} title="Strike out this entry"
+        <PressButton type="button" onClick={() => removeEntry(r)} title="Strike out this entry"
           className="rounded-lg p-1.5 text-slate-300 transition hover:bg-red-50 hover:text-red-500">
           <Trash2 size={14} />
-        </button>
+        </PressButton>
       ) : null),
     },
   ];

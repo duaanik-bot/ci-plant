@@ -2409,8 +2409,10 @@ export default function Section() {
 
       {/* Soft shade-card and plate alarms — both named, both overridable by the
           supervisor, both audited. See components/StartAlarms.jsx. */}
-      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
-        onAcknowledge={kind => { const next = { ...acked, [kind]: true }; setAcked(next); start(next); }} />
+      {/* The dialog now waits for start(); its close clears only its own alarm,
+          so a retry that raises the other alarm is not wiped by that close. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
+        onAcknowledge={kind => { const next = { ...acked, [kind]: true }; setAcked(next); return start(next); }} />
 
       {/* Extra sheets — the operator's controlled path when the run needs more
           board. Approval re-fires a linked Cutting task; Printing receives

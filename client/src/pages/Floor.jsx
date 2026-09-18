@@ -184,7 +184,7 @@ export default function Floor() {
     if (needsClearance(job.stage)) {
       setClearing(job); setChecks(freshClearance());
       loadBoardIssue(job);
-    } else doStart(job);
+    } else return doStart(job);
   };
   // Printing has two soft alarms — the shade card and the plate rack — and both
   // arrive as structured 409s that api.js keeps quiet for the caller to draw.
@@ -718,8 +718,10 @@ export default function Floor() {
       </Modal>
 
       {/* Soft shade-card / plate alarms. Without these the press's Start button
-          answers a structured 409 with nothing at all. */}
-      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
+          answers a structured 409 with nothing at all. Close only the alarm on
+          show: an acked shade retry can come back as the plate alarm, and the
+          dialog's close lands after it. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
         onAcknowledge={kind => doStart(alarm.job, alarm.lc, { ...alarm.ack, [kind]: true })} />
     </div>
   );

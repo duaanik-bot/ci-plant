@@ -17,7 +17,7 @@ import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { notificationLink } from '../lib/notificationLink.js';
 import { currentSubscription, readEnvironment, registerWorker, subscribe } from '../lib/webPush.js';
-import { useToast } from './ui.jsx';
+import { PressButton, useToast } from './ui.jsx';
 // A lazy chunk behind a boundary and an open-request queue — see ChatDockLoader.jsx.
 import ChatDock from './ChatDockLoader.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -283,9 +283,9 @@ function NotificationBell() {
               <p className="text-xs text-[#86868B]">Approvals, your messages, plant alerts</p>
             </div>
             {inbox.unread > 0 && (
-              <button onClick={markAllRead} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-[#007AFF] hover:bg-white/70">
+              <PressButton onClick={markAllRead} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-[#007AFF] hover:bg-white/70">
                 Mark all read
-              </button>
+              </PressButton>
             )}
           </div>
           <div className="max-h-[70vh] overflow-y-auto">
@@ -323,11 +323,11 @@ function NotificationBell() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       {push.support.can && (
-                        <button type="button" disabled={pushBusy} onClick={togglePush}
+                        <PressButton type="button" disabled={pushBusy} onClick={togglePush}
                           className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-50 ${
                             push.on ? 'text-slate-500 hover:bg-slate-100' : 'bg-[#007AFF] text-white hover:bg-[#0064D2]'}`}>
                           {pushBusy ? '…' : push.on ? 'Turn off' : 'Turn on'}
-                        </button>
+                        </PressButton>
                       )}
                       {nudging && (
                         <button type="button" onClick={dismissNudge} title="Not now — the toggle stays here"
@@ -374,14 +374,14 @@ function NotificationBell() {
                       <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">Tap to open this job in Planning</span>
                     </button>
                     <div className="mt-1.5 flex gap-1.5">
-                      <button disabled={deciding === a.id} onClick={() => decideMgt(a, 'approve')}
+                      <PressButton disabled={deciding === a.id} onClick={() => decideMgt(a, 'approve')}
                         className="flex-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
                         Approve
-                      </button>
-                      <button disabled={deciding === a.id} onClick={() => decideMgt(a, 'reject')}
+                      </PressButton>
+                      <PressButton disabled={deciding === a.id} onClick={() => decideMgt(a, 'reject')}
                         className="flex-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50">
                         Reject
-                      </button>
+                      </PressButton>
                     </div>
                   </div>
                 ))}

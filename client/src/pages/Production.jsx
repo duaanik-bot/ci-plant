@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ExportMenu, Field, Input, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PressButton, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
@@ -452,7 +452,7 @@ export default function Production() {
     if (needsClearance(st.stage)) {
       setClearing({ jc, st }); setChecks(freshClearance());
       loadBoardIssue(jc, st);
-    } else doStart(jc, st);
+    } else return doStart(jc, st);
   };
   // Printing's two soft alarms (shade card, plate rack) come back as structured
   // 409s that api.js keeps quiet for the caller to draw. This page drew neither,
@@ -987,10 +987,10 @@ export default function Production() {
                         </button>
                       )}
                       {st.status === 'pending' && jc.status !== 'closed' && (
-                        <button onClick={() => startStage(jc, st)}
+                        <PressButton onClick={() => startStage(jc, st)}
                           className="rounded bg-white p-1 text-gray-500 shadow-sm hover:text-brand-600" title="Start stage">
                           <Play size={12} />
-                        </button>
+                        </PressButton>
                       )}
                       {['in_progress', 'partially_completed'].includes(st.status) && (
                         <button onClick={() => openComplete(jc, st)}
@@ -1530,7 +1530,9 @@ export default function Production() {
       </Modal>
 
       {/* Soft shade-card / plate alarms — named, overridable, audited. */}
-      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(null)}
+      {/* The dialog now waits for doStart(); its close clears only its own
+          alarm, so a retry that raises the other alarm is not wiped by it. */}
+      <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
         onAcknowledge={kind => doStart(alarm.jc, alarm.st, alarm.lc, { ...alarm.ack, [kind]: true })} />
 
       {/* Over-issue alarm — a job card's parent sheets retyped well past the plan. */}

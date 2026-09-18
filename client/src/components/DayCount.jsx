@@ -14,7 +14,7 @@
 // credit stay final-only.
 import { useCallback, useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { Button, Field, Input, Modal, Select } from './ui.jsx';
+import { Button, Field, Input, Modal, PressButton, Select } from './ui.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { Trash2, AlertTriangle, Pencil } from 'lucide-react';
 import { PackingRows, emptyPack, packTotalOf } from './PackingRows.jsx';
@@ -178,10 +178,10 @@ export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
                     </button>
                   )}
                   {onDelete && (
-                    <button type="button" title="Remove this day count" onClick={() => onDelete(run)}
+                    <PressButton type="button" title="Remove this day count" onClick={() => onDelete(run)}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500">
                       <Trash2 size={15} />
-                    </button>
+                    </PressButton>
                   )}
                 </td>
               </>)}
