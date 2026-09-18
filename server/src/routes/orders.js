@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { planningResponse, planningScopeOf } from '../planning-scope.js';
@@ -528,6 +528,15 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
     }
 
     const result = await tx(async (qc, oc) => {
+      // Each rollbackLine below locks its line's gang first. An order's lines can
+      // sit in several gangs, and two orders being deleted at once could take
+      // them in crossing orders — so every gang goes first, in one ascending
+      // statement, and before the order row too: a plan save holding one of
+      // these gangs can need this order's row (its second line UPDATE re-checks
+      // the foreign key), so holding the order while waiting for the gang could
+      // cross it.
+      const before = await qc('SELECT DISTINCT gang_run_id FROM order_lines WHERE order_id=$1 AND gang_run_id IS NOT NULL', [orderId]);
+      await lockGangsFirst(before.map(r => r.gang_run_id), qc);
       const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId]);
       if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
       const dispatched = await oc('SELECT COUNT(*)::int AS n FROM dispatches WHERE order_id=$1', [orderId]);
@@ -537,7 +546,13 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
         e.blockers = ['Dispatch challans exist for this order — cancel those first'];
         throw e;
       }
-      const lines = await qc('SELECT id FROM order_lines WHERE order_id=$1', [orderId]);
+      // Locked as read (gangs, order, then lines ascending), so no line can
+      // change gang after the check below. A line that joined a gang after the
+      // first read would have its gang locked out of order — refuse instead.
+      const lines = await qc('SELECT id, gang_run_id FROM order_lines WHERE order_id=$1 ORDER BY id FOR UPDATE', [orderId]);
+      const locked = new Set(before.map(r => r.gang_run_id));
+      if (lines.some(l => l.gang_run_id && !locked.has(l.gang_run_id)))
+        throw Object.assign(new Error('A line of this order was just added to a gang — refresh and try again'), { status: 409 });
       const scopeLineIds = new Set(lines.map(l => l.id));
       for (const l of lines) {
         await rollbackLine({
@@ -1539,8 +1554,21 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
     // transaction, spoken after it commits: the plan is saved either way.
     const boardShortfalls = [];
     await tx(async (qc, oc) => {
-      const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+      let line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      // A ganged line's plan can dissolve its gang (a board change below: the
+      // mate's UPDATE and the run's DELETE). Take the run first, the order a push
+      // on the mate takes them in (helpers.js lockLineGangFirst — NO KEY UPDATE,
+      // which still admits the share-lock another save's second line UPDATE
+      // takes on the run), then read the line again under it.
+      if (line.gang_run_id) {
+        const gangId = line.gang_run_id;
+        await oc('SELECT id FROM gang_runs WHERE id=$1 FOR NO KEY UPDATE', [gangId]);
+        line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+        if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+        if (line.gang_run_id && line.gang_run_id !== gangId)
+          throw Object.assign(new Error('This line moved to another gang just now — refresh and try again'), { status: 409 });
+      }
 
       // Planning is over once the job leaves for the floor. This route rewrites
       // sheets_required, parent_sheets_required, the spec override and the board

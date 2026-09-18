@@ -3212,8 +3212,71 @@ export async function reopenRunLines(jc, qc = q, oc = one, user = null) {
   return out;
 }
 
+// ── One lock order for anything that touches a gang ──────────────────────────
+// Every gangs.js route locks the gang_runs row first and its member lines after.
+// Push to Job Card did the reverse — the CLICKED line, then every member in id
+// order, then the gang row last (through the job card's foreign key) — so it
+// deadlocked (40P01, one save fails) against a push on another member of the
+// same gang, against every gang edit, and against the PR / cover inserts that
+// share-lock member lines. This puts the gang first, for every caller:
+//
+//   gang_runs row → the run's parent job card (when asked) → member lines in
+//   ascending id (when asked) → the line itself
+//
+// Modes come from LOCK_MODES only, never from a request.
+//   gang  'NO KEY UPDATE', always. It serialises with every gang edit (they take
+//         FOR UPDATE) and with another push / reverse / rollback / plan save
+//         (NO KEY UPDATE against itself), yet admits the FOR KEY SHARE that
+//         Postgres takes on the gang row whenever a transaction updates a
+//         ganged line a second time (its foreign-key re-check — artwork lock,
+//         consume-FG) and that stage-complete's split takes for its child
+//         cards. FOR UPDATE here would deadlock with all of those. A path that
+//         dissolves the run upgrades at its DELETE; the only locks that DELETE
+//         can wait on are those share-locks, whose holders never wait back.
+//   card  push only: the run's card, before the line, for its queue update.
+//   lines NO KEY UPDATE for push — every write it makes to them leaves the key
+//         alone, and unlike UPDATE it does not block PR / GRN / mix inserts that
+//         only share-lock a line through a foreign key.
+// Returns the line (null when there is none — the caller keeps its own 404).
+// lockGangsFirst: several runs at once (an order's lines span gangs) — one
+// statement, ascending id, so two such transactions can never cross.
+export async function lockGangsFirst(gangIds, qc) {
+  const ids = [...new Set(gangIds.filter(Boolean).map(Number))];
+  if (ids.length) await qc('SELECT id FROM gang_runs WHERE id = ANY($1::int[]) ORDER BY id FOR NO KEY UPDATE', [ids]);
+}
+const LOCK_MODES = new Set(['UPDATE', 'NO KEY UPDATE', 'SHARE', 'KEY SHARE']);
+export const PUSH_LOCKS = Object.freeze({ gang: 'NO KEY UPDATE', card: 'NO KEY UPDATE', members: true, line: 'NO KEY UPDATE' });
+export async function lockLineGangFirst(lineId, qc, oc, { gang = 'NO KEY UPDATE', card = null, members = false, line = 'UPDATE' } = {}) {
+  for (const mode of [gang, card, line]) {
+    if (mode != null && !LOCK_MODES.has(mode)) throw new Error(`lockLineGangFirst: not a lock mode — ${mode}`);
+  }
+  const peek = await oc('SELECT gang_run_id FROM order_lines WHERE id=$1', [lineId]);
+  if (!peek) return null;
+  if (peek.gang_run_id) {
+    const run = await oc(`SELECT id FROM gang_runs WHERE id=$1 FOR ${gang}`, [peek.gang_run_id]);
+    if (run) {
+      const cards = card
+        ? await qc(`SELECT id FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL ORDER BY id FOR ${card}`, [run.id])
+        : [];
+      // With the run's card already made, a push takes its early return and
+      // never touches the members — so they are left alone.
+      if (members && !cards.length) {
+        await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR NO KEY UPDATE', [run.id]);
+      }
+    }
+  }
+  const row = await oc(`SELECT * FROM order_lines WHERE id=$1 FOR ${line}`, [lineId]);
+  // The peek was not locked. A line that LEFT its gang meanwhile carries on as
+  // a plain line (the stray gang locks are harmless). One that JOINED or moved
+  // to a gang is refused — locking that gang now would be out of order.
+  if (row?.gang_run_id && row.gang_run_id !== peek.gang_run_id) {
+    throw Object.assign(new Error('This line\'s gang changed just now — refresh and try again'), { status: 409 });
+  }
+  return row;
+}
+
 export async function createJobCardForLine(lineId, qc, oc, user = null) {
-  const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+  const line = await lockLineGangFirst(lineId, qc, oc, PUSH_LOCKS);
   if (!line) { const e = new Error('Line not found'); e.status = 404; throw e; }
 
   if (line.gang_run_id) {
@@ -3306,11 +3369,14 @@ export async function createJobCardForGang(gangRunId, qc, oc, user = null) {
     [gangRunId]);
   if (existing) return existing.id;
 
+  // NO KEY UPDATE: every write to a member here leaves its key alone, and the
+  // stronger FOR UPDATE would block PR / cover inserts that share-lock a member
+  // (lockLineGangFirst already took these, gang row first).
   const lines = await qc(`
     SELECT ol.* FROM order_lines ol
     WHERE ol.gang_run_id=$1
     ORDER BY ol.id
-    FOR UPDATE OF ol`, [gangRunId]);
+    FOR NO KEY UPDATE OF ol`, [gangRunId]);
   if (lines.length < 2) {
     const e = new Error('A gang job needs at least two bound order lines');
     e.status = 409;
@@ -3435,11 +3501,12 @@ export async function createJobCardForMergeRun(runId, qc, oc, user = null) {
     [runId]);
   if (existing) return existing.id;
 
+  // NO KEY UPDATE, gang row first — see createJobCardForGang.
   const lines = await qc(`
     SELECT ol.* FROM order_lines ol
     WHERE ol.gang_run_id=$1
     ORDER BY ol.id
-    FOR UPDATE OF ol`, [runId]);
+    FOR NO KEY UPDATE OF ol`, [runId]);
   if (lines.length < 2) {
     const e = new Error('A combined run needs at least two bound sales orders');
     e.status = 409;
@@ -3525,11 +3592,16 @@ export async function splitGangParentJob(parentJobCardId, qc, oc, user = null) {
   const existing = await qc('SELECT id FROM job_cards WHERE parent_job_card_id=$1 ORDER BY id', [parent.id]);
   if (existing.length) return existing.map(x => x.id);
 
+  // The gang row before its members, as every gang route takes them (see
+  // lockLineGangFirst). KEY SHARE is all the child cards' foreign key needs; it
+  // waits for a gang edit in progress before this holds any member that edit
+  // wants, and it does not block a push, which holds the row NO KEY UPDATE.
+  await oc('SELECT id FROM gang_runs WHERE id=$1 FOR KEY SHARE', [parent.gang_run_id]);
   const lines = await qc(`
     SELECT ol.* FROM order_lines ol
     WHERE ol.gang_run_id=$1
     ORDER BY ol.id
-    FOR UPDATE OF ol`, [parent.gang_run_id]);
+    FOR NO KEY UPDATE OF ol`, [parent.gang_run_id]);
   const childIds = [];
   for (const line of lines) {
     const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
@@ -4253,7 +4325,10 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
 // deleted in the same operation; a ganged line whose gang-mates fall outside
 // that set blocks, so a shared gang run is never half-destroyed.
 export async function rollbackLine({ lineId, mode = 'rollback', note = null, force = false, scopeLineIds = null }, qc = q, oc = one, user = null) {
-  const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+  // Gang row first (lockLineGangFirst): leaving a gang can dissolve it — the
+  // mate's UPDATE and the run's DELETE below — so the run is locked before this
+  // line, the order a push on the mate takes them in.
+  const line = await lockLineGangFirst(lineId, qc, oc, { gang: 'NO KEY UPDATE', line: 'UPDATE' });
   if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
 
   const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1', [lineId]);
@@ -4409,19 +4484,24 @@ export async function pullBackToJobCard(stageId, reason, qc = q, oc = one, user 
   // finalised on the board while its mates are being edited is the desync
   // sendStageBack already refuses to create.
   const cards = jc.gang_run_id
-    ? await qc('SELECT id, order_line_id FROM job_cards WHERE gang_run_id=$1', [jc.gang_run_id])
+    ? await qc('SELECT id, order_line_id FROM job_cards WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
     : [{ id: jc.id, order_line_id: jc.order_line_id }];
 
+  // Every card first (in id order — the run's parent before its children),
+  // then the lines. A push on a run that already has its card locks that card
+  // before the line (lockLineGangFirst); card, line, card, line here could
+  // cross it.
   for (const c of cards) {
     await qc(`UPDATE job_cards SET finalised_at=NULL, machine_id=NULL, queue_pos=NULL,
               status=CASE WHEN status='in_progress' THEN 'open' ELSE status END
               WHERE id=$1`, [c.id]);
-    // The planning board reads the press off the LINE too; leaving it set shows
-    // a job still assigned to a press it is no longer on.
-    if (c.order_line_id) await qc('UPDATE order_lines SET machine_id=NULL WHERE id=$1', [c.order_line_id]);
     await audit('job_card', c.id, 'pulled_to_job_card',
       `Pulled off the floor from ${out.from} — reopened for editing — ${reason}`, qc, user);
   }
+  // The planning board reads the press off the LINE too; leaving it set shows
+  // a job still assigned to a press it is no longer on.
+  const lineIds = cards.map(c => c.order_line_id).filter(Boolean).sort((a, b) => a - b);
+  for (const id of lineIds) await qc('UPDATE order_lines SET machine_id=NULL WHERE id=$1', [id]);
 
   // Whoever owns the Job Card station is the one who has to act on it now.
   const planners = await qc("SELECT id FROM users WHERE active=1 AND role IN ('planner','admin')");

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { PLANNING_ROLES } from '../auth.js';
-import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, releasePlanLockHolds, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor } from '../helpers.js';
+import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, releasePlanLockHolds, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor, lockLineGangFirst, PUSH_LOCKS } from '../helpers.js';
 
 const r = Router();
 
@@ -81,6 +81,20 @@ function requireAny(req, roles) {
   }
 }
 
+// The actions that reach past the clicked line into its gang take the gang
+// row first (helpers.js lockLineGangFirst), so a push, a reverse and a plan
+// reversal on members of one gang queue behind each other instead of crossing.
+// The reverses do NOT pre-lock the run's card: they reach it after its stages
+// (DELETE job_stages, then the card), the order stage start / complete use.
+// Every other action keeps the plain line lock: it never waits on a second row.
+export const REVERSE_LOCKS = Object.freeze({ gang: 'NO KEY UPDATE', line: 'UPDATE' });
+export const LOCKS_BY_ACTION = new Map([
+  ['push_to_job_card', PUSH_LOCKS],
+  ['reverse_to_planning', REVERSE_LOCKS],
+  ['reverse_job_card', REVERSE_LOCKS],
+  ['reverse_plan', REVERSE_LOCKS],
+]);
+
 async function linePayload(lineId) {
   const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [lineId]);
   return line ? { ...line, readiness: await readiness(line) } : null;
@@ -91,7 +105,10 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
     const { action, destinations = [], note, clear_artwork = true, force = false } = req.body || {};
     const lineId = +req.params.id;
     const result = await tx(async (qc, oc) => {
-      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+      const locks = LOCKS_BY_ACTION.get(action);
+      const line = locks
+        ? await lockLineGangFirst(lineId, qc, oc, locks)
+        : await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
 
       // A GANG member's work sits on the run's PARENT card, which carries no
