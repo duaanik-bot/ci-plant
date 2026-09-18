@@ -41,6 +41,7 @@ import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, r
   showsMachineColumn, ownMachineName, shownOperator } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { sectionFloorPath, hasCompletedRows, latestOnly } from '../lib/sectionCompleted.js';
+import { withLeanRows, rehydrateSection } from '../lib/sectionLean.js';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
@@ -495,6 +496,7 @@ export default function Section() {
   tabRef.current = tab;
   const loadGate = useRef(null);
   if (!loadGate.current) loadGate.current = latestOnly();
+  const hydrated = useRef({ res: null, data: null });
   // Read-only job card opened from a queue row — the floor asks "what IS this
   // job?" constantly, and until now the answer meant leaving the station.
   const [cardId, setCardId] = useState(null);
@@ -615,10 +617,21 @@ export default function Section() {
   // read (lib/sectionCompleted.js) — ~290 KB less on each tablet refresh. A tab
   // switch can leave two requests in flight, so an answer older than the one on
   // screen is dropped rather than painted over it.
+  //
+  // Every tab also asks for lean rows (lib/sectionLean.js): each traffic light
+  // sent once and pointed at, and no queue field a station never reads. The
+  // lights go back on the rows HERE, before setData — search and the dots read
+  // row.light. api.get hands back the same object for identical bytes, so the
+  // rehydrated data is kept per response: a fresh copy on every poll would
+  // re-render the whole station for nothing.
   const load = () => {
     const n = loadGate.current.begin();
-    return api.get(sectionFloorPath(section, tabRef.current))
-      .then(d => { if (loadGate.current.accept(n)) setData(d); });
+    return api.get(withLeanRows(sectionFloorPath(section, tabRef.current)))
+      .then(d => {
+        if (!loadGate.current.accept(n)) return;
+        if (hydrated.current.res !== d) hydrated.current = { res: d, data: rehydrateSection(d) };
+        setData(hydrated.current.data);
+      });
   };
   useEffect(() => {
     const firstTab = section === 'cutting' && searchParams.get('xs') === '1' ? 'extra_sheets' : 'queue';

@@ -16,6 +16,7 @@ import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
 import { internLights } from '../../../client/src/lib/floorLights.js';
+import { leanSectionRows, leanRowsAsked } from '../../../client/src/lib/sectionLean.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -81,13 +82,20 @@ export function leanCompletedRun(row) {
 // the few fields those read (client/src/lib/sectionCompleted.js), instead of
 // ~290 KB of rows nothing on that tab draws. `kpis` is computed from the full
 // rows before this, so the unpicked strip is untouched too.
+//
+// `fields=lean` and `lights=ref` (lib/sectionLean.js) are the newer bundle's
+// further asks, on every tab: queue rows without the fields no station reads,
+// and each distinct traffic light sent once in `lights`, the rows pointing at
+// it. Neither param, and the response is exactly one of the two above.
 export function sectionPayload({ section, kpis, queue, completed, audit, extraSheets, machines }, query = {}) {
   const kpiOnly = query?.completed === 'kpi';
+  const rows = leanSectionRows({ queue, completed, kpiOnly }, query);
   return {
-    section, kpis, queue,
-    completed: kpiOnly ? completed.map(completedKpiRow) : completed,
+    section, kpis, queue: rows.queue,
+    completed: kpiOnly ? completed.map(completedKpiRow) : rows.completed,
     audit, extra_sheets: extraSheets, machines,
     ...(kpiOnly ? { completed_rows: 'kpi' } : {}),
+    ...(rows.lights ? { lights: rows.lights } : {}),
   };
 }
 
@@ -374,6 +382,41 @@ const STAGE_VIEW = `
     WHERE job_card_id = jc.id AND status='issued'
     ORDER BY issued_at DESC NULLS LAST, id DESC LIMIT 1) lxs ON true
   ${MIX_CUTS_LATERAL}`;
+
+// The station's finished runs: this section's latest 200, newest first.
+//
+// A lean bundle on any tab but Completed (`?completed=kpi&fields=lean`) is sent
+// those 200 runs as eight fields each (COMPLETED_KPI_FIELDS), and the KPI block
+// reads four of them. Running STAGE_VIEW for that — gang roll-ups, board mix,
+// extra-sheet laterals, the print spec — was the heaviest query on the route,
+// thrown away row by row. COMPLETED_KPI_VIEW selects what the KPIs, the press
+// scope and the projection read, over the SAME joins that decide which rows
+// exist (the inner joins and the anchor line the orders join reads through), so
+// the same WHERE, ORDER BY and LIMIT pick the same 200 runs. Every other join in
+// STAGE_VIEW is a LEFT JOIN on a key or a LATERAL that yields exactly one row,
+// so it can neither add nor remove one. Old bundles never send fields=lean and
+// keep the full view; section-lean-rows.test.js pins both.
+const COMPLETED_KPI_VIEW = `
+  SELECT js.id, js.completed_at, js.started_at, js.qty_in, js.qty_out, js.qty_scrap,
+         js.machine_id, jc.machine_id AS press_machine_id,
+         COALESCE(js.operator, mcrew.name) AS operator
+  FROM job_stages js
+  JOIN job_cards jc ON jc.id = js.job_card_id
+  JOIN products p ON p.id = jc.product_id
+  JOIN materials bm ON bm.id = p.board_material_id
+  LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+  ${GANG_ANCHOR_LINE}
+  JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+  JOIN customers c ON c.id = o.customer_id
+  LEFT JOIN LATERAL (
+    SELECT e.name FROM machine_operators mo JOIN employees e ON e.id = mo.employee_id
+    WHERE mo.machine_id = COALESCE(js.machine_id, jc.machine_id) AND e.active = 1
+    ORDER BY e.name LIMIT 1) mcrew ON true`;
+
+export const completedRunsSql = query => `${
+  query?.completed === 'kpi' && leanRowsAsked(query) ? COMPLETED_KPI_VIEW : STAGE_VIEW}
+      WHERE js.stage=$1 AND js.status='completed'
+      ORDER BY js.completed_at DESC, js.id DESC LIMIT 200`;
 
 r.get('/floor', async (req, res, next) => {
   try {
@@ -1238,9 +1281,7 @@ r.get('/floor/:section', async (req, res, next) => {
     // Completed runs at this section (most recent first), yield per run.
     // Same window, same order, same 200 — each row shed of the live queue's
     // working state, which the Completed tab has no cell for (COMPLETED_DROPS).
-    const completed = (await q(`${STAGE_VIEW}
-      WHERE js.stage=$1 AND js.status='completed'
-      ORDER BY js.completed_at DESC LIMIT 200`, [section]))
+    const completed = (await q(completedRunsSql(req.query), [section]))
       .map(s => ({
         ...leanCompletedRun(s),
         yield_pct: s.qty_in > 0 ? +(100 * s.qty_out / s.qty_in).toFixed(1) : null,

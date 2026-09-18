@@ -46,7 +46,8 @@ function mapRows(sections, fn) {
   });
 }
 
-export function internLights(sections) {
+// One interning table: each distinct light (by JSON identity) gets one index.
+function lightTable() {
   const lights = [];
   const indexOf = new Map();     // JSON identity → index
   const refFor = light => {
@@ -55,15 +56,28 @@ export function internLights(sections) {
     if (!indexOf.has(key)) { indexOf.set(key, lights.length); lights.push(light); }
     return indexOf.get(key);
   };
-  const out = mapRows(sections, row => (row && 'light' in row ? swapKey(row, 'light', 'light_ref', refFor(row.light)) : row));
-  return { sections: out, lights };
+  return { lights, refFor };
+}
+const internRow = refFor => row => (row && 'light' in row ? swapKey(row, 'light', 'light_ref', refFor(row.light)) : row);
+const rehydrateRow = lights => row => (row && 'light_ref' in row
+  ? swapKey(row, 'light_ref', 'light', row.light_ref == null ? null : (lights[row.light_ref] ?? null))
+  : row);
+
+export function internLights(sections) {
+  const { lights, refFor } = lightTable();
+  return { sections: mapRows(sections, internRow(refFor)), lights };
 }
 
 // An older server ignores the param and answers the bare array — pass it through.
 export function rehydrateLights(res) {
   if (Array.isArray(res) || !res || !Array.isArray(res.sections)) return res;
-  const lights = res.lights || [];
-  return mapRows(res.sections, row => (row && 'light_ref' in row
-    ? swapKey(row, 'light_ref', 'light', row.light_ref == null ? null : (lights[row.light_ref] ?? null))
-    : row));
+  return mapRows(res.sections, rehydrateRow(res.lights || []));
 }
+
+// The same two moves over ONE flat list of rows — the station workspace's
+// queue (GET /floor/:section?lights=ref, see lib/sectionLean.js).
+export function internRowLights(rows) {
+  const { lights, refFor } = lightTable();
+  return { rows: rows.map(internRow(refFor)), lights };
+}
+export const rehydrateRowLights = (rows, lights) => rows.map(rehydrateRow(lights || []));
