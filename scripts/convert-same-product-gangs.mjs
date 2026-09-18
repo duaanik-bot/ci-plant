@@ -104,14 +104,30 @@ for (const r of runs) {
     skipped++;
     continue;
   }
-  const card = blocked?.card || null;
-  const num = await nextMrg();
-  console.log(`  ${APPLY ? 'CONVERT' : 'would convert'}  ${r.gang_number} → ${num}  ${r.product_code} × ${r.members} POs`
+  const say = (num, card) => console.log(`  ${APPLY ? 'CONVERT' : 'would convert'}  ${r.gang_number} → ${num}  ${r.product_code} × ${r.members} POs`
     + (card ? `  (dissolving unstarted ${card.jc_number}, members back to planned)` : ''));
-  if (!APPLY) { converted++; continue; }
+  if (!APPLY) { say(await nextMrg(), blocked?.card || null); converted++; continue; }
 
   try {
     await c.query('BEGIN');
+    // Minted INSIDE the transaction, under the app's own prefix lock
+    // (server/src/helpers.js lockDocNumber), so a gang converted on the floor at
+    // the same moment cannot read the same MAX. The gang's row first, then the
+    // prefix — the order POST /gang-runs/:id/convert-to-merge takes them in.
+    const { rows: [g] } = await c.query('SELECT kind FROM gang_runs WHERE id=$1 FOR UPDATE', [r.id]);
+    // The survey above ran before this lock. Under it, read the run again: the
+    // floor may have converted it, or started its card, in the meantime.
+    const now = g?.kind === 'merge' ? 'converted on the floor meanwhile' : await progressOf(r.id);
+    if (typeof now === 'string') {
+      await c.query('ROLLBACK');
+      console.log(`  SKIP  ${r.gang_number}  ${r.product_code} × ${r.members} POs — ${now}`);
+      skipped++;
+      continue;
+    }
+    const card = now?.card || null;
+    await c.query(`SELECT pg_advisory_xact_lock(764002, hashtext('CI-MRG-'))`);
+    const num = await nextMrg();
+    say(num, card);
     if (card) {
       await c.query('DELETE FROM job_stages WHERE job_card_id=$1', [card.id]);
       await c.query('DELETE FROM job_cards WHERE id=$1', [card.id]);

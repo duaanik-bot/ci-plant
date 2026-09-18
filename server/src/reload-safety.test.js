@@ -361,7 +361,9 @@ const read = p => readFileSync(new URL(`../../client/src/${p}`, import.meta.url)
 test('both of api.js\'s exits are counted, and only a write can be a save', () => {
   const api = read('api.js');
   assert.match(api, /import \{ tracked \} from '\.\/lib\/inFlight\.js'/);
-  assert.match(api, /return tracked\(method !== 'GET', \(\) => send\(method, url, body\)\)/, 'request()');
+  // Wrapped in the double-click join (write-once.test.js) — still one count per
+  // request that actually goes out.
+  assert.match(api, /\(\) => tracked\(method !== 'GET', \(\) => send\(method, url, body\)\)/, 'request()');
   assert.match(api, /upload\(url, file, extra = \{\}\) \{\s*return tracked\(true, async \(\) => \{/, 'upload()');
 });
 

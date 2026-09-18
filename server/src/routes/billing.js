@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { plantDateStr } from '../plant-calendar.js';
-import { audit, nextNumber, shadeCardsFor, fgReceipt, fgMove, setLineStatus, forceLineStatus, boxLeftoverFromFg, optionalText } from '../helpers.js';
+import { audit, nextNumber, lockDocNumbers, shadeCardsFor, fgReceipt, fgMove, setLineStatus, forceLineStatus, boxLeftoverFromFg, optionalText } from '../helpers.js';
 import { clashes, familyKey } from '../product-family.js';
 import { billingEntity, isIntraState, HOUSE_FALLBACK } from '../billing-entity.js';
 import { requireRole } from '../auth.js';
@@ -21,9 +21,10 @@ export const COMPANY = HOUSE_FALLBACK;
 
 // The number a new invoice would take. Exposed so the Create Invoice dialog can
 // PRE-FILL it and still let the user type over it — a number you can see before
-// saving is a number you can correct.
+// saving is a number you can correct. A preview, so it reads on the pool: it
+// inserts nothing, and the save mints its own number inside its transaction.
 r.get('/billing/next-invoice-number', async (_req, res, next) => {
-  try { res.json({ invoice_number: await nextNumber('CI-INV-', 'invoices', 'invoice_number') }); }
+  try { res.json({ invoice_number: await nextNumber('CI-INV-', 'invoices', 'invoice_number', one) }); }
   catch (e) { next(e); }
 });
 
@@ -361,6 +362,10 @@ r.post('/invoices/:id/lines/:lineId/remove', canBill, async (req, res, next) => 
   try {
     const action = ['remove', 'to_fg', 'to_leftover'].includes(req.body.action) ? req.body.action : 'remove';
     await tx(async (qc, oc) => {
+      // 'to_leftover' boxes the goods (CI-FG-, then CI-BOX-) after locking this
+      // invoice's rows and the order line — so its numbers are locked first, in
+      // the order every FG move takes them (helpers.js FG_MOVE_PREFIXES).
+      if (action === 'to_leftover') await lockDocNumbers(['CI-FG-', 'CI-BOX-'], oc);
       const inv = await oc('SELECT * FROM invoices WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!inv) throw Object.assign(new Error('Invoice not found'), { status: 404 });
       if (inv.status === 'cancelled') throw Object.assign(new Error('Cancelled invoices cannot be edited'), { status: 409 });

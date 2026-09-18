@@ -4,7 +4,7 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption } from '../helpers.js';
+import { audit, nextNumber, lockDocNumbers, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -40,6 +40,9 @@ r.post('/fg-lots', canStore, async (req, res, next) => {
     if (!job_card_id || !qty || +qty <= 0)
       return res.status(400).json({ error: 'Job card and a positive quantity are required' });
     const lotId = await tx(async (qc, oc) => {
+      // The lot's two numbers before the job card's row lock (helpers.js
+      // FG_MOVE_PREFIXES — the order every FG move takes them in).
+      await lockDocNumbers(['CI-FG-', 'CI-BOX-'], oc);
       const jc = await oc(`
         SELECT jc.*, ol.qty AS ordered_qty, ol.dispatched_qty
         FROM job_cards jc JOIN order_lines ol ON ol.id=jc.order_line_id

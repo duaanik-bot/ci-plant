@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, notify, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, lockDocNumber, notify, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -1520,6 +1520,9 @@ r.post('/grns/substitute', canBuy, async (req, res, next) => {
       return res.status(400).json({ error: 'PO line, the board received and a quantity above zero are required' });
 
     const out = await tx(async (qc, oc) => {
+      // The GRN number's lock before the po_lines row lock below — the order
+      // every GRN writer takes them in (helpers.js lockDocNumber).
+      await lockDocNumber('CI-GRN-', oc);
       const ctx = await substitutionContext(+po_line_id, +material_id, qc);
       if (ctx.poLine?.closed_short) throw Object.assign(
         new Error('This line is closed short — no more receipts were asked for. Reopen the line to receive against it.'), { status: 409 });
@@ -1697,6 +1700,10 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
     if (!purchase_order_id || !receipts.length)
       return res.status(400).json({ error: 'PO and at least one received quantity are required' });
     const ids = await tx(async (qc, oc) => {
+      // The GRN number's lock before the PO row lock: POST /grns mints first and
+      // then share-locks this PO through its insert, so taking them the other way
+      // round here could deadlock the two (helpers.js lockDocNumber).
+      await lockDocNumber('CI-GRN-', oc);
       const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [purchase_order_id]);
       if (!po) throw Object.assign(new Error('PO not found'), { status: 404 });
       if (po.status === 'closed') throw Object.assign(new Error('PO is closed'), { status: 409 });

@@ -61,7 +61,7 @@ const EDIT_COLS = ['title', 'colour_system', 'num_colours', 'print_process',
 // highest, so one card numbered `CI-SC-2026-A` would have restarted the
 // sequence at 0001 and jammed every later card on the unique index. It now
 // shares the tested minter.
-async function nextScNumber(oc = one) {
+async function nextScNumber(oc) {
   return nextNumber('CI-SC-', 'shade_cards', 'sc_number', oc);
 }
 

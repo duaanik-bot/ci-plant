@@ -115,6 +115,10 @@ async function nextGrnNumber() {
 
 await client.query('BEGIN');
 try {
+  // The same prefix lock the app's GRN routes take (server/src/helpers.js
+  // lockDocNumber), held to COMMIT: a GRN posted on the floor while this runs
+  // waits for it instead of minting a number this import is about to write.
+  await client.query(`SELECT pg_advisory_xact_lock(764002, hashtext('CI-GRN-'))`);
   const made = [];
   for (const p of plan) {
     const grn_number = await nextGrnNumber();

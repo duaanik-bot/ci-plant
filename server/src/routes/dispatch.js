@@ -1,7 +1,7 @@
 // Dispatch — produced lines with FG stock → challan → gone.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, fgMove, boxLeftoverFromFg } from '../helpers.js';
+import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, lockDocNumbers, FG_MOVE_PREFIXES, fgMove, boxLeftoverFromFg } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { cascadeAllocate, annotateReadyLines } from '../tolerance-cascade.js';
 import { toleranceCeiling, ceilingForWire, toleranceRoom, exceedsTolerance, toleranceLabel } from '../tolerance.js';
@@ -452,6 +452,12 @@ r.get('/fg/movement-preview', async (req, res, next) => {
 // would leave the plant reconciling by hand. Both callers therefore share this
 // body rather than a second copy of the tolerance and boxing rules.
 export async function applyFgMove({ product_id, mode, allocations = [], leftover_qty = 0, vehicle, driver, notes }, qc, oc, user) {
+    // Every number this move can mint is locked before any row: a move locks
+    // order lines and fg_stock and then mints, while POST /dispatches and
+    // POST /fg-lots mint and then touch the same rows — the opposite order would
+    // deadlock them. In /fg/move-bulk only the first product pays; the rest
+    // re-enter locks already held (helpers.js lockDocNumber).
+    await lockDocNumbers(FG_MOVE_PREFIXES, oc);
     const out = { challans: [], box: null, boxes: [] };
 
     if (mode === 'dispatch') {
@@ -573,6 +579,9 @@ r.post('/fg/move-bulk', canDispatch, async (req, res, next) => {
 // database in a test. Until they were, the riskiest new code in Dispatch had
 // never once executed — no live line has ever qualified as a shortage.
 export async function resolveShortage({ lineId, action, reason, vehicle, driver }, qc, oc, user) {
+    // 'close' ends in applyFgMove, which mints — its numbers before this row
+    // lock. 'replan' mints nothing and leaves the FG numbers free.
+    if (action === 'close') await lockDocNumbers(FG_MOVE_PREFIXES, oc);
     const ol = await oc(`
       SELECT ol.*, jc.status AS jc_status, jc.jc_number, p.name AS product_name,
              COALESCE(f.qty,0) AS fg_qty,

@@ -101,8 +101,9 @@ test('nextNumber: scopes the SELECT to the prefix and never orders by id', async
   const out = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
 
   assert.equal(out, 'CI-JC-0008');
-  assert.equal(calls.length, 1);
-  const { sql, params } = calls[0];
+  // Two statements: the prefix lock (doc-number-lock.test.js), then the read.
+  assert.equal(calls.length, 2);
+  const { sql, params } = calls[1];
   assert.match(sql, /FROM job_cards/);
   assert.doesNotMatch(sql, /ORDER BY\s+id\s+DESC/i,
     'ordering by insertion order is the bug — the newest row is not the highest');

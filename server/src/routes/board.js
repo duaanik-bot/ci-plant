@@ -3,7 +3,7 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, lockDocNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard, claimsByBoard, heldFor } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
@@ -361,6 +361,10 @@ r.post('/board/move', canMove, async (req, res, next) => {
       return res.status(400).json({ error: `${mat.name} is not a board — only board can be held for a job` });
 
     const out = await tx(async (qc, oc) => {
+      // A move can raise a PR (pr_new below). Its number's lock comes before the
+      // line locks: every other PR door mints first and then share-locks its
+      // line through the insert, so the other order could deadlock them.
+      await lockDocNumber('CI-PR-', oc);
       // Lock both lines for the life of the transaction, then re-plan from
       // freshly read rows — a client preview may be minutes stale.
       await qc('SELECT id FROM order_lines WHERE id=ANY($1::int[]) FOR UPDATE',

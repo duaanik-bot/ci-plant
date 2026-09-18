@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { plantDateStr } from '../plant-calendar.js';
-import { readiness, setLineStatus, nextNumber, nextNumberFrom } from '../helpers.js';
+import { readiness, setLineStatus, nextNumber, nextNumberFrom, lockDocNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { TOOL_FAMILIES, TOOL_ZONES, pushTargets, toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import {
@@ -55,8 +55,9 @@ const TOOL_VIEW = `
 // code with no trailing digits restarted the family at 0001 and collided from
 // then on; POST /tools also accepts a typed code, so junk in the column is not
 // hypothetical. Same rule as helpers.js nextNumber(), plus the family filter.
-async function nextToolCode(family, oc = one) {
+export async function nextToolCode(family, oc) {
   const prefix = TOOL_FAMILIES[family].prefix;
+  await lockDocNumber(prefix, oc); // see helpers.js — serialise minters on this prefix
   const row = await oc(
     `SELECT code FROM tools
       WHERE family = $1 AND left(code, length($2)) = $2

@@ -26,6 +26,7 @@ import { storage } from './lib/safeStorage.js';
 import { responseCache } from './lib/responseCache.js';
 import { cachedGet } from './lib/cachedGet.js';
 import { tracked } from './lib/inFlight.js';
+import { writeKey, joinIdentical } from './lib/writeOnce.js';
 
 export const HANDLED_BY = {
   SHADE_CARD_NOT_ELIGIBLE: {
@@ -98,8 +99,14 @@ export const auth = {
 // is not counted — the screens' own 30 s data polls would otherwise hold a wall
 // screen on an old build. Only a write that SUCCEEDS can mark a form as saved —
 // a GET never does, and neither does a refusal.
+//
+// A POST that mints a document number, identical to one still on the wire, is
+// joined to it, not sent again (lib/writeOnce.js): a double-clicked Save must
+// not book a second GRN or PO. Every other write goes out as it always has.
+const writesOnTheWire = new Map();
 function request(method, url, body) {
-  return tracked(method !== 'GET', () => send(method, url, body));
+  return joinIdentical(writesOnTheWire, writeKey(method, url, body, auth.token),
+    () => tracked(method !== 'GET', () => send(method, url, body)));
 }
 
 async function send(method, url, body) {

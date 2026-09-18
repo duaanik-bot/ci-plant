@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import {
-  audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, sheetsRequired, netProduceQty,
+  audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, lockDocNumber, sheetsRequired, netProduceQty,
   availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, cuttingParent, planLockParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
@@ -89,7 +89,8 @@ const MEMBER_VIEW = `
 // re-mints a number the other prefix already holds (converting a second gang
 // read "…GANG-0012" off the newest row and minted CI-MRG-0013, which existed).
 // Scanning the prefix's own MAX is immune to interleaving and to renumbering.
-async function nextRunNumber(prefix, oc) {
+export async function nextRunNumber(prefix, oc) {
+  await lockDocNumber(prefix, oc); // two gangs created at once must not both read the same MAX
   const row = await oc(
     `SELECT COALESCE(MAX((substring(gang_number FROM '\\d+$'))::int), 0) AS n
      FROM gang_runs WHERE gang_number LIKE $1`, [`${prefix}%`]);
@@ -2861,6 +2862,11 @@ r.delete('/gang-runs/:id', canPlan, async (req, res, next) => {
 r.post('/gang-runs/:id/raise-pr', canPlan, async (req, res, next) => {
   try {
     const out = await tx(async (qc, oc) => {
+      // The PR number's lock before the gang's row lock: every other PR door
+      // takes CI-PR- first (helpers.js lockDocNumber), and "Push to Job Card"
+      // share-locks this gang's row while holding its lines — so holding the
+      // row here while waiting for CI-PR- could close a three-way deadlock.
+      await lockDocNumber('CI-PR-', oc);
       // Read the gang INSIDE the transaction and lock it: two impatient clicks
       // must not both pass the "already covered?" check and both insert.
       await oc('SELECT id FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);

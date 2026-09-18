@@ -3213,18 +3213,33 @@ r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
     const boardRow = await one('SELECT leftover, name FROM materials WHERE id=$1', [gate.board_material_id]);
     if (boardRow?.leftover)
       return res.status(409).json({ error: `${boardRow.name} is a leftover offcut — raise the PR against its parent board instead.` });
-    const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number');
-    const [pr] = await q(
-      `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason, order_line_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [pr_number, gate.board_material_id, shortage, line.planned_date,
-       `Shortage for ${line.product_name} (PO ${line.po_number})`, line.id]);
-    // The mirror is the fence: without it a fresh_pr line's claim never nets
-    // its own purchase, and this endpoint's own re-buy guard reads zero
-    // forever. Same line + sync pair every other PR door writes.
-    await q(`INSERT INTO requisition_lines (requisition_id, material_id, qty, needed_by)
-             VALUES ($1,$2,$3,$4)`, [pr.id, gate.board_material_id, shortage, line.planned_date]);
-    await syncPrAllocation(q, pr);
-    await audit('requisition', pr.id, 'create_from_shortage', pr_number, q, req.user.name);
+    // The mint and the rows that carry the number, in one transaction: the
+    // CI-PR- number is only race-safe when minted on the transaction that
+    // inserts it (helpers.js lockDocNumber), and a PR row without its mirror
+    // line is a PR no shortage figure can see.
+    const pr = await tx(async (qc, oc) => {
+      const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number', oc);
+      const [row] = await qc(
+        `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason, order_line_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [pr_number, gate.board_material_id, shortage, line.planned_date,
+         `Shortage for ${line.product_name} (PO ${line.po_number})`, line.id]);
+      // The mirror is the fence: without it a fresh_pr line's claim never nets
+      // its own purchase, and this endpoint's own re-buy guard reads zero
+      // forever. Same line + sync pair every other PR door writes.
+      await qc(`INSERT INTO requisition_lines (requisition_id, material_id, qty, needed_by)
+               VALUES ($1,$2,$3,$4)`, [row.id, gate.board_material_id, shortage, line.planned_date]);
+      await audit('requisition', row.id, 'create_from_shortage', pr_number, qc, req.user.name);
+      return row;
+    });
+    // The allocation mirror onto every gang-mate runs after the commit, one
+    // statement at a time, as it always has. Inside the transaction it would
+    // hold this line while waiting on a mate — and "Push to Job Card" locks the
+    // line it was clicked on first and the rest of the gang after, so the two
+    // could deadlock. The PR is committed by now, so a failed mirror must not
+    // answer 500 — that invites a retry, and the retry would raise a second PR.
+    // The sync is re-derived on every call: the next approve / edit re-mirrors.
+    try { await syncPrAllocation(q, pr); }
+    catch (e) { console.error(`raise-pr: ${pr.pr_number} committed, gang mirror failed — the next approve or edit re-mirrors it`, e); }
     res.json(pr);
   } catch (e) { next(e); }
 });

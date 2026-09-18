@@ -2279,7 +2279,52 @@ export function nextNumberFrom(prefix, numbers = []) {
   return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
-export async function nextNumber(prefix, table, column, oc = one) {
+// Minting is read-then-write — read the highest number, the caller INSERTs the
+// next — so two transactions minting on one prefix at once both read the same
+// highest and the second INSERT dies on the unique index. That was live on
+// motionci.in from 2026-09-05: `grns_grn_number_key … (CI-GRN-0105) already
+// exists` — a double-clicked Create GRN (one user, the same second).
+//
+// So every minter first takes a transaction-scoped advisory lock on its prefix,
+// through the CALLER'S transaction client. A second minter on the same prefix
+// waits there until the first commits, then reads the number it wrote. A
+// rollback releases the lock too, and its number was never written, so the
+// next minter reuses it — no gaps. Different prefixes never wait on each other.
+//
+// Class id 764002 keeps these keys apart from the board-hold lock (764001,
+// material id). Transaction-scoped, so it is safe on Supavisor's transaction
+// pooler, where a session lock would outlive the transaction on a shared
+// backend. Taken through the POOL it would be released as soon as that one
+// statement ended — which is why every minter must be handed the `oc` of the
+// transaction that does the INSERT (doc-number-lock.test.js holds them to it).
+//
+// The lock is held to COMMIT, so it joins the transaction's row locks, and two
+// transactions that take the same two locks in opposite orders deadlock (40P01,
+// one of them fails). What rules that out is ONE order per prefix family. Where
+// routes that mint first met routes that lock the same rows first — CI-GRN-,
+// CI-PR-, CI-CH-, CI-FG-, CI-BOX- (the pre-ship review of 2026-09-18 traced each
+// pair) — the prefix comes FIRST: the row-first routes call lockDocNumbers() at
+// the top of their transaction (doc-number-lock-order.test.js pins them; the
+// minter's own lock is then a no-op re-entry), and several prefixes go in
+// FG_MOVE_PREFIXES order. Families whose minters all lock their rows first
+// (CI-JC-, CI-GANG-JC-, CI-GANG-, CI-MRG-) keep that order. A new minter joins
+// its family's order; mixing the two within a family is what deadlocks.
+//
+// The lock does NOT stop a double-submit: the second copy waits here, then
+// mints the next number and saves a second record. That is lib/writeOnce.js,
+// in the client, joining an identical write to the one already on the wire.
+export async function lockDocNumber(prefix, oc) {
+  await oc('SELECT pg_advisory_xact_lock(764002, hashtext($1))', [prefix]);
+}
+export async function lockDocNumbers(prefixes, oc) {
+  for (const prefix of prefixes) await lockDocNumber(prefix, oc);
+}
+// Challan, then FG stock reference, then box — the order applyFgMove has always
+// minted them in (dispatch before leftover; boxLeftoverFromFg: FG before BOX).
+export const FG_MOVE_PREFIXES = Object.freeze(['CI-CH-', 'CI-FG-', 'CI-BOX-']);
+
+export async function nextNumber(prefix, table, column, oc) {
+  await lockDocNumber(prefix, oc);
   // left()/substr() rather than a regex built around the prefix: prefixes are
   // code constants today, but a literal comparison can never be derailed by a
   // metacharacter creeping into one. For a digit-only tail after a fixed-width
@@ -3167,7 +3212,7 @@ export async function reopenRunLines(jc, qc = q, oc = one, user = null) {
   return out;
 }
 
-export async function createJobCardForLine(lineId, qc = q, oc = one, user = null) {
+export async function createJobCardForLine(lineId, qc, oc, user = null) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
   if (!line) { const e = new Error('Line not found'); e.status = 404; throw e; }
 
@@ -3255,7 +3300,7 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
   return jc.id;
 }
 
-export async function createJobCardForGang(gangRunId, qc = q, oc = one, user = null) {
+export async function createJobCardForGang(gangRunId, qc, oc, user = null) {
   const existing = await oc(
     'SELECT id, jc_number FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL',
     [gangRunId]);
@@ -3384,7 +3429,7 @@ export async function createJobCardForGang(gangRunId, qc = q, oc = one, user = n
 // qty_planned is in CARTONS (Σ netProduceQty), exactly like a plain card and
 // unlike a gang parent's child-sheet total — every downstream reader
 // (dispatch, FG, reports) then treats this card as the normal job it is.
-export async function createJobCardForMergeRun(runId, qc = q, oc = one, user = null) {
+export async function createJobCardForMergeRun(runId, qc, oc, user = null) {
   const existing = await oc(
     'SELECT id, jc_number FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL',
     [runId]);
@@ -3474,7 +3519,7 @@ export async function createJobCardForMergeRun(runId, qc = q, oc = one, user = n
   return jc.id;
 }
 
-export async function splitGangParentJob(parentJobCardId, qc = q, oc = one, user = null) {
+export async function splitGangParentJob(parentJobCardId, qc, oc, user = null) {
   const parent = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [parentJobCardId]);
   if (!parent?.gang_run_id || parent.order_line_id) return [];
   const existing = await qc('SELECT id FROM job_cards WHERE parent_job_card_id=$1 ORDER BY id', [parent.id]);
