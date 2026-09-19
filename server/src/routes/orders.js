@@ -2966,20 +2966,53 @@ r.get('/artwork', async (_req, res, next) => {
 // ONE approval endpoint — approvals only. Locking is a separate, deliberate
 // action (POST …/artwork/lock below): both ticks no longer lock automatically,
 // and a locked line's approvals are frozen until it is explicitly unlocked.
+// The artwork approval write, shared by the toggle and the detail form. Each
+// flag is sent or not: an unsent one (null / undefined) keeps what the ROW holds
+// when the UPDATE runs — COALESCE inside the statement, not a value read
+// earlier — so two saves that each change one flag can never undo each other.
+// A line locked in the meantime is left alone (no row returned).
+export const APPROVAL_UPDATE = `
+  UPDATE order_lines
+     SET artwork_customer_ok = COALESCE($2::int, artwork_customer_ok),
+         artwork_qa_ok       = COALESCE($3::int, artwork_qa_ok)
+   WHERE id = $1 AND artwork_locked = 0
+  RETURNING id`;
+const flag = v => (v == null ? null : (v ? 1 : 0));
+export const approvalParams = (id, customerOk, qaOk) => [id, flag(customerOk), flag(qaOk)];
+// The artwork lock: approvals re-checked in the same statement (see the route).
+export const ARTWORK_LOCK = `
+  UPDATE order_lines SET artwork_locked=1
+   WHERE id=$1 AND artwork_locked=0 AND artwork_customer_ok<>0 AND artwork_qa_ok<>0
+  RETURNING id`;
+// Which flags this save would actually change on `line` — none is a no-op.
+export const approvalChanges = (line, customerOk, qaOk) => [
+  ...(customerOk != null && flag(customerOk) !== (line.artwork_customer_ok ? 1 : 0) ? [`Customer ${customerOk ? 'approved' : 'cleared'}`] : []),
+  ...(qaOk != null && flag(qaOk) !== (line.artwork_qa_ok ? 1 : 0) ? [`QA shade/text ${qaOk ? 'approved' : 'cleared'}`] : []),
+];
+
 r.post('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
   try {
     const { customer_ok, qa_ok } = req.body;
+    // A toggle sends ONE flag. A body with both is an Artwork screen loaded
+    // before that change, sending the other flag off a row it may be drawing
+    // stale — the very race this route now prevents. Ask it to reload.
+    if (customer_ok !== undefined && qa_ok !== undefined) {
+      return res.status(409).json({ error: 'This Artwork screen is out of date — reload the page, then change the approval again' });
+    }
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       if (line.artwork_locked) {
         throw Object.assign(new Error('Artwork is locked — unlock it from the Locked tab before changing approvals'), { status: 409 });
       }
-      const cust = customer_ok ?? line.artwork_customer_ok;
-      const qa = qa_ok ?? line.artwork_qa_ok;
-      await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2 WHERE id=$3`,
-        [cust ? 1 : 0, qa ? 1 : 0, line.id]);
-      await audit('order_line', line.id, 'artwork_updated', null, qc, req.user.name);
+      // Only the flag sent changes, in ONE statement against the row as it is
+      // when the write lands (APPROVAL_UPDATE). Reading both flags here and
+      // writing both back let two quick toggles — or two people — undo each
+      // other: Customer ✓ then QA ✓ saved QA ✓ and Customer ✗.
+      const [done] = await qc(APPROVAL_UPDATE, approvalParams(line.id, customer_ok, qa_ok));
+      if (!done) throw Object.assign(new Error('Artwork was locked just now — unlock it from the Locked tab before changing approvals'), { status: 409 });
+      await audit('order_line', line.id, 'artwork_updated',
+        approvalChanges(line, customer_ok, qa_ok).join(' · ') || null, qc, req.user.name);
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     res.json({ ...out, readiness: await readiness(out) });
@@ -2994,10 +3027,17 @@ r.post('/order-lines/:id/artwork/lock', canArtwork, async (req, res, next) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       if (line.artwork_locked) return; // already locked — idempotent
-      if (!line.artwork_customer_ok || !line.artwork_qa_ok) {
-        throw Object.assign(new Error('Customer approval and QA approval are both required before the artwork can be locked'), { status: 409 });
+      const bothRequired = () => Object.assign(new Error('Customer approval and QA approval are both required before the artwork can be locked'), { status: 409 });
+      if (!line.artwork_customer_ok || !line.artwork_qa_ok) throw bothRequired();
+      // The approvals are checked again IN the lock, against the row as it is
+      // when the write lands: an approval cleared a moment ago must not end up
+      // locked (and promoted to Ready) with a flag off.
+      const [locked] = await qc(ARTWORK_LOCK, [line.id]);
+      if (!locked) {
+        const now = await oc('SELECT artwork_locked FROM order_lines WHERE id=$1', [line.id]);
+        if (now?.artwork_locked) return; // locked by someone else meanwhile — idempotent
+        throw bothRequired();
       }
-      await qc('UPDATE order_lines SET artwork_locked=1 WHERE id=$1', [line.id]);
       await audit('order_line', line.id, 'artwork_locked', 'locked from the Artwork queue', qc, req.user.name);
       const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
       const gate = await readiness(fresh, oc);
@@ -3043,7 +3083,14 @@ r.post('/order-lines/:id/artwork/unlock', canArtwork, async (req, res, next) => 
 // approval endpoint above; planning fields stay planner/admin-only.
 r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
   try {
-    const { customer_ok, qa_ok, planned_date, qty, notes, spec = {}, update_master } = req.body;
+    const { customer_ok, qa_ok, planned_date, qty, notes, spec = {}, update_master, approvals } = req.body;
+    // The form sends only the approvals changed on it, and says so. A form
+    // that sends approval flags without saying so is a pre-change Artwork
+    // screen resending both flags as they were when it opened — which would
+    // undo a colleague's approval made since. Ask it to reload.
+    if ((customer_ok !== undefined || qa_ok !== undefined) && approvals !== 'changed') {
+      return res.status(409).json({ error: 'This Artwork screen is out of date — reload the page, then save again' });
+    }
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
@@ -3051,11 +3098,17 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
       // Approvals save only while the artwork is unlocked; a locked line's
       // approvals are frozen (the lock itself never changes from this form —
       // locking/unlocking are the dedicated endpoints above).
-      if (!line.artwork_locked) {
-        const cust = customer_ok ?? line.artwork_customer_ok;
-        const qa = qa_ok ?? line.artwork_qa_ok;
-        await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2 WHERE id=$3`,
-          [cust ? 1 : 0, qa ? 1 : 0, line.id]);
+      // An approval CHANGE that cannot land (the line is, or has just been,
+      // locked) is refused — the whole save rolls back and says why. Flags sent
+      // back unchanged (an older form sends both) are a no-op either way.
+      const changes = approvalChanges(line, customer_ok, qa_ok);
+      // Only a flag that differs from the row goes into the write, so an
+      // unchanged one can never overwrite a toggle that lands meanwhile.
+      const cust = changes.some(c => c.startsWith('Customer')) ? customer_ok : undefined;
+      const qa = changes.some(c => c.startsWith('QA')) ? qa_ok : undefined;
+      const [done] = line.artwork_locked || !changes.length ? [] : await qc(APPROVAL_UPDATE, approvalParams(line.id, cust, qa));
+      if (changes.length && !done) {
+        throw Object.assign(new Error('Artwork is locked — its approvals cannot change. Unlock it from the Locked tab, or close the form without changing them.'), { status: 409 });
       }
 
       // Identity codes + finish spec edited on the Artwork form follow the

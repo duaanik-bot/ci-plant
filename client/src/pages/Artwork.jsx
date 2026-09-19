@@ -1,7 +1,7 @@
 // Artwork — two approvals, one DELIBERATE lock. Both ticks make a line
 // lockable; the planner locks it with the Lock button (nothing locks by
 // itself), and the Locked queue can reverse it while no job card exists.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, PressButton, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
@@ -350,10 +350,18 @@ export default function Artwork() {
   const [gangNums, setGangNums] = useState({ output_number: '', die_number: '' });
   const [gangNumBusy, setGangNumBusy] = useState(false);
   const [threads, setThreads] = useState({});
-  const load = () => api.get('/artwork').then(ls => {
-    setLines(ls);
-    threadSummary('order_line', ls.map(l => l.id)).then(setThreads).catch(() => {});
-  });
+  // Only the newest load paints. GET /artwork is slow, and a reload started
+  // before an approval was saved could otherwise land after it and draw the
+  // old ticks back (the saved row is put on screen at once — takeApproval).
+  const loadSeq = useRef(0);
+  const load = () => {
+    const n = ++loadSeq.current;
+    return api.get('/artwork').then(ls => {
+      if (n !== loadSeq.current) return;
+      setLines(ls);
+      threadSummary('order_line', ls.map(l => l.id)).then(setThreads).catch(() => {});
+    });
+  };
   useEffect(() => { load(); }, []);
   const canApprove = canPlan(auth.user) || auth.user?.role === 'qc';
   const canEditPlanning = canPlan(auth.user);
@@ -466,9 +474,20 @@ export default function Artwork() {
       : ids.filter(id => !visibleIds.includes(id)));
   };
 
+  // An approval save sends ONLY the flag that was pressed (the server leaves
+  // the other as it is at write time), and the answer goes straight onto the
+  // row: the next press — on either toggle — reads the saved state, not the
+  // row as it was before this save. Sending both flags off a stale row is how
+  // Customer ✓ then QA ✓ came out QA ✓, Customer ✗.
+  const takeApproval = saved => {
+    const byId = new Map([].concat(saved).map(r => [r.id, r]));
+    setLines(ls => ls.map(x => (byId.has(x.id)
+      ? { ...x, artwork_customer_ok: byId.get(x.id).artwork_customer_ok, artwork_qa_ok: byId.get(x.id).artwork_qa_ok }
+      : x)));
+  };
   const setApproval = async (l, patch) => {
-    await api.post(`/order-lines/${l.id}/artwork`, patch);
-    load();
+    try { takeApproval(await api.post(`/order-lines/${l.id}/artwork`, patch)); }
+    finally { load(); }   // a refusal (locked meanwhile) still refreshes the row
   };
   // The deliberate lock/unlock pair — approvals never lock a line by themselves.
   const lockArtwork = async l => {
@@ -497,14 +516,17 @@ export default function Artwork() {
   // Approve/clear ONE flag across EVERY carton in a gang at once — the gang is one
   // product, so it approves and locks as one. Each carton keeps its other flag.
   const setGangApproval = async (members, key, val) => {
-    for (const m of members) {
-      await api.post(`/order-lines/${m.id}/artwork`, {
-        customer_ok: key === 'customer' ? val : !!m.artwork_customer_ok,
-        qa_ok: key === 'qa' ? val : !!m.artwork_qa_ok,
-      });
+    const saved = [];
+    try {
+      for (const m of members) {
+        saved.push(await api.post(`/order-lines/${m.id}/artwork`,
+          key === 'customer' ? { customer_ok: val } : { qa_ok: val }));
+      }
+      toast.success(`${key === 'customer' ? 'Customer' : 'QA shade/text'} ${val ? 'approved' : 'cleared'} for all ${members.length} cartons`);
+    } finally {
+      takeApproval(saved);   // one repaint for the cartons that saved…
+      load();                // …and a refresh even when one was refused
     }
-    toast.success(`${key === 'customer' ? 'Customer' : 'QA shade/text'} ${val ? 'approved' : 'cleared'} for all ${members.length} cartons`);
-    load();
   };
   // Push EVERY carton's tooling to the hub in one go (each product keeps its own
   // plate/die/shade; a block only where that carton embosses or foils).
@@ -570,9 +592,13 @@ export default function Artwork() {
     return doSave({});
   };
   const doSave = async ({ spec, update_master }) => {
+    // An approval goes only if it was changed on this form: the form holds the
+    // flags as they were when it opened, and saving an unrelated field must not
+    // put back a flag someone else has set since.
     await api.put(`/order-lines/${editing.id}/artwork`, {
-      customer_ok: form.customer_ok,
-      qa_ok: form.qa_ok,
+      approvals: 'changed',   // tells the server these are only the approvals changed here
+      ...(form.customer_ok !== !!editing.artwork_customer_ok ? { customer_ok: form.customer_ok } : {}),
+      ...(form.qa_ok !== !!editing.artwork_qa_ok ? { qa_ok: form.qa_ok } : {}),
       ...(canEditPlanning ? { planned_date: form.planned_date, qty: form.qty, notes: form.notes } : {}),
       ...(spec && Object.keys(spec).length ? { spec, update_master: !!update_master } : {}),
     });
@@ -819,8 +845,8 @@ export default function Artwork() {
             }
             return (
               <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                <Toggle on={!!l.artwork_customer_ok} label="Customer" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { customer_ok: !l.artwork_customer_ok, qa_ok: !!l.artwork_qa_ok })} />
-                <Toggle on={!!l.artwork_qa_ok} label="QA Shade/Text" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { customer_ok: !!l.artwork_customer_ok, qa_ok: !l.artwork_qa_ok })} />
+                <Toggle on={!!l.artwork_customer_ok} label="Customer" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { customer_ok: !l.artwork_customer_ok })} />
+                <Toggle on={!!l.artwork_qa_ok} label="QA Shade/Text" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { qa_ok: !l.artwork_qa_ok })} />
               </div>);
           } },
           { key: 'lock', label: 'Lock', sortable: false, render: l => {
@@ -1188,7 +1214,9 @@ export default function Artwork() {
                         : <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-400"><LockOpen size={12} /> Open</span>}
                       <FluenceButton productId={m.product_id} context="artwork" />
                       <ToolingChip line={m} />
-                      {canEditPlanning && <Button size="sm" variant="secondary" onClick={() => setEditing(m)}><Pencil size={12} /> Codes</Button>}
+                      {/* openForm fills the form from THIS carton; setEditing alone left the
+                          last line's values in it, and Save sent them onto this one. */}
+                      {canEditPlanning && <Button size="sm" variant="secondary" onClick={() => openForm(m)}><Pencil size={12} /> Codes</Button>}
                     </div>
                   ))}
                 </div>
