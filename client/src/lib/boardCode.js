@@ -99,6 +99,41 @@ export function boardCode({ grade, gsm, sheet_l, sheet_w } = {}, taken = new Set
   return `${base}-${n}`;
 }
 
+// The name and code a board carries after a save. A board's name and code are
+// its identity everywhere it appears — POs, PRs, the warehouse, job cards, the
+// products planned onto it — and both are composed from its grade, GSM and
+// parent sheet. So they follow those fields, and nothing else moves them:
+//   • a stored name that still SAYS the row's grade, GSM and size is kept
+//     byte-for-byte, in whatever spelling it has ('23 × 36' and '23x36' are the
+//     same board — rewriting one would churn every copy of it for nothing);
+//   • a stored code whose base still matches the row keeps its -N suffix, so an
+//     ordinary edit (reorder level, GST, packet size) can never re-suffix it;
+//   • anything that no longer describes the row is rebuilt from it — which is
+//     exactly what editing a grade, a GSM or a size means.
+// materials 386 is why: its grade went FBB → CFBB and its GSM 300 → 280, and the
+// form, which previewed 'CFBB · 280 GSM · 20.5x31.5', saved the stored
+// 'FBB · 300 GSM · 20.5x31.5' / 2132300FBB back over it on every press.
+//
+// Incomplete fields never blank out or half-build what is stored. A blank
+// stored value composes (create, backfill). Idempotent: what it returns agrees
+// with the row, so a second save returns it unchanged.
+export function identityOnSave(stored, row, taken = new Set()) {
+  const was = { name: stored?.name ?? null, spec: stored?.spec ?? null };
+  const name = boardName(row);
+  if (!name) return was;
+  const said = parseBoardName(was.name);
+  const now = parseBoardName(name);
+  const nameAgrees = !!said && said.gsm === now.gsm && said.sheet_l === now.sheet_l
+    && said.sheet_w === now.sheet_w && said.grade.toLowerCase() === now.grade.toLowerCase();
+  const base = boardCode(row);
+  const spec = String(was.spec ?? '').trim();
+  const codeAgrees = spec === base || (spec.startsWith(`${base}-`) && /^\d+$/.test(spec.slice(base.length + 1)));
+  return {
+    name: nameAgrees ? was.name : name,
+    spec: codeAgrees ? was.spec : boardCode(row, taken),
+  };
+}
+
 // Builds the `taken` set to feed boardCode when generating a code for a board
 // form. Two rows MUST be excluded or the collision engine silently re-suffixes
 // an existing board's code on an ordinary edit:

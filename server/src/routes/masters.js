@@ -4,6 +4,7 @@ import { audit, lockProductCodeSeries, nextProductCode, placeholderBoardId, prod
 import { requireRole } from '../auth.js';
 import { isValidGstin } from '../billing-entity.js';
 import { productIdentityRoute } from '../product-identity.js';
+import { settleBoardIdentity, carryBoardIdentity } from '../board-identity.js';
 
 const r = Router();
 const canEdit = requireRole('planner'); // admin implied
@@ -292,11 +293,16 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         if (table === 'products' && req.body.code != null && String(req.body.code).trim()) {
           req.body.internal_carton_code = String(req.body.code).trim();
         }
+        // Field-level history: diff against the stored row so the audit trail
+        // records exactly what changed (old → new), not just "update". A board
+        // is read under its row lock — its name and code are decided from it.
+        const before = await oc(
+          `SELECT * FROM ${table} WHERE id=$1${table === 'materials' ? ' FOR UPDATE' : ''}`, [req.params.id]);
+        // Before `sets` is taken — like syncProductBoardName above, it writes
+        // into the body: the name and code this board will now carry.
+        if (table === 'materials') await settleBoardIdentity(req.body, before, qc);
         const sets = cols.filter(c => c in req.body);
         if (!sets.length) return null;
-        // Field-level history: diff against the stored row so the audit trail
-        // records exactly what changed (old → new), not just "update".
-        const before = await oc(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
         const assign = sets.map((c, i) => `${c}=$${i + 1}`).join(',');
         const vals = sets.map(c => req.body[c]);
         vals.push(req.params.id);
@@ -310,9 +316,15 @@ for (const [table, cols] of Object.entries(MASTERS)) {
           .map(c => `${c}: ${before[c] ?? '—'} → ${updated?.[c] ?? '—'}`)
           .join('; ') : null;
         await audit(table, +req.params.id, 'update', diff ? diff.slice(0, 500) : null, qc, req.user.name);
+        if (table === 'materials') await carryBoardIdentity(before, updated, qc, req.user.name);
         return updated;
       };
-      const row = table === 'products' ? await tx(update) : await update(q, one);
+      // A board edit and every copy of the board's name land together or not at
+      // all, like a product's re-mint and its write: the rename, the products
+      // that copied it and its offcuts share one transaction, because a rename
+      // that committed without its copies would leave nothing to carry them
+      // later — the next save sees no rename at all.
+      const row = (table === 'products' || table === 'materials') ? await tx(update) : await update(q, one);
       if (row === null) return res.json({});
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);

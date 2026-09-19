@@ -5,7 +5,7 @@ import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, 
 import MasterHistory from '../components/MasterHistory.jsx';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
-import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
+import { boardName, boardCode, takenCodesFor, identityOnSave } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { nextCodeForRows } from '../lib/productCode.js';
@@ -145,10 +145,15 @@ const CONFIGS = {
       { key: 'reorder_level', label: 'Reorder Level', type: 'number', hint: 'Trigger point — below this the board reads SHORT' },
       { key: 'min_stock', label: 'Minimum Stock', type: 'number', newRow: true, hint: 'Leave 0 if not set — the warehouse shows “—”' },
       { key: 'max_stock', label: 'Maximum Stock', type: 'number', hint: 'Caps what a replenishment PR suggests. 0 = no cap' },
-      // Composed, not typed. `compute` also runs on save, so the row stored is
-      // exactly the row previewed here.
-      { key: 'name', label: 'Board Name', type: 'derived', newRow: true, compute: b => boardName(b) },
-      { key: 'spec', label: 'Code', type: 'derived', compute: (b, ctx) => boardCode(b, ctx.takenCodes) },
+      // Composed, not typed. `onSave` is what the form shows AND what it saves,
+      // and the server settles the same rule (board-identity.js), so the row
+      // stored is exactly the row previewed here: edit a grade, GSM or size and
+      // the name and code move with it; any other edit keeps them byte-for-byte.
+      // See identityOnSave in boardCode.js.
+      { key: 'name', label: 'Board Name', type: 'derived', newRow: true, compute: b => boardName(b),
+        onSave: (b, ctx) => identityOnSave(b, b, ctx.takenCodes).name },
+      { key: 'spec', label: 'Code', type: 'derived', compute: (b, ctx) => boardCode(b, ctx.takenCodes),
+        onSave: (b, ctx) => identityOnSave(b, b, ctx.takenCodes).spec },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
     // `last_rate` is the one field the old Materials tab held that this master
@@ -817,15 +822,18 @@ export default function Masters() {
       for (const [k, v] of Object.entries(cfg.defaults)) if (!cfg.fields.some(f => f.key === k)) body[k] = v;
     for (const f of cfg.fields) {
       if (editing.id && f.createOnly) continue;               // e.g. email
-      // A derived field is read-only on the form and never lives in `editing`,
-      // but it IS a real column. On an EXISTING record keep the stored value
-      // verbatim — the name/code are identifiers (they print on POs, feed
-      // smartmatch), so an ordinary edit (reorder level, GST) must never
-      // recompose and risk re-suffixing them. Only compose when creating, or
-      // when the stored value is blank (backfill). Renaming a board is a
-      // deliberate act done by deleting + recreating, not a silent side effect.
+      // A derived field is read-only on the form and never typed, but it IS a
+      // real column. A field with an `onSave` (the board name and code) saves
+      // exactly what the form showed: kept byte-for-byte on an ordinary edit, so
+      // a reorder level or GST change can never re-suffix a code, and rebuilt
+      // when the grade, GSM or size it is composed from has changed — keeping
+      // it then is what froze materials 386 at 'FBB · 300 GSM' after it became
+      // CFBB 280. Any other derived field keeps a stored value and composes only
+      // when creating or when the stored value is blank (backfill).
       if (f.type === 'derived') {
-        body[f.key] = (editing.id && editing[f.key]) ? editing[f.key] : (f.compute(editing, derivedCtx) ?? null);
+        body[f.key] = f.onSave
+          ? (f.onSave(editing, derivedCtx) ?? null)
+          : (editing.id && editing[f.key]) ? editing[f.key] : (f.compute(editing, derivedCtx) ?? null);
         continue;
       }
       let v = editing[f.key];
@@ -1138,9 +1146,11 @@ export default function Masters() {
                     {(refs.board_grades || []).map(g => <option key={g.grade} value={g.grade} data-search={searchText(g)}>{g.grade}</option>)}
                   </Select>
                 ) : f.type === 'derived' ? (
-                  // Read-only: composed from the fields above, saved as typed here.
+                  // Read-only: composed from the fields above — the value shown is
+                  // the value saved (onSave where the field has one).
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-700">
-                    {f.compute(editing, derivedCtx) ?? <span className="font-sans text-slate-400">—</span>}
+                    {(f.onSave ? f.onSave(editing, derivedCtx) : f.compute(editing, derivedCtx))
+                      ?? <span className="font-sans text-slate-400">—</span>}
                   </div>
                 ) : (
                   <div>

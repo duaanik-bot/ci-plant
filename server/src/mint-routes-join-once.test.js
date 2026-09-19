@@ -169,8 +169,10 @@ test('the masters.js template mints only for products, only in the routes listed
     const body = lines.slice(r.i, r.end).join('\n');
     // The closure that mints also serves the other masters on the pool; only
     // this dispatch keeps a product on a transaction (the lock would be let go
-    // the moment its statement ended).
-    assert.match(body, /const row = table === 'products' \? await tx\((insert|update)\) : await \1\(q, one\);/,
+    // the moment its statement ended). Another master may share the
+    // transaction for its own reason — a board's rename and the copies it
+    // carries (board-identity.js) — so long as products is one of them.
+    assert.match(body, /const row = (?:table === 'products'|\((?:table === '\w+' \|\| )*table === 'products'(?: \|\| table === '\w+')*\)) \? await tx\((insert|update)\) : await \1\(q, one\);/,
       `${t.verb} ${t.route} no longer runs a product on a transaction`);
     for (const re of t.answer || [])
       assert.match(body, re, `${t.verb} ${t.route} lost part of its double-submit answer`);
