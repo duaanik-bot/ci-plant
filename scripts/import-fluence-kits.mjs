@@ -214,7 +214,7 @@ const q = async (sql, params = []) => (await client.query(sql, params)).rows;
 const report = {
   mode: APPLY ? 'apply' : 'dry-run', source: data.source_file, database: url.replace(/\/\/[^@]*@/, '//'),
   inner_products: { created: 0, mrp_filled: 0, kept: 0 },
-  kits: { created: 0, refreshed: 0 },
+  kits: { created: 0, refreshed: 0, unchanged: 0 },
   components: { kits_written: 0, kits_kept: 0, items_written: 0, repeated_items: [] , mrp_varies: [] },
   links: { linked: [], confirmed: [], confirmed_already: 0, confirmed_refused: [], suggested: [], superseded: [], conflicts: [], held_back: [], still_unlinked: [] },
   parts: { linked: [], already: 0, refused: [], outer_without_kit: [], not_linked: partDocs.flatMap(d => (d.not_linked || []).map(n => `${n.product_code} ${n.product_name}: ${n.why}`)) },
@@ -252,15 +252,21 @@ try {
   for (const k of data.kits) {
     const ref = `customer-master:party-sl:${k.party_sl_no}`;
     const kitLines = [...(linesByKit.get(k.kit_name) || [])].sort((a, b) => (a.sr ?? 0) - (b.sr ?? 0));
-    const total = kitLines.reduce((s, l) => s + (Number(l.mrp) || 0), 0);
+    // Rupees to the paisa: summing the lines in floating point gives 4139.4400000000005.
+    const total = Math.round(kitLines.reduce((s, l) => s + (Number(l.mrp) || 0), 0) * 100) / 100;
     const existing = (await q('SELECT id FROM fluence_kits WHERE source_ref = $1', [ref]))[0];
     let kitId;
     if (existing) {
-      await q(`UPDATE fluence_kits SET kit_name = $1, party_sl_no = $2, valid_from = $3, valid_to = $4, kit_type = $5,
-                 kit_total_mrp = $6, updated_at = now(), updated_by = $7 WHERE id = $8`,
+      // Only a kit whose customer fields differ is written: an unchanged row is not
+      // touched, so a re-run locks no kit a person may be saving at the same moment
+      // (the app's saves take the kit row FOR UPDATE; a Vercel request gives up at 30 s).
+      const changed = await q(`UPDATE fluence_kits SET kit_name = $1, party_sl_no = $2, valid_from = $3, valid_to = $4, kit_type = $5,
+                 kit_total_mrp = $6, updated_at = now(), updated_by = $7
+               WHERE id = $8 AND (kit_name, party_sl_no, valid_from, valid_to, kit_type, kit_total_mrp)
+                 IS DISTINCT FROM ($1::text, $2::int, $3::date, $4::date, $5::text, $6::numeric) RETURNING id`,
       [k.kit_name, k.party_sl_no, parseDmy(k.valid_from), parseDmy(k.valid_to), k.kit_type, total || null, WHO, existing.id]);
       kitId = existing.id;
-      report.kits.refreshed++;
+      if (changed.length) report.kits.refreshed++; else report.kits.unchanged++;
     } else {
       const [row] = await q(`
         INSERT INTO fluence_kits (kit_name, source_ref, party_sl_no, valid_from, valid_to, kit_type, kit_total_mrp, created_by, updated_by)
@@ -504,7 +510,7 @@ await client.end();
 const c = report.links;
 console.log(`\nFluence kit list import — ${report.mode.toUpperCase()}${LOCAL ? '' : ' · PRODUCTION'} (${report.source} → ${report.database})`);
 console.log(`  inner products: ${report.inner_products.created} created, ${report.inner_products.mrp_filled} MRP filled, ${report.inner_products.kept} kept as they were`);
-console.log(`  kits:           ${report.kits.created} created, ${report.kits.refreshed} refreshed`);
+console.log(`  kits:           ${report.kits.created} created, ${report.kits.refreshed} refreshed, ${report.kits.unchanged} unchanged`);
 console.log(`  components:     ${report.components.items_written} items written into ${report.components.kits_written} kits; ${report.components.kits_kept} kits kept their existing list`);
 console.log(`                  ${report.components.repeated_items.length} item(s) appear more than once in a kit (quantity > 1)`);
 console.log(`  links:          ${c.linked.length} linked (exact name) · ${c.confirmed.length} linked (confirmed by a person${c.confirmed_already ? `; ${c.confirmed_already} already linked` : ''}) · ${c.suggested.length} suggested · ${c.superseded.length} superseded re-listings · ${c.conflicts.length} conflicts · ${c.held_back.length} held back on purpose · ${c.still_unlinked.length} with no match`);
