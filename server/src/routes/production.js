@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, lineIdsClosedBy, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { effectiveProduct } from '../helpers.js';
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
@@ -3368,13 +3368,14 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         // The transition guard says so correctly but names only the two states
         // ("dispatched → produced"), which tells the man at the bench nothing
         // about what he is looking at or what to do next. Say it in his terms.
+        // Asked of exactly the lines closeRunLines() is about to move: a split
+        // gang child is not refused because its PARTNER has shipped.
         {
           const shipped = await qc(`
             SELECT ol.id, o.po_number FROM order_lines ol
             JOIN orders o ON o.id = ol.order_id
-            WHERE ol.status='dispatched'
-              AND (ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2))`,
-            [jc.order_line_id, jc.gang_run_id]);
+            WHERE ol.status='dispatched' AND ol.id = ANY($1::int[])`,
+            [await lineIdsClosedBy(jc, qc)]);
           if (shipped.length) {
             throw Object.assign(new Error(
               `${jc.jc_number} has already been dispatched (PO ${shipped.map(x => x.po_number).join(', ')})`
@@ -3419,14 +3420,16 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
         // matches — and nothing matching is the ORDINARY case here, so `oc`
         // made every reverse of an undispatched job die on "Cannot read
         // properties of null (reading 'length')". A multi-row query takes qc.
-        // SQL gathers this card's lines; dispatchedLinesBlockingReverse() is the
-        // one spelling of "cartons have left the building" — shared with the
+        // SQL gathers the lines this card closed — lineIdsClosedBy(), the set
+        // reopenRunLines() will reopen, so a gang child is not held hostage by a
+        // shipped partner — and dispatchedLinesBlockingReverse() is the one
+        // spelling of "cartons have left the building", shared with the
         // completed-run adjust below, and tested without a database.
         const lines = await qc(`
           SELECT ol.id, ol.dispatched_qty, ol.status, o.po_number FROM order_lines ol
           JOIN orders o ON o.id = ol.order_id
-          WHERE ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2)`,
-          [jc.order_line_id, jc.gang_run_id]);
+          WHERE ol.id = ANY($1::int[])`,
+          [await lineIdsClosedBy(jc, qc)]);
         const shipped = dispatchedLinesBlockingReverse(lines);
         if (shipped.length)
           throw Object.assign(new Error(
@@ -3503,7 +3506,8 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
 // and every change is audited old → new with a reason.
 async function stageImpact(stageId, newOut, newScrap, oc, qc) {
   const st = await oc(`
-    SELECT js.*, jc.status AS jc_status, jc.children_per_parent, jc.jc_number, jc.product_id
+    SELECT js.*, jc.status AS jc_status, jc.children_per_parent, jc.jc_number, jc.product_id,
+           jc.order_line_id, jc.gang_run_id
     FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id WHERE js.id=$1`, [stageId]);
   if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
 
@@ -3518,13 +3522,14 @@ async function stageImpact(stageId, newOut, newScrap, oc, qc) {
     // Same rule as the reverse gate, and now the same code — see
     // dispatchedLinesBlockingReverse(). A part-shipped line never reads
     // 'dispatched', so a status check would let a correction rewrite output the
-    // customer already holds.
+    // customer already holds. Asked of the lines THIS card closed
+    // (lineIdsClosedBy), so a gang child's correction is not refused over a
+    // partner's shipment.
     const lines = await qc(`
       SELECT ol.dispatched_qty, ol.status, o.po_number FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
-      JOIN job_cards jc ON jc.id = $1
-      WHERE ol.id = jc.order_line_id
-         OR (jc.gang_run_id IS NOT NULL AND ol.gang_run_id = jc.gang_run_id)`, [st.job_card_id]);
+      WHERE ol.id = ANY($1::int[])`,
+      [await lineIdsClosedBy({ order_line_id: st.order_line_id, gang_run_id: st.gang_run_id }, qc)]);
     const [shipped] = dispatchedLinesBlockingReverse(lines);
     if (shipped) {
       out.blocked = `Already dispatched (PO ${shipped.po_number}) — cancel that challan before changing what was produced.`;

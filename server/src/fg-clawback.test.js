@@ -71,7 +71,10 @@ test('nothing shipped — the correction proceeds', () => {
     [{ id: 115, status: 'produced', dispatched_qty: 0 }]), []);
 });
 
-test('a gang blocks if ANY member has shipped — one physical run', () => {
+// The list is whatever the card closed. For a COMBINED RUN card that is every
+// member — one pile — but a split gang CHILD closed only its own line, so a
+// partner's shipment never reaches this filter (lines-closed-by-card.test.js).
+test('a combined run blocks if ANY member has shipped — one pile, one pool', () => {
   const lines = [{ id: 1, dispatched_qty: 0 }, { id: 2, dispatched_qty: 50, po_number: 'X' }];
   assert.equal(dispatchedLinesBlockingReverse(lines).length, 1);
 });

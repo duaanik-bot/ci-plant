@@ -3214,6 +3214,25 @@ export function shouldSplitAtDieCut({ isLastStage, stage, gangRunId, orderLineId
   return !!(isLastStage && stage === 'die_cutting' && gangRunId && !orderLineId && runKind !== 'merge');
 }
 
+// The order lines a job card CLOSES — the one spelling of that set. A card with
+// a line of its own closes exactly that line: a plain card, and a split gang
+// CHILD, which also carries its run's gang_run_id but made cartons for its own
+// sales order only. Only a RUN card (order_line_id NULL) closes every line on
+// its run.
+//
+// closeRunLines and reopenRunLines act on this set, and every "already
+// dispatched" gate in front of a close, reverse or adjust must ask about this
+// set and no wider one. Sort & Paste's gates once matched
+// `ol.id = order_line_id OR ol.gang_run_id = gang_run_id`, so a child whose
+// PARTNER had shipped could not be closed although its own line was untouched —
+// CI-JC-0182 and CI-JC-0210 on 17 Sep 2026.
+export async function lineIdsClosedBy(jc, qc = q) {
+  if (jc?.order_line_id) return [jc.order_line_id];
+  if (!jc?.gang_run_id) return [];
+  return (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id]))
+    .map(l => l.id);
+}
+
 // The order lines a finished job card produced for. A plain or split-child
 // card produced for exactly one; a COMBINED RUN card produced one pile of
 // identical cartons for every member of its run, so every member becomes
@@ -3221,26 +3240,18 @@ export function shouldSplitAtDieCut({ isLastStage, stage, gangRunId, orderLineId
 // indistinguishable, and which sales order each one ends up on is decided at
 // dispatch (POST /fg/move fills earliest delivery first), not here.
 export async function closeRunLines(jc, qc = q, oc = one, user = null) {
-  if (jc.order_line_id) return [await setLineStatus(jc.order_line_id, 'produced', qc, oc, user)];
-  if (!jc.gang_run_id) return [];
-  const lines = await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id]);
   const out = [];
-  for (const l of lines) out.push(await setLineStatus(l.id, 'produced', qc, oc, user));
+  for (const id of await lineIdsClosedBy(jc, qc)) out.push(await setLineStatus(id, 'produced', qc, oc, user));
   return out;
 }
 
-// The inverse of closeRunLines — same shape, so a plain card and a combined run
-// reopen exactly the set of lines they closed. A line that already went out is
-// skipped, not thrown on: the caller has refused dispatched work before getting
-// here, and a gang whose OTHER member shipped must still reopen the rest.
+// The inverse of closeRunLines — the same lineIdsClosedBy() set, so a plain
+// card, a gang child and a combined run each reopen exactly the lines they
+// closed. A line that already went out is skipped, not thrown on: the caller
+// has refused dispatched work before getting here.
 export async function reopenRunLines(jc, qc = q, oc = one, user = null) {
-  const ids = jc.order_line_id
-    ? [jc.order_line_id]
-    : (jc.gang_run_id
-        ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])).map(l => l.id)
-        : []);
   const out = [];
-  for (const id of ids) {
+  for (const id of await lineIdsClosedBy(jc, qc)) {
     const line = await oc('SELECT status FROM order_lines WHERE id=$1', [id]);
     if (line?.status !== 'produced') continue;
     out.push(await setLineStatus(id, 'in_production', qc, oc, user));
