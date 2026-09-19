@@ -45,7 +45,7 @@ master and shows it wherever the carton is handled:
 | Quantity per kit = number of times an item is listed | Σ line MRPs = kit total on all 297 itemised kits, so each line is one unit |
 | A flat-priced kit shows its **line price**, never a sum (`kitListPrice`) | The 16 flat-priced kits repeat one figure on every line. On Topico, CGC and Umang that figure is the carton's own MRP, so a sum is several times the real price, e.g. ₹28,260 for a ₹4,710 carton. Kids Hair Fact Growth is the exception: its 2 × ₹1,116 lines add up to its ₹2,221 carton. "₹X on every line" is true for all 16, and the drawer shows it next to the carton MRP |
 | Carton dimensions left NULL | Not present in any of the four source files; never estimated |
-| Prescriptions come from the customer master ONLY (Anik, 2026-09-18: "one source of truth") | Each kit's prescription = its products in the master's SR order. The master has no day-wise schedule, so none is written or guessed; days and doses can be added by a person |
+| Prescriptions come from the customer master ONLY (Anik, 2026-09-18: "one source of truth") | Each kit's prescription = its Kit Lines, LINE FOR LINE in the master's SR order — a product listed twice is two lines (2026-09-19). The master has no day-wise schedule, so none is written or guessed; days and doses can be added by a person |
 | All FKs into existing tables are `ON DELETE SET NULL/CASCADE` | Deleting a product or customer behaves exactly as today |
 
 ## Data model (`supabase/migrations/20260917120000_fluence_prescription_kits.sql`)
@@ -166,12 +166,27 @@ Kits (Master), Kit Lines (Link), Products (Master), All Kit Cards, Search Kit, S
 (Original), and the hidden System sheet. Together they hold each kit's party serial, validity,
 products in SR order, MRPs, total and type. **There is no day-wise schedule anywhere in it.**
 
-- The importer writes each kit's prescription from the master: its products in SR order, one line
-  each, revision 1 by Anik Dua (MD) "from customer master". It does this only for a kit with no
-  prescription yet; anything a person enters is never overwritten.
+- The importer writes each kit's prescription from the master: its Kit Lines, line for line in SR
+  order, revision 1 by Anik Dua (MD) "from customer master". Anything a person enters is never
+  overwritten.
+- **Line for line (2026-09-19, Anik: "ensure data is mapped properly").** The first load kept each
+  product once, so 11 kits whose master lists a product twice had fewer lines than the master
+  (SKINFACT TIMELESS lists F-GLUTASURGE-C at SR 7 and SR 10: 10 lines, not 9; F-GLUTASURGE ACE lists
+  each of its three products twice: 6 lines, not 3). Those 11 were re-synced as revision 2, still
+  "from customer master", with before/after in History. A product listed twice is two units in the
+  kit, not a mistake — the validator lets BARE lines (no dose, no time) repeat; the same product at
+  the same time twice is still refused. The importer re-syncs only a prescription still exactly as
+  the master gave it; one a person has edited is listed, never touched.
+- Audit of the whole file (2026-09-19): every sheet and cell (91,930 cells, the hidden System sheet
+  and cell notes included) was scanned — the only day or timing words are inside product names
+  ("NIGHT SHIFT", "F-DAILY D"). All 313 kits in Kits (Master) / Kit Lines equal Fluence's own export
+  (Source Data (Original)) name for name, line for line, MRP for MRP. That export also holds 99
+  single-product deals (one item each, e.g. F-TRICHOSURE PRO) the kit sheets leave out; none is a
+  Fluence carton in the ERP, and none of the 29 cartons without a kit is among them.
 - Screens show it as a plain product list ("Customer master · N products"), with a quiet note that
-  the master has no day-wise schedule. The job card prints the same list; there is no "entered after
-  finalise" warning for this first revision.
+  the master has no day-wise schedule. The job card prints the same list; a prescription still as the
+  master gives it never shows the "revised after this job card was finalised" warning — only a
+  person's save does (`rxChangedAfterFinalise`).
 - Result: 312 kits filled (POST M -V2 is a duplicate listing; POST M - V2 carries it). All 312
   compared line by line with the master: 0 mismatches. 343 of 372 Fluence cartons show a
   prescription (311 kit cartons + 32 Topico parts).

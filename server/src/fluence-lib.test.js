@@ -6,6 +6,7 @@ import {
   nameKey, qtyValue, qtyText, unitFor, timingParts, formatSchedule, formatRxLine,
   lineHasDose, rxHasContent, normaliseRxPayload, normaliseComponentsPayload,
   normaliseDims, formatDims, kitListPrice, partLabel, kitCartons, rxState, RX_SLOTS, FLUENCE_CONTEXTS, REVIEW_CONTEXTS,
+  rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER,
 } from '../../client/src/lib/fluence.js';
 
 test('nameKey: spacing, hyphens and case do not make two kits — a plus sign does', () => {
@@ -101,7 +102,7 @@ test('normaliseRxPayload: names the line and the field it refuses', () => {
       { morning_qty: 1 },                                  // no item
       { item_label: 'X', night_qty: 'two' },               // not a number
       { item_label: 'Y', afternoon_qty: -1 },              // negative
-      { inner_product_id: 5 }, { inner_product_id: 5 },     // same item twice
+      { inner_product_id: 5, night_qty: 1 }, { inner_product_id: 5, night_qty: 2 }, // same item, same time
     ],
   });
   assert.ok(errors.some(e => e.startsWith('Line 1:') && /kit item/.test(e)), errors.join('\n'));
@@ -122,6 +123,21 @@ test('normaliseRxPayload: one item on two different days is two lines — the sa
     { inner_product_id: 7, other_timing: ' sunday ', other_qty: 2 },
   ] });
   assert.ok(twice.errors.some(e => /more than one line/.test(e)), twice.errors.join('\n'));
+});
+
+test('normaliseRxPayload: a product the customer master lists twice keeps both bare lines, in SR order', () => {
+  // SKINFACT TIMELESS, Kit Lines SR 7 and SR 10: F-GLUTASURGE-C (id 7) — two units, no schedule.
+  const master = normaliseRxPayload({ lines: [
+    { inner_product_id: 3 }, { inner_product_id: 7 }, { inner_product_id: 4 }, { inner_product_id: 7 },
+  ] });
+  assert.deepEqual(master.errors, []);
+  assert.deepEqual(master.value.lines.map(l => [l.sr, l.inner_product_id]), [[1, 3], [2, 7], [3, 4], [4, 7]]);
+  // Once a schedule is written, the same product at the same time twice is still a duplicate…
+  const sameTime = normaliseRxPayload({ lines: [{ inner_product_id: 7, morning_qty: 1 }, { inner_product_id: 7, morning_qty: 1 }] });
+  assert.ok(sameTime.errors.some(e => /more than one line/.test(e)), sameTime.errors.join('\n'));
+  // …while one timed line beside the master's bare line, or two different times, is not.
+  assert.deepEqual(normaliseRxPayload({ lines: [{ inner_product_id: 7, morning_qty: 1 }, { inner_product_id: 7 }] }).errors, []);
+  assert.deepEqual(normaliseRxPayload({ lines: [{ inner_product_id: 7, morning_qty: 1 }, { inner_product_id: 7, night_qty: 1 }] }).errors, []);
 });
 
 test('unitFor: lozenges are counted', () => {
@@ -210,4 +226,20 @@ test('contexts: every review-first module is a known module', () => {
   for (const c of REVIEW_CONTEXTS) assert.ok(FLUENCE_CONTEXTS[c], `${c} is not a Fluence context`);
   for (const m of ['planning', 'artwork', 'job_card', 'print_planning', 'printing', 'sort_paste', 'invoice', 'dispatch', 'accounts', 'warehouse'])
     assert.ok(FLUENCE_CONTEXTS[m], `${m} missing`);
+});
+
+test('rxChangedAfterFinalise: only a person\'s save after finalising warns — never the customer master\'s list', () => {
+  const card = '2026-09-15T12:06:33Z';
+  const later = '2026-09-19T08:00:00Z';
+  // Filled from the master (revision 1) or re-synced with it line for line (revision 2): no warning.
+  assert.equal(rxChangedAfterFinalise({ revision: 1, updated_at: later, updated_from: RX_FROM_CUSTOMER_MASTER }, card), false);
+  assert.equal(rxChangedAfterFinalise({ revision: 2, updated_at: later, updated_from: RX_FROM_CUSTOMER_MASTER }, card), false);
+  // A person's save from a module, after the card was finalised: warns.
+  assert.equal(rxChangedAfterFinalise({ revision: 3, updated_at: later, updated_from: 'artwork' }, card), true);
+  // …but not when it came before the card was finalised, or the card is not finalised.
+  assert.equal(rxChangedAfterFinalise({ revision: 3, updated_at: '2026-09-01T00:00:00Z', updated_from: 'artwork' }, card), false);
+  assert.equal(rxChangedAfterFinalise({ revision: 3, updated_at: later, updated_from: 'artwork' }, null), false);
+  assert.equal(rxChangedAfterFinalise(null, card), false);
+  // No module can be named "customer master": a screen can never claim the master's source.
+  assert.ok(!Object.keys(FLUENCE_CONTEXTS).includes(RX_FROM_CUSTOMER_MASTER));
 });

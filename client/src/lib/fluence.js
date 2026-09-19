@@ -52,6 +52,16 @@ export const REVIEW_CONTEXTS = new Set(['invoice', 'dispatch', 'accounts', 'ware
 // never claim it.
 export const RX_FROM_CUSTOMER_MASTER = 'customer master';
 
+// Whether a prescription changed under a job card: saved by a PERSON after the
+// card was finalised. A prescription still as the customer master gives it —
+// filled from the master, or re-synced with it line for line — lists the kit's
+// products the card already carries, so it is never a change made under it.
+export function rxChangedAfterFinalise(rx, finalisedAt) {
+  if (!rx?.updated_at || !finalisedAt) return false;
+  if (rx.updated_from === RX_FROM_CUSTOMER_MASTER) return false;
+  return new Date(rx.updated_at) > new Date(finalisedAt);
+}
+
 // Upper-case letters, digits and '+' — nothing else. "F1-O2", "F1 O2" and
 // "f1o2" are one kit; "M9O2" and "M9O2+" are two ('+' is a real variant).
 export function nameKey(name) {
@@ -194,10 +204,13 @@ export function normaliseRxPayload(body) {
   });
   // One item may sit on two lines when it is taken at different times (a carton
   // printing "1 lozenge Mon/Wed/Fri" and "2 on Sunday"); the same item at the
-  // same time twice is a duplicate.
+  // same time twice is a duplicate. A BARE line — the item alone, no dose and no
+  // time — says nothing about when, so it never collides: the customer master
+  // lists a product twice when the kit holds it twice (SKINFACT TIMELESS,
+  // F-Glutasurge C at SR 7 and SR 10), and its prescription keeps both lines.
   const timingKey = l => [l.inner_product_id, ...RX_SLOTS.map(s => l[s.key] != null && l[s.key] > 0 ? 'x' : ''),
     String(l.other_timing ?? '').trim().toLowerCase()].join('|');
-  const keys = lines.filter(l => l.inner_product_id != null).map(timingKey);
+  const keys = lines.filter(l => l.inner_product_id != null && lineHasDose(l)).map(timingKey);
   if (keys.some((k, i) => keys.indexOf(k) !== i)) errors.push('The same kit item appears on more than one line for the same time — give each time one line.');
   return {
     errors,

@@ -37,10 +37,14 @@
 //     no kit of its own, the outer not itself a part, the outer still carrying
 //     the kit the file names.
 //   • prescriptions — from this same customer master, the one source of truth:
-//     each kit's products in SR order. The master carries no day-wise schedule,
-//     so none is written. Only for a kit with no prescription yet, through the
-//     app's own validator, as revision 1 "from customer master". Anything a
-//     person has entered is never touched.
+//     each kit's Kit Lines, LINE FOR LINE in SR order — a product the master
+//     lists twice (two units in the kit) is two lines. The master carries no
+//     day-wise schedule, so none is written. Through the app's own validator:
+//     a kit with no prescription gets revision 1 "from customer master"; one
+//     still exactly as the master gave it (bare lines, last saved from the
+//     customer master) that no longer matches the master line for line is
+//     re-synced as its next revision. Anything a person has entered is never
+//     touched.
 //
 //   --links <file>   a confirmed-links file (default: every
 //                    scripts/data/fluence-kit-links-confirmed-*.json)
@@ -55,7 +59,7 @@ import path from 'path';
 import pg from 'pg';
 import ExcelJS from 'exceljs';
 import { fileURLToPath } from 'url';
-import { nameKey, normaliseRxPayload, RX_FROM_CUSTOMER_MASTER } from '../client/src/lib/fluence.js';
+import { nameKey, normaliseRxPayload, lineHasDose, RX_FROM_CUSTOMER_MASTER } from '../client/src/lib/fluence.js';
 import { matchKits, aggregateKitLines, parseDmy } from '../server/src/fluence-kit-match.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -214,7 +218,7 @@ const report = {
   components: { kits_written: 0, kits_kept: 0, items_written: 0, repeated_items: [] , mrp_varies: [] },
   links: { linked: [], confirmed: [], confirmed_already: 0, confirmed_refused: [], suggested: [], superseded: [], conflicts: [], held_back: [], still_unlinked: [] },
   parts: { linked: [], already: 0, refused: [], outer_without_kit: [], not_linked: partDocs.flatMap(d => (d.not_linked || []).map(n => `${n.product_code} ${n.product_name}: ${n.why}`)) },
-  prescriptions: { filled: 0, kept: 0, skipped: [], refused: [] },
+  prescriptions: { filled: 0, resynced: [], kept: 0, kept_edited: [], skipped: [], refused: [] },
 };
 
 try {
@@ -402,46 +406,78 @@ try {
       `Part cartons now show this kit's prescription: ${g.added.join(', ')} (outer carton ${g.outer.code}) — confirmed by ${g.doc.confirmed_by} on ${g.doc.confirmed_on} — ${g.doc.file}`, by]);
   }
 
-  // Prescriptions from the customer master — the one source of truth. Each kit's
-  // products, in the master's SR order, are its prescription. The master carries
-  // no day-wise schedule, so none is written. Only for a kit with no
-  // prescription yet: anything a person has entered is never touched.
+  // Prescriptions from the customer master — the one source of truth. A kit's
+  // prescription is its Kit Lines, LINE FOR LINE in the master's SR order: a
+  // product the master lists twice (two units in the kit) is two lines, where it
+  // stands. The master carries no day-wise schedule, so none is written.
+  //   • no prescription yet → revision 1 "from customer master";
+  //   • still exactly as the master gave it — every line bare, no instructions,
+  //     last saved from the customer master — but no longer line for line with
+  //     the master → re-synced as its next revision, still "from customer master";
+  //   • anything a person has entered or edited is never touched (listed instead).
   const RX_BY = 'Anik Dua (MD)';
+  const LINE_COLS = 'sr, inner_product_id, item_label, dosage, dose_form, pack_count, frequency, morning_qty, afternoon_qty, evening_qty, night_qty, other_timing, other_qty, instructions, remarks';
   for (const k of data.kits) {
     const label = `${k.kit_name} (party serial ${k.party_sl_no})`;
     const kit = (await q(`SELECT id, kit_name, superseded_by_kit_id FROM fluence_kits WHERE source_ref = $1`, [`customer-master:party-sl:${k.party_sl_no}`]))[0];
     if (!kit) { report.prescriptions.refused.push(`${label}: kit not found`); continue; }
     if (kit.superseded_by_kit_id) { report.prescriptions.skipped.push(`${label}: a re-listing of another kit — that kit carries the prescription`); continue; }
-    if ((await q('SELECT 1 FROM fluence_prescriptions WHERE kit_id = $1', [kit.id])).length) { report.prescriptions.kept++; continue; }
-    const products = [];
-    for (const l of [...(linesByKit.get(k.kit_name) || [])].sort((a, b) => (a.sr ?? 0) - (b.sr ?? 0))) {
-      if (!products.some(p => nameKey(p) === nameKey(l.product_name))) products.push(l.product_name);
-    }
+    const products = [...(linesByKit.get(k.kit_name) || [])].sort((a, b) => (a.sr ?? 0) - (b.sr ?? 0)).map(l => l.product_name);
     if (!products.length) { report.prescriptions.skipped.push(`${label}: the master lists no products for this kit`); continue; }
     const items = await q(`
       SELECT ip.id, ip.name, ip.name_key FROM fluence_kit_components kc
       JOIN fluence_inner_products ip ON ip.id = kc.inner_product_id WHERE kc.kit_id = $1`, [kit.id]);
     const byKey = new Map(items.map(i => [i.name_key, i]));
-    const missing = products.filter(p => !byKey.has(nameKey(p)));
+    const missing = [...new Set(products.filter(p => !byKey.has(nameKey(p))))];
     if (missing.length) { report.prescriptions.refused.push(`${label}: not among the kit's items — ${missing.join(', ')}`); continue; }
     // Through the app's own validator, exactly as a save from the drawer.
     const { errors, value } = normaliseRxPayload({ lines: products.map(p => ({ inner_product_id: byKey.get(nameKey(p)).id })) });
     if (errors.length) { report.prescriptions.refused.push(`${label}: ${errors.join(' ')}`); continue; }
-    const [rx] = await q(`
-      INSERT INTO fluence_prescriptions (kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from)
-      VALUES ($1, NULL, NULL, 1, now(), $2, $3) RETURNING id`, [kit.id, RX_BY, RX_FROM_CUSTOMER_MASTER]);
-    for (const l of value.lines) {
-      await q(`INSERT INTO fluence_prescription_lines (prescription_id, sr, inner_product_id) VALUES ($1, $2, $3)`, [rx.id, l.sr, l.inner_product_id]);
-    }
     const nameOf = new Map(items.map(i => [i.id, i.name]));
-    const after = { general_instructions: null, remarks: null, revision: 1,
-      lines: value.lines.map(l => ({ ...l, item_name: nameOf.get(l.inner_product_id) })) };
+    const snapshot = (revision, lines) => ({ general_instructions: null, remarks: null, revision,
+      lines: lines.map(l => ({ sr: l.sr, inner_product_id: l.inner_product_id, item_name: nameOf.get(l.inner_product_id) ?? null })) });
+    const writeLines = async rxId => {
+      for (const l of value.lines) {
+        await q(`INSERT INTO fluence_prescription_lines (prescription_id, sr, inner_product_id) VALUES ($1, $2, $3)`, [rxId, l.sr, l.inner_product_id]);
+      }
+    };
+
+    const current = (await q('SELECT id, revision, general_instructions, remarks, updated_by, updated_from FROM fluence_prescriptions WHERE kit_id = $1', [kit.id]))[0];
+    if (!current) {
+      const [rx] = await q(`
+        INSERT INTO fluence_prescriptions (kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from)
+        VALUES ($1, NULL, NULL, 1, now(), $2, $3) RETURNING id`, [kit.id, RX_BY, RX_FROM_CUSTOMER_MASTER]);
+      await writeLines(rx.id);
+      await q(`INSERT INTO fluence_master_revisions (kit_id, area, revision, before, after, note, changed_by, changed_from)
+               VALUES ($1, 'prescription', 1, NULL, $2::jsonb, $3, $4, $5)`,
+      [kit.id, JSON.stringify(snapshot(1, value.lines)),
+        `Products from ${data.source_file} (Kit Lines, line for line in SR order) — the customer master is the one source of truth and carries no day-wise schedule`,
+        RX_BY, RX_FROM_CUSTOMER_MASTER]);
+      report.prescriptions.filled++;
+      continue;
+    }
+
+    const have = await q(`SELECT ${LINE_COLS} FROM fluence_prescription_lines WHERE prescription_id = $1 ORDER BY sr, id`, [current.id]);
+    if (have.length === value.lines.length && have.every((l, i) => l.inner_product_id === value.lines[i].inner_product_id
+      && !l.item_label && !lineHasDose(l))) { report.prescriptions.kept++; continue; }
+    const mastersOwn = current.updated_from === RX_FROM_CUSTOMER_MASTER && !current.general_instructions && !current.remarks
+      && have.every(l => l.inner_product_id != null && !l.item_label && !lineHasDose(l)
+        && l.pack_count == null && !l.dose_form && !l.remarks);
+    if (!mastersOwn) {
+      report.prescriptions.kept_edited.push(`${label}: revision ${current.revision} by ${current.updated_by || 'someone'} from ${current.updated_from || 'a screen'} — differs from the master, left as entered`);
+      continue;
+    }
+    const revision = current.revision + 1;
+    await q(`UPDATE fluence_prescriptions SET revision = $2, updated_at = now(), updated_by = $3, updated_from = $4 WHERE id = $1`,
+      [current.id, revision, RX_BY, RX_FROM_CUSTOMER_MASTER]);
+    await q('DELETE FROM fluence_prescription_lines WHERE prescription_id = $1', [current.id]);
+    await writeLines(current.id);
     await q(`INSERT INTO fluence_master_revisions (kit_id, area, revision, before, after, note, changed_by, changed_from)
-             VALUES ($1, 'prescription', 1, NULL, $2::jsonb, $3, $4, $5)`,
-    [kit.id, JSON.stringify(after),
-      `Products from ${data.source_file} (Kit Lines, SR order) — the customer master is the one source of truth and carries no day-wise schedule`,
+             VALUES ($1, 'prescription', $2, $3::jsonb, $4::jsonb, $5, $6, $7)`,
+    [kit.id, revision, JSON.stringify(snapshot(current.revision, have)), JSON.stringify(snapshot(revision, value.lines)),
+      `Re-synced line for line with ${data.source_file} (Kit Lines, SR order): ${have.length} → ${value.lines.length} lines — a product the master lists twice is two lines, where the master puts it`,
       RX_BY, RX_FROM_CUSTOMER_MASTER]);
-    report.prescriptions.filled++;
+    report.prescriptions.resynced.push(`${label}: ${have.length} → ${value.lines.length} lines (revision ${revision})`);
   }
 
   await q(`INSERT INTO audit_log (entity, entity_id, action, detail, user_name) VALUES ('fluence_import', NULL, 'customer_kit_list_imported', $1, $2)`,
@@ -475,7 +511,7 @@ console.log(`  links:          ${c.linked.length} linked (exact name) · ${c.con
 const pp = report.parts;
 console.log(`  part cartons:   ${pp.linked.length} linked${pp.already ? ` · ${pp.already} already linked` : ''} · ${pp.refused.length} refused · ${pp.not_linked.length} left out on purpose${pp.outer_without_kit.length ? ` · ${pp.outer_without_kit.length} whose outer carton has no kit yet` : ''}`);
 const rr = report.prescriptions;
-console.log(`  prescriptions:  ${rr.filled} filled from the customer master (products, SR order) · ${rr.kept} kept (already entered) · ${rr.skipped.length} skipped · ${rr.refused.length} refused`);
+console.log(`  prescriptions:  ${rr.filled} filled from the customer master (line for line, SR order) · ${rr.resynced.length} re-synced with it · ${rr.kept} already match it · ${rr.kept_edited.length} entered by a person (kept) · ${rr.skipped.length} skipped · ${rr.refused.length} refused`);
 console.log(`  after:          ${JSON.stringify(report.totals_after)}`);
 if (c.confirmed.length) console.log(`\n  CONFIRMED LINKS APPLIED:\n    ${c.confirmed.join('\n    ')}`);
 if (c.confirmed_refused.length) console.log(`\n  CONFIRMED LINKS REFUSED (the data changed since they were confirmed):\n    ${c.confirmed_refused.join('\n    ')}`);
@@ -487,6 +523,8 @@ if (pp.linked.length) console.log(`\n  PART CARTONS LINKED:\n    ${pp.linked.joi
 if (pp.refused.length) console.log(`\n  PART CARTONS REFUSED:\n    ${pp.refused.join('\n    ')}`);
 if (pp.outer_without_kit.length) console.log(`\n  PART CARTONS WHOSE OUTER CARTON HAS NO KIT YET (they show nothing until it has one):\n    ${pp.outer_without_kit.join('\n    ')}`);
 if (pp.not_linked.length) console.log(`\n  PART CARTONS LEFT OUT ON PURPOSE:\n    ${pp.not_linked.join('\n    ')}`);
+if (rr.resynced.length) console.log(`\n  PRESCRIPTIONS RE-SYNCED LINE FOR LINE WITH THE MASTER:\n    ${rr.resynced.join('\n    ')}`);
+if (rr.kept_edited.length) console.log(`\n  PRESCRIPTIONS ENTERED BY A PERSON — kept, and they differ from the master:\n    ${rr.kept_edited.join('\n    ')}`);
 if (rr.skipped.length) console.log(`\n  PRESCRIPTIONS SKIPPED:\n    ${rr.skipped.join('\n    ')}`);
 if (rr.refused.length) console.log(`\n  PRESCRIPTIONS REFUSED:\n    ${rr.refused.join('\n    ')}`);
 fs.mkdirSync(path.join(root, 'backups'), { recursive: true });

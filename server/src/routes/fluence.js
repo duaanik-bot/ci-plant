@@ -14,7 +14,7 @@ import { q, one, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import {
-  nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, RX_FROM_CUSTOMER_MASTER,
+  nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, rxChangedAfterFinalise,
 } from '../../../client/src/lib/fluence.js';
 
 const r = Router();
@@ -284,10 +284,8 @@ r.get('/fluence/job-cards/prescriptions', async (req, res, next) => {
             part_of: d.part_of,
             components: d.components.map(c => ({ name: c.name, qty_per_kit: c.qty_per_kit })),
             prescription: rx,
-            // The first revision filled from the customer master lists the kit's
-            // products the card already carries — not a change made under it.
-            rx_changed_after_finalise: Boolean(rx?.updated_at && jc.finalised_at && new Date(rx.updated_at) > new Date(jc.finalised_at)
-              && !(rx.revision === 1 && rx.updated_from === RX_FROM_CUSTOMER_MASTER)),
+            // Only a person's save after finalising warns — never the customer master's list.
+            rx_changed_after_finalise: rxChangedAfterFinalise(rx, jc.finalised_at),
           });
         }
         if (items.length) cards[jc.id] = { id: jc.id, jc_number: jc.jc_number, finalised_at: jc.finalised_at, gang_number: jc.gang_number, run_kind: jc.run_kind, items };
