@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
+import { audit, lockProductCodeSeries, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { isValidGstin } from '../billing-entity.js';
 import { productIdentityRoute } from '../product-identity.js';
@@ -28,15 +28,13 @@ async function fillSectionDefaults(body) {
 }
 
 // The Internal Code is editable on the form, so a typed duplicate must come
-// back as a named 409, not a raw unique-key 500. Everything else passes
-// through untouched.
-function productCodeClash(table, e, req) {
-  if (table === 'products' && e.code === '23505' && e.constraint === 'products_code_key') {
-    e.status = 409;
-    e.message = `Internal Code ${req.body.code} is already taken — clear the field to take the next code in the series.`;
-  }
-  return e;
+// back as a named 409, not a raw unique-key 500 (helpers.js productCodeTaken).
+// Everything else passes through untouched.
+function productCodeClash(table, e, req, minted) {
+  return table === 'products' ? productCodeTaken(e, req.body.code, minted) : e;
 }
+
+const MOVED_SINCE_OPENED = 'This product was moved to another customer since you opened it — reload it to see its current customer and code.';
 
 // Generic CRUD for the five master tables — same shape everywhere.
 const MASTERS = {
@@ -180,6 +178,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
   });
 
   r.post(`/${table}`, canEdit, async (req, res, next) => {
+    let minted = false;
     try {
       checkOwnGstin(table, req.body);
       if (table === 'sections') await fillSectionDefaults(req.body);
@@ -188,15 +187,6 @@ for (const [table, cols] of Object.entries(MASTERS)) {
           && (req.body.gst_rate == null || req.body.gst_rate === '')) req.body.gst_rate = 18;
       if (table === 'products') {
         await syncProductBoardName(req.body, null);
-        // Internal Code: blank means "issue the next code in this customer's
-        // series" — the client normally prefills it, but the server is the
-        // authority so a bare API create is never born code-less.
-        if (!req.body.code || !String(req.body.code).trim()) {
-          req.body.code = await nextProductCode(+req.body.customer_id);
-        }
-        // internal_carton_code is a server-kept mirror of code (the FG-matching
-        // key) — the form no longer carries it.
-        req.body.internal_carton_code = req.body.code;
         // A product may now be raised before its board is chosen. Unlike ups or
         // colors, board_material_id has NO default to fall back on when the
         // column is left out — and it is INNER-joined in seven places,
@@ -225,21 +215,42 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // database fills what it can, the rest stays blank to be finished later,
       // and the form says what is still pending instead of refusing.
       // The UPDATE path below has always worked this way (`c in req.body`).
-      const sets = cols.filter(c => c in req.body && req.body[c] !== undefined);
-      if (!sets.length) {
-        return res.status(400).json({ error: 'Nothing to create — send at least one field' });
-      }
-      const ph = sets.map((_, i) => `$${i + 1}`).join(',');
-      const [row] = await q(
-        `INSERT INTO ${table} (${sets.join(',')}) VALUES (${ph}) RETURNING *`,
-        sets.map(c => req.body[c]));
-      await audit(table, row.id, 'create', null, q, req.user.name);
+      // A product's code is minted and written in ONE transaction, under the
+      // series lock (helpers.js nextProductCode) — two creates at once used to
+      // mint the same code. Every other master runs as it always has.
+      const insert = async (qc, oc) => {
+        if (table === 'products') {
+          // Internal Code: blank means "issue the next code in this customer's
+          // series" — the client normally prefills it, but the server is the
+          // authority so a bare API create is never born code-less.
+          if (!req.body.code || !String(req.body.code).trim()) {
+            req.body.code = await nextProductCode(+req.body.customer_id, qc, oc);
+            minted = true;
+          } else {
+            // A typed (or prefilled) code queues with the minters of its series.
+            await lockProductCodeSeries(req.body.code, oc);
+          }
+          // internal_carton_code is a server-kept mirror of code (the FG-matching
+          // key) — the form no longer carries it.
+          req.body.internal_carton_code = req.body.code;
+        }
+        const sets = cols.filter(c => c in req.body && req.body[c] !== undefined);
+        if (!sets.length) throw Object.assign(new Error('Nothing to create — send at least one field'), { status: 400 });
+        const ph = sets.map((_, i) => `$${i + 1}`).join(',');
+        const [created] = await qc(
+          `INSERT INTO ${table} (${sets.join(',')}) VALUES (${ph}) RETURNING *`,
+          sets.map(c => req.body[c]));
+        await audit(table, created.id, 'create', null, qc, req.user.name);
+        return created;
+      };
+      const row = table === 'products' ? await tx(insert) : await insert(q, one);
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
-    } catch (e) { next(productCodeClash(table, e, req)); }
+    } catch (e) { next(productCodeClash(table, e, req, minted)); }
   });
 
   r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
+    let minted = false;
     try {
       checkOwnGstin(table, req.body);
       // Before `sets` is taken — the sync adds board_name to the body, and a
@@ -249,35 +260,63 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // owner's code series — the form still carries the OLD code, so writing
       // the body as-is would file a Biotech product under SW-. Regenerate here;
       // the PUT's own field diff then audits `code: SW-204 → SGB-336` for free.
-      if (table === 'products' && req.body.customer_id != null) {
-        const cur = await one('SELECT customer_id FROM products WHERE id=$1', [req.params.id]);
-        if (cur && +req.body.customer_id !== +cur.customer_id) {
-          req.body.code = await nextProductCode(+req.body.customer_id);
+      // The re-mint and the write share ONE transaction for a product, under
+      // the series lock (helpers.js nextProductCode). Other masters as before.
+      // A form opened before someone else moved the product still holds the
+      // OLD customer's code, and saving it would file that code under the new
+      // owner — so the edit forms send the customer they opened with
+      // (_loaded_customer_id) and a mismatch is refused. The move itself is
+      // written only if the row is still where it was read: a second copy of
+      // the same move, overlapping the first, waits on the lock and would
+      // otherwise re-code the product a second time and burn the first code.
+      const update = async (qc, oc) => {
+        let movedFrom = null;
+        if (table === 'products') {
+          const cur = await oc('SELECT customer_id, code FROM products WHERE id=$1', [req.params.id]);
+          const opened = req.body._loaded_customer_id;
+          if (cur && opened != null && +opened !== +cur.customer_id) {
+            throw Object.assign(new Error(MOVED_SINCE_OPENED), { status: 409 });
+          }
+          if (cur && req.body.customer_id != null && +req.body.customer_id !== +cur.customer_id) {
+            req.body.code = await nextProductCode(+req.body.customer_id, qc, oc);
+            minted = true;
+            movedFrom = +cur.customer_id;
+          } else if (cur && req.body.code != null
+              && String(req.body.code).trim() !== String(cur.code ?? '').trim()) {
+            // A retyped code queues with the minters of its series.
+            await lockProductCodeSeries(req.body.code, oc);
+          }
         }
-      }
-      // Whatever code this row ends up with, the mirror follows it — the form
-      // no longer carries internal_carton_code, the server keeps it = code.
-      if (table === 'products' && req.body.code != null && String(req.body.code).trim()) {
-        req.body.internal_carton_code = String(req.body.code).trim();
-      }
-      const sets = cols.filter(c => c in req.body);
-      if (!sets.length) return res.json({});
-      // Field-level history: diff against the stored row so the audit trail
-      // records exactly what changed (old → new), not just "update".
-      const before = await one(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
-      const assign = sets.map((c, i) => `${c}=$${i + 1}`).join(',');
-      const vals = sets.map(c => req.body[c]);
-      vals.push(req.params.id);
-      const [row] = await q(
-        `UPDATE ${table} SET ${assign} WHERE id=$${sets.length + 1} RETURNING *`, vals);
-      const diff = before ? sets
-        .filter(c => String(before[c] ?? '') !== String(row?.[c] ?? ''))
-        .map(c => `${c}: ${before[c] ?? '—'} → ${row?.[c] ?? '—'}`)
-        .join('; ') : null;
-      await audit(table, +req.params.id, 'update', diff ? diff.slice(0, 500) : null, q, req.user.name);
+        // Whatever code this row ends up with, the mirror follows it — the form
+        // no longer carries internal_carton_code, the server keeps it = code.
+        if (table === 'products' && req.body.code != null && String(req.body.code).trim()) {
+          req.body.internal_carton_code = String(req.body.code).trim();
+        }
+        const sets = cols.filter(c => c in req.body);
+        if (!sets.length) return null;
+        // Field-level history: diff against the stored row so the audit trail
+        // records exactly what changed (old → new), not just "update".
+        const before = await oc(`SELECT * FROM ${table} WHERE id=$1`, [req.params.id]);
+        const assign = sets.map((c, i) => `${c}=$${i + 1}`).join(',');
+        const vals = sets.map(c => req.body[c]);
+        vals.push(req.params.id);
+        if (movedFrom != null) vals.push(movedFrom);
+        const [updated] = await qc(
+          `UPDATE ${table} SET ${assign} WHERE id=$${sets.length + 1}`
+          + (movedFrom != null ? ` AND customer_id=$${sets.length + 2}` : '') + ' RETURNING *', vals);
+        if (movedFrom != null && !updated) throw Object.assign(new Error(MOVED_SINCE_OPENED), { status: 409 });
+        const diff = before ? sets
+          .filter(c => String(before[c] ?? '') !== String(updated?.[c] ?? ''))
+          .map(c => `${c}: ${before[c] ?? '—'} → ${updated?.[c] ?? '—'}`)
+          .join('; ') : null;
+        await audit(table, +req.params.id, 'update', diff ? diff.slice(0, 500) : null, qc, req.user.name);
+        return updated;
+      };
+      const row = table === 'products' ? await tx(update) : await update(q, one);
+      if (row === null) return res.json({});
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
-    } catch (e) { next(productCodeClash(table, e, req)); }
+    } catch (e) { next(productCodeClash(table, e, req, minted)); }
   });
 
   r.delete(`/${table}/:id`, canEdit, async (req, res, next) => {
@@ -380,13 +419,29 @@ r.post('/products/:id/migrate-customer', canEdit, async (req, res, next) => {
     if (!target) return res.status(400).json({ error: 'customer_id required' });
     const p = await one('SELECT * FROM products WHERE id=$1', [req.params.id]);
     if (!p) return res.status(404).json({ error: 'Product not found' });
-    if (+p.customer_id === target) return res.status(400).json({ error: 'Product already belongs to that customer' });
+    const full = id => one(`
+      SELECT p.*, COALESCE(p.gst_pct, gr.rate, 12) AS gst
+      FROM products p LEFT JOIN gst_rates gr ON gr.product_type=p.product_type WHERE p.id=$1`, [id]);
+    // Already there — a second planner's "Move & use", or this one's retry
+    // after a lost answer. Nothing to move; hand back the product so the PO
+    // line can use it.
+    if (+p.customer_id === target) return res.json(await full(p.id));
     const cust = await one('SELECT id, name FROM customers WHERE id=$1 AND active=1', [target]);
     if (!cust) return res.status(400).json({ error: 'Target customer not found' });
     const from = await one('SELECT name FROM customers WHERE id=$1', [p.customer_id]);
-    const code = await nextProductCode(target);
-    const row = await tx(async (qc) => {
-      const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2, internal_carton_code=$2 WHERE id=$3 RETURNING *', [target, code, req.params.id]);
+    const row = await tx(async (qc, oc) => {
+      // Minted on this transaction, under the series lock — two migrations into
+      // one customer at once used to mint the same code (helpers.js nextProductCode).
+      // Moved only if it is still with the customer read above: a second copy
+      // of the same move waits on the lock, then finds it already moved and
+      // takes it as it is, rather than re-coding it a second time.
+      const code = await nextProductCode(target, qc, oc);
+      const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2, internal_carton_code=$2 WHERE id=$3 AND customer_id=$4 RETURNING *', [target, code, req.params.id, p.customer_id]);
+      if (!updated) {
+        const now = await oc('SELECT * FROM products WHERE id=$1', [req.params.id]);
+        if (now && +now.customer_id === target) return { ...now, alreadyMoved: true };
+        throw Object.assign(new Error('This product was moved to another customer just now — reload to see its current customer and code.'), { status: 409 });
+      }
       await qc(`INSERT INTO product_aliases (customer_id, alias_norm, product_id)
                 SELECT $1, alias_norm, product_id FROM product_aliases WHERE product_id=$2 AND customer_id=$3
                 ON CONFLICT (customer_id, alias_norm) DO UPDATE SET product_id=EXCLUDED.product_id`,
@@ -394,12 +449,11 @@ r.post('/products/:id/migrate-customer', canEdit, async (req, res, next) => {
       await qc('DELETE FROM product_aliases WHERE product_id=$1 AND customer_id=$2', [updated.id, p.customer_id]);
       return updated;
     });
-    await audit('product', row.id, 'migrate',
-      `${from?.name || p.customer_id} → ${cust.name}; code ${p.code} → ${row.code}`, q, req.user.name);
-    const full = await one(`
-      SELECT p.*, COALESCE(p.gst_pct, gr.rate, 12) AS gst
-      FROM products p LEFT JOIN gst_rates gr ON gr.product_type=p.product_type WHERE p.id=$1`, [row.id]);
-    res.json(full);
+    if (!row.alreadyMoved) {
+      await audit('product', row.id, 'migrate',
+        `${from?.name || p.customer_id} → ${cust.name}; code ${p.code} → ${row.code}`, q, req.user.name);
+    }
+    res.json(await full(row.id));
   } catch (e) { next(e); }
 });
 

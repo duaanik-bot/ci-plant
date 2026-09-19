@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { nextNumber } from './helpers.js';
+import { nextNumber, nextProductCode, lockProductCodeSeries, productCodeTaken } from './helpers.js';
 import { nextRunNumber } from './routes/gangs.js';
 import { nextToolCode } from './routes/tooling.js';
 
@@ -57,6 +57,38 @@ test('nextToolCode (die / plate / block codes) locks its prefix before reading',
   assertLockThenRead(calls, 'DIE-', 'tools');
 });
 
+test('nextProductCode locks its series on the caller\'s transaction before reading the highest code', async () => {
+  const seen = [];
+  const oc = async (sql, params = []) => { seen.push([sql, params]); return /FROM customers/.test(sql) ? { name: 'Swiss Garnier' } : null; };
+  const qc = async (sql, params = []) => { seen.push([sql, params]); return [{ code: 'SW-767' }]; };
+  assert.equal(await nextProductCode(4, qc, oc), 'SW-768');
+  const lockAt = seen.findIndex(([sql]) => /pg_advisory_xact_lock/.test(sql));
+  const seriesAt = seen.findIndex(([sql]) => /code LIKE \$1/.test(sql));
+  assert.ok(lockAt >= 0 && lockAt < seriesAt, 'the lock comes before the highest-code read');
+  assert.deepEqual(seen[lockAt][1], ['product-code:SW'], 'keyed on the series, in its own namespace');
+});
+
+test('a typed product code queues on the series its prefix names, the key a minter takes', async () => {
+  const keys = [];
+  const oc = async (sql, params = []) => { if (/pg_advisory_xact_lock/.test(sql)) keys.push(params[0]); return null; };
+  // '-001' is what a customer whose name has no Latin letter or digit mints:
+  // nextProductCode's prefix is '' and it locks 'product-code:'.
+  for (const code of [' sw-770 ', '3MC-012', 'SGB-A-7', '-001', '12345', '', null]) await lockProductCodeSeries(code, oc);
+  assert.deepEqual(keys, ['product-code:SW', 'product-code:3MC', 'product-code:SGB', 'product-code:'],
+    'a code outside any series takes no lock');
+});
+
+test('a taken product code names the code the write tried, and a minted one is not told to clear its field', () => {
+  const clash = () => Object.assign(new Error('duplicate key'), { code: '23505', constraint: 'products_code_key' });
+  const typed = productCodeTaken(clash(), 'SW-769');
+  assert.equal(typed.status, 409);
+  assert.match(typed.message, /^Internal Code SW-769 is already taken — clear the field/);
+  const minted = productCodeTaken(clash(), 'SW-770', true);
+  assert.match(minted.message, /^Internal Code SW-770 was taken by another save just now — save again/);
+  const other = Object.assign(new Error('x'), { code: '23505', constraint: 'grns_grn_number_key' });
+  assert.equal(productCodeTaken(other, 'SW-1').status, undefined, 'other unique keys pass through');
+});
+
 // ── Every caller mints inside a transaction ──────────────────────────────────
 // A transaction-scoped lock taken through the POOL (`one`) is released the
 // moment that single statement finishes — before the INSERT, which runs on a
@@ -67,7 +99,7 @@ test('nextToolCode (die / plate / block codes) locks its prefix before reading',
 // The single exception is GET /billing/next-invoice-number: it PREVIEWS the
 // next invoice number for the form and inserts nothing, so there is no write
 // to protect.
-const MINTERS = { nextNumber: 4, nextRunNumber: 2, nextToolCode: 2, nextScNumber: 1 };
+const MINTERS = { nextNumber: 4, nextRunNumber: 2, nextToolCode: 2, nextScNumber: 1, nextProductCode: 3, lockProductCodeSeries: 2 };
 // file → the one route in it allowed to preview on the pool.
 const POOL_PREVIEW_ALLOWED = { 'routes/billing.js': "GET /billing/next-invoice-number" };
 
@@ -147,6 +179,10 @@ test('the scan finds the minters it is guarding (a scan that finds nothing prove
   assert.ok(byName('nextNumber') >= 30, `found only ${byName('nextNumber')} nextNumber calls`);
   assert.ok(byName('nextRunNumber') >= 5, `found only ${byName('nextRunNumber')} nextRunNumber calls`);
   assert.ok(byName('nextToolCode') >= 3, `found only ${byName('nextToolCode')} nextToolCode calls`);
+  // Masters create / edit / migrate + PO-import quick-create; the typed-code
+  // lock in Masters create / edit + quick-create.
+  assert.ok(byName('nextProductCode') >= 4, `found only ${byName('nextProductCode')} nextProductCode calls`);
+  assert.ok(byName('lockProductCodeSeries') >= 3, `found only ${byName('lockProductCodeSeries')} lockProductCodeSeries calls`);
   assert.ok(calls.some(c => c.rel === 'routes/procurement.js' && c.name === 'nextNumber'
     && c.args[0] === "'CI-GRN-'"), 'the GRN minter that raised the production error is in scope');
 });
@@ -154,12 +190,35 @@ test('the scan finds the minters it is guarding (a scan that finds nothing prove
 test('every document-number minter is handed its transaction client, never the pool', () => {
   const bad = [];
   for (const c of minterCalls()) {
-    const client = c.args[c.arity - 1];
+    // Any client argument, not just the last: nextProductCode takes two.
+    const pool = c.args.find(a => a === 'one' || a === 'q');
     if (c.args.length !== c.arity) {
       bad.push(`${c.rel}:${c.line} ${c.name}(${c.args.join(', ')}) — no transaction client passed`);
-    } else if ((client === 'one' || client === 'q') && POOL_PREVIEW_ALLOWED[c.rel] !== c.route) {
-      bad.push(`${c.rel}:${c.line} ${c.name}(…, ${client}) in ${c.route} — minted on the pool, outside any transaction`);
+    } else if (pool && POOL_PREVIEW_ALLOWED[c.rel] !== c.route) {
+      bad.push(`${c.rel}:${c.line} ${c.name}(…, ${pool}) in ${c.route} — minted on the pool, outside any transaction`);
     }
   }
   assert.deepEqual(bad, [], `unprotected minters:\n  ${bad.join('\n  ')}`);
+});
+
+// A typed code only queues if its lock comes BEFORE the write that carries it.
+// These are the three places a code the user typed is written.
+test('every write of a typed product code takes its series lock first', () => {
+  const read = rel => stripComments(fs.readFileSync(path.join(SRC, rel), 'utf8'));
+  const between = (src, from, to) => {
+    const a = src.indexOf(from);
+    assert.ok(a >= 0, `${from} not found`);
+    return src.slice(a, src.indexOf(to, a + from.length));
+  };
+  const masters = read('routes/masters.js'), imp = read('routes/import.js');
+  const sites = [
+    ['Masters create', between(masters, 'r.post(`/${table}`', 'r.put(`/${table}/:id`'), 'lockProductCodeSeries(req.body.code, oc)', 'INSERT INTO ${table}'],
+    ['Masters edit', between(masters, 'r.put(`/${table}/:id`', 'r.delete(`/${table}/:id`'), 'lockProductCodeSeries(req.body.code, oc)', 'UPDATE ${table} SET'],
+    ['PO-import quick-create', between(imp, "r.post('/orders/import/quick-product'", '\n});'), 'lockProductCodeSeries(tried.code, oc)', 'INSERT INTO products'],
+  ];
+  for (const [name, body, lock, write] of sites) {
+    const at = body.indexOf(lock), w = body.indexOf(write);
+    assert.ok(at >= 0, `${name} no longer takes the series lock for a typed code`);
+    assert.ok(w > at, `${name} writes the code before it takes the series lock`);
+  }
 });

@@ -25,7 +25,7 @@ export default function ProductMasterEditor({ open, product, onClose, onSaved })
   useEffect(() => {
     if (!open || !product?.id) return;
     let current = true;
-    setForm({ ...product });
+    setForm({ ...product, _loadedCustomerId: product.customer_id });
     setLoading(true);
     setLoadError('');
     Promise.all([
@@ -39,7 +39,7 @@ export default function ProductMasterEditor({ open, product, onClose, onSaved })
       const fresh = allProducts.find(row => String(row.id) === String(product.id));
       setProducts(allProducts);
       setRefs({ customers, materials, dies, gst_rates: gstRates });
-      setForm({ ...product, ...(fresh || {}) });
+      setForm({ ...product, ...(fresh || {}), _loadedCustomerId: (fresh || product).customer_id });
     }).catch(error => {
       if (current) setLoadError(error.message || 'Could not load the full product master.');
     }).finally(() => {
@@ -60,7 +60,10 @@ export default function ProductMasterEditor({ open, product, onClose, onSaved })
     }
     setSaving(true);
     try {
-      const saved = await api.put(`/products/${form.id}`, body);
+      // The customer this editor was opened with: if someone moved the
+      // product since, the server refuses rather than filing the old code
+      // under the new owner (routes/masters.js PUT).
+      const saved = await api.put(`/products/${form.id}`, { ...body, _loaded_customer_id: form._loadedCustomerId ?? null });
       const next = { ...form, ...saved };
       toast.success('Product master updated');
       onSaved?.(next);

@@ -29,7 +29,7 @@ const freePort = () => new Promise((resolve, reject) => {
 describe('document numbers under real concurrency', {
   skip: ENABLED ? false : 'set DOC_NUMBER_RACE_PG=1 to boot a throwaway Postgres',
 }, () => {
-  let epg, dir, db, nextNumber, nextRunNumber, nextToolCode;
+  let epg, dir, db, nextNumber, nextRunNumber, nextToolCode, nextProductCode, lockProductCodeSeries;
 
   before(async () => {
     const { default: EmbeddedPostgres } = await import('embedded-postgres');
@@ -46,12 +46,14 @@ describe('document numbers under real concurrency', {
     process.env.DATABASE_URL = `postgresql://postgres:postgres@127.0.0.1:${port}/postgres`;
     db = await import('./db.js');
     await db.connect();
-    ({ nextNumber } = await import('./helpers.js'));
+    ({ nextNumber, nextProductCode, lockProductCodeSeries } = await import('./helpers.js'));
     ({ nextRunNumber } = await import('./routes/gangs.js'));
     ({ nextToolCode } = await import('./routes/tooling.js'));
     await db.q(`CREATE TABLE grns (id serial PRIMARY KEY, grn_number text NOT NULL UNIQUE)`);
     await db.q(`CREATE TABLE gang_runs (id serial PRIMARY KEY, gang_number text NOT NULL UNIQUE)`);
     await db.q(`CREATE TABLE tools (id serial PRIMARY KEY, family text NOT NULL, code text NOT NULL UNIQUE)`);
+    await db.q(`CREATE TABLE customers (id serial PRIMARY KEY, name text NOT NULL)`);
+    await db.q(`CREATE TABLE products (id serial PRIMARY KEY, customer_id int REFERENCES customers(id), code text UNIQUE)`);
   });
 
   after(async () => {
@@ -76,15 +78,16 @@ describe('document numbers under real concurrency', {
   // The production failure, step for step: A mints and inserts but has not yet
   // committed; B mints on the same prefix meanwhile; A commits. Unfixed, B read
   // the same highest number, minted the same next one, and its INSERT dies on
-  // the unique index once A commits.
-  async function race({ mint, insert }) {
+  // the unique index once A commits. `mintA` lets A take its number another way
+  // (a typed product code) while B mints.
+  async function race({ mint, mintA = mint, insert }) {
     let letACommit;
     const aMayCommit = new Promise(r => { letACommit = r; });
     let aMinted;
     const aHasMinted = new Promise(r => { aMinted = r; });
 
     const a = db.tx(async (qc, oc) => {
-      const n = await mint(oc);
+      const n = await mintA(oc, qc);
       await insert(qc, n);
       aMinted();
       await aMayCommit;
@@ -92,7 +95,7 @@ describe('document numbers under real concurrency', {
     });
     await aHasMinted;
     const b = db.tx(async (qc, oc) => {
-      const n = await mint(oc);
+      const n = await mint(oc, qc);
       await insert(qc, n);
       return n;
     });
@@ -128,6 +131,32 @@ describe('document numbers under real concurrency', {
 
   // Each test below mints on its own prefix, so a failure in one cannot shift
   // the numbers another expects.
+  // Product Internal Codes (SW-768…) are a series of their own, minted the
+  // same way — PO-import quick-create, Masters create / edit / migrate.
+  test('two products created at once for one customer get consecutive codes', async () => {
+    const { id: cust } = await db.one(`INSERT INTO customers (name) VALUES ('Swiss Garnier') RETURNING id`);
+    await db.q(`INSERT INTO products (customer_id, code) VALUES ($1, 'SW-767')`, [cust]);
+    const [a, b] = await race({
+      mint: (oc, qc) => nextProductCode(cust, qc, oc),
+      insert: (qc, code) => qc(`INSERT INTO products (customer_id, code) VALUES ($1, $2)`, [cust, code]),
+    });
+    assert.deepEqual([a, b], ['SW-768', 'SW-769']);
+  });
+
+  // The Masters form prefills the code, so most creates arrive TYPED. Unlocked,
+  // a typed HRB-004 mid-save was invisible to a minter, which minted HRB-004
+  // too and lost on the unique index when the typed one committed.
+  test('a typed code mid-save makes a minted create wait and take the next code', async () => {
+    const { id: cust } = await db.one(`INSERT INTO customers (name) VALUES ('Hindustan Rubber') RETURNING id`);
+    await db.q(`INSERT INTO products (customer_id, code) VALUES ($1, 'HRB-003')`, [cust]);
+    const [a, b] = await race({
+      mintA: async oc => { await lockProductCodeSeries('HRB-004', oc); return 'HRB-004'; },
+      mint: (oc, qc) => nextProductCode(cust, qc, oc),
+      insert: (qc, code) => qc(`INSERT INTO products (customer_id, code) VALUES ($1, $2)`, [cust, code]),
+    });
+    assert.deepEqual([a, b], ['HRB-004', 'HRB-005']);
+  });
+
   test('a burst of simultaneous posts (double-clicks, two storekeepers) all succeed with no gaps', async () => {
     await db.q(`INSERT INTO grns (grn_number) VALUES ('CI-BURST-0299')`);
     // allSettled, not all: a rejected minter must not leave its siblings still

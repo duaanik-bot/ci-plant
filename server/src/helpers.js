@@ -14,11 +14,6 @@ import { plateWearSummary } from './plates.js';
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
 import { customerInitials } from '../../client/src/lib/customerCode.js';
 
-// The next Internal Code in a customer's series, read off the data
-// (SW-001..767 style dense series; see productCode.js). Number is derived over
-// EVERY code in the prefix — products.code is globally unique, so this cannot
-// collide with an inactive or foreign row. Two simultaneous creates could
-// still race to the same number; the unique index rejects the loser, and at
 // Where a product waits when nobody has chosen its board yet.
 //
 // products.board_material_id is NOT NULL with no default, so a half-known
@@ -43,14 +38,55 @@ export async function placeholderBoardId(oc = one) {
   return any ? any.id : null;
 }
 
-// one-planner scale that is a retry, not a design problem. Shared by the
-// Masters create/migrate routes and the PO-import quick-create.
-export async function nextProductCode(customerId) {
-  const cust = await one('SELECT name FROM customers WHERE id=$1', [customerId]);
-  const customerCodes = (await q('SELECT code FROM products WHERE customer_id=$1 AND code IS NOT NULL', [customerId])).map(x => x.code);
+// The next Internal Code in a customer's series, read off the data
+// (SW-001..767 style dense series; see productCode.js). Number is derived over
+// EVERY code in the prefix — products.code is globally unique, so this cannot
+// collide with an inactive or foreign row.
+//
+// Read-the-highest-then-insert, so two creates at once (two planners, or a
+// double-submitted Save) used to read the same highest and the second INSERT
+// died on products_code_key as a raw 500. Now the series is locked first — the
+// document-number lock (lockDocNumber), in its own `product-code:` namespace —
+// on the CALLER'S transaction, which must be the one that writes the code: the
+// second create waits, then reads the first one's code and takes the next.
+// Shared by the Masters create / edit / migrate routes and the PO-import
+// quick-create; doc-number-lock.test.js holds every caller to a tx client.
+export async function nextProductCode(customerId, qc, oc) {
+  const cust = await oc('SELECT name FROM customers WHERE id=$1', [customerId]);
+  const customerCodes = (await qc('SELECT code FROM products WHERE customer_id=$1 AND code IS NOT NULL', [customerId])).map(x => x.code);
   const prefix = dominantPrefix(customerCodes) || customerInitials(cust?.name || '');
-  const allCodesInPrefix = (await q("SELECT code FROM products WHERE code LIKE $1 || '-%'", [prefix])).map(x => x.code);
+  await lockDocNumber(productSeriesKey(prefix), oc);
+  const allCodesInPrefix = (await qc("SELECT code FROM products WHERE code LIKE $1 || '-%'", [prefix])).map(x => x.code);
   return formatCode(prefix, nextSeriesNumber(allCodesInPrefix, prefix));
+}
+
+const productSeriesKey = prefix => `product-code:${prefix}`;
+
+// A code the user TYPED (or the form prefilled) joins the same series queue a
+// minted one does. Without it a typed SW-769 could land inside a minter's
+// read-then-insert and the MINTED create lost the unique race. The prefix is
+// read the way a minted one is built: letters/digits before the first '-',
+// possibly none — a customer whose name has no Latin letter or digit mints
+// '-001' under the empty prefix. A code with no '-' at all needs no lock:
+// nothing minted can equal it. Take it on the transaction that writes the
+// code, before the write.
+export async function lockProductCodeSeries(code, oc) {
+  const m = /^([A-Za-z0-9]*)-/.exec(String(code ?? '').trim());
+  if (m) await lockDocNumber(productSeriesKey(m[1].toUpperCase()), oc);
+}
+
+// A code that is already taken comes back as a named 409, not a raw unique-key
+// 500. `code` is the code the write tried; `minted` says the server chose it
+// (the field was blank), so the advice is to save again, not to clear a field
+// that is already clear. Anything else passes through untouched.
+export function productCodeTaken(e, code, minted = false) {
+  if (e?.code === '23505' && e.constraint === 'products_code_key') {
+    e.status = 409;
+    e.message = minted
+      ? `Internal Code ${code} was taken by another save just now — save again to take the next code in the series.`
+      : `Internal Code ${code} is already taken — clear the field to take the next code in the series.`;
+  }
+  return e;
 }
 
 // Central order-line state machine — every status change goes through this.

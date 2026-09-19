@@ -30,7 +30,8 @@
 // Pure — no fetch, no React — so the server suite can pin it.
 
 // Express paths of every POST that mints a document number (CI-GRN-, CI-VPO-,
-// CI-RCPT-, CI-CH-, CI-FG-/CI-BOX-, CI-JC-, CI-PR-, DIE-/PLT-/BLK-, …).
+// CI-RCPT-, CI-CH-, CI-FG-/CI-BOX-, CI-JC-, CI-PR-, DIE-/PLT-/BLK-, a product's
+// SW-769 Internal Code, …).
 export const MINTING_POSTS = Object.freeze([
   '/approvals',
   '/board/move',
@@ -57,12 +58,15 @@ export const MINTING_POSTS = Object.freeze([
   '/order-lines/:id/job-card',
   '/order-lines/:id/raise-pr',
   '/order-lines/:id/shortage',
+  '/orders/import/quick-product',
   '/payments',
   '/plate-masters',
   '/plates/grns',
   '/plates/grns/bulk',
   '/plates/purchase-orders',
   '/plates/warehouse/assets',
+  '/products',
+  '/products/:id/migrate-customer',
   '/purchase-orders',
   '/purchase-orders/from-requisitions',
   '/requisitions',

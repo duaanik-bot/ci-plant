@@ -3,8 +3,8 @@
 // (existing route) touch the DB.
 import { Router } from 'express';
 import multer from 'multer';
-import { q, one } from '../db.js';
-import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
+import { q, one, tx } from '../db.js';
+import { audit, lockProductCodeSeries, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { parsePO, parseFromRows, rowsFromItems, ocrPagesToItems } from '../poparse.js';
 import { cleanOcrPages } from '../ocr-words.js';
@@ -275,6 +275,8 @@ const splitSize2 = value => {
 // Quick-create master from an unmatched PO line: pre-filled from the parsed PDF,
 // editable in the import modal, and saved as a real product master immediately.
 r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
+  // The code the INSERT tries, for the 409 — the catch cannot see into the tx.
+  let tried = { code: null, minted: false };
   try {
     const {
       customer_id, name, rate, product_type, gst_pct, code,
@@ -297,41 +299,52 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
       if (!boardId) return res.status(400).json({ error: 'Create a board material first' });
       board = await one('SELECT id, name, spec, grade, gsm FROM materials WHERE id=$1', [boardId]);
     }
-    const internalCode = textOrNull(code) || await nextProductCode(+customer_id);
-    const dieSheet = splitSize2(sheet_size) || splitSize2(die?.sheet_size);
-    const body = {
-      board_grade: textOrNull(board_grade) || board?.grade || firstWordGrade(board),
-      gsm: numOrNull(gsm) != null ? Math.round(numOrNull(gsm)) : gsmFromBoard(board),
-      size: textOrNull(size) || textOrNull(die?.carton_size),
-      child_l: numOrNull(child_l) ?? dieSheet?.l ?? null,
-      child_w: numOrNull(child_w) ?? dieSheet?.w ?? null,
-      parent_l: numOrNull(parent_l), parent_w: numOrNull(parent_w),
-      ups: numOrNull(ups) ?? numOrNull(die?.ups),
-    };
-    const incomplete = spec_incomplete == null || spec_incomplete === ''
-      ? (specStillOpen(body) ? 1 : 0)
-      : (+spec_incomplete ? 1 : 0);
-    const [p] = await q(`
-      INSERT INTO products (
-        customer_id, name, code, internal_carton_code, party_item_code, party_artwork_code,
-        board_material_id, board_name, board_grade, gsm, size, child_l, child_w, parent_l, parent_w,
-        ups, colors, colour_type, coating, pasting_type, die_number, tool_id,
-        rate, product_type, gst_pct, spec_incomplete, active
-      )
-      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,1)
-      RETURNING *`,
-      [customer_id, name.trim(), internalCode, textOrNull(party_item_code), textOrNull(party_artwork_code),
-       board.id, /unspecified/i.test(board?.name || '') ? null : board?.name || null,
-       body.board_grade, body.gsm, body.size, body.child_l, body.child_w, body.parent_l, body.parent_w,
-       body.ups ?? 1, numOrNull(colors) ?? 4, textOrNull(colour_type) || 'CMYK', textOrNull(coating),
-       textOrNull(pasting_type), textOrNull(die_number) || textOrNull(die?.code), die?.id ?? null,
-       numOrNull(rate) ?? 0, textOrNull(product_type), numOrNull(gst_pct), incomplete]);
-    await audit('product', p.id, 'create', `quick-create from PO import: ${p.name}`, q, req.user.name);
+    // The code is minted and written in ONE transaction, under the series lock
+    // (helpers.js nextProductCode): two quick-creates at once used to mint the
+    // same code and the second died as a raw 500. A typed code waits in the same
+    // series queue (lockProductCodeSeries), so it cannot beat a minter to its
+    // number mid-save either.
+    tried = { code: textOrNull(code), minted: false };
+    const p = await tx(async (qc, oc) => {
+      if (tried.code) await lockProductCodeSeries(tried.code, oc);
+      else tried = { code: await nextProductCode(+customer_id, qc, oc), minted: true };
+      const internalCode = tried.code;
+      const dieSheet = splitSize2(sheet_size) || splitSize2(die?.sheet_size);
+      const body = {
+        board_grade: textOrNull(board_grade) || board?.grade || firstWordGrade(board),
+        gsm: numOrNull(gsm) != null ? Math.round(numOrNull(gsm)) : gsmFromBoard(board),
+        size: textOrNull(size) || textOrNull(die?.carton_size),
+        child_l: numOrNull(child_l) ?? dieSheet?.l ?? null,
+        child_w: numOrNull(child_w) ?? dieSheet?.w ?? null,
+        parent_l: numOrNull(parent_l), parent_w: numOrNull(parent_w),
+        ups: numOrNull(ups) ?? numOrNull(die?.ups),
+      };
+      const incomplete = spec_incomplete == null || spec_incomplete === ''
+        ? (specStillOpen(body) ? 1 : 0)
+        : (+spec_incomplete ? 1 : 0);
+      const [created] = await qc(`
+        INSERT INTO products (
+          customer_id, name, code, internal_carton_code, party_item_code, party_artwork_code,
+          board_material_id, board_name, board_grade, gsm, size, child_l, child_w, parent_l, parent_w,
+          ups, colors, colour_type, coating, pasting_type, die_number, tool_id,
+          rate, product_type, gst_pct, spec_incomplete, active
+        )
+        VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,1)
+        RETURNING *`,
+        [customer_id, name.trim(), internalCode, textOrNull(party_item_code), textOrNull(party_artwork_code),
+         board.id, /unspecified/i.test(board?.name || '') ? null : board?.name || null,
+         body.board_grade, body.gsm, body.size, body.child_l, body.child_w, body.parent_l, body.parent_w,
+         body.ups ?? 1, numOrNull(colors) ?? 4, textOrNull(colour_type) || 'CMYK', textOrNull(coating),
+         textOrNull(pasting_type), textOrNull(die_number) || textOrNull(die?.code), die?.id ?? null,
+         numOrNull(rate) ?? 0, textOrNull(product_type), numOrNull(gst_pct), incomplete]);
+      await audit('product', created.id, 'create', `quick-create from PO import: ${created.name}`, qc, req.user.name);
+      return created;
+    });
     const full = await one(`
       SELECT p.*, COALESCE(p.gst_pct, gr.rate, 12) AS gst
       FROM products p LEFT JOIN gst_rates gr ON gr.product_type=p.product_type WHERE p.id=$1`, [p.id]);
     res.json(full);
-  } catch (e) { next(e); }
+  } catch (e) { next(productCodeTaken(e, tried.code, tried.minted)); }
 });
 
 export default r;

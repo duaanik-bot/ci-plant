@@ -802,7 +802,7 @@ export default function Masters() {
             title={r.active ? 'Deactivate' : 'Activate'}
             onClick={() => toggleActive(r)}><Power size={14} /></PressButton>
         )}
-        <button className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={() => setEditing(r)}><Pencil size={14} /></button>
+        <button className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={() => setEditing(cfg.endpoint === '/products' ? { ...r, _loadedCustomerId: r.customer_id } : r)}><Pencil size={14} /></button>
         {!cfg.noDelete && (
           <button className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleting(r)}><Trash2 size={14} /></button>
         )}
@@ -845,6 +845,10 @@ export default function Masters() {
     if (cfg.endpoint === '/products') {
       const emb = +editing.emboss ? 1 : 0, leaf = +editing.leafing ? 1 : 0;
       body.special = emb && leaf ? 'foil_emboss' : emb ? 'emboss' : leaf ? 'foil' : 'none';
+      // The customer this form was opened with: if someone moved the product
+      // since, the server refuses rather than filing the old code under the
+      // new owner (routes/masters.js PUT).
+      if (editing.id && editing._loadedCustomerId != null) body._loaded_customer_id = editing._loadedCustomerId;
     }
     // Access scope travels with the user save — null on any dimension means
     // "everything" (all modules / all stations / all presses).
