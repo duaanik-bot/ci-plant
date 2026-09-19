@@ -384,7 +384,7 @@ r.post('/order-lines/:id/rollback', canPlan, async (req, res, next) => {
     const result = await tx((qc, oc) => rollbackLine({ lineId: +req.params.id, mode, note }, qc, oc, req.user.name));
     res.json(result);
   } catch (e) {
-    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers });
+    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers, ...(e.body?.code ? { code: e.body.code } : {}) });
     next(e);
   }
 });
@@ -569,7 +569,7 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
     });
     res.json(result);
   } catch (e) {
-    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers });
+    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers, ...(e.body?.code ? { code: e.body.code } : {}) });
     next(e);
   }
 });

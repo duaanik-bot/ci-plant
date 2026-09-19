@@ -3857,6 +3857,9 @@ r.get('/job-stages/:id/reverse-plan', canRun, async (req, res, next) => {
       target: plan.move.target, label: plan.move.label,
       items: plan.manifest.items, warnings: plan.manifest.warnings,
       gang: plan.gang, cards: plan.members.length,
+      // A split gang child can be sent back into its own queue but has no Job
+      // Card step to be pulled out to; child_of names the gang card it came from.
+      pull_back: plan.pullBack, child_of: plan.parentJcNumber,
     });
   } catch (e) { next(e); }
 });
@@ -3902,6 +3905,12 @@ r.post('/job-stages/:id/pull-back', canRun, async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       const plan = await stageReversePlan(+req.params.id, qc, oc);
       if (!plan.move) throw Object.assign(new Error('This stage cannot be pulled back'), { status: 409 });
+      // Before the approver gate, so the floor sees the real reason, not a 403.
+      if (!plan.pullBack) {
+        throw Object.assign(new Error(
+          `${plan.st.jc_number} is a gang child — its sheets were printed and die-cut on ${plan.parentJcNumber || 'the gang card'}, `
+          + 'so there is no Job Card step to pull it back to. Use Send back.'), { status: 409 });
+      }
       if (reverseNeedsApprover({ target: 'job_card', items: plan.manifest.items })) {
         const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
         if (!u?.reverse_approver) {

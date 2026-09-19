@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { PLANNING_ROLES } from '../auth.js';
-import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, releasePlanLockHolds, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor, lockLineGangFirst, PUSH_LOCKS } from '../helpers.js';
+import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, releasePlanLockHolds, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor, lockLineGangFirst, PUSH_LOCKS, lineIdsClosedBy, splitGangReverseBlock, cardForLine } from '../helpers.js';
 
 const r = Router();
 
@@ -58,16 +58,20 @@ async function clearFloor(oc, qc, jcId, { force, reason, user }) {
   return unwindJobCardOffFloor(jcId, reason || 'reversed to Planning', qc, oc, user);
 }
 
+// A split gang child (or a line whose child is gone, leaving only the split
+// parent) cannot be reversed to Planning / the Job Card / To Plan — refused
+// before anything is unwound. See helpers.js splitGangReverseBlock.
+function refuseSplitGang(jc) {
+  const msg = jc && splitGangReverseBlock(jc, jc.parent_jc_number);
+  if (msg) throw Object.assign(new Error(msg), { status: 409, body: { code: 'SPLIT_GANG_CHILD', blockers: [msg] } });
+}
+
 // What a reverse would have to walk back, before anyone commits to it.
 r.get('/workflow/order-lines/:id/reverse-preview', async (req, res, next) => {
   try {
     const line = await one('SELECT id, gang_run_id FROM order_lines WHERE id=$1', [+req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
-    const jc = await one(
-      `SELECT id FROM job_cards WHERE order_line_id=$1
-       UNION ALL
-       SELECT id FROM job_cards WHERE gang_run_id=$2 AND order_line_id IS NULL AND parent_job_card_id IS NULL
-       LIMIT 1`, [line.id, line.gang_run_id]);
+    const jc = await cardForLine(line, one);
     if (!jc) return res.json({ jc_number: null, at: null, chain: [], hops: 0, gang: false, jobs: 0 });
     res.json(await reverseChainPreview(jc.id));
   } catch (e) { next(e); }
@@ -116,12 +120,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       // `order_line_id = line.id` found nothing for a ganged job, so every
       // reverse below silently skipped the card that actually holds the stages —
       // which is why a gang could not be reversed from Artwork or Job Cards at all.
-      const cardFor = async () => await oc(
-        `SELECT * FROM job_cards WHERE order_line_id=$1
-         UNION ALL
-         SELECT * FROM job_cards
-          WHERE gang_run_id=$2 AND order_line_id IS NULL AND parent_job_card_id IS NULL
-         LIMIT 1`, [line.id, line.gang_run_id]);
+      const cardFor = () => cardForLine(line, oc);
 
       if (action === 'push_to_artwork') {
         requireAny(req, PLANNING_ROLES);
@@ -143,6 +142,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       if (action === 'reverse_to_planning') {
         requireAny(req, PLANNING_ROLES);
         const jc = await cardFor();
+        refuseSplitGang(jc);
         let hops = [];
         if (jc) {
           hops = await clearFloor(oc, qc, jc.id, {
@@ -174,9 +174,9 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // One physical run comes back as ONE job. A gang's stages live on the
         // parent card, so unwinding it while returning only the clicked member
         // would strand its mates reading 'in production' with no card under them.
-        const affected = jc?.gang_run_id
-          ? await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
-          : [{ id: line.id }];
+        // Exactly the lines the card closes (lineIdsClosedBy) — a split child
+        // never gets here (refuseSplitGang), so a partner is never swept along.
+        const affected = (jc ? await lineIdsClosedBy(jc, qc) : [line.id]).map(id => ({ id }));
         for (const a of affected) {
           await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [a.id]);
           await qc(
@@ -207,6 +207,10 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // membership and any unstarted job card are cleared. Material/spec edits
         // survive so the planner reopens the engine pre-filled.
         requireAny(req, PLANNING_ROLES);
+        // A split gang child first: its cartons exist, so no answer to the
+        // floor question below could make this reverse possible.
+        const jc = await cardFor();
+        refuseSplitGang(jc);
         // `force` is the planner having answered "yes, bring it back" to a job
         // that is on the floor — the status gate is exactly the wall that answer
         // is overriding, so it only applies to an unforced call.
@@ -215,7 +219,6 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
             new Error('Only a planned line can be reversed back to “To Plan”'),
             { status: 409, body: { code: 'LINE_ON_FLOOR', at: { stage: null, status: line.status } } });
         }
-        const jc = await cardFor();
         let hops = [];
         if (jc) {
           hops = await clearFloor(oc, qc, jc.id, {
@@ -298,6 +301,10 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         const target = req.body.target || 'planning';
         const jc = await cardFor();
         if (!jc) throw Object.assign(new Error('No job card exists for this line'), { status: 404 });
+        refuseSplitGang(jc);
+        // Exactly the lines this card closes (lineIdsClosedBy): a run card's
+        // every member, a plain card's own line. A split child is refused above.
+        const backIds = await lineIdsClosedBy(jc, qc);
         const hops = await clearFloor(oc, qc, jc.id, {
           force, user: req.user.name, reason: note || `job card reversed to ${target}`,
         });
@@ -311,17 +318,12 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // is not reset by this action.
         // …and for a gang, on EVERY member — the parent card being deleted here
         // is the one card all of them shared.
-        await qc(`DELETE FROM job_board_mix WHERE phase='issued' AND order_line_id IN (
-                    SELECT id FROM order_lines
-                     WHERE id=$1 OR ($2::int IS NOT NULL AND gang_run_id=$2))`,
-          [line.id, jc.gang_run_id]);
+        await qc(`DELETE FROM job_board_mix WHERE phase='issued' AND order_line_id = ANY($1::int[])`, [backIds]);
         await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
         await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
         const nextStatus = target === 'artwork' ? 'planned' : 'planned';
         // A gang card is one run over several lines — every member comes back.
-        const back = jc.gang_run_id
-          ? await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
-          : [{ id: line.id }];
+        const back = backIds.map(id => ({ id }));
         for (const b of back) {
           await forceLineStatus(b.id, nextStatus, note || `Job card reversed to ${target}`, qc, oc, req.user.name);
           if (target === 'planning') {

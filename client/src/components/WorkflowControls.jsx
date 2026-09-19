@@ -50,7 +50,11 @@ function WorkflowDecisionModal({
   bulkCount = 1,
 }) {
   const st = s => (s || '').replace(/_/g, ' ');
-  const onFloor = !!mode?.includes('reverse') && (preview?.hops || 0) > 0;
+  // No reverse can take this job at all (a split gang child — its cartons
+  // already exist). The server refuses it; say why instead of offering a
+  // confirm that can only fail.
+  const blocked = mode?.includes('reverse') ? preview?.blocked : null;
+  const onFloor = !blocked && !!mode?.includes('reverse') && (preview?.hops || 0) > 0;
   const toggleDestination = key => {
     setDestinations(current => {
       const next = current.includes(key) ? current.filter(x => x !== key) : [...current, key];
@@ -68,17 +72,25 @@ function WorkflowDecisionModal({
         {/* No hard block. A job on the floor used to disable this button and
             leave the planner nowhere to go; now the banner above says exactly
             where the job is and this confirms bringing the whole run back. */}
-        <Button
-          variant={mode?.includes('reverse') ? 'secondary' : 'primary'}
-          disabled={busy}
-          onClick={onConfirm}
-        >
-          {onFloor
-            ? `Bring back from ${st(preview.at?.stage)}`
-            : mode?.includes('reverse') ? 'Confirm Reverse' : 'Confirm Push'}
-        </Button>
+        {!blocked && (
+          <Button
+            variant={mode?.includes('reverse') ? 'secondary' : 'primary'}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {onFloor
+              ? `Bring back from ${st(preview.at?.stage)}`
+              : mode?.includes('reverse') ? 'Confirm Reverse' : 'Confirm Push'}
+          </Button>
+        )}
       </>}
     >
+      {blocked && (
+        <p className="mb-3 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-800">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          <span>{blocked}</span>
+        </p>
+      )}
       {onFloor && (
         <div className="mb-3 space-y-1.5 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
           <p className="flex items-start gap-2 font-bold">
@@ -108,7 +120,7 @@ function WorkflowDecisionModal({
         </div>
       )}
 
-      {mode === 'reversePlanning' && (
+      {mode === 'reversePlanning' && !blocked && (
         <div className="space-y-3">
           <div className="ci-summary-panel">
             Move {bulkCount > 1 ? `${bulkCount} selected products` : 'this product'} back to Planning so you can rework machine, dates, material, tooling, or product spec.
@@ -121,7 +133,7 @@ function WorkflowDecisionModal({
         </div>
       )}
 
-      {mode === 'reversePlan' && (
+      {mode === 'reversePlan' && !blocked && (
         <div className="space-y-3">
           <div className="ci-summary-panel">
             Move {bulkCount > 1 ? `${bulkCount} selected products` : 'this product'} back to <b>To Plan</b>. The locked cut plan — sheets, board position and any leftover booking — is cleared and artwork approvals reset, so the plan can be reworked from scratch. Material and spec edits are kept.
@@ -172,7 +184,7 @@ function WorkflowDecisionModal({
         </div>
       )}
 
-      {mode === 'reverseJob' && (
+      {mode === 'reverseJob' && !blocked && (
         <div className="space-y-3">
           {/* A started card is no longer a refusal — the amber banner above has
               already named the station and the confirm walks it back. This line
@@ -365,7 +377,9 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
     if (context === 'jobcard') {
       return [
         { key: 'jobcard', label: 'Route', title: 'Route Job Card', icon: ArrowLeftRight, show: jobCard?.status !== 'closed' },
-        { key: 'reverseJob', label: 'Reverse', icon: CornerDownLeft, show: jobCard?.status !== 'closed' },
+        // A split gang parent has no job left to reverse — each member now lives
+        // on its own child card, and a child's dialog says why it cannot go back.
+        { key: 'reverseJob', label: 'Reverse', icon: CornerDownLeft, show: !['closed', 'split'].includes(jobCard?.status) },
       ].filter(a => a.show);
     }
     return [];

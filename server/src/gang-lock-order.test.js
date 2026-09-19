@@ -154,7 +154,10 @@ test('deleting an order locks all its gangs, before the order row and any line',
 
 test('pull-back writes every card (in id order) before any line', () => {
   const pull = fnBody(read('helpers.js'), 'export async function pullBackToJobCard(');
-  assert.match(pull, /SELECT id, order_line_id FROM job_cards WHERE gang_run_id=\$1 ORDER BY id/);
+  // Only a RUN card's cards — a split gang child is refused before any write.
+  assert.match(pull, /SELECT id, order_line_id FROM job_cards WHERE gang_run_id=\$1 AND order_line_id IS NULL ORDER BY id/);
+  const refuseAt = pull.indexOf('if (isSplitChild(child))');
+  assert.ok(refuseAt > 0 && refuseAt < pull.indexOf('await sendStageBack('), 'a child is refused before sendStageBack writes anything');
   const cardWrite = pull.indexOf('UPDATE job_cards SET finalised_at=NULL');
   const lineWrite = pull.indexOf('UPDATE order_lines SET machine_id=NULL');
   assert.ok(cardWrite > 0 && lineWrite > cardWrite, 'cards first');

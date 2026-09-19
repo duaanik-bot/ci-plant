@@ -3233,6 +3233,51 @@ export async function lineIdsClosedBy(jc, qc = q) {
     .map(l => l.id);
 }
 
+// The same rule for every "a gang moves as one" decision: only a RUN card (an
+// unsplit gang parent or a combined run — gang_run_id set, no order line of its
+// own) speaks for the whole run. A split gang CHILD carries the run's
+// gang_run_id too, but after die cutting it is its own pile: sending it back,
+// pulling it back or reversing its line must never reach its partners.
+export const isRunCard = jc => !!jc?.gang_run_id && !jc?.order_line_id;
+export const isSplitChild = jc => !!jc?.parent_job_card_id;
+
+// The job card a line's reverse or rollback acts on: the line's OWN card first — a plain
+// card, or a split gang CHILD (which carries the run's gang_run_id as well) —
+// and only then the run card, for a gang member whose work still sits on the
+// run's parent card (the GANG_ANCHOR_LINE shape: order_line_id NULL). Two
+// lookups, in that order; a UNION with LIMIT 1 promised no order at all.
+// Carries the parent's number for splitGangReverseBlock's message.
+export async function cardForLine(line, oc) {
+  const cols = `jc.*, pj.jc_number AS parent_jc_number
+    FROM job_cards jc LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id`;
+  const own = await oc(`SELECT ${cols} WHERE jc.order_line_id=$1 ORDER BY jc.id LIMIT 1`, [line.id]);
+  if (own || !line.gang_run_id) return own;
+  return oc(`SELECT ${cols}
+    WHERE jc.gang_run_id=$1 AND jc.order_line_id IS NULL AND jc.parent_job_card_id IS NULL
+    ORDER BY jc.id LIMIT 1`, [line.gang_run_id]);
+}
+
+// Why a job-card reverse (to Planning, to the Job Card, to To Plan) or a
+// roll-back to the sales order cannot take this card, or null. A child's cartons were cut, printed and die-cut ONCE with
+// its whole gang on the parent card; deleting the child and sending its line
+// back strands it (a re-push finds the split parent, never a fresh child), and
+// widening to the run sent every member back while only one child card went —
+// the CI-JC-0317 orphan (2026-09-10). Pure.
+export function splitGangReverseBlock(jc, parentJcNumber = null) {
+  if (isSplitChild(jc)) {
+    return `${jc.jc_number} was cut, printed and die-cut with its gang on ${parentJcNumber || 'the gang card'} — `
+      + 'its cartons already exist, so this job cannot be reversed to Planning, rolled back or deleted. '
+      + (jc.status === 'closed'
+        ? 'It is finished — to correct it, use Reverse on its completed run at Sort & Paste.'
+        : 'To redo its sorting or pasting, use Send back at Sort & Paste.');
+  }
+  if (jc?.status === 'split') {
+    return `${jc.jc_number} was split into one card per job after die cutting and cannot be walked back — `
+      + "this job's own card is missing, so it needs a repair by the admin, not a reverse.";
+  }
+  return null;
+}
+
 // The order lines a finished job card produced for. A plain or split-child
 // card produced for exactly one; a COMBINED RUN card produced one pile of
 // identical cartons for every member of its run, so every member becomes
@@ -3782,7 +3827,7 @@ export function printReverseBlockers({ printingStatus, jcStatus, downstreamStage
 // not to give up, which is exactly what the old blanket refusal never said.
 export function stageReverseMoves({
   stage, status, jcStatus = null, downstreamStages = [], prevStage = null,
-  planningTarget = 'print_planning',
+  planningTarget = 'print_planning', pullBack = true,
 } = {}) {
   const label = s => (s || '').replace(/_/g, ' ');
   const blockers = [];
@@ -3809,13 +3854,19 @@ export function stageReverseMoves({
   const moves = [];
   if (status === 'completed')
     moves.push({ hop: 'reopen', target: stage, label: `Reopen ${label(stage)} to correct its output` });
-  moves.push({ hop: 'send_back', target, label: `Send back to ${label(target)}` });
+  moves.push({
+    hop: 'send_back', target,
+    // A split gang child's first stage has no station before it on its own
+    // card — its die cutting was done once, for the whole gang, on the parent.
+    // "Back" is its own queue, uncounted.
+    label: target === stage ? `Back to the ${label(stage)} queue, uncounted` : `Send back to ${label(target)}`,
+  });
   // Off the floor entirely, in one act. Walking a job back one station at a
   // time is the safe MECHANISM; it is not what somebody wants when they have
   // decided the job is wrong. Same guard as send_back — nothing downstream may
   // have started — so this can never orphan work built on this stage's output;
   // it just does every remaining hop in one transaction instead of four clicks.
-  moves.push({ hop: 'pull_back', target: 'job_card', label: 'Pull out to the Job Card' });
+  if (pullBack) moves.push({ hop: 'pull_back', target: 'job_card', label: 'Pull out to the Job Card' });
   return { moves, blockers: [] };
 }
 
@@ -3932,20 +3983,27 @@ async function stageFacts(st, isFirstStage, qc, oc) {
   };
 }
 
+const REVERSE_STAGE_COLS = `js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id,
+       jc.order_line_id, jc.parent_job_card_id, pj.jc_number AS parent_jc_number`;
+
 export async function stageReversePlan(stageId, qc = q, oc = one) {
   const st = await oc(`
-    SELECT js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id
+    SELECT ${REVERSE_STAGE_COLS}
     FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+    LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
     WHERE js.id=$1 FOR UPDATE OF js`, [stageId]);
   if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
 
-  // A gang moves as ONE run: the same stage on every card sharing the gang,
-  // exactly the member resolution print-planning's reverse uses.
-  const memberStages = st.gang_run_id
+  // A gang moves as ONE run: the same stage on every RUN card sharing the gang,
+  // exactly the member resolution print-planning's reverse uses. A split gang
+  // CHILD is not a run card (isRunCard) — after die cutting it is its own pile,
+  // so a partner's state neither refuses it nor is dragged back with it.
+  const memberStages = isRunCard(st)
     ? await qc(`
-        SELECT js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id
+        SELECT ${REVERSE_STAGE_COLS}
         FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
-        WHERE jc.gang_run_id=$1 AND js.stage=$2
+        LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
+        WHERE jc.gang_run_id=$1 AND jc.order_line_id IS NULL AND js.stage=$2
         ORDER BY jc.id FOR UPDATE OF js`, [st.gang_run_id, st.stage])
     : [st];
 
@@ -3955,9 +4013,15 @@ export async function stageReversePlan(stageId, qc = q, oc = one) {
     const downstream = await qc(
       'SELECT stage, status FROM job_stages WHERE job_card_id=$1 AND seq>$2 ORDER BY seq',
       [m.job_card_id, m.seq]);
+    const child = isSplitChild(m);
     const verdict = stageReverseMoves({
       stage: m.stage, status: m.status, jcStatus: m.jc_status,
       downstreamStages: downstream, prevStage: prev,
+      // A child's first stage has nothing before it on its own card: it goes
+      // back into its own queue, not off the floor to Print Planning (which it
+      // never came from), and there is no Job Card step to pull it back to.
+      planningTarget: child ? m.stage : undefined,
+      pullBack: !child,
     });
     results.push({ jc_number: m.jc_number, ...verdict, prev, m });
   }
@@ -3967,7 +4031,9 @@ export async function stageReversePlan(stageId, qc = q, oc = one) {
   const move = moves.find(x => x.hop === 'send_back');
   if (!move) throw Object.assign(new Error('This stage cannot be sent back'), { status: 409 });
 
-  const isFirstStage = !results[0].prev;
+  // A child never drew board (stage start skips it — the parent drew for the
+  // gang), so its first stage has none to return.
+  const isFirstStage = !results[0].prev && !isSplitChild(st);
   const members = [];
   for (const r of results) members.push(await stageFacts(r.m, isFirstStage, qc, oc));
 
@@ -3980,7 +4046,11 @@ export async function stageReversePlan(stageId, qc = q, oc = one) {
     extraIssued: sum('extraIssued'), runCount: sum('runCount'),
   });
 
-  return { st, move, manifest, members, gang: !!st.gang_run_id };
+  return {
+    st, move, manifest, members, gang: isRunCard(st),
+    pullBack: moves.some(x => x.hop === 'pull_back'),
+    parentJcNumber: st.parent_jc_number || null,
+  };
 }
 
 // Apply a plan: cross ONE station boundary, compensating every ledger effect
@@ -4172,18 +4242,24 @@ export async function reverseChainPreview(jcId, qc = q, oc = one) {
   const rows = await qc(
     `SELECT id, stage, status, seq FROM job_stages
      WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC`, [jcId]);
-  const jc = await oc(
-    'SELECT id, jc_number, status, gang_run_id, parent_job_card_id FROM job_cards WHERE id=$1', [jcId]);
+  const jc = await oc(`
+    SELECT jc.id, jc.jc_number, jc.status, jc.gang_run_id, jc.order_line_id, jc.parent_job_card_id,
+           pj.jc_number AS parent_jc_number
+    FROM job_cards jc LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
+    WHERE jc.id=$1`, [jcId]);
   // Member JOBS, not cards: a gang normally runs on ONE parent card, so a card
-  // count would say "all 1 cards come back together" while two jobs move.
-  const jobs = jc?.gang_run_id
+  // count would say "all 1 cards come back together" while two jobs move. A
+  // split child is one job (isRunCard).
+  const jobs = isRunCard(jc)
     ? (await qc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [jc.gang_run_id]))[0]?.n ?? 1
     : 1;
   return {
     jc_number: jc?.jc_number || null,
     jc_status: jc?.status || null,
-    gang: !!jc?.gang_run_id,
+    gang: isRunCard(jc),
     jobs,
+    // Set when no reverse can take this card at all — shown instead of a confirm.
+    blocked: jc ? splitGangReverseBlock(jc, jc.parent_jc_number) : null,
     // Where the job is RIGHT NOW — the furthest-along station, which is the one
     // the planner recognises ("it is at printing").
     at: rows[0] ? { stage: rows[0].stage, status: rows[0].status } : null,
@@ -4378,6 +4454,23 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
   const line = await lockLineGangFirst(lineId, qc, oc, { gang: 'NO KEY UPDATE', line: 'UPDATE' });
   if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
 
+  // A split gang child's cartons already exist: rolling its line back deleted
+  // the child card and took the line out of the gang while the split parent
+  // kept the board it drew — the CI-JC-0317 orphan by another door. Refused
+  // before anything else is read or written; only an order force-delete, which
+  // takes every gang-mate with it (scopeLineIds), keeps its own rules.
+  if (!(force && mode === 'delete')) {
+    const card = await cardForLine(line, oc);
+    const split = card && splitGangReverseBlock(card, card.parent_jc_number);
+    if (split) {
+      // Same shape as the other rollback refusals below (the /rollback and
+      // order-delete routes read e.blockers), with the code in body as well.
+      const e = new Error(split);
+      e.status = 409; e.blockers = [split]; e.body = { code: 'SPLIT_GANG_CHILD', blockers: [split] };
+      throw e;
+    }
+  }
+
   const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1', [lineId]);
   const stages = jc ? await qc('SELECT stage, status FROM job_stages WHERE job_card_id=$1', [jc.id]) : [];
   const prPo = await oc(
@@ -4523,15 +4616,29 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
 // editable again. reopenBlock allows that only once no stage has started, which
 // is precisely what sendStageBack has just arranged.
 export async function pullBackToJobCard(stageId, reason, qc = q, oc = one, user = null) {
+  // A split gang CHILD has no Job Card step: its sheets were printed and die-cut
+  // on the gang's parent card, and pulling it back used to reopen that SPLIT
+  // parent and every partner. Refused before anything is written.
+  const child = await oc(`
+    SELECT jc.jc_number, jc.parent_job_card_id, pj.jc_number AS parent_jc_number
+    FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+    LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
+    WHERE js.id=$1`, [stageId]);
+  if (isSplitChild(child)) {
+    throw Object.assign(new Error(
+      `${child.jc_number} is a gang child — its sheets were printed and die-cut on ${child.parent_jc_number}, `
+      + 'so there is no Job Card step to pull it back to. Use Send back.'), { status: 409 });
+  }
   const out = await sendStageBack(stageId, reason, qc, oc, user);
   const jc = await oc('SELECT id, jc_number, order_line_id, gang_run_id, machine_id FROM job_cards WHERE id=(SELECT job_card_id FROM job_stages WHERE id=$1)', [stageId]);
   if (!jc) return out;
 
   // The whole gang comes off together — it is one physical run, and a card left
   // finalised on the board while its mates are being edited is the desync
-  // sendStageBack already refuses to create.
-  const cards = jc.gang_run_id
-    ? await qc('SELECT id, order_line_id FROM job_cards WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
+  // sendStageBack already refuses to create. Only RUN cards (isRunCard): a split
+  // child never reaches here.
+  const cards = isRunCard(jc)
+    ? await qc('SELECT id, order_line_id FROM job_cards WHERE gang_run_id=$1 AND order_line_id IS NULL ORDER BY id', [jc.gang_run_id])
     : [{ id: jc.id, order_line_id: jc.order_line_id }];
 
   // Every card first (in id order — the run's parent before its children),

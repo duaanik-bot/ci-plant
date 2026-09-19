@@ -34,7 +34,9 @@ export function useSendBack({ toast, onDone }) {
   const sendBack = async () => {
     const { row, plan, stageId } = sendingBack;
     await api.post(`/job-stages/${stageId}/send-back`, { reason });
-    toast.info(`${row.jc_number} sent back to ${fmt.stage(plan.target)}`);
+    toast.info(inPlace(plan)
+      ? `${row.jc_number} is back in the ${fmt.stage(plan.stage)} queue`
+      : `${row.jc_number} sent back to ${fmt.stage(plan.target)}`);
     close(); onDone?.();
   };
   // Off the floor in one act. Same guard, same manifest — the difference is only
@@ -49,18 +51,29 @@ export function useSendBack({ toast, onDone }) {
   return { open, sendingBack, dialogProps: { sendingBack, reason, setReason, close, sendBack, pullBack } };
 }
 
+// A split gang CHILD's first stage has no station before it on its own card —
+// its die cutting was done once, for the whole gang, on the parent card — so
+// "back" is its own queue, uncounted. The server says so by targeting the stage
+// itself (helpers.js stageReversePlan).
+const inPlace = plan => plan?.target === plan?.stage;
+
 export function SendBackDialog({ sendingBack, reason, setReason, close, sendBack, pullBack, stationLabel }) {
+  const plan = sendingBack?.plan;
+  const where = plan ? (inPlace(plan) ? `the ${fmt.stage(plan.stage)} queue` : fmt.stage(plan.target)) : '';
   return (
     <Modal open={!!sendingBack} onClose={close}
-      title={sendingBack ? `Send back to ${fmt.stage(sendingBack.plan.target)} — ${sendingBack.row.jc_number}` : ''}
+      title={sendingBack ? `${inPlace(plan) ? 'Back to' : 'Send back to'} ${where} — ${sendingBack.row.jc_number}` : ''}
       footer={<>
         <Button variant="secondary" onClick={close}>Cancel</Button>
-        <Button variant="secondary" onClick={pullBack} disabled={!reason.trim()}
-          title="Take the job off the floor entirely and reopen it at the Job Card station">
-          <Undo2 size={13} /> Pull out to Job Card
-        </Button>
+        {/* A gang child has no Job Card step to be pulled out to (pull_back false). */}
+        {plan?.pull_back !== false && (
+          <Button variant="secondary" onClick={pullBack} disabled={!reason.trim()}
+            title="Take the job off the floor entirely and reopen it at the Job Card station">
+            <Undo2 size={13} /> Pull out to Job Card
+          </Button>
+        )}
         <Button variant="danger" onClick={sendBack} disabled={!reason.trim()}>
-          <Undo2 size={13} /> Send back to {sendingBack ? fmt.stage(sendingBack.plan.target) : ''}
+          <Undo2 size={13} /> {inPlace(plan) ? 'Back to the queue' : `Send back to ${where}`}
         </Button>
       </>}>
       {sendingBack && (
@@ -88,12 +101,23 @@ export function SendBackDialog({ sendingBack, reason, setReason, close, sendBack
               Nothing was consumed or produced here — only the stage returns to its queue.
             </p>
           )}
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-            <b>Send back</b> moves it one station, to {fmt.stage(sendingBack.plan.target)}.
-            {' '}<b>Pull out to Job Card</b> takes it off the floor altogether and reopens the
-            card so the spec or quantity can be corrected, then re-pushed. Both undo the same
-            list above.
-          </p>
+          {sendingBack.plan.child_of ? (
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+              This card was split from the gang card <b>{sendingBack.plan.child_of}</b> after die cutting,
+              so only this job moves — the rest of the gang stays where it is.
+              {' '}{inPlace(sendingBack.plan)
+                ? <>It goes back into the {fmt.stage(sendingBack.plan.stage)} queue, uncounted. Die cutting was
+                    done once for the whole gang and is not reopened.</>
+                : <>It moves one station, to {fmt.stage(sendingBack.plan.target)}.</>}
+            </p>
+          ) : (
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+              <b>Send back</b> moves it one station, to {fmt.stage(sendingBack.plan.target)}.
+              {' '}<b>Pull out to Job Card</b> takes it off the floor altogether and reopens the
+              card so the spec or quantity can be corrected, then re-pushed. Both undo the same
+              list above.
+            </p>
+          )}
           {sendingBack.plan.warnings.map(w => (
             <p key={w} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{w}</p>
           ))}
