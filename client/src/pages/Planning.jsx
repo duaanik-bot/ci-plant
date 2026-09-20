@@ -13,7 +13,7 @@ import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, K
 import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
-import { clientStrips, chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
+import { clientStrips, chosenCutsValid, chosenStrips, cutParentOf, parentLosesCuts, parentFollowsBoard, parentTooBig, runSheetParent, runMemberCut, engineParent, engineParentError, boardSheetFill, boardSwitch, boardUndo, sameSheet } from '../lib/cutFit.js';
 import { sharedRunFigures } from '../lib/gangRunMath.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
@@ -445,6 +445,15 @@ const CATEGORY_STYLE = {
 // third one is named for what it actually is.
 const CATEGORY_LABEL = { exact: 'Exact', near: 'Near', alternate: 'Off GSM' };
 
+// What a re-derive undid, said in the toast that reports the change (Task 6b):
+// a board, sheet, qty or ups change re-prices the cut plan, so a saved board
+// mix (priced on the old cut) is cleared and a planned leftover strip goes back
+// off the shelf. Unsaid, the planner finds the mix gone and the strip missing.
+const reDeriveNote = d => [
+  d?.mix_cleared ? 'saved board mix cleared — it was priced on the old cut, rebuild it' : null,
+  d?.leftover_unbanked ? 'planned leftover taken back off the shelf' : null,
+].filter(Boolean).map(s => ` · ${s}`).join('');
+
 export default function Planning() {
   const toast = useToast();
   // The list arrives in two halves (GET /planning?scope=, lib/planningScope.js).
@@ -468,7 +477,10 @@ export default function Planning() {
   const [planLine, setPlanLine] = useState(null);
   const [ctx, setCtx] = useState(null);
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
-  const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
+  // Previous selections, newest last — powers Undo. One entry per switch:
+  // { board, parentBefore: { parent_l, parent_w }, fill } — the board it left,
+  // the Parent fields as they were, and what it wrote into them (or null).
+  const [boardHist, setBoardHist] = useState([]);
   const [mixRows, setMixRows] = useState([]); // Board Mix draft — {material_id, sheets, ups, ...} rows
   // Which mix rows bank their strip, keyed by material_id. Session state like
   // the rows themselves: reset wherever mixRows reset, and reopening a saved
@@ -491,6 +503,10 @@ export default function Planning() {
   const [packetChoice, setPacketChoice] = useState({});
   const [gangPacketChoice, setGangPacketChoice] = useState({});
   const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', print_process: '', cmyk_colours: '', pantone_colours: '', pantone_codes: '', metallic_colours: '', metallic_details: '', print_instructions: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
+  // The form as it stands NOW, for a handler that decides after an await:
+  // resetBoard's parent carry runs once its reload lands, and the Parent fields
+  // stay editable meanwhile, so the form its click captured can be stale.
+  const formRef = useRef(form); formRef.current = form;
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
@@ -578,7 +594,7 @@ export default function Planning() {
   const [gangSmart, setGangSmart] = useState(null);  // smart-match board suggestions (null = closed)
   const [gangExpand, setGangExpand] = useState(null); // line id whose full spec panel is open
   const [gangSpecForm, setGangSpecForm] = useState(null); // per-product identity draft in the expander
-  const [gangSheetForm, setGangSheetForm] = useState({ child_l: '', child_w: '', coating: '' }); // unified gang sheet lock (child + coating)
+  const [gangSheetForm, setGangSheetForm] = useState({ child_l: '', child_w: '', coating: '', parent_l: '', parent_w: '' }); // unified gang sheet lock (child + coating + parent)
   const [gangNumbers, setGangNumbers] = useState({ output_number: '', die_number: '' }); // the RUN's own plate + die number
   const [gangNumBusy, setGangNumBusy] = useState(false);
   const [gangReverseOpen, setGangReverseOpen] = useState(false); // reverse confirm
@@ -1129,7 +1145,18 @@ export default function Planning() {
     // leaves standing are still this job's and stay remembered.
     setSmartPinned(false); setLastCommit(null); setHeldHere({}); setCommitConfirm(null);
     setStockBooking(l.stock_booking || 'book');
-    setBoardSel({ id: l.board_material_id, name: l.board_name, sheet_l: l.sheet_l, sheet_w: l.sheet_w });
+    // boardSel is the BOARD: its own sheet, the one plan-save judges a parent
+    // against. LINE_VIEW's sheet_l/_w are the folded parent (per side, the
+    // parent on file, else the board's sheet) — seeded here, they made the
+    // saved parent the engine's "board", so SW-544's fossil 22×28 was measured
+    // against itself and never warned. They stand in only for a row that does
+    // not carry board_sheet_l/_w at all — decided on the column's PRESENCE,
+    // never its value: an unsized board ("Unspecified board", #278) sends
+    // NULL, and falling back on that seated a 20×38 trim as the board, so
+    // picking the real 23×38 board carried the trim away.
+    setBoardSel({ id: l.board_material_id, name: l.board_name,
+      sheet_l: 'board_sheet_l' in l ? l.board_sheet_l : l.sheet_l,
+      sheet_w: 'board_sheet_w' in l ? l.board_sheet_w : l.sheet_w });
     setForm({
       qty: String(l.qty ?? ''),
       ups: String(l.ups),
@@ -1234,6 +1261,17 @@ export default function Planning() {
     return out;
   };
   const edited = planLine ? changedSpec() : {};
+  // What a BLANK Parent field stands for, per side — the field's placeholder
+  // and the hint under it. A blank is "no change" to plan-save, so over a side
+  // on file it means that side ("on file 22""); with nothing on file there,
+  // the board's own sheet ("board 23""); on an unsized board, nothing — never
+  // "null".
+  const parentBlank = side => {
+    const onFile = planLine?.[`parent_${side}`];
+    if (onFile != null) return { placeholder: String(onFile), hint: `on file ${onFile}"` };
+    const b = boardSel?.[`sheet_${side}`];
+    return +b > 0 ? { placeholder: String(b), hint: `board ${b}"` } : { placeholder: '', hint: undefined };
+  };
   // Which colour-detail fields the CURRENT form state asks for — read off the
   // form, not off planLine, so the boxes appear the moment the planner picks a
   // type rather than after a save.
@@ -1316,22 +1354,33 @@ export default function Planning() {
     const total = base + wastage;
     const childL = +form.child_l || planLine.child_l;
     const childW = +form.child_w || planLine.child_w;
-    // Parent cut = the finalised parent size the planner set, else the board's
-    // full mother sheet. Editing it re-fits the cut plan live.
-    const parentL = +form.parent_l || boardSel.sheet_l;
-    const parentW = +form.parent_w || boardSel.sheet_w;
+    // The parent this plan cuts on, read the way plan-save reads it
+    // (engineParent, lib/cutFit.js): per side, the typed value, else the one on
+    // file — a blank field is "no change" to the save, never "the board" — and
+    // only a whole pair is a parent; anything less cuts on the board's own
+    // sheet. boardSel IS that sheet (see openPlan), so the parent is judged
+    // against the board it is cut from. Editing it re-fits the cut plan live.
+    const board = { l: boardSel.sheet_l, w: boardSel.sheet_w };
+    const { declared, parent } = engineParent({
+      form: { parent_l: form.parent_l, parent_w: form.parent_w },
+      saved: { l: planLine.parent_l, w: planLine.parent_w },
+      board,
+    });
+    const parentL = parent.l, parentW = parent.w;
     const fit = clientFit(parentL, parentW, childL, childW);
     const cpp = fit?.cpp > 0 ? fit.cpp : 1;
-    const parentTrimmed = (+form.parent_l && +form.parent_l !== +boardSel.sheet_l) || (+form.parent_w && +form.parent_w !== +boardSel.sheet_w);
+    // Trimmed = a declared parent that is not the board's own sheet, either
+    // way round (a 38×23 parent on a 23×38 board is no trim) — and only on a
+    // board WITH a sheet: an unsized board has nothing to trim from, and said
+    // "trimmed from board ×"".
+    const boardSized = +board.l > 0 && +board.w > 0;
+    const parentTrimmed = !!declared && boardSized && !sameSheet(declared, board);
     // A "trim" larger than the board is physically impossible — you cannot cut
-    // a 25×38 parent out of a 23×26.5 mother sheet. Sorted-axis compare so a
+    // a 25×38 parent out of a 23×26.5 mother sheet. Orientation-free, so a
     // parent that is the board turned sideways still reads as a fit; the
-    // server's plan-save now 409s the same rule (parentFitsBoard), this just
-    // says it while the planner is still looking at the field.
-    const bL = +boardSel.sheet_l, bW = +boardSel.sheet_w;
-    const parentOversize = parentTrimmed && bL > 0 && bW > 0
-      && (Math.max(parentL, parentW) > Math.max(bL, bW) + 1e-6
-        || Math.min(parentL, parentW) > Math.min(bL, bW) + 1e-6);
+    // server's plan-save 409s the same rule (parentFitsBoard), this just says
+    // it while the planner is still looking at the field.
+    const parentOversize = !!declared && parentTooBig({ parentL: declared.l, parentW: declared.w, boardL: boardSel.sheet_l, boardW: boardSel.sheet_w });
     return {
       ups, wastage, base, total, planQty, childL, childW, parentL, parentW,
       wastagePctEq: base > 0 ? +((wastage / base) * 100).toFixed(1) : 0,
@@ -1342,7 +1391,10 @@ export default function Planning() {
       // before the save has to ask.
       engineParent: Math.ceil((base + DEFAULT_WASTAGE_SHEETS) / cpp),
       parentSize: fit ? `${parentL}×${parentW}"` : null,
-      parentTrimmed, parentOversize,
+      // `declared` is the parent this plan declares — typed, else on file —
+      // or null when it cuts on the board's own sheet. The Cut Plan's warning
+      // reads it.
+      parentTrimmed, parentOversize, declared,
       childSize: fit ? `${childL}×${childW}"` : null,
       orderQty,
     };
@@ -1392,6 +1444,10 @@ export default function Planning() {
     if (!gangView?.members?.length) return null;
     const w = Math.max(0, Math.round(+gangWastage || 0));
     const anchor = gangView.members[0];
+    // A co-printed run's lock cuts the shared child on the board's own sheet
+    // and never reads a member's parent on file; every other run's lock cuts
+    // each member on ITS parent (planLockParent) — so must this screen.
+    const coPrinted = gangView.kind !== 'merge' && gangView.layout_mode === 'shared';
     let baseChild = 0, childSheets = 0, parent = 0;
     // Net = ordered − FG-consumed − already dispatched, the server's
     // netProduceQty exactly (a re-planned line after a partial dispatch only
@@ -1402,8 +1458,14 @@ export default function Planning() {
       const ups = Math.max(1, +m.ups || 1);
       const base = Math.ceil(net / ups);
       const child = base + (i === 0 ? w : 0); // wastage once, on the lead member
-      const fit = clientFit(anchor?.sheet_l, anchor?.sheet_w, +m.child_l || +anchor?.child_l, +m.child_w || +anchor?.child_w);
-      const cpp = fit && fit.cpp > 0 ? fit.cpp : 1;
+      // Each member on the parent its lock cuts on, on ITS OWN board: the parent
+      // on file when that board can yield it, else the board's sheet
+      // (runMemberCut, lib/cutFit.js — held to the server's memberParentSheets
+      // by run-member-cut.test.js). The bare anchor board here is how
+      // CI-MRG-0028 said "Covered" at 3,550 while its lock wrote 10,650 off a
+      // 22×28 parent; the anchor's board standing in for an UNSIZED member
+      // counted a sheet that member is never cut from (the server issues it 1:1).
+      const { cpp } = runMemberCut({ member: m, coPrinted, childFallback: { child_l: anchor?.child_l, child_w: anchor?.child_w } });
       const p = Math.ceil(child / cpp);
       baseChild += base; childSheets += child; parent += p;
       return { id: m.id, base, child, cpp, parent: p };
@@ -1732,17 +1794,57 @@ export default function Planning() {
     return () => clearTimeout(t);
   }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW, boardRev, smartPinned]);
 
+  // A board change (a pick or a Reset) carries a parent that cannot stay on
+  // the new board: a copy of the OLD board's sheet, or a size the new board
+  // cannot yield (spec §4). boardSwitch (lib/cutFit.js) decides, on the parent
+  // this plan cuts on (typed, else on file) against the boards' OWN sheets —
+  // boardSel holds the board's sheet, not the folded parent (see openPlan).
+  // Seeded with the folded parent, every saved parent looked like a copy of
+  // its own board and every pick carried it away; now a genuine trim the new
+  // board can still yield (SW-258's 22×28 on a 26×30) stays exactly as it is,
+  // and the Cut Plan warns if it costs cuts. What a carry writes is the board's
+  // full sheet (boardSheetFill): over a parent on file, the new board's dims —
+  // visible before Lock, and carried by the Lock's master question (Update
+  // Product Master / This job only); with nothing on file, blanks — blank IS
+  // the board's sheet, asks nothing, and leaves no copy of this board to go
+  // stale on the next change. `cur` is the form to decide from (resetBoard
+  // passes formRef.current). Returns boardSwitch's answer plus the fields as
+  // they were before it: the Undo entry needs both.
+  const carryParent = (fromBoard, toBoard, cur = form) => {
+    const parentBefore = { parent_l: cur.parent_l, parent_w: cur.parent_w };
+    const sw = boardSwitch({
+      form: parentBefore,
+      saved: { l: planLine.parent_l, w: planLine.parent_w },
+      from: { l: fromBoard?.sheet_l, w: fromBoard?.sheet_w },
+      to: { l: toBoard?.sheet_l, w: toBoard?.sheet_w },
+    });
+    if (sw.fill) setForm(f => ({ ...f, ...sw.fill }));
+    return { ...sw, parentBefore };
+  };
+  // The toast names both sides of a carry.
+  const followNote = ({ declared: d, carried: c, fill }) => (!fill ? ''
+    : fill.parent_l === '' ? ` · parent ${d.l}×${d.w}" → the board's full sheet`
+    : ` · parent ${d.l}×${d.w}" → ${c.l}×${c.w}"`);
+  // A parent the way the engine reads the fields: the pair they declare
+  // (typed, else on file), or the board's full sheet.
+  const parentWords = p => {
+    const { declared } = engineParent({ form: p, saved: { l: planLine.parent_l, w: planLine.parent_w } });
+    return declared ? `${declared.l}×${declared.w}"` : 'the board\'s full sheet';
+  };
+
   // A warehouse / smart-match selection — job-level board change, previewed
   // instantly; the master-update philosophy asks its question on Lock.
-  // Every switch records the outgoing board so Undo can step back through
+  // Every switch records the outgoing board — with the Parent fields as they
+  // were and what the switch wrote into them — so Undo can step back through
   // the picks, and Reset jumps straight to the product master's board.
   const pickBoard = async row => {
     const next = { id: row.id ?? row.material_id, name: row.name, sheet_l: row.sheet_l, sheet_w: row.sheet_w };
-    setBoardHist(h => [...h, boardSel]);
+    const sw = carryParent(boardSel, next);
+    setBoardHist(h => [...h, { board: boardSel, parentBefore: sw.parentBefore, fill: sw.fill }]);
     setLo({ push: false, strip: null }); // a different board leaves different strips
     setBoardSel(next); setWhOpen(false); setCtx(null);
     setCtx(await loadCtx(planLine, next.id));
-    toast.info(`Board switched to ${next.name} for this plan — lock to confirm`);
+    toast.info(`Board switched to ${next.name} for this plan — lock to confirm${followNote(sw)}`);
   };
   // ── Commit / uncommit ──────────────────────────────────────────────────────
   // Committed demand is DERIVED — plan a job on a board and it is committed,
@@ -1826,26 +1928,50 @@ export default function Planning() {
     });
   };
 
+  // Undo steps back one board, and puts back what that switch wrote into the
+  // Parent fields — only if they still hold exactly what it wrote (boardUndo,
+  // lib/cutFit.js). It restores; it never re-derives: re-running the carry
+  // backwards turned a typed 22×36 into the old board's sheet, and a typed
+  // 22×28 into a carry nobody asked for. An edit made since the switch is the
+  // planner's and stands; a parent the old board cannot yield then shows as
+  // "larger than board" in the Cut Plan, before Lock.
   const undoBoard = async () => {
-    const prev = boardHist[boardHist.length - 1];
-    if (!prev) return;
+    const entry = boardHist[boardHist.length - 1];
+    if (!entry) return;
+    const back = boardUndo({ form, entry });
+    if (back) setForm(f => ({ ...f, ...back }));
     setBoardHist(h => h.slice(0, -1));
     setLo({ push: false, strip: null });
-    setBoardSel(prev); setCtx(null);
-    setCtx(await loadCtx(planLine, prev.id));
-    toast.info(`Board back to ${prev.name}`);
+    setBoardSel(entry.board); setCtx(null);
+    setCtx(await loadCtx(planLine, entry.board.id));
+    toast.info(`Board back to ${entry.board.name}${back ? ` · parent back to ${parentWords(back)}` : ''}`);
   };
   const resetBoard = async () => {
-    const master = { id: planLine.master_board_material_id, name: planLine.board_name, sheet_l: planLine.sheet_l, sheet_w: planLine.sheet_w };
-    // board_name/sheet dims in the line row belong to the effective board; if it
-    // was overridden, the context reload below fetches the master board's data.
-    setBoardHist(h => [...h, boardSel]);
+    const from = boardSel;
+    // A placeholder until the reload below names the master board: that
+    // board's own sheet off the materials list when the page has it, else none.
+    // Never the line row's sheet_l/_w — those are the folded parent (per side,
+    // the parent on file, else the effective board's sheet), not any board's.
+    const known = boardMasterFor(planLine.master_board_material_id);
+    const master = { id: planLine.master_board_material_id, name: planLine.board_name,
+                     sheet_l: known?.sheet_l ?? null, sheet_w: known?.sheet_w ?? null };
+    // Recorded now, so Undo can step back even if the reload fails; what this
+    // reset writes into the Parent fields is known only after it (below).
+    const entry = { board: from, parentBefore: { parent_l: form.parent_l, parent_w: form.parent_w }, fill: null };
+    setBoardHist(h => [...h, entry]);
     setLo({ push: false, strip: null });
     setBoardSel(master); setCtx(null);
     const fresh = await loadCtx(planLine, master.id);
-    setBoardSel({ id: fresh.board.id, name: fresh.board.name, sheet_l: fresh.board.sheet_l, sheet_w: fresh.board.sheet_w });
+    // The master board's own sheet is certain only now — the context returns
+    // the board's sheet, never the folded parent — so the parent carries here,
+    // after the reload, and from the fields as they are NOW (formRef): they
+    // stay editable through the reload, and this click's form may be stale.
+    const board = { id: fresh.board.id, name: fresh.board.name, sheet_l: fresh.board.sheet_l, sheet_w: fresh.board.sheet_w };
+    const sw = carryParent(from, board, formRef.current);
+    setBoardHist(h => h.map(e => (e === entry ? { board: from, parentBefore: sw.parentBefore, fill: sw.fill } : e)));
+    setBoardSel(board);
     setCtx(fresh);
-    toast.info('Board reset to the product master');
+    toast.info(`Board reset to the product master${followNote(sw)}`);
   };
 
   // Clicking Lock: a mix in play asks the coverage question first — "then you
@@ -1857,7 +1983,19 @@ export default function Planning() {
   // which is the answer it has always had. Unticking is the new part.
   const allPicked = changed => Object.fromEntries(Object.keys(changed).map(k => [k, true]));
 
+  // A parent the planner TYPED that no cut can use — half a parent, or a side
+  // of zero or less — is said here instead of saved (engineParentError,
+  // lib/cutFit.js; the Run Sheet's two messages). Input feedback, never a
+  // planning block: a half or zero parent already on file and untouched never
+  // stops an unrelated Save or Lock. The first thing Save and Lock each ask.
+  const parentRefused = () => {
+    const err = engineParentError({ form, saved: { l: planLine.parent_l, w: planLine.parent_w } });
+    if (err) toast.error(err);
+    return !!err;
+  };
+
   const onLock = () => {
+    if (parentRefused()) return;
     if (lo.push && !lo.strip) { toast.error('Pick which leftover strip to keep, or turn off the warehouse push'); return; }
     // SOFT gate, physics hard paperwork soft: a short plan may lock — the
     // server caps the hold at free stock and says so — but never silently.
@@ -1885,6 +2023,7 @@ export default function Planning() {
   // to LOCK a coverage decision, and a draft is not locking one. The mix rows
   // still save (when they balance — see savePlan).
   const onSave = () => {
+    if (parentRefused()) return;
     const changed = changedSpec();
     if (Object.keys(changed).length) setMasterPrompt({ changed, draft: true, picked: allPicked(changed) });
     else return savePlan({ spec: {}, update_master: false, draft: true });
@@ -2035,12 +2174,25 @@ export default function Planning() {
     const updated = await overIssue.guard(ack => api.post(`/order-lines/${planLine.id}/plan`,
       ack ? { ...planBody, ack_over_issue: ack } : planBody));
     if (!updated) return;
-    const masterNote = update_master
-      ? (master_fields ? ` · ${master_fields.length} field${master_fields.length === 1 ? '' : 's'} to the Product Master` : ' · Product Master updated')
+    // What the Product Master actually TOOK (the server's answer): a parent it
+    // kept on this job, or a field already the master's, is not counted.
+    const wrote = updated.master_written || [];
+    const masterNote = wrote.length
+      ? (master_fields ? ` · ${wrote.length} field${wrote.length === 1 ? '' : 's'} to the Product Master` : ' · Product Master updated')
       : Object.keys(spec || {}).length ? ' · saved for this job' : '';
+    // A parent sent to the master that stayed on this job: the master's own
+    // board cannot yield it (keepParentOffImpossibleMaster, server/src/helpers.js).
+    const keptNote = updated.parent_kept_job_only ? ` · parent kept for this job — the product master's own board can't yield it` : '';
+    // The master's own parent could not stay on the board this save moved it to
+    // (masterParentCannotStay) — cleared, so the master cuts its board's full
+    // sheet. THIS plan keeps the parent it was made on, the one on screen (the
+    // server's planSaveSpec), and so do the product's other open plans.
+    const clearedNote = updated.master_parent_cleared
+      ? ` · master parent ${updated.master_parent_cleared} cleared on ${planLine.product_code} — it can't stay on the new board; the master now cuts the board's full sheet`
+        + (updated.job_parent_kept ? ` · this job keeps ${updated.job_parent_kept}` : '') : '';
     toast.success(draft
-      ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}`
-      : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}`
+      ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}${keptNote}${clearedNote}`
+      : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}${keptNote}${clearedNote}`
         + (lo.push && lo.strip ? ` · leftover ${lo.strip.l}×${lo.strip.w}" → warehouse after cutting` : ''));
     sayBoardShortfalls(updated);
     // A gang shares one board — changing it moves this job out of the gang.
@@ -2236,6 +2388,10 @@ export default function Planning() {
     child_l: d.members?.[0]?.child_l != null ? String(d.members[0].child_l) : '',
     child_w: d.members?.[0]?.child_w != null ? String(d.members[0].child_w) : '',
     coating: d.members?.[0]?.coating || '',
+    // The parent ON FILE (MEMBER_VIEW's effective parent) — blank means the
+    // board's full sheet. Shown so the run never cuts on a parent nobody sees.
+    parent_l: d.members?.[0]?.parent_l != null ? String(d.members[0].parent_l) : '',
+    parent_w: d.members?.[0]?.parent_w != null ? String(d.members[0].parent_w) : '',
   });
   // The run's OWN plate and die number — typed, never fetched from a master,
   // because a gang's layout is made for this run and no other.
@@ -2312,7 +2468,7 @@ export default function Planning() {
     if (!Object.keys(body).length) return;
     const detail = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, body);
     setGangView(detail); seedGangEdits(detail); seedGangMix(detail); load();
-    toast.success(`${m.product_name} updated${body.qty ? ` · qty ${fmt.num(body.qty)}` : ''}${body.ups ? ` · ${body.ups} ups` : ''}`);
+    toast.success(`${m.product_name} updated${body.qty ? ` · qty ${fmt.num(body.qty)}` : ''}${body.ups ? ` · ${body.ups} ups` : ''}${reDeriveNote(detail)}`);
   };
   // Open the FULL planning engine on a gang member — the row carries only the
   // gang view's fields, so look the complete line up from the planning list.
@@ -2343,7 +2499,7 @@ export default function Planning() {
   // in case the gang dissolved (e.g. the member's board changed on lock).
   const returnToGang = async gid => {
     if (!gid) return;
-    try { const d = await api.get(`/gang-runs/${gid}`); setGangView(d); seedGangEdits(d); seedGangMix(d); setGangAddable(null); }
+    try { const d = await api.get(`/gang-runs/${gid}`); setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); setGangAddable(null); }
     catch { /* gang no longer exists — stay on the planning list */ }
   };
   // Close the engine, returning to the gang it was opened from (if any).
@@ -2361,10 +2517,16 @@ export default function Planning() {
     setGangBoardBusy(true);
     try {
       const d = await api.post(`/gang-runs/${planLine.gang_run_id}/board`, { board_material_id: +boardSel.id });
-      toast.success(`${d.gang_number} — ${boardSel.name} set as the gang's board for all ${d.members.length} jobs`);
+      toast.success(`${d.gang_number} — ${boardSel.name} set as the gang's board for all ${d.members.length} jobs${reDeriveNote(d)}`);
       // This job's board is now the gang board — reflect it so it's no longer a
-      // pending "change" (Lock won't try to pull it out of the gang).
-      const updatedLine = { ...planLine, board_material_id: +boardSel.id, board_name: boardSel.name, sheet_l: boardSel.sheet_l, sheet_w: boardSel.sheet_w };
+      // pending "change" (Lock won't try to pull it out of the gang). In
+      // LINE_VIEW's shape: board_sheet_l/_w are the board's own sheet, and
+      // sheet_l/_w stay the folded parent — folded PER SIDE, as LINE_VIEW's
+      // COALESCE does: that side of the parent on file, else that side of the
+      // board's sheet (the route changes only the board).
+      const updatedLine = { ...planLine, board_material_id: +boardSel.id, board_name: boardSel.name,
+        board_sheet_l: boardSel.sheet_l, board_sheet_w: boardSel.sheet_w,
+        sheet_l: planLine.parent_l ?? boardSel.sheet_l, sheet_w: planLine.parent_w ?? boardSel.sheet_w };
       setPlanLine(updatedLine); setBoardHist([]);
       setCtx(await loadCtx(updatedLine, +boardSel.id));
       load();
@@ -2384,32 +2546,90 @@ export default function Planning() {
   // board picker — every product prints on the same sheet.
   const setGangBoard = async board => {
     const boardId = board.id ?? board.material_id;
+    const before = gangView?.members?.[0];
     const d = await api.post(`/gang-runs/${gangView.id}/board`, { board_material_id: boardId });
-    toast.success(`${d.gang_number} — board set to ${board.name} for all ${d.members.length} jobs`);
+    toast.success(`${d.gang_number} — board set to ${board.name} for all ${d.members.length} jobs${reDeriveNote(d)}`);
     setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); setGangWhOpen(false); load();
+    // A parent that cannot stay on the new board — a copy of the OLD board's
+    // sheet (SW-544 kept its old board's 22×28 after moving to 23×38, and
+    // nobody was asked), or a size the new board cannot yield — follows the
+    // board into the Run Sheet: filled, not saved. Lock sheet → asks whether it
+    // goes to the Product Master or stays with these jobs. Never on a co-printed
+    // run: it cuts on the board's full sheet and shows no parent at all.
+    const lead = d.members?.[0];
+    const carried = d.kind !== 'merge' && d.layout_mode === 'shared' ? null : parentFollowsBoard({
+      parent: { l: lead?.parent_l, w: lead?.parent_w },
+      oldBoard: { l: before?.sheet_l, w: before?.sheet_w },
+      newBoard: { l: lead?.sheet_l, w: lead?.sheet_w },
+    });
+    if (carried) {
+      setGangSheetForm(f => ({ ...f, parent_l: String(carried.l), parent_w: String(carried.w) }));
+      toast.info(`Parent ${lead.parent_l}×${lead.parent_w}" follows the new board — set to ${carried.l}×${carried.w}". Lock sheet → to save it.`);
+    }
   };
-  // Lock the gang's shared sheet — board (parent) + child + coating. Opens the
+  // Lock the gang's shared sheet — board, parent, child + coating. Opens the
   // same master-update popup the single engine uses: keep the change job-only,
   // or push it back to the product master(s) for every future job.
-  const lockGangSheet = () => {
+  // `over` is the one-click "Use the board's full sheet": it fixes the PARENT
+  // only — no board, child or coating rides along — so fixing one flagged
+  // order can never re-stamp anything else across the run. `scope` is the line
+  // ids of the red row it was clicked on (Task 10): the fix is sent for those
+  // orders alone (line_ids), with THEIR board's sheet — run-wide, it overwrote
+  // other products' deliberate trims and wrote board-sheet copies into their
+  // masters. A typed parent (no `over`) stays run-wide. Whether the parent
+  // changed, what to send and what to say instead is runSheetParent
+  // (lib/cutFit.js): ONE rule for this payload and for the button's lit state.
+  const lockGangSheet = (over = null, scope = null) => {
     const anchor = gangView?.members?.[0];
-    setGangSheetPrompt({
-      gang_number: gangView.gang_number, count: gangView.members.length,
-      job_card: gangView.job_card || null,
-      payload: {
-        board_material_id: anchor?.board_material_id,
-        child_l: gangSheetForm.child_l, child_w: gangSheetForm.child_w, coating: gangSheetForm.coating,
-      },
+    const members = gangView?.members || [];
+    const d = runSheetParent({
+      form: gangSheetForm, over, scope, members,
+      isMerge: gangView?.kind === 'merge',
+      coPrinted: gangView?.kind !== 'merge' && gangView?.layout_mode === 'shared',
     });
+    if (d.error) { toast.error(d.error); return false; }
+    const scoped = over && scope ? members.filter(m => scope.includes(m.id)) : null;
+    setGangSheetPrompt({
+      gang_number: gangView.gang_number, count: members.length,
+      job_card: gangView.job_card || null,
+      // A scoped one-click's orders — the prompt names them ("1 of the 3 jobs —
+      // SW-544") and shows their board, the one the parent is cut from.
+      scope: scoped ? { n: scoped.length, codes: [...new Set(scoped.map(m => m.product_code))], board: scoped[0] } : null,
+      payload: over
+        ? { ...d.parent, ...(scoped ? { line_ids: scoped.map(m => m.id) } : {}) }
+        : {
+            board_material_id: anchor?.board_material_id,
+            child_l: gangSheetForm.child_l, child_w: gangSheetForm.child_w, coating: gangSheetForm.coating,
+            ...d.parent,
+          },
+    });
+    return true;
   };
   const applyGangSheet = async updateMaster => {
     const d = await api.post(`/gang-runs/${gangView.id}/shared`, { ...gangSheetPrompt.payload, update_master: updateMaster });
     const card = d.job_card ? ` · ${d.job_card.jc_number} re-stamped` : '';
-    toast.success(updateMaster
-      ? `${d.gang_number} — sheet saved to the product master(s) · applied to all ${d.members.length} jobs${card}`
-      : `${d.gang_number} — sheet locked for these ${d.members.length} jobs${card}`);
+    // A scoped one-click names the orders it changed.
+    const sc = gangSheetPrompt.scope;
+    const some = sc && sc.n < d.members.length ? `${sc.n} of the ${d.members.length} jobs (${sc.codes.join(', ')})` : null;
+    // A parent the master's own board cannot yield stayed on these jobs
+    // (keepParentOffImpossibleMaster, server/src/helpers.js).
+    const kept = d.parent_kept_job_only?.length
+      ? ` · parent kept for these jobs only on ${d.parent_kept_job_only.join(', ')} — the product master's own board can't yield it` : '';
+    // A master whose board moved out from under a parent that cannot stay
+    // lost that parent (masterParentCannotStay) — one note per product.
+    const cleared = (d.master_parent_cleared || [])
+      .map(c => ` · master parent ${c.from} cleared on ${c.code} — it can't stay on the new board; the master now cuts the board's full sheet`).join('');
+    // "Saved to the product master(s)" only when one was written: a one-click
+    // whose parent every master kept off wrote none (the server's answer).
+    const wrote = (d.masters_updated?.length ?? 0) > 0;
+    toast.success(wrote
+      ? `${d.gang_number} — sheet saved to the product master(s) · applied to ${some ?? `all ${d.members.length} jobs`}${card}${kept}${cleared}${reDeriveNote(d)}`
+      : `${d.gang_number} — sheet locked for ${some ?? `these ${d.members.length} jobs`}${card}${kept}${reDeriveNote(d)}`);
     setGangSheetPrompt(null); setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); load();
   };
+  // The board a Lock sheet prompt's parent is cut from: a scoped one-click's
+  // own orders' board (its red row's), else the run's.
+  const sheetPromptBoard = gangSheetPrompt?.scope?.board ?? gangView?.members?.[0];
   // Lock the whole gang's cut plan in one go (shared wastage), then close.
   // ONE payload for Save and Lock. Extracted rather than written twice on
   // purpose: the two differ by a single `draft` flag, and every other figure —
@@ -4309,14 +4529,14 @@ export default function Planning() {
                     <Field label={<>Child W (in){'child_w' in edited && <Edited />}</>}>
                       <Input type="number" min="0" step="0.25" value={form.child_w} onChange={e => setForm({ ...form, child_w: e.target.value })} />
                     </Field>
-                    <Field label={<>Parent L (in){'parent_l' in edited && <Edited />}</>} hint={boardSel ? `board ${boardSel.sheet_l}"` : undefined}>
+                    <Field label={<>Parent L (in){'parent_l' in edited && <Edited />}</>} hint={parentBlank('l').hint}>
                       <Input type="number" min="0" step="0.25" value={form.parent_l}
-                        placeholder={boardSel ? String(boardSel.sheet_l) : ''}
+                        placeholder={parentBlank('l').placeholder}
                         onChange={e => setForm({ ...form, parent_l: e.target.value })} />
                     </Field>
-                    <Field label={<>Parent W (in){'parent_w' in edited && <Edited />}</>} hint={boardSel ? `board ${boardSel.sheet_w}"` : undefined}>
+                    <Field label={<>Parent W (in){'parent_w' in edited && <Edited />}</>} hint={parentBlank('w').hint}>
                       <Input type="number" min="0" step="0.25" value={form.parent_w}
-                        placeholder={boardSel ? String(boardSel.sheet_w) : ''}
+                        placeholder={parentBlank('w').placeholder}
                         onChange={e => setForm({ ...form, parent_w: e.target.value })} />
                     </Field>
                     <Field label={<>Ups / print sheet{'ups' in edited && <Edited />}</>}>
@@ -4326,6 +4546,38 @@ export default function Planning() {
                       <Input type="number" min="0" step="10" value={form.wastage_sheets} onChange={e => setForm({ ...form, wastage_sheets: e.target.value })} />
                     </Field>
                   </div>
+                  {/* The parent this plan cuts on costs cuts against its own board —
+                      said out loud, never blocked (a deliberate trim is the
+                      planner's call). calc.declared is that parent (typed, else
+                      on file) and boardSel the board's OWN sheet, so a saved
+                      fossil warns the moment the plan opens. One click puts the
+                      board's full sheet in the fields (boardSheetFill: its dims
+                      over a parent on file, blanks when none is); the Lock's
+                      master question then asks where it goes. */}
+                  {calc && boardSel && (() => {
+                    const lossy = calc.declared && parentLosesCuts({ parentL: calc.declared.l, parentW: calc.declared.w,
+                      boardL: boardSel.sheet_l, boardW: boardSel.sheet_w, childL: calc.childL, childW: calc.childW });
+                    // A member of a CO-PRINTED run: its lock cuts the board's full
+                    // sheet and never reads the parent (gangs.js shared arm), so
+                    // the row must not claim this plan uses it. ctx.gang is
+                    // gangDetail's run (null on a single line, or until ctx loads).
+                    const coPrintedRun = ctx?.gang?.kind !== 'merge' && ctx?.gang?.layout_mode === 'shared';
+                    return lossy && (
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-2.5 py-1.5">
+                        <span className="text-[11px] font-semibold text-red-600">
+                          <AlertTriangle size={12} className="mr-1 inline" />
+                          Parent {lossy.declared.l}×{lossy.declared.w}" cuts {lossy.cuts_declared} per sheet —
+                          the {lossy.board.l}×{lossy.board.w}" board cuts {lossy.cuts_board}. {coPrintedRun
+                            ? <>Its co-printed run cuts the board's full sheet.</>
+                            : <>This plan uses {lossy.declared.l}×{lossy.declared.w}".</>}
+                        </span>
+                        <Button size="sm" variant="secondary"
+                          onClick={() => setForm(f => ({ ...f, ...boardSheetFill({ saved: { l: planLine.parent_l, w: planLine.parent_w }, board: { l: boardSel.sheet_l, w: boardSel.sheet_w } }) }))}>
+                          Use the board's full sheet
+                        </Button>
+                      </div>
+                    );
+                  })()}
                   {calc && (
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       <Stat label="Base Sheets" value={fmt.num(calc.base)} />
@@ -4453,7 +4705,7 @@ export default function Planning() {
                   actions={<>
                     {boardHist.length > 0 && (
                       <Button size="sm" variant="ghost" className="!px-2" onClick={undoBoard}
-                        title={`Undo — back to ${boardHist[boardHist.length - 1]?.name}`}>
+                        title={`Undo — back to ${boardHist[boardHist.length - 1]?.board?.name}`}>
                         <Undo2 size={12} /> Undo
                       </Button>
                     )}
@@ -5729,15 +5981,15 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                 <Card icon={Scissors}
                   title={mergeMode ? 'Run Sheet — parent · child · coating' : 'Gang Sheet — parent · child · coating'}
                   sub={mergeMode ? 'single source of truth · locked for the whole run' : 'single source of truth · locked for the whole gang'}>
-                  {/* Parent (board) */}
+                  {/* Board */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className={`text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Parent (board)</div>
+                      <div className={`text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Board</div>
                       <div className="flex items-center gap-1.5">
                         {!boardsDiffer && anchor?.board_grade && <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white">{anchor.board_grade}</span>}
                         <span className="truncate text-sm font-bold text-slate-800">{boardsDiffer ? 'Members on different boards' : (anchor?.board_name || '—')}</span>
                       </div>
-                      <div className="text-[11px] text-slate-400">{anchor?.sheet_l ? `${anchor.sheet_l}×${anchor.sheet_w}" parent sheet` : 'no size'}{boardsDiffer ? ' · pick one to unify' : ''}</div>
+                      <div className="text-[11px] text-slate-400">{anchor?.sheet_l ? `${anchor.sheet_l}×${anchor.sheet_w}" board sheet` : 'no size'}{boardsDiffer ? ' · pick one to unify' : ''}</div>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Button size="sm" variant={boardsDiffer ? 'primary' : 'secondary'} onClick={runGangSmart}><Sparkles size={13} /> Smart Match</Button>
@@ -5750,28 +6002,109 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                     </p>
                   )}
 
-                  {/* Child + coating — shared, with the live fit on the parent */}
+                  {/* Child + coating + parent — shared, with the live fit on the parent being typed */}
                   {(() => {
-                    const fit = clientFit(anchor?.sheet_l, anchor?.sheet_w, +gangSheetForm.child_l, +gangSheetForm.child_w);
-                    const dirty = anchor && ((gangSheetForm.child_l !== '' && +gangSheetForm.child_l !== +anchor.child_l)
+                    // A co-printed run cuts on the board's full sheet (its lock never
+                    // reads a parent on file), so it shows no parent fields.
+                    const coPrinted = gangView.kind !== 'merge' && gangView.layout_mode === 'shared';
+                    const boardSheet = { sheet_l: anchor?.sheet_l, sheet_w: anchor?.sheet_w };
+                    // The preview follows what is TYPED; the figures elsewhere on this
+                    // screen follow the SAVED parent — the one the lock will use — until
+                    // Lock sheet → saves the typed one.
+                    const typed = coPrinted ? { l: +anchor?.sheet_l, w: +anchor?.sheet_w }
+                      : cutParentOf({ parent_l: gangSheetForm.parent_l, parent_w: gangSheetForm.parent_w }, boardSheet);
+                    const fit = clientFit(typed.l, typed.w, +gangSheetForm.child_l, +gangSheetForm.child_w);
+                    // A typed parent the board cannot yield is SAID, not previewed as the
+                    // board (cutParentOf's silent fallback) — the lock would refuse it.
+                    const typedTooBig = !coPrinted && parentTooBig({ parentL: gangSheetForm.parent_l, parentW: gangSheetForm.parent_w,
+                      boardL: anchor?.sheet_l, boardW: anchor?.sheet_w });
+                    // Changed against what is on file — the SAME rule Lock sheet → sends
+                    // by (lib/cutFit.js runSheetParent), so the button and the payload
+                    // can never disagree.
+                    const parentDirty = runSheetParent({ form: gangSheetForm, members: gangView.members, isMerge: mergeMode, coPrinted }).changed;
+                    const dirty = anchor && (parentDirty
+                      || (gangSheetForm.child_l !== '' && +gangSheetForm.child_l !== +anchor.child_l)
                       || (gangSheetForm.child_w !== '' && +gangSheetForm.child_w !== +anchor.child_w)
                       || (gangSheetForm.coating || '') !== (anchor.coating || '')
                       || (anchor.board_name && anchor.master_board_name && anchor.board_name !== anchor.master_board_name)); // board changed vs master
+                    // The SAVED parent of any member the lock will not take as the
+                    // screen shows it: one that costs cuts on its board (the figures
+                    // here use it), or one larger than its board (the figures fall back
+                    // to the board, and the 14-Sep rule refuses the lock).
+                    // One row per product + parent + board: a combined run's orders share
+                    // them, and two identical rows read as two problems. Each row carries
+                    // the line ids it covers (`ids`) — its one-click is for those orders.
+                    const flagged = coPrinted ? [] : Object.values(gangView.members.reduce((acc, m) => {
+                      const args = { parentL: m.parent_l, parentW: m.parent_w, boardL: m.sheet_l, boardW: m.sheet_w,
+                                     childL: m.child_l, childW: m.child_w };
+                      const lossy = parentLosesCuts(args), tooBig = parentTooBig(args);
+                      if (!lossy && !tooBig) return acc;
+                      const k = `${m.product_id}|${m.parent_l}|${m.parent_w}|${m.sheet_l}|${m.sheet_w}`;
+                      acc[k] = acc[k] ? { ...acc[k], orders: acc[k].orders + 1, ids: [...acc[k].ids, m.id] } : { m, lossy, tooBig, orders: 1, ids: [m.id] };
+                      return acc;
+                    }, {}));
+                    // "Use the board's full sheet" on ONE red row: that row's orders get
+                    // THEIR board's sheet as the parent, and no other order's parent
+                    // moves (Task 10 — run-wide, the lead's board sheet overwrote other
+                    // products' deliberate trims and wrote copies into their masters).
+                    // It fills NOTHING in the Run Sheet form (round 2): a fill made before
+                    // the question was answered outlived a Cancel, and the next, unrelated
+                    // Lock sheet sent it run-wide. The prompt shows the parent from its
+                    // payload, and applyGangSheet re-seeds the form from the saved run.
+                    const fillBoardSheet = row => {
+                      if (!(+row.m.sheet_l > 0 && +row.m.sheet_w > 0)) {
+                        toast.error(`${row.m.product_code}'s board has no sheet size — set a board with a size first`);
+                        return;
+                      }
+                      const over = { parent_l: String(row.m.sheet_l), parent_w: String(row.m.sheet_w) };
+                      lockGangSheet(over, row.ids);   // asks: Update Product Master / These jobs only
+                    };
                     return (
                       <div className="mt-3 border-t border-slate-100 pt-3">
-                        <div className={`mb-1.5 text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Child (press sheet) &amp; coating — shared</div>
+                        <div className={`mb-1.5 text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>{coPrinted ? <>Child (press sheet) &amp; coating — shared</> : <>Child (press sheet), coating &amp; parent — shared</>}</div>
                         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                           <Field label="Child L (in)"><Input type="number" min="0" step="0.25" value={gangSheetForm.child_l} onChange={e => setGangSheetForm(f => ({ ...f, child_l: e.target.value }))} /></Field>
                           <Field label="Child W (in)"><Input type="number" min="0" step="0.25" value={gangSheetForm.child_w} onChange={e => setGangSheetForm(f => ({ ...f, child_w: e.target.value }))} /></Field>
                           <Field label="Coating"><SpecCombo id="gang-sheet-coat" value={gangSheetForm.coating} options={specOpts.coating} placeholder="e.g. Aqueous Varnish" onChange={e => setGangSheetForm(f => ({ ...f, coating: e.target.value }))} /></Field>
+                          {!coPrinted && (
+                            <>
+                              <Field label="Parent L (in)" hint={anchor?.sheet_l ? `board ${anchor.sheet_l}"` : undefined}>
+                                <Input type="number" min="0" step="0.25" value={gangSheetForm.parent_l}
+                                  placeholder={anchor?.sheet_l ? String(anchor.sheet_l) : ''}
+                                  onChange={e => setGangSheetForm(f => ({ ...f, parent_l: e.target.value }))} />
+                              </Field>
+                              <Field label="Parent W (in)" hint={anchor?.sheet_w ? `board ${anchor.sheet_w}"` : undefined}>
+                                <Input type="number" min="0" step="0.25" value={gangSheetForm.parent_w}
+                                  placeholder={anchor?.sheet_w ? String(anchor.sheet_w) : ''}
+                                  onChange={e => setGangSheetForm(f => ({ ...f, parent_w: e.target.value }))} />
+                              </Field>
+                            </>
+                          )}
                         </div>
+                        {coPrinted && (
+                          <p className="mt-1.5 text-[10px] text-slate-400">Co-printed runs cut on the board's full sheet.</p>
+                        )}
+                        {flagged.map(({ m, lossy, tooBig, orders, ids }) => (
+                          <div key={m.id} className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 px-2.5 py-1.5">
+                            <span className="text-[11px] font-semibold text-red-600">
+                              <AlertTriangle size={12} className="mr-1 inline" />
+                              {tooBig
+                                ? <>{m.product_code}{orders > 1 ? ` (${orders} orders)` : ''}: parent on file {m.parent_l}×{m.parent_w}" is larger than the {m.sheet_l}×{m.sheet_w}" board — no guillotine can cut it, so {mergeMode ? 'Lock Run Plan' : 'Lock Gang Plan'} will refuse until it changes.</>
+                                : <>{m.product_code}{orders > 1 ? ` (${orders} orders)` : ''}: parent on file {lossy.declared.l}×{lossy.declared.w}" cuts {lossy.cuts_declared} per sheet —
+                                  the {lossy.board.l}×{lossy.board.w}" board cuts {lossy.cuts_board}. The figures on this screen use {lossy.declared.l}×{lossy.declared.w}".</>}
+                            </span>
+                            <Button size="sm" variant="secondary" onClick={() => fillBoardSheet({ m, ids })}>Use the board's full sheet</Button>
+                          </div>
+                        ))}
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                           <span className="text-[11px] text-slate-500">
-                            {fit && fit.cpp > 0
+                            {typedTooBig
+                              ? <span className="font-semibold text-red-500">Parent {gangSheetForm.parent_l}×{gangSheetForm.parent_w}" is larger than the {anchor?.sheet_l}×{anchor?.sheet_w}" board — no guillotine can cut it, so {mergeMode ? 'Lock Run Plan' : 'Lock Gang Plan'} will refuse it until it changes.</span>
+                              : fit && fit.cpp > 0
                               ? <>Child on parent: <b className="text-slate-800">{fit.cpp}/parent</b> · <span className={fit.waste <= 10 ? 'text-emerald-600' : fit.waste <= 20 ? 'text-amber-600' : 'text-red-600'}>{fit.util}% util</span></>
-                              : <span className="font-semibold text-red-500">child doesn’t fit the board — adjust</span>}
+                              : <span className="font-semibold text-red-500">child doesn’t fit the parent — adjust</span>}
                           </span>
-                          <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty} onClick={lockGangSheet}>
+                          <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty} onClick={() => lockGangSheet()}>
                             <ShieldCheck size={13} /> Lock sheet →
                           </Button>
                         </div>
@@ -6352,20 +6685,42 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
         title={gangSheetPrompt ? `Lock the sheet for ${gangSheetPrompt.gang_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setGangSheetPrompt(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={() => applyGangSheet(false)}>Save for these {gangSheetPrompt?.count} jobs only</Button>
-          <Button onClick={() => applyGangSheet(true)}>Update Product Master{gangSheetPrompt?.count > 1 ? 's' : ''}</Button>
+          <Button variant="secondary" onClick={() => applyGangSheet(false)}>Save for {gangSheetPrompt?.scope?.n === 1 ? 'this job' : `these ${gangSheetPrompt?.scope?.n ?? gangSheetPrompt?.count} jobs`} only</Button>
+          <Button onClick={() => applyGangSheet(true)}>Update Product Master{(gangSheetPrompt?.scope?.codes.length ?? gangSheetPrompt?.count) > 1 ? 's' : ''}</Button>
         </>}>
         {gangSheetPrompt && (
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
-              The board, child sheet &amp; coating apply to all <b>{gangSheetPrompt.count}</b> jobs in {gangSheetPrompt.gang_number}.
-              Keep it just for these jobs, or push it back to the product master(s) so every future job inherits it?
+              {'child_l' in gangSheetPrompt.payload
+                ? <>The board, {gangSheetPrompt.payload.parent_l && gangSheetPrompt.payload.parent_w ? 'parent sheet, ' : ''}child sheet &amp; coating apply to all <b>{gangSheetPrompt.count}</b> jobs in {gangSheetPrompt.gang_number}.</>
+                : gangSheetPrompt.scope
+                  ? <>Only the parent sheet below changes, for <b>{gangSheetPrompt.scope.n < gangSheetPrompt.count ? `${gangSheetPrompt.scope.n} of the ${gangSheetPrompt.count}` : `all ${gangSheetPrompt.count}`}</b> jobs in {gangSheetPrompt.gang_number} — {gangSheetPrompt.scope.codes.join(', ')}.</>
+                  : <>Only the parent sheet below changes, for all <b>{gangSheetPrompt.count}</b> jobs in {gangSheetPrompt.gang_number}.</>}
+              {' '}Keep it just for these jobs, or push it back to the product master(s) so every future job inherits it?
             </p>
             <div className="space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
-              <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Parent (board)</span><span className="tabular-nums text-slate-500">{gangView?.members?.[0]?.board_grade} · {gangView?.members?.[0]?.board_name}</span></div>
-              <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Child sheet</span><span className="tabular-nums text-slate-500">{gangSheetPrompt.payload.child_l}×{gangSheetPrompt.payload.child_w}"</span></div>
-              <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Coating</span><span className="text-slate-500">{gangSheetPrompt.payload.coating ? fmt.title(gangSheetPrompt.payload.coating) : '—'}</span></div>
+              <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">{'child_l' in gangSheetPrompt.payload ? 'Board' : 'Board (unchanged)'}</span><span className="tabular-nums text-slate-500">{sheetPromptBoard?.board_grade} · {sheetPromptBoard?.board_name}</span></div>
+              {gangSheetPrompt.payload.parent_l && gangSheetPrompt.payload.parent_w && (
+                <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Parent sheet</span><span className="tabular-nums text-slate-500">{gangSheetPrompt.payload.parent_l}×{gangSheetPrompt.payload.parent_w}"</span></div>
+              )}
+              {'child_l' in gangSheetPrompt.payload && (
+                <>
+                  <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Child sheet</span><span className="tabular-nums text-slate-500">{gangSheetPrompt.payload.child_l}×{gangSheetPrompt.payload.child_w}"</span></div>
+                  <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Coating</span><span className="text-slate-500">{gangSheetPrompt.payload.coating ? fmt.title(gangSheetPrompt.payload.coating) : '—'}</span></div>
+                </>
+              )}
             </div>
+            {/* A parent the board cannot yield is said here too, before it is
+                saved — the plan lock refuses it (the 14-Sep rule). The board is
+                sheetPromptBoard: a scoped one-click's own orders' board, else
+                the run's — never the lead's for another product's fix. */}
+            {parentTooBig({ parentL: gangSheetPrompt.payload.parent_l, parentW: gangSheetPrompt.payload.parent_w,
+                            boardL: sheetPromptBoard?.sheet_l, boardW: sheetPromptBoard?.sheet_w }) && (
+              <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
+                <AlertTriangle size={14} className="mr-1 inline" />
+                Parent {gangSheetPrompt.payload.parent_l}×{gangSheetPrompt.payload.parent_w}" is larger than the {sheetPromptBoard?.sheet_l}×{sheetPromptBoard?.sheet_w}" board — no guillotine can cut it, so {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'} will refuse it until it changes.
+              </p>
+            )}
             {/* The card is already minted on a combined run — the sheet still
                 changes, and it takes the card's board and sheet count with it.
                 Say so BEFORE the planner commits: this is paperwork moving
@@ -6525,7 +6880,16 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                 <label key={k}
                   className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1 transition-colors hover:bg-white">
                   <Checkbox checked={!!masterPrompt.picked[k]}
-                    onChange={e => setMasterPrompt(p => ({ ...p, picked: { ...p.picked, [k]: e.target.checked } }))} />
+                    onChange={e => {
+                      // Parent L and W are ONE decision when both changed: ticking
+                      // (or unticking) one does the other, so a master is never
+                      // sent half a parent — a new L beside the old W is a sheet
+                      // nobody chose.
+                      const on = e.target.checked;
+                      const twin = { parent_l: 'parent_w', parent_w: 'parent_l' }[k];
+                      setMasterPrompt(p => ({ ...p, picked: { ...p.picked, [k]: on,
+                        ...(twin && twin in p.changed ? { [twin]: on } : {}) } }));
+                    }} />
                   <span className="shrink-0 font-semibold text-slate-700">{specLabel(k)}</span>
                   <span className="ml-auto min-w-0 text-right tabular-nums text-slate-500">
                     <span className="line-through">{planLine?.[k] == null || planLine?.[k] === '' ? '—' : specValue(k, planLine[k])}</span>

@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { planningResponse, planningScopeOf } from '../planning-scope.js';
@@ -16,7 +16,7 @@ import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags,
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
 import { sheetYield } from '../over-issue.js';
 import { rankBoardMatches } from '../smartmatch.js';
-import { splitMasterFields } from '../plan-save.js';
+import { planSaveSpec } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
 import { commitBoardForLine, commitInputs } from './board.js';
@@ -135,6 +135,13 @@ const LINE_VIEW = `
          COALESCE(mbm.name, p.board_name) AS master_board_name,
          COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l, bm.sheet_l) AS sheet_l,
          COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w, bm.sheet_w) AS sheet_w,
+         -- sheet_l/_w above stay the FOLDED parent — the sheet the plan cuts on.
+         -- These are the board's OWN sheet, which the planning engine needs to
+         -- judge a parent against: seeded from the folded pair, its "board" was
+         -- the saved parent itself, so SW-544's fossil 22×28 (its old board's
+         -- sheet, left on the 23×38 board) was measured against 22×28 and never
+         -- warned (19 Sep 2026).
+         bm.sheet_l AS board_sheet_l, bm.sheet_w AS board_sheet_w,
          -- Die/Block numbers: explicit job/master text wins; the Tooling Hub
          -- record's auto code (DIE-…/BLK-…) is the fallback when none is set.
          COALESCE(${DIE_TEXT}, d.code) AS die_number,
@@ -1553,6 +1560,18 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
     // Boards the mix planned but the shelf could not cover. Collected inside the
     // transaction, spoken after it commits: the plan is saved either way.
     const boardShortfalls = [];
+    // A parent the planner sent to the master that stayed on this job, because
+    // the master's own board cannot yield it (keepParentOffImpossibleMaster).
+    let parentKeptJobOnly = false;
+    // The master's own parent ('L×W') this save cleared because the master's
+    // board moved out from under it (masterParentCannotStay), and the fields
+    // the Product Master actually took — the toast counts these, not the ticks.
+    let masterParentCleared = null;
+    let masterWritten = [];
+    // When the master's parent is cleared: the product's OTHER open plans the
+    // save pinned to it (pinParentOnMasterClear), and the parent THIS plan keeps.
+    let parentPinnedLines = [];
+    let jobParentKept = null;
     await tx(async (qc, oc) => {
       let line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
@@ -1633,16 +1652,32 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       // `changed` the planner ticked; everything else in the same save falls
       // through to the job-only override below. Omitting it entirely keeps the
       // old all-or-nothing behaviour, so every existing caller is unaffected.
-      const { toMaster, toJob } = splitMasterFields({
-        changed, updateMaster: !!update_master, masterFields: req.body.master_fields,
+      // splitMasterFields, the master parent guards and the override — the whole
+      // spec decision — are planSaveSpec (plan-save.js), driven for real by
+      // plan-save-spec.test.js. The route writes what it decided.
+      const decided = await planSaveSpec({
+        changed, cleared, product, prev, updateMaster: !!update_master, masterFields: req.body.master_fields,
+        sheetOf: id => oc('SELECT sheet_l, sheet_w FROM materials WHERE id=$1', [id]),
       });
-      let nextOverride = { ...prev };
-      for (const f of cleared) delete nextOverride[f];
+      const { toMaster, toJob, nextOverride, eff } = decided;
+      parentKeptJobOnly = decided.keptJobOnly;
+      masterParentCleared = decided.masterParentCleared;
+      jobParentKept = decided.jobKeeps;
+      // Existing plans keep the parent they were made on; only future orders
+      // follow the board. This plan keeps its own (planSaveSpec); the product's
+      // OTHER open plans are pinned here, before the master write — the order
+      // lockSharedSheet takes the rows in too.
+      if (masterParentCleared) {
+        parentPinnedLines = await pinParentOnMasterClear({
+          productId: product.id, oldParent: { parent_l: product.parent_l, parent_w: product.parent_w },
+          excludeLineIds: [line.id], user: req.user.name, why: 'from planning' }, qc);
+      }
       if (Object.keys(toMaster).length) {
         {
+          masterWritten = Object.keys(toMaster);
           // Finalising the board also carries its grade + GSM back to the master —
           // the board IS the source of both, so they never drift out of sync.
-          const masterChanged = { ...toMaster };
+          const masterChanged = { ...decided.masterSets };
           if (toMaster.board_material_id) {
             const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [toMaster.board_material_id]);
             const id = boardIdentity(nb);
@@ -1671,9 +1706,10 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           const sets = Object.keys(masterChanged).map((c, i) => `${c}=$${i + 1}`).join(',');
           await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(masterChanged).length + 1}`,
             [...Object.values(masterChanged), product.id]);
-          for (const f of Object.keys(masterChanged)) delete nextOverride[f];
           await audit('product', product.id, 'master_update',
-            `from planning: ${Object.entries(masterChanged).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+            (`from planning: ${Object.entries(masterChanged).filter(([f]) => !(masterParentCleared && (f === 'parent_l' || f === 'parent_w')))
+              .map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`
+              + (masterParentCleared ? `; parent_l, parent_w: ${masterParentCleared} → none (follows the board)` : '')).slice(0, 500),
             qc, req.user.name);
         }
       }
@@ -1681,16 +1717,22 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       // "Save for this Job Only" — stays on the line. Both audit rows can be
       // written for one save now, which is the point: a split decision leaves a
       // split trail, naming which fields went where.
-      if (Object.keys(toJob).length) {
-        nextOverride = { ...nextOverride, ...toJob };
+      // The sides this plan keeps from a cleared master are said as a pin (the
+      // same line the product's other plans get), not as the planner's edits.
+      const ownJob = Object.entries(toJob).filter(([f]) => !decided.keptSides.includes(f));
+      if (ownJob.length) {
         await audit('order_line', line.id, 'spec_override',
-          `job-only: ${Object.entries(toJob).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+          (`job-only: ${ownJob.map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`
+            + (parentKeptJobOnly ? ' · parent kept job-only — the master\'s own board cannot yield it' : '')).slice(0, 500),
+          qc, req.user.name);
+      }
+      if (decided.keptSides.length) {
+        await audit('order_line', line.id, 'parent_pinned',
+          `parent ${jobParentKept} kept — the product master's parent was cleared; this plan keeps the sheet it was made on (from planning)`,
           qc, req.user.name);
       }
       const jobOverride = Object.keys(nextOverride).length ? nextOverride : null;
 
-      // Effective spec = master + surviving job override + this lock's changes.
-      const eff = { ...product, ...nextOverride, ...changed };
       const wastage = wastage_sheets === '' || wastage_sheets == null ? null : Math.max(0, Math.round(+wastage_sheets));
       const sheets = sheetsRequired(eff, netProduceQty(line), wastage);
       const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
@@ -2208,7 +2250,8 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         + loNote + ')', qc, req.user.name);
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
-    res.json({ ...out, readiness: await readiness(out), board_shortfalls: boardShortfalls });
+    res.json({ ...out, readiness: await readiness(out), board_shortfalls: boardShortfalls, parent_kept_job_only: parentKeptJobOnly,
+      master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept });
   } catch (e) { next(e); }
 });
 
@@ -2365,8 +2408,12 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     // ?board_material_id= previews the position of a different board (a
     // warehouse selection the planner hasn't locked yet).
     const matId = +req.query.board_material_id || line.board_material_id;
+    // The BOARD's own sheet either way — board_sheet_l/_w on the line's own
+    // board, the materials row on any other. Never line.sheet_l/_w: those are
+    // the folded parent, and the engine's Reset read them back as the board,
+    // so a saved parent was judged against itself (SW-544, 19 Sep 2026).
     const board = matId === line.board_material_id
-      ? { id: matId, name: line.board_name, sheet_l: line.sheet_l, sheet_w: line.sheet_w }
+      ? { id: matId, name: line.board_name, sheet_l: line.board_sheet_l, sheet_w: line.board_sheet_w }
       : await one('SELECT id, name, spec, sheet_l, sheet_w FROM materials WHERE id=$1', [matId]);
 
     const stock = await one(`

@@ -93,7 +93,13 @@ test('a separate-layout gang still banks nothing anywhere', () => {
 // ── The guard rails ─────────────────────────────────────────────────────────
 
 test('re-deriving a member takes the run’s bank back', () => {
-  const fn = slice(gangs, 'async function reDeriveMemberSheets', 6000);
+  // 7650, up from round 3's 6950: round 4's co-printed guard fix (hasPlan,
+  // the sibling check, a { mixCleared, leftoverUnbanked } return everywhere)
+  // grew the function again, to 8220 chars, and this pin's target
+  // (unbankRunLeftover) now sits at measured offset 7459 — past even round
+  // 3's window. Re-measured and widened 19 Sep 2026; the assertions below are
+  // untouched.
+  const fn = slice(gangs, 'async function reDeriveMemberSheets', 7650);
   assert.match(fn, /SELECT kind, layout_mode FROM gang_runs/,
     'the layout is read, not just the kind');
   assert.match(fn, /if \(runBanksLeftover\(run\)\) \{[\s\S]{0,200}?unbankRunLeftover/);
@@ -101,12 +107,23 @@ test('re-deriving a member takes the run’s bank back', () => {
 
 test('all three geometry-changing routes funnel through it', () => {
   // Per-member board reassignment, the shared sheet lock, and a qty/ups edit.
+  // Each route is sliced from its own anchor to the NEXT route ('\nr.'), no
+  // longer a fixed window. Rounds 3 and 4 kept widening one (7400, then 7650)
+  // as the routes grew, and Task 10 (19 Sep 2026: line_ids scope, the master
+  // parent guard) moved /shared's call to offset 9209. A window that wide lets
+  // /board — whose own call sits at 3081 — borrow /shared's and pass for the
+  // wrong reason. A route never contains the next one's '\nr.'. The assertion
+  // is untouched.
   for (const anchor of [
     "r.post('/gang-runs/:id/board'",
     "r.post('/gang-runs/:id/shared'",
     "r.patch('/gang-runs/:id/lines/:lineId'",
   ]) {
-    assert.match(slice(gangs, anchor, 5000), /reDeriveMemberSheets\(/,
+    const at = gangs.indexOf(anchor);
+    assert.notEqual(at, -1, `anchor not found: ${anchor}`);
+    const end = gangs.indexOf('\nr.', at + 1);
+    assert.notEqual(end, -1, `no route after ${anchor}`);
+    assert.match(gangs.slice(at, end), /reDeriveMemberSheets\(/,
       `${anchor} must re-derive, which is what unbanks`);
   }
 });
@@ -249,11 +266,12 @@ test('a member draws its boards from the STORED mix, not a re-derivation', () =>
 });
 
 test('re-deriving a member of a separate gang sweeps its own line bank', () => {
-  // 7000, not the default 6000: the block this pins sat 112 characters inside
-  // that window, so ANY line added anywhere earlier in the function failed this
-  // test on slice length rather than on the rule it is guarding (a four-line
-  // comment did exactly that). The assertion below is untouched.
-  const fn = slice(gangs, 'async function reDeriveMemberSheets', 7000);
+  // 8300, up from round 3's 7600: round 4 grew the function further still
+  // (see the guard-rail test above, now 8220 chars), and this pin's target
+  // (leftover_plan=NULL) now sits at measured offset 8123 — past even round
+  // 3's window. Re-measured and widened 19 Sep 2026; the assertion below is
+  // untouched.
+  const fn = slice(gangs, 'async function reDeriveMemberSheets', 8300);
   assert.match(fn, /\} else \{[\s\S]{0,600}?unbankPlanningLeftover\(line\.id[\s\S]{0,300}?leftover_plan=NULL/,
     'the run-level branch has an else for the member-level bank');
 });

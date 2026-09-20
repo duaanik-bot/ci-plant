@@ -286,6 +286,145 @@ export function parentFitsBoard(parent, board) {
       && Math.min(pl, pw) <= Math.min(bl, bw) + 1e-6;
 }
 
+// A parent WRITTEN to a Product Master must be one its own board can yield —
+// both master-write doors (the run's Lock sheet, gangs.js lockSharedSheet, and
+// the single engine's plan-save, orders.js) ask this before they write a
+// parent. It guards parent writes only. A write that moves the master's BOARD
+// under the parent it already has is masterParentCannotStay's (below).
+//
+// Why (final whole-branch review, 19 Sep 2026): "Use the board's full sheet"
+// fills the parent with the RUN's (or the line's) board sheet, and "Update
+// Product Master(s)" writes it. When that board is a JOB-ONLY override — run
+// Smart Match and Manual picks write one (/gang-runs/:id/board), and so does
+// GRN substitution — while the master keeps its own SMALLER board, the master
+// ends up with a parent its own board cannot yield (23×38 on a 22×28 board),
+// and the product's NEXT order meets the 14-Sep refusal (planLockParent). The
+// fix would create the very master defect it exists to prevent.
+//
+// Never a refusal either (no hard blockers — Anik, 19 Sep 2026): such a parent
+// simply stays on the job, whose own board yields it, and the caller says so.
+//   toMaster, toJob  the save's split (splitMasterFields / /shared's masterSets
+//                    and override)
+//   master           the product row: its parent_l/_w on file
+//   masterBoard      { sheet_l, sheet_w } of the RESULTING master board, which
+//                    the caller resolves: toMaster.board_material_id ??
+//                    master.board_material_id — a board written in the same save
+//                    is the one this parent will be cut from
+// The pair judged is the RESULTING master pair — this save's axis, else the
+// master's own (one axis alone pairs with the master's other). Half a pair is
+// no pair, and an unsized board is parentFitsBoard's "cannot judge": both leave
+// the save as it is. Pure; never mutates its inputs.
+// Returns { toMaster, toJob, keptJobOnly }.
+export function keepParentOffImpossibleMaster(args) {
+  const toMaster = args?.toMaster ?? {};
+  const toJob = args?.toJob ?? {};
+  const master = args?.master;
+  const masterBoard = args?.masterBoard;
+  const unchanged = { toMaster, toJob, keptJobOnly: false };
+  if (!('parent_l' in toMaster) && !('parent_w' in toMaster)) return unchanged;
+  const pair = { sheet_l: toMaster.parent_l ?? master?.parent_l, sheet_w: toMaster.parent_w ?? master?.parent_w };
+  if (pair.sheet_l == null || pair.sheet_w == null) return unchanged;
+  if (parentFitsBoard(pair, masterBoard)) return unchanged;
+  const nextMaster = { ...toMaster };
+  const nextJob = { ...toJob };
+  for (const k of ['parent_l', 'parent_w']) {
+    if (!(k in nextMaster)) continue;
+    nextJob[k] = nextMaster[k];
+    delete nextMaster[k];
+  }
+  return { toMaster: nextMaster, toJob: nextJob, keptJobOnly: true };
+}
+
+// Same sheet, either way round (23×38 is 38×23). Unsized is never "same".
+// The server spelling of cutFit.js sameSheet, on { sheet_l, sheet_w }.
+export function sameSheet(a, b) {
+  const al = +a?.sheet_l, aw = +a?.sheet_w, bl = +b?.sheet_l, bw = +b?.sheet_w;
+  if (!(al > 0 && aw > 0 && bl > 0 && bw > 0)) return false;
+  return Math.abs(Math.max(al, aw) - Math.max(bl, bw)) < 1e-6
+      && Math.abs(Math.min(al, aw) - Math.min(bl, bw)) < 1e-6;
+}
+
+// A master's parent when a master write moves its BOARD — the other half of
+// keeping a master's pair possible (keepParentOffImpossibleMaster, above,
+// guards a parent the write carries).
+//
+// Why (final review, round 2, 19 Sep 2026): after the one-click kept a parent
+// on the jobs, "Lock sheet → Update Product Masters" moved the master's board
+// and left its OLD parent behind — the CI-MRG-0028 fossil at master level
+// (SW-251 kept board #53's 22×28 on a 31.5×41.5 board) or an impossible master
+// (SW-097 kept 25.6×28 on 23×38: the next order meets the 14-Sep refusal). Both
+// silent on the run itself, whose lines carried job-only parents.
+//
+// The server twin of the client's board-change rule (cutFit.js
+// parentFollowsBoard — master-parent-cannot-stay.test.js holds the two
+// together): a copy of the OLD board's sheet (the boards differing), or a size
+// the NEW board cannot yield, cannot stay. The caller then clears it on the
+// same master write: no parent, so the master cuts its board's full sheet and
+// follows every future board by itself. Nothing is invented for the master —
+// never the job's parent.
+//   masterParent  { sheet_l, sheet_w } — the master's parent after this write
+//   oldBoard      { sheet_l, sheet_w } of the master's board before the write
+//   newBoard      { sheet_l, sheet_w } of the board being written
+// Half a parent is no parent, and unsized is "cannot judge": both answer false.
+export function masterParentCannotStay(args) {
+  const { masterParent, oldBoard, newBoard } = args ?? {};
+  if (masterParent?.sheet_l == null || masterParent?.sheet_w == null) return false;
+  if (!(+newBoard?.sheet_l > 0 && +newBoard?.sheet_w > 0)) return false;
+  const copied = sameSheet(masterParent, oldBoard) && !sameSheet(oldBoard, newBoard);
+  return copied || !parentFitsBoard(masterParent, newBoard);
+}
+
+// When a master write clears a product master's parent (masterParentCannotStay),
+// every OTHER open plan of the product keeps the parent it was made on; only
+// future orders follow the board. Both master-write doors call this —
+// lockSharedSheet (gangs.js) and plan-save (orders.js) — before their products
+// UPDATE, so the rows are taken in the same order either way.
+//
+// Why (final review, round 3, 19 Sep 2026): a line with a plan and no parent of
+// its own was cutting the master's parent. Clearing it silently moved that
+// line to the board's full sheet, so its stored parent_sheets_required no
+// longer matched the cuts readiness() gives at card push — the CI-JC-0335
+// shape, a card issuing far more board than the plan needs.
+//
+// A plan: status planned, ready or in_production, or a saved draft (pending
+// with figures). A pending line with no figures has no plan yet — it follows
+// the board. Lines on a CO-PRINTED run are skipped: their lock cuts the
+// board's own sheet and never read the parent, so there is nothing to keep.
+// Only the sides a line does not already hold are filled — an override side is
+// that line's own. Each pin is audited on the line it pins.
+//   productId       the product whose master parent was cleared
+//   oldParent       { parent_l, parent_w } — the master's parent before the clear
+//   excludeLineIds  the lines the request itself writes (they follow its own rule)
+//   user, why       for the audit trail
+// Returns the ids of the lines it pinned.
+export async function pinParentOnMasterClear({ productId, oldParent, excludeLineIds = [], user = null, why = null }, qc) {
+  const rows = await qc(`
+    SELECT ol.id, ol.status, ol.parent_sheets_required, ol.spec_override, gr.kind AS run_kind, gr.layout_mode
+      FROM order_lines ol LEFT JOIN gang_runs gr ON gr.id = ol.gang_run_id
+     WHERE ol.product_id = $1
+       AND NOT (ol.id = ANY($2::int[]))
+       AND ol.status IN ('pending', 'planned', 'ready', 'in_production')
+     ORDER BY ol.id
+       FOR NO KEY UPDATE OF ol`, [productId, excludeLineIds]);
+  const hasPlan = r => r.status !== 'pending' || r.parent_sheets_required != null;
+  const coPrinted = r => r.run_kind != null && r.run_kind !== 'merge' && r.layout_mode === 'shared';
+  const pinned = [];
+  for (const r of rows) {
+    if (!hasPlan(r) || coPrinted(r)) continue;
+    const ov = r.spec_override ? (typeof r.spec_override === 'string' ? JSON.parse(r.spec_override) : { ...r.spec_override }) : {};
+    const sides = ['parent_l', 'parent_w'].filter(f => ov[f] == null);
+    if (!sides.length) continue;
+    for (const f of sides) ov[f] = oldParent[f];
+    await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2', [JSON.stringify(ov), r.id]);
+    const what = sides.length === 2 ? `parent ${oldParent.parent_l}×${oldParent.parent_w}` : `${sides[0]} ${oldParent[sides[0]]}`;
+    await audit('order_line', r.id, 'parent_pinned',
+      `${what} pinned — the product master's parent was cleared; this plan keeps the sheet it was made on${why ? ` (${why})` : ''}`,
+      qc, user);
+    pinned.push(r.id);
+  }
+  return pinned;
+}
+
 // The parent to CUT AGAINST, as opposed to the parent on file.
 //
 // effectiveParent answers "what parent does this job declare?" and is what the
@@ -340,6 +479,43 @@ export function planLockParent(product, board, ref = null) {
       { status: 409 });
   }
   return parent;
+}
+
+// The parent on file COSTS CUTS: it can be trimmed out of the board (so
+// planLockParent lets it through), yet it yields fewer children than the
+// board's own sheet. CI-MRG-0028, 19 Sep 2026: SW-544 kept 22×28 — the sheet
+// of its OLD board #53 — after "Lock sheet" moved it to the 23×38 board #399.
+// A 12.6×23 child fits 22×28 once and 23×38 three times, so the run lock wrote
+// 10,650 parent sheets for a job that needs 3,550.
+//
+// NOT a refusal. Anik's rule (19 Sep 2026): no hard blockers in the planning
+// engine — a deliberate trim is the planner's call. This is a fact to SHOW:
+// check:parent lists it, and the planning screens warn with its client twin
+// (client/src/lib/cutFit.js parentLosesCuts — parent-loses-cuts.test.js holds
+// the two together) and offer the board's full sheet.
+export function parentLosesCuts(product, board) {
+  if (product?.parent_l == null || product?.parent_w == null) return null;
+  const declared = { sheet_l: +product.parent_l, sheet_w: +product.parent_w };
+  const bl = +board?.sheet_l, bw = +board?.sheet_w;
+  if (!(declared.sheet_l > 0 && declared.sheet_w > 0 && bl > 0 && bw > 0)) return null;
+  if (!parentFitsBoard(declared, board)) return null;   // does not fit inside the board (an edge too long, either way round): planLockParent refuses that
+  const onParent = childFit(declared, product);
+  const onBoard = childFit({ sheet_l: bl, sheet_w: bw }, product);
+  if (!onParent.sized || !onBoard.sized || onParent.count >= onBoard.count) return null;
+  return { declared: { l: declared.sheet_l, w: declared.sheet_w }, board: { l: bl, w: bw },
+           cuts_declared: onParent.count, cuts_board: onBoard.count };
+}
+
+// The cuts a CO-PRINTED run's card must carry: the shared child on the board's
+// own sheet — exactly the divisor its lock priced the run with (gangs.js plan
+// route, shared arm: parentSheetsRequired(run_child, childFit(board, child)
+// .count), which clamps an unsized or a zero fit to 1, as this does).
+// readiness() counts on the lead member's parent on file instead; on
+// CI-GANG-0019's shape that is 1 where the lock planned 2.
+export function coPrintedCardCuts(board, sharedChild) {
+  const fit = childFit({ sheet_l: board?.sheet_l, sheet_w: board?.sheet_w },
+                       { child_l: sharedChild?.l, child_w: sharedChild?.w });
+  return Math.max(1, fit.count || 1);
 }
 
 const FIT_EPS = 1e-6;
@@ -717,13 +893,28 @@ export async function unbankRunLeftover(runId, qc, oc, user, why = '', keep = []
   const batches = (await qc(
     `SELECT * FROM stock_batches WHERE batch_no LIKE $1 ORDER BY id`,
     [`LO-PLAN-RUN-${runId}-%`]))
-    .filter(b => !keep.includes(b.batch_no));
-  if (!batches.length) return;
+    .filter(b => !keep.includes(b.batch_no))
+    // Already dead — a prior call of this very function already zeroed both
+    // qty and initial_qty and marked it exhausted. Re-running the UPDATE below
+    // would be a no-op on the row but not on the audit trail: a co-printed
+    // run's re-derive calls this on every settle (its last member's turn
+    // through the loop), so a run whose bank is long gone would still write a
+    // fresh leftover_unplanned line on every later edit, over nothing. A batch
+    // CONSUMED TO ZERO BY ANOTHER JOB (qty=0, initial_qty>0) is not this case
+    // — see the UPDATE's own comment below — and stays in the sweep.
+    .filter(b => !(+b.qty === 0 && +b.initial_qty === 0));
+  if (!batches.length) return false;
+  // true only once a batch with real qty actually reverses stock — closing
+  // out a CONSUMED-to-zero record below (qty already 0) does not set this,
+  // so a caller asking "did this unbank anything" gets the physical answer,
+  // not "was a row touched".
+  let moved = false;
   for (const b of batches) {
     if (+b.qty > 0) {
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
         [b.material_id, b.id, -b.qty, runId, `Leftover un-planned${why ? ` — ${why}` : ''}`]);
+      moved = true;
     }
     // initial_qty zeroes too — a DELIBERATE divergence from the line-based
     // sweep above, which leaves it stale. There the leftover_plan JSON is
@@ -737,6 +928,7 @@ export async function unbankRunLeftover(runId, qc, oc, user, why = '', keep = []
     await qc(`UPDATE stock_batches SET qty=0, initial_qty=0, status='exhausted' WHERE id=$1`, [b.id]);
   }
   await audit('gang_run', runId, 'leftover_unplanned', why || 'plan cleared', qc, user);
+  return moved;
 }
 
 // Reverse a planning-time leftover bank that has NOT yet been confirmed at
@@ -758,16 +950,21 @@ export async function unbankPlanningLeftover(lineId, qc, oc, user, why = '', kee
     `SELECT * FROM stock_batches WHERE batch_no=$1 OR batch_no LIKE $2 ORDER BY id`,
     [`LO-PLAN-${lineId}`, `LO-PLAN-${lineId}-%`]))
     .filter(b => !keep.includes(b.batch_no));
-  if (!batches.length) return;
+  if (!batches.length) return false;
+  // true only once a batch with real qty actually reverses stock — see
+  // unbankRunLeftover's twin comment.
+  let moved = false;
   for (const b of batches) {
     if (+b.qty > 0) {
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'leftover_in',$3,'order_line',$4,$5)`,
         [b.material_id, b.id, -b.qty, lineId, `Leftover un-planned${why ? ` — ${why}` : ''}`]);
       await qc(`UPDATE stock_batches SET qty=0, status='exhausted' WHERE id=$1`, [b.id]);
+      moved = true;
     }
   }
   await audit('order_line', lineId, 'leftover_unplanned', why || 'plan cleared', qc, user);
+  return moved;
 }
 
 export function parentSheetsRequired(childSheets, childrenPerParent) {
@@ -793,8 +990,16 @@ export function memberParentSheets(m) {
   const child = m?.sheets_required != null
     ? m.sheets_required
     : sheetsRequired({ ups: m?.ups, wastage_pct: m?.wastage_pct }, netProduceQty(m), m?.wastage_sheets);
-  const fit = childFit({ sheet_l: m?.sheet_l, sheet_w: m?.sheet_w },
-                       { child_l: m?.child_l, child_w: m?.child_w });
+  // Counted on the parent the LOCK cuts on — cuttingParent over the member's
+  // parent on file (MEMBER_VIEW carries it) — never the bare board. Counting
+  // the board here is how CI-MRG-0028 read "Covered" at 3,550 while its lock
+  // wrote 10,650 off SW-544's 22×28 parent: one screen, two sheets. A row with
+  // no parent columns reads as "no parent on file", i.e. the board, as before.
+  // A parent the board cannot yield is estimated on the board (cuttingParent's
+  // fallback) — the lock refuses that one outright, and the screens say so.
+  const parent = cuttingParent({ parent_l: m?.parent_l, parent_w: m?.parent_w },
+                               { sheet_l: m?.sheet_l, sheet_w: m?.sheet_w });
+  const fit = childFit(parent, { child_l: m?.child_l, child_w: m?.child_w });
   return parentSheetsRequired(child, fit.count);
 }
 
@@ -2433,6 +2638,63 @@ export function effectiveProduct(product, line) {
   return { ...product, ...o };
 }
 
+// Does this request change any member's cut AS reDeriveMemberSheets reads it?
+// `patch` is the request's own proposed field set (only board_material_id,
+// child_l, child_w, parent_l, parent_w and ups count — every other key, a
+// coating, a colour, an identity field, is ignored here even if present).
+// `masters` maps product_id → the product row, read ONCE before any write in
+// the request: /shared and /board write every member's spec_override (and,
+// with update_master, the product master itself) in one pass, and with
+// update_master a second order of the SAME product sees the FIRST member's
+// just-written master mid-loop — so a per-line before/after taken inside that
+// loop would already be reading the after. This has to run before all of it.
+//
+// A CO-PRINTED run (gang.kind !== 'merge' && gang.layout_mode === 'shared')
+// reads its child from the OVERRIDE alone, never the master — sharedLayoutState
+// (routes/gangs.js, ~179) only ever looks at spec_override, because a
+// master's child size describes some OTHER product's own sheet, never this
+// layout's. The EFFECTIVE (override-over-master) child that round 2's
+// cutPlanInputs compared is the wrong value to diff: a layout still pending —
+// no override, the master's own size showing through as "effective" — read a
+// patch that happened to match that master value as unchanged, and the
+// re-derive that would have settled the layout never ran. So for a co-printed
+// run, child_l/child_w compare against the override alone (undefined → '',
+// same as unset); parent_l/parent_w are skipped entirely — a co-printed run's
+// lock and re-derive both measure the shared board's own sheet and never read
+// a parent on file, so a parent in the patch changes nothing for one. Every
+// other case (a separate-layout gang, a merge, board_material_id and ups even
+// on a co-printed run) compares the ordinary EFFECTIVE value.
+//
+// A request that changes none of these must not call reDeriveMemberSheets:
+// it clears the member's board mix — a saved draft's included — and sweeps
+// its banked strip, so a no-op save costing the planner their mix is the
+// failure mode this exists to close off, on both sides of the miss it
+// replaces (round 2 caught the PLANNED-line case and re-broke the co-printed
+// one; this is meant to catch both).
+export function requestChangesCut({ gang, lines, masters, patch }) {
+  const CUT_FIELDS = ['board_material_id', 'child_l', 'child_w', 'parent_l', 'parent_w', 'ups'];
+  const norm = v => {
+    if (v == null || v === '') return '';
+    const n = +v;
+    return Number.isFinite(n) ? String(n) : String(v);
+  };
+  const coPrinted = gang?.kind !== 'merge' && gang?.layout_mode === 'shared';
+  for (const line of (lines || [])) {
+    const master = masters?.get(line.product_id);
+    const ov = line?.spec_override
+      ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+      : {};
+    const eff = effectiveProduct(master, line) || {};
+    for (const k of CUT_FIELDS) {
+      if (!(patch && k in patch)) continue;
+      if (coPrinted && (k === 'parent_l' || k === 'parent_w')) continue;   // never read on a co-printed run
+      const current = coPrinted && (k === 'child_l' || k === 'child_w') ? ov[k] : eff[k];
+      if (norm(patch[k]) !== norm(current)) return true;
+    }
+  }
+  return false;
+}
+
 // Batch loader for readiness() over many lines. readiness() needs six lookups
 // per line; done one line at a time that is 6N queries, which on a remote DB
 // makes the planning queue's latency grow linearly with the queue. This resolves
@@ -3481,6 +3743,7 @@ export async function createJobCardForGang(gangRunId, qc, oc, user = null) {
   // OVERRIDES directly (helpers cannot import the route module) — the same
   // rule sharedLayoutState() enforces upstream.
   const gangRow = await oc('SELECT * FROM gang_runs WHERE id=$1', [gangRunId]);
+  let sharedChild = null;   // the settled layout's child — the card's cut is measured on it below
   if (gangRow?.layout_mode === 'shared') {
     const ov = lines.map(l => {
       const o = l.spec_override
@@ -3493,6 +3756,7 @@ export async function createJobCardForGang(gangRunId, qc, oc, user = null) {
       e.status = 409;
       throw e;
     }
+    sharedChild = ov[0];
   }
 
   const gates = [];
@@ -3542,13 +3806,22 @@ export async function createJobCardForGang(gangRunId, qc, oc, user = null) {
   const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [gangRunId]);
   const anchor = lines[0];
   const anchorProduct = products[0];
+  // The card's cut is the one its LOCK used. For every ordinary gang that is
+  // readiness()'s figure. A co-printed run's lock measured the shared child on
+  // the board's own sheet, never a member's parent on file — so its card does
+  // too (coPrintedCardCuts), or cutting is told a different count than the plan.
+  let cardCuts = Math.max(1, gates[0]?.children_per_parent || 1);
+  if (sharedChild && gangRow?.kind !== 'merge') {
+    const board = await oc('SELECT sheet_l, sheet_w FROM materials WHERE id=$1', [anchorProduct.board_material_id]);
+    cardCuts = coPrintedCardCuts(board, sharedChild);
+  }
   const jc_number = await nextNumber('CI-GANG-JC-', 'job_cards', 'jc_number', oc);
   const [jc] = await qc(`
     INSERT INTO job_cards (jc_number, order_line_id, gang_run_id, product_id, machine_id,
                            qty_planned, sheets_issued, children_per_parent, child_sheets_planned)
     VALUES ($1,NULL,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [jc_number, gangRunId, anchor.product_id, anchor.machine_id, totalChild, totalParent,
-     Math.max(1, gates[0]?.children_per_parent || 1), totalChild]);
+     cardCuts, totalChild]);
 
   const wanted = new Set(['cutting', 'printing', 'die_cutting']);
   for (const p of products) {

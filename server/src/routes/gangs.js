@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import {
   audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, lockDocNumber, sheetsRequired, netProduceQty,
-  availableQty, memberParentSheets,
+  availableQty, memberParentSheets, requestChangesCut, keepParentOffImpossibleMaster, masterParentCannotStay, parentFitsBoard, pinParentOnMasterClear,
   effectiveProduct, effectiveParent, cuttingParent, planLockParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, leftoverStrips, bankRunLeftover, unbankRunLeftover,
@@ -46,6 +46,8 @@ const MEMBER_VIEW = `
          COALESCE((ol.spec_override->>'ups')::int, p.ups) AS ups,
          COALESCE((ol.spec_override->>'child_l')::float, p.child_l) AS child_l,
          COALESCE((ol.spec_override->>'child_w')::float, p.child_w) AS child_w,
+         COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l) AS parent_l,
+         COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w) AS parent_w,
          COALESCE((ol.spec_override->>'emboss')::int, p.emboss) AS emboss,
          COALESCE((ol.spec_override->>'leafing')::int, p.leafing) AS leafing,
          COALESCE(ol.spec_override->>'leafing_colour', p.leafing_colour) AS leafing_colour,
@@ -634,7 +636,12 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [gangId]);
   if (!gang) { const e = new Error('Gang run not found'); e.status = 404; throw e; }
   const members = await qc(`${MEMBER_VIEW} WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [gangId]);
-  const withSheets = members.map(m => ({ ...m, parent_sheets: memberParentSheets(m) }));
+  // Every member's estimate counts on the parent its LOCK will cut on — except
+  // a co-printed run, whose lock cuts the shared child on the board's own
+  // sheet and never reads a member's parent on file (see the plan route's
+  // shared arm), so neither may its estimate.
+  const coPrinted = gang.kind !== 'merge' && gang.layout_mode === 'shared';
+  const withSheets = members.map(m => ({ ...m, parent_sheets: memberParentSheets(coPrinted ? { ...m, parent_l: null, parent_w: null } : m) }));
   const boardId = withSheets[0]?.board_material_id ?? null;
   const totalParent = withSheets.reduce((s, m) => s + m.parent_sheets, 0);
   const mix = await gangMixContext(gang, withSheets, boardId, oc, qc);
@@ -2227,55 +2234,95 @@ r.post('/gang-runs/:id/plan/discard', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Recompute a member's sheet requirement after its qty / ups changed — but only
-// once its plan is locked (planned / ready). A still-pending line has no cut plan
-// figures yet, so there is nothing to keep in sync.
+// Recompute a member's sheet requirement after its qty, ups, board, child or
+// parent changed — but only once it carries a cut plan: locked (planned /
+// ready) or a saved draft (pending with figures). A pending line nobody has
+// saved has no figures yet, so there is nothing to keep in sync. EXCEPT on a
+// CO-PRINTED run: the branch below re-splits every member from ONE call and
+// already skips a planless member's own row (its inner loop), so a call that
+// happens to land on that member — the highest id, which the in-loop
+// per-member call in /board and /shared always reaches LAST (see their own
+// comments) — must not bail here just because ITS OWN row has nothing saved.
+// It bails only when NOTHING in the run has a plan to re-split.
 //
 // live: a COMBINED RUN whose card is minted but unstarted has flipped every
 // member to in_production, and its sheet is still correctable (see
 // assertSheetEditable). Without this the spec would change while the cut plan
 // kept the old board's figures — the silent half-update that makes a "fixed"
 // job draw the wrong quantity of the right board.
-async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } = {}) {
+//
+// Re-deriving clears the member's board mix and sweeps its banked strip — not
+// free, so every caller runs it only when requestChangesCut says the request
+// actually changed one of its inputs (see its own comment), or, on the PATCH
+// route, a plain qty change. Returns { mixCleared, leftoverUnbanked }: the
+// board-mix rows cleared, and whether a banked strip was actually reversed
+// (not merely swept as already-dead — see unbankRunLeftover) — 0/false on
+// every early return, so a caller can total mixCleared into a mix_cleared
+// response and OR leftoverUnbanked into a leftover_unbanked one.
+export async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } = {}) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
   const editable = live ? ['planned', 'ready', 'in_production'] : ['planned', 'ready'];
-  if (!editable.includes(line.status)) return;
+  // A saved draft (pending, figures stored — LINE_VIEW's plan_draft) is a cut
+  // plan too: left on the old sheet, the run's Board Position, Short and Raise
+  // PR quote its stale figure while the screen counts the new one.
+  const isDraft = l => l.status === 'pending' && l.parent_sheets_required != null;
+  const hasPlan = l => editable.includes(l.status) || isDraft(l);
+  const gang = line.gang_run_id ? await oc('SELECT * FROM gang_runs WHERE id=$1', [line.gang_run_id]) : null;
+  // Same kind guard as the plan lock: a merge's run is a SUM, never the MAX.
+  const coPrinted = gang?.kind !== 'merge' && gang?.layout_mode === 'shared';
+  let siblings = null;
+  if (!hasPlan(line)) {
+    if (!coPrinted) return { mixCleared: 0, leftoverUnbanked: false };
+    // This call may have landed on a member with nothing of its own to
+    // re-derive — see the header comment — but the run as a whole still
+    // might. Fetched once here and reused below rather than re-queried.
+    siblings = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
+    if (!siblings.some(hasPlan)) return { mixCleared: 0, leftoverUnbanked: false };
+  }
   // A SHARED layout has no per-member cut plan — one member's qty/ups edit
   // moves the WHOLE run (the MAX can shift), so the recompute covers every
   // member together and re-splits the shares. Layout still pending → nothing
   // derivable yet; the figures land at plan time.
-  if (line.gang_run_id) {
-    const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [line.gang_run_id]);
-    // Same kind guard as the plan lock: a merge's run is a SUM, never the MAX.
-    if (gang?.kind !== 'merge' && gang?.layout_mode === 'shared') {
-      const lines = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
-      const layout = sharedLayoutState(gang, lines);
-      if (layout.pending) return;
-      const effs = [];
-      for (const l2 of lines) {
-        const m2 = await oc('SELECT * FROM products WHERE id=$1', [l2.product_id]);
-        effs.push(effectiveProduct(m2, l2));
-      }
-      if ([...new Set(effs.map(e2 => e2.board_material_id).filter(Boolean))].length !== 1) return;
-      if (effs.some(e2 => !(+e2.ups > 0))) return;
-      const run = sharedLayoutRun(
-        lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
-        { wastage: lines[0].wastage_sheets ?? 0 });
-      const board = await oc('SELECT * FROM materials WHERE id=$1', [effs[0].board_material_id]);
-      // Shared board's own sheet, not the lead's solo parent trim — the same
-      // geometry rule as the plan lock (see its comment).
-      const fit = childFit(board, { child_l: layout.child.l, child_w: layout.child.w });
-      const runParent = parentSheetsRequired(run.run_child, fit.count);
-      const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
-      const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
-      for (let i = 0; i < lines.length; i++) {
-        if (!['planned', 'ready'].includes(lines[i].status)) continue;
-        await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
-          [childShares[i].share, parentShares[i].share, lines[i].id]);
-        await clearMixPlan(lines[i].id, qc, user, why);
-      }
-      return;
+  if (coPrinted) {
+    // Swept BEFORE every return below, including layout.pending — the plan
+    // route's own rule for this bank: a co-printed run's strip was measured
+    // on the sheet THIS call means just changed, and a refusal further down
+    // (an unmeasurable layout, a disagreeing board, a missing ups) does not
+    // un-change it. Without this the branch returned before ever reaching
+    // the bottom-of-function sweep below, so a co-printed run's bank
+    // outlived every sheet it was ever measured on.
+    let leftoverUnbanked = false;
+    if (runBanksLeftover(gang)) {
+      leftoverUnbanked = await unbankRunLeftover(gang.id, qc, oc, user, why || 'gang member re-derived — cut plan changed');
     }
+    const lines = siblings || await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
+    const layout = sharedLayoutState(gang, lines);
+    if (layout.pending) return { mixCleared: 0, leftoverUnbanked };
+    const effs = [];
+    for (const l2 of lines) {
+      const m2 = await oc('SELECT * FROM products WHERE id=$1', [l2.product_id]);
+      effs.push(effectiveProduct(m2, l2));
+    }
+    if ([...new Set(effs.map(e2 => e2.board_material_id).filter(Boolean))].length !== 1) return { mixCleared: 0, leftoverUnbanked };
+    if (effs.some(e2 => !(+e2.ups > 0))) return { mixCleared: 0, leftoverUnbanked };
+    const run = sharedLayoutRun(
+      lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
+      { wastage: lines[0].wastage_sheets ?? 0 });
+    const board = await oc('SELECT * FROM materials WHERE id=$1', [effs[0].board_material_id]);
+    // Shared board's own sheet, not the lead's solo parent trim — the same
+    // geometry rule as the plan lock (see its comment).
+    const fit = childFit(board, { child_l: layout.child.l, child_w: layout.child.w });
+    const runParent = parentSheetsRequired(run.run_child, fit.count);
+    const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+    const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+    let mixCleared = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (!['planned', 'ready'].includes(lines[i].status) && !isDraft(lines[i])) continue;
+      await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
+        [childShares[i].share, parentShares[i].share, lines[i].id]);
+      mixCleared += await clearMixPlan(lines[i].id, qc, user, why);
+    }
+    return { mixCleared, leftoverUnbanked };
   }
   const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const eff = effectiveProduct(master, line);
@@ -2301,28 +2348,32 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   // plan that produced them, and this UPDATE just replaced it. A member can
   // carry a mix in from before it joined the gang (see the /plan endpoint
   // above), and each of this function's three callers — qty/ups edit, per-
-  // member board reassignment, shared-sheet lock — changes an input the cut
-  // math depends on. clearMixPlan is a cheap no-op when there is nothing to
-  // clear, so calling it unconditionally here (rather than diffing old vs new
-  // sheets) matches how plan-save itself doesn't diff either.
-  await clearMixPlan(lineId, qc, user, why || 'gang member re-derived — cut plan changed');
+  // member board reassignment, shared-sheet lock — now calls this function at
+  // all only when requestChangesCut (or, on the PATCH route, a plain qty
+  // change) says the request actually changed the cut, so by construction the
+  // mix this clears was frozen against the cut plan this UPDATE just
+  // replaced, never against the one still standing.
+  const mixCleared = await clearMixPlan(lineId, qc, user, why || 'gang member re-derived — cut plan changed');
   // The member rows just cleared were the run's own split mix, and the
   // run-level leftover bank mirrors that mix — so it goes with it, exactly as
   // re-locking without a mix sweeps it. The re-lock that follows a spec change
   // re-banks whatever the planner keeps.
   //
   // THIS IS THE GUARD RAIL FOR THE WHOLE FEATURE, and it is why it lives here
-  // rather than in three routes. All three callers change an input the strip is
-  // measured on — a per-member board reassignment (/board), the shared child
-  // size (/shared), a qty or ups edit (/lines/:lineId) — and a banked strip is
-  // live warehouse stock the moment the lock writes it. Leaving it behind would
-  // stock the rack with a size the run no longer cuts.
+  // rather than in three routes. A per-member board reassignment (/board) and
+  // the shared child size (/shared) change the strip's own geometry; a qty or
+  // ups edit (/lines/:lineId) changes only how many of it there are. Either
+  // way a banked strip is live warehouse stock the moment the lock writes it,
+  // so a stale COUNT is exactly as wrong as a stale GEOMETRY — leaving either
+  // behind would stock the rack with a size or a quantity the run no longer
+  // cuts.
   //
   // A run that cannot bank reads its kind and stops there, as before.
+  let leftoverUnbanked = false;
   if (line.gang_run_id) {
     const run = await oc('SELECT kind, layout_mode FROM gang_runs WHERE id=$1', [line.gang_run_id]);
     if (runBanksLeftover(run)) {
-      await unbankRunLeftover(line.gang_run_id, qc, oc, user,
+      leftoverUnbanked = await unbankRunLeftover(line.gang_run_id, qc, oc, user,
         why || 'gang member re-derived — cut plan changed');
     } else {
       // A SEPARATE-layout gang banks on the MEMBER, so the strip that goes with
@@ -2330,11 +2381,12 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
       // reason and by the same rule. Also catches a bank the line carried in
       // from being planned solo before it joined: clearMixPlan above has just
       // dropped the rows that bank mirrored.
-      await unbankPlanningLeftover(line.id, qc, oc, user,
+      leftoverUnbanked = await unbankPlanningLeftover(line.id, qc, oc, user,
         why || 'gang member re-derived — cut plan changed');
       await qc('UPDATE order_lines SET leftover_plan=NULL WHERE id=$1', [line.id]);
     }
   }
+  return { mixCleared, leftoverUnbanked };
 }
 
 // NAMING A MEMBER IS NOT EDITING THE RUN. The four fields the per-member
@@ -2372,12 +2424,14 @@ export function isIdentityOnlyEdit(body = {}) {
 // ── Edit one member — total qty and/or ups, in place ────────────────────────
 // The gang view's inline controls. Qty is the order quantity (guarded by what's
 // already dispatched); ups is a per-job spec override. Both re-derive the cut
-// plan when the member is already planned, and both are refused once the gang
-// has left planning. An identity-only save is exempt — see above.
+// plan when the member already carries one — planned/ready, or a saved draft
+// — and only when this edit actually moved a cut-plan input (requestChangesCut,
+// or a plain qty change); both are refused once the gang has left planning. An
+// identity-only save is exempt — see above.
 r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
   try {
     const identityOnly = isIdentityOnlyEdit(req.body);
-    await tx(async (qc, oc) => {
+    const out = await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
       if (!identityOnly) await assertPlanningOnlyGangEdit(gang.id, oc);
@@ -2385,22 +2439,15 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
         [req.params.lineId, gang.id]);
       if (!line) throw Object.assign(new Error('Line is not part of this gang'), { status: 404 });
 
-      if (req.body.qty !== undefined && req.body.qty !== '' && req.body.qty !== null) {
-        const qty = Math.round(+req.body.qty);
-        if (!Number.isFinite(qty) || qty <= 0)
-          throw Object.assign(new Error('Quantity must be greater than zero'), { status: 400 });
-        if (qty < line.dispatched_qty)
-          throw Object.assign(new Error(`Quantity cannot go below the ${line.dispatched_qty} already dispatched`), { status: 400 });
-        if (qty !== line.qty) {
-          await qc('UPDATE order_lines SET qty=$1 WHERE id=$2', [qty, line.id]);
-          await audit('order_line', line.id, 'qty_edit', `${line.qty} → ${qty} (gang ${gang.gang_number})`, qc, req.user.name);
-        }
-      }
-
       // Per-product spec — the full carton spec editable from the gang engine:
       // ups + the child sheet builder (child_l/child_w) + colours/coating/finish.
       // Everything lands as a job-only spec_override, cleared when it equals the
       // master so a value pushed back to master doesn't linger as an override.
+      // Set up here, BEFORE the qty write below, purely to read requestChangesCut
+      // off it before ANY write in the request — the same rule /board and
+      // /shared follow (see their comments). None of this reads or writes
+      // anything qty touches, so hoisting it above the qty block changes
+      // nothing about what it computes, only when.
       const spec = { ...(req.body.spec || {}) };
       if (req.body.ups !== undefined) spec.ups = req.body.ups;           // legacy top-level ups
       const GANG_SPEC = { ups: 'int', child_l: 'float', child_w: 'float', colors: 'int',
@@ -2408,16 +2455,42 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
         party_artwork_code: 'text', output_number: 'text', shade_card_number: 'text', shade_card_date: 'text',
         colour_type: 'text', pasting_type: 'text', die_number: 'text', block_number: 'text' };
       const provided = Object.keys(GANG_SPEC).filter(f => spec[f] !== undefined && spec[f] !== null && spec[f] !== '');
+      const cast = (f, v) => GANG_SPEC[f] === 'int' ? Math.round(+v) : GANG_SPEC[f] === 'float' ? +v : String(v);
+      let master = null, reDeriveForSpec = false;
       if (provided.length) {
-        const master = await oc(`SELECT ups, child_l, child_w, colors, coating, emboss, leafing, leafing_colour,
+        master = await oc(`SELECT ups, child_l, child_w, colors, coating, emboss, leafing, leafing_colour,
           party_artwork_code, output_number, shade_card_number, shade_card_date, colour_type, pasting_type,
           die_number, block_number
           FROM products WHERE id=$1`, [line.product_id]);
+        // The only cut fields this route ever takes are ups/child_l/child_w
+        // (board and parent are /board's and /shared's alone) — cast the same
+        // way the write below will, but not yet validated: an invalid value
+        // still throws in its usual place, below, before this ever reaches a
+        // re-derive decision.
+        const cutPatch = {};
+        for (const f of ['ups', 'child_l', 'child_w']) if (provided.includes(f)) cutPatch[f] = cast(f, spec[f]);
+        reDeriveForSpec = requestChangesCut({ gang, lines: [line], masters: new Map([[line.product_id, master]]), patch: cutPatch });
+      }
+
+      let qtyChanged = false;
+      if (req.body.qty !== undefined && req.body.qty !== '' && req.body.qty !== null) {
+        const qty = Math.round(+req.body.qty);
+        if (!Number.isFinite(qty) || qty <= 0)
+          throw Object.assign(new Error('Quantity must be greater than zero'), { status: 400 });
+        if (qty < line.dispatched_qty)
+          throw Object.assign(new Error(`Quantity cannot go below the ${line.dispatched_qty} already dispatched`), { status: 400 });
+        if (qty !== line.qty) {
+          qtyChanged = true;
+          await qc('UPDATE order_lines SET qty=$1 WHERE id=$2', [qty, line.id]);
+          await audit('order_line', line.id, 'qty_edit', `${line.qty} → ${qty} (gang ${gang.gang_number})`, qc, req.user.name);
+        }
+      }
+
+      if (provided.length) {
         const prev = line.spec_override
           ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
           : {};
         const next = { ...prev };
-        const cast = (f, v) => GANG_SPEC[f] === 'int' ? Math.round(+v) : GANG_SPEC[f] === 'float' ? +v : String(v);
         for (const f of provided) {
           const v = cast(f, spec[f]);
           if ((f === 'ups' && v < 1) || ((f === 'child_l' || f === 'child_w') && v <= 0))
@@ -2434,12 +2507,19 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
       // its side effects — it clears the member's board mix plan and, on a
       // combined run, unbanks the run's leftover. Typing a die number must not
       // cost the planner a mix he already balanced.
-      if (!identityOnly) {
-        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+      let mixCleared = 0;
+      let leftoverUnbanked = false;
+      const reDerive = !identityOnly && (qtyChanged || reDeriveForSpec);
+      if (reDerive) {
+        const result = await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
           `qty/spec changed on ${gang.gang_number} — cut plan re-derived`);
+        mixCleared = result?.mixCleared || 0;
+        leftoverUnbanked = !!result?.leftoverUnbanked;
       }
+      return { mix_cleared: mixCleared > 0, leftover_unbanked: leftoverUnbanked };
     });
-    res.json(await gangDetail(+req.params.id));
+    res.json({ ...(await gangDetail(+req.params.id)), mix_cleared: out?.mix_cleared ?? false,
+      leftover_unbanked: out?.leftover_unbanked ?? false });
   } catch (e) { next(e); }
 });
 
@@ -2520,7 +2600,7 @@ r.post('/gang-runs/:id/board', canPlan, async (req, res, next) => {
     const boardId = Math.round(+req.body.board_material_id);
     if (!Number.isFinite(boardId) || boardId <= 0)
       return res.status(400).json({ error: 'A board is required' });
-    await tx(async (qc, oc) => {
+    const out = await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
       await assertPlanningOnlyGangEdit(gang.id, oc);
@@ -2528,6 +2608,19 @@ r.post('/gang-runs/:id/board', canPlan, async (req, res, next) => {
       if (!board) throw Object.assign(new Error('Board not found'), { status: 404 });
       const lines = await qc(
         'SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR UPDATE OF order_lines', [gang.id]);
+      // Computed BEFORE the write loop, from a `masters` read before any
+      // write in the request — same reason as /shared (see its comment),
+      // though nothing here rewrites a master: kept for the same shape and
+      // the same one-query-per-distinct-product economy.
+      const masters = new Map();
+      for (const l of lines) {
+        if (!masters.has(l.product_id)) {
+          masters.set(l.product_id, await oc('SELECT * FROM products WHERE id=$1', [l.product_id]));
+        }
+      }
+      const reDerive = requestChangesCut({ gang, lines, masters, patch: { board_material_id: boardId } });
+      let mixCleared = 0;
+      let leftoverUnbanked = false;
       for (const line of lines) {
         const master = await oc('SELECT board_material_id FROM products WHERE id=$1', [line.product_id]);
         const prev = line.spec_override
@@ -2537,15 +2630,58 @@ r.post('/gang-runs/:id/board', canPlan, async (req, res, next) => {
         if (boardId === master.board_material_id) delete next.board_material_id; else next.board_material_id = boardId;
         await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
           [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
-        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
-          `board changed to ${board.name} on ${gang.gang_number} — cut plan re-derived`);
+        // In-loop, not a post-pass: on a CO-PRINTED run every member must
+        // agree on one board before reDeriveMemberSheets' own uniformity
+        // check will do anything, so calling it right after EACH member's own
+        // write — as round 1 did — means the first N-1 calls see the others
+        // still on their old board and no-op, and only the LAST member's call
+        // sees the run settled and does the real (single) re-split and sweep.
+        // A post-pass calling it once per CHANGED member after every write
+        // had already landed did that same full-run re-split N times over.
+        // That LAST call is not guaranteed to land on a member that itself
+        // carries a plan — a job added to the run after it was last saved has
+        // none — so reDeriveMemberSheets' own guard must not bail on it just
+        // because of that; see its comment.
+        if (reDerive) {
+          const result = await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+            `board changed to ${board.name} on ${gang.gang_number} — cut plan re-derived`);
+          mixCleared += result?.mixCleared || 0;
+          leftoverUnbanked = leftoverUnbanked || !!result?.leftoverUnbanked;
+        }
       }
       await audit('gang_run', gang.id, 'set_board',
         `${gang.gang_number} — board set to ${board.name} for all ${lines.length} jobs`, qc, req.user.name);
+      return { mix_cleared: mixCleared > 0, leftover_unbanked: leftoverUnbanked };
     });
-    res.json(await gangDetail(+req.params.id));
+    res.json({ ...(await gangDetail(+req.params.id)), mix_cleared: out?.mix_cleared ?? false,
+      leftover_unbanked: out?.leftover_unbanked ?? false });
   } catch (e) { next(e); }
 });
+
+// `line_ids` on POST /gang-runs/:id/shared: the orders a PARENT change is for.
+//
+// The Run Sheet's one-click ("Use the board's full sheet" on ONE product's red
+// row) sends that product's own board sheet. Sent run-wide, it re-stamped every
+// member's parent: on a gang of different products that overwrote deliberate
+// trims and wrote board-sheet copies into masters that had no parent (final
+// whole-branch review, 19 Sep 2026). So the row names its orders, and the route
+// touches no other.
+//
+// A parent-only patch alone may be scoped: a board, child or coating is the
+// run's ONE shared sheet, and a lock that set it for some orders and not others
+// would split the sheet the run prints on. (Judged on the patch as sent; after
+// a co-printed run drops the parent the answer is the same — that drop removes
+// parent fields only, and an emptied patch changes nothing.) A typed parent
+// through Lock sheet → stays run-wide: it sends no line_ids.
+// Returns { scope: Set of line ids | null (the whole run), error }.
+export function sharedLineScope(lineIds, patch) {
+  if (lineIds == null) return { scope: null, error: null };
+  if (!Array.isArray(lineIds) || !lineIds.length || !lineIds.every(id => Number.isInteger(id) && id > 0))
+    return { scope: null, error: 'line_ids must be a list of order line ids' };
+  if (Object.keys(patch || {}).some(k => k !== 'parent_l' && k !== 'parent_w'))
+    return { scope: null, error: 'line_ids scopes a parent change only' };
+  return { scope: new Set(lineIds), error: null };
+}
 
 // ── Lock the SHARED sheet for the gang: parent + child + coating ─────────────
 // The gang all prints on one physical sheet, so the mother board (parent), the
@@ -2561,92 +2697,256 @@ r.post('/gang-runs/:id/shared', canPlan, async (req, res, next) => {
     if (req.body.child_l != null && req.body.child_l !== '') patch.child_l = +req.body.child_l;
     if (req.body.child_w != null && req.body.child_w !== '') patch.child_w = +req.body.child_w;
     if (req.body.coating != null && req.body.coating !== '') patch.coating = String(req.body.coating);
+    // The parent the run cuts on — typed in the Run Sheet, or the board's own
+    // sheet sent by "Use the board's full sheet" (or by blanking a parent on
+    // file). A blank means "no change" here, never "clear": the client says
+    // "the board's full sheet" with the board's own dims. It rides the loop
+    // below exactly like the child size: equal to master → the override goes;
+    // update master → the master; otherwise a job-only override. Same question.
+    if (req.body.parent_l != null && req.body.parent_l !== '') patch.parent_l = +req.body.parent_l;
+    if (req.body.parent_w != null && req.body.parent_w !== '') patch.parent_w = +req.body.parent_w;
+    if (('parent_l' in patch) !== ('parent_w' in patch))
+      return res.status(400).json({ error: 'Parent size needs both length and width' });
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to lock' });
     if ((patch.child_l != null && !(patch.child_l > 0)) || (patch.child_w != null && !(patch.child_w > 0)))
       return res.status(400).json({ error: 'Child size must be greater than zero' });
+    if ((patch.parent_l != null && !(patch.parent_l > 0)) || (patch.parent_w != null && !(patch.parent_w > 0)))
+      return res.status(400).json({ error: 'Parent size must be greater than zero' });
+    // The one-click's orders (sharedLineScope, above): null is the whole run.
+    const { scope, error: scopeError } = sharedLineScope(req.body.line_ids, patch);
+    if (scopeError) return res.status(400).json({ error: scopeError });
 
-    await tx(async (qc, oc) => {
-      const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
-      // A combined run's card, minted but not yet on the floor, does not stop
-      // the sheet being corrected — it just has to travel with it. Everything
-      // else (a gang, or a run still in planning) keeps the ordinary rule.
-      const card = await assertSheetEditable(gang, oc);
-      if (!card) await assertPlanningOnlyGangEdit(gang.id, oc);
-      if (patch.board_material_id) {
-        const b = await oc('SELECT id FROM materials WHERE id=$1', [patch.board_material_id]);
-        if (!b) throw Object.assign(new Error('Board not found'), { status: 404 });
-      }
-      // Master-update philosophy (same as the single planning engine): when the
-      // planner chooses "update master", the shared sheet values are written to
-      // each member's PRODUCT MASTER (and removed from the override) so every
-      // future job inherits them; otherwise they stay a job-only spec_override.
-      const updateMaster = !!req.body.update_master;
-      const lines = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR UPDATE OF order_lines', [gang.id]);
-      for (const line of lines) {
-        const master = await oc('SELECT board_material_id, child_l, child_w, coating FROM products WHERE id=$1', [line.product_id]);
-        const prev = line.spec_override
-          ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
-          : {};
-        const next = { ...prev };
-        const masterSets = {};
-        for (const [f, v] of Object.entries(patch)) {
-          // On a SHARED layout the entered child size is the layout's own fact
-          // — never dropped just because it coincides with a master's size,
-          // or the gang would read Layout Pending again for that member.
-          const keepExplicit = gang.layout_mode === 'shared' && !updateMaster && (f === 'child_l' || f === 'child_w');
-          if (String(v) === String(master[f]) && !keepExplicit) { delete next[f]; continue; }   // already the master value
-          if (updateMaster) { masterSets[f] = v; delete next[f]; }             // push to master, drop override
-          else next[f] = v;                                                    // job-only override
-        }
-        if (updateMaster && Object.keys(masterSets).length) {
-          // When the board changes, keep the derived board name + grade in step.
-          if (masterSets.board_material_id) {
-            const nb = await oc('SELECT name FROM materials WHERE id=$1', [masterSets.board_material_id]);
-            masterSets.board_name = nb?.name || null;
-            masterSets.board_grade = nb?.name ? nb.name.split(' ')[0] : null;
-          }
-          const cols = Object.keys(masterSets);
-          const sets = cols.map((cc, i) => `${cc}=$${i + 1}`).join(', ');
-          await qc(`UPDATE products SET ${sets} WHERE id=$${cols.length + 1}`, [...cols.map(cc => masterSets[cc]), line.product_id]);
-          await audit('product', line.product_id, 'master_update',
-            `from gang ${gang.gang_number}: ${cols.join(', ')}`, qc, req.user.name);
-        }
-        await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
-          [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
-        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
-          `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} — cut plan re-derived`,
-          { live: !!card });
-      }
-      // The card carries its OWN copy of what to draw — sheets_issued is what
-      // the floor consumes at cutting (production.js issues exactly that many)
-      // and what the board-pending chip measures stock against. A new sheet
-      // that left it alone would hand the cutter the old board's count of the
-      // new board: right correction, wrong quantity. Re-read the members so
-      // readiness() sees the figures reDeriveMemberSheets just wrote — it
-      // prefers the stored ones — and restamp the card from them, exactly as
-      // createJobCardForMergeRun first built it.
-      if (card) {
-        const fresh = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
-        let totalParent = 0;
-        let perParent = 0;
-        for (const line of fresh) {
-          const gate = await readiness(line, oc);
-          totalParent += gate.parent_needed;
-          perParent = perParent || gate.children_per_parent;
-        }
-        await qc('UPDATE job_cards SET sheets_issued=$1, children_per_parent=$2 WHERE id=$3',
-          [totalParent, Math.max(1, perParent || 1), card.id]);
-        await audit('job_card', card.id, 'sheet_relocked',
-          `${card.jc_number} follows ${gang.gang_number}'s new sheet (${Object.keys(patch).join(', ')}) — issue ${totalParent} parent sheets`,
-          qc, req.user.name);
-      }
-      await audit('gang_run', gang.id, updateMaster ? 'lock_sheet_master' : 'lock_sheet',
-        `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} (${Object.keys(patch).join(', ')}) for all ${lines.length} jobs${card ? ` — ${card.jc_number} re-stamped` : ''}`, qc, req.user.name);
-    });
-    res.json(await gangDetail(+req.params.id));
+    const out = await tx((qc, oc) => lockSharedSheet(
+      { gangId: req.params.id, patch, updateMaster: !!req.body.update_master, scope, user: req.user.name }, qc, oc));
+    res.json({ ...(await gangDetail(+req.params.id)), mix_cleared: out?.mix_cleared ?? false,
+      leftover_unbanked: out?.leftover_unbanked ?? false, parent_kept_job_only: out?.parent_kept_job_only ?? [],
+      master_parent_cleared: out?.master_parent_cleared ?? [], masters_updated: out?.masters_updated ?? [],
+      parent_pinned_lines: out?.parent_pinned_lines ?? [] });
   } catch (e) { next(e); }
 });
+
+// POST /gang-runs/:id/shared, inside its transaction: everything after the
+// route's input checks. Exported so lock-shared-sheet.test.js can drive the
+// REAL write path with a stub qc/oc — both of Task 10's master-safety bugs
+// passed every source pin (final review, 19 Sep 2026), and only a behavioural
+// test catches the next one.
+//   gangId       the run
+//   patch        the validated sheet fields (board_material_id, child_l/_w,
+//                coating, parent_l/_w); copied, never changed for the caller
+//   updateMaster "Update Product Master(s)" was the answer
+//   scope        the Set of line ids a parent-only one-click is for
+//                (sharedLineScope), or null for the whole run
+//   user         who, for the audit trail
+// Returns the route's `out` — or nothing, when a co-printed run is left with
+// nothing to lock.
+export async function lockSharedSheet({ gangId, patch: sent, updateMaster = false, scope = null, user = null }, qc, oc) {
+  const patch = { ...sent };
+  const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [gangId]);
+  if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
+  // A combined run's card, minted but not yet on the floor, does not stop
+  // the sheet being corrected — it just has to travel with it. Everything
+  // else (a gang, or a run still in planning) keeps the ordinary rule.
+  const card = await assertSheetEditable(gang, oc);
+  if (!card) await assertPlanningOnlyGangEdit(gang.id, oc);
+  // A co-printed run cuts the shared child on the board's own sheet and
+  // never reads a parent on file (its lock and re-derive measure the board),
+  // so a parent sent for one is ignored — never written onto its products.
+  if (gang.kind !== 'merge' && gang.layout_mode === 'shared') { delete patch.parent_l; delete patch.parent_w; }
+  // Nothing left to lock (a parent-only request to a co-printed run): leave
+  // the run exactly as it is — no re-derive, no empty audit line.
+  if (!Object.keys(patch).length) return;
+  if (patch.board_material_id) {
+    const b = await oc('SELECT id FROM materials WHERE id=$1', [patch.board_material_id]);
+    if (!b) throw Object.assign(new Error('Board not found'), { status: 404 });
+  }
+  // Master-update philosophy (same as the single planning engine): when the
+  // planner chooses "update master", the shared sheet values are written to
+  // each member's PRODUCT MASTER (and removed from the override) so every
+  // future job inherits them; otherwise they stay a job-only spec_override.
+  const members = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR UPDATE OF order_lines', [gang.id]);
+  if (scope && ![...scope].every(id => members.some(l => l.id === id)))
+    throw Object.assign(new Error('line_ids names an order that is not in this run'), { status: 400 });
+  // A scoped one-click touches its own orders only: the masters read,
+  // requestChangesCut, the member loop and its re-derive below all run on
+  // `lines`. The live card's restamp further down re-reads every member.
+  const lines = scope ? members.filter(l => scope.has(l.id)) : members;
+  // Computed BEFORE the write loop below, from a `masters` read before
+  // any write in the request — re-deriving clears a member's board mix
+  // and sweeps its banked strip, so a Lock sheet that changes only (say)
+  // coating must not run it for every member. This has to run before the
+  // loop, not as a per-line before/after inside it: with update_master, a
+  // second member of the SAME product sees the master the FIRST member's
+  // turn through the loop just wrote, so a check taken at that member's
+  // own turn would already be reading the after.
+  const masters = new Map();
+  for (const l of lines) {
+    if (!masters.has(l.product_id)) {
+      masters.set(l.product_id, await oc('SELECT * FROM products WHERE id=$1', [l.product_id]));
+    }
+  }
+  const reDerive = requestChangesCut({ gang, lines, masters, patch });
+  let mixCleared = 0;
+  let leftoverUnbanked = false;
+  const codeOf = id => masters.get(id)?.code ?? `product #${id}`;
+  // Product codes whose parent stayed on these jobs instead of their master.
+  const parentKeptJobOnly = new Set();
+  // Masters whose board this write moved out from under a parent that cannot
+  // stay (masterParentCannotStay): product_id → { code, from }.
+  const masterParentCleared = new Map();
+  // Products whose master this request actually wrote, and the sheet fields
+  // that reached one — the audit and the toast say "saved to product masters"
+  // only then (a one-click whose parent every master kept off writes none).
+  const mastersWritten = new Set();
+  const masterCols = new Set();
+  // Other open plans of a cleared product, pinned to the parent they were made on.
+  const parentPinnedLines = [];
+  const coPrinted = gang.kind !== 'merge' && gang.layout_mode === 'shared';
+  for (const line of lines) {
+    const master = await oc('SELECT board_material_id, child_l, child_w, coating, parent_l, parent_w FROM products WHERE id=$1', [line.product_id]);
+    const prev = line.spec_override
+      ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+      : {};
+    let next = { ...prev };
+    let masterSets = {};
+    for (const [f, v] of Object.entries(patch)) {
+      // On a SHARED layout the entered child size is the layout's own fact
+      // — never dropped just because it coincides with a master's size,
+      // or the gang would read Layout Pending again for that member.
+      const keepExplicit = gang.layout_mode === 'shared' && !updateMaster && (f === 'child_l' || f === 'child_w');
+      if (String(v) === String(master[f]) && !keepExplicit) { delete next[f]; continue; }   // already the master value
+      if (updateMaster) { masterSets[f] = v; delete next[f]; }             // push to master, drop override
+      else next[f] = v;                                                    // job-only override
+    }
+    // A parent this write carries to the master must be one the master's own
+    // board can yield (keepParentOffImpossibleMaster, helpers.js): the run's
+    // board sheet on a master that keeps its own smaller board stays on these
+    // jobs. Judged against the board the master will HAVE — this save's, else
+    // its own.
+    if (updateMaster && ('parent_l' in masterSets || 'parent_w' in masterSets)) {
+      const boardId = masterSets.board_material_id ?? master.board_material_id;
+      const masterBoard = boardId != null ? await oc('SELECT sheet_l, sheet_w FROM materials WHERE id=$1', [boardId]) : null;
+      const kept = keepParentOffImpossibleMaster({ toMaster: masterSets, toJob: next, master, masterBoard });
+      masterSets = kept.toMaster; next = kept.toJob;
+      if (kept.keptJobOnly) parentKeptJobOnly.add(codeOf(line.product_id));
+    }
+    // …and a write that moves the master's BOARD without carrying a parent
+    // leaves it the one it already has — which must be able to stay
+    // (masterParentCannotStay: not a copy of the old board's sheet, not too big
+    // for the new one). One that cannot is cleared in this same write: no
+    // parent, so the master cuts its board's full sheet (final review, round 2:
+    // SW-251 kept #53's 22×28 on a 31.5×41.5 board; SW-097 an impossible
+    // 25.6×28 on 23×38). Co-printed runs too — their masters are planned alone
+    // one day. Only the master: every job keeps whatever parent it has.
+    let clearedFrom = null;
+    if (updateMaster && masterSets.board_material_id != null && !('parent_l' in masterSets) && !('parent_w' in masterSets)) {
+      const current = { sheet_l: master.parent_l, sheet_w: master.parent_w };
+      const oldBoard = master.board_material_id != null
+        ? await oc('SELECT sheet_l, sheet_w FROM materials WHERE id=$1', [master.board_material_id]) : null;
+      const newBoard = await oc('SELECT sheet_l, sheet_w FROM materials WHERE id=$1', [masterSets.board_material_id]);
+      // A parent TYPED equal to the master's own IS carried by this write — the
+      // split above dropped it only as "already the master's" — so it is judged
+      // as a written parent is: it stays while the new board can yield it.
+      const typed = 'parent_l' in patch && !('parent_l' in next) && !('parent_w' in next);
+      const cannotStay = typed
+        ? current.sheet_l != null && current.sheet_w != null && !parentFitsBoard(current, newBoard)
+        : masterParentCannotStay({ masterParent: current, oldBoard, newBoard });
+      if (cannotStay) {
+        masterSets.parent_l = null; masterSets.parent_w = null;
+        // A typed parent the split dropped stays with these jobs — typed values
+        // are used as typed; only the master lets go of it.
+        for (const f of ['parent_l', 'parent_w']) if (f in patch && !(f in next)) next[f] = patch[f];
+        clearedFrom = `${current.sheet_l}×${current.sheet_w}`;
+        masterParentCleared.set(line.product_id, { code: codeOf(line.product_id), from: clearedFrom });
+        // The product's OTHER open plans keep the parent they were made on —
+        // only future orders follow the board (pinParentOnMasterClear; before
+        // the products UPDATE, as plan-save does it). This request's own lines
+        // follow their own rule above and below.
+        parentPinnedLines.push(...await pinParentOnMasterClear({
+          productId: line.product_id, oldParent: { parent_l: current.sheet_l, parent_w: current.sheet_w },
+          excludeLineIds: lines.map(l => l.id), user, why: `from gang ${gang.gang_number}` }, qc));
+      }
+    }
+    if (updateMaster && Object.keys(masterSets).length) {
+      // When the board changes, keep the derived board name + grade in step.
+      if (masterSets.board_material_id) {
+        const nb = await oc('SELECT name FROM materials WHERE id=$1', [masterSets.board_material_id]);
+        masterSets.board_name = nb?.name || null;
+        masterSets.board_grade = nb?.name ? nb.name.split(' ')[0] : null;
+      }
+      const cols = Object.keys(masterSets);
+      const sets = cols.map((cc, i) => `${cc}=$${i + 1}`).join(', ');
+      await qc(`UPDATE products SET ${sets} WHERE id=$${cols.length + 1}`, [...cols.map(cc => masterSets[cc]), line.product_id]);
+      // A cleared parent is said on its own, not as a field the sheet wrote.
+      const written = clearedFrom ? cols.filter(cc => cc !== 'parent_l' && cc !== 'parent_w') : cols;
+      await audit('product', line.product_id, 'master_update',
+        `from gang ${gang.gang_number}: ${written.join(', ')}`
+          + (clearedFrom ? `; parent_l, parent_w: ${clearedFrom} → none (follows the board)` : ''), qc, user);
+      mastersWritten.add(line.product_id);
+      for (const cc of written) if (cc in patch) masterCols.add(cc);
+    }
+    await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
+      [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
+    // In-loop, not a post-pass — see /board's comment: a co-printed run's
+    // layout or board only settles on the LAST member's turn through this
+    // loop, so calling reDeriveMemberSheets right after EACH member's own
+    // write (as round 1 did) re-splits the run exactly once, not once per
+    // changed member. That LAST call is not guaranteed to land on a
+    // member that itself carries a plan — see reDeriveMemberSheets' own
+    // comment for why its guard must not bail on it regardless.
+    // A cleared master parent MOVES the cut of a job that has no parent of its
+    // own (it cut the master's), even when the patch itself changes nothing it
+    // cuts on — so it is re-derived too. Never on a co-printed run, whose lock
+    // never reads a parent.
+    const parentMoved = !coPrinted && masterParentCleared.has(line.product_id)
+      && !('parent_l' in next && 'parent_w' in next);
+    if (reDerive || parentMoved) {
+      const result = await reDeriveMemberSheets(line.id, qc, oc, user,
+        `${gang.gang_number} shared sheet ${mastersWritten.has(line.product_id) ? 'saved to product masters' : 'locked'} — cut plan re-derived`,
+        { live: !!card });
+      mixCleared += result?.mixCleared || 0;
+      leftoverUnbanked = leftoverUnbanked || !!result?.leftoverUnbanked;
+    }
+  }
+  // The card carries its OWN copy of what to draw — sheets_issued is what
+  // the floor consumes at cutting (production.js issues exactly that many)
+  // and what the board-pending chip measures stock against. A new sheet
+  // that left it alone would hand the cutter the old board's count of the
+  // new board: right correction, wrong quantity. Re-read the members so
+  // readiness() sees the figures reDeriveMemberSheets just wrote — it
+  // prefers the stored ones — and restamp the card from them, exactly as
+  // createJobCardForMergeRun first built it.
+  if (card) {
+    const fresh = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
+    let totalParent = 0;
+    let perParent = 0;
+    for (const line of fresh) {
+      const gate = await readiness(line, oc);
+      totalParent += gate.parent_needed;
+      perParent = perParent || gate.children_per_parent;
+    }
+    await qc('UPDATE job_cards SET sheets_issued=$1, children_per_parent=$2 WHERE id=$3',
+      [totalParent, Math.max(1, perParent || 1), card.id]);
+    await audit('job_card', card.id, 'sheet_relocked',
+      `${card.jc_number} follows ${gang.gang_number}'s new sheet (${Object.keys(patch).join(', ')}) — issue ${totalParent} parent sheets`,
+      qc, user);
+  }
+  // A scoped one-click names the orders it changed.
+  const jobs = scope ? `for ${lines.length} of the ${members.length} jobs — ${lines.map(l => `${masters.get(l.product_id)?.code ?? `product #${l.product_id}`} (line ${l.id})`).join(', ')}`
+    : `for all ${lines.length} jobs`;
+  // Kept and cleared parents are said on their own; the verb says whether a
+  // master was written at all, and the list names only what reached one.
+  const kept = parentKeptJobOnly.size
+    ? ` · parent kept job-only on ${[...parentKeptJobOnly].join(', ')} — the master's own board cannot yield it` : '';
+  const cleared = masterParentCleared.size
+    ? ` · master parent cleared on ${[...masterParentCleared.values()].map(c => `${c.code} (${c.from})`).join(', ')} — it cannot stay on the new board`
+    : '';
+  const wrote = mastersWritten.size > 0;
+  await audit('gang_run', gang.id, wrote ? 'lock_sheet_master' : 'lock_sheet',
+    `${gang.gang_number} shared sheet ${wrote ? `saved to product masters (${[...masterCols].join(', ')})` : `locked (${Object.keys(patch).join(', ')})`} ${jobs}${kept}${cleared}${card ? ` — ${card.jc_number} re-stamped` : ''}`, qc, user);
+  return { mix_cleared: mixCleared > 0, leftover_unbanked: leftoverUnbanked, parent_kept_job_only: [...parentKeptJobOnly],
+           master_parent_cleared: [...masterParentCleared.values()], masters_updated: [...mastersWritten].map(codeOf),
+           parent_pinned_lines: parentPinnedLines };
+}
 
 // ── Smart Match a shared board for the gang ─────────────────────────────────
 // Ranks boards that suit the gang: anchored on the first product's child size,
