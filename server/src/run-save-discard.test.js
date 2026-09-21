@@ -47,7 +47,9 @@ test('a draft does NOT remember the die', () => {
   // rememberDie seeds every FUTURE gang of this product combination. A draft is
   // not the plant deciding a layout, and shared state that outlives the discard
   // which threw the layout away is the one thing a draft must not write.
-  assert.match(gangs, /if \(!draft\) await rememberDie\(/,
+  // Further guards may join it (a batch gang must not write die memory either
+  // — see 'a batch gang never touches the die memory'), but !draft LEADS.
+  assert.match(gangs, /if \(!draft\b[^\n]*\) await rememberDie\(/,
     'rememberDie must be skipped on a draft');
   // The spec_override child stamp is a DIFFERENT thing and still runs: it is
   // local to these members and is what makes the saved figures re-derivable.
@@ -322,4 +324,28 @@ test('the run row wears the saved badge only when the WHOLE run is saved', () =>
   // The stale claim this replaced said gangs.js "never reads `draft`". It does now.
   assert.ok(!/the run has no draft save of its\s*\n?\s*\/\/ own/.test(planning),
     'the comment denying a run-level draft must be gone');
+});
+
+test('a batch gang never touches the die memory', () => {
+  // THE DIE MEMORY is keyed on the product SET — dieFingerprint dedupes the
+  // ids and findDieTemplate matches slots BY product_id. A batch gang gives
+  // ONE carton several slots at different ups, which that key cannot address:
+  // slots.find() would hand every member the same ups and flatten the split
+  // the planner just sized against the order quantities. Its layout follows
+  // those quantities, not a die, so there is nothing worth remembering.
+  assert.match(gangs, /if \(layoutMode === 'shared' && !repeatsAProduct\(members\)\) \{/,
+    'die RECOGNITION must be skipped when one product takes several slots');
+  assert.match(gangs, /if \(!draft && !repeatsAProduct\(lines\)\) await rememberDie\(/,
+    'die REMEMBERING must be skipped when one product takes several slots');
+});
+
+test('POST /gang-runs routes on the carton, not the product code', () => {
+  // Same product code under two BATCH numbers is two cartons: the batch prints
+  // at press, so a combined pile cannot serve both. The route must read the
+  // shared rule so an older client, a script or a direct POST all land on the
+  // same run kind the queue's button promised.
+  assert.match(gangs, /if \(runKindFor\(members\) === 'merge'\) \{/,
+    'the same-carton short circuit must read runKindFor, not product_id alone');
+  assert.ok(!/new Set\(members\.map\(m => m\.product_id\)\)\.size === 1/.test(gangs),
+    'the old product_id-only identity test must be gone');
 });

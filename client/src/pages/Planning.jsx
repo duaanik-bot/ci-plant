@@ -29,6 +29,7 @@ import { gangShortView } from '../lib/gangShort.js';
 import { boardPositionView } from '../lib/boardPositionView.js';
 import { boardShortOf } from '../lib/boardShort.js';
 import { parseBoardName } from '../lib/boardCode.js';
+import { batchOf, batchesOf, runKindFor } from '../lib/batchIdentity.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf, isGangRun, isMergeRun } from '../components/SetType.jsx';
 // One chip shape for every filter rail in the ERP — see FilterChip.jsx.
@@ -2281,6 +2282,14 @@ export default function Planning() {
 
   // ── Gang printing ─────────────────────────────────────────────────────────
   const gangCheck = gangSel ? gangPreview(gangSel) : null;
+  // What the selection IS decides what the modal offers. Same carton → combine;
+  // same carton under several BATCH numbers → gang (the batch prints at press,
+  // so one pile cannot serve two of them); different cartons → gang as always.
+  const gangSelMerges = !!gangSel && runKindFor(gangSel) === 'merge';
+  const gangSelBatches = gangSel ? batchesOf(gangSel) : [];
+  const gangSelBatchSplit = !!gangSel && !gangSelMerges
+    && new Set(gangSel.map(l => l.product_id)).size === 1;
+
   // Two families of opportunity from one endpoint. `kind` is absent on a cached
   // older payload, so anything not explicitly a carton group stays a board one.
   // Scoped to the set-type zone like everything else on the page — in the Gang
@@ -2299,13 +2308,18 @@ export default function Planning() {
     if (picked.length < 2) { toast.info('Those jobs have moved on — refreshing the queue'); load(); return; }
     setGangSel(picked);
   };
-  const createGang = async () => {
+  // `force` is the planner overriding the default the selection implies —
+  // 'merge' to combine batches into one pile anyway. Nothing here refuses; the
+  // override is a decision the modal spells out first.
+  const createGang = async (force) => {
     setGangBusy(true);
     try {
-      // Same product on every selected order → a COMBINED RUN (one pile, no
-      // split); different products → a gang. The server enforces the same rule.
-      const sameProduct = new Set(gangSel.map(l => l.product_id)).size === 1;
-      const gang = sameProduct
+      // One carton on every selected order → a COMBINED RUN (one pile, no
+      // split); anything else → a gang. "One carton" is runKindFor's answer,
+      // not the product code's: the same code under two BATCH numbers is two
+      // cartons, because the batch prints at press. The server reads the very
+      // same rule, so the button and the run can never disagree.
+      const gang = (force || runKindFor(gangSel)) === 'merge'
         ? await api.post('/merge-runs', { line_ids: gangSel.map(l => l.id) })
         : await api.post('/gang-runs', { line_ids: gangSel.map(l => l.id) });
       setGangSel(null); clearSelection(); load();
@@ -3542,7 +3556,8 @@ export default function Planning() {
           const buildable = selectedLines.length >= 2
             && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id);
           if (!buildable) return null;
-          const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
+          // Batches of one carton are NOT one carton — they gang.
+          const sameProduct = runKindFor(selectedLines) === 'merge';
           // "Gang these N" is the wording the in-table band already uses — the
           // two entry points into the same modal must not be two vocabularies.
           return sameProduct
@@ -5465,25 +5480,36 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
 
       {/* ── Create gang run ── */}
       <Modal open={!!gangSel} onClose={() => setGangSel(null)}
-        title={gangSel && new Set(gangSel.map(l => l.product_id)).size === 1
+        title={gangSelMerges
           ? 'Combine these orders into one run'
+          : gangSelBatchSplit ? 'Gang these batches on one press run'
           : 'Gang these jobs on one press run'}
         footer={<>
           <Button variant="secondary" onClick={() => setGangSel(null)}>Cancel</Button>
-          {gangSel && new Set(gangSel.map(l => l.product_id)).size === 1 ? (
-            <Button className="!bg-teal-600 hover:!bg-teal-700" onClick={createGang}
+          {gangSelMerges ? (
+            <Button className="!bg-teal-600 hover:!bg-teal-700" onClick={() => createGang('merge')}
               disabled={gangBusy || (gangSel?.length ?? 0) < 2}>
               <Layers size={14} /> Combine {gangSel?.length} Orders
             </Button>
-          ) : (
-            <Button onClick={createGang} disabled={gangBusy || !gangCheck?.ok || (gangSel?.length ?? 0) < 2}>
-              <Link2 size={14} /> Gang {gangSel?.length} Jobs
+          ) : (<>
+            {/* The batch split defaults to a gang, but the planner keeps the
+                call — one pile IS right when the batch is overprinted later,
+                and the plant, not the software, knows that. Warn, never refuse. */}
+            {gangSelBatchSplit && (
+              <Button variant="secondary" onClick={() => createGang('merge')}
+                disabled={gangBusy || (gangSel?.length ?? 0) < 2}
+                title={`Runs all ${gangSelBatches.length} batches as ONE pile — every carton prints a single batch number`}>
+                <Layers size={14} /> Combine into one pile anyway
+              </Button>
+            )}
+            <Button onClick={() => createGang('gang')} disabled={gangBusy || !gangCheck?.ok || (gangSel?.length ?? 0) < 2}>
+              <Link2 size={14} /> Gang {gangSel?.length} {gangSelBatchSplit ? 'Batches' : 'Jobs'}
             </Button>
-          )}
+          </>)}
         </>}>
         {gangSel && (
           <div className="space-y-3">
-            {new Set(gangSel.map(l => l.product_id)).size === 1 ? (
+            {gangSelMerges ? (
               <p className="rounded-xl bg-teal-50 px-3 py-2.5 text-sm text-teal-800">
                 Every order here is <b>{gangSel[0].product_name}</b> — the same carton. Combined, they run as
                 <b> ONE job</b> through every stage (no split after die cutting: one sort, one paste, one QC),
@@ -5491,13 +5517,25 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
               </p>
             ) : (
             <>
+            {gangSelBatchSplit ? (
+              // The batch split. Same carton, but the batch number prints at
+              // press, so one pile cannot serve two of them — each batch takes
+              // its own slot on the sheet and they split after die cutting.
+              <p className="rounded-xl bg-violet-50 px-3 py-2.5 text-sm text-violet-800">
+                Same carton, <b>{gangSelBatches.length} batch numbers</b> ({gangSelBatches.join(', ')}). The batch
+                prints at press, so these cannot run as one pile — ganged, each batch gets <b>its own slot</b> on
+                the shared sheet and they <b>split after die cutting</b> into a pile per batch.
+              </p>
+            ) : (
             <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
               Ganged jobs <b>print together</b>: they share the board, run back-to-back on the same press,
               and buy their board shortage on <b>one</b> purchase requisition.
             </p>
+            )}
             <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-              The system remembers your dies: a combination it has run before arrives with its layout
-              already filled in — a new one asks for the ups and the final child size once, then remembers it.
+              {gangSelBatchSplit
+                ? 'Set each batch its own ups on the shared sheet in the gang engine — the slots follow the order quantities, so every batch finishes in the same press run.'
+                : 'The system remembers your dies: a combination it has run before arrives with its layout already filled in — a new one asks for the ups and the final child size once, then remembers it.'}
             </p>
             </>
             )}
@@ -5505,6 +5543,11 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
               {gangSel.map(l => (
                 <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-xl bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-slate-100">
                   <span className="font-bold text-slate-800">{l.product_name}</span>
+                  {batchOf(l) && (
+                    <span className="rounded-full bg-violet-100 px-2 py-px font-bold tabular-nums text-violet-700">
+                      {batchOf(l)}
+                    </span>
+                  )}
                   <span className="text-slate-400">{l.po_number} · {l.customer_name}</span>
                   <span className="ml-auto tabular-nums text-slate-500">{fmt.num(l.qty)} pcs · {fmt.date(l.delivery_date)}</span>
                   {gangSel.length > 2 && (

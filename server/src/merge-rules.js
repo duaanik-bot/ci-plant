@@ -13,6 +13,58 @@
 // tests) never import through db.js.
 const net = m => Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0) - (+m.dispatched_qty || 0));
 
+// ── Batch identity ──────────────────────────────────────────────────────────
+// A pharma customer books ONE purchase order as several lines, one per BATCH,
+// and the batch number is PRINTED AT PRESS — so it is part of what the carton
+// physically is, not a note about it. Two lines of one product code with two
+// batch numbers are therefore two different cartons, and belong in a gang
+// (own slot on the shared sheet, split after die cutting), never in a combined
+// pile that would print every carton with one batch number.
+//
+// The number rides in `line_remark`, free text the PO import writes, so READ
+// it, do not trust it: only an explicit batch marker counts. A remark that is
+// not a batch returns null and changes nothing — absent data must never fork
+// a run. Both prefixes the plant actually types are accepted ("BATCH NO
+// 54TCR008", "BATCH 54TBT065", "B.NO TCL031").
+const BATCH_RE = /\b(?:BATCH|B\.?\s*N[O0]\.?)\s*(?:NO\.?|NUMBER|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9/-]*)/i;
+
+export function batchOf(member = {}) {
+  const raw = String(member.line_remark ?? '').trim();
+  if (!raw) return null;
+  const m = BATCH_RE.exec(raw);
+  return m ? m[1].toUpperCase() : null;
+}
+
+// The distinct batch numbers a selection names, in a stable order.
+const batchesOf = members => [...new Set(members.map(batchOf).filter(Boolean))].sort();
+
+// Is this selection ONE carton? Product code alone used to answer this, which
+// is what made a batch split impossible to gang. One product AND at most one
+// named batch. A single named batch beside unmarked lines stays one carton —
+// only a genuine SECOND batch forks the run.
+export function sameCarton(members = []) {
+  if (new Set(members.map(m => m.product_id)).size > 1) return false;
+  return batchesOf(members).length <= 1;
+}
+
+// Which build does this selection want? The ONE rule the planning queue and
+// POST /gang-runs both read, so the button the planner sees and the run the
+// server mints can never disagree.
+export function runKindFor(members = []) {
+  return sameCarton(members) ? 'merge' : 'gang';
+}
+
+// Does this run give ONE product more than one slot? THE DIE MEMORY is keyed
+// on the product SET (dieFingerprint dedupes the ids), and its slots are found
+// by product_id — so it cannot describe a run where one carton takes several
+// slots at different ups. A batch gang is exactly that, and its split is
+// driven by the ORDER QUANTITIES rather than by the die, so remembering it
+// would be wrong even if the key could hold it. Recognition and remembering
+// are skipped when this is true.
+export function repeatsAProduct(members = []) {
+  return new Set(members.map(m => Number(m.product_id))).size !== members.length;
+}
+
 // Can these order lines run as ONE combined pile?
 // Members are MEMBER_VIEW-shaped rows: effective (override-aware) spec fields.
 export function mergeCompat(members = []) {
@@ -61,6 +113,12 @@ export function mergeCompat(members = []) {
   const days = members.map(m => Date.parse(m.delivery_date)).filter(Number.isFinite);
   if (days.length > 1 && (Math.max(...days) - Math.min(...days)) / 86400000 > 7) {
     warnings.push({ field: 'delivery dates', values: uniq(m => m.delivery_date) });
+  }
+  // Combining across batches is the planner's call — but never a silent one:
+  // the pile prints ONE batch number whatever the order lines claim.
+  const batches = batchesOf(members);
+  if (batches.length > 1) {
+    warnings.push({ field: 'batches', values: batches });
   }
   const customers = uniq(m => m.customer_name);
   if (customers.length > 1) {

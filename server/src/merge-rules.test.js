@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeCompat, mergeShares, membersAtRisk } from './merge-rules.js';
+import { mergeCompat, mergeShares, membersAtRisk, batchOf, sameCarton, runKindFor, repeatsAProduct } from './merge-rules.js';
 import { shouldSplitAtDieCut } from './helpers.js';
 
 // The one invariant the whole feature hangs on: a gang splits at die cutting,
@@ -145,5 +145,102 @@ test('membersAtRisk', async t => {
 
   await t.test('a full pile has nobody at risk', () => {
     assert.deepEqual(membersAtRisk([m(1, 100, '2026-08-05', 'A'), m(2, 200, '2026-08-06', 'B')], 300), []);
+  });
+});
+
+// ── Batch identity ──────────────────────────────────────────────────────────
+// Swiss Garnier books one PO as several lines, one per PHARMA BATCH, and the
+// batch number is printed at press — so two lines of one product code are only
+// the same carton when they carry the same batch. Real rows off PO 01718.
+test('batchOf', async t => {
+  await t.test('reads the batch out of the remark the PO import writes', () => {
+    assert.equal(batchOf({ line_remark: 'BATCH NO 54TCR008' }), '54TCR008');
+  });
+  await t.test('the plant writes the prefix inconsistently — both forms read the same way', () => {
+    assert.equal(batchOf({ line_remark: 'BATCH NO TBT064' }), 'TBT064');
+    assert.equal(batchOf({ line_remark: 'BATCH 54TBT065' }), '54TBT065');
+    assert.equal(batchOf({ line_remark: 'B.NO TCL031' }), 'TCL031');
+  });
+  await t.test('case and stray whitespace do not make two batches out of one', () => {
+    assert.equal(batchOf({ line_remark: '  batch no  54tcr008 ' }), '54TCR008');
+  });
+  await t.test('a remark that is not a batch is not a batch — it must never force a gang', () => {
+    assert.equal(batchOf({ line_remark: 'handle with care' }), null);
+    assert.equal(batchOf({ line_remark: '' }), null);
+    assert.equal(batchOf({ line_remark: null }), null);
+    assert.equal(batchOf({}), null);
+  });
+});
+
+test('sameCarton', async t => {
+  const b = (id, remark) => row({ id, line_remark: remark });
+
+  await t.test('two orders of one carton with no batch named — one carton, as today', () => {
+    assert.equal(sameCarton([row(), row({ id: 2 })]), true);
+  });
+  await t.test('one carton, one batch, booked twice — still one carton', () => {
+    assert.equal(sameCarton([b(1, 'BATCH NO 54TCR008'), b(2, 'BATCH NO 54TCR008')]), true);
+  });
+  await t.test('THE BUG: one product code, two batch numbers — NOT one carton', () => {
+    assert.equal(sameCarton([b(1, 'BATCH NO 54TCR008'), b(2, 'BATCH NO 54TCR014')]), false);
+  });
+  await t.test('different products are never one carton, batch or no batch', () => {
+    assert.equal(sameCarton([row(), row({ id: 2, product_id: 11 })]), false);
+  });
+  await t.test('a single named batch beside unmarked lines does not fork the run', () => {
+    // Absent data must not change the routing — only a genuine second batch does.
+    assert.equal(sameCarton([b(1, 'BATCH NO 54TCR008'), b(2, null)]), true);
+  });
+});
+
+test('runKindFor — the ONE rule both the queue and POST /gang-runs read', async t => {
+  const b = (id, remark) => row({ id, line_remark: remark });
+
+  await t.test('repeat orders of one carton combine', () => {
+    assert.equal(runKindFor([row(), row({ id: 2 })]), 'merge');
+  });
+  await t.test('THE FIX: same carton, different batches → GANG, not combine', () => {
+    assert.equal(runKindFor([b(1, 'BATCH NO 54TCR008'), b(2, 'BATCH NO 54TCR014')]), 'gang');
+  });
+  await t.test('different products gang, as always', () => {
+    assert.equal(runKindFor([row(), row({ id: 2, product_id: 11 })]), 'gang');
+  });
+  await t.test("Anik's five SW-114 batches gang", () => {
+    const five = ['54TCR008', '54TCR014', '54TCR015', '54TCR016', '54TCR018']
+      .map((n, i) => b(i + 1, `BATCH NO ${n}`));
+    assert.equal(runKindFor(five), 'gang');
+  });
+});
+
+test('mergeCompat names the batches it is about to merge', async t => {
+  const b = (id, remark) => row({ id, line_remark: remark });
+
+  await t.test('combining two batches into one pile WARNS — allowed, never silent', () => {
+    const v = mergeCompat([b(1, 'BATCH NO 54TCR008'), b(2, 'BATCH NO 54TCR014')]);
+    assert.equal(v.ok, true, 'the planner may still combine — warn, never refuse');
+    const w = v.warnings.find(x => x.field === 'batches');
+    assert.ok(w, 'a merge across two batch numbers must say so');
+    assert.deepEqual(w.values, ['54TCR008', '54TCR014']);
+  });
+  await t.test('one batch across two orders is not noise', () => {
+    const v = mergeCompat([b(1, 'BATCH NO 54TCR008'), b(2, 'BATCH NO 54TCR008')]);
+    assert.equal(v.warnings.some(x => x.field === 'batches'), false);
+  });
+});
+
+// ── Die memory addressability ───────────────────────────────────────────────
+test('repeatsAProduct — can the die memory address this run?', async t => {
+  const b = (id, pid, remark) => row({ id, product_id: pid, line_remark: remark });
+
+  await t.test('a normal gang gives each product one slot — addressable', () => {
+    assert.equal(repeatsAProduct([b(1, 10), b(2, 11), b(3, 12)]), false);
+  });
+  await t.test('a BATCH gang gives ONE product five slots — the die key cannot hold it', () => {
+    const five = ['54TCR008', '54TCR014', '54TCR015', '54TCR016', '54TCR018']
+      .map((n, i) => b(i + 1, 612, `BATCH NO ${n}`));
+    assert.equal(repeatsAProduct(five), true);
+  });
+  await t.test('a mixed gang that happens to repeat one product is also unaddressable', () => {
+    assert.equal(repeatsAProduct([b(1, 10), b(2, 10), b(3, 11)]), true);
   });
 });

@@ -21,7 +21,7 @@ import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, 
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
 import { gangPosition, claimsByBoard, boardPosition, heldFor, stockHoldBudget } from '../board-allocation.js';
-import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
+import { mergeCompat, mergeShares, membersAtRisk, runKindFor, repeatsAProduct } from '../merge-rules.js';
 import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
 import { commitBoardForLine, commitInputs } from './board.js';
@@ -37,6 +37,10 @@ const MEMBER_VIEW = `
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
          ol.dispatched_qty,
          ol.wastage_sheets, ol.spec_override, ol.stock_booking,
+         -- The pharma BATCH rides here (free text the PO import writes). It is
+         -- part of the carton's identity — batchOf/runKindFor read it to tell a
+         -- batch split from a repeat order — so it must travel with the member.
+         ol.line_remark,
          o.po_number, o.delivery_date, c.name AS customer_name,
          p.id AS product_id, p.name AS product_name, p.code AS product_code, p.party_item_code, p.gsm,
          p.ups AS master_ups, p.wastage_pct,
@@ -859,7 +863,9 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     // transaction, and on a one-client serverless pool a pool read from in
     // there deadlocks. The .catch would swallow it, so the only symptom would
     // be the die panel silently emptying after a ten-second stall.
-    const die = await findDieTemplate(withSheets.map(m => m.product_id), qc, oc).catch(() => null);
+    const die = repeatsAProduct(withSheets)
+      ? null   // a batch split has no die to recognise — see POST /gang-runs
+      : await findDieTemplate(withSheets.map(m => m.product_id), qc, oc).catch(() => null);
     // The hoisted run above — now carrying cpp / run_parent / need_parent so
     // the engine's client twin and this payload can never disagree on the
     // parent conversion.
@@ -983,14 +989,20 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
       const withJc = members.find(m => m.job_card_id);
       if (withJc) throw Object.assign(new Error(`${withJc.product_name} already has job card ${withJc.jc_number}`), { status: 409 });
 
-      // ONE CARTON IS NEVER A GANG. Repeat orders of the same product are a
+      // ONE CARTON IS NEVER A GANG. Repeat orders of the same carton are a
       // COMBINED RUN — one pile, no split — and a gang of them would run
       // sorting, pasting and QC once per sales order over an identical stack.
       // The client already routes the selection, but the rule belongs HERE:
       // any caller (an older client, a script, a direct POST) that asks to gang
       // one carton gets the right thing instead of a run that has to be
       // converted later. This is why legacy same-product gangs existed at all.
-      if (new Set(members.map(m => m.product_id)).size === 1) {
+      //
+      // "One carton" is runKindFor's answer, not the product code's. A pharma
+      // customer books one PO as several lines, one per BATCH, and the batch
+      // number is printed at press: same code, different cartons, and a gang
+      // is the only run that can give each batch its own slot on the sheet and
+      // split them back apart after die cutting.
+      if (runKindFor(members) === 'merge') {
         const verdict = mergeCompat(members);
         if (verdict.ok) {
           const run_number = await nextRunNumber('CI-MRG-', oc);
@@ -1026,7 +1038,11 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
       await clearJoinersMix(lineIds, gang_number, qc, req.user.name);
 
       let recognised = null;
-      if (layoutMode === 'shared') {
+      // repeatsAProduct: a batch gang gives ONE product several slots, which
+      // the product-keyed die memory cannot address — slots.find() would hand
+      // every member the same ups and flatten the planner's split. Its layout
+      // follows the order quantities anyway, so there is nothing to remember.
+      if (layoutMode === 'shared' && !repeatsAProduct(members)) {
         const die = await findDieTemplate(members.map(m => m.product_id), qc, oc);
         if (die) {
           for (const m of members) {
@@ -1386,7 +1402,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // the discard that threw it away. The spec_override stamp above is a
         // different thing and still happens on a draft — it is local to these
         // members and is exactly what makes the saved figures re-derivable.
-        if (!draft) await rememberDie(gang, lines, effs, child, qc, oc, req.user.name);
+        if (!draft && !repeatsAProduct(lines)) await rememberDie(gang, lines, effs, child, qc, oc, req.user.name);
         if (childAdopted) adoptedChildNote = ` · layout ${child.l}×${child.w}" adopted from the members' spec and saved`;
       } else {
       for (let i = 0; i < lines.length; i++) {
