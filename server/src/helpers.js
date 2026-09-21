@@ -4068,6 +4068,37 @@ export function forceDeleteBlockers({ dispatchedQty = 0, fgReservedElsewhere = f
   return out;
 }
 
+// Saving an order line for LESS than has already shipped. This is a warning, not
+// a blocker, and the distinction is the whole point.
+//
+// A dispatch can legitimately exceed the ordered quantity: every line carries a
+// tolerance_pct and the plant ships to it, so 1,280 delivered against a 1,250
+// order is a normal, accepted delivery, not a data error. The old guard sat in
+// PUT /orders/:id and REFUSED any save where qty < dispatched_qty — and that
+// route re-validates every line in the payload, not just the edited one. So a
+// single within-tolerance over-delivery froze the entire order against any edit,
+// forever, on every line. 112 live orders were locked this way. Worse, the
+// refusal named no line, so it read as a complaint about whichever line the
+// planner had actually touched (PMP/01768: the message pointed at CARVEDILOL,
+// which had never shipped a single piece — the lock was on MA-ARGI).
+//
+// Lowering a quantity under what shipped is still worth SAYING out loud: it
+// leaves the line over-delivered and changes what the customer is billed for.
+// But it is the planner's call — they are usually correcting the order to match
+// what the plant actually sent. Warn, carry on, and leave a trail.
+//
+// Silent when the line is UNCHANGED: resending an already-over-delivered line
+// untouched is what every sibling edit does, and warning there would put a
+// notice on screen that names no decision the planner just made.
+export function qtyBelowDispatchedWarning(line = {}, nextQty) {
+  const dispatched = Number(line.dispatched_qty) || 0;
+  const next = Number(nextQty);
+  if (dispatched <= 0 || !Number.isFinite(next)) return null;
+  if (next >= dispatched) return null;
+  if (next === (Number(line.qty) || 0)) return null;
+  return `Quantity ${fmtSheets(next)} is below the ${fmtSheets(dispatched)} already dispatched — this line stays over-delivered`;
+}
+
 // Guard for reversing a printed (completed) printing run back to Triage. Pure —
 // mirrors rollbackBlockers so it is unit-testable without a DB. Returns a list
 // of human blocker strings; an empty list means the reverse is safe.

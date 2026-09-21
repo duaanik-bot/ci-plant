@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, qtyBelowDispatchedWarning, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { planningResponse, planningScopeOf } from '../planning-scope.js';
@@ -283,6 +283,7 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
     }
 
     const orderId = +req.params.id;
+    const warnings = [];
     await tx(async (qc, oc) => {
       const order = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId]);
       if (!order) throw Object.assign(new Error('Order not found'), { status: 404 });
@@ -302,7 +303,7 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
       for (const l of lines) {
         if (!l.product_id || !l.qty) throw Object.assign(new Error('Each line needs a product and quantity'), { status: 400 });
         const product = await oc(`
-          SELECT p.id, p.rate, p.customer_id, p.gst_pct, gr.rate AS type_gst
+          SELECT p.id, p.code, p.rate, p.customer_id, p.gst_pct, gr.rate AS type_gst
           FROM products p LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
           WHERE p.id=$1`, [l.product_id]);
         if (!product || String(product.customer_id) !== String(customer_id)) {
@@ -319,8 +320,16 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
         if (l.id) {
           const current = existing.find(x => x.id === +l.id);
           if (!current) throw Object.assign(new Error('Order line not found'), { status: 404 });
-          if (qty < current.dispatched_qty) {
-            throw Object.assign(new Error('Quantity cannot be below dispatched quantity'), { status: 400 });
+          // Saving UNDER what already shipped warns; it never refuses. This
+          // route re-validates every line in the payload, so the old throw let
+          // one within-tolerance over-delivery freeze the whole order against
+          // any edit — including on lines that had never shipped a piece. See
+          // qtyBelowDispatchedWarning for the full account.
+          const warn = qtyBelowDispatchedWarning(current, qty);
+          if (warn) {
+            warnings.push(`${product.code || product.id}: ${warn}`);
+            await audit('order_line', current.id, 'qty_below_dispatched',
+              `${current.qty} → ${qty}, ${current.dispatched_qty} dispatched`, qc, req.user.name);
           }
           await qc('UPDATE order_lines SET product_id=$1, qty=$2, rate=$3, gst_pct=$4, line_remark=$6 WHERE id=$5',
             [product.id, qty, rate, gst, current.id, cleanLineRemark(l.line_remark)]);
@@ -359,6 +368,7 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
       SELECT o.*, c.name AS customer_name, c.city, c.gstin FROM orders o
       JOIN customers c ON c.id=o.customer_id WHERE o.id=$1`, [orderId]);
     updated.lines = await q(`${LINE_VIEW} WHERE ol.order_id=$1 ORDER BY ol.id`, [orderId]);
+    if (warnings.length) updated.warnings = warnings;
     res.json(updated);
   } catch (e) { next(e); }
 });

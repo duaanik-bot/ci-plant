@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { orderTransitionError, rollbackBlockers, forceDeleteBlockers, removedLineDetail } from './helpers.js';
+import { orderTransitionError, rollbackBlockers, forceDeleteBlockers, removedLineDetail, qtyBelowDispatchedWarning } from './helpers.js';
 import { incompleteOrderLine, payloadLines } from '../../client/src/lib/orderLines.js';
 
 // ── orderTransitionError ──────────────────────────────────────────────
@@ -257,4 +257,36 @@ test('edit payload: the two halves agree — nothing incompleteOrderLine clears 
   const kept = new Set(payloadLines(rows));
   for (const r of rows)
     if (r.id) assert.ok(kept.has(r), `persisted line ${r.id} must survive the filter`);
+});
+
+// ── qtyBelowDispatchedWarning ─────────────────────────────────────────
+// PMP/01768 could not be saved at all. The planner was editing the CARVEDILOL
+// line (dispatched_qty 0, still pending); the refusal came from the OTHER line
+// on the same PO — MA-ARGI, 1,280 shipped against a 1,250 order, a normal
+// within-tolerance delivery. PUT /orders/:id re-validates every line in the
+// payload, so one over-delivered line froze the whole order, and the message
+// named no line so it read as a complaint about CARVEDILOL.
+test('qty below dispatched: an UNTOUCHED over-delivered line is silent', () => {
+  // The MA-ARGI line, resent unchanged while the planner edits a sibling.
+  assert.equal(qtyBelowDispatchedWarning({ qty: 1250, dispatched_qty: 1280 }, 1250), null);
+});
+test('qty below dispatched: a line with nothing shipped is silent', () => {
+  // The CARVEDILOL line: 56,000 → 20,530, nothing dispatched. Never a warning.
+  assert.equal(qtyBelowDispatchedWarning({ qty: 56000, dispatched_qty: 0 }, 20530), null);
+});
+test('qty below dispatched: actively lowering under the shipped qty WARNS, never blocks', () => {
+  const w = qtyBelowDispatchedWarning({ qty: 1250, dispatched_qty: 1280 }, 900);
+  assert.match(w, /900/);
+  assert.match(w, /1,?280/);
+  assert.match(w, /dispatched|delivered|shipped/i);
+});
+test('qty below dispatched: raising, but still under the shipped qty, warns', () => {
+  assert.match(qtyBelowDispatchedWarning({ qty: 1000, dispatched_qty: 1280 }, 1100), /1,?280/);
+});
+test('qty below dispatched: raising clear of the shipped qty is silent', () => {
+  assert.equal(qtyBelowDispatchedWarning({ qty: 1250, dispatched_qty: 1280 }, 1300), null);
+});
+test('qty below dispatched: a missing dispatched_qty is not a shipment', () => {
+  assert.equal(qtyBelowDispatchedWarning({ qty: 1250, dispatched_qty: null }, 10), null);
+  assert.equal(qtyBelowDispatchedWarning({ qty: 1250 }, 10), null);
 });

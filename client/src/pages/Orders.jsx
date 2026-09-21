@@ -497,6 +497,9 @@ export default function Orders() {
       .map(l => ({ ...l, qty: +l.qty, rate: l.rate === '' ? undefined : +l.rate }));
     const updated = await api.put(`/orders/${detail.id}`, { ...editForm, customer_id: +editForm.customer_id, lines });
     toast.success('Order updated');
+    // The save went through; these are things the planner should know about it,
+    // not reasons it was refused.
+    for (const w of updated.warnings || []) toast.info(w);
     setDetail(updated);
     setEditForm(detailToForm(updated));
     setEditing(false);
@@ -1215,7 +1218,10 @@ export default function Orders() {
                           value={l.line_remark ?? ''}
                           onChange={e => setEditLine(i, { line_remark: e.target.value })} />
                       </div>
-                      <Input type="number" min={Math.max(1, l.dispatched_qty || 0)} placeholder="Qty" value={l.qty} onChange={e => setEditLine(i, { qty: e.target.value })} />
+                      {/* No dispatched_qty floor here. Shipping slightly over the ordered qty is
+                          normal (every line carries a tolerance), and a floor made those
+                          lines uneditable — the server now warns instead of refusing. */}
+                      <Input type="number" min={1} placeholder="Qty" value={l.qty} onChange={e => setEditLine(i, { qty: e.target.value })} />
                       <Input type="number" step="0.01" placeholder="Rate ₹" value={l.rate} onChange={e => setEditLine(i, { rate: e.target.value })} />
                       <Input type="number" step="0.01" min="0" placeholder="GST %" title="GST % — defaults from product type" value={l.gst ?? ''} onChange={e => setEditLine(i, { gst: e.target.value })} />
                       <div className="rounded-lg bg-slate-50 px-3 py-2 text-right text-xs font-bold tabular-nums text-slate-600">
