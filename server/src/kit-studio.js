@@ -50,9 +50,10 @@ const numText = n => String(Math.round(Number(n) * 100) / 100);
 // The ERP product master's spelling of a carton size: "138X75X108".
 export const sizeText = d => `${numText(d.L)}X${numText(d.W)}X${numText(d.H)}`;
 
-// "138X75X108", "140x78x108", "138 x 75 x 108 mm" → {L, W, H}; anything else → null.
+// "138X75X108", "140x78x108", "138 x 75 x 108 mm", "130X115X130MM" → {L, W, H};
+// anything else → null.
 export function parseSizeText(s) {
-  const m = String(s ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:mm)?$/);
+  const m = String(s ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:mm)?$/i);
   return m ? dimsOf({ L: m[1], W: m[2], H: m[3] }) : null;
 }
 
@@ -220,6 +221,109 @@ export function kitDoc(kit, fk, comps, pidOf) {
     doc.erp = null;
   }
   return doc;
+}
+
+// ── The kit carton in the ERP product master ────────────────────────────────
+//
+// A kit finalised in the studio is printed as a carton, and the carton is an ERP
+// product: the next code in the Fluence series (FP-373), the Fluence billing code
+// invoices run on (20251368), and a print spec taken from the kit it is modelled
+// on. When the carton is ALREADY in the product master — an order brought it in
+// before the kit was designed here — the kit is linked to that product instead,
+// so the plant never carries one carton under two codes.
+
+// Fluence's 8-digit billing code: 20251001 … 20251367 on record in Sept 2026.
+export const BILLING_CODE = /^20\d{6}$/;
+export function billingCodeOf(v) {
+  const t = String(v ?? '').trim();
+  return BILLING_CODE.test(t) ? t : null;
+}
+
+// The code after the highest on record, or null when there is none to follow.
+export function nextBillingCode(codes) {
+  let top = null;
+  for (const c of codes || []) {
+    const t = billingCodeOf(c);
+    if (t && (top == null || +t > +top)) top = t;
+  }
+  return top == null ? null : String(+top + 1);
+}
+
+// The print spec a new carton takes from the kit carton it is modelled on: the
+// board and the print process always; the die and the sheet layout only when the
+// two cartons are the same size — a different size needs its own die, and
+// Planning lays out its sheet. Never the artwork's own details (its codes, shade
+// card, Pantone references, emboss block) and never the price.
+export const SPEC_COPIED = [
+  'board_material_id', 'board_name', 'board_grade', 'gsm', 'colors', 'colour_type', 'print_process',
+  'cmyk_colours', 'pantone_colours', 'metallic_colours', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour',
+  'pasting_type', 'product_type', 'wastage_pct',
+];
+export const SPEC_SAME_CARTON = ['die_number', 'tool_id', 'ups', 'child_l', 'child_w', 'parent_l', 'parent_w'];
+
+// The new product's columns. `ref` is the product the spec is copied from, or
+// null — then it parks on the placeholder board (`boardId`) and claims nothing
+// else. A column left out takes the table's default: "not known yet". Always
+// spec_incomplete, so Masters shows it as a spec still to finish.
+export function newProductRow({ customerId, name, code, billingCode = null, mrp = null, size = null, ref = null, sameSize = false, boardId = null }) {
+  const row = {
+    customer_id: customerId, name, code, internal_carton_code: code,
+    party_item_code: billingCode, mrp, size, product_type: 'carton', active: 1, spec_incomplete: 1,
+  };
+  if (ref) {
+    for (const c of SPEC_COPIED) if (ref[c] != null) row[c] = ref[c];
+    if (sameSize) for (const c of SPEC_SAME_CARTON) if (ref[c] != null) row[c] = ref[c];
+  } else {
+    row.board_material_id = boardId;
+  }
+  return row;
+}
+
+// What the product-master dialog sends: the product's name (a new product only),
+// the billing code — or blank until Fluence issues one — the carton's MRP (or
+// blank) and the product to copy the print spec from.
+export function productInput(body, { create = true } = {}) {
+  const errors = [];
+  const name = text(body?.name)?.replace(/\s+/g, ' ') ?? null;
+  if (create && !name) errors.push('The product needs a name.');
+  const rawCode = text(body?.billing_code);
+  const billingCode = rawCode ? billingCodeOf(rawCode) : null;
+  if (rawCode && !billingCode) errors.push(`${rawCode} is not a Fluence billing code — it is 8 digits, like 20251368.`);
+  const mrp = money(body?.mrp);
+  if (Number.isNaN(mrp) || mrp === 0) errors.push('The MRP must be a number more than zero, or left blank.');
+  const rawRef = body?.ref_product_id;
+  const refId = rawRef == null || rawRef === '' ? null : Number(rawRef);
+  if (refId != null && !(Number.isInteger(refId) && refId > 0)) errors.push('Pick the kit to copy the print spec from again.');
+  return { errors, name, billingCode, mrp: Number.isNaN(mrp) || mrp === 0 ? null : mrp, refId };
+}
+
+// Is this kit a product already in the master? Its name against a product's:
+// 1 the same, 0.9 contained in it ("Shed Control" in "DR. FACT SHED CONTROL"),
+// otherwise the share of the kit's own words the product carries. The words
+// every Fluence carton shares (DR FACT, SKIN FACT …) say nothing about which
+// carton it is, so they do not count.
+const nameWords = s => String(s ?? '').toUpperCase().split(/[^A-Z0-9+]+/).filter(Boolean);
+const COMMON_WORDS = new Set(['DR', 'FACT', 'DRFACT', 'SKIN', 'SKINFACT', 'HAIR', 'HAIRFACT', 'PRO', 'PROFACT', 'KIT', 'THE', 'AND', 'FOR', 'OF']);
+export function nameMatch(kitName, productName) {
+  const kit = nameKey(kitName), prod = nameKey(productName);
+  if (!kit || !prod) return 0;
+  if (kit === prod) return 1;
+  const contained = prod.includes(kit) ? 0.9 : 0;
+  const words = nameWords(kitName).filter(w => !COMMON_WORDS.has(w));
+  if (!words.length) return contained;
+  const have = new Set(nameWords(productName));
+  const found = words.filter(w => have.has(w) || (w.length >= 4 && prod.includes(w))).length;
+  return Math.max(contained, Math.round((0.85 * found / words.length) * 100) / 100);
+}
+
+// Fluence products no kit holds yet, best match first. The same carton size
+// lifts a product that already matches on name — never one that does not.
+export function rankMatches(kit, products) {
+  return (products || []).map(p => {
+    const name = nameMatch(kit?.name, p.name);
+    const same = sameCarton(parseSizeText(p.size), kit?.dims);
+    return { ...p, same_size: same, score: Math.round((name + (same && name > 0 ? 0.1 : 0)) * 100) / 100 };
+  }).sort((a, b) => b.score - a.score || String(b.code).localeCompare(String(a.code), undefined, { numeric: true }));
 }
 
 // prod: a kit_studio_products row (or null); inner: its fluence_inner_products row (or null).

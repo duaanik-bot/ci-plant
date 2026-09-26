@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import {
   dim, dimsOf, sizeText, parseSizeText, sameCarton, statusOf, masterDimsFor, validId, nameKey,
   splitKit, splitProduct, splitSettings, kitDoc, productDoc,
+  billingCodeOf, nextBillingCode, newProductRow, productInput, nameMatch, rankMatches, SPEC_COPIED, SPEC_SAME_CARTON,
 } from './kit-studio.js';
 import { nameKey as fluenceNameKey } from '../../client/src/lib/fluence.js';
 
@@ -24,6 +25,9 @@ test('sizes: numbers in, the ERP product spelling out, and back', () => {
   assert.deepEqual(parseSizeText('138X75X108'), { L: 138, W: 75, H: 108 });
   assert.deepEqual(parseSizeText('140x78x108'), { L: 140, W: 78, H: 108 });
   assert.deepEqual(parseSizeText(' 170 x 150 x 110 mm'), { L: 170, W: 150, H: 110 });
+  // The product master writes the unit both ways (FP-371 is "130X115X130MM").
+  assert.deepEqual(parseSizeText('130X115X130MM'), { L: 130, W: 115, H: 130 });
+  assert.deepEqual(parseSizeText('278X140X62 MM'), { L: 278, W: 140, H: 62 });
   assert.equal(parseSizeText('A4'), null);
   assert.equal(parseSizeText(''), null);
   // The same carton turned another way is the same carton.
@@ -189,8 +193,136 @@ test('the studio route is mounted, and every write needs a Planning role', () =>
   assert.match(app, /app\.use\('\/api', kitStudio\)/);
   const route = read('server/src/routes/kitstudio.js');
   const writes = [...route.matchAll(/r\.(put|post|delete)\('([^']+)',\s*(\w+)?/g)];
-  assert.ok(writes.length >= 6);
-  for (const [, verb, path, guard] of writes) assert.equal(guard, 'canEditStudio', `${verb.toUpperCase()} ${path} is not guarded`);
+  assert.ok(writes.length >= 9);
+  // The product master itself is kept by planners and admins only — the same
+  // rule as Masters (masters.js requireRole('planner')). Everything else in the
+  // studio is open to every Planning role.
+  const PRODUCT_MASTER = ['/kit-studio/kits/:id/erp-product', '/kit-studio/kits/:id/erp-link', '/kit-studio/kits/:id/erp-unlink'];
+  for (const [, verb, path, guard] of writes) {
+    assert.equal(guard, PRODUCT_MASTER.includes(path) ? 'canKeepProducts' : 'canEditStudio', `${verb.toUpperCase()} ${path} is not guarded`);
+  }
+  assert.deepEqual(writes.filter(w => w[3] === 'canKeepProducts').map(w => w[2]).sort(), [...PRODUCT_MASTER].sort());
+  assert.match(route, /const canKeepProducts = requireRole\('planner'\);/);
+  assert.match(read('server/src/routes/masters.js'), /const canEdit = requireRole\('planner'\);/, 'Masters changed who keeps products');
+});
+
+// ── The kit carton in the product master ────────────────────────────────────
+
+test('billing codes: 8 digits in the Fluence series, the next one after the highest', () => {
+  assert.equal(billingCodeOf(' 20251368 '), '20251368');
+  for (const bad of ['2025136', '202513689', '202251024', '30251368', 'FP-373', '', null]) assert.equal(billingCodeOf(bad), null, String(bad));
+  assert.equal(nextBillingCode(['20251367', '20251352', null, 'x', '20251001']), '20251368');
+  assert.equal(nextBillingCode([]), null, 'nothing on record: nothing to follow, never a guess');
+  assert.equal(nextBillingCode(['20259999']), '20260000');
+});
+
+test('productInput: a name for a new carton, a well-formed code, a positive MRP', () => {
+  const ok = productInput({ name: '  dr. fact   shed control ', billing_code: '20251368', mrp: '950', ref_product_id: '1509' });
+  assert.deepEqual(ok, { errors: [], name: 'dr. fact shed control', billingCode: '20251368', mrp: 950, refId: 1509 });
+  assert.deepEqual(productInput({ name: 'X', billing_code: '', mrp: '' }).errors, []);
+  assert.equal(productInput({ name: 'X', billing_code: '' }).billingCode, null, 'blank until Fluence issues one');
+  assert.match(productInput({ name: 'X', billing_code: '202251024' }).errors.join(), /not a Fluence billing code/);
+  assert.match(productInput({ name: 'X', mrp: 0 }).errors.join(), /more than zero/);
+  assert.match(productInput({ name: 'X', mrp: '-5' }).errors.join(), /more than zero/);
+  assert.match(productInput({}).errors.join(), /needs a name/);
+  assert.deepEqual(productInput({}, { create: false }).errors, [], 'a link names no product');
+  assert.match(productInput({ name: 'X', ref_product_id: 'abc' }).errors.join(), /print spec/);
+});
+
+test('a new carton copies the board and print always, the die and sheet only for the same size', () => {
+  const ref = {
+    customer_id: 43, board_material_id: 378, board_name: 'Met Saffire · 340 GSM · 20x38', board_grade: 'Met Saffire', gsm: 350, colors: 6,
+    colour_type: 'CMYK + Pantone', print_process: 'Offset', cmyk_colours: 4, pantone_colours: 2, metallic_colours: null, coating: 'Drip Off',
+    special: 'emboss', emboss: 1, leafing: 0, leafing_colour: null, pasting_type: 'LOCK BOTTOM', product_type: 'carton', wastage_pct: 8,
+    die_number: 'D-118', tool_id: 7, ups: 2, child_l: 19, child_w: 20, parent_l: 20, parent_w: 38,
+    // never copied: the artwork's own and the price
+    party_item_code: '20251013', party_artwork_code: 'AW-1', shade_card_number: 'SC-1', block_number: 'B-1', rate: 84.15, mrp: 908,
+  };
+  const base = { customerId: 43, name: 'SHED CONTROL', code: 'FP-373', billingCode: '20251368', mrp: 950, size: '140X90X125', ref };
+  const other = newProductRow({ ...base, sameSize: false });
+  assert.equal(other.code, 'FP-373');
+  assert.equal(other.internal_carton_code, 'FP-373', 'the FG-matching mirror of the code');
+  assert.equal(other.party_item_code, '20251368');
+  assert.equal(other.spec_incomplete, 1, 'Planning still has to check it');
+  assert.equal(other.active, 1);
+  assert.equal(other.board_material_id, 378);
+  assert.equal(other.coating, 'Drip Off');
+  for (const c of SPEC_SAME_CARTON) assert.ok(!(c in other), `${c} copied for a different size`);
+  for (const c of ['party_artwork_code', 'shade_card_number', 'block_number', 'rate']) assert.ok(!(c in other), `${c} must never be copied`);
+  assert.equal(other.mrp, 950, 'the MRP is the dialog\'s, never the model kit\'s');
+  const same = newProductRow({ ...base, sameSize: true });
+  for (const c of SPEC_SAME_CARTON) assert.equal(same[c], ref[c], c);
+  const bare = newProductRow({ customerId: 43, name: 'X', code: 'FP-374', boardId: 999 });
+  assert.equal(bare.board_material_id, 999, 'no spec to copy: the placeholder board');
+  assert.equal(bare.party_item_code, null);
+  assert.equal(bare.spec_incomplete, 1);
+  assert.ok(SPEC_COPIED.every(c => !SPEC_SAME_CARTON.includes(c)));
+});
+
+test('a kit finds the product an order already brought in, before anyone makes a second one', () => {
+  assert.equal(nameMatch('Shed Control', 'DR. FACT SHED CONTROL'), 0.9);
+  assert.equal(nameMatch('Hydra boost', 'SKIN FACT HYDRA BOOST'), 0.9);
+  assert.equal(nameMatch('F1-O2', 'F1O2'), 1);
+  assert.ok(nameMatch('Hydra boost', 'DR.FACT VOLU-BOOST') < 0.5);
+  assert.equal(nameMatch('Shed Control', 'SKINFACT OPEN PORES'), 0);
+  const free = [
+    { id: 1712, code: 'FP-372', name: 'SKINFACT OPEN PORES', size: '156X78X108' },
+    { id: 1711, code: 'FP-371', name: 'SKIN FACT HYDRA BOOST', size: '130X115X130MM' },
+    { id: 1710, code: 'FP-370', name: 'DR.FACT VOLU-BOOST', size: '135X75X108' },
+    { id: 1709, code: 'FP-369', name: 'DR. FACT SHED CONTROL', size: '138X90X108' },
+  ];
+  const shed = rankMatches({ name: 'Shed Control', dims: { L: 140, W: 90, H: 125 } }, free);
+  assert.equal(shed[0].code, 'FP-369');
+  assert.ok(shed[0].score >= 0.85);
+  const hydra = rankMatches({ name: 'Hydra boost', dims: { L: 130, W: 115, H: 130 } }, free);
+  assert.equal(hydra[0].code, 'FP-371');
+  assert.ok(hydra[0].same_size, 'the same carton size, whatever the unit spelling');
+  assert.equal(hydra[0].score, 1);
+  // The same size alone makes nothing a match.
+  assert.equal(rankMatches({ name: 'Brand New', dims: { L: 156, W: 78, H: 108 } }, free)[0].score, 0);
+});
+
+test('the product master routes: one transaction, the code minted and the billing code claimed inside it', () => {
+  const route = read('server/src/routes/kitstudio.js');
+  const block = (from, to) => { const a = route.indexOf(from); assert.ok(a >= 0, from); return route.slice(a, route.indexOf(to, a + from.length)); };
+  const create = block("r.post('/kit-studio/kits/:id/erp-product'", "r.post('/kit-studio/kits/:id/erp-link'");
+  assert.match(create, /await tx\(async \(qc, oc\) =>/);
+  assert.match(create, /assertNoCarton\(k\)/);
+  assert.match(create, /code = await nextProductCode\(customerId, qc, oc\)/);
+  assert.match(create, /claimBillingCode\(/);
+  assert.match(create, /linkKit\(k\.fk, product,/);
+  assert.match(create, /productCodeTaken\(e, code, true\)/);
+  // A same-name Fluence product is refused: link it instead of making a second.
+  assert.match(create, /already in the product master — link this kit to it/);
+  const link = block("r.post('/kit-studio/kits/:id/erp-link'", "r.post('/kit-studio/kits/:id/erp-unlink'");
+  assert.match(link, /assertNoCarton\(k\)/);
+  assert.match(link, /already carries the kit/);
+  assert.match(link, /part carton/);
+  // Only an EMPTY billing code or MRP is filled; one already on the product is never changed here.
+  assert.match(link, /input\.billingCode && !String\(p\.party_item_code \?\? ''\)\.trim\(\)/);
+  assert.match(link, /input\.mrp != null && p\.mrp == null/);
+  // Every billing-code write queues on one lock BEFORE it checks who has the code.
+  const claim = block('async function claimBillingCode', '\n}\n');
+  assert.ok(claim.indexOf("lockDocNumber('fluence-billing-code', oc)") >= 0);
+  assert.ok(claim.indexOf("lockDocNumber('fluence-billing-code', oc)") < claim.indexOf('billingCodeHolder('));
+  // The unlink lets go of the studio's own kits only.
+  const unlink = block("r.post('/kit-studio/kits/:id/erp-unlink'", '// ── Inner products');
+  assert.match(unlink, /if \(!k\.own\) throw fail\(409/);
+});
+
+test('a double-clicked Create joins the first instead of minting a second FP- code', async () => {
+  const { MINTING_POSTS, mintsNumber } = await import('../../client/src/lib/writeOnce.js');
+  assert.ok(MINTING_POSTS.includes('/kit-studio/kits/:id/erp-product'));
+  assert.ok(mintsNumber('/kit-studio/kits/n1a2b3c/erp-product'));
+  assert.ok(!mintsNumber('/kit-studio/kits/n1a2b3c/erp-link'), 'a link mints nothing');
+});
+
+test('a customer kit linked over a studio kit takes its studio entry along', () => {
+  const route = read('server/src/routes/fluence.js');
+  const a = route.indexOf("String(holder.source_ref).startsWith('kit-studio:')");
+  const b = route.indexOf("DELETE FROM fluence_kits WHERE id = $1', [holder.id]");
+  assert.ok(a > 0 && b > a, 'the studio row must be re-pointed before the holder kit is deleted');
+  assert.match(route.slice(a, b), /UPDATE kit_studio_kits SET fluence_kit_id = \$1 WHERE fluence_kit_id = \$2/);
 });
 
 test('the studio page is served from our own origin, bridge first, no CDN', () => {
@@ -198,6 +330,13 @@ test('the studio page is served from our own origin, bridge first, no CDN', () =
   assert.match(html, /^<!doctype html>/);
   assert.ok(html.indexOf('<script src="erp-bridge.js"></script>') < html.indexOf('<script>\n'), 'the bridge must load before the studio');
   assert.doesNotMatch(html, /cdnjs\.cloudflare\.com/);
+  // It wears the ERP's own theme: system fonts, light only, on the ERP's canvas.
+  assert.doesNotMatch(html, /IBM Plex|Archivo/);
+  const fonts = html.match(/https:\/\/fonts\.googleapis\.com\/css2\?[^"]+/g) || [];
+  assert.equal(fonts.length, 1, 'one font sheet: the ERP\'s own');
+  assert.ok(read('client/index.html').includes(fonts[0]), 'the studio loads the same typeface as the ERP');
+  assert.doesNotMatch(html, /prefers-color-scheme:\s*dark|data-theme="dark"/);
+  assert.match(html, /html,body\{background:transparent\}/);
   assert.match(html, /const PDF_LIB=\['lib\/jspdf\.umd\.min\.js','lib\/jspdf\.plugin\.autotable\.min\.js'\]/);
   for (const f of ['erp-bridge.js', 'lib/jspdf.umd.min.js', 'lib/jspdf.plugin.autotable.min.js'])
     assert.ok(read(`client/public/kit-studio-app/${f}`).length > 1000, `${f} missing`);

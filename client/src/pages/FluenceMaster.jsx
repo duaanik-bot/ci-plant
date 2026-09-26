@@ -140,7 +140,8 @@ export default function FluenceMaster() {
             { key: 'kit_name', label: 'Customer kit', render: p => (
               <div className="text-xs">
                 {p.kit_id
-                  ? <span>{p.kit_name}{String(p.source_ref || '').startsWith('erp-product:') ? <span className="ml-1 text-[10px] text-gray-400">(plant-entered)</span> : null}</span>
+                  ? <span>{p.kit_name}{String(p.source_ref || '').startsWith('erp-product:') ? <span className="ml-1 text-[10px] text-gray-400">(plant-entered)</span>
+                    : String(p.source_ref || '').startsWith('kit-studio:') ? <span className="ml-1 text-[10px] text-gray-400">(Kit Studio)</span> : null}</span>
                   : <span className="text-amber-700">{p.part ? 'Outer carton has no kit' : 'Not linked'}</span>}
                 {p.part && <div className="text-[10px] font-semibold text-green-800">{partLabel({ part: p.part, outer_code: p.outer_code })} — reads its kit</div>}
               </div>) },

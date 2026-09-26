@@ -352,7 +352,9 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
                       {dossier.part_of
                         ? <Fact label={`Outer carton MRP (${dossier.part_of.outer_code})`} value={dossier.part_of.outer_mrp != null ? fmt.inr(dossier.part_of.outer_mrp) : null} />
                         : <Fact label="MRP on product master" value={dossier.product.mrp != null ? fmt.inr(dossier.product.mrp) : null} />}
-                      <Fact label="Linked" value={dossier.kit.from_customer_list ? `${(dossier.kit.link_method || '').replace(/_/g, ' ')}${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}` : 'Started from the ERP product'} />
+                      <Fact label="Linked" value={dossier.kit.from_customer_list ? `${(dossier.kit.link_method || '').replace(/_/g, ' ')}${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
+                        : String(dossier.kit.source_ref || '').startsWith('kit-studio:') ? `Kit Studio${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
+                        : 'Started from the ERP product'} />
                       <Fact label="Carton size (ERP)" value={dossier.product.size} />
                       <KitCartonsFact dossier={dossier} />
                     </div>

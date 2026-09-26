@@ -14,18 +14,26 @@
 //     CONFIRMED studio size only while it is empty. A different size already on
 //     the product is never overwritten by a save; that takes the explicit
 //     "Use in ERP" action, which is audited.
+//   • the product master itself, once a kit is finalised: a new carton (the
+//     next FP- code, the Fluence billing code, a print spec copied from a
+//     similar kit) or a link to the product the carton already is. Only the
+//     people who keep the product master (Masters: planner, admin) do this.
 import { Router } from 'express';
 import { q, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, lockDocNumber, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import {
   validId, nameKey, dimsOf, sizeText, parseSizeText, sameCarton, masterDimsFor,
   splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc,
+  nextBillingCode, billingCodeOf, newProductRow, productInput, rankMatches,
 } from '../kit-studio.js';
 
 const r = Router();
 const canEditStudio = requireRole(...PLANNING_ROLES);
 const canEdit = user => user?.role === 'admin' || PLANNING_ROLES.includes(user?.role);
+// The product master's own rule (masters.js: requireRole('planner'), admin implied).
+const canKeepProducts = requireRole('planner');
+const keepsProducts = user => user?.role === 'admin' || user?.role === 'planner';
 const FROM = 'kit_studio';
 
 // Every refusal names the studio: the studio page shows the message itself, so
@@ -94,9 +102,9 @@ function compose({ kits, fks, comps, prods, inners, drafts, settings }) {
 r.get('/kit-studio/state', async (req, res, next) => {
   try {
     const state = await loadState();
-    res.json({ ...state, me: { name: req.user?.name ?? null, can_edit: canEdit(req.user) } });
+    res.json({ ...state, me: { name: req.user?.name ?? null, can_edit: canEdit(req.user), can_keep_products: keepsProducts(req.user) } });
   } catch (e) {
-    if (e?.code === MISSING_TABLE) return res.json({ kits: [], products: [], drafts: [], settings: null, me: { name: req.user?.name ?? null, can_edit: false }, missing: true });
+    if (e?.code === MISSING_TABLE) return res.json({ kits: [], products: [], drafts: [], settings: null, me: { name: req.user?.name ?? null, can_edit: false, can_keep_products: false }, missing: true });
     next(e);
   }
 });
@@ -117,11 +125,11 @@ const componentsSnapshot = (kitId, qc) => qc(`
   FROM fluence_kit_components kc JOIN fluence_inner_products ip ON ip.id = kc.inner_product_id
   WHERE kc.kit_id = $1 ORDER BY kc.sr, kc.id`, [kitId]);
 
-async function recordRevision(kitId, before, after, user, note, qc) {
+async function recordRevision(kitId, before, after, user, note, qc, area = 'components') {
   await qc(`
     INSERT INTO fluence_master_revisions (kit_id, area, before, after, note, changed_by, changed_by_id, changed_from)
-    VALUES ($1, 'components', $2::jsonb, $3::jsonb, $4, $5, $6, $7)`,
-  [kitId, JSON.stringify(before), JSON.stringify(after), note, user.name, user.id ?? null, FROM]);
+    VALUES ($1, $8, $2::jsonb, $3::jsonb, $4, $5, $6, $7)`,
+  [kitId, JSON.stringify(before), JSON.stringify(after), note, user.name, user.id ?? null, FROM, area]);
 }
 
 // Studio product ids → inner product ids. Every product the studio lists is in
@@ -286,7 +294,7 @@ r.delete('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
         ? await oc('SELECT id, source_ref, product_id FROM fluence_kits WHERE id = $1 FOR UPDATE', [row.fluence_kit_id]) : null;
       if (fk) {
         if (fk.source_ref !== `kit-studio:${id}`) throw fail(409, 'This kit is in the Fluence master — it can only be retired there, not deleted from the studio.');
-        if (fk.product_id) throw fail(409, 'This kit is linked to an ERP product. Unlink it in the Fluence Master before deleting it here.');
+        if (fk.product_id) throw fail(409, 'This kit is linked to an ERP product. Unlink it first (In the ERP → Unlink) before deleting it here.');
         const rx = await oc('SELECT id FROM fluence_prescriptions WHERE kit_id = $1', [fk.id]);
         if (rx) throw fail(409, 'This kit has a prescription in the Fluence master — it can only be retired there.');
         await qc('DELETE FROM fluence_kits WHERE id = $1', [fk.id]);
@@ -295,6 +303,246 @@ r.delete('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
       await qc('DELETE FROM kit_studio_kits WHERE id = $1', [id]);
     });
     res.json({ id, deleted: true });
+  } catch (e) { next(e); }
+});
+
+// ── The kit carton in the product master ────────────────────────────────────
+//
+// Once a kit is finalised its carton goes into the product master: either a new
+// product (the next FP- code, the Fluence billing code, a print spec copied from
+// a similar kit — always marked spec incomplete, for Planning to finish) or, when
+// the carton is already there because an order brought it in, a link to that
+// product. Never both: a carton under two codes splits its orders and invoices.
+
+// The kit an action is about: its studio row (none for a customer kit the studio
+// has never saved — 'f<id>') and its Fluence kit joined to the linked product.
+async function erpKitFor(id, oc, { lock = false } = {}) {
+  if (!validId(id)) throw fail(400, 'Not a valid kit id.');
+  const row = await oc(`SELECT * FROM kit_studio_kits WHERE id = $1${lock ? ' FOR UPDATE' : ''}`, [id]);
+  let fkId = row?.fluence_kit_id ?? null;
+  if (!row) {
+    const m = id.match(/^f(\d+)$/);
+    if (!m) throw fail(404, 'This kit is not in the studio any more — reload the page.');
+    fkId = Number(m[1]);
+    const held = await oc('SELECT id FROM kit_studio_kits WHERE fluence_kit_id = $1', [fkId]);
+    if (held) throw fail(409, 'This kit is open in the studio under another entry — reload the page.');
+  }
+  if (fkId == null) throw fail(409, 'Save this kit first — it is not in the Fluence master yet.');
+  const fk = await oc(`${KIT_ROWS} WHERE fk.id = $1${lock ? ' FOR UPDATE OF fk' : ''}`, [fkId]);
+  if (!fk) throw fail(409, 'This kit is no longer in the Fluence master — reload the page.');
+  const own = fk.source_ref === `kit-studio:${id}`;
+  return { row, fk, own, name: row && own ? row.name : fk.kit_name, dims: row ? dimsOf({ L: row.carton_l, W: row.carton_w, H: row.carton_h }) : null };
+}
+
+// Only a kit with no carton yet takes one — and never an old listing of a kit
+// the customer has since re-listed under a newer entry.
+function assertNoCarton(k) {
+  if (k.fk.product_id) throw fail(409, `This kit is already ${k.fk.product_code} ${k.fk.product_name} in the ERP — reload the page.`);
+  if (k.fk.superseded_by_kit_id != null) throw fail(409, 'The Fluence master lists this kit again under a newer entry — put that one in the ERP instead.');
+}
+
+// The highest Fluence billing code on record: every Fluence product's, and the
+// code a kit carries while it has no product (a linked kit shows its product's
+// code, so its own copy claims nothing). 8-digit strings, so text order is
+// number order.
+const TOP_BILLING_CODE = `
+  SELECT max(code) AS top FROM (
+    SELECT btrim(p.party_item_code) AS code FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id
+     WHERE btrim(p.party_item_code) ~ '^20[0-9]{6}$'
+    UNION ALL
+    SELECT s.data->>'code' FROM kit_studio_kits s LEFT JOIN fluence_kits k ON k.id = s.fluence_kit_id
+     WHERE s.data->>'code' ~ '^20[0-9]{6}$' AND k.product_id IS NULL) x`;
+
+// Who already carries this billing code, other than the product and the kit it is for.
+async function billingCodeHolder(code, { productId = null, studioId = null }, oc) {
+  const p = await oc(`
+    SELECT p.code, p.name FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id
+    WHERE btrim(p.party_item_code) = $1 AND ($2::int IS NULL OR p.id <> $2) ORDER BY p.id LIMIT 1`, [code, productId]);
+  if (p) return `on ${p.code} ${p.name}`;
+  const k = await oc(`
+    SELECT s.name FROM kit_studio_kits s LEFT JOIN fluence_kits k ON k.id = s.fluence_kit_id
+    WHERE s.data->>'code' = $1 AND k.product_id IS NULL AND ($2::text IS NULL OR s.id <> $2) ORDER BY s.id LIMIT 1`, [code, studioId]);
+  return k ? `the code of the kit ${k.name}` : null;
+}
+
+// Invoices run on the billing code, so one code is one carton. Every write of a
+// code queues on the same lock first — two saves at once cannot both take it.
+async function claimBillingCode(code, who, oc) {
+  await lockDocNumber('fluence-billing-code', oc);
+  const holder = await billingCodeHolder(code, who, oc);
+  if (holder) throw fail(409, `Billing code ${code} is already ${holder}. Use another, or leave it blank until Fluence issues one.`);
+  return code;
+}
+
+// A Fluence product's print spec, as a new carton copies it.
+const SPEC_ROW = `
+  SELECT p.id, p.code, p.name, p.size, p.customer_id, p.board_material_id, p.board_name, p.board_grade, p.gsm, p.colors,
+         p.colour_type, p.print_process, p.cmyk_colours, p.pantone_colours, p.metallic_colours, p.coating, p.special,
+         p.emboss, p.leafing, p.leafing_colour, p.pasting_type, p.product_type, p.wastage_pct,
+         p.die_number, p.tool_id, t.code AS tool_code, p.ups, p.child_l, p.child_w, p.parent_l, p.parent_w
+  FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id LEFT JOIN tools t ON t.id = p.tool_id`;
+
+// Fluence products no kit holds yet — what a finalised kit's carton may already
+// be. A part carton (a Topico tray, a leaflet) never holds a kit: its outer does.
+const FREE_PRODUCTS = `
+  SELECT p.id, p.code, p.name, p.size, p.mrp, p.party_item_code,
+         (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.product_id = p.id AND ol.status <> 'cancelled') AS order_lines
+  FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id
+  WHERE COALESCE(p.active, 1) = 1
+    AND NOT EXISTS (SELECT 1 FROM fluence_kits k WHERE k.product_id = p.id)
+    AND NOT EXISTS (SELECT 1 FROM fluence_part_cartons pc WHERE pc.product_id = p.id)`;
+
+// The customer a new carton is filed under: the one its spec comes from, or —
+// with nothing to copy — the only Fluence customer there is.
+async function soleFluenceCustomer(qc) {
+  const rows = await qc('SELECT customer_id FROM fluence_customers ORDER BY customer_id');
+  if (rows.length === 1) return rows[0].customer_id;
+  throw fail(400, rows.length ? 'Pick the kit to copy the print spec from — it decides which Fluence customer the carton is filed under.'
+    : 'Fluence is not set up in this ERP.');
+}
+
+// Link a kit to its carton the way the Fluence Master does: a revision and an
+// audit line on the kit.
+async function linkKit(fk, product, user, note, qc) {
+  await qc(`UPDATE fluence_kits SET product_id = $1, link_method = 'manual', linked_at = now(), linked_by = $2,
+              updated_at = now(), updated_by = $2 WHERE id = $3`, [product.id, user.name, fk.id]);
+  await recordRevision(fk.id, { product_id: null },
+    { product_id: product.id, product_code: product.code, link_method: 'manual' }, user, note, qc, 'kit_link');
+  await audit('fluence_kit', fk.id, 'kit_linked', `${fk.kit_name} → ${product.code} ${product.name} (${note})`, qc, user.name);
+}
+
+// Everything the product-master dialog needs, read fresh each time it opens:
+// the next FP- code and billing code, the products this kit's carton may already
+// be (best match first), and the print spec of the kits the page offers to copy
+// (?refs=1,2,3). Reads only — the FP- code is previewed on the series lock and
+// taken for real by the POST below.
+r.get('/kit-studio/kits/:id/erp-options', async (req, res, next) => {
+  try {
+    const refIds = [...new Set(String(req.query.refs ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 40);
+    const out = await tx(async (qc, oc) => {
+      const k = await erpKitFor(req.params.id, oc);
+      const own = billingCodeOf(k.row?.data?.code);
+      const top = await oc(TOP_BILLING_CODE);
+      const free = await qc(FREE_PRODUCTS);
+      const refs = refIds.length ? await qc(`${SPEC_ROW} WHERE p.id = ANY($1::int[])`, [refIds]) : [];
+      const customers = await qc('SELECT customer_id FROM fluence_customers ORDER BY customer_id');
+      return {
+        kit: {
+          id: req.params.id, name: k.name, own: k.own, size: k.dims ? sizeText(k.dims) : null, size_status: k.row?.size_status ?? 'MISSING',
+          product: k.fk.product_id ? { id: k.fk.product_id, code: k.fk.product_code, name: k.fk.product_name } : null,
+          superseded: k.fk.superseded_by_kit_id != null,
+        },
+        billing: { next: nextBillingCode([top?.top]), own, own_taken_by: own ? await billingCodeHolder(own, { studioId: k.row?.id ?? null }, oc) : null },
+        matches: rankMatches({ name: k.name, dims: k.dims }, free),
+        refs: refs.map(p => ({ ...p, same_size: sameCarton(parseSizeText(p.size), k.dims) })),
+        can_keep_products: keepsProducts(req.user),
+        // Last, so the series lock is held for no longer than the commit.
+        fp_code: customers.length ? await nextProductCode(customers[0].customer_id, qc, oc) : null,
+      };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// A new carton for a finalised kit, and the kit linked to it — one transaction,
+// so either all of it is there or none of it.
+r.post('/kit-studio/kits/:id/erp-product', canKeepProducts, async (req, res, next) => {
+  let code = null;
+  try {
+    const id = req.params.id;
+    const input = productInput(req.body);
+    if (input.errors.length) throw fail(400, input.errors.join(' '));
+    const outcome = await tx(async (qc, oc) => {
+      const k = await erpKitFor(id, oc, { lock: true });
+      assertNoCarton(k);
+      const ref = input.refId ? await oc(`${SPEC_ROW} WHERE p.id = $1`, [input.refId]) : null;
+      if (input.refId && !ref) throw fail(400, 'The kit to copy the print spec from is not a Fluence product — pick it again.');
+      const same = await oc(`
+        SELECT p.code, p.name FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id
+        WHERE regexp_replace(upper(p.name), '[^A-Z0-9+]', '', 'g') = $1 ORDER BY p.id LIMIT 1`, [nameKey(input.name)]);
+      if (same) throw fail(409, `${same.code} ${same.name} is already in the product master — link this kit to it instead of making a second product.`);
+      const billingCode = input.billingCode ? await claimBillingCode(input.billingCode, { studioId: k.row?.id ?? null }, oc) : null;
+      const customerId = ref ? ref.customer_id : await soleFluenceCustomer(qc);
+      const boardId = ref ? null : await placeholderBoardId(oc);
+      if (!ref && !boardId) throw fail(409, 'Create a board material first.');
+      const sameSize = !!(ref && sameCarton(parseSizeText(ref.size), k.dims));
+      const size = k.row?.size_status === 'CONFIRMED' && k.dims ? sizeText(k.dims) : null;
+      code = await nextProductCode(customerId, qc, oc);
+      const values = newProductRow({ customerId, name: input.name, code, billingCode, mrp: input.mrp, size, ref, sameSize, boardId });
+      const cols = Object.keys(values);
+      const product = await oc(`INSERT INTO products (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, code, name`,
+        cols.map(c => values[c]));
+      const spec = ref
+        ? `print spec from ${ref.code} ${ref.name}${sameSize ? ', with its die and sheet layout (same carton size)' : ' — board and print only (a different size: no die or sheet layout)'}`
+        : 'no print spec copied (placeholder board)';
+      await audit('products', product.id, 'create',
+        `from Kit Studio, kit "${k.name}" · billing code ${billingCode || 'none yet'} · ${spec}`, qc, req.user.name);
+      await linkKit(k.fk, product, req.user, 'product master created from the kit in Kit Studio', qc);
+      return { product: { ...product, party_item_code: billingCode }, spec_from: ref ? { code: ref.code, name: ref.name, die: sameSize } : null };
+    });
+    res.json({ id, ...outcome, doc: await composeOne('kits', id) });
+  } catch (e) { next(productCodeTaken(e, code, true)); }
+});
+
+// The carton is already in the product master — an order brought it in before
+// the kit was finalised here. Link the kit to it. A billing code or MRP the
+// product lacks is filled from the dialog; one it already has is never changed
+// here (that is Masters' job, with its own history).
+r.post('/kit-studio/kits/:id/erp-link', canKeepProducts, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const productId = Number(req.body?.product_id);
+    if (!(Number.isInteger(productId) && productId > 0)) throw fail(400, 'Choose the ERP product this kit is printed as.');
+    const input = productInput(req.body, { create: false });
+    if (input.errors.length) throw fail(400, input.errors.join(' '));
+    const outcome = await tx(async (qc, oc) => {
+      const k = await erpKitFor(id, oc, { lock: true });
+      assertNoCarton(k);
+      const p = await oc(`
+        SELECT p.* FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id
+        WHERE p.id = $1 FOR UPDATE OF p`, [productId]);
+      if (!p) throw fail(400, 'That product is not a Fluence product.');
+      const part = await oc(`
+        SELECT pc.part, op.code FROM fluence_part_cartons pc JOIN products op ON op.id = pc.outer_product_id
+        WHERE pc.product_id = $1`, [productId]);
+      if (part) throw fail(409, `${p.code} is a part carton (${part.part}) of ${part.code} — a kit links to its outer carton.`);
+      const holder = await oc('SELECT kit_name FROM fluence_kits WHERE product_id = $1', [productId]);
+      if (holder) throw fail(409, `${p.code} ${p.name} already carries the kit "${holder.kit_name}".`);
+      const fills = {};
+      if (input.billingCode && !String(p.party_item_code ?? '').trim()) {
+        fills.party_item_code = await claimBillingCode(input.billingCode, { productId: p.id, studioId: k.row?.id ?? null }, oc);
+      }
+      if (input.mrp != null && p.mrp == null) fills.mrp = input.mrp;
+      const keys = Object.keys(fills);
+      if (keys.length) {
+        await qc(`UPDATE products SET ${keys.map((c, i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1`, [p.id, ...keys.map(c => fills[c])]);
+        await audit('product', p.id, 'master_update', `from Kit Studio: ${keys.map(c => `${c}: — → ${fills[c]}`).join('; ')}`, qc, req.user.name);
+      }
+      await linkKit(k.fk, p, req.user, 'linked in Kit Studio', qc);
+      const erp = k.row ? await writeErpSize({ product_id: p.id }, k.row, req.user, qc) : { erp: 'not confirmed' };
+      return { product: { id: p.id, code: p.code, name: p.name, party_item_code: fills.party_item_code ?? p.party_item_code ?? null }, filled: keys, ...erp };
+    });
+    res.json({ id, ...outcome, doc: await composeOne('kits', id) });
+  } catch (e) { next(e); }
+});
+
+// Undo a link made here: the studio's own kit lets go of its carton. The product
+// stays as it is — retire it in Masters if it was made by mistake. A kit from the
+// customer's list is unlinked in the Fluence Master, where it was linked.
+r.post('/kit-studio/kits/:id/erp-unlink', canKeepProducts, async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    await tx(async (qc, oc) => {
+      const k = await erpKitFor(id, oc, { lock: true });
+      if (!k.own) throw fail(409, 'This kit is on the customer\'s kit list — unlink it in the Fluence Master.');
+      if (!k.fk.product_id) return;
+      await qc(`UPDATE fluence_kits SET product_id = NULL, link_method = NULL, linked_at = NULL, linked_by = NULL,
+                  updated_at = now(), updated_by = $1 WHERE id = $2`, [req.user.name, k.fk.id]);
+      await recordRevision(k.fk.id, { product_id: k.fk.product_id, product_code: k.fk.product_code }, { product_id: null },
+        req.user, 'unlinked in Kit Studio', qc, 'kit_link');
+      await audit('fluence_kit', k.fk.id, 'kit_unlinked', `${k.fk.kit_name} ✕ ${k.fk.product_code} ${k.fk.product_name} — in Kit Studio`, qc, req.user.name);
+    });
+    res.json({ id, doc: await composeOne('kits', id) });
   } catch (e) { next(e); }
 });
 

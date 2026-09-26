@@ -54,6 +54,7 @@ export const MINTING_POSTS = Object.freeze([
   '/invoices/:id/lines/:lineId/remove',
   '/job-cards/:id/tooling-requirements',
   '/job-stages/:id/complete',
+  '/kit-studio/kits/:id/erp-product',
   '/merge-runs',
   '/order-lines/:id/job-card',
   '/order-lines/:id/raise-pr',

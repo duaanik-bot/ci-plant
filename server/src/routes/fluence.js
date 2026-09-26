@@ -696,6 +696,13 @@ r.post('/fluence/kits/:id/link', canEditMaster, async (req, res, next) => {
         if (holderItems > 0) await qc('UPDATE fluence_kit_components SET kit_id = $1 WHERE kit_id = $2', [kit.id, holder.id]);
         if (holderRx) await qc('UPDATE fluence_prescriptions SET kit_id = $1 WHERE id = $2', [kit.id, holderRx.id]);
         await qc('UPDATE fluence_master_revisions SET kit_id = $1 WHERE kit_id = $2', [kit.id, holder.id]);
+        // A kit designed in Kit Studio: its size, layout and history there follow
+        // the records across to the customer's kit — unless that kit already has
+        // a studio entry of its own (the other one is then left unlinked there).
+        if (String(holder.source_ref).startsWith('kit-studio:')) {
+          const studio = await oc('SELECT id FROM kit_studio_kits WHERE fluence_kit_id = $1', [kit.id]);
+          if (!studio) await qc('UPDATE kit_studio_kits SET fluence_kit_id = $1 WHERE fluence_kit_id = $2', [kit.id, holder.id]);
+        }
         await qc('UPDATE fluence_kits SET product_id = NULL WHERE id = $1', [holder.id]);
         await qc('DELETE FROM fluence_kits WHERE id = $1', [holder.id]);
         note = `carried over the records the plant had entered for ${product.code}`;

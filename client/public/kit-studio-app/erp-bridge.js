@@ -196,16 +196,29 @@
     },
   };
 
-  // ERP-only actions the studio page offers inside the ERP.
+  // ERP-only actions the studio page offers inside the ERP. Each one that changes
+  // a kit answers with the kit as the ERP now composes it, which lands at once.
+  function landed(id) {
+    return function (res) {
+      res = clone(res) || {};
+      if (res.doc && res.doc.id === id) { state.kits.set(id, { version: res.doc.version, data: res.doc.data }); sigs.kits = null; fire('kits'); }
+      refresh();
+      return res;
+    };
+  }
+  function refused(err) { if (err && err.status === 409) refresh(); throw studioError(err); }
   window.kitStudioErp = {
-    useErpSize: function (id) {
-      return host.request('erpSize', { id: id }).then(function (res) {
-        res = clone(res) || {};
-        if (res.doc && res.doc.id === id) { state.kits.set(id, { version: res.doc.version, data: res.doc.data }); sigs.kits = null; fire('kits'); }
-        refresh();
-        return res;
-      }, function (err) { throw studioError(err); });
+    useErpSize: function (id) { return host.request('erpSize', { id: id }).then(landed(id), refused); },
+    // May this person create or link the kit's carton in the product master?
+    canKeepProducts: function () { return !!me.can_keep_products; },
+    // What the product-master dialog shows: next codes, likely products, and the
+    // print spec of the kits offered to copy from (product ids).
+    erpOptions: function (id, refs) {
+      return host.request('erpOptions', { id: id, refs: (refs || []).filter(Boolean).join(',') }).then(clone, refused);
     },
+    createProduct: function (id, body) { return host.request('erpProduct', { id: id, body: clone(body) }).then(landed(id), refused); },
+    linkProduct: function (id, body) { return host.request('erpLink', { id: id, body: clone(body) }).then(landed(id), refused); },
+    unlinkProduct: function (id) { return host.request('erpUnlink', { id: id }).then(landed(id), refused); },
   };
 
   // Another person's save, or an edit in the Fluence Master, reaches this page

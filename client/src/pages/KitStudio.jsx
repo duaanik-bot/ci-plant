@@ -49,11 +49,17 @@ export default function KitStudio() {
       user: auth.user,
     };
     function send(op, p) {
+      const kit = `/kit-studio/kits/${encodeURIComponent(p.id)}`;
       switch (op) {
         case 'state': return api.get('/kit-studio/state');
         case 'put': return api.put(pathFor(p.coll, p.id), { doc: p.doc, base_version: p.base_version });
         case 'del': return api.del(pathFor(p.coll, p.id), { base_version: p.base_version });
-        case 'erpSize': return api.post(`/kit-studio/kits/${encodeURIComponent(p.id)}/erp-size`, {});
+        case 'erpSize': return api.post(`${kit}/erp-size`, {});
+        // The kit's carton in the product master (routes/kitstudio.js).
+        case 'erpOptions': return api.get(`${kit}/erp-options${p.refs ? `?refs=${encodeURIComponent(p.refs)}` : ''}`);
+        case 'erpProduct': return api.post(`${kit}/erp-product`, p.body);
+        case 'erpLink': return api.post(`${kit}/erp-link`, p.body);
+        case 'erpUnlink': return api.post(`${kit}/erp-unlink`, {});
         default: return Promise.reject(new Error(`Kit Studio: unknown request ${op}`));
       }
     }
@@ -70,24 +76,29 @@ export default function KitStudio() {
 
   // The studio scrolls inside its own frame (its drawers are pinned to the
   // frame's viewport), so the frame fills the screen below the ERP's header.
+  // On a phone the tab bar (.ci-dock) is pinned over the bottom of the page, so
+  // the frame stops above it — the studio's own toasts and footers stay in view.
   useLayoutEffect(() => {
     const fit = () => {
       const top = frameBox.current?.getBoundingClientRect().top ?? 0;
-      setHeight(Math.max(520, Math.round(window.innerHeight - Math.max(0, top) - 12)));
+      const dock = document.querySelector('.ci-dock')?.getBoundingClientRect().height ?? 0;
+      setHeight(Math.max(520, Math.round(window.innerHeight - Math.max(0, top) - dock - 12)));
     };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
   }, [ready]);
 
+  // No frame of its own: the studio page is transparent and wears the ERP's
+  // theme, so it sits on the same canvas as every other module.
   return (
-    <div ref={frameBox} className="-mx-1 overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm sm:-mx-0">
+    <div ref={frameBox} className="-mx-1 sm:-mx-0">
       {ready && (
         <iframe
           src="/kit-studio-app/index.html"
           title="Kit Studio"
-          className="block w-full border-0"
-          style={{ height }}
+          className="block w-full border-0 bg-transparent"
+          style={{ height, colorScheme: 'light' }}
         />
       )}
     </div>
