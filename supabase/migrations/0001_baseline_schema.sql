@@ -469,6 +469,9 @@ ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS die_number TEXT;
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
 ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_stock_booking_check;
 ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
+-- The run's AVS switch (see order_lines.avs_mandatory): the sheet prints together,
+-- so one switch covers the whole run.
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS avs_mandatory INTEGER NOT NULL DEFAULT 0;
 
 -- Fixed gang templates — the plant's PERMANENT co-printed layouts ("Niko
 -- Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking 4;
@@ -712,6 +715,11 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wastage_sheets INTEGER;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
 ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_stock_booking_check;
 ALTER TABLE order_lines ADD CONSTRAINT order_lines_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
+-- AVS before printing can be completed, decided per job by Planning (off by
+-- default). When on, the PRINTING stage of the job's card cannot be completed
+-- until QA releases the job in Artwork Verification (avs-gate.js). A gang or a
+-- combined run carries it on gang_runs, stamped onto every member line.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS avs_mandatory INTEGER NOT NULL DEFAULT 0;
 -- Machines can be retired without breaking history.
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
 -- Vendor promise date on the PO — drives pendency ageing.

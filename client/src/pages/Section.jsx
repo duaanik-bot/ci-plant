@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS, PLATE_RETURN_CONDITIONS, PLATE_CONDITION_TONES, PLATE_REPLACEMENT_REASONS } from '../sections.js';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
+import AvsPrompt, { AvsGateBanner } from '../components/avs/AvsPrompt.jsx';
+import { AvsChip } from '../components/avs/AvsSwitch.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PacketsOpened from '../components/PacketsOpened.jsx';
@@ -554,6 +556,7 @@ export default function Section() {
   // slow GET resolves.
   const issueReqRef = useRef(0);
   const [alarm, setAlarm] = useState(null);                // soft shade/plate 409 → { kind, shade|plates }
+  const [avsPrompt, setAvsPrompt] = useState(null);        // AVS pop-up → { kind: 'start'|'locked', row, gate? }
   const [acked, setAcked] = useState(NO_ACKS);             // which soft alarms this attempt has already answered
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
   // Mid-run plate replacement: the row being raised against, the plates issued to
@@ -840,6 +843,8 @@ export default function Section() {
       throw e;
     }
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
+    // Planning made AVS mandatory for this job: tell the press now, not at Complete.
+    if (section === 'printing' && starting.avs_mandatory) setAvsPrompt({ kind: 'start', row: starting });
     setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setPacketsOpened({});
     setAlarm(null); setAcked(NO_ACKS);
     setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]);
@@ -1020,19 +1025,26 @@ export default function Section() {
       // cut_children the completion 400s (see CutChildrenEntry.jsx).
       const perBoard = needsCutChildren(section, completing.mix_cuts)
         ? cutChildrenPayload(completing.mix_cuts, cutChildren) : null;
-      await api.post(`/job-stages/${completing.id}/complete`, {
-        qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
-        scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
-        variance_reason: variance.reason || undefined,
-        variance_note: variance.note || undefined,
-        packing_lines: packLines?.length ? packLines : undefined,
-        cut_children: perBoard || undefined,
-        plate_dispositions: plateDispositions,
-        // Who finished it, not who started it. Without this the server falls
-        // back to st.operator and a job Shiv starts but Dileep closes is filed
-        // entirely under Shiv.
-        operator: pick?.name || undefined,
-      });
+      try {
+        await api.post(`/job-stages/${completing.id}/complete`, {
+          qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+          scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
+          variance_reason: variance.reason || undefined,
+          variance_note: variance.note || undefined,
+          packing_lines: packLines?.length ? packLines : undefined,
+          cut_children: perBoard || undefined,
+          plate_dispositions: plateDispositions,
+          // Who finished it, not who started it. Without this the server falls
+          // back to st.operator and a job Shiv starts but Dileep closes is filed
+          // entirely under Shiv.
+          operator: pick?.name || undefined,
+        });
+      } catch (e) {
+        // AVS is mandatory and QA has not released the job: say why, offer the
+        // photo upload, and keep the dialog so a Partial count can still go in.
+        if (e.data?.code === 'AVS_NOT_RELEASED') { setAvsPrompt({ kind: 'locked', row: completing, gate: e.data.avs }); return; }
+        throw e;
+      }
       toast.success(section === 'die_cutting' && completing.gang_number
         ? `${completing.jc_number} — die cutting done, ${completing.gang_number} separated into individual job cards`
         : `${completing.jc_number} — ${meta.label} completed`);
@@ -1506,6 +1518,7 @@ export default function Section() {
                     the row height is untouched. */}
                 {r.plate_state && <PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact />}
                 {r.wip && <WipChip on />}
+                {section === 'printing' && <AvsChip on={r.avs_mandatory} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {section === 'printing' && <FluenceButton productIds={jobCardProductIds({ ...r, gang_parent: r.gang_members?.length > 0 })} context="printing" />}
                 {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
@@ -1697,6 +1710,7 @@ export default function Section() {
                       {/* Shown in every state, including green — see the queue row. */}
                       {r.plate_state && <div className="mt-0.5"><PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact /></div>}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
+                      {section === 'printing' && r.avs_mandatory && <div className="mt-0.5"><AvsChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                       {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
                         <div className="mt-0.5">
@@ -2041,6 +2055,7 @@ export default function Section() {
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <OutputChip number={r.output_number} />
                 {r.wip && <WipChip on />}
+                {section === 'printing' && <AvsChip on={r.avs_mandatory} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
@@ -2411,6 +2426,7 @@ export default function Section() {
           supervisor, both audited. See components/StartAlarms.jsx. */}
       {/* The dialog now waits for start(); its close clears only its own alarm,
           so a retry that raises the other alarm is not wiped by that close. */}
+      <AvsPrompt prompt={avsPrompt} onClose={() => setAvsPrompt(null)} />
       <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
         onAcknowledge={kind => { const next = { ...acked, [kind]: true }; setAcked(next); return start(next); }} />
 
@@ -2603,6 +2619,7 @@ export default function Section() {
             shared device that is exactly where the wrong man's name gets
             recorded. Closing it clears the pick and the rail goes back to All. */}
         {completing && <RecordingAs pick={pick} onChange={() => choosePick(null)} />}
+        {completing && section === 'printing' && completing.avs_mandatory && <AvsGateBanner jobCardId={completing.job_card_id} />}
         {completing && section === 'printing' && mode !== 'partial' && (
           <section className="ci-form-panel">
             <div className="ci-form-panel-title"><span>Return Plates</span><span>Required to complete printing</span></div>

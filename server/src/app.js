@@ -35,6 +35,8 @@ import writeons from './routes/writeons.js';
 import verification from './routes/verification.js';
 import fluence from './routes/fluence.js';
 import avs from './routes/avs.js';
+import avsSwitch from './routes/avs-switch.js';
+import avsIntake from './routes/avs-intake.js';
 import kitStudio from './routes/kitstudio.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
@@ -96,6 +98,10 @@ app.use('/api', fluence);
 // AVS — carton checks run in Claude; reports live in the Supabase schema avs.
 // Reads those reports and records QA's final decision in avs.decisions only.
 app.use('/api', avs);
+// Planning's per-job AVS switch (printing waits for QA's release), and the photo
+// sets people upload for Claude to check (to Google Drive, then the AVS routine).
+app.use('/api', avsSwitch);
+app.use('/api', avsIntake);
 // Kit Studio: carton sizing, layouts and draft kits on top of the Fluence master.
 // Owns kit_studio_*; writes the Fluence master through, with its revisions.
 app.use('/api', kitStudio);

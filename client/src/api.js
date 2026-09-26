@@ -75,6 +75,14 @@ export const HANDLED_BY = {
   // deleted …). The studio page in the frame toasts the message itself; the host
   // page is what receives it and passes it on.
   KIT_STUDIO_REFUSED: { at: ['pages/KitStudio.jsx'], says: 'KIT_STUDIO_REFUSED' },
+  // The AVS printing lock: Planning made AVS mandatory for the job and QA has
+  // not released it yet. The three pages that complete printing branch on it and
+  // draw AvsPrompt's dialog (why, report by report, and the photo upload).
+  AVS_NOT_RELEASED: {
+    at: ['pages/Section.jsx', 'pages/Floor.jsx', 'pages/Production.jsx'], says: 'AVS_NOT_RELEASED' },
+  // Switching AVS off once printing has started: AvsSwitch asks for the reason
+  // and sends the switch again with it.
+  AVS_REASON_REQUIRED: { at: ['components/avs/AvsSwitch.jsx'], says: 'AVS_REASON_REQUIRED' },
 };
 
 export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));

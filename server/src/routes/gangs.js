@@ -36,7 +36,7 @@ const MEMBER_VIEW = `
   SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id,
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
          ol.dispatched_qty,
-         ol.wastage_sheets, ol.spec_override, ol.stock_booking,
+         ol.wastage_sheets, ol.spec_override, ol.stock_booking, ol.avs_mandatory,
          -- The pharma BATCH rides here (free text the PO import writes). It is
          -- part of the carton's identity — batchOf/runKindFor read it to tell a
          -- batch split from a repeat order — so it must travel with the member.

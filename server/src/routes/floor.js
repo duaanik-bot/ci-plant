@@ -13,6 +13,7 @@ import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, own
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
+import { avsMandatorySql } from '../avs-gate.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
 import { internLights } from '../../../client/src/lib/floorLights.js';
@@ -57,6 +58,7 @@ export const COMPLETED_DROPS = Object.freeze([
   'latest_xs', 'latest_xs_status', 'latest_xs_stage_qty',
   'extra_issued_parents', 'extra_issued_units',
   'ready_override', 'ready_override_by', 'ready_override_at', 'ready_override_reason',
+  'avs_mandatory',
   // the print spec — set up before the run, read on the queue row and the card
   'colors', 'colour_type', 'print_process', 'cmyk_colours', 'pantone_colours',
   'pantone_codes', 'metallic_colours', 'metallic_details', 'print_instructions',
@@ -284,6 +286,8 @@ const STAGE_VIEW = `
          ol.line_remark,
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
+         -- AVS before printing can be completed — Planning's switch (avs-gate.js).
+         ${avsMandatorySql('jc')} AS avs_mandatory,
          jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
          p.name AS product_name, p.code AS product_code, p.party_item_code,
          -- Customer WIP — the customer is chasing this item; the station queue
@@ -432,6 +436,7 @@ r.get('/floor', async (req, res, next) => {
              jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
              jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
+             ${avsMandatorySql('jc')} AS avs_mandatory,
              -- Anchor line: the card's own order line, or the gang's lead
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,

@@ -10,7 +10,8 @@ import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, PressButton, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, ResetFilters, Tabs, Textarea, useFilterReset, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
-import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
+import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap, ScanSearch } from 'lucide-react';
+import AvsSwitch, { AvsChip } from '../components/avs/AvsSwitch.jsx';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips, chosenCutsValid, chosenStrips, cutParentOf, parentLosesCuts, parentFollowsBoard, parentTooBig, runSheetParent, runMemberCut, engineParent, engineParentError, boardSheetFill, boardSwitch, boardUndo, sameSheet } from '../lib/cutFit.js';
@@ -3732,6 +3733,7 @@ export default function Planning() {
                       <div className="mt-0.5"><OutputChip number={l.run_output_number || l.output_number} /></div>
                     )}
                     {l._gang.some(m => m.wip) && <div className="mt-0.5"><WipChip on /></div>}
+                    {l._gang.some(m => +m.avs_mandatory === 1) && <div className="mt-0.5"><AvsChip on /></div>}
                   </div>
                 );
               })()
@@ -3744,6 +3746,7 @@ export default function Planning() {
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
+                {+l.avs_mandatory === 1 && !l._gang && <div className="mt-0.5"><AvsChip on /></div>}
               </div>) },
           // PO Date and OD as columns of their own — the same pair Artwork and
           // the Job Card register carry, so the one clock most of this book has
@@ -4710,6 +4713,16 @@ export default function Planning() {
                   <Field label="Remarks">
                     <Input value={form.notes} placeholder="Optional planning note" onChange={e => setForm({ ...form, notes: e.target.value })} />
                   </Field>
+                </Card>
+
+                {/* AVS — decided here, per job. On: printing of this job can be
+                    completed only after QA releases it in Artwork Verification.
+                    A gang or combined run decides it once, in the Gang Engine. */}
+                <Card icon={ScanSearch} title="AVS check" sub="before printing can be completed">
+                  {planLine.gang_run_id
+                    ? <p className="text-xs text-slate-500">This job prints in a run with other orders, so AVS is switched on the run (Gang Engine).</p>
+                    : <AvsSwitch value={planLine.avs_mandatory} lineId={planLine.id}
+                        onChanged={on => { setPlanLine(p => (p ? { ...p, avs_mandatory: on ? 1 : 0 } : p)); load(); }} />}
                 </Card>
               </div>
 
@@ -6246,6 +6259,14 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                     </Card>
                   );
                 })()}
+
+                {/* AVS — one switch for the whole run: the sheet prints together,
+                    so every carton on it waits for QA's release in Artwork
+                    Verification before printing can be completed. */}
+                <Card icon={ScanSearch} title="AVS check" sub="before printing of this run can be completed">
+                  <AvsSwitch value={+gangView.avs_mandatory === 1 || (gangView.members || []).some(m => +m.avs_mandatory === 1)}
+                    runId={gangView.id} onChanged={() => { refreshGangView(); load(); }} />
+                </Card>
 
                 {/* Sheets to issue — the full calculation, then the planner's
                     final call on how much board actually goes to the floor. */}

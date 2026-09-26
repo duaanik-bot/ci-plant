@@ -1,20 +1,27 @@
 // Artwork Verification (AVS) — every printed-carton check in one register, and
 // QA's final decision on each.
 //
-// The checks themselves run in Claude (Cowork): photos of a printed sheet are
-// compared with the approved artwork, the customer's PO and our order book, and
-// the report lands in the Supabase schema `avs`. This page reads those reports
-// and records the decision — Release, Keep on hold, Reject cartons, Artwork
-// alert checked — in avs.decisions, where the next check reads it back.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// The checks themselves run in Claude: photos of a printed sheet are compared
+// with the approved artwork, the customer's PO and our order book, and the
+// report lands in the Supabase schema `avs`. This page reads those reports and
+// records the decision — Release, Keep on hold, Reject cartons, Artwork alert
+// checked — in avs.decisions, where the next check reads it back.
+//
+// Photos can be uploaded here too (Upload photos): they go to Google Drive and,
+// on Verify, Claude's AVS routine checks them in its own cloud session. The
+// photo sets and their progress show under the KPI tiles (AvsSets).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, ExternalLink, FileText, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, ExternalLink, FileText, Settings2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
-  AVS_DECISIONS, AVS_REMARK_MAX, CASE_STATE_LABEL, decisionLabel, decisionProblem, reportLabel,
+  AVS_DECISIONS, AVS_REMARK_MAX, AVS_SET_ACTIVE, CASE_STATE_LABEL, decisionLabel, decisionProblem, reportLabel,
 } from '../lib/avs.js';
+import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
+import AvsSets from '../components/avs/AvsSets.jsx';
+import AvsSetup from '../components/avs/AvsSetup.jsx';
 
 const RESULT_TONE = {
   REJECT: 'bg-red-50 text-red-700 ring-red-200',
@@ -67,6 +74,22 @@ export default function Avs() {
     .catch(() => setLoadError(true)), []);
   useFallbackRefresh(load, { intervalMs: 60000 });
 
+  // Photo sets: every 10 s while Claude has one waiting or in hand, else every
+  // minute. A set that just finished brings its report into the register.
+  const [uploads, setUploads] = useState(null);
+  const [uploading, setUploading] = useState(null); // { resume? } — the upload dialog
+  const [setupOpen, setSetupOpen] = useState(false);
+  const wasActive = useRef([]);
+  const loadUploads = useCallback(() => api.get('/avs/uploads').then(d => {
+    const sets = d.sets || [];
+    const finished = sets.some(x => wasActive.current.includes(x.id) && !AVS_SET_ACTIVE.includes(x.status));
+    wasActive.current = sets.filter(x => AVS_SET_ACTIVE.includes(x.status)).map(x => x.id);
+    setUploads(d);
+    if (finished) load();
+  }).catch(() => {}), [load]);
+  const activeSets = (uploads?.sets || []).some(x => AVS_SET_ACTIVE.includes(x.status));
+  useFallbackRefresh(loadUploads, { intervalMs: activeSets ? 10000 : 60000 });
+
   const rows = useMemo(() => (data?.reports || []).map(r => ({ ...r, id: r.report_no })), [data]);
   const kpis = useMemo(() => Object.fromEntries(Object.entries(KPI_ROWS).map(([k, f]) => [k, rows.filter(f).length])), [rows]);
   const searched = useMemo(() => {
@@ -82,7 +105,19 @@ export default function Avs() {
   return (
     <div>
       <PageHeader title="Artwork Verification (AVS)"
-        subtitle="Printed-carton checks against the approved artwork, the customer's PO and our job card — and QA's final decision" />
+        subtitle="Printed-carton checks against the approved artwork, the customer's PO and our job card — and QA's final decision"
+        actions={<>
+          {uploads?.is_admin && (
+            <Button variant="secondary" repeatable onClick={() => setSetupOpen(true)}>
+              <span className="inline-flex items-center gap-1.5"><Settings2 size={15} /> Setup</span>
+            </Button>
+          )}
+          {uploads?.can_upload && (
+            <Button repeatable onClick={() => setUploading({})}>
+              <span className="inline-flex items-center gap-1.5"><Camera size={15} /> Upload photos</span>
+            </Button>
+          )}
+        </>} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard icon={XCircle} tone="bad" label="Reject — do not use" value={fmt.num(kpis.reject)}
           onClick={() => kpi.toggle('reject')} active={kpi.is('reject')} />
@@ -93,6 +128,8 @@ export default function Avs() {
         <KpiCard icon={CheckCircle2} tone="good" label="Decided or closed" value={fmt.num(kpis.decided)}
           onClick={() => kpi.toggle('decided')} active={kpi.is('decided')} />
       </div>
+      <AvsSets data={uploads} onChanged={loadUploads} onOpenReport={no => open(no)}
+        onContinue={s => setUploading({ resume: s })} />
       <KpiFilterNotice filter={kpi} label={KPI_LABEL[kpi.key]} shown={filtered.length} total={searched.length} />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -145,6 +182,9 @@ export default function Avs() {
       {openNo && (
         <ReportModal no={openNo} onClose={() => open(null)} onSaved={load} />
       )}
+      <AvsUploadDialog open={!!uploading} resume={uploading?.resume || null}
+        onClose={() => { setUploading(null); loadUploads(); }} onDone={() => loadUploads()} />
+      {uploads?.is_admin && <AvsSetup open={setupOpen} onClose={() => setSetupOpen(false)} onChanged={loadUploads} />}
     </div>
   );
 }

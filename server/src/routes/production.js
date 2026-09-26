@@ -26,6 +26,7 @@ import { plateComponentsFromSpec } from '../plates.js';
 // Which runs bank an offcut is ONE rule, and the cutting confirm must read the
 // same one the plan lock wrote by — see runBanksLeftover's own comment.
 import { runBanksLeftover } from './gangs.js';
+import { avsGateForCard, avsLockedError, avsMandatorySql } from '../avs-gate.js';
 
 const r = Router();
 const canPlan = requireRole(...PLANNING_ROLES);
@@ -75,6 +76,8 @@ const JC_VIEW = `
               THEN EXISTS (SELECT 1 FROM order_lines olw
                            WHERE olw.gang_run_id = jc.gang_run_id AND olw.wip)
               ELSE COALESCE(ol.wip, false) END AS wip,
+         -- AVS before printing can be completed — Planning's switch (avs-gate.js).
+         ${avsMandatorySql('jc')} AS avs_mandatory,
          -- The run's own numbers, unresolved — lets a screen tell "this gang
          -- has been named" apart from "this is the anchor carton's master number".
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
@@ -1706,6 +1709,7 @@ r.get('/print-planning', async (req, res, next) => {
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
+             ${avsMandatorySql('jc')} AS avs_mandatory,
              js.status AS printing_status, js.operator AS printing_operator,
              js.id AS printing_stage_id, js.qty_out AS printed_so_far,
              js.qty_scrap AS print_waste_so_far, js.qty_in AS print_qty_in,
@@ -2235,6 +2239,12 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       if (!['in_progress', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error('Stage is not running'), { status: 409 });
       if (st.stage === 'printing') {
+        // AVS lock: Planning switched AVS on for this job, so printing is closed
+        // only after QA has released it in Artwork Verification. Refused before
+        // anything is recorded. Day counts (POST /runs) stay open meanwhile, so
+        // the press keeps running while the check is done.
+        const avsGate = await avsGateForCard(qc, oc, st.job_card_id);
+        if (avsGate?.mandatory && !avsGate.released) throw avsLockedError(avsGate);
         // Whatever the press says about its plates is recorded; what it does not
         // say is simply not recorded. A completion is never refused over a plate
         // left unaccounted for — the run is finished either way, and a count is

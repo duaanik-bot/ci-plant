@@ -174,6 +174,13 @@ export function markFailed(ledger) {
   if (ledger) ledger.cacheable = false;
 }
 
+// For a GET whose rows change outside this app — the AVS schema is written by
+// Claude through Supabase, where no change is ever announced on the feed — so
+// no browser may answer it from memory. Default: the ledger of this request.
+export function markUncacheable(ledger = currentLedger()) {
+  if (ledger) ledger.cacheable = false;
+}
+
 // Headers for a finished request, or null when there is nothing to say.
 export function ledgerHeaders(ledger, { method = 'GET', status = 200 } = {}) {
   if (!ledger) return {};

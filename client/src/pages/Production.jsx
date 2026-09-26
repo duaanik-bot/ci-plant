@@ -9,6 +9,8 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, odDays, odExport, OutputChip, OverdueDays, PageHeader, PressButton, ResetFilters, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
+import AvsPrompt from '../components/avs/AvsPrompt.jsx';
+import AvsSwitch, { AvsChip } from '../components/avs/AvsSwitch.jsx';
 import { useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 // Timeline — the register narrowed to a stretch of days, anchored on the
 // PLANNED date. The rule and the presets live in one lib so the chip counts and
@@ -240,6 +242,7 @@ export default function Production() {
   const breakupReqRef = useRef(0);
   const [clearing, setClearing] = useState(null);     // {jc, st} awaiting line clearance
   const [alarm, setAlarm] = useState(null);          // soft shade/plate 409 → { kind, jc, st, lc, ack }
+  const [avsPrompt, setAvsPrompt] = useState(null);  // AVS pop-up → { kind: 'start'|'locked', row, gate? }
   const [reversing, setReversing] = useState(null);   // {jc, st}
   const [reverseReason, setReverseReason] = useState('');
   const [checks, setChecks] = useState([]);
@@ -469,6 +472,10 @@ export default function Production() {
       throw e;
     }
     toast.success(`${fmt.stage(st.stage)} started on ${jc.jc_number}`);
+    // Planning made AVS mandatory for this job: tell the press now, not at Complete.
+    if (st.stage === 'printing' && jc.avs_mandatory) {
+      setAvsPrompt({ kind: 'start', row: { job_card_id: jc.id, jc_number: jc.jc_number, product_name: jc.product_name } });
+    }
     setClearing(null);
     setAlarm(null);
     load();
@@ -541,10 +548,20 @@ export default function Production() {
     // without it the completion 400s. Everything else sends the legacy body.
     const perBoard = needsCutChildren(st.stage, jc.mix_cuts)
       ? cutChildrenPayload(jc.mix_cuts, cutChildren) : null;
-    await api.post(`/job-stages/${st.id}/complete`, {
-      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
-      ...(perBoard ? { cut_children: perBoard } : {}),
-    });
+    try {
+      await api.post(`/job-stages/${st.id}/complete`, {
+        qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+        ...(perBoard ? { cut_children: perBoard } : {}),
+      });
+    } catch (e) {
+      // AVS is mandatory and QA has not released the job yet.
+      if (e.data?.code === 'AVS_NOT_RELEASED') {
+        setAvsPrompt({ kind: 'locked', gate: e.data.avs,
+          row: { job_card_id: jc.id, jc_number: jc.jc_number, product_name: jc.product_name } });
+        return;
+      }
+      throw e;
+    }
     const isLast = st.seq === Math.max(...jc.stages.map(s => s.seq));
     toast.success(isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.stage(st.stage)} completed`);
     setCompleting(null); load();
@@ -884,6 +901,7 @@ export default function Production() {
                       chip the station queues and the press board wear. */}
                   <OutputChip number={jc.output_number} />
                   <WipChip on={jc.wip} />
+                  <AvsChip on={jc.avs_mandatory} />
                   <StatusBadge status={jc.status} />
                   {/* A card can start without being finalised, so the debt is
                       flagged on the card rather than left to the tab it sits in. */}
@@ -1158,6 +1176,18 @@ export default function Production() {
                 </Field>
               </div>
             </section>
+
+            {/* AVS — Planning's switch: printing is completed only after QA
+                releases the job in Artwork Verification. Planning (planner,
+                admin) switches it; everyone else sees it read-only. A card split
+                off a gang after printing has nothing left to lock. */}
+            {!editing.parent_job_card_id && (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>AVS check before printing is completed</span><AvsChip on={editing.avs_mandatory} /></div>
+                <AvsSwitch value={editing.avs_mandatory} jobCardId={editing.id}
+                  onChanged={on => { setEditing(cur => (cur ? { ...cur, avs_mandatory: on } : cur)); load(); }} />
+              </section>
+            )}
 
             {/* Inherited — Planning */}
             <section className="ci-form-panel">
@@ -1532,6 +1562,7 @@ export default function Production() {
       {/* Soft shade-card / plate alarms — named, overridable, audited. */}
       {/* The dialog now waits for doStart(); its close clears only its own
           alarm, so a retry that raises the other alarm is not wiped by it. */}
+      <AvsPrompt prompt={avsPrompt} onClose={() => setAvsPrompt(null)} />
       <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
         onAcknowledge={kind => doStart(alarm.jc, alarm.st, alarm.lc, { ...alarm.ack, [kind]: true })} />
 

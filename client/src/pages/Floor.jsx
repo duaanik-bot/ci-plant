@@ -13,6 +13,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, ResetFilters, rowMatches, SearchInput, Select, useFilterReset, useToast } from '../components/ui.jsx';
 import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
+import AvsPrompt from '../components/avs/AvsPrompt.jsx';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
@@ -69,6 +70,7 @@ export default function Floor() {
   const [log, setLog] = useState(null);
   const [clearing, setClearing] = useState(null);  // job awaiting line clearance before start
   const [alarm, setAlarm] = useState(null);       // soft shade/plate 409 → { kind, job, lc, ack }
+  const [avsPrompt, setAvsPrompt] = useState(null); // AVS pop-up → { kind: 'start'|'locked', row, gate? }
   const [checks, setChecks] = useState([]);
   // Board issue — board is consumed only at a job's FIRST stage (cutting is
   // always first in routingFor()), and never for a gang card (order_line_id is
@@ -202,6 +204,8 @@ export default function Floor() {
       throw e;
     }
     toast.success(`${job.jc_number} started`);
+    // Planning made AVS mandatory for this job: tell the press now, not at Complete.
+    if (job.stage === 'printing' && job.avs_mandatory) setAvsPrompt({ kind: 'start', row: job });
     setClearing(null);
     setAlarm(null);
     load();
@@ -270,10 +274,16 @@ export default function Floor() {
     // without it the completion 400s. Everything else sends the legacy body.
     const perBoard = needsCutChildren(completing.stage, completing.mix_cuts)
       ? cutChildrenPayload(completing.mix_cuts, cutChildren) : null;
-    await api.post(`/job-stages/${completing.stage_id}/complete`, {
-      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
-      ...(perBoard ? { cut_children: perBoard } : {}),
-    });
+    try {
+      await api.post(`/job-stages/${completing.stage_id}/complete`, {
+        qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+        ...(perBoard ? { cut_children: perBoard } : {}),
+      });
+    } catch (e) {
+      // AVS is mandatory and QA has not released the job yet.
+      if (e.data?.code === 'AVS_NOT_RELEASED') { setAvsPrompt({ kind: 'locked', row: completing, gate: e.data.avs }); return; }
+      throw e;
+    }
     toast.success(`${completing.jc_number} — stage completed`);
     setCompleting(null);
     load();
@@ -721,6 +731,7 @@ export default function Floor() {
           answers a structured 409 with nothing at all. Close only the alarm on
           show: an acked shade retry can come back as the plate alarm, and the
           dialog's close lands after it. */}
+      <AvsPrompt prompt={avsPrompt} onClose={() => setAvsPrompt(null)} />
       <StartAlarmDialog alarm={alarm} onClose={() => setAlarm(cur => (cur === alarm ? null : cur))}
         onAcknowledge={kind => doStart(alarm.job, alarm.lc, { ...alarm.ack, [kind]: true })} />
     </div>

@@ -14,6 +14,8 @@
 import { Router } from 'express';
 import { q, one } from '../db.js';
 import { optionalText } from '../helpers.js';
+import { markUncacheable } from '../data-tables.js';
+import { avsGateForCard } from '../avs-gate.js';
 import {
   AVS_REPORT_NO, AVS_REMARK_MAX, canDecideAvs, caseState, decisionProblem,
 } from '../../../client/src/lib/avs.js';
@@ -24,11 +26,19 @@ const MISSING = new Set(['42P01', '3F000']); // undefined table / undefined sche
 const offWhenMissing = (res, next, empty) => e => (MISSING.has(e?.code) ? res.json(empty) : next(e));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-// The last decision on each report — one row per report_no.
+// The last decision on each report — one row per report_no. An artwork-alert
+// sign-off never decides a case, so it is left out here: taken as the "last
+// decision" it made a released report look open again.
 const LAST_DECISION = `
   SELECT DISTINCT ON (report_no) report_no, report_rev, check_no, decision, decided_by, remark, decided_at
     FROM avs.decisions
-   ORDER BY report_no, decided_at DESC`;
+   WHERE decision <> 'ARTWORK ALERT OK'
+   ORDER BY report_no, decided_at DESC, id DESC`;
+
+// Every AVS answer is built from rows Claude writes straight into Supabase,
+// where no change is announced on the realtime feed, so none may be answered
+// from a browser's memory.
+r.use('/avs', (req, _res, next) => { if (req.method === 'GET') markUncacheable(); next(); });
 
 // ── Register: the latest issue of every report ──────────────────────────────
 r.get('/avs/reports', async (req, res, next) => {
@@ -80,13 +90,27 @@ r.get('/avs/reports/:no', async (req, res, next) => {
            FROM avs.decisions WHERE report_no = $1 ORDER BY decided_at DESC`, [no]),
       one(`SELECT note, issued_at FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' ORDER BY issued_at DESC LIMIT 1`, [no]),
     ]);
-    const last = decisions[0] || null;
+    const last = decisions.find(d => d.decision !== 'ARTWORK ALERT OK') || null;
     delete report.id;
     res.json({
       report: { ...report, closed: !!closedRow, closed_note: closedRow?.note ?? null,
         case_state: caseState({ ...report, closed: !!closedRow }, last) },
       problems, history, decisions, can_decide: await mayDecide(req.user),
     });
+  } catch (e) { next(e); }
+});
+
+// ── The printing lock of one job card ───────────────────────────────────────
+// What the printing station shows before it tries to complete: is AVS
+// mandatory for this job, is it released, and if not, why. The completion
+// route asks the same question (avs-gate.js) and refuses on the same answer.
+r.get('/avs/gate/:jobCardId', async (req, res, next) => {
+  try {
+    const id = Number(req.params.jobCardId);
+    if (!Number.isInteger(id) || id <= 0) throw fail(400, 'Not a job card id');
+    const gate = await avsGateForCard(q, one, id);
+    if (!gate) throw fail(404, 'Job card not found');
+    res.json(gate);
   } catch (e) { next(e); }
 });
 
