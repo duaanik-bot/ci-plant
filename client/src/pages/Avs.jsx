@@ -7,8 +7,9 @@
 // records the decision — Release, Keep on hold, Reject cartons, Artwork alert
 // checked — in avs.decisions, where the next check reads it back.
 //
-// Photos can be uploaded here too (Upload photos): they go to Google Drive and,
-// on Verify, Claude's AVS routine checks them in its own cloud session. The
+// Photos can be uploaded here too (Upload photos): they go to Google Drive (or
+// are kept in CI Plant until the Drive link is set up) and, on Verify, Claude's
+// AVS routine checks them in its own cloud session. The
 // photo sets and their progress show under the KPI tiles (AvsSets).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';

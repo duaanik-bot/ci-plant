@@ -4,8 +4,13 @@
 //      at printing start), names the job card and adds photos. Each photo goes
 //      straight to Google Drive, into the AVS folder under
 //      "AVS CHECK/<date>/Set 0012 <job card>", through the Drive link (a Google
-//      Apps Script web app the owner deployed from that Drive; its source is in
-//      client/src/lib/avsRobot.js). Nothing but the photo's details is kept here.
+//      Apps Script web app the owner deployed from that Drive; its source is
+//      client/src/lib/avs-robot/drive-link.gs). While the Drive link is not set
+//      up — or when Drive refuses — CI Plant keeps the photo itself
+//      (avs.check_photo_bytes) until the check files it in the AVS folder: an
+//      upload never fails for want of the Drive link. The check fetches such a
+//      photo through routes/avs-robot.js with the robot key, and marking it
+//      filed (stored = 'drive') drops the kept copy.
 //   2. Verify queues the set and fires the AVS routine at claude.ai — Claude's
 //      own cloud session, so it runs with the owner's Mac and Claude app closed.
 //      One run checks every set waiting in the queue, so a run already under way
@@ -13,12 +18,13 @@
 //   3. Claude writes the report to avs.reports / avs.problems (it shows on this
 //      page) and marks the set done (runbook section 3). QA then decides here.
 //
-// This router writes avs.check_requests, avs.check_photos and avs.settings only.
+// This router writes avs.check_requests, avs.check_photos, avs.check_photo_bytes
+// and avs.settings only, and deletes nothing.
 // The two links live in avs.settings (admin only; the token is never sent back).
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import multer from 'multer';
-import { q, one } from '../db.js';
+import { q, one, tx } from '../db.js';
 import { optionalText } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { markUncacheable } from '../data-tables.js';
@@ -40,6 +46,11 @@ const canRetry = requireRole('qc', 'planner');
 // The two links: admin only.
 const isAdmin = requireRole();
 
+// A ceiling on the photos CI Plant keeps while they wait to be filed in Google
+// Drive, so a check that never runs cannot fill the database.
+const keptMaxBytes = () => (Number(process.env.AVS_KEPT_MAX_MB) > 0 ? Number(process.env.AVS_KEPT_MAX_MB) : 1024) * 1024 * 1024;
+const sizeText = n => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`);
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: AVS_PHOTO_MAX_BYTES }, defParamCharset: 'utf8' });
 const uploadOne = (req, res, next) => upload.single('file')(req, res, err => {
   if (!err) return next();
@@ -47,7 +58,7 @@ const uploadOne = (req, res, next) => upload.single('file')(req, res, err => {
 });
 
 // ── Settings: the Drive link and the Claude link ────────────────────────────
-const SETTING_KEYS = ['drive_bridge_url', 'drive_bridge_secret', 'routine_fire_url', 'routine_token'];
+const SETTING_KEYS = ['drive_bridge_url', 'drive_bridge_secret', 'routine_fire_url', 'routine_token', 'robot_key'];
 
 async function settings() {
   const rows = await q('SELECT key, value FROM avs.settings WHERE key = ANY($1)', [SETTING_KEYS]);
@@ -67,6 +78,18 @@ async function driveSecret(user) {
   const secret = crypto.randomBytes(24).toString('base64url');
   await saveSetting('drive_bridge_secret', secret, `made by ${user || 'CI Plant'} ${new Date().toISOString()}`);
   return secret;
+}
+
+// The key the AVS check uses to fetch a photo kept in CI Plant (avs-robot.js).
+// Made with the first such photo; read by the check from avs.settings; never
+// sent to a browser.
+async function ensureRobotKey(cfg) {
+  if (cfg.robot_key) return;
+  // Never replaces a key already made (two first uploads at once make one key).
+  await q(`INSERT INTO avs.settings AS s (key, value, note) VALUES ('robot_key', $1, $2)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, note = EXCLUDED.note
+           WHERE COALESCE(s.value, '') = ''`,
+    [crypto.randomBytes(24).toString('hex'), 'made by CI Plant: the AVS check fetches photos kept in CI Plant with it']);
 }
 
 const linked = cfg => ({
@@ -107,7 +130,7 @@ export async function callDrive(cfg, payload, { timeoutMs = 25000 } = {}) {
 // POST to the routine's API trigger. The text is only a pointer: the routine
 // reads the queue itself from avs.check_requests, and treats fire text as data.
 export async function fireRoutine(cfg, text, { timeoutMs = 15000 } = {}) {
-  if (!cfg.routine_fire_url || !cfg.routine_token) return { ok: false, status: 'not_linked', error: 'Claude is not linked yet' };
+  if (!cfg.routine_fire_url || !cfg.routine_token) return { ok: false, status: 'not_linked', error: 'Claude is not linked to CI Plant yet' };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -135,8 +158,17 @@ export async function fireRoutine(cfg, text, { timeoutMs = 15000 } = {}) {
 }
 
 // One Claude run checks every set in the queue, so a run already checking (or
-// fired a moment ago and not yet started) is joined, not fired again.
+// fired a moment ago and not yet started) is joined, not fired again. The cloud
+// run reaches the AVS folder only through the Drive link: without it no run is
+// spent, and the set waits for a check started in Cowork (runbook 2C.7).
 async function fireUnlessRunning(cfg, set, { force = false } = {}) {
+  const links = linked(cfg);
+  if (links.claude && !links.drive) {
+    const error = 'The Drive link is not set up, so Claude cannot reach the AVS folder from the cloud';
+    await q(`UPDATE avs.check_requests SET fire_status = 'not_linked', fire_error = $2, updated_at = now() WHERE id = $1`,
+      [set.id, error]);
+    return { ok: false, status: 'not_linked', error };
+  }
   if (!force) {
     const busy = await one(`SELECT id FROM avs.check_requests
       WHERE (status = 'checking' AND claimed_at > now() - interval '3 hours')
@@ -165,7 +197,8 @@ async function readSets({ id = null, limit = 40 } = {}) {
   const sets = await q(`SELECT ${SET_COLS} FROM avs.check_requests s
      WHERE ($1::bigint IS NULL OR s.id = $1) ORDER BY s.id DESC LIMIT $2`, [id, limit]);
   if (!sets.length) return [];
-  const photos = await q(`SELECT id, request_id, seq, file_name, mime, size_bytes, captured_at, drive_url, uploaded_at
+  const photos = await q(`SELECT id, request_id, seq, file_name, mime, size_bytes, captured_at, drive_url, uploaded_at,
+            stored, filed_at, filed_path
      FROM avs.check_photos WHERE request_id = ANY($1) ORDER BY request_id, seq`, [sets.map(s => s.id)]);
   return sets.map(s => ({ ...s, label: setLabel(s.id), photos: photos.filter(p => +p.request_id === +s.id) }));
 }
@@ -250,7 +283,7 @@ const photoMime = file => {
 };
 const cleanName = name => String(name || 'photo.jpg').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim().slice(-80) || 'photo.jpg';
 
-// One photo per call, straight on to Google Drive.
+// One photo per call: on to Google Drive, or kept here until the check files it.
 r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) => {
   try {
     const id = toId(req.params.id);
@@ -264,34 +297,57 @@ r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) =
     const problem = photoProblem({ size: file.size, type: mime });
     if (problem) throw fail(400, problem);
 
+    const count = await one('SELECT count(*)::int AS n FROM avs.check_photos WHERE request_id = $1', [set.id]);
+    if (count.n >= AVS_SET_MAX_PHOTOS) throw fail(409, `A set holds at most ${AVS_SET_MAX_PHOTOS} photos. Start a new set for more.`);
     // Reserve the photo's number first: two phones adding to one set never
-    // collide, and the count is read from the photos themselves.
+    // collide. A photo that is not saved gives its number back (below).
     const seqRow = await one(`UPDATE avs.check_requests SET next_seq = next_seq + 1, updated_at = now()
       WHERE id = $1 AND status = 'uploading' RETURNING next_seq`, [set.id]);
     if (!seqRow) throw fail(409, `${setLabel(set.id)} was already sent for checking.`);
-    const count = await one('SELECT count(*)::int AS n FROM avs.check_photos WHERE request_id = $1', [set.id]);
-    if (count.n >= AVS_SET_MAX_PHOTOS) throw fail(409, `A set holds at most ${AVS_SET_MAX_PHOTOS} photos. Start a new set for more.`);
-
     const seq = +seqRow.next_seq;
+    const giveBack = () => q(`UPDATE avs.check_requests SET next_seq = next_seq - 1
+      WHERE id = $1 AND next_seq = $2`, [set.id, seq]).catch(() => {});
+
     const folder = set.drive_folder_path || avsSetFolder({ id: set.id, day: istDay(set.created_at), jc_number: set.jc_number });
     const name = `${String(seq).padStart(2, '0')} ${cleanName(file.originalname)}`;
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
-    const cfg = await settings();
-    const put = await callDrive(cfg, {
-      op: 'put', path: folder, name, mime, base64: file.buffer.toString('base64'),
-    });
     const capturedAt = Number.isFinite(Date.parse(req.body?.captured_at)) ? new Date(req.body.captured_at).toISOString() : null;
-    await q(`INSERT INTO avs.check_photos (request_id, seq, file_name, original_name, mime, size_bytes, sha256,
-                                           captured_at, drive_file_id, drive_url, uploaded_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [set.id, seq, name, String(file.originalname || '').slice(0, 200), mime, file.size, sha256,
-        capturedAt, put.id || null, put.url || null, req.user.name ?? null]);
+    const cfg = await settings();
+
+    // Google Drive when the Drive link is set up. Otherwise — or when Drive
+    // refuses — CI Plant keeps the photo until the AVS check files it in Drive.
+    let put = null;
+    let driveError = null;
+    if (linked(cfg).drive) {
+      try {
+        put = await callDrive(cfg, { op: 'put', path: folder, name, mime, base64: file.buffer.toString('base64') });
+      } catch (e) { driveError = e.message; }
+    }
+    if (!put) {
+      const kept = await one(`SELECT COALESCE(sum(size_bytes), 0)::bigint AS n FROM avs.check_photos WHERE stored = 'ci_plant'`);
+      if (Number(kept.n) + file.size > keptMaxBytes()) {
+        await giveBack();
+        throw fail(503, `CI Plant is already holding ${sizeText(Number(kept.n))} of AVS photos that wait to be filed in Google Drive, `
+          + 'its limit. Ask the admin to run the AVS check (it files them) or to set up the Drive link, then add this photo again.');
+      }
+    }
+    try {
+      await tx(async (qc, oc) => {
+        const photo = await oc(`INSERT INTO avs.check_photos (request_id, seq, file_name, original_name, mime, size_bytes, sha256,
+                                                              captured_at, drive_file_id, drive_url, uploaded_by, stored)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+          [set.id, seq, name, String(file.originalname || '').slice(0, 200), mime, file.size, sha256,
+            capturedAt, put?.id || null, put?.url || null, req.user.name ?? null, put ? 'drive' : 'ci_plant']);
+        if (!put) await qc('INSERT INTO avs.check_photo_bytes (photo_id, bytes) VALUES ($1, $2)', [photo.id, file.buffer]);
+      });
+    } catch (e) { await giveBack(); throw e; }
     await q(`UPDATE avs.check_requests SET drive_folder_path = $2,
                     drive_folder_id = COALESCE($3, drive_folder_id), drive_folder_url = COALESCE($4, drive_folder_url),
                     updated_at = now() WHERE id = $1`,
-      [set.id, folder, put.parent?.id || null, put.parent?.url || null]);
+      [set.id, folder, put?.parent?.id || null, put?.parent?.url || null]);
+    if (!put) await ensureRobotKey(cfg);
     const [out] = await readSets({ id: set.id });
-    res.status(201).json(out);
+    res.status(201).json({ ...out, last_photo: { seq, stored: put ? 'drive' : 'ci_plant', drive_error: driveError } });
   } catch (e) { next(e); }
 });
 

@@ -37,6 +37,7 @@ import fluence from './routes/fluence.js';
 import avs from './routes/avs.js';
 import avsSwitch from './routes/avs-switch.js';
 import avsIntake from './routes/avs-intake.js';
+import avsRobot from './routes/avs-robot.js';
 import kitStudio from './routes/kitstudio.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
@@ -61,6 +62,8 @@ app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson : standardJson)(req
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public
+// The AVS check fetches photos kept in CI Plant with its own key, not a login.
+app.use('/api', avsRobot);
 app.use('/api', requireAuth);         // everything below needs a token
 app.use('/api', heartbeatMiddleware); // keeps the browsers' change feed provably alive
 app.use('/api', usersRouter);

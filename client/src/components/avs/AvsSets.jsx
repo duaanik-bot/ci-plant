@@ -1,6 +1,8 @@
 // Photo sets on the Artwork Verification page — each upload and where it stands:
 // adding photos → waiting for Claude → Claude is checking (with its progress) →
 // report ready | check failed. Refreshed every 10 seconds while one is under way.
+// Photos taken while the Drive link is not set up are kept in CI Plant until the
+// check files them in the AVS folder; the count of those still waiting shows here.
 import { useState } from 'react';
 import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
@@ -36,7 +38,9 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue }) {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Photo sets sent for checking</h2>
         <span className="flex items-center gap-2 text-[11px]">
-          <span className={data.linked?.drive ? 'text-emerald-600' : 'text-slate-400'}>Drive {data.linked?.drive ? 'linked' : 'not linked'}</span>
+          <span className={data.linked?.drive ? 'text-emerald-600' : 'text-slate-400'}
+            title={data.linked?.drive ? undefined : 'Photos are kept in CI Plant until Claude files them in the AVS folder'}>
+            Drive {data.linked?.drive ? 'linked' : 'not linked'}</span>
           <span className={data.linked?.claude ? 'text-emerald-600' : 'text-slate-400'}>· Claude {data.linked?.claude ? 'linked' : 'not linked'}</span>
         </span>
       </div>
@@ -44,6 +48,7 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue }) {
       <ul className="divide-y divide-slate-100">
         {sets.slice(0, 12).map(s => {
           const Icon = ICON[s.status] || Clock;
+          const kept = s.photos?.filter(p => p.stored === 'ci_plant').length || 0;
           return (
             <li key={s.id} className="flex flex-wrap items-start justify-between gap-3 py-2">
               <div className="min-w-0 flex-1">
@@ -57,10 +62,12 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue }) {
                   <span className="truncate text-sm text-slate-800">{s.product_hint || ''}</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-500">
-                  {s.photos?.length || 0} photo{s.photos?.length === 1 ? '' : 's'} · {s.created_by || '—'} · {fmt.date(s.created_at)}
+                  {s.photos?.length || 0} photo{s.photos?.length === 1 ? '' : 's'}
+                  {kept ? ` (${kept === s.photos.length ? 'all' : kept} kept in CI Plant until filed in Drive)` : ''}
+                  {' '}· {s.created_by || '—'} · {fmt.date(s.created_at)}
                   {s.status === 'checking' && s.progress ? ` · ${s.progress}` : ''}
                   {s.status === 'queued' && s.fire_status === 'failed' && s.fire_error ? ` · ${s.fire_error}` : ''}
-                  {s.status === 'queued' && s.fire_status === 'not_linked' ? ' · Claude is not linked yet' : ''}
+                  {s.status === 'queued' && s.fire_status === 'not_linked' ? ' · waits for a check started in Cowork (/avs)' : ''}
                 </div>
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>

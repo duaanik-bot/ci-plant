@@ -1,10 +1,11 @@
 // Upload photos for an AVS check, then Verify.
 //
 // 1. The job card (printing jobs first), or "no job card" with the product name.
-// 2. Photos: taken with the camera or chosen. Each one goes on its own, straight
-//    to Google Drive (AVS CHECK/<date>/Set 0012 <job card>). A photo over 4 MB
-//    is shrunk first (Vercel's limit); one under it goes as it is, with its
-//    camera data.
+// 2. Photos: taken with the camera or chosen. Each one goes on its own to
+//    Google Drive (AVS CHECK/<date>/Set 0012 <job card>) when the Drive link is
+//    set up; until then CI Plant keeps it, and Claude files it in the AVS folder
+//    when it checks the set. A photo over 4 MB is shrunk first (Vercel's limit);
+//    one under it goes as it is, with its camera data.
 // 3. Verify: the set joins the queue and Claude is started. The report then
 //    appears in Artwork Verification, where QA decides.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,11 +37,22 @@ async function fitPhoto(file) {
 export const FIRE_TEXT = {
   fired: 'Claude has started checking. The report appears in Artwork Verification when it is done.',
   joined: 'Claude is already checking other photos and will check these in the same run.',
-  not_linked: 'Claude is not linked yet, so the set waits in the queue. An admin links it in Artwork Verification → Setup.',
 };
+// Not linked: the set waits for a check started in Cowork (/avs), which also
+// files any photos CI Plant kept.
 export const fireText = fire => (fire?.ok ? FIRE_TEXT[fire.status] || FIRE_TEXT.fired
-  : fire?.status === 'not_linked' ? FIRE_TEXT.not_linked
+  : fire?.status === 'not_linked'
+    ? `The set is in the queue. ${fire.error || 'Claude is not linked to CI Plant yet'}, so the check starts when it is run from Cowork (/avs).`
     : `${fire?.error || 'Claude did not start'}. The set waits in the queue; QA can press Try again.`);
+
+// Where the set's photos are: Google Drive, or CI Plant until Claude files them.
+export function savedText(saved, keptHere) {
+  if (!saved) return 'No photo saved yet.';
+  const n = `${saved} photo${saved === 1 ? '' : 's'} saved`;
+  if (!keptHere) return `${n} in Google Drive.`;
+  if (keptHere === saved) return `${n} in CI Plant; Claude files them in Google Drive when it checks.`;
+  return `${n}; ${keptHere} kept in CI Plant until Claude files them in Google Drive.`;
+}
 
 // jobCard: { id, jc_number, product_name } to skip the choice (the printing pop-up).
 // resume: a set still taking photos (Continue in the list).
@@ -116,7 +128,7 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
           const out = await api.upload(`/avs/uploads/${s.id}/photos`, file,
             { captured_at: new Date(original.lastModified || Date.now()).toISOString() });
           setRef.current = out; setSet(out);
-          mark(key, { status: 'done' });
+          mark(key, { status: 'done', stored: out.last_photo?.stored, driveError: out.last_photo?.drive_error });
         } catch (e) {
           mark(key, { status: 'failed', error: e?.message || 'Upload failed' });
         }
@@ -142,12 +154,13 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
     pump();
   };
 
-  const inDrive = set?.photos?.length || 0;
-  const earlier = Math.max(0, inDrive - items.filter(x => x.status === 'done').length);
+  const saved = set?.photos?.length || 0;
+  const keptHere = set?.photos?.filter(p => p.stored === 'ci_plant').length || 0;
+  const earlier = Math.max(0, saved - items.filter(x => x.status === 'done').length);
   const pending = items.some(x => x.status === 'waiting' || x.status === 'uploading');
 
   const verify = async () => {
-    if (!set || pending || !inDrive) return;
+    if (!set || pending || !saved) return;
     setSending(true);
     try {
       const out = await api.post(`/avs/uploads/${set.id}/verify`, {});
@@ -166,8 +179,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
         ? <Button onClick={close}>Done</Button>
         : step === 'photos'
           ? <>
-            <Button variant="secondary" repeatable onClick={close} disabled={pending}>{inDrive ? 'Later' : 'Cancel'}</Button>
-            <Button onClick={verify} disabled={!inDrive || pending || sending}>
+            <Button variant="secondary" repeatable onClick={close} disabled={pending}>{saved ? 'Later' : 'Cancel'}</Button>
+            <Button onClick={verify} disabled={!saved || pending || sending}>
               <span className="inline-flex items-center gap-1.5"><Send size={15} /> Verify with Claude</span>
             </Button>
           </>
@@ -240,12 +253,15 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
           {items.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {items.map(x => (
-                <div key={x.key} className="relative h-24 overflow-hidden rounded-lg bg-slate-100">
+                <div key={x.key} className="relative h-24 overflow-hidden rounded-lg bg-slate-100"
+                  title={x.status === 'done' && x.stored === 'ci_plant'
+                    ? `Saved in CI Plant. Claude files it in the AVS folder in Google Drive when it checks the set.${x.driveError ? ` (${x.driveError})` : ''}`
+                    : undefined}>
                   <img src={x.preview} alt={x.name} className="h-full w-full object-cover" />
                   <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/55 py-0.5 text-[10px] font-semibold text-white">
                     {x.status === 'waiting' && 'Waiting'}
-                    {x.status === 'uploading' && <><Loader2 size={11} className="animate-spin" /> To Drive…</>}
-                    {x.status === 'done' && <><CheckCircle2 size={11} /> In Drive</>}
+                    {x.status === 'uploading' && <><Loader2 size={11} className="animate-spin" /> Saving…</>}
+                    {x.status === 'done' && <><CheckCircle2 size={11} /> {x.stored === 'ci_plant' ? 'Saved' : 'In Drive'}</>}
                     {x.status === 'failed' && <><XCircle size={11} /> Failed</>}
                   </span>
                 </div>
@@ -263,7 +279,7 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
                 className="mt-1 min-h-[56px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
             </div>
           )}
-          <p className="text-[11px] text-slate-400">{inDrive} photo{inDrive === 1 ? '' : 's'} in Google Drive. Press Verify when all are in.</p>
+          <p className="text-[11px] text-slate-400">{savedText(saved, keptHere)} Press Verify when all are in.</p>
         </div>
       )}
 

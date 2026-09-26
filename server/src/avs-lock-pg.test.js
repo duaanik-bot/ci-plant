@@ -1,5 +1,6 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -79,6 +80,20 @@ describe('the AVS printing lock — through the real app', {
     let json = null; try { json = await res.json(); } catch {}
     return { status: res.status, body: json };
   };
+
+  // The photo tables as production has them: both AVS photo migrations, minus
+  // the grants to Supabase's roles, which a plain Postgres does not have.
+  const applyAvsPhotoSchema = async () => {
+    await db.q('CREATE SCHEMA IF NOT EXISTS avs');
+    for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql']) {
+      await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
+        .replace(/REVOKE ALL[^;]*;/g, ''));
+    }
+    await db.q('CREATE TABLE IF NOT EXISTS avs.settings (key text PRIMARY KEY, value text, note text)');
+  };
+  const setSettings = pairs => db.q(`INSERT INTO avs.settings (key, value)
+      SELECT k, v FROM unnest($1::text[], $2::text[]) AS x(k, v)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [Object.keys(pairs), Object.values(pairs)]);
 
   // A job whose cutting is done and whose printing is running.
   let n = 0;
@@ -255,13 +270,11 @@ describe('the AVS printing lock — through the real app', {
     await new Promise(r => drive.listen(0, '127.0.0.1', r));
     await new Promise(r => routine.listen(0, '127.0.0.1', r));
     try {
-      await db.q(fs.readFileSync(new URL('../../supabase/migrations/20260926140100_avs_photo_sets.sql', import.meta.url), 'utf8')
-        .replace(/REVOKE ALL[^;]*;/, ''));
-      await db.q(`CREATE TABLE IF NOT EXISTS avs.settings (key text PRIMARY KEY, value text, note text)`);
-      await db.q(`INSERT INTO avs.settings (key, value) VALUES
-        ('drive_bridge_url', $1), ('drive_bridge_secret', 'test-secret'), ('routine_fire_url', $2), ('routine_token', 'sk-ant-test-token')
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [`http://127.0.0.1:${drive.address().port}/exec`, `http://127.0.0.1:${routine.address().port}/fire`]);
+      await applyAvsPhotoSchema();
+      await setSettings({
+        drive_bridge_url: `http://127.0.0.1:${drive.address().port}/exec`, drive_bridge_secret: 'test-secret',
+        routine_fire_url: `http://127.0.0.1:${routine.address().port}/fire`, routine_token: 'sk-ant-test-token',
+      });
 
       const job = await printingJob();
       const made = await call('production', 'POST', '/avs/uploads', { job_card_id: job.cardId, note: 'first sheets' });
@@ -284,6 +297,9 @@ describe('the AVS printing lock — through the real app', {
       assert.deepEqual(Buffer.from(sent.base64, 'base64'), photo, 'the bytes reach Drive exactly');
       const row = await db.one('SELECT * FROM avs.check_photos WHERE request_id=$1', [made.body.id]);
       assert.equal(row.drive_file_id, 'f1');
+      assert.equal(row.stored, 'drive');
+      assert.equal(upBody.last_photo.stored, 'drive');
+      assert.equal((await db.one('SELECT count(*)::int AS n FROM avs.check_photo_bytes')).n, 0, 'nothing kept when Drive took it');
       assert.equal(row.size_bytes, photo.length);
       assert.equal(row.captured_at.toISOString(), '2026-09-26T05:10:00.000Z');
 
@@ -333,6 +349,132 @@ describe('the AVS printing lock — through the real app', {
       assert.equal((await call('production', 'GET', '/avs/setup')).status, 403);
     } finally {
       drive.close(); routine.close();
+    }
+  });
+
+  // ── Without the Drive link: the photo is kept in CI Plant ─────────────────
+  // The owner has not set up the Drive link (or Drive refuses): the upload still
+  // works, the photo waits in avs.check_photo_bytes, the AVS check fetches it
+  // with the robot key, and marking it filed drops the copy kept here.
+  test('without the Drive link a photo is kept in CI Plant, and the check fetches it with its key', async () => {
+    const http = await import('node:http');
+    await applyAvsPhotoSchema();
+    await setSettings({ drive_bridge_url: '', routine_fire_url: '', routine_token: '' });
+    const job = await printingJob();
+    const made = await call('production', 'POST', '/avs/uploads', { job_card_id: job.cardId });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const photo = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 20000 }, (_, i) => (i * 7) % 256)]);
+    const send = async name => {
+      const fd = new FormData();
+      fd.append('file', new Blob([photo], { type: 'image/jpeg' }), name);
+      const res = await fetch(`${base}/avs/uploads/${made.body.id}/photos`, {
+        method: 'POST', headers: { authorization: `Bearer ${tokens.production}` }, body: fd });
+      return { status: res.status, body: await res.json() };
+    };
+
+    const up = await send('IMG-20260926-WA0001.jpg');
+    assert.equal(up.status, 201, JSON.stringify(up.body));
+    assert.equal(up.body.last_photo.stored, 'ci_plant');
+    assert.equal(up.body.last_photo.drive_error, null, 'nothing was tried: the link is not set up');
+    assert.equal(up.body.photos[0].stored, 'ci_plant');
+    assert.equal(up.body.photos[0].file_name, '01 IMG-20260926-WA0001.jpg');
+    const row = await db.one(`SELECT p.id, p.drive_file_id, b.bytes FROM avs.check_photos p
+      JOIN avs.check_photo_bytes b ON b.photo_id = p.id WHERE p.request_id = $1`, [made.body.id]);
+    assert.equal(row.drive_file_id, null);
+    assert.deepEqual(row.bytes, photo, 'kept byte for byte');
+
+    // The check fetches it with the key in avs.settings — and only with that.
+    const key = (await db.one(`SELECT value FROM avs.settings WHERE key = 'robot_key'`)).value;
+    assert.match(key, /^[0-9a-f]{48}$/);
+    const fetchPhoto = headers => fetch(`${base}/avs/robot/photos/${row.id}`, { headers });
+    assert.equal((await fetchPhoto({})).status, 401);
+    assert.equal((await fetchPhoto({ 'x-avs-robot-key': 'nope' })).status, 401);
+    assert.equal((await fetchPhoto({ authorization: `Bearer ${tokens.qc}` })).status, 401, 'an ERP login does not open it');
+    const got = await fetchPhoto({ 'x-avs-robot-key': key });
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get('content-type'), 'image/jpeg');
+    assert.equal(got.headers.get('cache-control'), 'no-store');
+    assert.equal(got.headers.get('x-photo-sha256'), crypto.createHash('sha256').update(photo).digest('hex'));
+    assert.deepEqual(Buffer.from(await got.arrayBuffer()), photo, 'the check gets the photo byte for byte');
+    assert.equal((await fetch(`${base}/avs/robot/photos/999999`, { headers: { 'x-avs-robot-key': key } })).status, 404);
+
+    // The list says where each photo is — never the photo, never the key.
+    const list = await call('production', 'GET', '/avs/uploads');
+    assert.equal(list.body.linked.drive, false);
+    assert.ok(!JSON.stringify(list.body).includes(key), 'the robot key never goes to a browser');
+
+    // Drive set up but refusing: the photo is still kept, with the reason.
+    const refusing = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Wrong secret' }));
+      });
+    });
+    await new Promise(r => refusing.listen(0, '127.0.0.1', r));
+    try {
+      await setSettings({ drive_bridge_url: `http://127.0.0.1:${refusing.address().port}/exec`, drive_bridge_secret: 'stale' });
+      const second = await send('IMG-20260926-WA0002.jpg');
+      assert.equal(second.status, 201, JSON.stringify(second.body));
+      assert.equal(second.body.last_photo.stored, 'ci_plant');
+      assert.match(second.body.last_photo.drive_error, /Wrong secret/);
+      assert.equal(second.body.photos[1].file_name, '02 IMG-20260926-WA0002.jpg');
+
+      // At the ceiling the upload is refused, says why, and gives its number back.
+      process.env.AVS_KEPT_MAX_MB = '0.04';
+      const full = await send('IMG-20260926-WA0003.jpg');
+      delete process.env.AVS_KEPT_MAX_MB;
+      assert.equal(full.status, 503);
+      assert.match(full.body.error, /waiting to be filed|wait to be filed/);
+      const third = await send('IMG-20260926-WA0003.jpg');
+      assert.equal(third.status, 201, JSON.stringify(third.body));
+      assert.equal(third.body.photos.at(-1).file_name, '03 IMG-20260926-WA0003.jpg', 'the refused photo gave its number back');
+    } finally {
+      delete process.env.AVS_KEPT_MAX_MB;
+      refusing.close();
+    }
+
+    // Verify with Claude not linked (and no run under way to join): queued,
+    // waiting for a check run from Cowork.
+    await db.q(`UPDATE avs.check_requests SET status = 'done', finished_at = now()
+      WHERE status IN ('checking', 'queued') AND id <> $1`, [made.body.id]);
+    const v = await call('production', 'POST', `/avs/uploads/${made.body.id}/verify`);
+    assert.equal(v.status, 200, JSON.stringify(v.body));
+    assert.equal(v.body.set.status, 'queued');
+    assert.equal(v.body.fire.status, 'not_linked');
+
+    // Filed by the check: the copy kept here goes, and the fetch says where it is.
+    await db.q(`UPDATE avs.check_photos SET stored = 'drive', filed_at = now(), filed_path = $2 WHERE id = $1`,
+      [row.id, '2026-09 SEPTEMBER/26-09-2026/X/Photos AVS-2026-0901 Check 1/01 IMG-20260926-WA0001.jpg']);
+    assert.equal((await db.one('SELECT count(*)::int AS n FROM avs.check_photo_bytes WHERE photo_id = $1', [row.id])).n, 0);
+    const gone = await fetchPhoto({ 'x-avs-robot-key': key });
+    assert.equal(gone.status, 410);
+    assert.match((await gone.json()).filed_path, /Photos AVS-2026-0901 Check 1/);
+    assert.equal((await db.one('SELECT count(*)::int AS n FROM avs.check_photo_bytes')).n, 2, 'the other two wait to be filed');
+
+    // Claude linked but no Drive link: no cloud run is spent on a check that could
+    // not reach the AVS folder; the set waits for a check started in Cowork.
+    const fires = [];
+    const routine = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => { fires.push(1); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+    });
+    await new Promise(r => routine.listen(0, '127.0.0.1', r));
+    try {
+      await setSettings({ drive_bridge_url: '', routine_fire_url: `http://127.0.0.1:${routine.address().port}/fire`, routine_token: 'sk-ant-test-token' });
+      const other = await call('qc', 'POST', '/avs/uploads', { product_hint: 'Sample carton' });
+      const fd = new FormData();
+      fd.append('file', new Blob([photo], { type: 'image/jpeg' }), 'x.jpg');
+      const kept = await fetch(`${base}/avs/uploads/${other.body.id}/photos`, {
+        method: 'POST', headers: { authorization: `Bearer ${tokens.qc}` }, body: fd });
+      assert.equal(kept.status, 201);
+      const v2 = await call('qc', 'POST', `/avs/uploads/${other.body.id}/verify`);
+      assert.equal(v2.body.set.status, 'queued');
+      assert.equal(v2.body.fire.status, 'not_linked');
+      assert.match(v2.body.fire.error, /Drive link is not set up/);
+      assert.equal(fires.length, 0, 'no routine run spent');
+    } finally {
+      routine.close();
     }
   });
 });

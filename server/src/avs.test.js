@@ -148,9 +148,41 @@ const writesIn = file => {
 
 test('the AVS switch writes only the job\'s switch; the photo sets only their own avs tables', () => {
   assert.deepEqual(writesIn('./routes/avs-switch.js'), ['gang_runs', 'order_lines']);
-  assert.deepEqual(writesIn('./routes/avs-intake.js'), ['avs.check_photos', 'avs.check_requests', 'avs.settings']);
+  assert.deepEqual(writesIn('./routes/avs-intake.js'),
+    ['avs.check_photo_bytes', 'avs.check_photos', 'avs.check_requests', 'avs.settings']);
   assert.doesNotMatch(readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8'), /DELETE\s/i,
     'nothing uploaded is ever deleted');
+});
+
+// ── Photos kept in CI Plant while the Drive link is not set up ──────────────
+test('an upload never needs the Drive link: without it the photo is kept in CI Plant', () => {
+  const src = readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8');
+  const route = src.slice(src.indexOf("r.post('/avs/uploads/:id/photos'"), src.indexOf("r.post('/avs/uploads/:id/verify'"));
+  assert.match(route, /if \(linked\(cfg\)\.drive\) \{\s*try \{\s*put = await callDrive\(/, 'Drive is tried only when linked, and its refusal is caught');
+  assert.match(route, /INSERT INTO avs\.check_photo_bytes/, 'otherwise the photo itself is kept');
+  assert.match(route, /await tx\(/, 'the photo row and its bytes are saved together or not at all');
+  assert.match(route, /keptMaxBytes\(\)/, 'with a ceiling, so a check that never runs cannot fill the database');
+});
+
+test('the check fetches a kept photo with its key and changes nothing', () => {
+  const src = readFileSync(new URL('./routes/avs-robot.js', import.meta.url), 'utf8');
+  assert.deepEqual(writesIn('./routes/avs-robot.js'), []);
+  assert.match(src, /timingSafeEqual/);
+  assert.match(src, /'Cache-Control', 'no-store'/);
+  // Outside the ERP login (the check has none), but inside the statement ledger.
+  const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+  const robot = app.indexOf("app.use('/api', avsRobot)");
+  assert.ok(robot > app.indexOf("app.use('/api', dataTablesMiddleware)"));
+  assert.ok(robot < app.indexOf("app.use('/api', requireAuth)"));
+  // The key never goes to a browser.
+  assert.doesNotMatch(readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8'), /robot_key:/);
+});
+
+test('filing a kept photo in Drive drops the copy kept in CI Plant', () => {
+  const sql = readFileSync(new URL('../../supabase/migrations/20260926170000_avs_photos_kept_in_ci_plant.sql', import.meta.url), 'utf8');
+  assert.match(sql, /CHECK \(stored IN \('drive', 'ci_plant'\)\)/);
+  assert.match(sql, /AFTER UPDATE OF stored ON avs\.check_photos\s+FOR EACH ROW WHEN \(NEW\.stored = 'drive'\)/);
+  assert.match(sql, /REFERENCES avs\.check_photos\(id\) ON DELETE CASCADE/);
 });
 
 test('printing is locked before anything is recorded, and the press never switches its own lock', () => {
