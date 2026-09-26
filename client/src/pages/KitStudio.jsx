@@ -1,6 +1,6 @@
 // Kit Studio — carton sizing, layouts and draft kits for the Fluence kit master.
 //
-// The studio is a self-contained page (client/public/kit-studio/index.html) with
+// The studio is a self-contained page (client/public/kit-studio-app/index.html) with
 // its own look and its own drawers, so it runs in an iframe here rather than
 // being rebuilt in React. This component is its host:
 //
@@ -84,7 +84,7 @@ export default function KitStudio() {
     <div ref={frameBox} className="-mx-1 overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-sm sm:-mx-0">
       {ready && (
         <iframe
-          src="/kit-studio/index.html"
+          src="/kit-studio-app/index.html"
           title="Kit Studio"
           className="block w-full border-0"
           style={{ height }}

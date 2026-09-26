@@ -1,6 +1,6 @@
 // Kit Studio — carton sizing, layouts and draft kits, on top of the Fluence
 // kit master. The page itself is a stand-alone app served at
-// /kit-studio/index.html and hosted by pages/KitStudio.jsx; every read and write
+// /kit-studio-app/index.html and hosted by pages/KitStudio.jsx; every read and write
 // it makes comes here.
 //
 // What it owns, what it borrows (see kit-studio.js for the full mapping):

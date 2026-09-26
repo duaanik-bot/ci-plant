@@ -194,18 +194,32 @@ test('the studio route is mounted, and every write needs a Planning role', () =>
 });
 
 test('the studio page is served from our own origin, bridge first, no CDN', () => {
-  const html = read('client/public/kit-studio/index.html');
+  const html = read('client/public/kit-studio-app/index.html');
   assert.match(html, /^<!doctype html>/);
   assert.ok(html.indexOf('<script src="erp-bridge.js"></script>') < html.indexOf('<script>\n'), 'the bridge must load before the studio');
   assert.doesNotMatch(html, /cdnjs\.cloudflare\.com/);
   assert.match(html, /const PDF_LIB=\['lib\/jspdf\.umd\.min\.js','lib\/jspdf\.plugin\.autotable\.min\.js'\]/);
   for (const f of ['erp-bridge.js', 'lib/jspdf.umd.min.js', 'lib/jspdf.plugin.autotable.min.js'])
-    assert.ok(read(`client/public/kit-studio/${f}`).length > 1000, `${f} missing`);
-  // Vercel serves a file that exists before any rewrite; the SPA catch-all must
-  // not be what answers /kit-studio/.
-  const bridge = read('client/public/kit-studio/erp-bridge.js');
+    assert.ok(read(`client/public/kit-studio-app/${f}`).length > 1000, `${f} missing`);
+  const bridge = read('client/public/kit-studio-app/erp-bridge.js');
   assert.match(bridge, /window\.parent\.__kitStudioHost/);
   assert.doesNotMatch(bridge, /ci_token|localStorage/, 'the studio never touches the ERP sign-in');
+});
+
+// Vercel answers from the filesystem BEFORE any rewrite, and a folder's
+// index.html answers the folder's own path. The static page first shipped at
+// /kit-studio/ — the module's own route — so a refresh on motionci.in/kit-studio
+// served the bare studio page instead of the ERP around it (2026-09-26). No
+// folder in client/public may carry the name of an app route.
+test('no static folder shadows an app route', async () => {
+  const { readdirSync, statSync } = await import('node:fs');
+  const { MODULES } = await import('../../client/src/modules.js');
+  const pub = new URL('client/public/', root);
+  const dirs = readdirSync(pub).filter(n => statSync(new URL(n, pub)).isDirectory());
+  const routes = MODULES.flatMap(m => [m.path, ...(m.aliases || [])]).map(p => p.split('/')[1]).filter(Boolean);
+  for (const d of dirs) assert.ok(!routes.includes(d), `client/public/${d}/ would answer the /${d} route with its own index.html`);
+  assert.ok(dirs.includes('kit-studio-app'));
+  assert.match(read('client/src/pages/KitStudio.jsx'), /src="\/kit-studio-app\/index\.html"/);
 });
 
 test('Kit Studio is a module anyone with Fluence access can open', async () => {
