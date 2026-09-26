@@ -111,8 +111,12 @@ export default function Avs() {
           searchValue={q} onSearchChange={setQ}
           searchPlaceholder="Search product, AVS no., job card, PO, artwork code…"
           rows={filtered}
+          // Newest check on top: it is the one QA has to act on.
+          defaultSort={{ key: 'report_no', dir: 'desc' }}
           onRowClick={r => open(r.report_no)}
-          empty={loadError ? 'Server unreachable — nothing to show until it reconnects.' : 'No AVS reports yet. They appear here after the next check in Claude.'}
+          empty={loadError ? 'Server unreachable — nothing to show until it reconnects.'
+            : data === null ? 'Loading AVS reports…'
+            : 'No AVS reports yet. They appear here after the next check in Claude.'}
           columns={[
             { key: 'report_no', label: 'Report', export: r => reportLabel(r),
               render: r => <span className="font-mono text-xs font-semibold text-slate-700">{reportLabel(r)}</span> },
