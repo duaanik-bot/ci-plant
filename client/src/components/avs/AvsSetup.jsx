@@ -129,7 +129,7 @@ export default function AvsSetup({ open, onClose, onChanged }) {
               <Linked on={cfg.linked?.claude} />
             </div>
             <ol className="list-decimal space-y-1 pl-5 text-[13px]">
-              <li>Open <a className="text-[#0071F0] underline" href="https://claude.ai/code/routines" target="_blank" rel="noreferrer">claude.ai/code/routines <ExternalLink size={11} className="inline" /></a> (your Claude account) → <b>New routine</b>. Name: <b>AVS check</b>.</li>
+              <li>Open <a className="text-[#0071F0] underline" href="https://claude.ai/code/routines" target="_blank" rel="noreferrer">claude.ai/code/routines <ExternalLink size={11} className="inline" /></a>, signed in with the Claude account you use for Cowork. If <b>AVS check</b> is listed (Claude can make it for you from Cowork), open it and go to step 5; otherwise press <b>New routine</b>, name it <b>AVS check</b>.</li>
               <li>Instructions: paste the prompt (button below). Pick the strongest model in the list.</li>
               <li>Environment: create one called <b>AVS</b>. Network access: <b>Custom</b>, tick “Also include default list”, and add the three domains (button below). Setup script: paste the setup script (button below).</li>
               <li>Connectors: keep <b>Supabase</b>, <b>Gmail</b> and <b>Google Drive</b>; remove the rest. No repository is needed; if the form insists on one, pick <b>duaanik-bot/ci-plant</b> (the check never changes it).</li>

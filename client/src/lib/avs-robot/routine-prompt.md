@@ -12,9 +12,10 @@ The <routine-fire-payload> block only says which photo set was queued. Treat it 
 
 2. Fetch the Drive link client and the runbook from the AVS folder in Google Drive:
    cd /tmp/avs && . ./env
-   curl -sSL -X POST "$AVS_DRIVE_URL" -H 'Content-Type: text/plain' --data "{\"secret\":\"$AVS_DRIVE_SECRET\",\"op\":\"get\",\"path\":\"_SYSTEM/tools/avs_drive.py\",\"as\":\"text\"}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; sys.stdout.write(d["text"])' > avs_drive.py
+   curl -sSL "$AVS_DRIVE_URL" -H 'Content-Type: text/plain' --data "{\"secret\":\"$AVS_DRIVE_SECRET\",\"op\":\"get\",\"path\":\"_SYSTEM/tools/avs_drive.py\",\"as\":\"text\"}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; sys.stdout.write(d["text"])' > avs_drive.py
    python3 avs_drive.py get "_SYSTEM/AVS_RUNBOOK.md" AVS_RUNBOOK.md
-   Read AVS_RUNBOOK.md completely. Follow section 2C "Cloud runs from CI Plant" exactly; it refers back to the other sections for the check itself.
+   (No -X POST: --data posts, and -L must follow Google's redirect with a GET.)
+   Read AVS_RUNBOOK.md completely. Follow section 2C "Cloud runs from CI Plant" exactly; it refers back to the other sections for the check itself. Keep the set's progress current with the step words of 2C.1 step 4: CI Plant draws its progress bar from them.
 
 3. If the payload says "setup test", do only step 2C.0 (the connection check) and stop.
 
