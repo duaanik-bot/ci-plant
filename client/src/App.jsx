@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Orders = lazy(() => import('./pages/Orders.jsx'));
 const Planning = lazy(() => import('./pages/Planning.jsx'));
 const Artwork = lazy(() => import('./pages/Artwork.jsx'));
+const Avs = lazy(() => import('./pages/Avs.jsx'));
 const Production = lazy(() => import('./pages/Production.jsx'));
 const Inventory = lazy(() => import('./pages/Inventory.jsx'));
 const Procurement = lazy(() => import('./pages/Procurement.jsx'));
@@ -148,6 +149,7 @@ export default function App() {
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/planning" element={<Planning />} />
                 <Route path="/artwork" element={<Artwork />} />
+                <Route path="/avs" element={<Avs />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
                 {/* Plural — the batch stack. Distinct segment from the singular

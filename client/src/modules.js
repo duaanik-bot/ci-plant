@@ -11,6 +11,8 @@ export const MODULES = [
   { key: 'accounts', label: 'Accounts', path: '/accounts' },
   { key: 'planning', label: 'Planning', path: '/planning' },
   { key: 'artwork', label: 'Artwork', path: '/artwork' },
+  // AVS — printed-carton verification reports and QA's release decision.
+  { key: 'avs', label: 'Artwork Verification (AVS)', path: '/avs' },
   { key: 'production', label: 'Job Cards', path: '/production' },
   { key: 'print_planning', label: 'Print Planning', path: '/print-planning' },
   { key: 'floor', label: 'Live Floor', path: '/floor' },

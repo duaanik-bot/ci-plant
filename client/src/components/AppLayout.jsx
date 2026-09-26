@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
@@ -48,6 +48,8 @@ const NAV = [
     items: [
       { label: 'Planning', to: '/planning', icon: CalendarClock, roles: ['admin', 'planner'], module: 'planning' },
       { label: 'Artwork', to: '/artwork', icon: Palette, roles: ['admin', 'planner', 'qc'], module: 'artwork' },
+      // AVS: every printed-carton check with its PDF, and QA's Release / Hold / Reject.
+      { label: 'Artwork Verification', to: '/avs', icon: ScanSearch, roles: 'all', module: 'avs' },
       { label: 'Job Cards', to: '/production', icon: ClipboardList, roles: ['admin', 'planner', 'production', 'qc', 'viewer'], module: 'production' },
       { label: 'Print Planning', to: '/print-planning', icon: Kanban, roles: ['admin', 'planner', 'production'], module: 'print_planning' },
     ],
