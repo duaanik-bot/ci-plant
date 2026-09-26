@@ -65,8 +65,12 @@ export default function Login() {
         <form onSubmit={submit} className="glass rounded-[28px] p-6">
           <h1 className="mb-4 text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">Sign in</h1>
           <div className="space-y-3">
-            <Field label="Email" required>
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@motionci.com" autoFocus />
+            {/* An email, or a login ID that is not one (a customer's own login,
+                "fluence…"): a plain field, so the browser does not refuse an ID
+                without an @ before the server has seen it. */}
+            <Field label="Email or login ID" required>
+              <Input type="text" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false}
+                value={email} onChange={e => setEmail(e.target.value)} placeholder="you@motionci.com" autoFocus />
             </Field>
             <Field label="Password" required>
               <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />

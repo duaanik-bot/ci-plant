@@ -74,7 +74,7 @@ export const HANDLED_BY = {
   // Kit Studio's refusals (a kit changed under you, a master kit that cannot be
   // deleted …). The studio page in the frame toasts the message itself; the host
   // page is what receives it and passes it on.
-  KIT_STUDIO_REFUSED: { at: ['pages/KitStudio.jsx'], says: 'KIT_STUDIO_REFUSED' },
+  KIT_STUDIO_REFUSED: { at: ['components/fluence/KitStudioFrame.jsx'], says: 'KIT_STUDIO_REFUSED' },
   // The AVS printing lock: Planning made AVS mandatory for the job and QA has
   // not released it yet. The three pages that complete printing branch on it and
   // draw AvsPrompt's dialog (why, report by report, and the photo upload).

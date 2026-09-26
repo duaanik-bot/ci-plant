@@ -39,7 +39,7 @@ export const FLUENCE_CONTEXTS = {
   dispatch: 'Dispatch',
   accounts: 'Accounts',
   warehouse: 'Warehouse',
-  fluence_master: 'Fluence Master',
+  fluence_master: 'Fluence',
   kit_studio: 'Kit Studio',
   masters: 'Masters',
 };
@@ -340,4 +340,47 @@ export function kitCartons(outer, parts) {
   if (!outer?.code || !parts?.length) return [];
   return [{ product_id: outer.product_id, code: outer.code, part: 'outer carton' },
     ...parts.map(p => ({ product_id: p.product_id, code: p.code, part: p.part }))];
+}
+
+// A kit change in a sentence — what a notification to Colour Impressions
+// management says when a customer's login changed a kit: which items came in or
+// went out, which counts and prices moved, whose dose now reads differently.
+// `before` / `after`: { components: [{ inner_product_id, name, qty_per_kit,
+// mrp_in_kit }], rx: { general_instructions, lines: [...] } | null }.
+export function kitChangeSummary(before, after, max = 480) {
+  const out = [];
+  const num = v => (v == null || v === '' ? null : Number(v));
+  const nameOf = c => c?.name || `item ${c?.inner_product_id}`;
+  const b = new Map((before?.components || []).map(c => [Number(c.inner_product_id), c]));
+  const a = new Map((after?.components || []).map(c => [Number(c.inner_product_id), c]));
+  for (const [id, c] of a) if (!b.has(id)) out.push(`added ${nameOf(c)} × ${qtyText(c.qty_per_kit)}`);
+  for (const [id, c] of b) if (!a.has(id)) out.push(`took out ${nameOf(c)}`);
+  for (const [id, c] of a) {
+    const o = b.get(id);
+    if (!o) continue;
+    if (num(o.qty_per_kit) !== num(c.qty_per_kit)) out.push(`${nameOf(c)} ${qtyText(o.qty_per_kit)} → ${qtyText(c.qty_per_kit)} per kit`);
+    if (num(o.mrp_in_kit) !== num(c.mrp_in_kit)) out.push(`${nameOf(c)} MRP ${o.mrp_in_kit == null ? '—' : `₹${qtyText(o.mrp_in_kit)}`} → ${c.mrp_in_kit == null ? '—' : `₹${qtyText(c.mrp_in_kit)}`}`);
+  }
+  const kept = ids => ids.filter(id => a.has(id) && b.has(id)).join();
+  if (kept([...b.keys()]) !== kept([...a.keys()])) out.push('items in a new order');
+  // The prescription, item by item, as the card would read it.
+  const doses = rx => {
+    const m = new Map();
+    for (const l of rx?.lines || []) {
+      const k = l.item_name || l.item_label || `item ${l.inner_product_id}`;
+      const text = formatRxLine(l, '');
+      if (text) m.set(k, [...(m.get(k) || []), text]);
+    }
+    return m;
+  };
+  const bd = doses(before?.rx), ad = doses(after?.rx);
+  for (const k of new Set([...bd.keys(), ...ad.keys()])) {
+    const was = (bd.get(k) || []).join(' + '), now = (ad.get(k) || []).join(' + ');
+    if (was === now) continue;
+    out.push(now ? `${k}: ${now}` : `${k}: dose cleared`);
+  }
+  const g = rx => String(rx?.general_instructions ?? '').trim();
+  if (g(before?.rx) !== g(after?.rx)) out.push(g(after?.rx) ? `instructions: ${g(after.rx)}` : 'instructions cleared');
+  const text = out.join('; ') || 'saved with no change to the items or doses';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }

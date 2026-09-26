@@ -1,26 +1,34 @@
-// Fluence Master — the home of the Fluence prescription & kit master.
+// Fluence — the one module for Fluence Pharmaceuticals' kits.
 //
-//   Products        every Fluence carton: its customer kit, kit items and
-//                   prescription status — open any one in the Fluence drawer
-//   Customer kits   the customer's own kit list, and which ERP product each kit
-//                   is printed as. Exact names were linked by the import; the
-//                   rest wait here for a person — with a suggestion where one
-//                   exists — because a wrong link would print the wrong
-//                   prescription on a carton
-//   Inner products  every item that goes inside a kit, with carton dimensions
-//                   (blank until supplied — never estimated)
+// What used to be two modules (the Fluence Master and Kit Studio) is one page
+// with one row of tabs:
+//
+//   Kits          Overview · Kits · New kit · Drafts — Kit Studio: every kit's
+//                 carton size and arrangement, new kits designed and drafted
+//   Masters       Inner products (sizes, codes, packaging) · Fluence products
+//                 (the FP cartons: kit and prescription status) · Customer list
+//                 (the customer's kit list, and which carton each kit is printed as)
+//   Records       Change log (who changed what, signed) · Export & settings
+//
+// A kit's contents and its prescription are edited in one table, one save (the
+// Fluence drawer). Masters keeps what is printed and billed — the FP code, billing
+// code, carton MRP, size and spec — and each points at the other.
 //
 // Fluence Pharmaceuticals only. Nothing here touches any other customer.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Boxes, CheckCircle2, Link2, Pill, Plus, Ruler, Unlink, AlertTriangle } from 'lucide-react';
+import { Boxes, CheckCircle2, History, Link2, Pill, Ruler, Unlink, AlertTriangle } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, KpiCard, KpiRow, Modal, PageHeader, SearchableSelect, Tabs, useToast } from '../components/ui.jsx';
-import { canPlan } from '../modules.js';
+import { Button, DataTable, GroupedTabs, KpiCard, KpiRow, Modal, PageHeader, SearchableSelect, useToast } from '../components/ui.jsx';
+import { canAccess, canPlan } from '../modules.js';
 import FluenceDrawer from '../components/fluence/FluenceDrawer.jsx';
-import InnerProductForm from '../components/fluence/InnerProductForm.jsx';
-import { DimsCell } from '../components/fluence/KitComponents.jsx';
+import KitStudioFrame from '../components/fluence/KitStudioFrame.jsx';
 import { FLUENCE_CONTEXTS, kitListPrice, partLabel } from '../lib/fluence.js';
+
+// Tab → where it lives: a view of the studio in the frame, or a table here.
+const STUDIO_VIEW = { overview: 'overview', kits: 'kits', build: 'build', drafts: 'drafts', inner: 'products', settings: 'export' };
+const TAB_OF_VIEW = Object.fromEntries(Object.entries(STUDIO_VIEW).map(([tab, view]) => [view, tab]));
+const TABS = ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'settings'];
 
 const KIT_FILTERS = [
   { key: 'all', label: 'All' },
@@ -28,37 +36,70 @@ const KIT_FILTERS = [
   { key: 'suggested', label: 'Suggested' },
   { key: 'unlinked', label: 'Not linked' },
 ];
-
 const kitState = k => (k.superseded_by_kit_id ? 'superseded' : k.product_id ? 'linked' : k.suggested_product_id && !k.suggested_taken_by_kit_id ? 'suggested' : 'unlinked');
 
-export default function FluenceMaster() {
+// What each kind of change is called in the log.
+const CHANGE_LABEL = {
+  prescription: 'Prescription', components: 'Kit list', kit_link: 'Kit link',
+  kit_create: 'Kit added', kit_delete: 'Kit deleted', kit_studio_saved: 'Kit Studio',
+  inner_product_create: 'Inner product added', inner_product_update: 'Inner product',
+  studio_draft_created: 'Draft started', studio_draft_saved: 'Draft saved', studio_draft_deleted: 'Draft deleted',
+  studio_settings: 'Clearances',
+};
+
+export default function Fluence() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const tab = ['products', 'kits', 'inner'].includes(params.get('tab')) ? params.get('tab') : 'products';
-  const setTab = t => setParams(p => { const n = new URLSearchParams(p); n.set('tab', t); return n; }, { replace: true });
+  const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
+  const setTab = useCallback(t => setParams(p => {
+    const n = new URLSearchParams(p);
+    n.set('tab', t);
+    n.delete('open'); n.delete('kit'); n.delete('view');
+    return n;
+  }, { replace: true }), [setParams]);
   const [products, setProducts] = useState(null);
   const [kits, setKits] = useState(null);
-  const [inner, setInner] = useState(null);
-  const [drawer, setDrawer] = useState(null);       // { productId } or, for a kit with no product, { kitId }
+  const [changes, setChanges] = useState(null);
+  const [drafts, setDrafts] = useState(null);
+  // The drawer: { productId } or, for a kit with no product, { kitId }; `view` opens a tab in it.
+  const [drawer, setDrawer] = useState(null);
   const [kitFilter, setKitFilter] = useState('all');
   const [linking, setLinking] = useState(null);     // kit row
   const [linkProduct, setLinkProduct] = useState('');
   const [unlinking, setUnlinking] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [innerEditing, setInnerEditing] = useState(null); // row, or {} for new
-  const canEdit = canPlan(auth.user);
+  const user = auth.user;
+  const canEdit = canPlan(user);
+  // Which carton a customer kit is printed as is a product-master decision.
+  const keepsProducts = canEdit && canAccess(user, 'masters');
 
   const load = useCallback(() => Promise.all([
     api.get('/fluence/products').then(setProducts),
     api.get('/fluence/kits').then(setKits),
-    api.get('/fluence/inner-products').then(setInner),
   ]).catch(() => {}), []);
+  const loadChanges = useCallback(() => api.get('/fluence/changes?limit=400').then(setChanges).catch(() => setChanges([])), []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (tab === 'changes') loadChanges(); }, [tab, loadChanges]);
+
+  // Links into the module: ?open=<product id> or ?kit=<kit id>[&view=history]
+  // open the drawer — a notification about a change lands on the change itself.
+  useEffect(() => {
+    const open = Number(params.get('open'));
+    const kit = Number(params.get('kit'));
+    const view = params.get('view') === 'history' ? 'history' : null;
+    if (Number.isInteger(open) && open > 0) setDrawer({ productId: open, view });
+    else if (Number.isInteger(kit) && kit > 0) setDrawer({ kitId: kit, view });
+  }, [params]);
+  const closeDrawer = () => {
+    setDrawer(null);
+    if (params.get('open') || params.get('kit')) setParams(p => { const n = new URLSearchParams(p); n.delete('open'); n.delete('kit'); n.delete('view'); return n; }, { replace: true });
+    load();
+    if (tab === 'changes') loadChanges();
+  };
 
   const kpi = useMemo(() => {
     const p = products || [];
     const k = (kits || []).filter(x => !x.superseded_by_kit_id);
-    const i = inner || [];
     return {
       products: p.length,
       withKit: p.filter(x => x.kit_id).length,
@@ -68,10 +109,8 @@ export default function FluenceMaster() {
       openNoRx: p.filter(x => x.open_lines > 0 && x.rx_state === 'none').length,
       kitsUnlinked: k.filter(x => !x.product_id).length,
       kitsSuggested: k.filter(x => kitState(x) === 'suggested').length,
-      inner: i.length,
-      dimsMissing: i.filter(x => x.carton_l == null || x.carton_w == null || x.carton_h == null).length,
     };
-  }, [products, kits, inner]);
+  }, [products, kits]);
 
   // A part carton shows its outer carton's kit — a customer kit links to the outer carton, never to a part.
   const freeProducts = useMemo(() => (products || []).filter(p => !p.part && (!p.kit_id || !String(p.source_ref || '').startsWith('customer-master:'))), [products]);
@@ -99,28 +138,41 @@ export default function FluenceMaster() {
   };
 
   const kitRows = useMemo(() => (kits || []).filter(k => kitFilter === 'all' || kitState(k) === kitFilter), [kits, kitFilter]);
+  const studioView = STUDIO_VIEW[tab] ?? null;
+  const groups = [
+    { label: 'Kits', items: [
+      { key: 'overview', label: 'Overview' }, { key: 'kits', label: 'Kits' }, { key: 'build', label: 'New kit' },
+      { key: 'drafts', label: drafts ? `Drafts · ${drafts}` : 'Drafts' },
+    ] },
+    { label: 'Masters', items: [
+      { key: 'inner', label: 'Inner products' }, { key: 'products', label: 'Fluence products' },
+      { key: 'customer', label: kpi.kitsUnlinked ? `Customer list · ${kpi.kitsUnlinked} to link` : 'Customer list' },
+    ] },
+    { label: 'Records', items: [{ key: 'changes', label: 'Change log' }, { key: 'settings', label: 'Export & settings' }] },
+  ];
 
   return (
     <div>
       <PageHeader
-        title={<span className="inline-flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-700 text-white"><Pill size={16} /></span> Fluence Master</span>}
-        subtitle="Prescriptions, kits and inner products — Fluence Pharmaceuticals only. Entered once here (or from any Fluence button) and read live by every module."
-        actions={tab === 'inner' && canEdit ? <Button onClick={() => setInnerEditing({})}><Plus size={14} /> New inner product</Button> : null} />
+        title={<span className="inline-flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-700 text-white"><Pill size={16} /></span> Fluence</span>}
+        subtitle="Kits, their prescriptions and cartons — Fluence Pharmaceuticals only. Sized and designed here, edited in one place, read live by every module." />
 
-      <KpiRow cols={6}>
-        <KpiCard compact label="Fluence products" value={fmt.num(kpi.products)} sub={`${fmt.num(kpi.withKit)} with a kit${kpi.asPart ? ` · ${fmt.num(kpi.asPart)} parts` : ''}`} icon={Boxes} />
-        <KpiCard compact label="Prescriptions" value={fmt.num(kpi.withRx + kpi.itemsOnly)} sub={`${fmt.num(kpi.products - kpi.withRx - kpi.itemsOnly)} blank · ${fmt.num(kpi.withRx)} with days`} icon={Pill} tone={kpi.withRx + kpi.itemsOnly ? 'good' : undefined} />
-        <KpiCard compact label="Open orders, no Rx" value={fmt.num(kpi.openNoRx)} sub="products on live orders" icon={AlertTriangle} tone={kpi.openNoRx ? 'warn' : undefined} />
-        <KpiCard compact label="Customer kits not linked" value={fmt.num(kpi.kitsUnlinked)} sub={`${fmt.num(kpi.kitsSuggested)} with a suggestion`} icon={Link2} onClick={() => { setTab('kits'); setKitFilter('unlinked'); }} />
-        <KpiCard compact label="Inner products" value={fmt.num(kpi.inner)} icon={CheckCircle2} />
-        <KpiCard compact label="Carton size not known" value={fmt.num(kpi.dimsMissing)} sub="left blank, never estimated" icon={Ruler} onClick={() => setTab('inner')} />
-      </KpiRow>
+      <GroupedTabs groups={groups} active={tab} onChange={setTab} />
 
-      <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'products', label: 'Products', count: products?.length },
-        { key: 'kits', label: 'Customer kits', count: kits?.filter(k => !k.superseded_by_kit_id).length, tone: kpi.kitsUnlinked ? 'danger' : undefined },
-        { key: 'inner', label: 'Inner products', count: inner?.length },
-      ]} />
+      {/* Kit Studio: always mounted once the page is open, shown on its tabs. */}
+      <KitStudioFrame view={studioView ?? undefined} hidden={!studioView}
+        onView={v => { const t = TAB_OF_VIEW[v]; if (t && t !== tab && STUDIO_VIEW[tab]) setTab(t); }}
+        onDrafts={setDrafts} />
+
+      {!studioView && tab !== 'changes' && (
+        <KpiRow cols={5}>
+          <KpiCard compact label="Fluence products" value={fmt.num(kpi.products)} sub={`${fmt.num(kpi.withKit)} with a kit${kpi.asPart ? ` · ${fmt.num(kpi.asPart)} parts` : ''}`} icon={Boxes} />
+          <KpiCard compact label="Prescriptions" value={fmt.num(kpi.withRx + kpi.itemsOnly)} sub={`${fmt.num(kpi.products - kpi.withRx - kpi.itemsOnly)} blank · ${fmt.num(kpi.withRx)} with days`} icon={Pill} tone={kpi.withRx + kpi.itemsOnly ? 'good' : undefined} />
+          <KpiCard compact label="Open orders, no Rx" value={fmt.num(kpi.openNoRx)} sub="products on live orders" icon={AlertTriangle} tone={kpi.openNoRx ? 'warn' : undefined} />
+          <KpiCard compact label="Customer kits not linked" value={fmt.num(kpi.kitsUnlinked)} sub={`${fmt.num(kpi.kitsSuggested)} with a suggestion`} icon={Link2} onClick={() => { setTab('customer'); setKitFilter('unlinked'); }} />
+          <KpiCard compact label="Carton sizes" value="Inner products" sub="sizes, codes and packaging" icon={Ruler} onClick={() => setTab('inner')} />
+        </KpiRow>
+      )}
 
       {tab === 'products' && (
         <DataTable searchable rows={products || []} empty={products ? 'No Fluence products' : 'Loading…'}
@@ -159,7 +211,7 @@ export default function FluenceMaster() {
           ]} />
       )}
 
-      {tab === 'kits' && (
+      {tab === 'customer' && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {KIT_FILTERS.map(f => (
@@ -216,7 +268,7 @@ export default function FluenceMaster() {
                 // A kit with no product yet opens by itself: its items and
                 // prescription can be kept before its carton is linked.
                 const open = <Button size="sm" variant="secondary" onClick={() => setDrawer(st === 'linked' ? { productId: k.product_id } : { kitId: k.id })}><Pill size={12} /> Open</Button>;
-                if (!canEdit) return <div className="flex justify-end" onClick={e => e.stopPropagation()}>{open}</div>;
+                if (!keepsProducts) return <div className="flex justify-end" onClick={e => e.stopPropagation()}>{open}</div>;
                 return (
                   <div className="flex justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                     {st !== 'linked' && open}
@@ -238,28 +290,41 @@ export default function FluenceMaster() {
         </>
       )}
 
-      {tab === 'inner' && (
-        <DataTable searchable rows={inner || []} empty={inner ? 'No inner products' : 'Loading…'}
-          defaultSort={{ key: 'name', dir: 'asc' }}
-          onRowClick={canEdit ? r => setInnerEditing(r) : undefined}
-          exportName="Fluence Inner Products" exportSubtitle="Kit items and carton dimensions"
-          columns={[
-            { key: 'name', label: 'Inner product', render: r => (
-              <div>
-                <div className="font-semibold">{r.name}</div>
-                <div className="text-[11px] text-gray-400">{r.kind === 'packaging' ? 'Packaging component' : 'Item'}{r.dosage_form ? ` · ${r.dosage_form}` : ''}{r.packaging_info ? ` · ${r.packaging_info}` : ''}</div>
-              </div>) },
-            { key: 'standard_mrp', label: 'Std MRP', align: 'right', render: r => (r.standard_mrp != null ? fmt.inr(r.standard_mrp) : '—') },
-            { key: 'dims', label: 'Carton (L × W × H)', sortValue: r => (r.carton_l == null ? 0 : 1), render: r => <DimsCell item={r} /> },
-            { key: 'codes', label: 'Codes', render: r => <span className="font-mono text-[11px] text-gray-500">{[r.product_code && `Code ${r.product_code}`, r.artwork_code && `AW ${r.artwork_code}`, r.erp_product_code && `ERP ${r.erp_product_code}`].filter(Boolean).join(' · ') || '—'}</span> },
-            { key: 'kits_count', label: 'In kits', align: 'right', render: r => <span className="tabular-nums">{r.kits_count}</span> },
-            { key: 'remarks', label: 'Remarks', render: r => <span className="text-xs text-gray-500">{r.remarks || ''}</span> },
-          ]} />
+      {tab === 'changes' && (
+        <>
+          <p className="mb-3 text-xs text-gray-500">
+            Every change to the Fluence kits, prescriptions, inner products and Kit Studio — newest first, with who made it and from where.
+            A change made from a customer’s own login carries its login ID as its signature, and Colour Impressions management is told at once.
+          </p>
+          <DataTable searchable rows={changes || []} empty={changes ? 'No changes recorded yet' : 'Loading…'}
+            defaultSort={{ key: 'at', dir: 'desc' }}
+            onRowClick={c => (c.kit_id ? setDrawer({ kitId: c.kit_id, view: 'history' }) : null)}
+            exportName="Fluence Change Log" exportSubtitle="Kits, prescriptions, inner products and Kit Studio"
+            columns={[
+              { key: 'at', label: 'When', sortValue: c => new Date(c.at).getTime(), export: c => fmt.dt(c.at),
+                render: c => <span className="whitespace-nowrap text-xs tabular-nums">{fmt.dt(c.at)}</span> },
+              { key: 'who', label: 'Signed', render: c => <span className="text-xs font-semibold">{c.who || '—'}</span> },
+              { key: 'area', label: 'Change', export: c => `${CHANGE_LABEL[c.area] || c.area}${c.revision ? ` rev ${c.revision}` : ''}`,
+                render: c => (
+                  <span className="whitespace-nowrap rounded-full bg-green-700/10 px-2 py-0.5 text-[10px] font-bold text-green-800">
+                    {CHANGE_LABEL[c.area] || c.area}{c.revision ? ` · rev ${c.revision}` : ''}
+                  </span>) },
+              { key: 'kit_name', label: 'Kit or item', render: c => (
+                <div className="text-xs">
+                  <div className="font-semibold">{c.kit_name || '—'}</div>
+                  {c.product_code && <div className="font-mono text-[10px] text-gray-400">{c.product_code}</div>}
+                </div>) },
+              { key: 'detail', label: 'What', render: c => <span className="text-xs text-gray-600">{c.detail || ''}</span> },
+              { key: 'from_ctx', label: 'From', render: c => <span className="text-xs text-gray-500">{c.from_ctx ? FLUENCE_CONTEXTS[c.from_ctx] || c.from_ctx : ''}</span> },
+              { key: 'go', label: '', sortable: false, render: c => (c.kit_id ? (
+                <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); setDrawer({ kitId: c.kit_id, view: 'history' }); }}><History size={12} /> History</Button>) : null) },
+            ]} />
+        </>
       )}
 
       {drawer && (
-        <FluenceDrawer productIds={drawer.productId ? [drawer.productId] : []} kitId={drawer.kitId ?? null} context="fluence_master"
-          onClose={() => { setDrawer(null); load(); }} />
+        <FluenceDrawer key={`${drawer.productId ?? ''}:${drawer.kitId ?? ''}`} productIds={drawer.productId ? [drawer.productId] : []} kitId={drawer.kitId ?? null}
+          initialTab={drawer.view ?? undefined} context="fluence_master" onClose={closeDrawer} />
       )}
 
       <Modal open={Boolean(linking)} onClose={() => setLinking(null)} title={linking ? `Link customer kit — ${linking.kit_name}` : ''}
@@ -289,9 +354,6 @@ export default function FluenceMaster() {
           </p>
         )}
       </Modal>
-
-      <InnerProductForm open={Boolean(innerEditing)} item={innerEditing && innerEditing.id ? innerEditing : null}
-        onClose={() => setInnerEditing(null)} onSaved={() => load()} />
     </div>
   );
 }

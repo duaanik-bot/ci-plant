@@ -22,7 +22,8 @@ import { Router } from 'express';
 import { q, tx } from '../db.js';
 import { audit, lockDocNumber, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
-import { keepRxInStep } from './fluence.js';
+import { keepRxInStep, tellManagement } from './fluence.js';
+import { needsMasters } from '../access.js';
 import {
   validId, nameKey, dimsOf, sizeText, parseSizeText, sameCarton, masterDimsFor,
   splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc,
@@ -32,9 +33,12 @@ import {
 const r = Router();
 const canEditStudio = requireRole(...PLANNING_ROLES);
 const canEdit = user => user?.role === 'admin' || PLANNING_ROLES.includes(user?.role);
-// The product master's own rule (masters.js: requireRole('planner'), admin implied).
-const canKeepProducts = requireRole('planner');
-const keepsProducts = user => user?.role === 'admin' || user?.role === 'planner';
+// The product master's own rule (masters.js: requireRole('planner'), admin
+// implied) — and the Masters tick: a login without it (a customer's own) designs
+// and sizes kits, while their cartons, billing codes and print spec stay with
+// Masters (access.js).
+const canKeepProducts = [requireRole('planner'), needsMasters];
+const keepsProducts = req => (req.user?.role === 'admin' || req.user?.role === 'planner') && req.access?.masters === true;
 const FROM = 'kit_studio';
 
 // Every refusal names the studio: the studio page shows the message itself, so
@@ -103,7 +107,7 @@ function compose({ kits, fks, comps, prods, inners, drafts, settings }) {
 r.get('/kit-studio/state', async (req, res, next) => {
   try {
     const state = await loadState();
-    res.json({ ...state, me: { name: req.user?.name ?? null, can_edit: canEdit(req.user), can_keep_products: keepsProducts(req.user) } });
+    res.json({ ...state, me: { name: req.user?.name ?? null, can_edit: canEdit(req.user), can_keep_products: keepsProducts(req), masters: req.access?.masters === true } });
   } catch (e) {
     if (e?.code === MISSING_TABLE) return res.json({ kits: [], products: [], drafts: [], settings: null, me: { name: req.user?.name ?? null, can_edit: false, can_keep_products: false }, missing: true });
     next(e);
@@ -289,7 +293,17 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
         await assertSameContents(fk.id, items, qc);
       }
       const saved = await upsertKitRow(id, fk.id, row, req.user, qc);
-      const erp = await writeErpSize(fk, saved[0], req.user, qc);
+      // A confirmed size fills an empty product size — a product-master write,
+      // so only for a login with the Masters tick.
+      const erp = req.access?.masters === true ? await writeErpSize(fk, saved[0], req.user, qc) : { erp: 'kept in Masters' };
+      const sizeLine = dimsOf({ L: row.carton_l, W: row.carton_w, H: row.carton_h }) ? `${row.carton_l} × ${row.carton_w} × ${row.carton_h} mm (${row.size_status})` : 'size not set';
+      const what = String(req.body?.doc?.history?.[0]?.what ?? '').trim();
+      if (created) {
+        await tellManagement(req.user, { kitId: fk.id, subject: `New kit ${row.name}`, change: `added in Kit Studio — ${items.length} item(s), ${sizeLine}` }, qc);
+      } else {
+        await audit('fluence_kit', fk.id, 'studio_saved', `${row.name} — ${what || `saved in Kit Studio, ${sizeLine}`}`.slice(0, 1000), qc, req.user.name);
+        await tellManagement(req.user, { kitId: fk.id, subject: `Kit ${row.name}`, change: `Kit Studio: ${(what || sizeLine).slice(0, 400)}` }, qc);
+      }
       return { version: saved[0].version, componentsChanged, ...erp };
     });
     res.json({ id, ...outcome, doc: await composeOne('kits', id) });
@@ -298,7 +312,7 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
 
 // "Use in ERP": replace the kit carton's product size with the studio's
 // CONFIRMED size. Only ever a deliberate click — a save never does this.
-r.post('/kit-studio/kits/:id/erp-size', canEditStudio, async (req, res, next) => {
+r.post('/kit-studio/kits/:id/erp-size', canEditStudio, needsMasters, async (req, res, next) => {
   try {
     const id = req.params.id;
     const outcome = await tx(async (qc, oc) => {
@@ -339,6 +353,7 @@ r.delete('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
         await audit('fluence_kit', fk.id, 'delete', `${row.name} — deleted in Kit Studio (never linked to a product)`, qc, req.user.name);
       }
       await qc('DELETE FROM kit_studio_kits WHERE id = $1', [id]);
+      await tellManagement(req.user, { subject: `Kit ${row.name}`, change: 'deleted in Kit Studio', link: '/fluence?tab=kits' }, qc);
     });
     res.json({ id, deleted: true });
   } catch (e) { next(e); }
@@ -454,7 +469,7 @@ async function linkKit(fk, product, user, note, qc) {
 // be (best match first), and the print spec of the kits the page offers to copy
 // (?refs=1,2,3). Reads only — the FP- code is previewed on the series lock and
 // taken for real by the POST below.
-r.get('/kit-studio/kits/:id/erp-options', async (req, res, next) => {
+r.get('/kit-studio/kits/:id/erp-options', needsMasters, async (req, res, next) => {
   try {
     const refIds = [...new Set(String(req.query.refs ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 40);
     const out = await tx(async (qc, oc) => {
@@ -473,7 +488,7 @@ r.get('/kit-studio/kits/:id/erp-options', async (req, res, next) => {
         billing: { next: nextBillingCode([top?.top]), own, own_taken_by: own ? await billingCodeHolder(own, { studioId: k.row?.id ?? null }, oc) : null },
         matches: rankMatches({ name: k.name, dims: k.dims }, free),
         refs: refs.map(p => ({ ...p, same_size: sameCarton(parseSizeText(p.size), k.dims) })),
-        can_keep_products: keepsProducts(req.user),
+        can_keep_products: keepsProducts(req),
         // Last, so the series lock is held for no longer than the commit.
         fp_code: customers.length ? await nextProductCode(customers[0].customer_id, qc, oc) : null,
       };
@@ -656,6 +671,14 @@ r.put('/kit-studio/products/:id', canEditStudio, async (req, res, next) => {
           version = kit_studio_products.version + 1, updated_at = now(), updated_by = EXCLUDED.updated_by
         RETURNING version`,
       [id, inner.id, row.name, row.carton_l, row.carton_w, row.carton_h, row.size_status, JSON.stringify(row.data), req.user.name]);
+      const told = changed.filter(k => k !== 'name_key').map(k => `${k}: ${inner[k] ?? '—'} → ${want[k] ?? '—'}`);
+      if (!cur || told.length) {
+        await tellManagement(req.user, {
+          subject: `Inner product ${row.name}`,
+          change: !cur ? `added in Kit Studio${told.length ? ` — ${told.join('; ')}` : ''}` : `Kit Studio: ${told.join('; ')}`,
+          link: '/fluence?tab=inner',
+        }, qc);
+      }
       return { version: saved.version, masterChanged: changed.filter(k => k !== 'name_key') };
     });
     res.json({ id, ...outcome, doc: await composeOne('products', id) });
@@ -677,6 +700,8 @@ r.put('/kit-studio/drafts/:id', canEditStudio, async (req, res, next) => {
         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, data = EXCLUDED.data,
           version = kit_studio_drafts.version + 1, updated_at = now(), updated_by = EXCLUDED.updated_by
         RETURNING version`, [id, name, JSON.stringify(data), req.user.name]);
+      await audit('kit_studio', null, cur ? 'draft_saved' : 'draft_created', `Draft kit ${name}`, qc, req.user.name);
+      await tellManagement(req.user, { subject: `Draft kit ${name}`, change: cur ? 'saved in Kit Studio' : 'started in Kit Studio', link: '/fluence?tab=drafts' }, qc);
       return saved.version;
     });
     res.json({ id, version });
@@ -685,7 +710,12 @@ r.put('/kit-studio/drafts/:id', canEditStudio, async (req, res, next) => {
 
 r.delete('/kit-studio/drafts/:id', canEditStudio, async (req, res, next) => {
   try {
-    await q('DELETE FROM kit_studio_drafts WHERE id = $1', [req.params.id]);
+    await tx(async (qc, oc) => {
+      const gone = await oc('DELETE FROM kit_studio_drafts WHERE id = $1 RETURNING name', [req.params.id]);
+      if (!gone) return;
+      await audit('kit_studio', null, 'draft_deleted', `Draft kit ${gone.name}`, qc, req.user.name);
+      await tellManagement(req.user, { subject: `Draft kit ${gone.name}`, change: 'deleted in Kit Studio', link: '/fluence?tab=drafts' }, qc);
+    });
     res.json({ id: req.params.id, deleted: true });
   } catch (e) { next(e); }
 });
@@ -702,6 +732,8 @@ r.put('/kit-studio/settings/main', canEditStudio, async (req, res, next) => {
         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, version = kit_studio_settings.version + 1,
           updated_at = now(), updated_by = EXCLUDED.updated_by
         RETURNING version`, [JSON.stringify(data), req.user.name]);
+      await audit('kit_studio', null, 'settings', 'Kit Studio clearances changed', qc, req.user.name);
+      await tellManagement(req.user, { subject: 'Kit Studio clearances', change: 'changed — every kit size recommendation follows them', link: '/fluence?tab=settings' }, qc);
       return saved.version;
     });
     res.json({ id: 'main', version });

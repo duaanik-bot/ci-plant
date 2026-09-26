@@ -54,6 +54,10 @@ const OF_KIND = Object.freeze({
   // CTP simply has to make another — so it is a plant alert, not an approval, and
   // it goes to management, planning, the press and CTP at once.
   plate_replacement: 'alerts',
+  // A customer changed a kit, a prescription or an inner product from its own
+  // Fluence login. Nobody approves it — the change is made and signed — but
+  // management is told at once, so it files with the plant alerts.
+  fluence_change: 'alerts',
   // A stage sent back one station. It files here rather than under `approvals`
   // because the receiving station has nothing to decide — the call was already
   // made upstream and this is the answer arriving. Same shape as

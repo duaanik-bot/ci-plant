@@ -11,11 +11,13 @@
 // overwrite each other — and records who changed what, from where.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, notify } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
+import { notificationRecipients } from '../approvals.js';
+import { dossierFor, needsMasters } from '../access.js';
 import {
   nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, rxChangedAfterFinalise,
-  rxLinesInStep, componentsSignature,
+  rxLinesInStep, componentsSignature, kitChangeSummary,
 } from '../../../client/src/lib/fluence.js';
 
 const r = Router();
@@ -25,6 +27,23 @@ const canEditMaster = requireRole(...PLANNING_ROLES);
 const canEdit = user => user?.role === 'admin' || PLANNING_ROLES.includes(user?.role);
 
 const fail = (status, message, body) => Object.assign(new Error(message), { status, ...(body ? { body } : {}) });
+
+// A change made from a customer's own login (only the Fluence module ticked —
+// access.js) is made at once, signed with the login's ID, and Colour Impressions
+// management (Masters → Users: Management) is told in the same transaction:
+// what changed, on which kit, and who signed it. Staff changes stay quiet.
+export async function tellManagement(user, { kitId = null, subject, change, link = null }, qc) {
+  if (!user?.outside) return;
+  const users = await qc('SELECT id, active, is_management FROM users');
+  await notify(notificationRecipients(users, 'is_management', user.id), {
+    kind: 'fluence_change',
+    title: `${subject} — changed by ${user.name}`,
+    body: `${change}. Signed: ${user.name}.`,
+    link: link ?? (kitId ? `/fluence?kit=${kitId}&view=history` : '/fluence'),
+    refTable: kitId ? 'fluence_kits' : null,
+    refId: kitId,
+  }, qc);
+}
 
 // A database that has not had the Fluence migration applied answers every read
 // with an empty, switched-off feature instead of a 500 — so no button anywhere
@@ -190,7 +209,7 @@ r.get('/fluence/kits/:id/dossier', async (req, res, next) => {
     if (!(Number.isInteger(kitId) && kitId > 0)) throw fail(400, 'Not a valid kit.');
     const dossier = await loadKitDossier(kitId);
     if (!dossier) throw fail(404, 'This kit is no longer in the Fluence master — reload the page.');
-    res.json({ can_edit: canEdit(req.user), dossier });
+    res.json({ can_edit: canEdit(req.user), dossier: dossierFor(dossier, req.access) });
   } catch (e) {
     offWhenMissing(res, next, { can_edit: false, dossier: null })(e);
   }
@@ -200,7 +219,7 @@ r.get('/fluence/dossiers', async (req, res, next) => {
   try {
     const ids = idList(req.query.product_ids);
     const dossiers = await loadDossiers(ids);
-    res.json({ can_edit: canEdit(req.user), dossiers, not_fluence: ids.filter(id => !dossiers.some(d => d.product.id === id)) });
+    res.json({ can_edit: canEdit(req.user), dossiers: dossiers.map(d => dossierFor(d, req.access)), not_fluence: ids.filter(id => !dossiers.some(d => d.product.id === id)) });
   } catch (e) {
     offWhenMissing(res, next, { can_edit: false, dossiers: [], not_fluence: [] })(e);
   }
@@ -558,6 +577,12 @@ async function saveKitAndRx({ kit, product, outer, body, user, from }, qc, oc) {
       qc, user.name);
     rxChanged = true;
   }
+  if (user.outside && (componentsChanged || rxChanged)) {
+    const afterComps = componentsChanged ? await componentsSnapshot(kit.id, qc) : beforeComps;
+    const afterRx = rxChanged ? await rxSnapshot(kit.id, qc) : beforeRx;
+    const change = kitChangeSummary({ components: beforeComps, rx: beforeRx }, { components: afterComps, rx: afterRx });
+    await tellManagement(user, { kitId: kit.id, subject: label, change: rxChanged ? `${change} (prescription revision ${revision})` : change }, qc);
+  }
   return { unchanged: !componentsChanged && !rxChanged, componentsChanged, rxChanged, revision };
 }
 
@@ -576,7 +601,7 @@ r.put('/fluence/products/:productId/kit', canEditMaster, async (req, res, next) 
       return saveKitAndRx({ kit, product, outer, body: req.body, user: req.user, from }, qc, oc);
     });
     const [dossier] = await loadDossiers([productId]);
-    res.json({ ...outcome, dossier });
+    res.json({ ...outcome, dossier: dossierFor(dossier, req.access) });
   } catch (e) { next(e); }
 });
 
@@ -592,7 +617,7 @@ r.put('/fluence/kits/:id/kit', canEditMaster, async (req, res, next) => {
       const product = kit.product_id ? await oc('SELECT id, code, name FROM products WHERE id = $1', [kit.product_id]) : null;
       return saveKitAndRx({ kit, product, outer: null, body: req.body, user: req.user, from }, qc, oc);
     });
-    res.json({ ...outcome, dossier: await loadKitDossier(kitId) });
+    res.json({ ...outcome, dossier: dossierFor(await loadKitDossier(kitId), req.access) });
   } catch (e) { next(e); }
 });
 
@@ -626,10 +651,15 @@ r.put('/fluence/products/:productId/prescription', canEditMaster, async (req, re
       await recordRevision({ kitId: kit.id, area: 'prescription', revision, before, after, note: fromPart(product, outer), user: req.user, from }, qc);
       await audit('fluence_kit', kit.id, `prescription_revised:rev ${revision}`,
         `${product.code} ${product.name}${outer ? ` (part carton of ${outer.code})` : ''} — prescription revision ${revision}, ${value.lines.length} line(s), saved from ${FLUENCE_CONTEXTS[from]}`, qc, req.user.name);
+      const comps = await componentsSnapshot(kit.id, qc);
+      await tellManagement(req.user, {
+        kitId: kit.id, subject: `${product.code} ${product.name}`,
+        change: `${kitChangeSummary({ components: comps, rx: before }, { components: comps, rx: after })} (prescription revision ${revision})`,
+      }, qc);
       return { unchanged: false, revision };
     });
     const [dossier] = await loadDossiers([productId]);
-    res.json({ ...outcome, dossier });
+    res.json({ ...outcome, dossier: dossierFor(dossier, req.access) });
   } catch (e) { next(e); }
 });
 
@@ -653,10 +683,11 @@ r.put('/fluence/products/:productId/components', canEditMaster, async (req, res,
       await audit('fluence_kit', kit.id, 'kit_components_updated',
         `${product.code} ${product.name}${outer ? ` (part carton of ${outer.code})` : ''} — ${after.length} inner product(s), saved from ${FLUENCE_CONTEXTS[from]}`, qc, req.user.name);
       await keepRxInStep(kit.id, req.user, from, qc, oc);
+      await tellManagement(req.user, { kitId: kit.id, subject: `${product.code} ${product.name}`, change: kitChangeSummary({ components: before }, { components: after }) }, qc);
       return { unchanged: false };
     });
     const [dossier] = await loadDossiers([productId]);
-    res.json({ ...outcome, dossier });
+    res.json({ ...outcome, dossier: dossierFor(dossier, req.access) });
   } catch (e) { next(e); }
 });
 
@@ -738,6 +769,7 @@ r.post('/fluence/inner-products', canEditMaster, async (req, res, next) => {
         value.carton_l, value.carton_w, value.carton_h, value.packaging_info ?? null, value.remarks ?? null,
         value.active ?? null, req.user.name]);
       await audit('fluence_inner_product', created.id, 'create', created.name, qc, req.user.name);
+      await tellManagement(req.user, { subject: `Inner product ${created.name}`, change: 'added to the inner product master', link: '/fluence?tab=inner' }, qc);
       return created;
     });
     res.status(201).json(row);
@@ -765,8 +797,9 @@ r.put('/fluence/inner-products/:id', canEditMaster, async (req, res, next) => {
         [before.id, ...keys.map(k => value[k]), req.user.name]);
       const changed = keys.filter(k => String(before[k] ?? '') !== String(updated[k] ?? ''));
       if (changed.length) {
-        await audit('fluence_inner_product', before.id, 'update',
-          changed.map(k => `${k}: ${before[k] ?? '—'} → ${updated[k] ?? '—'}`).join('; ').slice(0, 1000), qc, req.user.name);
+        const what = changed.map(k => `${k}: ${before[k] ?? '—'} → ${updated[k] ?? '—'}`).join('; ');
+        await audit('fluence_inner_product', before.id, 'update', what.slice(0, 1000), qc, req.user.name);
+        await tellManagement(req.user, { subject: `Inner product ${updated.name}`, change: what.slice(0, 480), link: '/fluence?tab=inner' }, qc);
       }
       return updated;
     });
@@ -837,6 +870,38 @@ r.get('/fluence/kits', async (_req, res, next) => {
   }
 });
 
+// ── The change log: every change to the Fluence master, newest first ────────
+// Kit lists, prescriptions and links (with their revisions), inner products, and
+// Kit Studio's kits, drafts and clearances — who made each change and from where.
+// A change from a customer's own login carries its login ID in the name.
+r.get('/fluence/changes', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 300, 1), 1000);
+    res.json(await q(`
+      SELECT x.* FROM (
+        SELECT 'r' || r.id AS id, r.changed_at AS at, r.changed_by AS who, r.changed_from AS from_ctx, r.area,
+               r.revision, r.note AS detail, r.kit_id, k.kit_name, p.code AS product_code, p.name AS product_name
+        FROM fluence_master_revisions r
+        LEFT JOIN fluence_kits k ON k.id = r.kit_id
+        LEFT JOIN products p ON p.id = k.product_id
+        UNION ALL
+        SELECT 'a' || a.id, a.created_at, a.user_name, NULL,
+               CASE WHEN a.entity = 'fluence_inner_product' THEN 'inner_product_' || a.action
+                    WHEN a.entity = 'kit_studio' THEN 'studio_' || a.action
+                    ELSE 'kit_' || a.action END,
+               NULL, a.detail, CASE WHEN a.entity = 'fluence_kit' THEN a.entity_id END, COALESCE(k.kit_name, ip.name), p.code, p.name
+        FROM audit_log a
+        LEFT JOIN fluence_kits k ON a.entity = 'fluence_kit' AND k.id = a.entity_id
+        LEFT JOIN fluence_inner_products ip ON a.entity = 'fluence_inner_product' AND ip.id = a.entity_id
+        LEFT JOIN products p ON p.id = k.product_id
+        WHERE a.entity IN ('fluence_inner_product', 'kit_studio')
+           OR (a.entity = 'fluence_kit' AND a.action IN ('create', 'delete', 'studio_saved'))
+      ) x ORDER BY x.at DESC, x.id DESC LIMIT $1`, [limit]));
+  } catch (e) {
+    offWhenMissing(res, next, [])(e);
+  }
+});
+
 r.get('/fluence/kits/:id/revisions', async (req, res, next) => {
   try {
     res.json(await q(`
@@ -851,7 +916,9 @@ r.get('/fluence/kits/:id/revisions', async (req, res, next) => {
 // makes this link (the import links exact names only). If the product already
 // carries a kit the plant started for it, that kit's records move across —
 // nothing anybody entered is dropped.
-r.post('/fluence/kits/:id/link', canEditMaster, async (req, res, next) => {
+// Which carton a customer kit is printed as decides the prescription on
+// Colour Impressions' cartons: a product-master decision, with the Masters tick.
+r.post('/fluence/kits/:id/link', canEditMaster, needsMasters, async (req, res, next) => {
   try {
     const productId = Number(req.body?.product_id);
     if (!(Number.isInteger(productId) && productId > 0)) throw fail(400, 'Choose the Fluence product this kit is printed as.');
@@ -905,7 +972,7 @@ r.post('/fluence/kits/:id/link', canEditMaster, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/fluence/kits/:id/unlink', canEditMaster, async (req, res, next) => {
+r.post('/fluence/kits/:id/unlink', canEditMaster, needsMasters, async (req, res, next) => {
   try {
     const from = contextOf(req.body?.from) || 'fluence_master';
     await tx(async (qc, oc) => {

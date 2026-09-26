@@ -6,7 +6,7 @@ import {
   nameKey, qtyValue, qtyText, unitFor, timingParts, formatSchedule, formatRxLine,
   lineHasDose, rxHasContent, normaliseRxPayload, normaliseComponentsPayload,
   normaliseDims, formatDims, kitListPrice, partLabel, kitCartons, rxState, RX_SLOTS, FLUENCE_CONTEXTS, REVIEW_CONTEXTS,
-  rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER, rxLinesInStep, bareRxLine, componentsSignature, RX_LINE_KEYS,
+  rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER, rxLinesInStep, bareRxLine, componentsSignature, RX_LINE_KEYS, kitChangeSummary,
 } from '../../client/src/lib/fluence.js';
 
 test('nameKey: spacing, hyphens and case do not make two kits — a plus sign does', () => {
@@ -288,4 +288,26 @@ test('componentsSignature: the database\'s "1.00" is the editor\'s 1; order, qua
 test('contexts: Kit Studio and Masters are places a save can come from', () => {
   assert.equal(FLUENCE_CONTEXTS.kit_studio, 'Kit Studio');
   assert.equal(FLUENCE_CONTEXTS.masters, 'Masters');
+});
+
+test('kitChangeSummary: what a notification to management says a customer changed', () => {
+  const before = {
+    components: [{ inner_product_id: 1, name: 'F-EASME', qty_per_kit: 1, mrp_in_kit: 365 }, { inner_product_id: 2, name: 'F-ONGLE', qty_per_kit: 1, mrp_in_kit: 446 }],
+    rx: { lines: [{ inner_product_id: 1, item_name: 'F-EASME' }, { inner_product_id: 2, item_name: 'F-ONGLE' }] },
+  };
+  const after = {
+    components: [{ inner_product_id: 1, name: 'F-EASME', qty_per_kit: 2, mrp_in_kit: 365 }, { inner_product_id: 3, name: 'F-CAL D3', qty_per_kit: 1, mrp_in_kit: 221 }],
+    rx: { general_instructions: 'Take for 30 days', lines: [{ inner_product_id: 1, item_name: 'F-EASME', morning_qty: 1, dose_form: 'Tablet' }, { inner_product_id: 3, item_name: 'F-CAL D3' }] },
+  };
+  assert.equal(kitChangeSummary(before, after),
+    'added F-CAL D3 × 1; took out F-ONGLE; F-EASME 1 → 2 per kit; F-EASME: Morning: 1 tablet; instructions: Take for 30 days');
+  // Prices and order, and a dose taken off again.
+  const priced = { ...before, components: [{ ...before.components[1] }, { ...before.components[0], mrp_in_kit: 399 }] };
+  assert.equal(kitChangeSummary(before, priced), 'F-EASME MRP ₹365 → ₹399; items in a new order');
+  assert.equal(kitChangeSummary(after, { ...after, rx: { ...after.rx, lines: after.rx.lines.map(l => ({ ...l, morning_qty: null })) } }), 'F-EASME: dose cleared');
+  assert.equal(kitChangeSummary(before, before), 'saved with no change to the items or doses');
+  // Long changes are cut, never the notification.
+  const many = { components: Array.from({ length: 60 }, (_, i) => ({ inner_product_id: i + 10, name: `ITEM NUMBER ${i}`, qty_per_kit: 1 })) };
+  const long = kitChangeSummary({ components: [] }, many);
+  assert.ok(long.length <= 480 && long.endsWith('…'), long.length);
 });

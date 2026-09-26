@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Boxes,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
@@ -21,7 +21,7 @@ import { PressButton, useToast } from './ui.jsx';
 // A lazy chunk behind a boundary and an open-request queue — see ChatDockLoader.jsx.
 import ChatDock from './ChatDockLoader.jsx';
 import { FLOOR_NAV } from '../sections.js';
-import { canAccess, canAccessSection } from '../modules.js';
+import { canAccess, canAccessSection, isFluenceOnly } from '../modules.js';
 import { useTier } from '../lib/tier.js';
 import { storage } from '../lib/safeStorage.js';
 
@@ -89,11 +89,10 @@ const NAV = [
     group: 'Admin',
     items: [
       { label: 'Masters', to: '/masters', icon: Settings2, roles: ['admin', 'planner'], module: 'masters' },
-      // Fluence-only master. The Fluence buttons in every module are the everyday
-      // door; this page is where kits are linked and inner products maintained.
-      { label: 'Fluence Master', to: '/fluence', icon: Pill, roles: ['admin', 'planner', 'production'], module: 'fluence' },
-      // Kit Studio sizes the Fluence kits' cartons and designs new kits.
-      { label: 'Kit Studio', to: '/kit-studio', icon: Boxes, roles: ['admin', 'planner', 'production'], module: 'kit_studio' },
+      // Fluence — kits, prescriptions and Kit Studio, one module. The Fluence
+      // buttons in every module are the everyday door; this page is where kits
+      // are sized, designed, linked and kept.
+      { label: 'Fluence', to: '/fluence', icon: Pill, roles: ['admin', 'planner', 'production'], module: 'fluence' },
       { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
       { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],
@@ -781,9 +780,14 @@ export default function AppLayout() {
   const [user, setUser] = useState(auth.user);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // A customer's own login (only Fluence ticked) sees the Fluence module and
+  // nothing of the plant: no messenger, no bell, no floor figures — and asks the
+  // server for none of them (it would refuse: server/src/access.js).
+  const outside = isFluenceOnly(user);
+  const shellActions = outside ? null : <><ChatDock /><NotificationBell /></>;
   // Poll the floor total only where the desktop rail (which polls it itself)
   // is not mounted — one clock per shell, never two.
-  const floorTotal = useFloorTotal(tier !== 'desktop');
+  const floorTotal = useFloorTotal(tier !== 'desktop' && !outside);
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
   // Desktop sidebar open/close — persisted like a macOS window state.
   const [collapsed, setCollapsed] = useState(() => storage.getItem('ci_sidebar_collapsed') === '1');
@@ -843,7 +847,7 @@ export default function AppLayout() {
             onToggleSidebar={() => setMoreOpen(true)}
             user={user}
             onSignOut={logout}
-            actions={<><ChatDock /><NotificationBell /></>}
+            actions={shellActions}
           />
           <main className="w-full px-3 pt-4"
             style={{ paddingBottom: 'calc(84px + var(--sab))', paddingLeft: 'max(0.75rem, var(--sal))', paddingRight: 'max(0.75rem, var(--sar))' }}>
@@ -896,7 +900,7 @@ export default function AppLayout() {
             onToggleSidebar={() => setMobileOpen(o => !o)}
             user={user}
             onSignOut={logout}
-            actions={<><ChatDock /><NotificationBell /></>}
+            actions={shellActions}
           />
           <main className="mx-auto w-full max-w-[1880px] px-3 py-5 sm:px-4">
             <Outlet />
@@ -995,7 +999,7 @@ export default function AppLayout() {
           }}
           user={user}
           onSignOut={logout}
-          actions={<><ChatDock /><NotificationBell /></>}
+          actions={shellActions}
         />
         {/* Full-width workspace — tables use the whole pane; when the sidebar
             is hidden the content flows edge to edge (soft cap only on ultrawide). */}

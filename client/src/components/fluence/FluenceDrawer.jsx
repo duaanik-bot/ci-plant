@@ -113,13 +113,13 @@ function savedText(out) {
 }
 
 export default function FluenceDrawer({
-  productIds = [], resolve = null, kitId = null, startEditing = false, context = 'fluence_master', title, onClose, onSaved,
+  productIds = [], resolve = null, kitId = null, startEditing = false, initialTab = 'kit', context = 'fluence_master', title, onClose, onSaved,
 }) {
   const [ids, setIds] = useState(productIds);
   const [dossiers, setDossiers] = useState(null);
   const [canEditServer, setCanEditServer] = useState(false);
   const [active, setActive] = useState(null);         // a dossier key (keyOf), or 'all'
-  const [tab, setTab] = useState('kit');
+  const [tab, setTab] = useState(TABS.some(t => t.key === initialTab) ? initialTab : 'kit');
   const [editing, setEditing] = useState(false);
   const [editorKey, setEditorKey] = useState(0);      // remounts the editor on "load the latest"
   const [dirty, setDirty] = useState(false);
@@ -251,10 +251,10 @@ export default function FluenceDrawer({
               <p className="truncate text-[15px] font-bold tracking-[-0.01em] text-[#1D1D1F]">{header.name}</p>
               {header.sub && <p className="truncate text-[11px] text-[#6E6E73]">{header.sub}</p>}
             </div>
-            {context !== 'fluence_master' && (
+            {context !== 'fluence_master' && context !== 'kit_studio' && canAccess(user, 'fluence') && (
               <Link to="/fluence" onClick={e => { if (editing && dirty) { e.preventDefault(); return; } onClose(); }}
-                className="hidden items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[#0064D2] hover:bg-white/70 sm:inline-flex" title="Open the Fluence Master">
-                Fluence Master <ExternalLink size={11} />
+                className="hidden items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[#0064D2] hover:bg-white/70 sm:inline-flex" title="Open the Fluence module">
+                Fluence <ExternalLink size={11} />
               </Link>
             )}
             <button type="button" onClick={close} aria-label="Close"
@@ -377,7 +377,7 @@ export default function FluenceDrawer({
                     <p className="text-xs text-[#6E6E73]">
                       {dossier.product.code} is a part carton — it shows the kit of its outer carton {dossier.part_of.outer_code}, which has no kit linked.
                       {' '}Link the customer kit to {dossier.part_of.outer_code} in the{' '}
-                      <Link to="/fluence?tab=kits" className="font-semibold text-[#0064D2] hover:underline" onClick={onClose}>Fluence Master</Link>.
+                      <Link to="/fluence?tab=customer" className="font-semibold text-[#0064D2] hover:underline" onClick={onClose}>Fluence module (Customer list)</Link>.
                     </p>
                   </Section>
                 ) : null}
@@ -448,17 +448,22 @@ export default function FluenceDrawer({
                     <Fact label="Artwork code" value={dossier.product.party_artwork_code} mono />
                     <Fact label="Carton MRP" value={dossier.product.mrp != null ? fmt.inr(dossier.product.mrp) : null} />
                     <Fact label="Carton size" value={dossier.product.size} />
+                    <Fact label="Colours" value={[dossier.product.colors, dossier.product.colour_type].filter(Boolean).join(' · ')} />
+                    <Fact label="Customer" value={dossier.product.customer_name} />
+                  </div>
+                  {/* How the carton is made is Colour Impressions' own — shown to a login with the Masters tick. */}
+                  {canAccess(user, 'masters') && (
+                  <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[#1D1D1F]/[0.06] pt-3 sm:grid-cols-4">
                     <Fact label="Output number" value={dossier.product.output_number} mono />
                     <Fact label="Shade card" value={[dossier.product.shade_card_number, dossier.product.shade_card_date].filter(Boolean).join(' · ')} />
-                    <Fact label="Colours" value={[dossier.product.colors, dossier.product.colour_type].filter(Boolean).join(' · ')} />
                     <Fact label="Board" value={dossier.product.board_name} />
                     <Fact label="Coating" value={dossier.product.coating} />
                     <Fact label="Pasting" value={dossier.product.pasting_type} />
                     <Fact label="Child sheet" value={dossier.product.child_l && dossier.product.child_w ? `${dossier.product.child_l} × ${dossier.product.child_w}` : null} />
                     <Fact label="Ups" value={dossier.product.ups} />
                     <Fact label="Die" value={dossier.product.die_number} />
-                    <Fact label="Customer" value={dossier.product.customer_name} />
                   </div>
+                  )}
                   <p className="mt-3 text-[11px] text-[#86868B]">
                     Masters owns what is printed and billed — the FP code, billing code, carton MRP, size and spec. The Fluence master owns what is in the kit and its prescription.
                     {mastersLink ? ' Change these in Masters.' : ''}
@@ -472,7 +477,7 @@ export default function FluenceDrawer({
                   <p className="mt-1.5 text-xs text-[#6E6E73]">
                     {fromStudio(dossier.kit)
                       ? 'Create or link its product master from the kit in Kit Studio (“Create product master”) — the FP code and the next billing code are given there.'
-                      : 'Link it to its product under Customer kits in the Fluence Master.'}
+                      : 'Link it to its product under Customer list in the Fluence module.'}
                   </p>
                 </Section>
               )

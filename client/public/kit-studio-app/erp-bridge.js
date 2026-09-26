@@ -211,6 +211,8 @@
     useErpSize: function (id) { return host.request('erpSize', { id: id }).then(landed(id), refused); },
     // May this person create or link the kit's carton in the product master?
     canKeepProducts: function () { return !!me.can_keep_products; },
+    // Has this login the Masters tick (a product's size is written there)?
+    hasMasters: function () { return !!me.masters; },
     // What the product-master dialog shows: next codes, likely products, and the
     // print spec of the kits offered to copy from (product ids).
     erpOptions: function (id, refs) {
@@ -224,6 +226,16 @@
     // save reaches this page through the realtime feed like any other.
     openKitEditor: typeof host.openKitEditor === 'function'
       ? function (fluenceKitId, opts) { host.openKitEditor(Number(fluenceKitId), { edit: !!(opts && opts.edit) }); }
+      : null,
+    // An inner product's codes, dosage form and packaging live in the Fluence
+    // inner product master; its form opens over the studio.
+    openInnerProduct: typeof host.openInnerProduct === 'function'
+      ? function (innerId) { host.openInnerProduct(Number(innerId)); }
+      : null,
+    // Embedded in the Fluence page: which view the studio is on (and how many
+    // drafts are open), so the page's own tabs follow a jump made in here.
+    viewChanged: typeof host.viewChanged === 'function'
+      ? function (view, info) { host.viewChanged(String(view), clone(info || {})); }
       : null,
   };
 

@@ -41,10 +41,8 @@ const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
 const POPrint = lazy(() => import('./pages/POPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
-// Fluence-only: the prescription & kit master.
-const FluenceMaster = lazy(() => import('./pages/FluenceMaster.jsx'));
-// Kit Studio: carton sizing, layouts and draft kits for the Fluence kit master.
-const KitStudio = lazy(() => import('./pages/KitStudio.jsx'));
+// Fluence — kits, prescriptions and Kit Studio, one module (Fluence Pharmaceuticals only).
+const Fluence = lazy(() => import('./pages/Fluence.jsx'));
 
 // Quiet placeholder while a route chunk downloads — matches the app's muted grey.
 function PageLoading() {
@@ -180,8 +178,9 @@ export default function App() {
                 <Route path="/tooling/shade-cards" element={<Tooling family="shade_card" />} />
                 <Route path="/tooling/:family/po/:id" element={<POPrint />} />
                 <Route path="/shade-cards" element={<ShadeCards />} />
-                <Route path="/fluence" element={<FluenceMaster />} />
-                <Route path="/kit-studio" element={<KitStudio />} />
+                <Route path="/fluence" element={<Fluence />} />
+                {/* Kit Studio was a page of its own before it joined the Fluence module. */}
+                <Route path="/kit-studio" element={<Navigate to="/fluence?tab=kits" replace />} />
               </Route>
             </Route>
           </Routes>

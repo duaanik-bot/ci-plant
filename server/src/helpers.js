@@ -13,6 +13,7 @@ import { plateWearSummary } from './plates.js';
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
 import { customerInitials } from '../../client/src/lib/customerCode.js';
+import { isFluenceOnly } from '../../client/src/modules.js';
 
 // Where a product waits when nobody has chosen its board yet.
 //
@@ -213,7 +214,13 @@ export function withReason(base, value) {
 // the app shell. userIds may contain duplicates or nulls; both are dropped so
 // callers can pass "everyone who should hear this" without pre-cleaning.
 export async function notify(userIds, { kind, title, body = null, link = null, refTable = null, refId = null }, qc = q) {
-  const ids = [...new Set(userIds)].filter(id => Number.isInteger(+id) && +id > 0);
+  const wanted = [...new Set(userIds)].filter(id => Number.isInteger(+id) && +id > 0).map(Number);
+  // A customer's own login (only the Fluence module ticked) hears nothing of the
+  // plant — whatever list it was on by role — and has no bell to hear it in.
+  const ids = wanted.length
+    ? (await qc('SELECT id, role, modules FROM users WHERE id = ANY($1::int[])', [wanted]))
+      .filter(u => !isFluenceOnly(u)).map(u => u.id)
+    : [];
   for (const id of ids) {
     await qc(
       'INSERT INTO notifications (user_id, kind, title, body, link, ref_table, ref_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',

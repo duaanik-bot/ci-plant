@@ -6,7 +6,7 @@ import MasterHistory from '../components/MasterHistory.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
-import { MODULES, FLOOR_SECTIONS } from '../modules.js';
+import { MODULES, FLOOR_SECTIONS, isFluenceOnly } from '../modules.js';
 import { boardName, boardCode, takenCodesFor, identityOnSave } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
@@ -45,6 +45,12 @@ const USER_TEMPLATES = [
   { key: 'designer', label: 'Designer — planning, ganging & artwork', role: 'planner', modules: ['track', 'status_sheet', 'orders', 'planning', 'artwork', 'production', 'shade_cards', 'tooling'], sections: null, machine_ids: null, landing_path: '/planning' },
   { key: 'press', label: 'Press Operator — one press', role: 'production', modules: ['floor'], sections: ['printing'], machine_ids: [], landing_path: '/floor/printing' },
   { key: 'station', label: 'Station Operator — one station', role: 'production', modules: ['floor'], sections: [], machine_ids: null, landing_path: '/floor' },
+  // A customer's own login: the Fluence module ticked and nothing else. It may
+  // change its kits and prescriptions (role planner clears the Fluence master's
+  // guard); each change is signed with its login ID and told to management. The
+  // server holds it to the one tick (server/src/access.js) — no plant module, no
+  // bell, no messenger, no product master.
+  { key: 'fluence_customer', label: 'Customer — Fluence module only', role: 'planner', modules: ['fluence'], sections: null, machine_ids: null, landing_path: '/fluence' },
 ];
 
 const CONFIGS = {
@@ -317,7 +323,7 @@ const CONFIGS = {
     label: 'Users', endpoint: '/users', adminOnly: true, moduleAccess: true,
     fields: [
       { key: 'name', label: 'Name', required: true },
-      { key: 'email', label: 'Email', type: 'email', required: true },
+      { key: 'email', label: 'Email or login ID', required: true, hint: 'What they sign in with — an email, or an ID such as fluence01' },
       { key: 'password', label: 'Password', type: 'password', hint: 'Leave blank to keep unchanged' },
       { key: 'role', label: 'Role', type: 'select', options: ['admin', 'planner', 'production', 'qc', 'dispatch', 'viewer'], required: true },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
@@ -1398,6 +1404,12 @@ export default function Masters() {
                             Grant all
                           </button>
                         )}
+                        {modCount > 0 && (
+                          <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                            onClick={() => setEditing(ed => ({ ...ed, modules: [] }))}>
+                            Clear all
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
@@ -1412,6 +1424,12 @@ export default function Masters() {
                     {modRestricted && modCount === 0 && (
                       <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
                         No modules selected — this user won't be able to open anything after signing in.
+                      </p>
+                    )}
+                    {modRestricted && modCount > 0 && isFluenceOnly(editing) && (
+                      <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">
+                        Fluence only — a customer's own login. It opens the Fluence module and nothing of Colour Impressions: no other module,
+                        no messages, no notifications, no product master. Its changes are signed with this login ID and told to Management.
                       </p>
                     )}
                   </div>

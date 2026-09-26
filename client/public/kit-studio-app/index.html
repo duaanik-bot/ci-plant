@@ -49,6 +49,8 @@ body{color:var(--ink);font:14px/1.45 var(--f-body);margin:0;-webkit-font-smoothi
 @keyframes ksIn{from{opacity:0;transform:scale(.97) translateY(4px)}to{opacity:1;transform:none}}
 @keyframes ksPop{0%{opacity:0;transform:translate(-50%,-50%) scale(.92)}60%{opacity:1;transform:translate(-50%,-50%) scale(1.015)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
 .wrap{max-width:none;margin:0;padding:0 2px 40px}
+/* Inside the ERP's Fluence page the page's own tabs lead: the studio's title and tab bar step aside */
+.embed header.top,.embed nav.tabs{display:none!important}
 /* PageHeader: .module-page-title / .module-page-subtitle */
 header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;margin:0 0 16px}
 .brand h1{font:800 26px/1.25 var(--f-disp);letter-spacing:-.03em;margin:0;color:var(--ink)}
@@ -407,6 +409,13 @@ const S = {products:new Map(), kits:new Map(), drafts:new Map(), settings:{...DE
   kf:{q:'',st:'ALL',origin:'ALL'}, pf:{q:'',st:'ALL'}, drawer:null,
   build:blankBuild()};
 try{ const v=localStorage.getItem('kst.view'); if(v) S.view=v; }catch(e){}
+/* Embedded in the ERP's Fluence page (?embed=1): its tabs choose the view (window.kitStudio.show)
+   and hear where the studio went (kitStudioErp.viewChanged) — one tab bar for the whole module. */
+const EMBED=new URLSearchParams(location.search).get('embed')==='1';
+if(EMBED) document.documentElement.classList.add('embed');
+const VIEWS=['overview','kits','products','build','drafts','export'];
+// Opened on a tab: that view, not the one this browser last had open.
+{ const v0=new URLSearchParams(location.search).get('view'); if(EMBED&&VIEWS.includes(v0)) S.view=v0; }
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -428,6 +437,8 @@ const parseSz = t => { const m=String(t||'').trim().match(/^(\d+(?:\.\d+)?)\s*[x
 function erpKitBlock(d,orig,ro){
   const e=d.erp; if(!window.kitStudioInErp||!e) return '';
   const X=window.kitStudioErp, keep=!ro&&!!(X&&X.canKeepProducts&&X.canKeepProducts());
+  // The product's size is a product-master write: a login with the Masters tick.
+  const sizing=!ro&&!!(X&&X.hasMasters&&X.hasMasters());
   const sz=String(e.size||'').trim(), p=parseSz(sz), mine=hasSize(d);
   const same=!!(p&&mine&&cartonNums(p)===cartonNums(d));
   const saved=!!(orig&&hasSize(orig)&&orig.sizeStatus==='CONFIRMED'&&d.sizeStatus==='CONFIRMED'&&cartonNums(orig)===cartonNums(d));
@@ -436,15 +447,16 @@ function erpKitBlock(d,orig,ro){
     body=`<div class="erpline"><span><span class="k">Product</span><b class="mono">${esc(e.productCode||'')}</b> ${esc(e.productName||'')}</span><span><span class="k">Billing code</span><b class="mono">${d.code?esc(d.code):'—'}</b></span><span><span class="k">ERP size</span><b class="mono">${sz?esc(sz):'—'}</b></span></div>`;
     if(mine){
       if(same) act='<span class="chip CONFIRMED">ERP size matches</span>';
+      else if(!sizing) act=`<span class="note">${sz?`The ERP product says ${esc(sz)}.`:'No size on the ERP product yet.'} Its size is set in Masters by Colour Impressions.</span>`;
       else if(!sz) act=`<span class="note">${d.sizeStatus==='CONFIRMED'?'Saving this CONFIRMED size fills the ERP product size.':'The ERP product size is filled once this size is CONFIRMED and saved.'}</span>`;
-      else if(saved&&!ro) act=`<button class="btn sm" data-erp-size>Use this size in ERP</button><span class="note">Replaces ${esc(sz)} on the ERP product — Planning and the job card read it.</span>`;
+      else if(saved) act=`<button class="btn sm" data-erp-size>Use this size in ERP</button><span class="note">Replaces ${esc(sz)} on the ERP product — Planning and the job card read it.</span>`;
       else act=`<span class="note">The ERP product says ${esc(sz)}. Confirm and save this kit’s size first to use it in the ERP.</span>`;
     }
     if(e.own&&keep) act+=`<button class="btn sm ghost" data-erp-unlink style="margin-left:auto">Unlink</button>`;
   } else if(e.superseded){
     body='<p class="note" style="margin:0">An older listing — the Fluence master lists this kit again under a newer entry.</p>';
   } else {
-    body=`<p class="note" style="margin:0">Not in the ERP product master yet.${e.own?' Designed here in Kit Studio.':''} Once the kit is final, give its carton a product master — the next FP- code and the Fluence billing code — or link it to the product an order already brought in.</p>`;
+    body=`<p class="note" style="margin:0">Not in the ERP product master yet.${e.own?' Designed here in Kit Studio.':''} ${keep||ro?'Once the kit is final, give its carton a product master — the next FP- code and the Fluence billing code — or link it to the product an order already brought in.':'Once the kit is final, Colour Impressions gives its carton a product master — its FP- code and billing code.'}</p>`;
     if(keep) act='<button class="btn sm primary" data-erp-product>Create product master…</button>';
     else if(S.canEdit) act='<span class="note">A planner or an admin puts it in the product master.</span>';
   }
@@ -1251,7 +1263,11 @@ async function saveDoc(coll, id, before, after, isKit, msg){
 
 /* ---------- views ---------- */
 let busy=false, drag=null, d3=null, pendingR=false, noClickUntil=0, lastCard={k:'',t:0};
-function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ renderInner(); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); }
+function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ renderInner(); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); tellHost(); }
+let toldView=null, toldDrafts=null;
+function tellHost(){ const X=window.kitStudioErp; if(!X||!X.viewChanged) return;
+  const n=[...S.drafts.values()].filter(d=>!d.pushed).length; if(S.view===toldView&&n===toldDrafts) return;
+  toldView=S.view; toldDrafts=n; X.viewChanged(S.view,{drafts:n}); }
 /* floating rotate / flat toolbar above the selected carton */
 function placeCardTools(){
   document.querySelectorAll('.cardtools').forEach(tb=>{ const stage=tb.closest('.laystage'), r=stage&&stage.querySelector('g[data-on="1"] rect');
@@ -1656,6 +1672,7 @@ function renderDrawerRaw(){
           <label class="f">Size status<select id="qSS" data-d="sizeStatus" ${ro?'disabled':''}>${['CONFIRMED','VERIFY','MISSING'].map(s=>`<option ${d.sizeStatus===s?'selected':''}>${s}</option>`).join('')}</select></label>
         </div>${d.fluenceName?`<p class="note">Fluence size file lists it as “${esc(d.fluenceName)}”.</p>`:''}${window.kitStudioInErp?`<p class="note">${D.isNew?'Saving adds it to the Fluence inner product master. ':''}The Fluence master shows this size once it is CONFIRMED.</p>`:''}</div>
         <label class="f">Remarks<textarea id="qRem" data-d="remarks" ${ro?'disabled':''}>${esc(d.remarks||'')}</textarea></label>
+        ${!D.isNew&&d.erp&&d.erp.innerId&&window.kitStudioErp&&window.kitStudioErp.openInnerProduct?`<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><button class="btn sm" data-inner-details>${ro?'Codes, dosage form &amp; packaging':'Codes, dosage form &amp; packaging…'}</button><span class="note">Kept in the Fluence inner product master, with its carton size.</span></div>`:''}
         ${u.length?`<div><h3>Kits using this product</h3><ul class="list">${u.sort((a,b)=>sortName(a[1],b[1])).slice(0,60).map(([id,k])=>`<li><button class="link" data-open-kit="${id}">${esc(k.name)}</button><span class="row"><span class="dims ${hasSize(k)?'':'none'}">${dimTxt(k)}</span>${chip(k.sizeStatus)}</span></li>`).join('')}</ul></div>`:''}
         ${D.isNew?'':`<div><h3>Change history</h3><div class="hist">${(orig.history||[]).length?(orig.history||[]).map(h=>`<div><b>${esc(who(h.by))}</b> · ${fmtDate(h.at)}<br>${esc(h.what)}</div>`).join(''):'<span>No edits since the import.</span>'}</div></div>`}
       </div>
@@ -1730,6 +1747,7 @@ document.addEventListener('click', async e => {
     try{ const res=await window.kitStudioErp.useErpSize(id); toast(res.erp==='same'?'The ERP product already has this size':'ERP product size is now '+(res.erpSize||''));
       const k=S.kits.get(id); if(k&&S.drawer&&S.drawer.id===id){ S.drawer.d.erp=k.erp; renderDrawer(); } }
     catch(err){ toast('Could not update the ERP: '+(err?.message||'try again')); t.disabled=false; } return; }
+  if(ds.innerDetails!==undefined){ const D=S.drawer, X=window.kitStudioErp; if(D&&D.d.erp&&D.d.erp.innerId&&X&&X.openInnerProduct) X.openInnerProduct(D.d.erp.innerId); return; }
   if(ds.kitRx!==undefined){ const D=S.drawer, X=window.kitStudioErp; if(!D||!D.d.erp||!D.d.erp.kitId||!X||!X.openKitEditor) return;
     X.openKitEditor(D.d.erp.kitId,{edit:S.canEdit}); return; }
   if(ds.erpProduct!==undefined){ if(S.drawer&&S.drawer.id) pmOpen(S.drawer.id); return; }
@@ -2440,10 +2458,18 @@ async function buildPdf(R,opt){
   }
 }
 
+/* ---------- the host page's handle (embedded in the ERP's Fluence page) ---------- */
+window.kitStudio={
+  // The page's tab chose a view. An open drawer stays open, as it does when the
+  // studio's own tabs are used — unsaved edits in it are never dropped here.
+  show(v){ if(!VIEWS.includes(v)||S.view===v) return; S.view=v; try{localStorage.setItem('kst.view',v);}catch(_){} render(); window.scrollTo(0,0); },
+  openKit(id){ if(S.kits.has(id)) openKit(id); },
+};
+
 /* ---------- boot ---------- */
 render();
 (async () => {
-  if(!window.claude?.use){ $('#banner').innerHTML='<div class="banner">Open Kit Studio from the ERP menu (Admin → Kit Studio) to load and edit the kit data.</div>'; $('#view').innerHTML=''; return; }
+  if(!window.claude?.use){ $('#banner').innerHTML='<div class="banner">Open Kit Studio from the ERP menu (Admin → Fluence) to load and edit the kit data.</div>'; $('#view').innerHTML=''; return; }
   const [db,user,dl]=await Promise.all([claude.use('db'),claude.use('user'),claude.use('downloads')]);
   S.db=db; S.user=user; S.dl=dl;
   if(!db){ $('#banner').innerHTML='<div class="banner">The kit database isn’t available. Reload the page, or sign in to the ERP again.</div>'; $('#view').innerHTML=''; return; }

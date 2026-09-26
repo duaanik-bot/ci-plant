@@ -202,7 +202,12 @@ test('the studio route is mounted, and every write needs a Planning role', () =>
     assert.equal(guard, PRODUCT_MASTER.includes(path) ? 'canKeepProducts' : 'canEditStudio', `${verb.toUpperCase()} ${path} is not guarded`);
   }
   assert.deepEqual(writes.filter(w => w[3] === 'canKeepProducts').map(w => w[2]).sort(), [...PRODUCT_MASTER].sort());
-  assert.match(route, /const canKeepProducts = requireRole\('planner'\);/);
+  // …and the Masters tick: a login without it (a customer's own) never makes,
+  // links or sizes a product master from the studio, nor reads its print spec.
+  assert.match(route, /const canKeepProducts = \[requireRole\('planner'\), needsMasters\];/);
+  assert.match(route, /r\.post\('\/kit-studio\/kits\/:id\/erp-size', canEditStudio, needsMasters,/);
+  assert.match(route, /r\.get\('\/kit-studio\/kits\/:id\/erp-options', needsMasters,/);
+  assert.match(route, /const erp = req\.access\?\.masters === true \? await writeErpSize\(/);
   assert.match(read('server/src/routes/masters.js'), /const canEdit = requireRole\('planner'\);/, 'Masters changed who keeps products');
 });
 
@@ -358,17 +363,21 @@ test('no static folder shadows an app route', async () => {
   const routes = MODULES.flatMap(m => [m.path, ...(m.aliases || [])]).map(p => p.split('/')[1]).filter(Boolean);
   for (const d of dirs) assert.ok(!routes.includes(d), `client/public/${d}/ would answer the /${d} route with its own index.html`);
   assert.ok(dirs.includes('kit-studio-app'));
-  assert.match(read('client/src/pages/KitStudio.jsx'), /src="\/kit-studio-app\/index\.html"/);
+  assert.match(read('client/src/components/fluence/KitStudioFrame.jsx'), /src=\{`\/kit-studio-app\/index\.html\?embed=1/);
 });
 
-test('Kit Studio is a module anyone with Fluence access can open', async () => {
+test('Kit Studio is part of the one Fluence module: one tick, its old page and key still open it', async () => {
   const { MODULES, canAccess, moduleForPath } = await import('../../client/src/modules.js');
-  assert.equal(MODULES.at(-1).key, 'kit_studio', 'last, so no login\'s first module changes');
-  assert.equal(moduleForPath('/kit-studio'), 'kit_studio');
-  assert.ok(canAccess({ role: 'viewer', modules: ['fluence'] }, 'kit_studio'));
-  assert.ok(canAccess({ role: 'viewer', modules: ['kit_studio'] }, 'kit_studio'));
-  assert.ok(!canAccess({ role: 'viewer', modules: ['orders'] }, 'kit_studio'));
-  assert.ok(canAccess({ role: 'planner', modules: null }, 'kit_studio'));
+  assert.equal(MODULES.at(-1).key, 'fluence', 'last, so no login\'s first module changes');
+  assert.ok(!MODULES.some(m => m.key === 'kit_studio'), 'one tick in Masters → Users, not two');
+  assert.equal(moduleForPath('/kit-studio'), 'fluence');
+  assert.equal(moduleForPath('/fluence'), 'fluence');
+  for (const key of ['fluence', 'kit_studio']) {
+    assert.ok(canAccess({ role: 'viewer', modules: ['fluence'] }, key));
+    assert.ok(canAccess({ role: 'viewer', modules: ['kit_studio'] }, key), 'a login given Kit Studio before the merge keeps it');
+    assert.ok(!canAccess({ role: 'viewer', modules: ['orders'] }, key));
+    assert.ok(canAccess({ role: 'planner', modules: null }, key));
+  }
 });
 
 // What is in a kit and how each item is taken are edited in ONE place — the
@@ -388,7 +397,7 @@ test('an existing kit\'s contents are edited with its prescription, not in the s
   // The bridge offers the hand-off only when the host can do it; the host opens the drawer.
   const bridge = read('client/public/kit-studio-app/erp-bridge.js');
   assert.match(bridge, /openKitEditor: typeof host\.openKitEditor === 'function'/);
-  const hostPage = read('client/src/pages/KitStudio.jsx');
+  const hostPage = read('client/src/components/fluence/KitStudioFrame.jsx');
   assert.match(hostPage, /openKitEditor\(kitId, opts = \{\}\)/);
   assert.match(hostPage, /<FluenceDrawer key=\{kitEditor\.kitId\} kitId=\{kitEditor\.kitId\} startEditing=\{kitEditor\.edit\} context="kit_studio"/);
   // The server agrees: a studio save may not change an existing kit's contents.

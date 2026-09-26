@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto';
 import { q, one } from './db.js';
 import { withoutLedger } from './data-tables.js';
 import { audit } from './helpers.js';
+import { forgetAccess } from './access.js';
+import { isFluenceOnly } from '../../client/src/modules.js';
 
 // This module previously fell back to a hardcoded literal when JWT_SECRET was
 // unset, with no environment guard — so a deployment that forgot the variable
@@ -209,11 +211,14 @@ usersRouter.post('/users', requireRole(), async (req, res, next) => {
        cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management),
        cleanFlag(req.body.reverse_approver)]);
     // Standing chat rooms flagged auto_add (Plant Floor) take every new login
-    // the moment it exists — nobody joins the plant and misses the plant.
-    await q(`
-      INSERT INTO conversation_members (conversation_id, user_id, role)
-      SELECT c.id, $1, $2 FROM conversations c WHERE c.auto_add = 1
-      ON CONFLICT DO NOTHING`, [u.id, (role || 'viewer') === 'admin' ? 'admin' : 'member']);
+    // the moment it exists — nobody joins the plant and misses the plant. A
+    // customer's login (only Fluence ticked) is not the plant, and joins none.
+    if (!isFluenceOnly(u)) {
+      await q(`
+        INSERT INTO conversation_members (conversation_id, user_id, role)
+        SELECT c.id, $1, $2 FROM conversations c WHERE c.auto_add = 1
+        ON CONFLICT DO NOTHING`, [u.id, (role || 'viewer') === 'admin' ? 'admin' : 'member']);
+    }
     await audit('user', u.id, 'create', email, q, req.user.name);
     res.json(u);
   } catch (e) {
@@ -251,6 +256,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     const [u] = await q(
       `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver`, vals);
     await audit('user', +req.params.id, 'update', null, q, req.user.name);
+    forgetAccess(+req.params.id);   // new ticks, a switch-off: at once, not in a few seconds
     res.json(u);
   } catch (e) {
     if (String(e.message).includes('users_email_key')) { e.status = 409; e.message = 'A user with this email already exists'; }
@@ -272,6 +278,7 @@ usersRouter.delete('/users/:id', requireRole(), async (req, res, next) => {
       if (n === 0) return res.status(409).json({ error: 'Cannot delete the last admin account' });
     }
     await q('DELETE FROM users WHERE id=$1', [id]);
+    forgetAccess(id);
     await audit('user', id, 'delete', target.email, q, req.user.name);
     res.json({ ok: true });
   } catch (e) { next(e); }

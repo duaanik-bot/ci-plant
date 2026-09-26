@@ -4,6 +4,7 @@
 import express from 'express';
 import cors from 'cors';
 import { authRouter, requireAuth, usersRouter } from './auth.js';
+import { moduleGate } from './access.js';
 import masters from './routes/masters.js';
 import boardRates from './routes/board-rates.js';
 import plateRates from './routes/plate-rates.js';
@@ -66,6 +67,10 @@ app.use('/api', authRouter);          // login is public
 app.use('/api', avsRobot);
 app.use('/api', requireAuth);         // everything below needs a token
 app.use('/api', heartbeatMiddleware); // keeps the browsers' change feed provably alive
+// The modules ticked for a login in Masters → Users hold on the server too: a
+// login with only Fluence ticked (a customer's) reaches the Fluence module and
+// nothing of the plant. A switched-off login is refused here even on a live token.
+app.use('/api', moduleGate);
 app.use('/api', usersRouter);
 app.use('/api', masters);
 app.use('/api', boardRates);

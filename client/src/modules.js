@@ -27,13 +27,26 @@ export const MODULES = [
   { key: 'masters', label: 'Masters', path: '/masters' },
   { key: 'tooling', label: 'Tooling Hub', path: '/tooling' },
   { key: 'shade_cards', label: 'Shade Cards', path: '/tooling/shade-cards', aliases: ['/shade-cards'] },
-  // Fluence-only: the prescription & kit master. Last, so no login's
-  // first-allowed module changes because it exists.
-  { key: 'fluence', label: 'Fluence Master', path: '/fluence' },
-  // Kit Studio — carton sizing and draft kits on top of the Fluence master.
-  // Anyone who may open the Fluence master may open it too (canAccess below).
-  { key: 'kit_studio', label: 'Kit Studio', path: '/kit-studio' },
+  // Fluence — kits, their prescriptions and Kit Studio, for Fluence
+  // Pharmaceuticals only. Last, so no login's first-allowed module changes
+  // because it exists. Kit Studio was a module of its own until the two became
+  // one: its page (/kit-studio) and its key still open this one (FLUENCE_KEYS).
+  { key: 'fluence', label: 'Fluence (kits, prescriptions & Kit Studio)', path: '/fluence', aliases: ['/kit-studio'] },
 ];
+
+// The Fluence module's keys: its own, and Kit Studio's from before the merge —
+// a login given either opens the one module.
+export const FLUENCE_KEYS = ['fluence', 'kit_studio'];
+
+// A login whose ticked modules are ALL Fluence — a customer's own login. It
+// opens the Fluence module and nothing of Colour Impressions: not the shared
+// Cutting board a Planning or Production role otherwise reaches, not the bell,
+// the messenger or the plant's figures. The server answers it the same way
+// (server/src/access.js), so a tick in Masters → Users is the whole switch.
+export function isFluenceOnly(user) {
+  if (!user || user.role === 'admin') return false;
+  return Array.isArray(user.modules) && user.modules.every(k => FLUENCE_KEYS.includes(k));
+}
 
 // Live Floor sub-stations — the 10 production sections a Live-Floor login can be
 // dedicated to. users.sections is NULL (= every station) or an array of these
@@ -73,10 +86,13 @@ export function canPlan(user) {
 export function canAccess(user, moduleKey) {
   if (!user) return false;
   if (user.role === 'admin') return true;
+  const fluence = FLUENCE_KEYS.includes(moduleKey);
+  // A customer's login: the Fluence module, when ticked, and nothing else.
+  if (isFluenceOnly(user)) return fluence && user.modules.length > 0;
   if (moduleKey === 'floor' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.modules == null) return true;
-  // Kit Studio works on the Fluence master: a Fluence grant carries it.
-  if (moduleKey === 'kit_studio' && user.modules.includes('fluence')) return true;
+  // Either Fluence key opens the one Fluence module.
+  if (fluence) return user.modules.some(k => FLUENCE_KEYS.includes(k));
   return user.modules.includes(moduleKey);
 }
 
@@ -86,6 +102,7 @@ export function canAccess(user, moduleKey) {
 export function canAccessSection(user, sectionKey) {
   if (!user) return false;
   if (user.role === 'admin') return true;
+  if (isFluenceOnly(user)) return false;
   if (sectionKey === 'cutting' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.sections == null) return true;
   return user.sections.includes(sectionKey);
