@@ -70,16 +70,6 @@ async function saveSetting(key, value, note) {
            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, note = EXCLUDED.note`, [key, value, note]);
 }
 
-// The shared secret the Drive link checks on every call. Made once, here; the
-// setup panel writes it into the script the owner pastes into Apps Script.
-async function driveSecret(user) {
-  const cfg = await settings();
-  if (cfg.drive_bridge_secret) return cfg.drive_bridge_secret;
-  const secret = crypto.randomBytes(24).toString('base64url');
-  await saveSetting('drive_bridge_secret', secret, `made by ${user || 'CI Plant'} ${new Date().toISOString()}`);
-  return secret;
-}
-
 // The key the AVS check uses to fetch a photo kept in CI Plant (avs-robot.js).
 // Made with the first such photo; read by the check from avs.settings; never
 // sent to a browser.
@@ -99,17 +89,23 @@ const linked = cfg => ({
 
 // ── The Drive link ───────────────────────────────────────────────────────────
 // One POST per call; Apps Script answers through a redirect, which fetch follows.
+// The secret it checks is made by the link itself when CI Plant pairs with it
+// (pairDrive below), so nobody ever copies a secret by hand.
 export async function callDrive(cfg, payload, { timeoutMs = 25000 } = {}) {
   if (!cfg.drive_bridge_url || !cfg.drive_bridge_secret) {
     throw fail(503, 'The Google Drive link for AVS is not set up yet. An admin sets it up in Artwork Verification → Setup.');
   }
+  return postDrive(cfg.drive_bridge_url, { secret: cfg.drive_bridge_secret, ...payload }, { timeoutMs });
+}
+
+async function postDrive(url, body, { timeoutMs = 25000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(cfg.drive_bridge_url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ secret: cfg.drive_bridge_secret, ...payload }),
+      body: JSON.stringify(body),
       redirect: 'follow',
       signal: ctrl.signal,
     });
@@ -124,6 +120,24 @@ export async function callDrive(cfg, payload, { timeoutMs = 25000 } = {}) {
     if (e.name === 'AbortError') throw fail(504, 'Google Drive took too long to answer. Try again.');
     throw e;
   } finally { clearTimeout(timer); }
+}
+
+// Pair with a freshly deployed link: its first "pair" answer carries the secret
+// it made, and it refuses to pair again.
+async function pairDrive(url, user) {
+  let out;
+  try {
+    out = await postDrive(url, { op: 'pair' });
+  } catch (e) {
+    if (/Already paired/.test(e.message)) {
+      throw fail(409, 'This Drive link is already paired with something else. In Apps Script: Project Settings > Script Properties > '
+        + 'delete AVS_SECRET, then press Save here again.');
+    }
+    throw e;
+  }
+  if (!/^[0-9a-f]{32,128}$/.test(String(out.secret || ''))) throw fail(502, 'Google Drive paired but sent no usable secret.');
+  await saveSetting('drive_bridge_secret', out.secret, `paired by ${user || 'admin'} ${new Date().toISOString()}`);
+  return out;
 }
 
 // ── The Claude link ──────────────────────────────────────────────────────────
@@ -415,11 +429,9 @@ const tokenHint = t => (t ? `…${t.slice(-4)}` : '');
 r.get('/avs/setup', isAdmin, async (req, res, next) => {
   try {
     markUncacheable();
-    const secret = await driveSecret(req.user.name);
     const cfg = await settings();
     res.json({
       drive_bridge_url: cfg.drive_bridge_url || '',
-      drive_bridge_secret: secret,
       routine_fire_url: cfg.routine_fire_url || '',
       routine_token_hint: tokenHint(cfg.routine_token),
       linked: linked(cfg),
@@ -435,22 +447,46 @@ r.put('/avs/setup', isAdmin, async (req, res, next) => {
     const problem = setupProblem(next_);
     if (problem) throw fail(400, problem);
     const stamp = `set by ${req.user.name || 'admin'} ${new Date().toISOString()}`;
+    const before = await settings();
     for (const [key, value] of Object.entries(next_)) {
       // An empty token field means "keep the one saved" — it is never sent back.
       if (value == null || (key === 'routine_token' && value === '')) continue;
       await saveSetting(key, value, stamp);
     }
+    // A new Drive link pairs at once, and an emptied one is unlinked: the old
+    // secret belongs to the old link. The answer says whether pairing worked,
+    // with the AVS folder the link found.
+    let drive = null;
+    const newLink = next_.drive_bridge_url != null && next_.drive_bridge_url !== (before.drive_bridge_url || '');
+    if (newLink) await saveSetting('drive_bridge_secret', '', stamp);
+    if (next_.drive_bridge_url && (newLink || !before.drive_bridge_secret)) {
+      const out = await pairDrive(next_.drive_bridge_url, req.user.name);
+      drive = { paired: true, root: out.root || null };
+    }
     const cfg = await settings();
-    res.json({ ok: true, linked: linked(cfg), routine_token_hint: tokenHint(cfg.routine_token) });
+    res.json({ ok: true, linked: linked(cfg), drive, routine_token_hint: tokenHint(cfg.routine_token) });
   } catch (e) { next(e); }
 });
 
-// A new secret invalidates the deployed script until it is pasted in again.
+// Pair again with the saved link (after AVS_SECRET was deleted in Apps Script).
+// A link that is paired already is left alone.
+r.post('/avs/setup/pair-drive', isAdmin, async (req, res, next) => {
+  try {
+    const cfg = await settings();
+    if (!cfg.drive_bridge_url) throw fail(400, 'Save the Drive link\'s Web app URL first.');
+    if (cfg.drive_bridge_secret) throw fail(409, 'The Drive link is paired already. Press Test to check it.');
+    const out = await pairDrive(cfg.drive_bridge_url, req.user.name);
+    res.json({ ok: true, root: out.root || null, linked: linked(await settings()) });
+  } catch (e) { next(e); }
+});
+
+// A new secret, made by the link itself and saved here; nothing to paste.
 r.post('/avs/setup/new-secret', isAdmin, async (req, res, next) => {
   try {
-    const secret = crypto.randomBytes(24).toString('base64url');
-    await saveSetting('drive_bridge_secret', secret, `made by ${req.user.name || 'admin'} ${new Date().toISOString()}`);
-    res.json({ ok: true, drive_bridge_secret: secret });
+    const out = await callDrive(await settings(), { op: 'rotate' });
+    if (!/^[0-9a-f]{32,128}$/.test(String(out.secret || ''))) throw fail(502, 'Google Drive sent no usable secret.');
+    await saveSetting('drive_bridge_secret', out.secret, `rotated by ${req.user.name || 'admin'} ${new Date().toISOString()}`);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

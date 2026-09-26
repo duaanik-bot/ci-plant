@@ -9,8 +9,9 @@
 //                 Verify calls it; Claude checks the queue in its own cloud
 //                 session, with the Mac and the Claude app closed.
 //
-// The secret the Drive link checks is made by CI Plant and written into the
-// script shown here; the Claude token is kept on the server and never shown again.
+// The Drive link makes its own secret when CI Plant pairs with it (on Save), so
+// the script holds nothing secret and nobody copies a secret by hand. The
+// Claude token is kept on the server and never shown again.
 import { useEffect, useState } from 'react';
 import { Bot, CheckCircle2, Copy, ExternalLink, HardDrive, XCircle } from 'lucide-react';
 import { api } from '../../api.js';
@@ -53,11 +54,14 @@ export default function AvsSetup({ open, onClose, onChanged }) {
   }).catch(() => {});
   useEffect(() => { if (open) load(); }, [open]);
 
-  const script = cfg ? DRIVE_LINK_SOURCE.replace("'__SECRET__'", `'${cfg.drive_bridge_secret}'`) : '';
-
   const save = async body => {
-    await api.put('/avs/setup', body);
-    toast.success('Saved');
+    const out = await api.put('/avs/setup', body);
+    toast.success(out?.drive?.paired ? `Saved. The Drive link is paired with folder ${out.drive.root?.name || 'AVS'}.` : 'Saved');
+    await load(); onChanged?.();
+  };
+  const pairAgain = async () => {
+    const out = await api.post('/avs/setup/pair-drive', {});
+    toast.success(`Paired with folder ${out.root?.name || 'AVS'}`);
     await load(); onChanged?.();
   };
   const test = async what => {
@@ -75,7 +79,7 @@ export default function AvsSetup({ open, onClose, onChanged }) {
   };
   const newSecret = async () => {
     await api.post('/avs/setup/new-secret', {});
-    toast.info('New secret made: copy the script again and paste it into Apps Script, then Deploy > Manage deployments > Edit > New version.');
+    toast.success('The Drive link made a new secret and CI Plant saved it. Nothing to paste.');
     load();
   };
 
@@ -101,18 +105,21 @@ export default function AvsSetup({ open, onClose, onChanged }) {
               <li>Delete what is in the editor, paste the script (button below), and press Save.</li>
               <li>On the left, next to Services, press <b>+</b>, pick <b>Drive API</b>, press Add.</li>
               <li>Deploy → New deployment → gear icon → <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. Deploy, then Authorize access (Google says the app is unverified: it is your own script — Advanced → Go to project → Allow).</li>
-              <li>Copy the <b>Web app URL</b> (ends in /exec), paste it here, Save, then Test.</li>
+              <li>Copy the <b>Web app URL</b> (ends in /exec), paste it here and press <b>Save</b>. CI Plant pairs with it by itself: there is no secret to copy.</li>
             </ol>
             <div className="flex flex-wrap gap-2">
-              <CopyButton text={script} label="Copy script" />
-              <Button size="sm" variant="ghost" onClick={newSecret}>Make a new secret</Button>
+              <CopyButton text={DRIVE_LINK_SOURCE} label="Copy script" />
             </div>
             <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" className={inputCls} />
             {!drivePattern && <p className="text-xs text-red-600">That is not a Web app URL: it starts with https://script.google.com/macros/s/ and ends in /exec.</p>}
             <div className="flex flex-wrap gap-2">
               <Button size="sm" disabled={!drivePattern || driveUrl.trim() === (cfg.drive_bridge_url || '')}
                 onClick={() => save({ drive_bridge_url: driveUrl.trim() })}>Save</Button>
-              <Button size="sm" variant="secondary" disabled={!cfg.drive_bridge_url || testing === 'drive'} onClick={() => test('drive')}>Test</Button>
+              <Button size="sm" variant="secondary" disabled={!cfg.linked?.drive || testing === 'drive'} onClick={() => test('drive')}>Test</Button>
+              {cfg.drive_bridge_url && !cfg.linked?.drive && (
+                <Button size="sm" variant="secondary" onClick={pairAgain}>Pair again</Button>
+              )}
+              {cfg.linked?.drive && <Button size="sm" variant="ghost" onClick={newSecret}>Make a new secret</Button>}
             </div>
           </section>
 

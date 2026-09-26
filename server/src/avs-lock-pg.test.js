@@ -55,7 +55,7 @@ describe('the AVS printing lock — through the real app', {
 
     const { default: jwt } = await import('jsonwebtoken');
     const { JWT_SECRET: secret } = await import('./auth.js');
-    for (const role of ['planner', 'production', 'qc']) {
+    for (const role of ['planner', 'production', 'qc', 'admin']) {
       const u = await db.one(`INSERT INTO users (name, email, password_hash, role)
         VALUES ($1, $2, 'x', $3) RETURNING id, name, role`, [`AVS ${role}`, `avs-${role}@test.local`, role]);
       tokens[role] = jwt.sign({ id: u.id, name: u.name, role: u.role }, secret);
@@ -486,5 +486,78 @@ describe('the AVS printing lock — through the real app', {
     assert.equal(newest.body.sets.filter(x => x.status === 'done').length, 1, 'only the newest finished set of each status');
     assert.equal(newest.body.sets.filter(x => x.status === 'queued').length, 2, 'every set still in progress');
     assert.equal(newest.body.counts.done, 2, 'the chip still counts them all');
+  });
+
+  // ── Setup: CI Plant pairs with the Drive link ──────────────────────────────
+  // The stand-in pairs and rotates the way drive-link.gs does, and answers
+  // through a redirect like Apps Script.
+  test('the Drive link pairs with CI Plant: no secret is copied by hand, none reaches a browser', async () => {
+    const http = await import('node:http');
+    await applyAvsPhotoSchema();
+    let secret = null;
+    const results = new Map();
+    const link = http.createServer((req, res) => {
+      if (req.method !== 'POST') {
+        const key = new URL(req.url, 'http://x').searchParams.get('k');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify(results.get(key)));
+      }
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const j = JSON.parse(body);
+        let out;
+        if (j.op === 'pair') {
+          if (secret) out = { ok: false, error: 'Already paired. To pair again: Project Settings > Script Properties > delete AVS_SECRET.' };
+          else { secret = 'a'.repeat(64); out = { ok: true, paired: true, secret, root: { name: 'AVS', id: 'root1' } }; }
+        } else if (!secret) out = { ok: false, error: 'Not paired yet' };
+        else if (j.secret !== secret) out = { ok: false, error: 'Wrong secret' };
+        else if (j.op === 'rotate') { secret = 'b'.repeat(64); out = { ok: true, secret }; }
+        else out = { ok: true, root: { name: 'AVS', id: 'root1' } };
+        const key = String(results.size + 1);
+        results.set(key, out);
+        res.writeHead(302, { Location: `http://127.0.0.1:${link.address().port}/echo?k=${key}` });
+        res.end();
+      });
+    });
+    await new Promise(r => link.listen(0, '127.0.0.1', r));
+    const saved = async key => (await db.one('SELECT value FROM avs.settings WHERE key = $1', [key]))?.value;
+    try {
+      // Only a real Apps Script Web app URL is accepted in Setup.
+      const bad = await call('admin', 'PUT', '/avs/setup', { drive_bridge_url: 'https://evil.example.com/exec' });
+      assert.equal(bad.status, 400);
+      // A saved link with no secret yet: Pair makes the link hand over its own.
+      await setSettings({ drive_bridge_url: `http://127.0.0.1:${link.address().port}/exec`, drive_bridge_secret: '' });
+      const before = await call('admin', 'GET', '/avs/setup');
+      assert.equal(before.status, 200);
+      assert.equal(before.body.linked.drive, false);
+      const paired = await call('admin', 'POST', '/avs/setup/pair-drive');
+      assert.equal(paired.status, 200, JSON.stringify(paired.body));
+      assert.equal(paired.body.root.name, 'AVS');
+      assert.equal(paired.body.linked.drive, true);
+      assert.equal(await saved('drive_bridge_secret'), 'a'.repeat(64));
+      // Linked: pairing again is refused and the working secret is kept.
+      assert.equal((await call('admin', 'POST', '/avs/setup/pair-drive')).status, 409);
+      assert.equal(await saved('drive_bridge_secret'), 'a'.repeat(64));
+      assert.equal((await call('admin', 'POST', '/avs/setup/test-drive')).status, 200);
+      // A new secret comes from the link and is saved here; the old one stops working.
+      assert.equal((await call('admin', 'POST', '/avs/setup/new-secret')).status, 200);
+      assert.equal(await saved('drive_bridge_secret'), 'b'.repeat(64));
+      assert.equal((await call('admin', 'POST', '/avs/setup/test-drive')).status, 200);
+      // A link paired with someone else: CI Plant says how to free it.
+      await setSettings({ drive_bridge_secret: '' });
+      const taken = await call('admin', 'POST', '/avs/setup/pair-drive');
+      assert.equal(taken.status, 409);
+      assert.match(taken.body.error, /delete AVS_SECRET/);
+      // The secret never goes to a browser, not even an admin's.
+      await setSettings({ drive_bridge_secret: 'b'.repeat(64) });
+      const setup = await call('admin', 'GET', '/avs/setup');
+      assert.ok(!JSON.stringify(setup.body).includes('b'.repeat(64)));
+      assert.equal('drive_bridge_secret' in setup.body, false);
+      // Only admin sees the setup.
+      assert.equal((await call('qc', 'POST', '/avs/setup/pair-drive')).status, 403);
+    } finally {
+      link.close();
+    }
   });
 });

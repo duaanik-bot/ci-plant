@@ -150,7 +150,7 @@ test('the AVS switch writes only the job\'s switch; the photo sets only their ow
   assert.deepEqual(writesIn('./routes/avs-switch.js'), ['gang_runs', 'order_lines']);
   assert.deepEqual(writesIn('./routes/avs-intake.js'),
     ['avs.check_photo_bytes', 'avs.check_photos', 'avs.check_requests', 'avs.settings']);
-  assert.doesNotMatch(readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8'), /DELETE\s/i,
+  assert.doesNotMatch(readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8'), /\bDELETE\s+FROM\b/i,
     'nothing uploaded is ever deleted');
 });
 

@@ -17,12 +17,16 @@
  *     Press Authorize access and choose your account. Google says the app is
  *     not verified (it is your own script): Advanced > Go to project > Allow.
  *  4. Copy the Web app URL (it ends in /exec) into CI Plant >
- *     Artwork Verification > Setup > Drive link, press Save, then Test.
+ *     Artwork Verification > Setup > Drive link and press Save. CI Plant links
+ *     itself to it and tests it.
  *
- * The secret below comes from CI Plant. Anyone who has it can read and add
- * files in the AVS folder, so keep this code to yourself.
+ * No secret is written in this code. CI Plant's first call ("pair") makes one,
+ * keeps it in this project's Script properties (AVS_SECRET) and hands it to CI
+ * Plant; from then on every call must carry it and pairing is closed. Anyone who
+ * has the secret can read and add files in the AVS folder. To pair again (a lost
+ * secret, a new CI Plant): Project Settings > Script Properties > delete
+ * AVS_SECRET, then press Save in CI Plant's Setup again.
  */
-var SECRET = '__SECRET__';
 var ROOT_PATH = '01_Business/AVS'; // the AVS folder, counted from My Drive
 
 function doGet() {
@@ -36,10 +40,14 @@ function doPost(e) {
   } catch (err) {
     return out_({ ok: false, error: 'The request is not JSON' });
   }
-  if (!req.secret || req.secret !== SECRET) return out_({ ok: false, error: 'Wrong secret' });
+  if (req.op === 'pair') return out_(guard_(pair_));
+  var secret = PropertiesService.getScriptProperties().getProperty('AVS_SECRET');
+  if (!secret) return out_({ ok: false, error: 'Not paired yet: save this Web app URL in CI Plant > Artwork Verification > Setup' });
+  if (!req.secret || req.secret !== secret) return out_({ ok: false, error: 'Wrong secret' });
   var lock = null;
   try {
     if (req.op === 'ping') return out_({ ok: true, root: folderInfo_(root_()) });
+    if (req.op === 'rotate') return out_(guard_(rotate_));
     if (req.op === 'list') return out_({ ok: true, entries: list_(folderAt_(req.path, false)) });
     if (req.op === 'get') return out_(get_(req));
     // Writes one at a time, so two photos arriving together never make two
@@ -57,6 +65,41 @@ function doPost(e) {
       try { lock.releaseLock(); } catch (ignore) {}
     }
   }
+}
+
+// Pairing: the first caller gets the secret; after that, only a caller that
+// has it may make a new one (rotate). One at a time.
+function guard_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  } finally {
+    try { lock.releaseLock(); } catch (ignore) {}
+  }
+}
+
+function newSecret_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+}
+
+function pair_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('AVS_SECRET')) {
+    return { ok: false, error: 'Already paired. To pair again: Project Settings > Script Properties > delete AVS_SECRET.' };
+  }
+  var root = folderInfo_(root_()); // the AVS folder must be there before anything is paired
+  var secret = newSecret_();
+  props.setProperty('AVS_SECRET', secret);
+  return { ok: true, paired: true, secret: secret, root: root };
+}
+
+function rotate_() {
+  var secret = newSecret_();
+  PropertiesService.getScriptProperties().setProperty('AVS_SECRET', secret);
+  return { ok: true, secret: secret };
 }
 
 function out_(obj) {
