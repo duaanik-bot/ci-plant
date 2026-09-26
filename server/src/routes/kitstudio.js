@@ -22,6 +22,7 @@ import { Router } from 'express';
 import { q, tx } from '../db.js';
 import { audit, lockDocNumber, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
+import { keepRxInStep } from './fluence.js';
 import {
   validId, nameKey, dimsOf, sizeText, parseSizeText, sameCarton, masterDimsFor,
   splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc,
@@ -133,8 +134,9 @@ async function recordRevision(kitId, before, after, user, note, qc, area = 'comp
 }
 
 // Studio product ids → inner product ids. Every product the studio lists is in
-// the inner product master, so an id that maps to nothing is a stale page.
-async function innerIdsFor(pids, qc) {
+// the inner product master, so an id that maps to nothing is a stale page —
+// refused, unless the caller only compares (`strict: false` maps it to null).
+async function innerIdsFor(pids, qc, { strict = true } = {}) {
   const rows = pids.length ? await qc(
     'SELECT id, fluence_inner_product_id FROM kit_studio_products WHERE id = ANY($1::text[])', [pids]) : [];
   const byId = new Map(rows.map(r => [r.id, r.fluence_inner_product_id]));
@@ -148,9 +150,28 @@ async function innerIdsFor(pids, qc) {
   const found = want.length ? await qc('SELECT id FROM fluence_inner_products WHERE id = ANY($1::int[])', [want]) : [];
   const ok = new Set(found.map(f => f.id));
   for (const [pid, inner] of out) {
-    if (inner == null || !ok.has(inner)) throw fail(400, 'One of the kit\'s products is not in the Fluence inner product master any more — reload the page and pick it again.');
+    if (inner == null || !ok.has(inner)) {
+      if (strict) throw fail(400, 'One of the kit\'s products is not in the Fluence inner product master any more — reload the page and pick it again.');
+      out.set(pid, null);
+    }
   }
   return out;
+}
+
+// A kit already in the Fluence master has its contents changed in ONE place —
+// the Contents & prescription editor, which keeps the prescription in step. The
+// studio only reads them, so a save that carries a different kit list comes from
+// a page older than that rule and is refused rather than quietly dropped.
+async function assertSameContents(fkId, items, qc) {
+  const master = await componentsSnapshot(fkId, qc);
+  const innerOf = await innerIdsFor(items.map(i => i.pid), qc, { strict: false });
+  const key = list => JSON.stringify(list.slice().sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+  const onFile = key(master.map(c => [c.inner_product_id, +c.qty_per_kit]));
+  const sent = key(items.map(i => [innerOf.get(i.pid) ?? null, +i.q]));
+  if (onFile !== sent) {
+    throw fail(409, 'This kit’s contents are changed with “Edit contents & prescription” now, and the studio only reads them. '
+      + 'Your other changes were not saved — reload the page and make them again.');
+  }
 }
 
 // Write a kit's contents through to fluence_kit_components, the way the Fluence
@@ -238,12 +259,12 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
         if (taken) throw fail(409, 'This Fluence kit is already open in the studio under another entry — reload the page.');
       }
 
-      const innerOf = await innerIdsFor(items.map(i => i.pid), qc);
+      let created = null;
       if (!fk) {
         // A kit designed in the studio becomes a Fluence kit when it is saved
-        // as a kit: unlinked (no product yet) until someone links its carton
-        // in the Fluence Master, like any other kit on the customer's list.
-        const created = await oc(`
+        // as a kit: unlinked (no product yet) until its carton goes into the
+        // product master, like any other kit on the customer's list.
+        created = await oc(`
           INSERT INTO fluence_kits (kit_name, source_ref, remarks, created_by, updated_by)
           VALUES ($1, $2, 'Created in Kit Studio', $3, $3)
           ON CONFLICT (source_ref) DO UPDATE SET updated_at = now()
@@ -256,8 +277,17 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
       }
       if (fk.source_ref !== `kit-studio:${id}`) row.name = fk.kit_name; // a master kit keeps the customer's name
 
-      const label = fk.product_code ? `${fk.product_code} ${fk.product_name}` : fk.kit_name;
-      const componentsChanged = await writeComponents(fk.id, items, innerOf, req.user, label, qc);
+      // The kit list is written only when the kit is born here (Push to Kits),
+      // and its prescription starts in step with it: a bare line per item.
+      // After that, contents change in the Contents & prescription editor.
+      let componentsChanged = false;
+      if (created) {
+        const innerOf = await innerIdsFor(items.map(i => i.pid), qc);
+        componentsChanged = await writeComponents(fk.id, items, innerOf, req.user, fk.kit_name, qc);
+        await keepRxInStep(fk.id, req.user, FROM, qc, oc);
+      } else {
+        await assertSameContents(fk.id, items, qc);
+      }
       const saved = await upsertKitRow(id, fk.id, row, req.user, qc);
       const erp = await writeErpSize(fk, saved[0], req.user, qc);
       return { version: saved[0].version, componentsChanged, ...erp };
@@ -295,8 +325,16 @@ r.delete('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
       if (fk) {
         if (fk.source_ref !== `kit-studio:${id}`) throw fail(409, 'This kit is in the Fluence master — it can only be retired there, not deleted from the studio.');
         if (fk.product_id) throw fail(409, 'This kit is linked to an ERP product. Unlink it first (In the ERP → Unlink) before deleting it here.');
-        const rx = await oc('SELECT id FROM fluence_prescriptions WHERE kit_id = $1', [fk.id]);
-        if (rx) throw fail(409, 'This kit has a prescription in the Fluence master — it can only be retired there.');
+        // Its prescription goes with it — unless someone has entered doses on it.
+        const dosed = await oc(`
+          SELECT r.id FROM fluence_prescriptions r
+          WHERE r.kit_id = $1 AND (NULLIF(btrim(r.general_instructions), '') IS NOT NULL OR EXISTS (
+            SELECT 1 FROM fluence_prescription_lines l WHERE l.prescription_id = r.id AND (
+              COALESCE(l.morning_qty, 0) > 0 OR COALESCE(l.afternoon_qty, 0) > 0 OR COALESCE(l.evening_qty, 0) > 0
+              OR COALESCE(l.night_qty, 0) > 0 OR COALESCE(l.other_qty, 0) > 0 OR NULLIF(btrim(l.other_timing), '') IS NOT NULL
+              OR NULLIF(btrim(l.dosage), '') IS NOT NULL OR NULLIF(btrim(l.frequency), '') IS NOT NULL
+              OR NULLIF(btrim(l.instructions), '') IS NOT NULL)))`, [fk.id]);
+        if (dosed) throw fail(409, 'Doses are entered on this kit’s prescription — clear them first if the kit really goes.');
         await qc('DELETE FROM fluence_kits WHERE id = $1', [fk.id]);
         await audit('fluence_kit', fk.id, 'delete', `${row.name} — deleted in Kit Studio (never linked to a product)`, qc, req.user.name);
       }

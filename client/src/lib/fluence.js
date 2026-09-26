@@ -41,6 +41,7 @@ export const FLUENCE_CONTEXTS = {
   warehouse: 'Warehouse',
   fluence_master: 'Fluence Master',
   kit_studio: 'Kit Studio',
+  masters: 'Masters',
 };
 
 // Review-first modules: the drawer opens read-only and says so. Editing is
@@ -221,6 +222,46 @@ export function normaliseRxPayload(body) {
       lines,
     },
   };
+}
+
+// ── Contents and prescription, kept in step ──────────────────────────────────
+// The prescription names the kit's items: every item in the box has at least one
+// line — a bare line (the item alone) until someone enters its dose — and a line
+// for an item that has left the box has nothing left to say. Whenever the kit list
+// changes the prescription follows: lines for items no longer in the box go, and
+// each new item gets a bare line at the end. A line that names something not in
+// the box on purpose (an item_label, no item) is left alone.
+export const RX_LINE_KEYS = ['inner_product_id', 'item_label', 'dosage', 'dose_form', 'pack_count', 'frequency',
+  'morning_qty', 'afternoon_qty', 'evening_qty', 'night_qty', 'other_timing', 'other_qty', 'instructions', 'remarks'];
+export function bareRxLine(innerProductId) {
+  const line = Object.fromEntries(RX_LINE_KEYS.map(k => [k, null]));
+  line.inner_product_id = Number(innerProductId);
+  return line;
+}
+export function rxLinesInStep(components, lines) {
+  const inKit = new Set((components || []).map(c => Number(c.inner_product_id)));
+  const kept = [], removed = [];
+  for (const l of lines || []) {
+    if (l.inner_product_id == null || inKit.has(Number(l.inner_product_id))) kept.push(l);
+    else removed.push(l);
+  }
+  const named = new Set(kept.filter(l => l.inner_product_id != null).map(l => Number(l.inner_product_id)));
+  const added = [];
+  for (const c of components || []) {
+    const id = Number(c.inner_product_id);
+    if (!named.has(id)) { named.add(id); added.push(bareRxLine(id)); }
+  }
+  return { lines: [...kept, ...added].map((l, i) => ({ ...l, sr: i + 1 })), removed, added };
+}
+
+// What a kit list IS, for telling whether it changed under an open editor: the
+// items in order with their quantity, MRP and remarks. Numbers are compared as
+// numbers ("1.00" from the database is the 1 an editor typed).
+export function componentsSignature(components) {
+  const num = v => (v == null || v === '' ? null : Number(v));
+  return JSON.stringify((components || []).map(c => [
+    Number(c.inner_product_id), num(c.qty_per_kit), num(c.mrp_in_kit), c.remarks == null || c.remarks === '' ? null : String(c.remarks),
+  ]));
 }
 
 // A kit composition save: which inner products, how many of each, in order.

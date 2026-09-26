@@ -370,3 +370,56 @@ test('Kit Studio is a module anyone with Fluence access can open', async () => {
   assert.ok(!canAccess({ role: 'viewer', modules: ['orders'] }, 'kit_studio'));
   assert.ok(canAccess({ role: 'planner', modules: null }, 'kit_studio'));
 });
+
+// What is in a kit and how each item is taken are edited in ONE place — the
+// one-table editor (KitRxEditor) in the Fluence drawer — and saved together.
+// The studio sizes and arranges a kit; it hands the contents over.
+test('an existing kit\'s contents are edited with its prescription, not in the studio', () => {
+  const html = read('client/public/kit-studio-app/index.html');
+  // The drawer of a kit in the Fluence master reads its contents and hands over.
+  assert.match(html, /d\.erp&&d\.erp\.kitId\?kitContentsCard\(d,ro\):/);
+  assert.match(html, /X\.openKitEditor\(D\.d\.erp\.kitId,\{edit:S\.canEdit\}\)/);
+  // Removing a carton would take an item out: not on such a kit.
+  const rm = html.slice(html.indexOf('function removeSel(ctx){'), html.indexOf('function swapCols('));
+  assert.match(rm, /^function removeSel\(ctx\)\{\n\s+if\(contentsLocked\(ctx\)\)\{ toast\(/);
+  assert.match(html, /contentsLocked\(ctx\)\?'':b\('del'/);
+  // An open kit takes the master's new contents when they change under it.
+  assert.match(html, /render\(\); resolveNames\(\); syncDrawerContents\(\); \}/);
+  // The bridge offers the hand-off only when the host can do it; the host opens the drawer.
+  const bridge = read('client/public/kit-studio-app/erp-bridge.js');
+  assert.match(bridge, /openKitEditor: typeof host\.openKitEditor === 'function'/);
+  const hostPage = read('client/src/pages/KitStudio.jsx');
+  assert.match(hostPage, /openKitEditor\(kitId, opts = \{\}\)/);
+  assert.match(hostPage, /<FluenceDrawer key=\{kitEditor\.kitId\} kitId=\{kitEditor\.kitId\} startEditing=\{kitEditor\.edit\} context="kit_studio"/);
+  // The server agrees: a studio save may not change an existing kit's contents.
+  const route = read('server/src/routes/kitstudio.js');
+  assert.match(route, /if \(created\) \{[\s\S]*?await keepRxInStep\(fk\.id, req\.user, FROM, qc, oc\);\s*\} else \{\s*await assertSameContents\(fk\.id, items, qc\);\s*\}/);
+});
+
+test('the one-table editor saves contents and prescription in one request, naming what it opened', () => {
+  const editor = read('client/src/components/fluence/KitRxEditor.jsx');
+  assert.match(editor, /dossier\.product \? `\/fluence\/products\/\$\{dossier\.product\.id\}\/kit` : `\/fluence\/kits\/\$\{dossier\.kit\.id\}\/kit`/);
+  assert.match(editor, /base_components: componentsSignature\(dossier\.components \|\| \[\]\)/);
+  assert.match(editor, /base_revision: dossier\.prescription\?\.revision \?\? 0/);
+  const route = read('server/src/routes/fluence.js');
+  for (const path of ["r.put('/fluence/products/:productId/kit', canEditMaster", "r.put('/fluence/kits/:id/kit', canEditMaster", "r.get('/fluence/kits/:id/dossier'"])
+    assert.ok(route.includes(path), path);
+  // Both halves in one transaction, each with its own revision only when it changed.
+  const save = route.slice(route.indexOf('async function saveKitAndRx'), route.indexOf("r.put('/fluence/products/:productId/kit'"));
+  assert.match(save, /componentsSignature\(beforeComps\) !== componentsSignature\(components\)/);
+  assert.match(save, /!\(beforeRx && sameRx\(beforeRx, value\)\)/);
+  assert.match(save, /throw fail\(409, 'The kit list was changed by someone else/);
+  // The old kit-list route keeps the prescription in step with what it wrote.
+  const comps = route.slice(route.indexOf("r.put('/fluence/products/:productId/components'"), route.indexOf('// ── Inner product master'));
+  assert.match(comps, /await keepRxInStep\(kit\.id, req\.user, from, qc, oc\);/);
+});
+
+test('Masters and the Fluence drawer point at each other', () => {
+  const masters = read('client/src/pages/Masters.jsx');
+  assert.match(masters, /<FluenceButton productId=\{r\.id\} context="masters" compact/);
+  assert.match(masters, /<FluenceButton productId=\{editing\.id\} context="masters" label="Fluence kit & prescription" \/>/);
+  assert.match(masters, /new URLSearchParams\(location\.search\)\.get\('edit'\)/);
+  const drawer = read('client/src/components/fluence/FluenceDrawer.jsx');
+  assert.match(drawer, /`\/masters\?tab=products&edit=\$\{dossier\.product\.id\}`/);
+  assert.match(drawer, /context !== 'masters' && canAccess\(user, 'masters'\)/);
+});

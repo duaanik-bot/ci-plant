@@ -6,7 +6,7 @@ import {
   nameKey, qtyValue, qtyText, unitFor, timingParts, formatSchedule, formatRxLine,
   lineHasDose, rxHasContent, normaliseRxPayload, normaliseComponentsPayload,
   normaliseDims, formatDims, kitListPrice, partLabel, kitCartons, rxState, RX_SLOTS, FLUENCE_CONTEXTS, REVIEW_CONTEXTS,
-  rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER,
+  rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER, rxLinesInStep, bareRxLine, componentsSignature, RX_LINE_KEYS,
 } from '../../client/src/lib/fluence.js';
 
 test('nameKey: spacing, hyphens and case do not make two kits — a plus sign does', () => {
@@ -242,4 +242,50 @@ test('rxChangedAfterFinalise: only a person\'s save after finalising warns — n
   assert.equal(rxChangedAfterFinalise(null, card), false);
   // No module can be named "customer master": a screen can never claim the master's source.
   assert.ok(!Object.keys(FLUENCE_CONTEXTS).includes(RX_FROM_CUSTOMER_MASTER));
+});
+
+test('rxLinesInStep: a new item gets a bare line at the end; an item that left the box loses its lines', () => {
+  const lines = [
+    { inner_product_id: 3, morning_qty: 1 },
+    { inner_product_id: 9, night_qty: 1 },          // 9 has left the box
+    { inner_product_id: null, item_label: 'Leaflet reading', instructions: 'Read first' },
+    { inner_product_id: 3, night_qty: 2 },          // one item, two times: both lines stay
+  ];
+  const step = rxLinesInStep([{ inner_product_id: 3 }, { inner_product_id: 5 }], lines);
+  assert.deepEqual(step.lines.map(l => [l.sr, l.inner_product_id, l.item_label ?? null]),
+    [[1, 3, null], [2, null, 'Leaflet reading'], [3, 3, null], [4, 5, null]]);
+  assert.deepEqual(step.removed.map(l => l.inner_product_id), [9]);
+  assert.deepEqual(step.added.map(l => l.inner_product_id), [5]);
+  // The added line is bare: the item alone, every other field empty.
+  assert.deepEqual(step.added[0], bareRxLine(5));
+  for (const k of RX_LINE_KEYS) if (k !== 'inner_product_id') assert.equal(step.added[0][k], null, k);
+  // Ids that arrive as strings (a form) and numbers (the database) are one item.
+  assert.deepEqual(rxLinesInStep([{ inner_product_id: '3' }], [{ inner_product_id: 3 }]).added, []);
+});
+
+test('rxLinesInStep: a kit already in step comes back unchanged; an empty kit keeps only its typed lines', () => {
+  const lines = [{ inner_product_id: 3 }, { inner_product_id: 4, morning_qty: 1 }];
+  const same = rxLinesInStep([{ inner_product_id: 3 }, { inner_product_id: 4 }], lines);
+  assert.deepEqual([same.added, same.removed], [[], []]);
+  assert.deepEqual(same.lines.map(l => l.inner_product_id), [3, 4]);
+  const empty = rxLinesInStep([], [...lines, { item_label: 'Diet chart' }]);
+  assert.deepEqual(empty.lines.map(l => l.item_label), ['Diet chart']);
+  assert.equal(empty.removed.length, 2);
+  assert.deepEqual(rxLinesInStep(null, null), { lines: [], removed: [], added: [] });
+});
+
+test('componentsSignature: the database\'s "1.00" is the editor\'s 1; order, quantity, MRP and remarks all count', () => {
+  const db = [{ inner_product_id: 3, qty_per_kit: '1.00', mrp_in_kit: '109.00', remarks: null }, { inner_product_id: 4, qty_per_kit: '2.000', mrp_in_kit: null, remarks: '' }];
+  const typed = [{ inner_product_id: '3', qty_per_kit: '1', mrp_in_kit: 109, remarks: '' }, { inner_product_id: 4, qty_per_kit: 2, mrp_in_kit: '', remarks: null }];
+  assert.equal(componentsSignature(db), componentsSignature(typed));
+  assert.notEqual(componentsSignature(db), componentsSignature([...typed].reverse()));
+  assert.notEqual(componentsSignature(db), componentsSignature([{ ...typed[0], qty_per_kit: 2 }, typed[1]]));
+  assert.notEqual(componentsSignature(db), componentsSignature([{ ...typed[0], mrp_in_kit: 110 }, typed[1]]));
+  assert.notEqual(componentsSignature(db), componentsSignature([{ ...typed[0], remarks: 'Free sample' }, typed[1]]));
+  assert.equal(componentsSignature([]), componentsSignature(null));
+});
+
+test('contexts: Kit Studio and Masters are places a save can come from', () => {
+  assert.equal(FLUENCE_CONTEXTS.kit_studio, 'Kit Studio');
+  assert.equal(FLUENCE_CONTEXTS.masters, 'Masters');
 });

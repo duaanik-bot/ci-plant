@@ -219,6 +219,12 @@
     createProduct: function (id, body) { return host.request('erpProduct', { id: id, body: clone(body) }).then(landed(id), refused); },
     linkProduct: function (id, body) { return host.request('erpLink', { id: id, body: clone(body) }).then(landed(id), refused); },
     unlinkProduct: function (id) { return host.request('erpUnlink', { id: id }).then(landed(id), refused); },
+    // What is in a kit and its prescription are edited in the ERP's one-table
+    // editor (the Fluence drawer), opened over the studio by the host page. Its
+    // save reaches this page through the realtime feed like any other.
+    openKitEditor: typeof host.openKitEditor === 'function'
+      ? function (fluenceKitId, opts) { host.openKitEditor(Number(fluenceKitId), { edit: !!(opts && opts.edit) }); }
+      : null,
   };
 
   // Another person's save, or an edit in the Fluence Master, reaches this page

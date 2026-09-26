@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, PressButton, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
+import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
 import { boardName, boardCode, takenCodesFor, identityOnSave } from '../lib/boardCode.js';
@@ -413,6 +415,11 @@ export default function Masters() {
   const [deleting, setDeleting] = useState(null);
   const [viewing, setViewing] = useState(null); // {kind, record} for the 360° drawer
   const [company, setCompany] = useState(null); // single-row "our company" profile
+  // ?tab=products&edit=<id> opens that product's form — the Fluence drawer's
+  // "Open in Masters" lands here. Used once, then dropped from the address.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [pendingEdit, setPendingEdit] = useState(null);
 
   const isCompany = tab === 'company';
   const cfg = CONFIGS[tab];
@@ -466,6 +473,24 @@ export default function Masters() {
     load();
     if (isCompany) api.get('/company-profile').then(c => setCompany(c || {})).catch(() => setCompany({}));
   }, [tab]);
+
+  useEffect(() => {
+    const want = Number(new URLSearchParams(location.search).get('edit'));
+    if (!(Number.isInteger(want) && want > 0)) return;
+    if (tab !== 'products') selectTab('products');
+    setPendingEdit(want);
+    const next = new URLSearchParams(location.search);
+    next.delete('edit');
+    next.set('tab', 'products');
+    navigate({ pathname: location.pathname, search: `?${next}` }, { replace: true });
+  }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!pendingEdit || tab !== 'products' || !loaded) return;
+    const r = rows.find(x => x.id === pendingEdit);
+    setPendingEdit(null);
+    if (r) setEditing({ ...r, _loadedCustomerId: r.customer_id });
+    else toast.error('That product is not in the product master.');
+  }, [pendingEdit, tab, loaded, rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveCompany = async () => {
     try { await api.put('/company-profile', company); toast.success('Company profile saved'); }
@@ -719,9 +744,15 @@ export default function Masters() {
               {r.shade_card_date && <span className="mt-0.5 block"><ShadeAge date={r.shade_card_date} /></span>}
             </span>;
           }
-          if (k === 'name' && cfg.endpoint === '/products' && r.spec_incomplete)
-            return <span className="inline-flex items-center gap-2">{v}
-              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span></span>;
+          // A Fluence carton carries its door to the kit and prescription it is
+          // printed with (the Fluence master); every other product shows nothing.
+          if (k === 'name' && cfg.endpoint === '/products')
+            return <span className="block leading-tight">
+              <span className="block">{v}</span>
+              <span className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
+                {r.spec_incomplete && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span>}
+                <FluenceButton productId={r.id} context="masters" compact title="Fluence — the kit and prescription this carton is printed with" />
+              </span></span>;
           // Boards: the short code sits under the name, so the code an operator is
           // handed on the floor ("2037DPGB230") can be read straight off the list.
           // Same tight two-line stack the Products tab already uses for Sheets and
@@ -993,6 +1024,13 @@ export default function Masters() {
         </>}>
         {editing && (
           <div className={`grid gap-3 ${tab === 'products' || tab === 'boards' || cfg.wideForm ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {/* A Fluence carton: its kit and prescription live in the Fluence
+                master — one click from the product they are printed on. */}
+            {tab === 'products' && editing.id && (
+              <div className="col-span-2 flex justify-end empty:hidden">
+                <FluenceButton productId={editing.id} context="masters" label="Fluence kit & prescription" />
+              </div>
+            )}
             {/* Soft spec alarm — never a gate. These fields are wanted before
                 the job reaches the press, not before the master can exist, so
                 the form names what is still open and lets the save through.

@@ -924,7 +924,12 @@ function undo(ctx){
 }
 
 /* ---------- remove, swap, stack ---------- */
+/* A kit in the Fluence master keeps what is in the box there, edited with its
+   prescription in one table ("Edit contents & prescription"). The studio still
+   arranges its cartons and sizes it — it does not add or take items out. */
+function contentsLocked(ctx){ return ctx==='d'&&!!(S.drawer&&S.drawer.t==='kit'&&S.drawer.d&&S.drawer.d.erp&&S.drawer.d.erp.kitId); }
 function removeSel(ctx){
+  if(contentsLocked(ctx)){ toast('What is in the kit is changed with “Edit contents & prescription” — here you arrange its cartons.'); return; }
   const c=editLanes(ctx); if(!c) return; const lanes=c.lanes;
   const cells=selCells(ctx).filter(([r,i])=>lanes[r]&&lanes[r].items[i]); if(!cells.length) return;
   const before=capturePos(ctx); pushHist(ctx);
@@ -1046,13 +1051,13 @@ function lopBtns(ctx,ri,pi,nLanes,nIn,it){
   return `<div class="grp"><span class="lbl">Turn</span>${b('rot',ICON.rot+'Turn 90°','Turn a quarter turn on the spot'+all+' (key R)')}</div>
     <div class="grp"><span class="lbl">Stand</span>${b('edge',ICON.edge+'Standing','Standing on its long side, like a book on a shelf'+all+' (key S)',!multi&&o==='edge')}${b('end',ICON.end+'Tall','Standing tall on its end'+all+' (key T)',!multi&&o==='end')}${b('flat',ICON.flat+'Flat','Lying flat on its biggest face'+all+' (key F)',!multi&&o==='flat')}</div>
     ${multi?'':`<div class="grp"><span class="lbl">Move</span>${b('left','◀ Left','Move left in its row',undefined,pi===0)}${b('back','▲ Back','Move one row towards the back')}${b('front','▼ Front','Move one row towards the front')}${b('right','Right ▶','Move right in its row',undefined,pi===nIn-1)}</div>`}
-    <div class="grp"><span class="lbl">Kit</span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Put the stacked cartons side by side again'):''}${b('del',ICON.del+'Remove','Remove '+(multi?'the selected cartons':'this carton')+' from the kit (Delete key) — you can undo','','','danger')}</div>`;
+    ${!multi&&hasStack(it)||!contentsLocked(ctx)?`<div class="grp"><span class="lbl">Kit</span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Put the stacked cartons side by side again'):''}${contentsLocked(ctx)?'':b('del',ICON.del+'Remove','Remove '+(multi?'the selected cartons':'this carton')+' from the kit (Delete key) — you can undo','','','danger')}</div>`:''}`;
 }
 function cardTools(ctx,sel,it){
   const o=it.orient||'edge';
   const b=(op,html,title,pressed)=>`<button class="ct" data-lop="${op}" data-ctx="${ctx}" data-r="${sel.r}" data-i="${sel.i}" title="${title}" aria-label="${title}" ${pressed!==undefined?`aria-pressed="${!!pressed}"`:''}>${html}</button>`;
   const multi=selCells(ctx).length>1;
-  return `<div class="cardtools" data-tools="${ctx}" hidden>${multi?`<span class="ctn">${selCells(ctx).length} selected</span><span class="ctsep"></span>`:''}${b('rot',ICON.rot+'Turn','Turn 90°')}<span class="ctsep"></span>${b('edge',ICON.edge+'Standing','Standing',!multi&&o==='edge')}${b('end',ICON.end+'Tall','Tall',!multi&&o==='end')}${b('flat',ICON.flat+'Flat','Flat',!multi&&o==='flat')}<span class="ctsep"></span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Unstack'):''}${b('del',ICON.del,'Remove from the kit (Delete)')}</div>`;
+  return `<div class="cardtools" data-tools="${ctx}" hidden>${multi?`<span class="ctn">${selCells(ctx).length} selected</span><span class="ctsep"></span>`:''}${b('rot',ICON.rot+'Turn','Turn 90°')}<span class="ctsep"></span>${b('edge',ICON.edge+'Standing','Standing',!multi&&o==='edge')}${b('end',ICON.end+'Tall','Tall',!multi&&o==='end')}${b('flat',ICON.flat+'Flat','Flat',!multi&&o==='flat')}<span class="ctsep"></span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Unstack'):''}${contentsLocked(ctx)?'':b('del',ICON.del,'Remove from the kit (Delete)')}</div>`;
 }
 function orientTable(lay, ctx){
   const rows=[]; lay.lanes.forEach((ln,ri)=>ln.items.forEach((col,pi)=>colItems(col).forEach((it,lv)=>rows.push({ri,pi,it,lv,n:ln.items.length}))));
@@ -1366,6 +1371,18 @@ function vProducts(){
     <tbody>${rows.map(([id,p])=>`<tr data-open-prod="${id}"><td><b>${esc(p.name)}</b></td><td class="num mono">${p.mrp??'—'}</td><td class="dims ${hasSize(p)?'':'none'}">${dimTxt(p)}</td><td>${chip(p.sizeStatus)}</td><td class="num mono">${u[id]||0}</td><td class="muted">${esc(p.status||'')}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">No products match.</td></tr>`}</tbody>
   </table></div>`;
 }
+/* What is in a kit that lives in the Fluence master: read here, changed there —
+   with its prescription, in one table and one save. */
+function kitContentsCard(d, ro){
+  const items=d.items||[], n=items.reduce((s,i)=>s+(+i.q||1),0), X=window.kitStudioErp, can=!!(X&&X.openKitEditor);
+  const li=items.map(it=>{ const p=S.products.get(it.pid);
+    return `<li><span><b class="mono">${esc(it.q||1)} ×</b> ${esc(p?p.name:(it.raw||'Unknown product'))}</span><span class="dims ${it.pid&&hasSize(p)?'':'none'}">${it.pid&&hasSize(p)?dimTxt(p):'no inner size'}</span></li>`; }).join('');
+  return `<div class="card pad kitrx" data-kit-contents>
+    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">Contents &amp; prescription <span class="note" style="font-weight:500">${n} item${n===1?'':'s'} · MRP ₹${Math.round(kitMrp(d)).toLocaleString('en-IN')}</span></h3>
+      ${can?`<button class="btn sm ${ro?'':'primary'}" data-kit-rx>${ro?'View contents &amp; prescription':'Edit contents &amp; prescription'}</button>`:''}</div>
+    ${items.length?`<ul class="list" style="margin-top:8px">${li}</ul>`:'<p class="note" style="margin:8px 0 0">Nothing in this kit yet.</p>'}
+    <p class="note" style="margin:8px 0 0">What goes in the box and how each item is taken are kept in the Fluence master and edited together. Here you size the kit and arrange its cartons.</p></div>`;
+}
 function itemsEditor(items, prefix, disabled){
   return `<div class="items">${items.map((it,i)=>{ const p=S.products.get(it.pid);
     return `<div class="item"><input type="text" data-ac="products" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="acPop" aria-expanded="false" id="${prefix}p${i}" data-item="${prefix}" data-i="${i}" data-f="name" value="${esc(p?p.name:(it.raw||''))}" placeholder="Type to pick a product" aria-label="Product ${i+1}" ${disabled?'disabled':''}>
@@ -1579,6 +1596,15 @@ function vExport(){
 /* ---------- drawer ---------- */
 function openKit(id){ const k=S.kits.get(id); if(!k) return; S.sel=null; HIST.d=[]; S.drawer={t:'kit',id,d:JSON.parse(JSON.stringify({...k,history:undefined})),confirmDel:false,layEdit:loadLayout(k.layout,k.items||[])}; renderDrawer(); }
 function openProd(id,isNew){ const p=isNew?{name:'',mrp:'',status:'Active',L:'',W:'',H:'',sizeStatus:'MISSING',remarks:''}:S.products.get(id); if(!p) return; S.drawer={t:'prod',id,isNew,d:JSON.parse(JSON.stringify({...p,history:undefined}))}; renderDrawer(); }
+/* The open kit's contents changed in the Fluence master (its editor, or a
+   colleague): take the new list, keep every other unsaved edit on screen. */
+function syncDrawerContents(){
+  const D=S.drawer; if(!D||D.t!=='kit'||!D.d.erp||!D.d.erp.kitId) return; const k=S.kits.get(D.id); if(!k) return;
+  const sig=x=>JSON.stringify((x||[]).map(i=>[i.pid,+i.q||1,i.mrp??null]));
+  if(sig(k.items)===sig(D.d.items)) return;
+  D.d.items=JSON.parse(JSON.stringify(k.items||[])); D.d.erp=JSON.parse(JSON.stringify(k.erp||null)); D.layEdit=null; HIST.d=[]; if(S.sel&&S.sel.ctx==='d') S.sel=null;
+  renderDrawer(); toast('The kit’s contents changed in the Fluence master — shown here now.');
+}
 function closeDrawer(){ S.drawer=null; HIST.d=[]; closeAsk(); if(S.sel&&S.sel.ctx==='d') S.sel=null; if(S.v3big&&S.v3big!=='b'){ S.v3big=null; renderV3Big(); } renderDrawer(); }
 function renderDrawer(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(renderDrawer,0); return; } busy=true; try{ keepFocus(renderDrawerRaw); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); }
 function renderDrawerRaw(){
@@ -1603,7 +1629,7 @@ function renderDrawerRaw(){
         </div>${d.sizeSource?`<p class="note">Source: ${esc(d.sizeSource)}</p>`:''}</div>
         ${erpKitBlock(d,orig,ro)}
         ${spaceBlock((d.items||[]).filter(i=>i.pid),d,r)}
-        <div><h3>Products (${(d.items||[]).reduce((s,i)=>s+(+i.q||1),0)} items · MRP ₹${Math.round(kitMrp(d)).toLocaleString('en-IN')})</h3>${itemsEditor(d.items||[],'d',ro)}</div>
+        ${d.erp&&d.erp.kitId?kitContentsCard(d,ro):`<div><h3>Products (${(d.items||[]).reduce((s,i)=>s+(+i.q||1),0)} items · MRP ₹${Math.round(kitMrp(d)).toLocaleString('en-IN')})</h3>${itemsEditor(d.items||[],'d',ro)}</div>`}
         ${recCard(r,{useBtn:true,disabled:ro,ctx:'d',cur:hasSize(d)?d:null})}
         ${sizeTable(r,'d',hasSize(d)?d:null)}
         ${layoutCard(r, hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null, hasSize(d)?'Carton orientation in this kit · top view':'Carton orientation · top view', 'd', ro)}
@@ -1704,6 +1730,8 @@ document.addEventListener('click', async e => {
     try{ const res=await window.kitStudioErp.useErpSize(id); toast(res.erp==='same'?'The ERP product already has this size':'ERP product size is now '+(res.erpSize||''));
       const k=S.kits.get(id); if(k&&S.drawer&&S.drawer.id===id){ S.drawer.d.erp=k.erp; renderDrawer(); } }
     catch(err){ toast('Could not update the ERP: '+(err?.message||'try again')); t.disabled=false; } return; }
+  if(ds.kitRx!==undefined){ const D=S.drawer, X=window.kitStudioErp; if(!D||!D.d.erp||!D.d.erp.kitId||!X||!X.openKitEditor) return;
+    X.openKitEditor(D.d.erp.kitId,{edit:S.canEdit}); return; }
   if(ds.erpProduct!==undefined){ if(S.drawer&&S.drawer.id) pmOpen(S.drawer.id); return; }
   if(ds.pmClose!==undefined){ if(S.pm&&!S.pm.busy){ S.pm=null; renderModal(); } return; }
   if(ds.pmGo!==undefined){ pmGo(); return; }
@@ -2421,7 +2449,7 @@ render();
   if(!db){ $('#banner').innerHTML='<div class="banner">The kit database isn’t available. Reload the page, or sign in to the ERP again.</div>'; $('#view').innerHTML=''; return; }
   try{ S.canEdit = user ? !!(await user.canEdit()) : false; S.me = user ? await user.id() : null; }catch(e){}
   db.collection('products').limit(1000).onSnapshot(snap=>{ S.products=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedP=true; dataVer++; render(); resolveNames(); }, err=>toast('Products stopped updating — reload the page.'));
-  db.collection('kits').limit(1000).onSnapshot(snap=>{ S.kits=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedK=true; dataVer++; render(); resolveNames(); }, err=>toast('Kits stopped updating — reload the page.'));
+  db.collection('kits').limit(1000).onSnapshot(snap=>{ S.kits=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedK=true; dataVer++; render(); resolveNames(); syncDrawerContents(); }, err=>toast('Kits stopped updating — reload the page.'));
   db.collection('drafts').limit(500).onSnapshot(snap=>{ S.drafts=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedD=true; render(); resolveNames(); }, err=>toast('Drafts stopped updating — reload the page.'));
   db.doc('settings/main').onSnapshot(s=>{ if(s.exists){ const d=s.data(); S.settings={...DEF}; for(const k in DEF) if(typeof d[k]==='number') S.settings[k]=d[k]; layCache.clear(); fitCache.clear(); dataVer++; render(); } }, ()=>{});
   render();

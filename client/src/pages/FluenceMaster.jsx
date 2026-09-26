@@ -39,7 +39,7 @@ export default function FluenceMaster() {
   const [products, setProducts] = useState(null);
   const [kits, setKits] = useState(null);
   const [inner, setInner] = useState(null);
-  const [drawer, setDrawer] = useState(null);       // product id
+  const [drawer, setDrawer] = useState(null);       // { productId } or, for a kit with no product, { kitId }
   const [kitFilter, setKitFilter] = useState('all');
   const [linking, setLinking] = useState(null);     // kit row
   const [linkProduct, setLinkProduct] = useState('');
@@ -124,7 +124,7 @@ export default function FluenceMaster() {
 
       {tab === 'products' && (
         <DataTable searchable rows={products || []} empty={products ? 'No Fluence products' : 'Loading…'}
-          onRowClick={p => setDrawer(p.id)}
+          onRowClick={p => setDrawer({ productId: p.id })}
           defaultSort={{ key: 'code', dir: 'asc' }}
           exportName="Fluence Products" exportSubtitle="Kit and prescription status"
           columns={[
@@ -155,7 +155,7 @@ export default function FluenceMaster() {
             { key: 'open_lines', label: 'Open order lines', align: 'right', render: p => <span className="tabular-nums">{p.open_lines || '—'}</span> },
             { key: 'mrp', label: 'MRP', align: 'right', render: p => (p.mrp != null ? fmt.inr(p.mrp) : '—') },
             { key: 'open', label: '', sortable: false, render: p => (
-              <Button size="sm" variant="secondary" onClick={e => { e.stopPropagation(); setDrawer(p.id); }}><Pill size={12} /> Open</Button>) },
+              <Button size="sm" variant="secondary" onClick={e => { e.stopPropagation(); setDrawer({ productId: p.id }); }}><Pill size={12} /> Open</Button>) },
           ]} />
       )}
 
@@ -212,9 +212,14 @@ export default function FluenceMaster() {
               } },
               { key: 'actions', label: '', sortable: false, render: k => {
                 const st = kitState(k);
-                if (!canEdit || st === 'superseded') return null;
+                if (st === 'superseded') return null;
+                // A kit with no product yet opens by itself: its items and
+                // prescription can be kept before its carton is linked.
+                const open = <Button size="sm" variant="secondary" onClick={() => setDrawer(st === 'linked' ? { productId: k.product_id } : { kitId: k.id })}><Pill size={12} /> Open</Button>;
+                if (!canEdit) return <div className="flex justify-end" onClick={e => e.stopPropagation()}>{open}</div>;
                 return (
                   <div className="flex justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                    {st !== 'linked' && open}
                     {st === 'suggested' && (
                       <Button size="sm" variant="success" className="whitespace-nowrap" disabled={busy} onClick={() => link(k, k.suggested_product_id)}>
                         <CheckCircle2 size={12} /> Link {k.suggested_code}
@@ -223,7 +228,7 @@ export default function FluenceMaster() {
                     {st !== 'linked' && <Button size="sm" variant="secondary" className="whitespace-nowrap" disabled={busy} onClick={() => { setLinking(k); setLinkProduct(''); }}><Link2 size={12} /> Link…</Button>}
                     {st === 'linked' && (
                       <>
-                        <Button size="sm" variant="secondary" onClick={() => setDrawer(k.product_id)}><Pill size={12} /> Open</Button>
+                        {open}
                         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setUnlinking(k)}><Unlink size={12} /> Unlink</Button>
                       </>
                     )}
@@ -252,7 +257,10 @@ export default function FluenceMaster() {
           ]} />
       )}
 
-      {drawer && <FluenceDrawer productIds={[drawer]} context="fluence_master" onClose={() => { setDrawer(null); load(); }} />}
+      {drawer && (
+        <FluenceDrawer productIds={drawer.productId ? [drawer.productId] : []} kitId={drawer.kitId ?? null} context="fluence_master"
+          onClose={() => { setDrawer(null); load(); }} />
+      )}
 
       <Modal open={Boolean(linking)} onClose={() => setLinking(null)} title={linking ? `Link customer kit — ${linking.kit_name}` : ''}
         footer={<>

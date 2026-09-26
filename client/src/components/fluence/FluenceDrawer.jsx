@@ -1,39 +1,45 @@
-// The Fluence drawer — one panel, opened from a Fluence button in any of the ten
-// modules, showing the Fluence master for one product or for every Fluence
-// carton on a gang / invoice / challan:
+// The Fluence drawer — one panel, opened from a Fluence button in any module,
+// showing the Fluence master for one product, for every Fluence carton on a
+// gang / invoice / challan, or for one kit by its own id (a kit designed in Kit
+// Studio has no product until its carton goes into the product master):
 //
-//   Prescription   what to take, how much, when — edited here, saved to the master
-//   Kit            the inner products, quantities and carton sizes
-//   Product        the ERP product and artwork identity it is printed as
-//   History        every change: who, when, from which module
+//   Kit & prescription   what is in the box and how each item is taken — one
+//                        table, edited in one place and saved together
+//   Product (Masters)    the product master row the carton is printed and
+//                        billed as: FP code, billing code, MRP, size, spec.
+//                        Read-only here; it is edited in Masters.
+//   History              every change: who, when, from which module
 //
 // It is FLUENCE-ONLY by construction: it is only ever opened with Fluence product
-// ids, and the server refuses anything else. Review-first modules (Invoice,
-// Dispatch, Accounts, Warehouse) open it read-only with a verification summary;
-// editing stays one deliberate click away for an authorised user.
+// ids or Fluence kits, and the server refuses anything else. Review-first modules
+// (Invoice, Dispatch, Accounts, Warehouse) open it read-only with a verification
+// summary; editing stays one deliberate click away for an authorised user.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, BadgeCheck, CheckCircle2, ClipboardList, ExternalLink, History, Layers, Loader2, Package, Pencil, Pill, X,
+  AlertTriangle, BadgeCheck, CheckCircle2, ClipboardList, ExternalLink, History, Layers, Loader2, Pencil, Pill, X,
 } from 'lucide-react';
 import { api, fmt, auth } from '../../api.js';
 import { Button, Modal } from '../ui.jsx';
-import { canPlan } from '../../modules.js';
-import { FLUENCE_CONTEXTS, REVIEW_CONTEXTS, rxHasContent, rxState, qtyText, kitListPrice, partLabel, kitCartons } from '../../lib/fluence.js';
+import { canAccess, canPlan } from '../../modules.js';
+import { FLUENCE_CONTEXTS, REVIEW_CONTEXTS, rxState, qtyText, kitListPrice, partLabel, kitCartons } from '../../lib/fluence.js';
 import { RxLinesTable, RxGeneral, ProductRxTable, rxStampText } from './PrescriptionView.jsx';
-import PrescriptionEditor from './PrescriptionEditor.jsx';
-import { KitComponentsTable, KitComponentsEditor } from './KitComponents.jsx';
+import KitRxEditor from './KitRxEditor.jsx';
 import InnerProductForm from './InnerProductForm.jsx';
 
 const TABS = [
-  { key: 'rx', label: 'Prescription', icon: Pill },
-  { key: 'kit', label: 'Kit & inner products', icon: Package },
-  { key: 'product', label: 'Product & artwork', icon: ClipboardList },
+  { key: 'kit', label: 'Kit & prescription', icon: Pill },
+  { key: 'product', label: 'Product (Masters)', icon: ClipboardList },
   { key: 'history', label: 'History', icon: History },
 ];
 
 const AREA_LABEL = { prescription: 'Prescription', components: 'Kit list', kit_link: 'Kit link' };
+
+// A dossier's identity in this drawer: its product, or — for a kit with no
+// product yet — the kit itself.
+const keyOf = d => (d?.product ? d.product.id : d?.kit ? `kit:${d.kit.id}` : null);
+const fromStudio = kit => String(kit?.source_ref || '').startsWith('kit-studio:');
 
 function Section({ title, children, right }) {
   return (
@@ -62,6 +68,7 @@ function Fact({ label, value, mono }) {
 // (Topico): the outer carton and its parts, this carton highlighted.
 function KitCartonsFact({ dossier }) {
   const { kit, product, part_of: partOf } = dossier;
+  if (!product) return null;
   const outer = partOf ? { product_id: partOf.outer_product_id, code: partOf.outer_code } : { product_id: product.id, code: product.code };
   const cartons = kitCartons(outer, kit?.parts);
   if (!cartons.length) return null;
@@ -90,20 +97,38 @@ function VerifyRow({ ok, warn, label, value }) {
   );
 }
 
-export default function FluenceDrawer({ productIds = [], resolve = null, context = 'fluence_master', title, onClose }) {
+// What a save did, in the words the floor reads it in.
+function savedText(out) {
+  if (out.unchanged) return 'Nothing changed — the Fluence master is as it was.';
+  const d = out.dossier;
+  const what = [out.componentsChanged && 'kit list', out.rxChanged && `prescription (revision ${out.revision})`].filter(Boolean).join(' and ') || 'kit';
+  const plural = out.componentsChanged && out.rxChanged;
+  if (!d?.product) {
+    return `Fluence master updated — ${what} for ${d?.kit?.kit_name || 'this kit'}. Every module reads ${plural ? 'them' : 'it'} once the kit’s carton is in the product master.`;
+  }
+  const outer = d.part_of?.outer_code;
+  return outer
+    ? `Fluence master updated — ${what} for the kit of ${outer}. ${outer}, its part cartons, Planning, Job Cards and every other module now read ${plural ? 'them' : 'it'}.`
+    : `Fluence master updated — ${what} for ${d.product.code}. Planning, Job Cards and every other module now read ${plural ? 'them' : 'it'}.`;
+}
+
+export default function FluenceDrawer({
+  productIds = [], resolve = null, kitId = null, startEditing = false, context = 'fluence_master', title, onClose, onSaved,
+}) {
   const [ids, setIds] = useState(productIds);
   const [dossiers, setDossiers] = useState(null);
   const [canEditServer, setCanEditServer] = useState(false);
-  const [active, setActive] = useState(null);         // product id, or 'all'
-  const [tab, setTab] = useState('rx');
-  const [editing, setEditing] = useState(null);       // 'rx' | 'kit' | null
+  const [active, setActive] = useState(null);         // a dossier key (keyOf), or 'all'
+  const [tab, setTab] = useState('kit');
+  const [editing, setEditing] = useState(false);
+  const [editorKey, setEditorKey] = useState(0);      // remounts the editor on "load the latest"
   const [dirty, setDirty] = useState(false);
   const [askDiscard, setAskDiscard] = useState(null); // the action to run once discarded
   const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(null);           // { productId, text }
+  const [saved, setSaved] = useState(null);           // { key, tone, text }
   const [innerEditing, setInnerEditing] = useState(null);
   const [revisions, setRevisions] = useState(null);
-  const panelRef = useRef(null);
+  const autoEdit = useRef(Boolean(startEditing));
 
   const review = REVIEW_CONTEXTS.has(context);
   const user = auth.user;
@@ -111,6 +136,13 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
 
   const load = useCallback(async (list) => {
     setError(null);
+    if (kitId) {
+      const out = await api.get(`/fluence/kits/${kitId}/dossier`);
+      setCanEditServer(Boolean(out.can_edit));
+      setDossiers(out.dossier ? [out.dossier] : []);
+      setActive(cur => cur ?? keyOf(out.dossier));
+      return;
+    }
     let want = list;
     if ((!want || !want.length) && resolve) {
       const qs = new URLSearchParams(Object.entries(resolve).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
@@ -121,16 +153,26 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
     const out = await api.get(`/fluence/dossiers?product_ids=${want.join(',')}`);
     setCanEditServer(Boolean(out.can_edit));
     setDossiers(out.dossiers);
-    setActive(cur => cur ?? (out.dossiers.length > 1 ? 'all' : out.dossiers[0]?.product.id ?? null));
-  }, [resolve]);
+    setActive(cur => cur ?? (out.dossiers.length > 1 ? 'all' : keyOf(out.dossiers[0])));
+  }, [resolve, kitId]);
 
   useEffect(() => { load(productIds).catch(e => { setError(e.message); setDossiers([]); }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dossier = useMemo(() => (dossiers || []).find(d => d.product.id === active) || null, [dossiers, active]);
+  const dossier = useMemo(() => (dossiers || []).find(d => keyOf(d) === active) || null, [dossiers, active]);
+
+  // Opened to edit (Kit Studio's "Edit contents & prescription"): straight into
+  // the editor, once, for someone who may edit.
+  useEffect(() => {
+    if (!autoEdit.current || !dossier || !canEdit) return;
+    autoEdit.current = false;
+    setTab('kit');
+    setEditing(true);
+  }, [dossier, canEdit]);
 
   // Guard every way out of an unsaved edit.
   const guard = action => { if (editing && dirty) setAskDiscard(() => action); else action(); };
   const close = () => guard(onClose);
+  const stopEditing = () => { setEditing(false); setDirty(false); };
 
   // Escape closes the drawer only — never the engine or form it was opened over.
   useEffect(() => {
@@ -154,37 +196,47 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
     return () => { live = false; };
   }, [tab, dossier?.kit?.id, dossier?.revisions?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const replaceDossier = next => {
-    if (!next) return;
-    setDossiers(list => (list || []).map(d => (d.product.id === next.product.id ? next : d)));
+  const afterSave = out => {
+    const next = out.dossier;
+    if (next) {
+      const was = active;
+      setDossiers(list => (list || []).map(d => (keyOf(d) === was ? next : d)));
+      setActive(keyOf(next));
+    }
+    stopEditing();
+    setSaved({ key: keyOf(next), tone: out.unchanged ? 'info' : 'ok', text: savedText(out) });
+    onSaved?.(out);
   };
 
-  const afterSave = (kind, out) => {
-    replaceDossier(out.dossier);
-    setEditing(null);
+  // A colleague saved first: fetch the latest and reopen the editor on it.
+  const reloadLatest = async () => {
     setDirty(false);
-    const p = out.dossier?.product;
-    const outer = out.dossier?.part_of?.outer_code;
-    if (out.unchanged) setSaved({ productId: p?.id, tone: 'info', text: 'Nothing changed — the Fluence master is as it was.' });
-    else if (kind === 'rx' && outer) setSaved({ productId: p?.id, tone: 'ok', text: `Fluence master updated — prescription revision ${out.revision} for the kit of ${outer}. ${outer}, its part cartons, Planning, Job Cards and every other module now read this prescription.` });
-    else if (kind === 'rx') setSaved({ productId: p?.id, tone: 'ok', text: `Fluence master updated — prescription revision ${out.revision} for ${p?.code}. Planning, Job Cards and every other module now read this prescription.` });
-    else if (outer) setSaved({ productId: p?.id, tone: 'ok', text: `Fluence master updated — kit list of ${outer} saved; its part cartons read it too.` });
-    else setSaved({ productId: p?.id, tone: 'ok', text: `Fluence master updated — kit list for ${p?.code} saved.` });
+    try { await load(ids); setEditorKey(k => k + 1); } catch (e) { setError(e.message); }
   };
 
-  const summaryItems = (dossiers || []).map(d => ({
+  const summaryItems = (dossiers || []).filter(d => d.product).map(d => ({
     product_id: d.product.id, product_code: d.product.code, product_name: d.product.name,
     party_artwork_code: d.product.party_artwork_code, prescription: d.prescription,
   }));
 
-  const header = dossier
+  const header = dossier?.product
     ? { name: dossier.product.name, sub: `${dossier.product.code}${dossier.product.party_item_code ? ` · Item ${dossier.product.party_item_code}` : ''}` }
-    : { name: title || (dossiers?.length > 1 ? `${dossiers.length} Fluence products` : 'Fluence'), sub: dossiers?.length > 1 ? 'Each product keeps its own prescription' : '' };
+    : dossier?.kit
+      ? { name: dossier.kit.kit_name, sub: fromStudio(dossier.kit) ? 'Kit Studio kit · not in the product master yet' : `Customer kit${dossier.kit.party_sl_no ? ` · party Sl.No ${dossier.kit.party_sl_no}` : ''} · not linked to a product yet` }
+      : { name: title || (dossiers?.length > 1 ? `${dossiers.length} Fluence products` : 'Fluence'), sub: dossiers?.length > 1 ? 'Each product keeps its own prescription' : '' };
+
+  const rx = dossier?.prescription;
+  const components = dossier?.components || [];
+  const hasAnything = components.length > 0 || (rx?.lines || []).length > 0 || Boolean(rx?.general_instructions);
+  const whereLabel = dossier?.part_of ? `kit of ${dossier.part_of.outer_code} (from ${dossier.product.code})` : dossier?.product ? dossier.product.code : dossier?.kit?.kit_name;
+  // Opened from Masters, the product is already a click away there (and its
+  // form may be open under this drawer) — no link back into it.
+  const mastersLink = dossier?.product && context !== 'masters' && canAccess(user, 'masters') ? `/masters?tab=products&edit=${dossier.product.id}` : null;
 
   return createPortal(
     <div data-ci-overlay className="no-print fixed inset-0 z-[58]" data-fluence-drawer="1">
       <div className="absolute inset-0 bg-[#1D1D1F]/25 backdrop-blur-[3px] animate-fadeIn" onClick={close} />
-      <aside ref={panelRef} className="absolute inset-y-0 right-0 flex w-full max-w-[920px] p-0 sm:p-3" role="dialog" aria-label="Fluence prescription and kit">
+      <aside className={`absolute inset-y-0 right-0 flex w-full p-0 transition-[max-width] duration-200 sm:p-3 ${editing ? 'max-w-[1240px]' : 'max-w-[920px]'}`} role="dialog" aria-label="Fluence kit and prescription">
         <div className="glass flex h-full w-full flex-col overflow-hidden rounded-none sm:rounded-[26px] animate-scaleIn">
           {/* Header */}
           <div className="flex items-center gap-3 border-b border-[#1D1D1F]/[0.06] bg-white/45 px-4 py-3">
@@ -193,16 +245,18 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="shrink-0 whitespace-nowrap rounded-full bg-green-700/10 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-green-800">Fluence only</span>
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-[#86868B]">
-                  {review ? 'Review & verify' : 'Prescription & kit master'} · from {FLUENCE_CONTEXTS[context] || 'ERP'}
+                  {review ? 'Review & verify' : 'Kit & prescription master'} · from {FLUENCE_CONTEXTS[context] || 'ERP'}
                 </span>
               </div>
               <p className="truncate text-[15px] font-bold tracking-[-0.01em] text-[#1D1D1F]">{header.name}</p>
               {header.sub && <p className="truncate text-[11px] text-[#6E6E73]">{header.sub}</p>}
             </div>
-            <Link to="/fluence" onClick={e => { if (editing && dirty) { e.preventDefault(); return; } onClose(); }}
-              className="hidden items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[#0064D2] hover:bg-white/70 sm:inline-flex" title="Open the Fluence Master">
-              Fluence Master <ExternalLink size={11} />
-            </Link>
+            {context !== 'fluence_master' && (
+              <Link to="/fluence" onClick={e => { if (editing && dirty) { e.preventDefault(); return; } onClose(); }}
+                className="hidden items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-[#0064D2] hover:bg-white/70 sm:inline-flex" title="Open the Fluence Master">
+                Fluence Master <ExternalLink size={11} />
+              </Link>
+            )}
             <button type="button" onClick={close} aria-label="Close"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">
               <X size={16} />
@@ -212,34 +266,34 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
           {/* Product switcher — a gang, invoice or challan carries several */}
           {dossiers?.length > 1 && (
             <div className="flex gap-1.5 overflow-x-auto border-b border-[#1D1D1F]/[0.06] bg-white/30 px-4 py-2 scrollbar-none">
-              <button type="button" onClick={() => guard(() => { setActive('all'); setEditing(null); })}
+              <button type="button" onClick={() => guard(() => { setActive('all'); stopEditing(); })}
                 className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold ${active === 'all' ? 'bg-green-700 text-white' : 'bg-white/70 text-[#515154] hover:bg-white'}`}>
                 All {dossiers.length} products
               </button>
               {dossiers.map(d => {
                 const has = rxState(d.prescription) !== 'none';
+                const key = keyOf(d);
                 return (
-                  <button key={d.product.id} type="button" onClick={() => guard(() => { setActive(d.product.id); setEditing(null); })}
-                    className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${active === d.product.id ? 'bg-green-700 text-white' : 'bg-white/70 text-[#515154] hover:bg-white'}`}
+                  <button key={key} type="button" onClick={() => guard(() => { setActive(key); stopEditing(); })}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold ${active === key ? 'bg-green-700 text-white' : 'bg-white/70 text-[#515154] hover:bg-white'}`}
                     title={has ? 'Prescription entered' : 'No prescription entered yet'}>
                     <span className={`h-1.5 w-1.5 rounded-full ${has ? 'bg-green-400' : 'bg-amber-400'}`} />
-                    {d.product.code} · {d.product.name}
+                    {d.product ? `${d.product.code} · ${d.product.name}` : d.kit?.kit_name}
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Tabs (single product) */}
+          {/* Tabs (one kit) */}
           {dossier && (
             <div className="flex gap-1 overflow-x-auto border-b border-[#1D1D1F]/[0.06] bg-white/25 px-4 py-2 scrollbar-none">
               {TABS.map(t => (
-                <button key={t.key} type="button" onClick={() => guard(() => { setTab(t.key); setEditing(null); })}
+                <button key={t.key} type="button" data-fluence-tab={t.key} onClick={() => guard(() => { setTab(t.key); stopEditing(); })}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${tab === t.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
                   <t.icon size={13} /> {t.label}
-                  {t.key === 'kit' && dossier.components.length > 0 && <span className="rounded-full bg-[#1D1D1F]/[0.07] px-1.5 text-[10px]">{dossier.components.length}</span>}
-                  {t.key === 'rx' && rxState(dossier.prescription) === 'full' && <span className="rounded-full bg-green-700/10 px-1.5 text-[10px] text-green-800">rev {dossier.prescription.revision}</span>}
-                  {t.key === 'rx' && rxState(dossier.prescription) === 'items' && <span className="rounded-full bg-green-700/10 px-1.5 text-[10px] text-green-800">master</span>}
+                  {t.key === 'kit' && components.length > 0 && <span className="rounded-full bg-[#1D1D1F]/[0.07] px-1.5 text-[10px]">{components.length} items</span>}
+                  {t.key === 'kit' && rxState(rx) === 'full' && <span className="rounded-full bg-green-700/10 px-1.5 text-[10px] text-green-800">rev {rx.revision}</span>}
                 </button>
               ))}
             </div>
@@ -252,11 +306,11 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
             )}
             {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
             {dossiers && dossiers.length === 0 && !error && (
-              <p className="py-12 text-center text-sm text-[#6E6E73]">No Fluence products on this record.</p>
+              <p className="py-12 text-center text-sm text-[#6E6E73]">{kitId ? 'This kit is no longer in the Fluence master.' : 'No Fluence products on this record.'}</p>
             )}
 
-            {saved && (!dossier || saved.productId === dossier.product.id || active === 'all') && (
-              <div className={`flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs font-semibold ${saved.tone === 'ok' ? 'border-green-200 bg-green-50 text-green-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+            {saved && (!dossier || saved.key === keyOf(dossier) || active === 'all') && (
+              <div className={`flex items-start gap-2 rounded-2xl border px-3 py-2 text-xs font-semibold ${saved.tone === 'ok' ? 'border-green-200 bg-green-50 text-green-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`} data-fluence-saved="1">
                 <BadgeCheck size={15} className="mt-0.5 shrink-0" />
                 <span className="min-w-0 flex-1">{saved.text}</span>
                 <button type="button" className="shrink-0 text-[11px] underline" onClick={() => setSaved(null)}>Dismiss</button>
@@ -266,153 +320,162 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
             {/* All products — the product-wise table */}
             {active === 'all' && dossiers?.length > 1 && (
               <Section title="Prescription — product-wise" right={<span className="text-[10px] text-[#86868B]">Every product keeps its own prescription</span>}>
-                <ProductRxTable items={summaryItems} onOpen={id => { setActive(id); setTab('rx'); }} />
+                <ProductRxTable items={summaryItems} onOpen={id => { setActive(id); setTab('kit'); }} />
               </Section>
             )}
 
-            {dossier && review && (
+            {dossier?.product && review && (
               <Section title="Verification">
                 <VerifyRow ok label="Product" value={`${dossier.product.code} · ${dossier.product.name}`} />
                 <VerifyRow ok={Boolean(dossier.product.party_artwork_code)} warn label="Artwork code" value={dossier.product.party_artwork_code || 'Not on the product master'} />
                 <VerifyRow ok={Boolean(dossier.kit)} warn label="Kit" value={dossier.kit ? `${dossier.kit.kit_name}${dossier.kit.party_sl_no ? ` · party Sl.No ${dossier.kit.party_sl_no}` : ''}${dossier.part_of ? ` · via its outer carton (${partLabel(dossier.part_of).toLowerCase()})` : ''}` : dossier.part_of ? `${partLabel(dossier.part_of)} — the outer carton has no kit linked` : 'No customer kit linked'} />
-                <VerifyRow ok={dossier.components.length > 0} warn label="Inner products" value={dossier.components.length ? `${dossier.components.length} items · ${qtyText(dossier.components.reduce((s, c) => s + (+c.qty_per_kit || 0), 0))} units` : 'None recorded'} />
-                <VerifyRow ok={rxState(dossier.prescription) !== 'none'} warn label="Prescription" value={{ full: rxStampText(dossier.prescription), items: `${dossier.prescription?.lines?.length || 0} products, from the customer master (it has no day-wise schedule)`, none: 'Not entered in the Fluence master' }[rxState(dossier.prescription)]} />
+                <VerifyRow ok={components.length > 0} warn label="Inner products" value={components.length ? `${components.length} items · ${qtyText(components.reduce((s, c) => s + (+c.qty_per_kit || 0), 0))} units` : 'None recorded'} />
+                <VerifyRow ok={rxState(rx) !== 'none'} warn label="Prescription" value={{ full: rxStampText(rx), items: `${rx?.lines?.length || 0} products, from the customer master (it has no day-wise schedule)`, none: 'Not entered in the Fluence master' }[rxState(rx)]} />
               </Section>
             )}
 
-            {dossier?.part_of && (
+            {dossier?.part_of && tab === 'kit' && (
               <div className="flex items-start gap-2 rounded-2xl border border-green-200 bg-green-50/80 px-3 py-2 text-xs text-green-900" data-fluence-part="1">
                 <Layers size={15} className="mt-0.5 shrink-0" />
                 <span className="min-w-0">
                   <b>{partLabel(dossier.part_of)}</b> — a part carton of {dossier.part_of.outer_name}.{' '}
                   {dossier.kit
-                    ? 'It shows that kit’s prescription and contents; an edit made here changes them for the outer carton and all its parts.'
-                    : 'The outer carton has no kit linked yet, so there is no prescription to show.'}
+                    ? 'It shows that kit’s contents and prescription; an edit made here changes them for the outer carton and all its parts.'
+                    : 'The outer carton has no kit linked yet, so there is nothing to show.'}
                 </span>
               </div>
             )}
 
-            {dossier && tab === 'rx' && (
-              editing === 'rx' ? (
-                <Section title={dossier.part_of ? `Edit prescription — kit of ${dossier.part_of.outer_code} (from ${dossier.product.code})` : `Edit prescription — ${dossier.product.code}`}>
-                  <PrescriptionEditor dossier={dossier} context={context} onDirty={setDirty}
-                    onCancel={() => guard(() => { setEditing(null); setDirty(false); })}
-                    onSaved={out => afterSave('rx', out)} />
-                </Section>
-              ) : (
-                <Section title="Prescription"
-                  right={canEdit && (
-                    <Button size="sm" variant={review ? 'secondary' : 'primary'} onClick={() => { setEditing('rx'); setSaved(null); }}>
-                      <Pencil size={12} /> {dossier.prescription ? 'Edit prescription' : 'Add prescription'}
-                    </Button>
-                  )}>
-                  {rxState(dossier.prescription) === 'full' ? (
-                    <>
-                      <p className="mb-2 text-[11px] font-semibold text-green-800">{rxStampText(dossier.prescription)}</p>
-                      <RxLinesTable rx={dossier.prescription} />
-                      <RxGeneral rx={dossier.prescription} />
-                    </>
-                  ) : rxState(dossier.prescription) === 'items' ? (
-                    <>
-                      <p className="mb-2 text-[11px] font-semibold text-green-800">{rxStampText(dossier.prescription)}</p>
-                      <RxLinesTable rx={dossier.prescription} />
-                      <p className="mt-2 text-[11px] text-[#6E6E73]">
-                        The kit's products, as the customer master (Master from Customer.xlsx) lists them. The master has no day-wise schedule
-                        {canEdit ? ' — days and doses can be added with Edit prescription.' : '.'}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/70 px-4 py-5 text-center">
-                      <p className="text-sm font-bold text-amber-800">No prescription in the Fluence master yet</p>
-                      <p className="mt-1 text-xs text-amber-800/80">
-                        {canEdit ? 'Add it once here — Planning, the Job Card and every station will read it from the master.' : 'Ask Planning or Artwork to enter it in the Fluence master.'}
-                      </p>
-                    </div>
-                  )}
-                  {review && canEdit && <p className="mt-2 text-[11px] text-[#86868B]">Opened for review from {FLUENCE_CONTEXTS[context]} — editing changes the master for every module.</p>}
-                </Section>
-              )
-            )}
-
-            {dossier && tab === 'kit' && (
+            {dossier && tab === 'kit' && !editing && (
               <>
-                <Section title="Customer kit">
-                  {dossier.kit ? (
+                {dossier.kit ? (
+                  <Section title="Customer kit">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       <Fact label="Kit (customer list)" value={dossier.kit.kit_name} />
                       <Fact label="Party Sl.No" value={dossier.kit.party_sl_no} />
                       <Fact label="Type" value={dossier.kit.kit_type} />
                       <Fact label="Valid" value={dossier.kit.valid_from ? `${fmt.date(dossier.kit.valid_from)} – ${dossier.kit.valid_to ? fmt.date(dossier.kit.valid_to) : '…'}` : null} />
                       {(() => {
-                        const price = kitListPrice(dossier.kit, (dossier.components || []).map(c => c.mrp_in_kit));
+                        const price = kitListPrice(dossier.kit, components.map(c => c.mrp_in_kit));
                         return price?.kind === 'per_line'
                           ? <Fact label="Line price (customer list)" value={`${fmt.inr(price.amount)} on every line`} />
                           : <Fact label="Kit total (customer list)" value={price ? fmt.inr(price.amount) : null} />;
                       })()}
                       {dossier.part_of
                         ? <Fact label={`Outer carton MRP (${dossier.part_of.outer_code})`} value={dossier.part_of.outer_mrp != null ? fmt.inr(dossier.part_of.outer_mrp) : null} />
-                        : <Fact label="MRP on product master" value={dossier.product.mrp != null ? fmt.inr(dossier.product.mrp) : null} />}
-                      <Fact label="Linked" value={dossier.kit.from_customer_list ? `${(dossier.kit.link_method || '').replace(/_/g, ' ')}${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
-                        : String(dossier.kit.source_ref || '').startsWith('kit-studio:') ? `Kit Studio${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
+                        : <Fact label="Carton MRP (Masters)" value={dossier.product?.mrp != null ? fmt.inr(dossier.product.mrp) : null} />}
+                      <Fact label="Linked" value={!dossier.product && !dossier.part_of ? 'Not in the product master yet'
+                        : dossier.kit.from_customer_list ? `${(dossier.kit.link_method || '').replace(/_/g, ' ')}${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
+                        : fromStudio(dossier.kit) ? `Kit Studio${dossier.kit.linked_by ? ` · ${dossier.kit.linked_by}` : ''}`
                         : 'Started from the ERP product'} />
-                      <Fact label="Carton size (ERP)" value={dossier.product.size} />
+                      <Fact label="Carton size (Masters)" value={dossier.product?.size} />
                       <KitCartonsFact dossier={dossier} />
                     </div>
-                  ) : dossier.part_of ? (
+                  </Section>
+                ) : dossier.part_of ? (
+                  <Section title="Customer kit">
                     <p className="text-xs text-[#6E6E73]">
                       {dossier.product.code} is a part carton — it shows the kit of its outer carton {dossier.part_of.outer_code}, which has no kit linked.
                       {' '}Link the customer kit to {dossier.part_of.outer_code} in the{' '}
                       <Link to="/fluence?tab=kits" className="font-semibold text-[#0064D2] hover:underline" onClick={onClose}>Fluence Master</Link>.
                     </p>
-                  ) : (
+                  </Section>
+                ) : null}
+
+                <Section title="Kit & prescription"
+                  right={canEdit && (
+                    <Button size="sm" variant={review ? 'secondary' : 'primary'} onClick={() => { setEditing(true); setSaved(null); }} data-fluence-edit="1">
+                      <Pencil size={12} /> {hasAnything ? 'Edit kit & prescription' : 'Add items & prescription'}
+                    </Button>
+                  )}>
+                  {hasAnything ? (
+                    <>
+                      {rx && <p className="mb-2 text-[11px] font-semibold text-green-800">{rxStampText(rx)}</p>}
+                      <RxLinesTable rx={rx} components={components} onEditItem={canEdit ? setInnerEditing : null} />
+                      <RxGeneral rx={rx} />
+                      {rxState(rx) !== 'full' && components.length > 0 && (
+                        <p className="mt-2 text-[11px] text-[#6E6E73]">
+                          No day-wise schedule yet — the customer master lists the kit’s products only
+                          {canEdit ? '. Doses and times go in with Edit kit & prescription, beside each item.' : '.'}
+                        </p>
+                      )}
+                      {components.some(c => c.carton_l == null || c.carton_w == null || c.carton_h == null) && (
+                        <p className="mt-1 text-[11px] text-amber-700">Carton sizes marked “not known yet” are blank on purpose — they are filled in when the sizes are supplied, never estimated.</p>
+                      )}
+                    </>
+                  ) : dossier.part_of && !dossier.kit ? (
                     <p className="text-xs text-[#6E6E73]">
-                      No customer kit is linked to {dossier.product.code}. {canEdit ? 'Record its items below, or link the customer kit in the ' : 'Link it in the '}
-                      <Link to="/fluence?tab=kits" className="font-semibold text-[#0064D2] hover:underline" onClick={onClose}>Fluence Master</Link>.
+                      Nothing to show until the outer carton {dossier.part_of.outer_code} has a kit.
+                      {canEdit ? ` Items added here start that kit on ${dossier.part_of.outer_code}.` : ''}
                     </p>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/70 px-4 py-5 text-center">
+                      <p className="text-sm font-bold text-amber-800">Nothing in the Fluence master for this kit yet</p>
+                      <p className="mt-1 text-xs text-amber-800/80">
+                        {canEdit ? 'Add its items and how each is taken — one table, one save. Planning, the Job Card and every station read it from the master.'
+                          : 'Ask Planning or Artwork to enter it in the Fluence master.'}
+                      </p>
+                    </div>
                   )}
+                  {review && canEdit && <p className="mt-2 text-[11px] text-[#86868B]">Opened for review from {FLUENCE_CONTEXTS[context]} — editing changes the master for every module.</p>}
                 </Section>
-                {editing === 'kit' ? (
-                  <Section title={dossier.part_of ? `Edit kit list — kit of ${dossier.part_of.outer_code} (from ${dossier.product.code})` : `Edit kit list — ${dossier.product.code}`}>
-                    <KitComponentsEditor dossier={dossier} context={context} onDirty={setDirty}
-                      onCancel={() => guard(() => { setEditing(null); setDirty(false); })}
-                      onSaved={out => afterSave('kit', out)} />
-                  </Section>
-                ) : (
-                  <Section title="Inner products"
-                    right={canEdit && <Button size="sm" variant="secondary" onClick={() => { setEditing('kit'); setSaved(null); }}><Pencil size={12} /> Edit kit list</Button>}>
-                    {dossier.components.length
-                      ? <KitComponentsTable components={dossier.components} canEdit={canEdit} onEditItem={setInnerEditing} />
-                      : <p className="text-xs text-[#6E6E73]">No inner products recorded for this kit.</p>}
-                    {dossier.components.some(c => c.carton_l == null || c.carton_w == null || c.carton_h == null) && (
-                      <p className="mt-2 text-[11px] text-amber-700">Carton dimensions marked “Not known yet” are blank on purpose — they are filled in when the sizes are supplied, never estimated.</p>
-                    )}
-                  </Section>
-                )}
               </>
             )}
 
-            {dossier && tab === 'product' && (
-              <Section title="Product & artwork">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Fact label="Product" value={dossier.product.name} />
-                  <Fact label="Internal code" value={dossier.product.code} mono />
-                  <Fact label="Item code" value={dossier.product.party_item_code} mono />
-                  <Fact label="Artwork code" value={dossier.product.party_artwork_code} mono />
-                  <Fact label="Output number" value={dossier.product.output_number} mono />
-                  <Fact label="Shade card" value={[dossier.product.shade_card_number, dossier.product.shade_card_date].filter(Boolean).join(' · ')} />
-                  <Fact label="Carton size" value={dossier.product.size} />
-                  <Fact label="MRP" value={dossier.product.mrp != null ? fmt.inr(dossier.product.mrp) : null} />
-                  <Fact label="Colours" value={[dossier.product.colors, dossier.product.colour_type].filter(Boolean).join(' · ')} />
-                  <Fact label="Board" value={dossier.product.board_name} />
-                  <Fact label="Coating" value={dossier.product.coating} />
-                  <Fact label="Pasting" value={dossier.product.pasting_type} />
-                  <Fact label="Child sheet" value={dossier.product.child_l && dossier.product.child_w ? `${dossier.product.child_l} × ${dossier.product.child_w}` : null} />
-                  <Fact label="Ups" value={dossier.product.ups} />
-                  <Fact label="Die" value={dossier.product.die_number} />
-                  <Fact label="Customer" value={dossier.product.customer_name} />
-                </div>
-                <p className="mt-3 text-[11px] text-[#86868B]">Product and artwork details come from the Product Master and are read-only here.</p>
+            {dossier && tab === 'kit' && editing && (
+              <Section title={`Edit kit & prescription — ${whereLabel}`}>
+                <KitRxEditor key={`${keyOf(dossier)}:${editorKey}`} dossier={dossier} context={context} onDirty={setDirty}
+                  onCancel={() => guard(stopEditing)}
+                  onReload={reloadLatest}
+                  onSaved={afterSave} />
               </Section>
+            )}
+
+            {dossier && tab === 'product' && (
+              dossier.product ? (
+                <Section title="Product master (Masters)"
+                  right={mastersLink && (
+                    <Link to={mastersLink} data-fluence-open-masters="1"
+                      onClick={e => { if (editing && dirty) { e.preventDefault(); return; } onClose(); }}
+                      className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-[#0064D2] shadow-[0_1px_4px_rgba(29,29,31,0.08)] hover:bg-white">
+                      Open in Masters <ExternalLink size={11} />
+                    </Link>
+                  )}>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Fact label="Product" value={dossier.product.name} />
+                    <Fact label="FP code" value={dossier.product.code} mono />
+                    <Fact label="Billing code (item code)" value={dossier.product.party_item_code} mono />
+                    <Fact label="Artwork code" value={dossier.product.party_artwork_code} mono />
+                    <Fact label="Carton MRP" value={dossier.product.mrp != null ? fmt.inr(dossier.product.mrp) : null} />
+                    <Fact label="Carton size" value={dossier.product.size} />
+                    <Fact label="Output number" value={dossier.product.output_number} mono />
+                    <Fact label="Shade card" value={[dossier.product.shade_card_number, dossier.product.shade_card_date].filter(Boolean).join(' · ')} />
+                    <Fact label="Colours" value={[dossier.product.colors, dossier.product.colour_type].filter(Boolean).join(' · ')} />
+                    <Fact label="Board" value={dossier.product.board_name} />
+                    <Fact label="Coating" value={dossier.product.coating} />
+                    <Fact label="Pasting" value={dossier.product.pasting_type} />
+                    <Fact label="Child sheet" value={dossier.product.child_l && dossier.product.child_w ? `${dossier.product.child_l} × ${dossier.product.child_w}` : null} />
+                    <Fact label="Ups" value={dossier.product.ups} />
+                    <Fact label="Die" value={dossier.product.die_number} />
+                    <Fact label="Customer" value={dossier.product.customer_name} />
+                  </div>
+                  <p className="mt-3 text-[11px] text-[#86868B]">
+                    Masters owns what is printed and billed — the FP code, billing code, carton MRP, size and spec. The Fluence master owns what is in the kit and its prescription.
+                    {mastersLink ? ' Change these in Masters.' : ''}
+                  </p>
+                </Section>
+              ) : (
+                <Section title="Product master (Masters)">
+                  <p className="text-xs text-[#515154]">
+                    <b>{dossier.kit?.kit_name}</b> has no carton in the product master yet, so it has no FP code or billing code and no module shows it.
+                  </p>
+                  <p className="mt-1.5 text-xs text-[#6E6E73]">
+                    {fromStudio(dossier.kit)
+                      ? 'Create or link its product master from the kit in Kit Studio (“Create product master”) — the FP code and the next billing code are given there.'
+                      : 'Link it to its product under Customer kits in the Fluence Master.'}
+                  </p>
+                </Section>
+              )
             )}
 
             {dossier && tab === 'history' && (
@@ -459,7 +522,7 @@ export default function FluenceDrawer({ productIds = [], resolve = null, context
       <Modal open={Boolean(askDiscard)} onClose={() => setAskDiscard(null)} layer="nested" title="Discard your changes?"
         footer={<>
           <Button variant="secondary" onClick={() => setAskDiscard(null)}>Keep editing</Button>
-          <Button variant="danger" onClick={() => { const a = askDiscard; setAskDiscard(null); setEditing(null); setDirty(false); a?.(); }}>Discard</Button>
+          <Button variant="danger" onClick={() => { const a = askDiscard; setAskDiscard(null); stopEditing(); a?.(); }}>Discard</Button>
         </>}>
         <p className="text-sm text-gray-600">You have unsaved edits to the Fluence master. Leave without saving?</p>
       </Modal>

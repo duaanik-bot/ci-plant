@@ -12,9 +12,13 @@
 //
 // Who may do what is the server's call (routes/kitstudio.js): everyone who can
 // open the Fluence master may look; Planning roles may edit.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, auth } from '../api.js';
 import { subscribeToDbChanges } from '../lib/realtime.js';
+
+// What is in a kit and its prescription are edited in the one-table editor of
+// the Fluence drawer; the studio hands a kit over to it (openKitEditor).
+const FluenceDrawer = lazy(() => import('../components/fluence/FluenceDrawer.jsx'));
 
 // The tables the studio's view is built from.
 const STUDIO_TABLES = [
@@ -32,7 +36,9 @@ function pathFor(coll, id) {
 export default function KitStudio() {
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(720);
+  const [kitEditor, setKitEditor] = useState(null);   // { kitId, edit } — the Fluence drawer over the studio
   const frameBox = useRef(null);
+  const listenersRef = useRef(null);
 
   useEffect(() => {
     const listeners = new Set();
@@ -46,8 +52,12 @@ export default function KitStudio() {
         });
       },
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+      openKitEditor(kitId, opts = {}) {
+        if (Number.isInteger(kitId) && kitId > 0) setKitEditor({ kitId, edit: Boolean(opts.edit) });
+      },
       user: auth.user,
     };
+    listenersRef.current = listeners;
     function send(op, p) {
       const kit = `/kit-studio/kits/${encodeURIComponent(p.id)}`;
       switch (op) {
@@ -89,6 +99,9 @@ export default function KitStudio() {
     return () => window.removeEventListener('resize', fit);
   }, [ready]);
 
+  // A save in the editor reaches the studio at once, not only on the next feed tick.
+  const studioRefresh = () => { for (const fn of listenersRef.current || []) { try { fn(); } catch { /* the poll catches up */ } } };
+
   // No frame of its own: the studio page is transparent and wears the ERP's
   // theme, so it sits on the same canvas as every other module.
   return (
@@ -100,6 +113,12 @@ export default function KitStudio() {
           className="block w-full border-0 bg-transparent"
           style={{ height, colorScheme: 'light' }}
         />
+      )}
+      {kitEditor && (
+        <Suspense fallback={null}>
+          <FluenceDrawer key={kitEditor.kitId} kitId={kitEditor.kitId} startEditing={kitEditor.edit} context="kit_studio"
+            onSaved={studioRefresh} onClose={() => { setKitEditor(null); studioRefresh(); }} />
+        </Suspense>
       )}
     </div>
   );

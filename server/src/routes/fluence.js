@@ -15,6 +15,7 @@ import { audit } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import {
   nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, rxChangedAfterFinalise,
+  rxLinesInStep, componentsSignature,
 } from '../../../client/src/lib/fluence.js';
 
 const r = Router();
@@ -61,6 +62,38 @@ const KIT_OF_CARTON = `
     LEFT JOIN fluence_kits k ON k.product_id = COALESCE(pc.outer_product_id, p.id)`;
 
 // ── Dossier: everything a Fluence door shows about one product ───────────────
+// What a kit holds and says — its items, its prescription and its history —
+// for any set of kits, whether or not a product carries them yet.
+async function kitRecords(kitIds, qc) {
+  const components = kitIds.length ? await qc(`
+    SELECT kc.kit_id, kc.id, kc.sr, kc.qty_per_kit, kc.mrp_in_kit, kc.remarks,
+           ip.id AS inner_product_id, ip.name, ip.kind, ip.product_code, ip.artwork_code, ip.dosage_form,
+           ip.standard_mrp, ip.carton_l, ip.carton_w, ip.carton_h, ip.packaging_info,
+           ip.remarks AS inner_remarks, ip.erp_product_id, ep.code AS erp_product_code, ep.size AS erp_size
+    FROM fluence_kit_components kc
+    JOIN fluence_inner_products ip ON ip.id = kc.inner_product_id
+    LEFT JOIN products ep ON ep.id = ip.erp_product_id
+    WHERE kc.kit_id = ANY($1::int[])
+    ORDER BY kc.kit_id, kc.sr, kc.id`, [kitIds]) : [];
+
+  const rxs = kitIds.length ? await qc(`
+    SELECT id, kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from
+    FROM fluence_prescriptions WHERE kit_id = ANY($1::int[])`, [kitIds]) : [];
+  const rxIds = rxs.map(x => x.id);
+  const rxLines = rxIds.length ? await qc(`
+    SELECT l.*, ip.name AS item_name
+    FROM fluence_prescription_lines l
+    LEFT JOIN fluence_inner_products ip ON ip.id = l.inner_product_id
+    WHERE l.prescription_id = ANY($1::int[])
+    ORDER BY l.prescription_id, l.sr, l.id`, [rxIds]) : [];
+
+  const revisions = kitIds.length ? await qc(`
+    SELECT id, kit_id, area, revision, note, changed_by, changed_from, changed_at
+    FROM fluence_master_revisions WHERE kit_id = ANY($1::int[])
+    ORDER BY changed_at DESC, id DESC`, [kitIds]) : [];
+  return { components, rxs, rxLines, revisions };
+}
+
 async function loadDossiers(productIds, qc = q) {
   if (!productIds.length) return [];
   const products = await qc(`
@@ -88,32 +121,7 @@ async function loadDossiers(productIds, qc = q) {
       AND NOT EXISTS (SELECT 1 FROM fluence_kits own WHERE own.product_id = pc.product_id)
     ORDER BY pc.outer_product_id, p.code, p.id`, [outerIds]) : [];
 
-  const components = kitIds.length ? await qc(`
-    SELECT kc.kit_id, kc.id, kc.sr, kc.qty_per_kit, kc.mrp_in_kit, kc.remarks,
-           ip.id AS inner_product_id, ip.name, ip.kind, ip.product_code, ip.artwork_code, ip.dosage_form,
-           ip.standard_mrp, ip.carton_l, ip.carton_w, ip.carton_h, ip.packaging_info,
-           ip.remarks AS inner_remarks, ip.erp_product_id, ep.code AS erp_product_code, ep.size AS erp_size
-    FROM fluence_kit_components kc
-    JOIN fluence_inner_products ip ON ip.id = kc.inner_product_id
-    LEFT JOIN products ep ON ep.id = ip.erp_product_id
-    WHERE kc.kit_id = ANY($1::int[])
-    ORDER BY kc.kit_id, kc.sr, kc.id`, [kitIds]) : [];
-
-  const rxs = kitIds.length ? await qc(`
-    SELECT id, kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from
-    FROM fluence_prescriptions WHERE kit_id = ANY($1::int[])`, [kitIds]) : [];
-  const rxIds = rxs.map(x => x.id);
-  const rxLines = rxIds.length ? await qc(`
-    SELECT l.*, ip.name AS item_name
-    FROM fluence_prescription_lines l
-    LEFT JOIN fluence_inner_products ip ON ip.id = l.inner_product_id
-    WHERE l.prescription_id = ANY($1::int[])
-    ORDER BY l.prescription_id, l.sr, l.id`, [rxIds]) : [];
-
-  const revisions = kitIds.length ? await qc(`
-    SELECT id, kit_id, area, revision, note, changed_by, changed_from, changed_at
-    FROM fluence_master_revisions WHERE kit_id = ANY($1::int[])
-    ORDER BY changed_at DESC, id DESC`, [kitIds]) : [];
+  const { components, rxs, rxLines, revisions } = await kitRecords(kitIds, qc);
 
   const byId = new Map(products.map(p => [p.id, p]));
   return productIds.filter(id => byId.has(id)).map(id => {
@@ -149,6 +157,44 @@ async function loadDossiers(productIds, qc = q) {
     };
   });
 }
+
+// The same dossier found by the kit's own id — a kit designed in Kit Studio has
+// no product until its carton goes into the product master. A linked kit IS its
+// product's dossier; an unlinked one carries no product.
+async function loadKitDossier(kitId, qc = q) {
+  const kit = (await qc(`
+    SELECT k.id, k.product_id, k.kit_name, k.source_ref, k.link_method, k.linked_at, k.linked_by, k.party_sl_no,
+           to_char(k.valid_from, 'YYYY-MM-DD') AS valid_from, to_char(k.valid_to, 'YYYY-MM-DD') AS valid_to,
+           k.kit_type, k.kit_total_mrp, k.remarks, k.superseded_by_kit_id
+    FROM fluence_kits k WHERE k.id = $1`, [kitId]))[0];
+  if (!kit) return null;
+  if (kit.product_id) {
+    const [d] = await loadDossiers([kit.product_id], qc);
+    if (d && d.kit?.id === kit.id) return d;
+  }
+  const { components, rxs, rxLines, revisions } = await kitRecords([kit.id], qc);
+  const rx = rxs[0] || null;
+  return {
+    product: null,
+    part_of: null,
+    kit: { ...kit, from_customer_list: String(kit.source_ref || '').startsWith('customer-master:'), parts: [] },
+    components,
+    prescription: rx ? { ...rx, lines: rxLines } : null,
+    revisions: revisions.slice(0, 20),
+  };
+}
+
+r.get('/fluence/kits/:id/dossier', async (req, res, next) => {
+  try {
+    const kitId = Number(req.params.id);
+    if (!(Number.isInteger(kitId) && kitId > 0)) throw fail(400, 'Not a valid kit.');
+    const dossier = await loadKitDossier(kitId);
+    if (!dossier) throw fail(404, 'This kit is no longer in the Fluence master — reload the page.');
+    res.json({ can_edit: canEdit(req.user), dossier });
+  } catch (e) {
+    offWhenMissing(res, next, { can_edit: false, dossier: null })(e);
+  }
+});
 
 r.get('/fluence/dossiers', async (req, res, next) => {
   try {
@@ -388,6 +434,168 @@ async function recordRevision({ kitId, area, revision = null, before, after, not
   [kitId, area, revision, before == null ? null : JSON.stringify(before), after == null ? null : JSON.stringify(after), note, user.name, user.id ?? null, from]);
 }
 
+// A prescription written as `value` says, at `revision`: the header row, and its
+// lines replaced whole.
+async function writeRx(kitId, value, revision, user, from, qc, oc) {
+  const rx = await oc(`
+    INSERT INTO fluence_prescriptions (kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from)
+    VALUES ($1, $2, $3, $4, now(), $5, $6)
+    ON CONFLICT (kit_id) DO UPDATE SET
+      general_instructions = EXCLUDED.general_instructions, remarks = EXCLUDED.remarks,
+      revision = EXCLUDED.revision, updated_at = now(), updated_by = EXCLUDED.updated_by, updated_from = EXCLUDED.updated_from
+    RETURNING *`, [kitId, value.general_instructions, value.remarks, revision, user.name, from]);
+  await qc('DELETE FROM fluence_prescription_lines WHERE prescription_id = $1', [rx.id]);
+  for (const l of value.lines) {
+    await qc(`
+      INSERT INTO fluence_prescription_lines
+        (prescription_id, sr, inner_product_id, item_label, dosage, dose_form, pack_count, frequency,
+         morning_qty, afternoon_qty, evening_qty, night_qty, other_timing, other_qty, instructions, remarks)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+    [rx.id, l.sr, l.inner_product_id, l.item_label, l.dosage, l.dose_form, l.pack_count, l.frequency,
+      l.morning_qty, l.afternoon_qty, l.evening_qty, l.night_qty, l.other_timing, l.other_qty, l.instructions, l.remarks]);
+  }
+  return rx;
+}
+
+// A kit list written whole, in order.
+async function writeKitComponents(kitId, components, user, qc) {
+  await qc('DELETE FROM fluence_kit_components WHERE kit_id = $1', [kitId]);
+  for (const c of components) {
+    await qc(`
+      INSERT INTO fluence_kit_components (kit_id, inner_product_id, sr, qty_per_kit, mrp_in_kit, remarks, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)`, [kitId, c.inner_product_id, c.sr, c.qty_per_kit, c.mrp_in_kit, c.remarks, user.name]);
+  }
+}
+
+// After a kit list was written on its own (Kit Studio's Push to Kits, the old
+// kit-list editor), the prescription follows it: a bare line for each new item,
+// the lines of an item that left the box removed. A revision says what moved.
+// Nothing happens when the two already agree. Exported for Kit Studio.
+export async function keepRxInStep(kitId, user, from, qc, oc) {
+  const comps = await componentsSnapshot(kitId, qc);
+  const current = await oc('SELECT * FROM fluence_prescriptions WHERE kit_id = $1 FOR UPDATE', [kitId]);
+  const before = current ? await rxSnapshot(kitId, qc) : null;
+  if (!before && !comps.length) return null;
+  const step = rxLinesInStep(comps, before?.lines || []);
+  if (before && !step.added.length && !step.removed.length) return null;
+  const revision = (current?.revision ?? 0) + 1;
+  await writeRx(kitId, { general_instructions: before?.general_instructions ?? null, remarks: before?.remarks ?? null, lines: step.lines },
+    revision, user, from, qc, oc);
+  const after = await rxSnapshot(kitId, qc);
+  const nameOf = id => comps.find(c => c.inner_product_id === id)?.name ?? `item ${id}`;
+  const note = ['Kept in step with the kit list',
+    step.added.length ? `added ${step.added.map(l => nameOf(l.inner_product_id)).join(', ')}` : null,
+    step.removed.length ? `removed ${step.removed.map(l => l.item_name || `item ${l.inner_product_id}`).join(', ')}` : null,
+  ].filter(Boolean).join(' — ');
+  await recordRevision({ kitId, area: 'prescription', revision, before, after, note, user, from }, qc);
+  await audit('fluence_kit', kitId, `prescription_revised:rev ${revision}`, note, qc, user.name);
+  return { revision };
+}
+
+// ── Kit contents and prescription, in one save ───────────────────────────────
+// What is in the box and how each item is taken are edited together and saved
+// in ONE transaction; each keeps its own revision, minted only when it changed.
+// A line names an item in the box or says what it is for; every item in the box
+// keeps at least one line, so a job card can never print a kit list and a
+// prescription that disagree. Both halves carry what the editor opened
+// (base_components, base_revision): a colleague's save in between is refused,
+// never overwritten.
+async function saveKitAndRx({ kit, product, outer, body, user, from }, qc, oc) {
+  const comps = normaliseComponentsPayload(body);
+  const rx = normaliseRxPayload(body);
+  const errors = [...comps.errors, ...rx.errors];
+  const components = comps.value.components;
+  const inKit = new Set(components.map(c => c.inner_product_id));
+  rx.value.lines.forEach((l, i) => {
+    if (l.inner_product_id != null && !inKit.has(l.inner_product_id)) {
+      errors.push(`Line ${i + 1}: that item is not in the kit — add it to the kit, or type what the line is for.`);
+    }
+  });
+  if (errors.length) throw fail(400, errors.join(' '));
+  await assertInnerProducts(components.map(c => c.inner_product_id), qc);
+  const value = {
+    general_instructions: rx.value.general_instructions,
+    remarks: rx.value.remarks,
+    lines: rxLinesInStep(components, rx.value.lines).lines,
+  };
+
+  const beforeComps = await componentsSnapshot(kit.id, qc);
+  if (body?.base_components != null && String(body.base_components) !== componentsSignature(beforeComps)) {
+    throw fail(409, 'The kit list was changed by someone else after you opened it. '
+      + 'Your edits were not saved — reopen it to see the latest, then make your change again.');
+  }
+  const current = await oc('SELECT * FROM fluence_prescriptions WHERE kit_id = $1 FOR UPDATE', [kit.id]);
+  const currentRev = current?.revision ?? 0;
+  if (body?.base_revision != null && Number(body.base_revision) !== currentRev) {
+    throw fail(409,
+      `This prescription was changed by ${current?.updated_by || 'someone else'} (now revision ${currentRev}) after you opened it. `
+      + 'Your edits were not saved — reopen it to see the latest, then make your change again.');
+  }
+  const label = product ? `${product.code} ${product.name}${outer ? ` (part carton of ${outer.code})` : ''}` : kit.kit_name;
+  const note = product ? fromPart(product, outer) : null;
+
+  let componentsChanged = false;
+  if (componentsSignature(beforeComps) !== componentsSignature(components)) {
+    await writeKitComponents(kit.id, components, user, qc);
+    const after = await componentsSnapshot(kit.id, qc);
+    await recordRevision({ kitId: kit.id, area: 'components', before: beforeComps, after, note, user, from }, qc);
+    await audit('fluence_kit', kit.id, 'kit_components_updated',
+      `${label} — ${after.length} inner product(s), saved with the prescription from ${FLUENCE_CONTEXTS[from]}`, qc, user.name);
+    componentsChanged = true;
+  }
+
+  const beforeRx = current ? await rxSnapshot(kit.id, qc) : null;
+  const nothing = !value.lines.length && !value.general_instructions && !value.remarks;
+  let rxChanged = false;
+  let revision = currentRev;
+  if (!(nothing && !current) && !(beforeRx && sameRx(beforeRx, value))) {
+    revision = currentRev + 1;
+    await writeRx(kit.id, value, revision, user, from, qc, oc);
+    const after = await rxSnapshot(kit.id, qc);
+    await recordRevision({ kitId: kit.id, area: 'prescription', revision, before: beforeRx, after, note, user, from }, qc);
+    await audit('fluence_kit', kit.id, `prescription_revised:rev ${revision}`,
+      `${label} — prescription revision ${revision}, ${value.lines.length} line(s), saved with the kit list from ${FLUENCE_CONTEXTS[from]}`,
+      qc, user.name);
+    rxChanged = true;
+  }
+  return { unchanged: !componentsChanged && !rxChanged, componentsChanged, rxChanged, revision };
+}
+
+// The one editor's save — contents and prescription together. By product (the
+// Fluence door in any module) …
+r.put('/fluence/products/:productId/kit', canEditMaster, async (req, res, next) => {
+  try {
+    const productId = Number(req.params.productId);
+    const from = contextOf(req.body?.from) || 'fluence_master';
+    const outcome = await tx(async (qc, oc) => {
+      const product = await fluenceProduct(productId, oc);
+      const b = req.body || {};
+      const empty = !(b.components || []).length && !(b.lines || []).length && !String(b.general_instructions ?? '').trim() && !String(b.remarks ?? '').trim();
+      if (empty && !(await kitIdOf(product.id, oc))) return { unchanged: true, revision: 0 };
+      const { kit, outer } = await kitForProduct(product, req.user, qc, oc);
+      return saveKitAndRx({ kit, product, outer, body: req.body, user: req.user, from }, qc, oc);
+    });
+    const [dossier] = await loadDossiers([productId]);
+    res.json({ ...outcome, dossier });
+  } catch (e) { next(e); }
+});
+
+// … or by kit, for a kit that has no product yet (designed in Kit Studio).
+r.put('/fluence/kits/:id/kit', canEditMaster, async (req, res, next) => {
+  try {
+    const kitId = Number(req.params.id);
+    if (!(Number.isInteger(kitId) && kitId > 0)) throw fail(400, 'Not a valid kit.');
+    const from = contextOf(req.body?.from) || 'fluence_master';
+    const outcome = await tx(async (qc, oc) => {
+      const kit = await oc('SELECT * FROM fluence_kits WHERE id = $1 FOR UPDATE', [kitId]);
+      if (!kit) throw fail(404, 'This kit is no longer in the Fluence master — reload the page.');
+      const product = kit.product_id ? await oc('SELECT id, code, name FROM products WHERE id = $1', [kit.product_id]) : null;
+      return saveKitAndRx({ kit, product, outer: null, body: req.body, user: req.user, from }, qc, oc);
+    });
+    res.json({ ...outcome, dossier: await loadKitDossier(kitId) });
+  } catch (e) { next(e); }
+});
+
 r.put('/fluence/products/:productId/prescription', canEditMaster, async (req, res, next) => {
   try {
     const productId = Number(req.params.productId);
@@ -413,23 +621,7 @@ r.put('/fluence/products/:productId/prescription', canEditMaster, async (req, re
       if (before && sameRx(before, value)) return { unchanged: true, revision: currentRev };
 
       const revision = currentRev + 1;
-      const rx = await oc(`
-        INSERT INTO fluence_prescriptions (kit_id, general_instructions, remarks, revision, updated_at, updated_by, updated_from)
-        VALUES ($1, $2, $3, $4, now(), $5, $6)
-        ON CONFLICT (kit_id) DO UPDATE SET
-          general_instructions = EXCLUDED.general_instructions, remarks = EXCLUDED.remarks,
-          revision = EXCLUDED.revision, updated_at = now(), updated_by = EXCLUDED.updated_by, updated_from = EXCLUDED.updated_from
-        RETURNING *`, [kit.id, value.general_instructions, value.remarks, revision, req.user.name, from]);
-      await qc('DELETE FROM fluence_prescription_lines WHERE prescription_id = $1', [rx.id]);
-      for (const l of value.lines) {
-        await qc(`
-          INSERT INTO fluence_prescription_lines
-            (prescription_id, sr, inner_product_id, item_label, dosage, dose_form, pack_count, frequency,
-             morning_qty, afternoon_qty, evening_qty, night_qty, other_timing, other_qty, instructions, remarks)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-        [rx.id, l.sr, l.inner_product_id, l.item_label, l.dosage, l.dose_form, l.pack_count, l.frequency,
-          l.morning_qty, l.afternoon_qty, l.evening_qty, l.night_qty, l.other_timing, l.other_qty, l.instructions, l.remarks]);
-      }
+      await writeRx(kit.id, value, revision, req.user, from, qc, oc);
       const after = await rxSnapshot(kit.id, qc);
       await recordRevision({ kitId: kit.id, area: 'prescription', revision, before, after, note: fromPart(product, outer), user: req.user, from }, qc);
       await audit('fluence_kit', kit.id, `prescription_revised:rev ${revision}`,
@@ -455,16 +647,12 @@ r.put('/fluence/products/:productId/components', canEditMaster, async (req, res,
       const before = await componentsSnapshot(kit.id, qc);
       const norm = list => JSON.stringify(list.map(c => [c.inner_product_id, +c.qty_per_kit, c.mrp_in_kit == null ? null : +c.mrp_in_kit, c.remarks ?? null]));
       if (norm(before) === norm(value.components)) return { unchanged: true };
-      await qc('DELETE FROM fluence_kit_components WHERE kit_id = $1', [kit.id]);
-      for (const c of value.components) {
-        await qc(`
-          INSERT INTO fluence_kit_components (kit_id, inner_product_id, sr, qty_per_kit, mrp_in_kit, remarks, updated_by)
-          VALUES ($1,$2,$3,$4,$5,$6,$7)`, [kit.id, c.inner_product_id, c.sr, c.qty_per_kit, c.mrp_in_kit, c.remarks, req.user.name]);
-      }
+      await writeKitComponents(kit.id, value.components, req.user, qc);
       const after = await componentsSnapshot(kit.id, qc);
       await recordRevision({ kitId: kit.id, area: 'components', before, after, note: fromPart(product, outer), user: req.user, from }, qc);
       await audit('fluence_kit', kit.id, 'kit_components_updated',
         `${product.code} ${product.name}${outer ? ` (part carton of ${outer.code})` : ''} — ${after.length} inner product(s), saved from ${FLUENCE_CONTEXTS[from]}`, qc, req.user.name);
+      await keepRxInStep(kit.id, req.user, from, qc, oc);
       return { unchanged: false };
     });
     const [dossier] = await loadDossiers([productId]);
