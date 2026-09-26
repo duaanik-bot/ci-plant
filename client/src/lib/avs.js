@@ -192,13 +192,41 @@ export const AVS_CHECK_STEPS = [
   { words: 'Filing the report', pct: 95 },
 ];
 
+// "45 s", "4 min 05 s", "1 h 5 min", "2 d 3 h".
+export function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(Number(ms) / 1000) || 0);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ${m % 60} min`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+// The clock on a set: how long it has waited for Claude, how long Claude has
+// been checking it (both run live), or how long the check took.
+export function setClock(set, now = Date.now()) {
+  const at = v => (v ? Date.parse(v) : NaN);
+  const queued = at(set?.queued_at);
+  const claimed = at(set?.claimed_at);
+  const finished = at(set?.finished_at);
+  if (set?.status === 'queued' && Number.isFinite(queued)) return { label: 'waiting', text: elapsedText(now - queued), live: true };
+  if (set?.status === 'checking' && Number.isFinite(claimed)) return { label: 'checking', text: elapsedText(now - claimed), live: true };
+  if (['done', 'failed'].includes(set?.status) && Number.isFinite(claimed) && Number.isFinite(finished)) {
+    return { label: 'checked in', text: elapsedText(finished - claimed), live: false };
+  }
+  return null;
+}
+
 // Where a set stands, as one bar: adding photos 5% → waiting for Claude 10% →
 // the check's steps 15–95% → report ready 100%.
 export function setProgress(set) {
   const text = String(set?.progress || '').trim();
   switch (set?.status) {
     case 'uploading': return { pct: 5, label: 'Adding photos', tone: 'slate' };
-    case 'queued': return { pct: 10, label: 'Waiting for Claude', tone: 'sky' };
+    case 'queued': return set.fire_status === 'not_linked'
+      ? { pct: 10, label: 'Waiting: start the check from Cowork (/avs)', tone: 'amber' }
+      : { pct: 10, label: 'Waiting for Claude', tone: 'sky' };
     case 'checking': {
       const low = text.toLowerCase();
       const at = AVS_CHECK_STEPS.findIndex(s => low.startsWith(s.words.toLowerCase()));

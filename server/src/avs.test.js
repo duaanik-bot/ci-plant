@@ -230,3 +230,21 @@ test('the bar follows the set: photos, the queue, each step Claude writes, the r
   assert.equal(other.label, 'Waiting for another AVS check to finish');
   assert.equal(setProgress({ status: 'done', progress: 'Report ready' }).pct, 100);
 });
+
+import { elapsedText, setClock } from '../../client/src/lib/avs.js';
+
+test('the clock on a set: waiting, checking live, and how long a finished check took', () => {
+  assert.equal(elapsedText(45_000), '45 s');
+  assert.equal(elapsedText(272_000), '4 min 32 s');
+  assert.equal(elapsedText(65_000), '1 min 05 s');
+  assert.equal(elapsedText(3_900_000), '1 h 5 min');
+  assert.equal(elapsedText(-5_000), '0 s', 'a browser clock a little behind the server never shows a negative time');
+  const now = Date.parse('2026-09-26T14:50:00Z');
+  assert.deepEqual(setClock({ status: 'queued', queued_at: '2026-09-26T14:45:00Z' }, now), { label: 'waiting', text: '5 min 00 s', live: true });
+  assert.equal(setClock({ status: 'checking', claimed_at: '2026-09-26T14:49:15Z' }, now).text, '45 s');
+  const done = setClock({ status: 'done', claimed_at: '2026-09-26T14:45:45Z', finished_at: '2026-09-26T14:47:30Z' }, now);
+  assert.deepEqual(done, { label: 'checked in', text: '1 min 45 s', live: false });
+  assert.equal(setClock({ status: 'uploading' }, now), null);
+  // Not linked: the waiting bar says what starts it.
+  assert.match(setProgress({ status: 'queued', fire_status: 'not_linked' }).label, /Cowork \(\/avs\)/);
+});

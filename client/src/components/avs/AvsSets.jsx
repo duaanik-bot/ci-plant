@@ -8,11 +8,11 @@
 //
 // Photos taken while the Drive link is not set up are kept in CI Plant until the
 // check files them in the AVS folder; the note under the chips says so plainly.
-import { useState } from 'react';
-import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, Loader2, RefreshCw, Settings2, XCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, Loader2, RefreshCw, Settings2, Timer, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
-import { AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, setGroupOf, setLabel, setProgress } from '../../lib/avs.js';
+import { AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, setClock, setGroupOf, setLabel, setProgress } from '../../lib/avs.js';
 import { fireText } from './AvsUpload.jsx';
 
 const TONE = {
@@ -25,7 +25,21 @@ const CHIP_ON = {
   active: 'bg-violet-600 text-white ring-violet-600', done: 'bg-emerald-600 text-white ring-emerald-600',
   failed: 'bg-red-600 text-white ring-red-600', cancelled: 'bg-slate-600 text-white ring-slate-600',
 };
-const BAR = { slate: 'bg-slate-400', sky: 'bg-sky-500', violet: 'bg-violet-500', emerald: 'bg-emerald-500', red: 'bg-red-500' };
+const BAR = {
+  slate: 'bg-slate-400', sky: 'bg-sky-500', amber: 'bg-amber-500', violet: 'bg-violet-500', emerald: 'bg-emerald-500', red: 'bg-red-500',
+};
+
+// Ticks every second while a set waits or is being checked, for the clocks.
+function useNow(active) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
 const EMPTY = {
   active: 'Nothing in progress. Press Upload photos to send a printed sheet for checking.',
   done: 'No report from a photo set yet.',
@@ -33,8 +47,9 @@ const EMPTY = {
   cancelled: 'Nothing cancelled.',
 };
 
-function SetProgress({ set }) {
+function SetProgress({ set, now }) {
   const p = setProgress(set);
+  const clock = setClock(set, now);
   return (
     <div className="mt-1.5 max-w-2xl">
       <div className="flex items-center justify-between gap-3 text-[11px]">
@@ -43,7 +58,14 @@ function SetProgress({ set }) {
           {p.detail ? <span> · {p.detail}</span> : null}
           {p.step ? <span className="text-slate-400"> · step {p.step} of {p.steps}</span> : null}
         </span>
-        <span className="shrink-0 font-mono font-semibold tabular-nums text-slate-700">{p.pct}%</span>
+        <span className="flex shrink-0 items-center gap-3 tabular-nums">
+          {clock && (
+            <span className="inline-flex items-center gap-1 text-slate-500" title={`${clock.label} ${clock.text}`}>
+              <Timer size={12} className={clock.live ? 'text-violet-500' : ''} /> {clock.text}
+            </span>
+          )}
+          <span className="font-mono font-semibold text-slate-700">{p.pct}%</span>
+        </span>
       </div>
       <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar"
         aria-valuenow={p.pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${setLabel(set.id)}: ${p.label}`}>
@@ -70,6 +92,7 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
   const toast = useToast();
   const [busy, setBusy] = useState(null);
   const [group, setGroup] = useState('active');
+  const now = useNow((data?.sets || []).some(s => s.status === 'queued' || s.status === 'checking'));
   if (!data?.enabled) return null;
   const sets = data.sets || [];
   const counts = data.counts || {};
@@ -126,6 +149,7 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
         {shown.map(s => {
           const Icon = ICON[s.status] || Clock;
           const kept = s.photos?.filter(p => p.stored === 'ci_plant').length || 0;
+          const took = ['done', 'failed'].includes(s.status) ? setClock(s) : null;
           return (
             <li key={s.id} className="flex flex-wrap items-start justify-between gap-3 py-2.5">
               <div className="min-w-[16rem] flex-1">
@@ -142,10 +166,10 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   {s.photos?.length || 0} photo{s.photos?.length === 1 ? '' : 's'}
                   {kept ? ` (${kept === s.photos.length ? 'all' : kept} kept in CI Plant until filed in Drive)` : ''}
                   {' '}· {s.created_by || '—'} · {fmt.date(s.created_at)}
+                  {took ? ` · ${took.label} ${took.text}` : ''}
                   {s.status === 'queued' && s.fire_status === 'failed' && s.fire_error ? ` · ${s.fire_error}` : ''}
-                  {s.status === 'queued' && s.fire_status === 'not_linked' ? ' · waits for a check started in Cowork (/avs)' : ''}
                 </div>
-                {setGroupOf(s.status) === 'active' && <SetProgress set={s} />}
+                {setGroupOf(s.status) === 'active' && <SetProgress set={s} now={now} />}
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
                 )}
