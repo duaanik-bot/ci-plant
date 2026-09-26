@@ -193,9 +193,15 @@ const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
   s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at`;
 
-async function readSets({ id = null, limit = 40 } = {}) {
-  const sets = await q(`SELECT ${SET_COLS} FROM avs.check_requests s
-     WHERE ($1::bigint IS NULL OR s.id = $1) ORDER BY s.id DESC LIMIT $2`, [id, limit]);
+// One set, or the list: every set still in progress, and the newest
+// `perStatus` of each finished status (the page shows them by status, with
+// chips counting all of them).
+async function readSets({ id = null, perStatus = 25 } = {}) {
+  const sets = id
+    ? await q(`SELECT ${SET_COLS} FROM avs.check_requests s WHERE s.id = $1`, [id])
+    : await q(`SELECT ${SET_COLS} FROM (
+          SELECT *, row_number() OVER (PARTITION BY status ORDER BY id DESC) AS nth FROM avs.check_requests) s
+        WHERE s.status IN ('uploading', 'queued', 'checking') OR s.nth <= $1 ORDER BY s.id DESC`, [perStatus]);
   if (!sets.length) return [];
   const photos = await q(`SELECT id, request_id, seq, file_name, mime, size_bytes, captured_at, drive_url, uploaded_at,
             stored, filed_at, filed_path
@@ -210,18 +216,23 @@ const offWhenMissing = (res, next, empty) => e => (MISSING.has(e?.code) ? res.js
 r.get('/avs/uploads', async (req, res, next) => {
   try {
     markUncacheable();
-    const [cfg, sets] = await Promise.all([settings(), readSets({ limit: Math.min(100, toId(req.query.limit) || 40) })]);
+    const [cfg, sets, counts] = await Promise.all([
+      settings(),
+      readSets({ perStatus: Math.min(100, toId(req.query.per_status) || 25) }),
+      q('SELECT status, count(*)::int AS n FROM avs.check_requests GROUP BY status'),
+    ]);
     const role = req.user?.role;
     res.json({
       enabled: true,
       linked: linked(cfg),
+      counts: Object.fromEntries(counts.map(x => [x.status, x.n])),
       can_upload: ['admin', 'qc', 'production', 'planner'].includes(role),
       can_retry: ['admin', 'qc', 'planner'].includes(role),
       is_admin: role === 'admin',
       sets,
     });
   } catch (e) {
-    offWhenMissing(res, next, { enabled: false, linked: { drive: false, claude: false }, can_upload: false, sets: [] })(e);
+    offWhenMissing(res, next, { enabled: false, linked: { drive: false, claude: false }, can_upload: false, counts: {}, sets: [] })(e);
   }
 });
 

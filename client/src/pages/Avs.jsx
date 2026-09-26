@@ -76,17 +76,28 @@ export default function Avs() {
   useFallbackRefresh(load, { intervalMs: 60000 });
 
   // Photo sets: every 10 s while Claude has one waiting or in hand, else every
-  // minute. A set that just finished brings its report into the register.
+  // minute. A set that just finished brings its report into the register and
+  // says where it went (its chip in the photo-set list).
   const [uploads, setUploads] = useState(null);
   const [uploading, setUploading] = useState(null); // { resume? } — the upload dialog
   const [setupOpen, setSetupOpen] = useState(false);
   const wasActive = useRef([]);
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const loadUploads = useCallback(() => api.get('/avs/uploads').then(d => {
     const sets = d.sets || [];
-    const finished = sets.some(x => wasActive.current.includes(x.id) && !AVS_SET_ACTIVE.includes(x.status));
+    const ended = sets.filter(x => wasActive.current.includes(x.id) && !AVS_SET_ACTIVE.includes(x.status));
     wasActive.current = sets.filter(x => AVS_SET_ACTIVE.includes(x.status)).map(x => x.id);
     setUploads(d);
-    if (finished) load();
+    for (const x of ended) {
+      if (x.status === 'done') {
+        toastRef.current.success(`${x.label}: report ready${x.report_no ? ` (${x.report_no}${x.result ? ` ${x.result}` : ''})` : ''}. It is under Report ready.`);
+      } else if (x.status === 'failed') {
+        toastRef.current.error(`${x.label}: the check could not be finished. It is under Check failed.`);
+      }
+    }
+    if (ended.length) load();
   }).catch(() => {}), [load]);
   const activeSets = (uploads?.sets || []).some(x => AVS_SET_ACTIVE.includes(x.status));
   useFallbackRefresh(loadUploads, { intervalMs: activeSets ? 10000 : 60000 });
@@ -130,7 +141,7 @@ export default function Avs() {
           onClick={() => kpi.toggle('decided')} active={kpi.is('decided')} />
       </div>
       <AvsSets data={uploads} onChanged={loadUploads} onOpenReport={no => open(no)}
-        onContinue={s => setUploading({ resume: s })} />
+        onContinue={s => setUploading({ resume: s })} onSetup={() => setSetupOpen(true)} />
       <KpiFilterNotice filter={kpi} label={KPI_LABEL[kpi.key]} shown={filtered.length} total={searched.length} />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">

@@ -195,3 +195,38 @@ test('printing is locked before anything is recorded, and the press never switch
   assert.match(sw, /const canSwitch = requireRole\('planner'\);/);
   assert.doesNotMatch(sw, /PLANNING_ROLES/, 'production logins share planning work but never this switch');
 });
+
+// ── The photo-set list: status chips and the progress bar ───────────────────
+import { AVS_CHECK_STEPS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, setGroupOf, setProgress } from '../../client/src/lib/avs.js';
+
+test('every set status belongs to exactly one chip, and a finished set leaves In progress', () => {
+  for (const status of Object.keys(AVS_SET_STATUS_LABEL)) {
+    assert.equal(AVS_SET_GROUPS.filter(g => g.statuses.includes(status)).length, 1, status);
+  }
+  assert.deepEqual(['uploading', 'queued', 'checking'].map(setGroupOf), ['active', 'active', 'active']);
+  assert.equal(setGroupOf('done'), 'done');
+  assert.equal(setGroupOf('failed'), 'failed');
+  assert.equal(setGroupOf('cancelled'), 'cancelled');
+});
+
+test('the bar follows the set: photos, the queue, each step Claude writes, the report', () => {
+  assert.equal(setProgress({ status: 'uploading' }).pct, 5);
+  assert.equal(setProgress({ status: 'queued' }).pct, 10);
+  const pcts = AVS_CHECK_STEPS.map(s => s.pct);
+  assert.deepEqual(pcts, [...pcts].sort((a, b) => a - b), 'the steps only go forward');
+  assert.ok(pcts[0] > 10 && pcts.at(-1) < 100);
+  const po = setProgress({ status: 'checking', progress: 'Reading the PO' });
+  assert.equal(po.pct, 50);
+  assert.equal(po.label, 'Reading the PO');
+  assert.equal(po.live, true);
+  assert.equal(po.step, AVS_CHECK_STEPS.findIndex(s => s.words === 'Reading the PO') + 1);
+  // Detail after a colon is kept; case does not matter.
+  const master = setProgress({ status: 'checking', progress: 'finding the approved master: PCS-G305-R0' });
+  assert.equal(master.pct, 35);
+  assert.equal(master.detail, 'PCS-G305-R0');
+  // Words the page does not know still show, at the start of the check.
+  const other = setProgress({ status: 'checking', progress: 'Waiting for another AVS check to finish' });
+  assert.equal(other.pct, 15);
+  assert.equal(other.label, 'Waiting for another AVS check to finish');
+  assert.equal(setProgress({ status: 'done', progress: 'Report ready' }).pct, 100);
+});

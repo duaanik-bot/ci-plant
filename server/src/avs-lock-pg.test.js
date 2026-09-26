@@ -476,5 +476,15 @@ describe('the AVS printing lock — through the real app', {
     } finally {
       routine.close();
     }
+
+    // The list the chips are drawn from: every set in progress, the newest
+    // finished ones of each status, and counts of all of them.
+    const all = await call('production', 'GET', '/avs/uploads');
+    assert.equal(all.body.counts.done, 2);
+    assert.equal(all.body.counts.queued, 2);
+    const newest = await call('production', 'GET', '/avs/uploads?per_status=1');
+    assert.equal(newest.body.sets.filter(x => x.status === 'done').length, 1, 'only the newest finished set of each status');
+    assert.equal(newest.body.sets.filter(x => x.status === 'queued').length, 2, 'every set still in progress');
+    assert.equal(newest.body.counts.done, 2, 'the chip still counts them all');
   });
 });

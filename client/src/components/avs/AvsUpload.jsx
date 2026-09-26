@@ -158,6 +158,10 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
   const keptHere = set?.photos?.filter(p => p.stored === 'ci_plant').length || 0;
   const earlier = Math.max(0, saved - items.filter(x => x.status === 'done').length);
   const pending = items.some(x => x.status === 'waiting' || x.status === 'uploading');
+  // This batch's bar: photos saved (or refused) out of those picked.
+  const handled = items.filter(x => x.status === 'done' || x.status === 'failed').length;
+  const refused = items.filter(x => x.status === 'failed').length;
+  const batchPct = items.length ? Math.round((handled / items.length) * 100) : 0;
 
   const verify = async () => {
     if (!set || pending || !saved) return;
@@ -266,6 +270,22 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+          {items.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between gap-3 text-[11px] text-slate-600">
+                <span>
+                  {pending ? `Saving photo ${Math.min(handled + 1, items.length)} of ${items.length}…` : `${handled - refused} of ${items.length} saved`}
+                  {refused ? <span className="text-red-600"> · {refused} failed</span> : null}
+                </span>
+                <span className="font-mono font-semibold tabular-nums">{batchPct}%</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar"
+                aria-valuenow={batchPct} aria-valuemin={0} aria-valuemax={100} aria-label="Photos saved">
+                <div className={`h-full rounded-full transition-[width] duration-500 ${refused ? 'bg-amber-500' : 'bg-violet-500'}`}
+                  style={{ width: `${Math.max(batchPct, 2)}%` }} />
+              </div>
             </div>
           )}
           {items.filter(x => x.status === 'failed').map(x => (

@@ -166,6 +166,55 @@ export const AVS_SET_STATUS_LABEL = {
 export const AVS_SET_ACTIVE = ['queued', 'checking'];
 export const setLabel = id => `Set ${String(id).padStart(4, '0')}`;
 
+// The list of photo sets shows one group at a time, picked with chips: the
+// sets still in progress, and the finished ones by how they ended.
+export const AVS_SET_GROUPS = [
+  { key: 'active', label: 'In progress', statuses: ['uploading', 'queued', 'checking'] },
+  { key: 'done', label: 'Report ready', statuses: ['done'] },
+  { key: 'failed', label: 'Check failed', statuses: ['failed'] },
+  { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
+];
+export const setGroupOf = status => AVS_SET_GROUPS.find(g => g.statuses.includes(status))?.key ?? 'active';
+
+// The steps of a check, in order, as Claude writes them into
+// avs.check_requests.progress at the start of each (runbook 2C.1 step 4): the
+// step's words, then any detail after a colon ("Finding the approved master:
+// PCS-G305-R0"). "Filing the photos" happens only when CI Plant kept some.
+export const AVS_CHECK_STEPS = [
+  { words: 'Claude started', pct: 15 },
+  { words: 'Filing the photos', pct: 20 },
+  { words: 'Reading the photos', pct: 25 },
+  { words: 'Finding the approved master', pct: 35 },
+  { words: 'Reading the PO', pct: 50 },
+  { words: 'Checking the order book', pct: 60 },
+  { words: 'Comparing the panels', pct: 70 },
+  { words: 'Writing the report', pct: 85 },
+  { words: 'Filing the report', pct: 95 },
+];
+
+// Where a set stands, as one bar: adding photos 5% → waiting for Claude 10% →
+// the check's steps 15–95% → report ready 100%.
+export function setProgress(set) {
+  const text = String(set?.progress || '').trim();
+  switch (set?.status) {
+    case 'uploading': return { pct: 5, label: 'Adding photos', tone: 'slate' };
+    case 'queued': return { pct: 10, label: 'Waiting for Claude', tone: 'sky' };
+    case 'checking': {
+      const low = text.toLowerCase();
+      const at = AVS_CHECK_STEPS.findIndex(s => low.startsWith(s.words.toLowerCase()));
+      if (at < 0) return { pct: 15, label: text || 'Claude is checking', detail: '', tone: 'violet', live: true };
+      const step = AVS_CHECK_STEPS[at];
+      return {
+        pct: step.pct, label: step.words, detail: text.slice(step.words.length).replace(/^[\s:–—-]+/, ''),
+        tone: 'violet', live: true, step: at + 1, steps: AVS_CHECK_STEPS.length,
+      };
+    }
+    case 'done': return { pct: 100, label: 'Report ready', tone: 'emerald' };
+    case 'failed': return { pct: 100, label: 'Check failed', tone: 'red' };
+    default: return { pct: 0, label: AVS_SET_STATUS_LABEL[set?.status] || String(set?.status || ''), tone: 'slate' };
+  }
+}
+
 // One photo per request: Vercel's function body limit is 4.5 MB, so the page
 // shrinks anything larger before sending it (see AvsUpload.jsx).
 export const AVS_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
