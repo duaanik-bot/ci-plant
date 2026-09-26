@@ -43,6 +43,8 @@ const POPrint = lazy(() => import('./pages/POPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
 // Fluence-only: the prescription & kit master.
 const FluenceMaster = lazy(() => import('./pages/FluenceMaster.jsx'));
+// Kit Studio: carton sizing, layouts and draft kits for the Fluence kit master.
+const KitStudio = lazy(() => import('./pages/KitStudio.jsx'));
 
 // Quiet placeholder while a route chunk downloads — matches the app's muted grey.
 function PageLoading() {
@@ -179,6 +181,7 @@ export default function App() {
                 <Route path="/tooling/:family/po/:id" element={<POPrint />} />
                 <Route path="/shade-cards" element={<ShadeCards />} />
                 <Route path="/fluence" element={<FluenceMaster />} />
+                <Route path="/kit-studio" element={<KitStudio />} />
               </Route>
             </Route>
           </Routes>

@@ -2803,4 +2803,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // (fluence_*). Replayed like the plate lifecycle files above: every statement
   // is IF NOT EXISTS / ON CONFLICT DO NOTHING, so this is a no-op once applied.
   await pool.query(migration('20260917120000_fluence_prescription_kits.sql'));
+
+  // Kit Studio — carton sizing, layouts and draft kits on top of the Fluence
+  // master (kit_studio_*). Additive and idempotent like the file above, and
+  // after it: its tables reference fluence_kits and fluence_inner_products.
+  await pool.query(migration('20260926100000_kit_studio.sql'));
 }

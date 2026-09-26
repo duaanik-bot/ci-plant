@@ -30,6 +30,9 @@ export const MODULES = [
   // Fluence-only: the prescription & kit master. Last, so no login's
   // first-allowed module changes because it exists.
   { key: 'fluence', label: 'Fluence Master', path: '/fluence' },
+  // Kit Studio — carton sizing and draft kits on top of the Fluence master.
+  // Anyone who may open the Fluence master may open it too (canAccess below).
+  { key: 'kit_studio', label: 'Kit Studio', path: '/kit-studio' },
 ];
 
 // Live Floor sub-stations — the 10 production sections a Live-Floor login can be
@@ -72,6 +75,8 @@ export function canAccess(user, moduleKey) {
   if (user.role === 'admin') return true;
   if (moduleKey === 'floor' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.modules == null) return true;
+  // Kit Studio works on the Fluence master: a Fluence grant carries it.
+  if (moduleKey === 'kit_studio' && user.modules.includes('fluence')) return true;
   return user.modules.includes(moduleKey);
 }
 

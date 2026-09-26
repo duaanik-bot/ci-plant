@@ -40,6 +40,7 @@ export const FLUENCE_CONTEXTS = {
   accounts: 'Accounts',
   warehouse: 'Warehouse',
   fluence_master: 'Fluence Master',
+  kit_studio: 'Kit Studio',
 };
 
 // Review-first modules: the drawer opens read-only and says so. Editing is

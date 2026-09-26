@@ -71,6 +71,10 @@ export const HANDLED_BY = {
   // drawn — so the guard is what is named. over-issue-wiring.test.js holds each
   // call site to going through it.
   OVER_ISSUE: { at: ['components/OverIssueAlarm.jsx'], says: 'OVER_ISSUE' },
+  // Kit Studio's refusals (a kit changed under you, a master kit that cannot be
+  // deleted …). The studio page in the frame toasts the message itself; the host
+  // page is what receives it and passes it on.
+  KIT_STUDIO_REFUSED: { at: ['pages/KitStudio.jsx'], says: 'KIT_STUDIO_REFUSED' },
 };
 
 export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));

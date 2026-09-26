@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Boxes,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
@@ -92,6 +92,8 @@ const NAV = [
       // Fluence-only master. The Fluence buttons in every module are the everyday
       // door; this page is where kits are linked and inner products maintained.
       { label: 'Fluence Master', to: '/fluence', icon: Pill, roles: ['admin', 'planner', 'production'], module: 'fluence' },
+      // Kit Studio sizes the Fluence kits' cartons and designs new kits.
+      { label: 'Kit Studio', to: '/kit-studio', icon: Boxes, roles: ['admin', 'planner', 'production'], module: 'kit_studio' },
       { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
       { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],
