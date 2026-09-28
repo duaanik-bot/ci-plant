@@ -247,3 +247,30 @@ test('a photo moves into its case folder and keeps its id', () => {
   assert.equal(moved.id, put.id);
   assert.equal(moved.parent.name, 'Photos AVS-2026-0005 Check 2');
 });
+
+test('a batch runs several ops in one call, each answering on its own, in order', () => {
+  const d = load();
+  const s = d.secret;
+  const ping = d.call({ secret: s, op: 'ping' });
+  assert.equal(ping.batch, true, 'ping says the batch op is there');
+  const b64 = t => Buffer.from(t).toString('base64');
+  const out = d.call({ secret: s, op: 'batch', ops: [
+    { op: 'put', path: '_SYSTEM/records/AVS-2026-0099 evidence', name: 'D-001.png', base64: b64('png1') },
+    { op: 'put', path: '_SYSTEM', name: 'AVS_Register.csv', text: 'a,b\r\n' },
+    { op: 'get', path: '_SYSTEM/AVS_Register.csv', as: 'text' },
+    { op: 'get', path: '_SYSTEM/missing.txt', as: 'text' },
+    { op: 'rotate' },
+    { op: 'list', path: '_SYSTEM/records/AVS-2026-0099 evidence' },
+  ] });
+  assert.equal(out.ok, true);
+  const r = out.results;
+  assert.equal(r.length, 6);
+  assert.equal(r[0].ok, true);
+  assert.equal(r[1].ok, true);
+  assert.equal(r[2].text, 'a,b\r\n', 'a later op sees what an earlier one wrote');
+  assert.equal(r[3].ok, false, 'one op failing does not stop the others');
+  assert.equal(r[4].ok, false, 'rotate is never allowed inside a batch');
+  assert.deepEqual(r[5].entries.map(e => e.name), ['D-001.png']);
+  assert.equal(d.call({ secret: s, op: 'batch', ops: [] }).ok, false);
+  assert.equal(d.call({ secret: 'wrong', op: 'batch', ops: [{ op: 'ping' }] }).error, 'Wrong secret');
+});

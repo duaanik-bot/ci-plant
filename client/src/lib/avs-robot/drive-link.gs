@@ -50,18 +50,36 @@ function doPost(e) {
   if (!req.secret || req.secret !== secret) return out_({ ok: false, error: 'Wrong secret' });
   var lock = null;
   try {
-    if (req.op === 'ping') return out_({ ok: true, root: folderInfo_(root_()) });
     if (req.op === 'rotate') return out_(guard_(rotate_));
-    if (req.op === 'list') return out_({ ok: true, entries: list_(folderAt_(req.path, false)) });
-    if (req.op === 'get') return out_(get_(req));
+    // Several calls in one (since 28 Sep 2026): each call to this web app costs
+    // 1 to 30 seconds of start-up and redirect, so a check reads its register,
+    // PO cache and records, and files its evidence, in a few batches instead of
+    // dozens of calls. Up to 40 ops; each answers on its own ({ ok, ... } or
+    // { ok: false, error }), in order. Writes in a batch run under the lock.
+    if (req.op === 'batch') {
+      var ops = Array.isArray(req.ops) ? req.ops : [];
+      if (!ops.length || ops.length > 40) return out_({ ok: false, error: 'A batch holds 1 to 40 ops' });
+      var writes = ops.some(function (o) { return WRITE_OPS_[o && o.op]; });
+      if (writes) {
+        lock = LockService.getScriptLock();
+        lock.waitLock(30000);
+      }
+      var results = ops.map(function (o) {
+        try {
+          if (!o || !OPS_[o.op]) return { ok: false, error: 'Unknown op: ' + (o && o.op) };
+          return one_(o);
+        } catch (err) {
+          return { ok: false, error: String((err && err.message) || err) };
+        }
+      });
+      return out_({ ok: true, results: results });
+    }
+    if (!WRITE_OPS_[req.op]) return out_(OPS_[req.op] ? one_(req) : { ok: false, error: 'Unknown op: ' + req.op });
     // Writes one at a time, so two photos arriving together never make two
     // folders of the same name.
     lock = LockService.getScriptLock();
     lock.waitLock(30000);
-    if (req.op === 'put') return out_(put_(req));
-    if (req.op === 'move') return out_(move_(req));
-    if (req.op === 'mkdir') return out_({ ok: true, folder: folderInfo_(folderAt_(req.path, true)) });
-    return out_({ ok: false, error: 'Unknown op: ' + req.op });
+    return out_(one_(req));
   } catch (err) {
     return out_({ ok: false, error: String((err && err.message) || err) });
   } finally {
@@ -69,6 +87,19 @@ function doPost(e) {
       try { lock.releaseLock(); } catch (ignore) {}
     }
   }
+}
+
+var OPS_ = { ping: 1, list: 1, get: 1, put: 1, move: 1, mkdir: 1 };
+var WRITE_OPS_ = { put: 1, move: 1, mkdir: 1 };
+// One op, as an answer object. ping says which ops this version knows.
+function one_(req) {
+  if (req.op === 'ping') return { ok: true, root: folderInfo_(root_()), version: 2, batch: true };
+  if (req.op === 'list') return { ok: true, entries: list_(folderAt_(req.path, false)) };
+  if (req.op === 'get') return get_(req);
+  if (req.op === 'put') return put_(req);
+  if (req.op === 'move') return move_(req);
+  if (req.op === 'mkdir') return { ok: true, folder: folderInfo_(folderAt_(req.path, true)) };
+  return { ok: false, error: 'Unknown op: ' + req.op };
 }
 
 // Pairing: the first caller gets the secret; after that, only a caller that
