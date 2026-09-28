@@ -1280,12 +1280,14 @@ r.get('/floor/:section', async (req, res, next) => {
     // The QA stamp at the press (owner's request, 28 Sep 2026): how QA stands on
     // the card's AVS reports — "QA Approved" when every one is released. Only on
     // the printing queue; a card with no report gets none.
+    let qaStamps = null;
+    const stampOf = r => {
+      const st = qaStamps?.get(String(r.jc_number || '').trim().toUpperCase());
+      return st ? { state: st.state, text: st.text, reports: st.lines.map(l => l.text).join(' ') } : null;
+    };
     if (section === 'printing' && queue.length) {
-      const stamps = await qaStampsForCards(q, one, queue.map(r => r.jc_number));
-      for (const r of queue) {
-        const st = stamps.get(String(r.jc_number || '').trim().toUpperCase());
-        r.qa_stamp = st ? { state: st.state, text: st.text, reports: st.lines.map(l => l.text).join(' ') } : null;
-      }
+      qaStamps = await qaStampsForCards(q, one, queue.map(r => r.jc_number));
+      for (const r of queue) r.qa_stamp = stampOf(r);
     }
     // Press scope: keep only jobs on this operator's press.
     if (pressKeep) {
@@ -1305,6 +1307,12 @@ r.get('/floor/:section', async (req, res, next) => {
           ? Math.round((new Date(s.completed_at) - new Date(s.started_at)) / 60000) : null,
       }))
       .filter(s => !pressKeep || pressKeep.has(effectiveMachineId(s)));
+    // Finished printing runs carry the stamp too: QA often decides after the run.
+    if (section === 'printing' && completed.length) {
+      const more = await qaStampsForCards(q, one, completed.map(r => r.jc_number));
+      qaStamps = new Map([...(qaStamps || []), ...more]);
+      for (const r of completed) r.qa_stamp = stampOf(r);
+    }
 
     // Section KPIs
     const today = completed.filter(s => new Date(s.completed_at).toDateString() === new Date().toDateString());

@@ -209,7 +209,7 @@ export default function Avs() {
           columns={[
             { key: 'report_no', label: 'Report', export: r => reportLabel(r),
               sortValue: r => `${r.report_no}|${String(r.check_no ?? 1).padStart(3, '0')}|${String(r.report_rev ?? 0).padStart(3, '0')}`,
-              render: r => <span className="font-mono text-xs font-semibold text-slate-700">{reportLabel(r)}</span> },
+              render: r => <span className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700">{reportLabel(r)}</span> },
             { key: 'product_name', label: 'Product', sortValue: r => String(r.product_name || r.product || '').toLowerCase(),
               render: r => (
                 <div className="min-w-0">
@@ -490,9 +490,9 @@ function RowActions({ r, canDecide, onAct }) {
       {canDecide && !closed && (
         <select value="" aria-label={`Action on ${reportLabel(r)}`}
           onChange={e => { if (e.target.value) onAct(e.target.value); }}
-          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 focus:border-[#0071F0] focus:outline-none">
+          className="h-8 w-28 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 focus:border-[#0071F0] focus:outline-none">
           <option value="">Action…</option>
-          <option value="RELEASE" disabled={r.status === 'REJECT'}>Approve / Release{r.status === 'REJECT' ? ' (needs a new check)' : ''}</option>
+          <option value="RELEASE" disabled={r.status === 'REJECT'} title={r.status === 'REJECT' ? 'A REJECT report needs a new check of corrected cartons first' : undefined}>Approve / Release</option>
           <option value="KEEP ON HOLD">Hold</option>
           <option value="REJECT">Reject</option>
           {decidedHere && <option value="UNDO">Undo: {decisionLabel(r.last_decision)}</option>}

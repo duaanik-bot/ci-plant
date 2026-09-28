@@ -2045,6 +2045,7 @@ export default function Section() {
                 </span>
                 <YieldPill pct={r.yield_pct} />
               </div>
+              {section === 'printing' && r.qa_stamp && <div className="mt-1"><QaStamp stamp={r.qa_stamp} /></div>}
               {r.gang_members?.length
                 ? <div className="mt-1.5"><GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense /><SheetLine r={r} /></div>
                 : (
@@ -2122,6 +2123,7 @@ export default function Section() {
                       </span>
                       <div className="mt-0.5"><OutputChip number={r.output_number} /></div>
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
+                      {section === 'printing' && r.qa_stamp && <div className="mt-1"><QaStamp stamp={r.qa_stamp} /></div>}
                     </td>
                     {/* Same rule as the queue: the name wraps in full, the
                         customer sits under it as initials with the registered
