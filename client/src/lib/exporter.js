@@ -4,8 +4,9 @@
 //     columns, rows,                          // simple single-table report
 //     sections: [{ heading, columns, rows, summary, pdfColumns?, pdfGroup? }],
 //     orientation,                            // 'portrait' | 'landscape' (auto by width)
-//     sheetPerSection }                       // XLSX only: one worksheet per section,
+//     sheetPerSection,                        // XLSX only: one worksheet per section,
 //                                             // each with its own filter + frozen header
+//     watermark }                             // { text, line, ref } — see "Watermark" below
 // Column: { key, label, align, render?, export?, exportable?, pdfWeight?, pdfTone? }.
 // pdfGroup: { by(row), label(rows), status?(rows), tone?(rows) } — prints the
 // section as banded groups with a coloured rail (PDF only; see the section loop).
@@ -161,12 +162,105 @@ function normalizeSpec(spec) {
     summary: (spec.summary || []).filter(Boolean),
     sections,
     rowCount: sections.reduce((n, s) => n + s.grid.length, 0),
+    watermark: normalizeWatermark(spec.watermark),
   };
 }
 
 export function specRowCount(spec) {
   if (spec.sections?.length) return spec.sections.reduce((n, s) => n + (s.rows || []).length, 0);
   return (spec.rows || []).length;
+}
+
+// ─── Watermark ───────────────────────────────────────────────────────────────
+// A file a customer's own login downloads wears Colour Impressions on every
+// page. `spec.watermark` = { text, line, ref } comes from the server's record of
+// the download (lib/fluenceDownloads.js): `text` is the name set across the
+// page, `line` says whose copy it is, when it was taken and its reference.
+//   PDF:   the name diagonally over every page, light enough to read through,
+//          and the line in red under the footer; the file's properties say it too.
+//   Excel: the name tiled behind the cells (a sheet background), the line as a
+//          red banner above the table and in the printed header and footer, and
+//          the workbook's properties.
+// Staff downloads carry no watermark: the spec has none and nothing changes.
+export function normalizeWatermark(w) {
+  if (!w || !String(w.text || '').trim()) return null;
+  return { text: String(w.text).trim(), line: String(w.line || '').trim(), ref: String(w.ref || '').trim() };
+}
+
+function watermarkPdf(doc, wm, { W, H, M }) {
+  const pages = doc.internal.getNumberOfPages();
+  const theta = Math.atan2(H, W);          // along the page's diagonal
+  const angle = theta * 180 / Math.PI;
+  const diag = Math.hypot(W, H);
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.09 }));
+    doc.setFont('helvetica', 'bold').setFontSize(60);
+    const size = Math.max(28, Math.min(96, 60 * (diag * 0.7) / doc.getTextWidth(wm.text)));
+    doc.setFontSize(size).setTextColor(...BRAND.accentDeep);
+    const tw = doc.getTextWidth(wm.text);
+    const cap = size * 0.3528 * 0.7;        // cap height in mm (1pt = 0.3528mm)
+    // Start so the name's middle sits on the page's centre, along the diagonal.
+    const x = W / 2 - (tw / 2) * Math.cos(theta) + (cap / 2) * Math.sin(theta);
+    const y = H / 2 + (tw / 2) * Math.sin(theta) + (cap / 2) * Math.cos(theta);
+    doc.text(wm.text, x, y, { angle });
+    doc.restoreGraphicsState();
+    if (wm.line) {
+      doc.setFont('helvetica', 'bold').setFontSize(6.6).setTextColor(185, 28, 28);
+      doc.text(pdfText(wm.line), M, H - 3.4);
+    }
+  }
+}
+
+// Excel header/footer codes start with "&": a literal one is doubled.
+const hf = t => String(t ?? '').replace(/&/g, '&&');
+
+// The name tiled behind the cells — drawn once per workbook on a canvas. There is
+// no canvas outside a browser (the node tests), and then the banner, header and
+// footer still carry it.
+function watermarkImage(wb, wm) {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 960; c.height = 560;
+  const g = c.getContext && c.getContext('2d');
+  if (!g) return null;
+  g.translate(c.width / 2, c.height / 2);
+  g.rotate(-Math.atan2(c.height, c.width));
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0, 100, 210, 0.11)';
+  g.font = 'bold 70px Helvetica, Arial, sans-serif';
+  g.fillText(wm.text, 0, -8);
+  if (wm.ref) {
+    g.fillStyle = 'rgba(185, 28, 28, 0.16)';
+    g.font = 'bold 22px Helvetica, Arial, sans-serif';
+    g.fillText(`Ref ${wm.ref}`, 0, 50);
+  }
+  return wb.addImage({ base64: c.toDataURL('image/png'), extension: 'png' });
+}
+
+function watermarkWorkbook(wb, wm, title) {
+  wb.creator = BRAND.company;
+  wb.lastModifiedBy = BRAND.company;
+  wb.company = BRAND.company;
+  wb.title = title;
+  wb.subject = wm.line;
+  wb.description = wm.line;
+  wb.keywords = wm.ref;
+}
+
+// Row `at` becomes the banner; returns the row the content may follow.
+function watermarkSheet(ws, wm, imageId, totalCols, at) {
+  if (imageId != null) ws.addBackgroundImage(imageId);
+  ws.headerFooter.oddHeader = `&C&"Calibri,Bold"&14&K0064D2${hf(wm.text)}`;
+  ws.headerFooter.oddFooter = `&L&8&KB91C1C${hf(wm.line)}&R&8Page &P of &N`;
+  const cell = ws.getCell(at, 1);
+  cell.value = `${wm.text} — ${wm.line}`;
+  cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB91C1C' } };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF2F2' } };
+  ws.mergeCells(at, 1, at, totalCols);
+  return at + 1;
 }
 
 // ─── PDF ─────────────────────────────────────────────────────────────────────
@@ -479,6 +573,13 @@ export async function exportPDF(rawSpec) {
     doc.text(`Page ${p} of ${pages}`, W - M, H - 7, { align: 'right' });
   }
 
+  if (spec.watermark) {
+    watermarkPdf(doc, spec.watermark, { W, H, M });
+    doc.setProperties({
+      title: spec.title, author: BRAND.company, creator: `${BRAND.app} — ${BRAND.company}`,
+      subject: spec.watermark.line, keywords: spec.watermark.ref,
+    });
+  }
   doc.save(`${specFileName(spec)}.pdf`);
 }
 
@@ -500,7 +601,7 @@ function xlNumber(v) {
 // the stacked single-sheet layout necessarily loses. Opt-in; every existing
 // caller keeps the stacked layout untouched. The top-level summary lands on
 // the first sheet only.
-function writeSectionSheets(wb, spec) {
+function writeSectionSheets(wb, spec, imageId = null) {
   const user = auth?.user || null;
   const metaLine = [...spec.meta, `Generated ${stamp()}${user?.name ? ` by ${user.name}` : ''}`].join('   ·   ');
   const sheetName = (s, i) =>
@@ -518,7 +619,7 @@ function writeSectionSheets(wb, spec) {
     ws.getCell('A3').font = { name: 'Calibri', size: 9, color: { argb: XL.faint } };
     [1, 2, 3].forEach(r => ws.mergeCells(r, 1, r, totalCols));
 
-    let rowIdx = 4;
+    let rowIdx = spec.watermark ? watermarkSheet(ws, spec.watermark, imageId, totalCols, 4) : 4;
     const sums = [...(i === 0 ? spec.summary : []), ...section.summary];
     for (const s of sums) {
       rowIdx += 1;
@@ -558,7 +659,8 @@ function writeSectionSheets(wb, spec) {
       });
       row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
         cell.font = { name: 'Calibri', size: 10, color: { argb: colNumber === 1 ? XL.faint : XL.ink } };
-        if (ri % 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.rowAlt } };
+        // A watermarked sheet leaves its rows unfilled so the name behind them shows.
+        if (ri % 2 && !spec.watermark) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.rowAlt } };
         cell.border = { bottom: { style: 'hair', color: { argb: XL.hairline } } };
         if (typeof cell.value === 'number' && colNumber > 1) {
           cell.numFmt = Number.isInteger(cell.value) ? '#,##0' : '#,##0.00';
@@ -581,8 +683,10 @@ export async function exportXLSX(rawSpec) {
   const wb = new ExcelJS.Workbook();
   wb.creator = `${BRAND.app} — ${BRAND.company}`;
   wb.created = new Date();
+  const imageId = spec.watermark ? watermarkImage(wb, spec.watermark) : null;
+  if (spec.watermark) watermarkWorkbook(wb, spec.watermark, spec.title);
   if (spec.sheetPerSection && spec.sections.length > 1) {
-    writeSectionSheets(wb, spec);
+    writeSectionSheets(wb, spec, imageId);
     const buf = await wb.xlsx.writeBuffer();
     downloadBlob(
       new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
@@ -608,7 +712,7 @@ export async function exportXLSX(rawSpec) {
   ws.getCell('A3').font = { name: 'Calibri', size: 9, color: { argb: XL.faint } };
   [1, 2, 3].forEach(r => ws.mergeCells(r, 1, r, totalCols));
 
-  let rowIdx = 4;
+  let rowIdx = spec.watermark ? watermarkSheet(ws, spec.watermark, imageId, totalCols, 4) : 4;
 
   // Top-level summary block.
   const writeSummary = items => {
@@ -664,7 +768,7 @@ export async function exportXLSX(rawSpec) {
       });
       row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
         cell.font = { name: 'Calibri', size: 10, color: { argb: colNumber === 1 ? XL.faint : XL.ink } };
-        if (i % 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.rowAlt } };
+        if (i % 2 && !spec.watermark) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.rowAlt } };
         cell.border = { bottom: { style: 'hair', color: { argb: XL.hairline } } };
         if (typeof cell.value === 'number' && colNumber > 1) {
           cell.numFmt = Number.isInteger(cell.value) ? '#,##0' : '#,##0.00';

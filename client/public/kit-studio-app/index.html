@@ -51,6 +51,8 @@ body{color:var(--ink);font:14px/1.45 var(--f-body);margin:0;-webkit-font-smoothi
 .wrap{max-width:none;margin:0;padding:0 2px 40px}
 /* Inside the ERP's Fluence page the page's own tabs lead: the studio's title and tab bar step aside */
 .embed header.top,.embed nav.tabs{display:none!important}
+.xgrid{display:grid;gap:8px}.xrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line,rgba(0,0,0,.08))}
+.xrow:first-child{border-top:0}
 /* A view this login does not open (the Fluence tabs ticked for it): no way in. */
 .no-overview [data-v="overview"],.no-kits [data-v="kits"],.no-products [data-v="products"],.no-build [data-v="build"],.no-drafts [data-v="drafts"],.no-export [data-v="export"],
 .no-build [data-goto="build"],.no-build [data-new-draft],.no-drafts [data-goto="drafts"],.no-drafts [data-needs="drafts"],.no-kits [data-waste-list]{display:none!important}
@@ -1369,10 +1371,30 @@ function kitMatches(k){
   return hay.includes(q);
 }
 function seg(name, cur, opts){ return `<div class="seg" role="group" aria-label="${name}">${opts.map(([v,l])=>`<button data-seg="${name}" data-val="${v}" aria-pressed="${cur===v}">${l}</button>`).join('')}</div>`; }
-function vKits(){
+/* The rows each list shows — the view and its export read the same ones. */
+function kitsInView(){
   const ws=new Map([...S.kits].map(([id,k])=>[id,spaceUse(k.items,k)])), wp=id=>{ const w=ws.get(id); return w&&w.pct!=null?w.pct:null; };
   const srt=S.kf.sort||'';
   const rows=[...S.kits].filter(([,k])=>kitMatches(k)).sort((a,b)=>{ if(srt){ const x=wp(a[0]), y=wp(b[0]); if(x==null&&y!=null) return 1; if(y==null&&x!=null) return -1; if(x!=null&&y!=null&&x!==y) return srt==='desc'?y-x:x-y; } return sortName(a[1],b[1]); });
+  return {rows,ws,srt};
+}
+function productsInView(){
+  const f=S.pf; const q=f.q.toUpperCase().replace(/[\s\-.]/g,'');
+  return [...S.products].filter(([,p])=>(f.st==='ALL'||(p.sizeStatus||'MISSING')===f.st) && (!q||String(p.name).toUpperCase().replace(/[\s\-.]/g,'').includes(q))).sort((a,b)=>sortName(a[1],b[1]));
+}
+function draftsInView(){
+  const f=S.df;
+  const all=[...S.drafts].sort((a,b)=>String(b[1].updatedAt||'').localeCompare(String(a[1].updatedAt||'')));
+  const open=all.filter(([,d])=>!d.pushed), pushed=all.filter(([,d])=>d.pushed);
+  return {all,open,pushed,rows:f==='PUSHED'?pushed:f==='ALL'?all:open};
+}
+/* PDF / Excel of the list on screen — through the ERP, which records the download
+   (a customer's copy is watermarked and CI management is told). */
+const DLI='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>';
+const listExportBtns = list => (window.kitStudioErp&&window.kitStudioErp.exportList)
+  ? `<span class="row" style="gap:6px" data-list-exports="${list}"><button class="btn" data-list-export="${list}:pdf" title="This list as a PDF">${DLI}PDF</button><button class="btn" data-list-export="${list}:xlsx" title="This list as an Excel workbook">${DLI}Excel</button></span>` : '';
+function vKits(){
+  const {rows,ws,srt}=kitsInView();
   return `
   <div class="toolbar">
     <input type="search" id="kq" placeholder="Search kit, code, FP- code or product" value="${esc(S.kf.q)}" aria-label="Search kits">
@@ -1380,6 +1402,7 @@ function vKits(){
     ${seg('kor',S.kf.origin,[['ALL','All kits'],['MASTER','Customer master'],['NEW','New development'],['INACTIVE','Inactive']])}
     <span class="count">${rows.length} of ${S.kits.size}</span>
     <span style="flex:1"></span>
+    ${listExportBtns('kits')}
     <button class="btn primary" data-goto="build" ${can('build')?'':'disabled'}>New kit</button>
   </div>
   <div class="tablewrap"><table>
@@ -1388,13 +1411,14 @@ function vKits(){
   </table></div>`;
 }
 function vProducts(){
-  const u=usage(), f=S.pf; const q=f.q.toUpperCase().replace(/[\s\-.]/g,'');
-  const rows=[...S.products].filter(([,p])=>(f.st==='ALL'||(p.sizeStatus||'MISSING')===f.st) && (!q||String(p.name).toUpperCase().replace(/[\s\-.]/g,'').includes(q))).sort((a,b)=>sortName(a[1],b[1]));
+  const u=usage(), f=S.pf;
+  const rows=productsInView();
   return `
   <div class="toolbar">
     <input type="search" id="pq" placeholder="Search product" value="${esc(f.q)}" aria-label="Search products">
     ${seg('pst',f.st,[['ALL','All'],['CONFIRMED','Confirmed'],['VERIFY','Verify'],['MISSING','Missing']])}
     <span class="count">${rows.length} of ${S.products.size}</span><span style="flex:1"></span>
+    ${listExportBtns('products')}
     <button class="btn" data-new-prod ${can('inner')?'':'disabled'}>Add product</button>
   </div>
   <div class="tablewrap"><table>
@@ -1609,10 +1633,12 @@ function vExport(){
   const st=S.settings, ro=!can('settings');
   const nf=(id,label,v)=>`<label class="f">${label}<input type="number" id="${id}" value="${v}" ${ro?'disabled':''}></label>`;
   return `<div class="two">
-    <section class="card pad grid"><h2>Export to Excel</h2>
-      <p class="note">CSV files open directly in Excel. To bring changes back into “Master from Customer.xlsx”, ask Claude to sync from this page — it reads the same data.</p>
-      <div class="row"><button class="btn" data-export="kits">Kits (one row per kit)</button><button class="btn" data-export="lines">Kit contents (one row per product)</button><button class="btn" data-export="products">Inner products</button></div>
-      <p class="note" id="dlNote"></p>
+    <section class="card pad grid" style="align-content:start"><h2>Export to PDF or Excel</h2>
+      ${window.kitStudioErp&&window.kitStudioErp.exportList?`<p class="note">Every kit and product, not only the ones on screen. Each file is the ERP’s branded report; a download from a Fluence login carries the Colour Impressions watermark and is recorded.</p>
+      <div class="xgrid">${[['kits','Kits','one row per kit'],['lines','Kit contents','one row per product in a kit'],['products','Inner products','sizes and use']].map(([k,l,sub])=>`<div class="xrow"><span><b>${l}</b> <span class="note">${sub}</span></span><span class="row" style="gap:6px"><button class="btn sm" data-export="${k}:pdf">${DLI}PDF</button><button class="btn sm" data-export="${k}:xlsx">${DLI}Excel</button></span></div>`).join('')}</div>`
+      :`<p class="note">CSV files open directly in Excel.</p>
+      <div class="row"><button class="btn" data-export="kits">Kits (one row per kit)</button><button class="btn" data-export="lines">Kit contents (one row per product)</button><button class="btn" data-export="products">Inner products</button></div>`}
+      <p class="note" id="dlNote" role="status" aria-live="polite"></p>
     </section>
     <section class="card pad grid"><h2>Size engine settings</h2>
       <h3>Clearance for a new size (added to the packed contents)</h3>
@@ -1794,6 +1820,7 @@ document.addEventListener('click', async e => {
   if(ds.saveSettings!==undefined){ const m={sL:'cL',sW:'cW',sH:'cH',rLa:'dLmin',rLb:'dLmax',rWa:'dWmin',rWb:'dWmax',rHa:'dHmin',rHb:'dHmax'}; const s={}; for(const id in m){ const v=num($('#'+id).value); s[m[id]]=v==null?DEF[m[id]]:v; }
     try{ await S.db.doc('settings/main').set({...s,updatedAt:new Date().toISOString(),updatedBy:S.me||null}); toast('Settings saved'); }catch(err){ toast('Could not save settings'); } return; }
   if(ds.export){ doExport(ds.export); return; }
+  if(ds.listExport){ const [k,f]=ds.listExport.split(':'); listExport(k,f,'view',t); return; }
   if(t.tagName==='TR' && ds.openKit){ openKit(ds.openKit); }
 });
 document.addEventListener('input', e => {
@@ -2018,9 +2045,75 @@ document.addEventListener('pointercancel', e=>end3(e,true));
 document.addEventListener('pointercancel', e=>endDrag(e,true));
 
 /* ---------- export ---------- */
+/* One table per export: columns (key, label, align) and rows as objects. The ERP
+   turns it into its branded PDF or Excel; without the ERP it goes out as CSV. */
+function exportTable(kind, scope){
+  const d=new Date(), stamp=`${d.getDate()}-${d.getMonth()+1}-${d.getFullYear()}`;
+  const R='right', mrpOf=k=>Math.round(kitMrp(k)), items=k=>(k.items||[]).reduce((s,i)=>s+(+i.q||1),0);
+  const pct=w=>w&&w.pct!=null?Math.round(w.pct):'';
+  if(kind==='kits'){
+    const list=scope==='view'?kitsInView().rows:[...S.kits].sort((a,b)=>sortName(a[1],b[1]));
+    const columns=[{key:'name',label:'Kit'},{key:'code',label:'Fluence code'},{key:'fp',label:'FP code'},{key:'family',label:'Family'},{key:'status',label:'Kit status'},
+      {key:'L',label:'L mm',align:R},{key:'W',label:'W mm',align:R},{key:'H',label:'H mm',align:R},{key:'sizeStatus',label:'Size status'},{key:'sizeSource',label:'Size source'},
+      {key:'items',label:'Items',align:R},{key:'mrp',label:'MRP total',align:R},{key:'products',label:'Products'},{key:'origin',label:'Origin'},{key:'updated',label:'Last updated'},
+      {key:'remarks',label:'Remarks'},{key:'layout',label:'Carton layout'},{key:'boxcm3',label:'Box volume cm3',align:R},{key:'cartcm3',label:'Cartons volume cm3',align:R},{key:'empty',label:'Empty space %',align:R}];
+    const pdfColumns=[{key:'name',label:'Kit',pdfWeight:3},{key:'code',label:'Fluence code',pdfWeight:1.3},{key:'fp',label:'FP code',pdfWeight:1.1},{key:'size',label:'Panel size (mm)',pdfWeight:1.6},
+      {key:'sizeStatus',label:'Size',pdfWeight:1.1},{key:'items',label:'Items',align:R,pdfWeight:0.7},{key:'mrp',label:'MRP',align:R,pdfWeight:0.9},{key:'empty',label:'Empty %',align:R,pdfWeight:0.9},{key:'status',label:'Status',pdfWeight:1.2}];
+    const rows=list.map(([,k])=>{ const w=spaceUse(k.items,k); return {name:k.name,code:k.code||'',fp:k.erp&&k.erp.productCode||'',family:k.family||'',status:k.status||'',L:k.L,W:k.W,H:k.H,size:hasSize(k)?dimTxt(k):'',
+      sizeStatus:k.sizeStatus||'MISSING',sizeSource:k.sizeSource||'',items:items(k),mrp:mrpOf(k),products:(k.items||[]).map(i=>pName(i.pid)+(i.q>1?' ×'+i.q:'')).join('; '),
+      origin:k.origin==='new'?'New development':'Customer master',updated:k.updatedAt||'',remarks:k.remarks||'',
+      layout:k.layout?k.layout.rows.map((r,i)=>'Row '+(i+1)+': '+r.map(x=>x.name+' ('+x.placement+', '+x.along+'x'+x.depth+', '+x.upright+' up)').join(' + ')).join(' | '):'',
+      boxcm3:w?Math.round(w.box/1000):'',cartcm3:w&&w.pct!=null?Math.round(w.vol/1000):'',empty:pct(w)}; });
+    return {title:'Fluence Kits',what:scope==='view'?'Kit Studio — Kits list':'Kit Studio — all kits',file:`Fluence Kits ${stamp}`,columns,pdfColumns,rows,orientation:'landscape'};
+  }
+  if(kind==='lines'){
+    const columns=[{key:'kit',label:'Kit'},{key:'code',label:'Fluence code'},{key:'product',label:'Product'},{key:'q',label:'Qty',align:R},{key:'mrp',label:'MRP',align:R},{key:'L',label:'Inner L',align:R},{key:'W',label:'Inner W',align:R},{key:'H',label:'Inner H',align:R}];
+    const rows=[]; for(const [,k] of [...S.kits].sort((a,b)=>sortName(a[1],b[1]))) for(const i of k.items||[]){ const p=S.products.get(i.pid)||{}; rows.push({kit:k.name,code:k.code||'',product:p.name||i.pid,q:i.q,mrp:i.mrp,L:p.L,W:p.W,H:p.H}); }
+    return {title:'Fluence Kit Contents',what:'Kit Studio — kit contents',file:`Fluence Kit Contents ${stamp}`,columns,rows};
+  }
+  if(kind==='products'){
+    const u=usage(), list=scope==='view'?productsInView():[...S.products].sort((a,b)=>sortName(a[1],b[1]));
+    const columns=[{key:'name',label:'Product'},{key:'mrp',label:'Standard MRP',align:R},{key:'status',label:'Status'},{key:'L',label:'L mm',align:R},{key:'W',label:'W mm',align:R},{key:'H',label:'H mm',align:R},
+      {key:'sizeStatus',label:'Size status'},{key:'fluenceName',label:'Name in Fluence size file'},{key:'used',label:'Used in kits',align:R},{key:'remarks',label:'Remarks'}];
+    const rows=list.map(([id,p])=>({name:p.name,mrp:p.mrp,status:p.status||'',L:p.L,W:p.W,H:p.H,sizeStatus:p.sizeStatus||'MISSING',fluenceName:p.fluenceName||'',used:u[id]||0,remarks:p.remarks||''}));
+    return {title:'Fluence Inner Products',what:scope==='view'?'Kit Studio — Inner products list':'Kit Studio — all inner products',file:`Fluence Inner Products ${stamp}`,columns,rows};
+  }
+  if(kind==='drafts'){
+    const columns=[{key:'name',label:'Kit'},{key:'family',label:'Family'},{key:'items',label:'Items',align:R},{key:'size',label:'Panel size (mm)'},{key:'empty',label:'Empty space %',align:R},
+      {key:'status',label:'Status'},{key:'by',label:'Last saved by'},{key:'at',label:'Last saved'},{key:'notes',label:'Notes'}];
+    const rows=draftsInView().rows.map(([,dr])=>({name:dr.name||'Untitled',family:dr.family||'',items:items(dr),size:hasSize(dr)?dimTxt(dr):'',empty:pct(spaceUse(dr.items,dr)),
+      status:dr.pushed?'In Kits':(dr.status||'In development'),by:who(dr.updatedBy),at:fmtDate(dr.updatedAt),notes:String(dr.notes||'')}));
+    return {title:'Fluence Kit Drafts',what:'Kit Studio — Drafts list',file:`Fluence Kit Drafts ${stamp}`,columns,rows};
+  }
+  return null;
+}
+/* What the list on screen is filtered by — printed on the report. */
+function exportMeta(kind){
+  const lab=(v,opts)=>(opts.find(o=>o[0]===v)||[v,v])[1];
+  if(kind==='kits'){ const f=S.kf; return [f.q?`Search: "${f.q}"`:null, f.st!=='ALL'?`Size: ${lab(f.st,[['CONFIRMED','Confirmed'],['VERIFY','Verify'],['PROPOSED','Proposed'],['CONFLICT','Conflict'],['MISSING','Missing']])}`:null,
+    f.origin!=='ALL'?`Kits: ${lab(f.origin,[['MASTER','Customer master'],['NEW','New development'],['INACTIVE','Inactive']])}`:null, f.sort?`Sorted by empty space, ${f.sort==='desc'?'most':'least'} first`:null].filter(Boolean); }
+  if(kind==='products'){ const f=S.pf; return [f.q?`Search: "${f.q}"`:null, f.st!=='ALL'?`Size: ${f.st.charAt(0)+f.st.slice(1).toLowerCase()}`:null].filter(Boolean); }
+  if(kind==='drafts') return [S.df==='PUSHED'?'Pushed to Kits':S.df==='ALL'?'All drafts':'In development'];
+  return [];
+}
+async function listExport(kind, format, scope, btn){
+  const X=window.kitStudioErp, T=exportTable(kind, scope);
+  const note=scope==='all'?$('#dlNote'):null, say=m=>{ if(note) note.textContent=m; else toast(m); };
+  if(!T||!T.rows.length){ say('Nothing to export in this view.'); return; }
+  if(!X||!X.exportList){ say('Open Kit Studio from the ERP to export.'); return; }
+  const spec={title:T.title,what:T.what,subtitle:'Kit Studio',name:T.title,orientation:T.orientation,meta:scope==='view'?exportMeta(kind):['Every record'],
+    sections:[{columns:T.columns,pdfColumns:T.pdfColumns,rows:T.rows}]};
+  const btns=btn?btn.parentElement.querySelectorAll('button'):[]; btns.forEach(b=>b.disabled=true);
+  say(`Preparing the ${format==='pdf'?'PDF':'Excel file'}…`);
+  try{ const r=await X.exportList(spec, format); say(`${T.title} — ${format==='pdf'?'PDF':'Excel'} downloaded (${r&&r.rows||T.rows.length} rows).`); }
+  catch(err){ say('Export didn’t go through: '+(err&&err.message||'try again')); }
+  finally{ btns.forEach(b=>b.disabled=false); }
+}
 function csv(rows){ return '﻿'+rows.map(r=>r.map(v=>{ const s=String(v??''); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(',')).join('\r\n'); }
 async function doExport(kind){
   const d=new Date(), stamp=`${d.getDate()}-${d.getMonth()+1}-${d.getFullYear()}`; let rows, name;
+  /* Inside the ERP: "kits:pdf", "lines:xlsx"… — the ERP's branded file, on record. */
+  if(kind.includes(':')){ const [k,f]=kind.split(':'); return listExport(k,f,'all',null); }
   if(kind==='kits'){ name=`Fluence Kits ${stamp}.csv`; rows=[['Kit','Fluence code','Family','Kit status','L mm','W mm','H mm','Size status','Size source','Items','MRP total','Products','Origin','Last updated','Remarks','Carton layout','Box volume cm3','Cartons volume cm3','Empty space %']];
     for(const k of [...S.kits.values()].sort(sortName)) rows.push([k.name,k.code,k.family,k.status,k.L,k.W,k.H,k.sizeStatus,k.sizeSource,(k.items||[]).reduce((s,i)=>s+(+i.q||1),0),Math.round(kitMrp(k)),(k.items||[]).map(i=>pName(i.pid)+(i.q>1?' ×'+i.q:'')).join('; '),k.origin==='new'?'New development':'Customer master',k.updatedAt||'',k.remarks,k.layout?k.layout.rows.map((r,i)=>'Row '+(i+1)+': '+r.map(x=>x.name+' ('+x.placement+', '+x.along+'x'+x.depth+', '+x.upright+' up)').join(' + ')).join(' | '):'',...(w=>w?[Math.round(w.box/1000),w.pct==null?'':Math.round(w.vol/1000),w.pct==null?'':Math.round(w.pct)]:['','',''])(spaceUse(k.items,k))]); }
   else if(kind==='lines'){ name=`Fluence Kit Contents ${stamp}.csv`; rows=[['Kit','Fluence code','Product','Qty','MRP','Inner L','Inner W','Inner H']];
@@ -2214,15 +2307,14 @@ async function runPush(){
 }
 function vDrafts(){
   const f=S.df, ro=!can('drafts');
-  const all=[...S.drafts].sort((a,b)=>String(b[1].updatedAt||'').localeCompare(String(a[1].updatedAt||'')));
-  const open=all.filter(([,d])=>!d.pushed), pushed=all.filter(([,d])=>d.pushed);
-  const rows=f==='PUSHED'?pushed:f==='ALL'?all:open;
+  const {all,open,pushed,rows}=draftsInView();
   const stChip=d=>d.pushed?'<span class="chip PUSHED">In Kits</span>':`<span class="chip ${d.status==='Approved'?'APPROVED':d.status==='Dummy sent'?'DUMMY':'DEV'}">${esc(d.status||'In development')}</span>`;
   const editing=S.build.draftId;
   return `
   <div class="toolbar">
     ${seg('dst',f,[['OPEN',`In development (${open.length})`],['PUSHED',`Pushed to Kits (${pushed.length})`],['ALL','All']])}
     <span style="flex:1"></span>
+    ${rows.length?listExportBtns('drafts'):''}
     <button class="btn primary" data-new-draft ${ro?'disabled':''}>New kit</button>
   </div>
   <p class="note" style="margin:0 0 12px">Drafts stay out of the Kits list and out of the size history. Open one to keep working on it in New kit, and push it to Kits once the dummy is approved.</p>
@@ -2293,7 +2385,12 @@ async function runReport(){
   const data=repData(R.ctx); if(!data||!data.contents.length){ R.msg='Add products to the kit first.'; renderModal(); return; }
   if(!S.dl){ R.msg='Downloads aren’t available in this view.'; renderModal(); return; }
   R.busy=true; R.msg='Preparing the PDF…'; renderModal();
-  let out; try{ out=await buildPdf(data,R); }
+  /* Inside the ERP the download goes on record first; a customer's copy wears
+     the Colour Impressions watermark the ERP answers with. No record, no file. */
+  let wm=null; const X=window.kitStudioErp;
+  if(X&&X.beforeDownload){ try{ wm=await X.beforeDownload({what:`Kit report — ${data.K.name}`,format:'pdf',rows:data.contents.length}); }
+    catch(err){ R.busy=false; R.msg='The download could not be recorded, so the PDF was not made: '+(err&&err.message||'try again'); if(S.rep===R) renderModal(); return; } }
+  let out; try{ out=await buildPdf(data,R,wm); }
   catch(err){ R.busy=false; R.msg=err&&err.pdf?err.message:'Could not build the PDF: '+(err&&err.message||'unknown error'); if(S.rep===R) renderModal(); return; }
   R.msg='Confirm the download to save '+out.filename+'.'; if(S.rep===R) renderModal();
   try{ await S.dl.save({filename:out.filename,data:out.bytes}); if(S.rep===R){ S.rep=null; renderModal(); } toast(out.filename+' is ready'); }
@@ -2321,7 +2418,7 @@ function isoOrder(cells){ // draw far cartons first (viewer at the front-right c
   for(let i=0;i<n;i++) if(!out.includes(i)) out.push(i);
   return out.map(i=>cells[i]);
 }
-async function buildPdf(R,opt){
+async function buildPdf(R,opt,wm){
   const {J,at}=await pdfLib();
   const doc=new J({unit:'mm',format:'a4',compress:true});
   const PW=210, PH=297, M=14, CW=PW-2*M, K=R.K, st=S.settings;
@@ -2411,6 +2508,15 @@ async function buildPdf(R,opt){
   const np=doc.getNumberOfPages();
   for(let i=1;i<=np;i++){ doc.setPage(i); doc.setDrawColor(...C.line); doc.setLineWidth(0.2); doc.line(M,PH-12,PW-M,PH-12); F('normal',7,C.faint);
     doc.text(fitTxt(`Colour Impressions · ${K.name} · kit carton report · ${dstr}`,CW-25),M,PH-8); doc.text(`Page ${i} of ${np}`,PW-M,PH-8,{align:'right'}); }
+  /* A customer's copy: Colour Impressions across every page, and whose copy it is. */
+  if(wm&&wm.text){ const th=Math.atan2(PH,PW), ang=th*180/Math.PI, dg=Math.hypot(PW,PH);
+    for(let i=1;i<=np;i++){ doc.setPage(i); doc.saveGraphicsState(); doc.setGState(new doc.GState({opacity:0.09}));
+      F('bold',60,[0,100,210]); const sz=Math.max(28,Math.min(96,60*(dg*0.7)/doc.getTextWidth(wm.text))); doc.setFontSize(sz);
+      const tw=doc.getTextWidth(wm.text), cap=sz*0.3528*0.7;
+      doc.text(wm.text,PW/2-(tw/2)*Math.cos(th)+(cap/2)*Math.sin(th),PH/2+(tw/2)*Math.sin(th)+(cap/2)*Math.cos(th),{angle:ang});
+      doc.restoreGraphicsState();
+      if(wm.line){ F('bold',6.6,[185,28,28]); doc.text(fitTxt(wm.line,CW),M,PH-3.4); } }
+    doc.setProperties({title:`${K.name} — kit carton report`,author:'Colour Impressions',subject:wm.line||'',keywords:wm.ref||''}); }
 
   const fn=`${K.name} - kit report ${now.getDate()}-${now.getMonth()+1}-${now.getFullYear()}.pdf`.replace(/[\\/:*?"<>|]+/g,'-').replace(/\s+/g,' ').trim();
   return {bytes:doc.output('arraybuffer'),filename:fn};

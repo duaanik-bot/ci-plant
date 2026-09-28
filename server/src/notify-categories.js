@@ -58,6 +58,8 @@ const OF_KIND = Object.freeze({
   // Fluence login. Nobody approves it — the change is made and signed — but
   // management is told at once, so it files with the plant alerts.
   fluence_change: 'alerts',
+  // …and every file it downloads from the module (a list, a report, a print).
+  fluence_download: 'alerts',
   // A stage sent back one station. It files here rather than under `approvals`
   // because the receiving station has nothing to decide — the call was already
   // made upstream and this is the answer arriving. Same shape as

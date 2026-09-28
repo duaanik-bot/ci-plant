@@ -14,7 +14,10 @@
 //     jump inside it (Push to Kits opens Kits) moves the tab too;
 //   • what the studio does not edit itself opens here, over it: a kit's contents
 //     and prescription (the Fluence drawer's one table) and an inner product's
-//     codes, dosage form and packaging (the inner product form).
+//     codes, dosage form and packaging (the inner product form);
+//   • every file it hands out goes through here: its lists as the ERP's branded
+//     PDF or Excel (exportList), and its own kit report once the download is on
+//     record (recordDownload) — a customer's copy watermarked, CI management told.
 //
 // Who may do what is the server's call (routes/kitstudio.js): everyone who can
 // open the Fluence module may look; Planning roles may edit; the product master
@@ -23,6 +26,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, auth } from '../../api.js';
 import { subscribeToDbChanges } from '../../lib/realtime.js';
+import { fluenceExportGate, recordDownload } from '../../lib/fluenceDownloads.js';
 import InnerProductForm from './InnerProductForm.jsx';
 
 const FluenceDrawer = lazy(() => import('./FluenceDrawer.jsx'));
@@ -78,6 +82,23 @@ export default function KitStudioFrame({ view, startView, hidden = false, onView
       viewChanged(v, info = {}) {
         said.current.onView?.(v);
         if (info.drafts != null) said.current.onDrafts?.(Number(info.drafts));
+      },
+      // A list from the studio, as the ERP's branded PDF or Excel. The record
+      // (and a customer's watermark) comes first; no record, no file.
+      async exportList(spec, format) {
+        const kind = format === 'pdf' ? 'pdf' : 'xlsx';
+        const plain = JSON.parse(JSON.stringify(spec || {}));
+        const { exportPDF, exportXLSX, specRowCount } = await import('../../lib/exporter.js');
+        if (!specRowCount(plain)) throw new Error('Nothing to export in this view.');
+        const gated = await fluenceExportGate(String(plain.what || plain.title || 'Kit Studio list'))(kind, plain);
+        if (kind === 'pdf') await exportPDF(gated); else await exportXLSX(gated);
+        return { rows: specRowCount(plain), watermarked: Boolean(gated.watermark) };
+      },
+      // The studio's own files (a kit's customer report): on record first, and
+      // the watermark a customer's copy must wear, or null for Colour Impressions.
+      recordDownload(info = {}) {
+        const i = JSON.parse(JSON.stringify(info || {}));
+        return recordDownload({ what: String(i.what || 'Kit Studio file'), format: i.format === 'xlsx' ? 'xlsx' : 'pdf', rows: Number.isInteger(i.rows) ? i.rows : null });
       },
       user: auth.user,
     };

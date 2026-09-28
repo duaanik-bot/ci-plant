@@ -244,6 +244,19 @@
     viewChanged: typeof host.viewChanged === 'function'
       ? function (view, info) { host.viewChanged(String(view), clone(info || {})); }
       : null,
+    // A list as the ERP's branded PDF or Excel (format 'pdf' | 'xlsx'). The ERP
+    // puts the download on record first and watermarks a customer's copy.
+    // spec = { title, what, subtitle?, meta?, columns:[{key,label,align?}], rows:[{…}] }
+    // or sections:[{ heading?, columns, pdfColumns?, rows }].
+    exportList: typeof host.exportList === 'function'
+      ? function (spec, format) { return host.exportList(clone(spec), String(format)).then(clone); }
+      : null,
+    // Before the studio makes a file of its own (a kit's customer report): the
+    // ERP records the download and answers with the watermark a customer's copy
+    // must wear — { text, line, ref } — or null. A refusal means: make no file.
+    beforeDownload: typeof host.recordDownload === 'function'
+      ? function (info) { return host.recordDownload(clone(info || {})).then(clone); }
+      : null,
   };
 
   // Another person's save, or an edit in the Fluence Master, reaches this page

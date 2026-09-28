@@ -12,6 +12,7 @@ import {
   Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
 } from 'lucide-react';
 import { api, auth, currentUser, fmt } from '../api.js';
+import { recordDownload } from '../lib/fluenceDownloads.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -602,6 +603,25 @@ const SHORT_LABEL = {
 // glass pinned to the bottom edge, padded by the home-bar inset, five slots:
 // four modules and More. Rendered only in the phone tree, so the desktop DOM
 // never carries it.
+// A customer's own login (only Fluence ticked): every page it prints — and a PDF
+// saved from the print dialog — wears Colour Impressions across it and whose copy
+// it is along the foot. Print only: nothing shows on screen. The print itself is
+// recorded and CI management told (AppLayout's beforeprint listener).
+function PrintWatermark({ user }) {
+  return (
+    <div data-ci-chrome aria-hidden="true" data-print-watermark="1"
+      className="pointer-events-none fixed inset-0 z-[2147483647] hidden items-center justify-center print:flex">
+      <span className="whitespace-nowrap text-[88px] font-extrabold tracking-[0.04em]"
+        style={{ color: 'rgba(0, 100, 210, 0.1)', transform: 'rotate(-35deg)' }}>
+        COLOUR IMPRESSIONS
+      </span>
+      <span className="absolute inset-x-0 bottom-0 text-center text-[8px] font-bold" style={{ color: '#b91c1c' }}>
+        Colour Impressions copy · printed by {user?.name || 'a Fluence login'}{user?.email ? ` (ID ${user.email})` : ''}
+      </span>
+    </div>
+  );
+}
+
 function PhoneNav({ groups, floorTotal, onMore }) {
   const flat = groups.flatMap(g => g.items);
   const byTo = Object.fromEntries(flat.filter(i => i.to).map(i => [i.to, i]));
@@ -788,6 +808,19 @@ export default function AppLayout() {
   // Poll the floor total only where the desktop rail (which polls it itself)
   // is not mounted — one clock per shell, never two.
   const floorTotal = useFloorTotal(tier !== 'desktop' && !outside);
+  // …and whatever it prints — or saves as PDF from the print dialog — wears the
+  // Colour Impressions watermark (PrintWatermark, print only) and goes on record
+  // like any download from the module, CI management told (lib/fluenceDownloads.js).
+  useEffect(() => {
+    if (!outside) return undefined;
+    const onPrint = () => {
+      const where = `${window.location.pathname}${window.location.search}`;
+      recordDownload({ what: `Printed the page ${where}`, format: 'print' }).catch(() => {});
+    };
+    window.addEventListener('beforeprint', onPrint);
+    return () => window.removeEventListener('beforeprint', onPrint);
+  }, [outside]);
+  const printMark = outside ? <PrintWatermark user={user} /> : null;
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
   // Desktop sidebar open/close — persisted like a macOS window state.
   const [collapsed, setCollapsed] = useState(() => storage.getItem('ci_sidebar_collapsed') === '1');
@@ -849,6 +882,7 @@ export default function AppLayout() {
           <main className="w-full px-3 pt-4"
             style={{ paddingBottom: 'calc(84px + var(--sab))', paddingLeft: 'max(0.75rem, var(--sal))', paddingRight: 'max(0.75rem, var(--sar))' }}>
             <Outlet />
+            {printMark}
           </main>
           <PhoneNav groups={groups} floorTotal={floorTotal} onMore={() => setMoreOpen(true)} />
           <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} groups={groups} floorTotal={floorTotal} user={user} />
@@ -901,6 +935,7 @@ export default function AppLayout() {
           />
           <main className="mx-auto w-full max-w-[1880px] px-3 py-5 sm:px-4">
             <Outlet />
+            {printMark}
           </main>
         </div>
       </div>
@@ -1005,6 +1040,7 @@ export default function AppLayout() {
             from the rail. */}
         <main className="mx-auto w-full max-w-[1880px] px-3 py-6 sm:px-4 lg:px-5">
           <Outlet />
+          {printMark}
         </main>
       </div>
     </div>

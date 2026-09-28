@@ -88,12 +88,17 @@ test('staff: the tabs narrow the Fluence module, never the Fluence doors in the 
 
 test('every write of the Fluence module and Kit Studio belongs to a tab', () => {
   const sample = p => p.replace(/:[a-zA-Z]+/g, 'x1');
+  // A download's record belongs to whichever tab offered the file — the list it
+  // exports was already served to that tab. It writes the record, not the master.
+  const NO_TAB = new Set(['POST /fluence/downloads']);
   for (const file of ['server/src/routes/kitstudio.js', 'server/src/routes/fluence.js']) {
     const src = read(file);
     for (const [, m, p] of src.matchAll(/r\.(put|post|delete)\('([^']+)'/g)) {
+      if (NO_TAB.has(`${m.toUpperCase()} ${p}`)) continue;
       assert.ok(tabsForRequest(m.toUpperCase(), sample(p)), `${m.toUpperCase()} ${p} (${file}) is no tab's`);
     }
   }
+  assert.equal(tabsForRequest('POST', '/fluence/downloads'), null);
   // The listings a tab alone shows are that tab's.
   assert.deepEqual(tabsForRequest('GET', '/fluence/changes'), ['changes']);
   assert.deepEqual(tabsForRequest('GET', '/fluence/kits'), ['customer']);

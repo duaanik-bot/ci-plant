@@ -1152,8 +1152,11 @@ export function rowMatches(row, query, extra = '') {
 
 // Export menu — branded PDF / Excel download for any tabular view.
 // `build` returns (or resolves to) an exporter spec at click time, so it always
-// captures the currently filtered data.
-export function ExportMenu({ build, size = 'sm', variant = 'secondary', label = 'Export', className = '' }) {
+// captures the currently filtered data. `gate(kind, spec)`, when given, runs
+// before the file is made and returns the spec to use — the Fluence module's
+// puts every download on record and adds the watermark a customer's copy
+// wears (lib/fluenceDownloads.js); if it throws, no file is made.
+export function ExportMenu({ build, gate = null, size = 'sm', variant = 'secondary', label = 'Export', className = '' }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(null);
   const [rect, setRect] = useState(null);
@@ -1191,7 +1194,8 @@ export function ExportMenu({ build, size = 'sm', variant = 'secondary', label = 
       const { exportPDF, exportXLSX, specRowCount } = await import('../lib/exporter');
       const spec = await build();
       if (!spec || !specRowCount(spec)) { toast?.info('Nothing to export'); return; }
-      if (kind === 'pdf') await exportPDF(spec); else await exportXLSX(spec);
+      const file = gate ? await gate(kind, spec) : spec;
+      if (kind === 'pdf') await exportPDF(file); else await exportXLSX(file);
       toast?.success(`${kind === 'pdf' ? 'PDF' : 'Excel'} downloaded`);
     } catch (e) {
       console.error('Export failed', e);
@@ -1368,6 +1372,7 @@ export function DataTable({
   serialNumber = true,
   exportName,
   exportSubtitle,
+  exportGate = null,
   exportMeta,
   exportSummary,
   // Replace the built-in spec entirely: `exportSpec(sortedRows, columns)` is
@@ -1569,7 +1574,7 @@ export function DataTable({
                 </label>
               )}
               <span className="ml-auto flex items-center gap-2">
-                {exportName && <ExportMenu build={buildExport} />}
+                {exportName && <ExportMenu build={buildExport} gate={exportGate} />}
               </span>
             </div>
           </div>
@@ -1720,7 +1725,7 @@ export function DataTable({
           {onSearchChange
             ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full max-w-xl" />
             : searchable ? <SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} /> : <span />}
-          {exportName && <ExportMenu build={buildExport} />}
+          {exportName && <ExportMenu build={buildExport} gate={exportGate} />}
         </div>
       )}
       <div className="overflow-x-auto">

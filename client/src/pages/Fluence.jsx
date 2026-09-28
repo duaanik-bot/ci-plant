@@ -25,6 +25,7 @@ import { api, auth, currentUser, fmt } from '../api.js';
 import { Button, DataTable, GroupedTabs, KpiCard, KpiRow, Modal, PageHeader, SearchableSelect, useToast } from '../components/ui.jsx';
 import { canAccess, canPlan, fluenceTabsOf, FLUENCE_TABS } from '../modules.js';
 import FluenceDrawer from '../components/fluence/FluenceDrawer.jsx';
+import { fluenceExportGate } from '../lib/fluenceDownloads.js';
 import KitStudioFrame from '../components/fluence/KitStudioFrame.jsx';
 import { FLUENCE_CONTEXTS, kitListPrice, partLabel } from '../lib/fluence.js';
 
@@ -48,6 +49,15 @@ const CHANGE_LABEL = {
   inner_product_create: 'Inner product added', inner_product_update: 'Inner product',
   studio_draft_created: 'Draft started', studio_draft_saved: 'Draft saved', studio_draft_deleted: 'Draft deleted',
   studio_settings: 'Clearances',
+  download_pdf: 'Downloaded · PDF', download_xlsx: 'Downloaded · Excel', download_print: 'Printed',
+};
+
+// Every list here downloads through the module's record: a customer's copy is
+// watermarked and CI management is told (lib/fluenceDownloads.js).
+const GATE = {
+  products: fluenceExportGate('Fluence products'),
+  customer: fluenceExportGate('Customer kit list'),
+  changes: fluenceExportGate('Fluence change log'),
 };
 
 export default function Fluence() {
@@ -205,7 +215,7 @@ export default function Fluence() {
         <DataTable searchable rows={products || []} empty={products ? 'No Fluence products' : 'Loading…'}
           onRowClick={p => setDrawer({ productId: p.id })}
           defaultSort={{ key: 'code', dir: 'asc' }}
-          exportName="Fluence Products" exportSubtitle="Kit and prescription status"
+          exportName="Fluence Products" exportSubtitle="Kit and prescription status" exportGate={GATE.products}
           columns={[
             // The shared sort reads "FP-100" as a DATE (Date.parse is lenient), which
             // scrambles the series — sort on the number instead.
@@ -251,7 +261,7 @@ export default function Fluence() {
           </div>
           <DataTable searchable rows={kitRows} empty={kits ? 'No kits in this view' : 'Loading…'}
             defaultSort={{ key: 'party_sl_no', dir: 'asc' }}
-            exportName="Fluence Customer Kits" exportSubtitle="Customer kit list and ERP product links"
+            exportName="Fluence Customer Kits" exportSubtitle="Customer kit list and ERP product links" exportGate={GATE.customer}
             columns={[
               { key: 'party_sl_no', label: 'Party Sl.No', align: 'right', render: k => <span className="tabular-nums">{k.party_sl_no}</span> },
               { key: 'kit_name', label: 'Kit (customer list)', render: k => (
@@ -321,12 +331,13 @@ export default function Fluence() {
         <>
           <p className="mb-3 text-xs text-gray-500">
             Every change to the Fluence kits, prescriptions, inner products and Kit Studio — newest first, with who made it and from where.
-            A change made from a customer’s own login carries its login ID as its signature, and Colour Impressions management is told at once.
+            A change made from a customer’s own login carries its login ID as its signature, and Colour Impressions management is told at once —
+            so is every file it downloads (listed here too, with the reference its watermark carries).
           </p>
           <DataTable searchable rows={changes || []} empty={changes ? 'No changes recorded yet' : 'Loading…'}
             defaultSort={{ key: 'at', dir: 'desc' }}
             onRowClick={c => (c.kit_id ? setDrawer({ kitId: c.kit_id, view: 'history' }) : null)}
-            exportName="Fluence Change Log" exportSubtitle="Kits, prescriptions, inner products and Kit Studio"
+            exportName="Fluence Change Log" exportSubtitle="Kits, prescriptions, inner products and Kit Studio" exportGate={GATE.changes}
             columns={[
               { key: 'at', label: 'When', sortValue: c => new Date(c.at).getTime(), export: c => fmt.dt(c.at),
                 render: c => <span className="whitespace-nowrap text-xs tabular-nums">{fmt.dt(c.at)}</span> },

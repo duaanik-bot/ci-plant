@@ -49,6 +49,19 @@ export async function tellManagement(user, { kitId = null, subject, change, link
   }, qc);
 }
 
+// The same notice for a file a customer's login took out of the module — what it
+// was, how many rows, and the reference its watermark carries.
+export async function tellManagementOfDownload(user, { what, detail }, qc) {
+  if (!user?.outside) return;
+  const users = await qc('SELECT id, active, is_management FROM users');
+  await notify(notificationRecipients(users, 'is_management', user.id), {
+    kind: 'fluence_download',
+    title: `${what} — downloaded by ${user.name}`,
+    body: `${detail}. Signed: ${user.name}.`,
+    link: '/fluence?tab=changes',
+  }, qc);
+}
+
 // A database that has not had the Fluence migration applied answers every read
 // with an empty, switched-off feature instead of a 500 — so no button anywhere
 // can appear, and no screen can break, before the tables exist.
@@ -874,10 +887,59 @@ r.get('/fluence/kits', async (_req, res, next) => {
   }
 });
 
+// ── Downloads ───────────────────────────────────────────────────────────────
+// Every file the module hands out — a list as PDF or Excel, a kit's customer
+// report, a printed page — is made in the browser, which asks here first. For a
+// customer's own login the download goes on record before the file exists: an
+// audit line (it shows in the Change log) and a notice to CI management, in one
+// transaction. The answer carries the watermark the file must wear — Colour
+// Impressions across every page, and who took it, when, and the reference that
+// finds this record again. The browser makes no file without that answer.
+// A Colour Impressions login is answered with no watermark and nothing recorded.
+const DOWNLOAD_FORMATS = { pdf: 'PDF', xlsx: 'Excel', print: 'Printed' };
+export const istStamp = at => new Date(at).toLocaleString('en-IN', {
+  timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+});
+export function downloadDetail({ what, format, rows, filter }) {
+  const parts = [`${what} — ${DOWNLOAD_FORMATS[format]}`];
+  if (rows != null) parts.push(`${rows} row${rows === 1 ? '' : 's'}`);
+  if (filter) parts.push(filter);
+  return parts.join(', ');
+}
+r.post('/fluence/downloads', async (req, res, next) => {
+  try {
+    if (!req.user?.outside) return res.json({ watermark: null });
+    const format = Object.hasOwn(DOWNLOAD_FORMATS, req.body?.format) ? req.body.format : null;
+    if (!format) throw fail(400, 'Say which file this is: pdf, xlsx or print.');
+    const what = String(req.body?.what ?? '').replace(/\s+/g, ' ').trim().slice(0, 160) || 'Fluence list';
+    const n = Number(req.body?.rows);
+    const rows = Number.isInteger(n) && n >= 0 ? n : null;
+    const filter = String(req.body?.filter ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    const detail = downloadDetail({ what, format, rows, filter });
+    const out = await tx(async (qc, oc) => {
+      const row = await oc(`
+        INSERT INTO audit_log (entity, entity_id, action, detail, user_name)
+        VALUES ('fluence_download', $1, $2, $3, $4) RETURNING id, created_at`,
+      [req.user.id ?? null, `download_${format}`, detail.slice(0, 1000), req.user.name]);
+      const ref = `FD-${row.id}`;
+      await tellManagementOfDownload(req.user, { what, detail: `${detail}. Ref ${ref}` }, qc);
+      return { ref, at: row.created_at };
+    });
+    res.json({
+      watermark: {
+        text: 'COLOUR IMPRESSIONS',
+        line: `Colour Impressions copy · Downloaded by ${req.user.name} · ${istStamp(out.at)} · Ref ${out.ref}`,
+        ref: out.ref,
+      },
+    });
+  } catch (e) { next(e); }
+});
+
 // ── The change log: every change to the Fluence master, newest first ────────
 // Kit lists, prescriptions and links (with their revisions), inner products, and
 // Kit Studio's kits, drafts and clearances — who made each change and from where.
-// A change from a customer's own login carries its login ID in the name.
+// A change from a customer's own login carries its login ID in the name, and
+// every file that login downloaded is listed too.
 r.get('/fluence/changes', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 300, 1), 1000);
@@ -892,13 +954,14 @@ r.get('/fluence/changes', async (req, res, next) => {
         SELECT 'a' || a.id, a.created_at, a.user_name, NULL,
                CASE WHEN a.entity = 'fluence_inner_product' THEN 'inner_product_' || a.action
                     WHEN a.entity = 'kit_studio' THEN 'studio_' || a.action
+                    WHEN a.entity = 'fluence_download' THEN a.action
                     ELSE 'kit_' || a.action END,
                NULL, a.detail, CASE WHEN a.entity = 'fluence_kit' THEN a.entity_id END, COALESCE(k.kit_name, ip.name), p.code, p.name
         FROM audit_log a
         LEFT JOIN fluence_kits k ON a.entity = 'fluence_kit' AND k.id = a.entity_id
         LEFT JOIN fluence_inner_products ip ON a.entity = 'fluence_inner_product' AND ip.id = a.entity_id
         LEFT JOIN products p ON p.id = k.product_id
-        WHERE a.entity IN ('fluence_inner_product', 'kit_studio')
+        WHERE a.entity IN ('fluence_inner_product', 'kit_studio', 'fluence_download')
            OR (a.entity = 'fluence_kit' AND a.action IN ('create', 'delete', 'studio_saved'))
       ) x ORDER BY x.at DESC, x.id DESC LIMIT $1`, [limit]));
   } catch (e) {
