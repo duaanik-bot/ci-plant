@@ -91,7 +91,8 @@ describe('the AVS printing lock — through the real app', {
           CONSTRAINT decisions_decision_check CHECK (decision IN ('RELEASE', 'KEEP ON HOLD', 'REJECT', 'ARTWORK ALERT OK')),
         decided_by text, remark text, decided_at timestamptz NOT NULL DEFAULT now())`);
     for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql',
-      '20260928180000_avs_redo_verification.sql', '20260928190000_avs_undo_and_job_cards.sql']) {
+      '20260928180000_avs_redo_verification.sql', '20260928190000_avs_undo_and_job_cards.sql',
+      '20260928200000_avs_progress_log.sql']) {
       await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
         .replace(/REVOKE ALL[^;]*;/g, ''));
     }
@@ -791,12 +792,10 @@ describe('the AVS printing lock — through the real app', {
     assert.equal(rowOf(floor, a)?.qa_stamp?.text, 'QA Approved');
     assert.equal(rowOf(floor, b)?.qa_stamp?.state, 'approved');
 
-    // Undo needs a reason, then brings the lock back — kept as a row, never deleted.
-    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: '' });
-    assert.equal(out.status, 400);
-    out = await call('production', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'wrong job' });
+    // Undo — no questions asked — brings the lock back; kept as a row, never deleted.
+    out = await call('production', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, {});
     assert.equal(out.status, 403, 'the press does not decide');
-    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'released the wrong report' });
+    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, {});
     assert.equal(out.status, 201, JSON.stringify(out.body));
     assert.equal(out.body.decision, 'UNDO');
     out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'again please' });
@@ -818,5 +817,12 @@ describe('the AVS printing lock — through the real app', {
     assert.equal(again.status, 201);
     out = await completePrinting(a);
     assert.equal(out.status, 200, JSON.stringify(out.body));
+
+    // Each progress step Claude writes is stamped by the database, in order.
+    await db.q(`UPDATE avs.check_requests SET progress = 'Claude started' WHERE id = $1`, [made.body.id]);
+    await db.q(`UPDATE avs.check_requests SET progress = 'Reading the PO: 02512' WHERE id = $1`, [made.body.id]);
+    await db.q(`UPDATE avs.check_requests SET note = 'x' WHERE id = $1`, [made.body.id]);
+    const log = (await db.one('SELECT progress_log FROM avs.check_requests WHERE id = $1', [made.body.id])).progress_log;
+    assert.deepEqual(log.map(x => x.p), ['Claude started', 'Reading the PO: 02512']);
   });
 });

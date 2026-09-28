@@ -30,11 +30,10 @@ export const decisionLabel = key => (key === 'UNDO' ? 'Decision undone' : AVS_DE
 // naming it (undoes_id), with who, when and why. The decision in force is the
 // newest one that is neither an artwork-alert sign-off, nor an UNDO row, nor
 // undone — so an undo brings back the decision before it, if any.
-export const AVS_UNDO_MIN = 5;
+// No questions asked (owner, 28 Sep 2026): an undo needs no remark; who and
+// when are kept on the UNDO row all the same.
 export function undoProblem({ remark }) {
-  const t = String(remark ?? '').trim();
-  if (t.length < AVS_UNDO_MIN) return 'Write why the decision is being undone.';
-  if (t.length > AVS_REMARK_MAX) return `Keep the remark under ${AVS_REMARK_MAX} characters.`;
+  if (String(remark ?? '').trim().length > AVS_REMARK_MAX) return `Keep the remark under ${AVS_REMARK_MAX} characters.`;
   return null;
 }
 // decisions: newest first. Marks each undone one, and gives the one in force.
@@ -75,17 +74,47 @@ export function decisionProblem({ decision, remark, status, hasAlert = false }) 
   if (!AVS_STATUSES.includes(status)) return 'This report has no PASS / HOLD / REJECT result.';
   const text = String(remark ?? '').trim();
   if (text.length > AVS_REMARK_MAX) return `Keep the remark under ${AVS_REMARK_MAX} characters.`;
-  if (decision === 'RELEASE' && status === 'REJECT') {
-    return 'A REJECT report cannot be released. Correct the cartons and send new photos for the next check.';
-  }
+  // Not a hard block (owner, 28 Sep 2026): QA may release even a REJECT report,
+  // with a remark saying why — the remark is the record of that call.
   if (decision === 'ARTWORK ALERT OK' && !hasAlert) return 'This report has no artwork alert to confirm.';
   if (!text && !(decision === 'RELEASE' && status === 'PASS')) {
     return decision === 'RELEASE'
-      ? 'Write which HOLD points QA has cleared, and how.'
-      : 'Write a remark: what was checked and what happens to the cartons.';
+      ? status === 'REJECT' ? 'Pick or write why a REJECT report is released.' : 'Pick or write which HOLD points QA has cleared.'
+      : 'Pick or write a remark.';
   }
   return null;
 }
+
+// Ready-made remarks, one tap each (owner, 28 Sep 2026). The person can still
+// add words after picking one.
+export const AVS_REMARK_PRESETS = {
+  RELEASE: [
+    'Checked by QA: OK to go ahead',
+    'Corrected sheets checked: OK',
+    'Customer approved the deviation',
+    'Minor point, accepted by QA',
+    'Board / GSM confirmed OK',
+    'PO confirmed with the customer',
+  ],
+  'KEEP ON HOLD': [
+    'Waiting for customer confirmation',
+    'Waiting for corrected sheets',
+    'PO to be confirmed',
+    'Board / GSM to be confirmed',
+    'Better photos needed',
+  ],
+  REJECT: [
+    'Artwork does not match the approved master',
+    'Old or wrong artwork printed',
+    'Print defect (ink, register, voids)',
+    'Wrong board / GSM',
+    'Text, batch or barcode error',
+  ],
+  'ARTWORK ALERT OK': [
+    'Artwork team confirmed with the customer',
+    'Checked against the customer\'s earlier approved carton',
+  ],
+};
 
 // Where a case stands, from its latest report, its latest decision and whether
 // the owner closed it (a CLOSE row in avs.reports).
@@ -179,9 +208,9 @@ export function qaStamp(reports = []) {
   const lines = reports.map(avsGateLine);
   const waiting = lines.filter(l => l.state !== 'released');
   if (!waiting.length) return { state: 'approved', text: 'QA Approved', lines };
-  if (waiting.some(l => l.state === 'rejected' || l.status === 'REJECT')) return { state: 'rejected', text: 'QA: Rejected', lines };
-  if (waiting.some(l => l.decision === 'KEEP ON HOLD' || l.status === 'HOLD')) return { state: 'hold', text: 'QA: On hold', lines };
-  return { state: 'pending', text: 'QA: Waiting', lines };
+  if (waiting.some(l => l.state === 'rejected' || l.status === 'REJECT')) return { state: 'rejected', text: 'QA Rejected', lines };
+  if (waiting.some(l => l.decision === 'KEEP ON HOLD' || l.status === 'HOLD')) return { state: 'hold', text: 'QA Hold', lines };
+  return { state: 'pending', text: 'QA Pending', lines };
 }
 
 export function avsGate(reports = []) {
@@ -281,6 +310,20 @@ export function setClock(set, now = Date.now()) {
     return { label: 'checked in', text: elapsedText(finished - claimed), live: false };
   }
   return null;
+}
+
+// Where a check's time went: each step Claude wrote (progress_log, stamped by
+// the database) until the next one, or until the check finished. The words
+// are the step's own, without the detail after the colon.
+export function stepTimes(set) {
+  const log = Array.isArray(set?.progress_log) ? set.progress_log : [];
+  const end = Date.parse(set?.finished_at) || null;
+  return log.map((x, i) => {
+    const from = Date.parse(x.at);
+    const to = i + 1 < log.length ? Date.parse(log[i + 1].at) : end;
+    const step = String(x.p || '').split(':')[0].trim();
+    return { step, ms: Number.isFinite(from) && Number.isFinite(to) ? Math.max(0, to - from) : null };
+  }).filter(x => x.ms != null && x.step && !/^report ready$|^not checked$/i.test(x.step));
 }
 
 // Where a set stands, as one bar: adding photos 5% → waiting for Claude 10% →

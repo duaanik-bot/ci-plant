@@ -196,7 +196,7 @@ r.post('/avs/reports/:no/decisions/:id/undo', async (req, res, next) => {
         VALUES ($1, $2, $3, 'UNDO', $4, $5, $6, $7, $8, now(), 'ci-plant')
         RETURNING id, report_rev, check_no, decision, undoes_id, decided_by, decided_by_role, remark, decided_at, source`,
         [no, target.report_rev, target.check_no ?? 1, target.id, req.user.name ?? null, req.user.id ?? null,
-          req.user.role ?? null, remark.slice(0, AVS_REMARK_MAX)]);
+          req.user.role ?? null, remark ? remark.slice(0, AVS_REMARK_MAX) : null]);
     } catch (e) {
       if (e?.code === '23505') throw fail(409, 'This decision was already undone. Reload the report.');
       throw e;

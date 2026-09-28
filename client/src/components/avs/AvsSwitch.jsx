@@ -24,28 +24,22 @@ export function AvsChip({ on, className = '' }) {
   );
 }
 
-// The QA stamp under a job card at the press: "QA Approved" when QA has
-// released every AVS report on the card (a decision undone no longer counts).
-// Only those two words — never colour or anything else. Short of approval, a
-// small plain tag says how it stands. stamp: row.qa_stamp from GET /floor/printing.
-const QA_TAG = {
-  hold: 'bg-amber-50 text-amber-800 ring-amber-200',
-  rejected: 'bg-red-50 text-red-700 ring-red-200',
-  pending: 'bg-slate-50 text-slate-600 ring-slate-200',
+// The QA stamp under a job card at the press: where QA stands right now on the
+// card's AVS reports — QA APPROVED (every report released), QA HOLD, QA
+// REJECTED, or QA PENDING (a report waiting for QA). One large stamp, the same
+// size for every state, only those words. stamp: row.qa_stamp from
+// GET /floor/printing, re-read with every refresh of the station.
+const STAMP_INK = {
+  approved: 'border-emerald-700 text-emerald-700',
+  hold: 'border-amber-600 text-amber-700',
+  rejected: 'border-red-700 text-red-700',
+  pending: 'border-slate-500 text-slate-600',
 };
 export function QaStamp({ stamp, className = '' }) {
   if (!stamp) return null;
-  if (stamp.state === 'approved') {
-    return (
-      <span title={stamp.reports || 'QA Approved'} aria-label="QA Approved"
-        className={`inline-flex -rotate-3 select-none items-center rounded-md border-[3px] border-double border-emerald-700 px-2 py-0.5 text-[12px] font-black uppercase leading-none tracking-[0.12em] text-emerald-700 ${className}`}>
-        QA Approved
-      </span>
-    );
-  }
   return (
-    <span title={stamp.reports || stamp.text}
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${QA_TAG[stamp.state] || QA_TAG.pending} ${className}`}>
+    <span title={stamp.reports || stamp.text} aria-label={stamp.text}
+      className={`inline-flex -rotate-3 select-none items-center whitespace-nowrap rounded-md border-[3px] border-double bg-white/70 px-2.5 py-1 text-[13px] font-black uppercase leading-none tracking-[0.12em] ${STAMP_INK[stamp.state] || STAMP_INK.pending} ${className}`}>
       {stamp.text}
     </span>
   );

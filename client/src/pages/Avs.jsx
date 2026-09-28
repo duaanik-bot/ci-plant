@@ -30,7 +30,7 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
-  AVS_DECISIONS, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
+  AVS_DECISIONS, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_REMARK_PRESETS, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
   istStamp, reportLabel, setLabel,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
@@ -239,7 +239,10 @@ export default function Avs() {
                   {r.issued_at && <div className="text-[11px] tabular-nums text-slate-500">{istStamp(r.issued_at).split(', ').pop()}</div>}
                 </div>) },
             { key: '_actions', label: 'Action', sortable: false,
-              render: r => <RowActions r={r} canDecide={!!data?.can_decide} onAct={action => setActing({ row: r, action })} /> },
+              render: r => <RowActions r={r} canDecide={!!data?.can_decide}
+                onAct={action => (action === 'UNDO'
+                  ? undoDecision(r.report_no, r.last_decision_id, toast).then(load).catch(() => {})
+                  : setActing({ row: r, action }))} /> },
           ]}
         />
       </div>
@@ -265,7 +268,6 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
   const [pick, setPick] = useState(null);
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
-  const [undoing, setUndoing] = useState(null); // a decision to undo
 
   const load = useCallback(() => api.get(`/avs/reports/${encodeURIComponent(no)}`)
     .then(d => { setDetail(d); setErr(null); })
@@ -379,11 +381,7 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
           </section>
 
           <RedoAndTrail no={no} r={r} detail={detail} canRedo={canRedo} onRedo={onRedo} />
-          {undoing && (
-            <QuickDecision action="UNDO" onClose={() => setUndoing(null)}
-              onSaved={async () => { setUndoing(null); await load(); onSaved?.(); }}
-              row={{ ...r, last_decision_id: undoing.id, last_decision: undoing.decision, last_decided_by: undoing.decided_by }} />
-          )}
+
 
           <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">QA decision</h3>
@@ -404,7 +402,8 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
                             <span className="text-slate-500"> · {d.decided_by || '—'} · {istStamp(d.decided_at)} · on {reportLabel({ report_no: no, ...d })}</span>
                           </span>
                           {detail.can_decide && onLatest && !d.undone && d.decision !== 'UNDO' && (inForce || d.decision === 'ARTWORK ALERT OK') && r.case_state !== 'closed' && (
-                            <Button size="sm" variant="ghost" repeatable onClick={() => setUndoing(d)}>
+                            <Button size="sm" variant="ghost" repeatable
+                              onClick={() => undoDecision(no, d.id, toast).then(async () => { await load(); onSaved?.(); }).catch(() => {})}>
                               <span className="inline-flex items-center gap-1"><Undo2 size={12} /> Undo</span>
                             </Button>
                           )}
@@ -423,27 +422,26 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
               <div className="mt-3 space-y-3">
                 <div className="flex flex-wrap gap-2">
                   {AVS_DECISIONS.filter(d => d.key !== 'ARTWORK ALERT OK' || hasAlert).map(d => {
-                    const blocked = d.key === 'RELEASE' && r.status === 'REJECT';
                     return (
                       <Button key={d.key} repeatable size="md"
                         variant={pick === d.key ? DECISION_BUTTON[d.key] : 'secondary'}
                         className={pick === d.key && d.key === 'KEEP ON HOLD' ? 'bg-amber-500' : ''}
-                        disabled={blocked}
-                        title={blocked ? 'A REJECT report needs a new check of corrected cartons before release' : d.hint}
-                        onClick={() => setPick(d.key)}>
+                        title={d.hint}
+                        onClick={() => { setPick(d.key); setRemark(''); }}>
                         {d.label}
                       </Button>
                     );
                   })}
                 </div>
-                {r.status === 'REJECT' && (
-                  <p className="text-xs text-slate-500">Release needs a new check of corrected cartons (Check {(+r.check_no || 1) + 1}) that comes back PASS.</p>
+                {pick === 'RELEASE' && r.status === 'REJECT' && (
+                  <p className="text-xs text-amber-800">This report is REJECT. Releasing it is your call; the remark is kept as the reason.</p>
                 )}
                 {pick && (
                   <div className="space-y-2 rounded-lg bg-white p-3 ring-1 ring-slate-200">
                     <div className="text-sm"><b>{AVS_DECISIONS.find(d => d.key === pick)?.label}</b> <span className="text-slate-500">— {AVS_DECISIONS.find(d => d.key === pick)?.hint}</span></div>
+                    <RemarkPresets decision={pick} value={remark} onPick={setRemark} />
                     <label htmlFor="avs-remark" className="block text-xs font-medium text-slate-600">
-                      Remark {pick === 'RELEASE' && r.status === 'PASS' ? '(optional)' : '(required)'} — what was checked, who agreed, quantity
+                      Or write your own{pick === 'RELEASE' && r.status === 'PASS' ? ' (optional)' : ''} — saved with your name
                     </label>
                     <textarea id="avs-remark" value={remark} maxLength={AVS_REMARK_MAX} onChange={e => setRemark(e.target.value)}
                       className="min-h-[72px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
@@ -462,6 +460,32 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
       )}
     </Modal>
   );
+}
+
+// Ready-made remarks: one tap fills the remark; more words can be added.
+function RemarkPresets({ decision, value, onPick }) {
+  const list = AVS_REMARK_PRESETS[decision] || [];
+  if (!list.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {list.map(t => {
+        const on = String(value || '').trim().startsWith(t);
+        return (
+          <button key={t} type="button" onClick={() => onPick(t)} aria-pressed={on}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${on
+              ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-300 hover:bg-slate-50'}`}>
+            {t}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Undo, no questions asked: who and when are kept on the UNDO row.
+async function undoDecision(reportNo, decisionId, toast) {
+  await api.post(`/avs/reports/${encodeURIComponent(reportNo)}/decisions/${decisionId}/undo`, {});
+  toast.success(`${reportNo}: decision undone`);
 }
 
 // The report PDF, straight from the row: open it, or download it.
@@ -492,7 +516,7 @@ function RowActions({ r, canDecide, onAct }) {
           onChange={e => { if (e.target.value) onAct(e.target.value); }}
           className="h-8 w-28 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 focus:border-[#0071F0] focus:outline-none">
           <option value="">Action…</option>
-          <option value="RELEASE" disabled={r.status === 'REJECT'} title={r.status === 'REJECT' ? 'A REJECT report needs a new check of corrected cartons first' : undefined}>Approve / Release</option>
+          <option value="RELEASE">Approve / Release</option>
           <option value="KEEP ON HOLD">Hold</option>
           <option value="REJECT">Reject</option>
           {decidedHere && <option value="UNDO">Undo: {decisionLabel(r.last_decision)}</option>}
@@ -548,12 +572,21 @@ function QuickDecision({ row, action, onClose, onSaved }) {
         {undo
           ? <p className="text-sm text-slate-600">The decision stays in the trail, marked undone{row.last_decided_by ? ` (made by ${row.last_decided_by})` : ''}. The decision before it, if any, applies again. Printing locks again if this job needs AVS.</p>
           : <p className="text-sm text-slate-600">{meta?.hint}</p>}
+        {!undo && (
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-slate-600">Pick a remark</div>
+            <RemarkPresets decision={action} value={remark} onPick={setRemark} />
+          </div>
+        )}
         <label htmlFor="avs-quick-remark" className="block text-xs font-medium text-slate-600">
-          Remark {!undo && action === 'RELEASE' && row.status === 'PASS' ? '(optional)' : '(required)'} — saved with your name
+          {undo ? 'Note (optional)' : `Or write your own ${action === 'RELEASE' && row.status === 'PASS' ? '(optional)' : ''}`} — saved with your name
         </label>
-        <textarea id="avs-quick-remark" value={remark} maxLength={AVS_REMARK_MAX} onChange={e => setRemark(e.target.value)} autoFocus
-          className="min-h-[80px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
+        <textarea id="avs-quick-remark" value={remark} maxLength={AVS_REMARK_MAX} onChange={e => setRemark(e.target.value)}
+          className="min-h-[64px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
         {problem && <p className="text-xs text-slate-500">{problem}</p>}
+        {!undo && action === 'RELEASE' && row.status === 'REJECT' && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">This report is REJECT. Releasing it is your call; the remark is kept as the reason.</p>
+        )}
       </div>
     </Modal>
   );

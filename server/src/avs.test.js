@@ -7,8 +7,9 @@ import {
 
 // The page greys out exactly what the server refuses: both call decisionProblem.
 
-test('a REJECT report is never released from the ERP', () => {
-  assert.match(decisionProblem({ decision: 'RELEASE', remark: 'looks fine', status: 'REJECT' }), /cannot be released/);
+test('a REJECT report may be released, with a remark saying why (no hard block)', () => {
+  assert.match(decisionProblem({ decision: 'RELEASE', remark: '', status: 'REJECT' }), /REJECT report is released/);
+  assert.equal(decisionProblem({ decision: 'RELEASE', remark: 'Customer approved the deviation', status: 'REJECT' }), null);
 });
 
 test('releasing a PASS report needs no remark; releasing a HOLD report does', () => {
@@ -320,7 +321,7 @@ test('an undo is a row of its own: the decision before it is in force again', ()
   assert.equal(last.id, 2);
   assert.deepEqual(list.map(d => d.undone), [false, true, false, false]);
   assert.equal(decisionsInForce([]).last, null);
-  assert.match(undoProblem({ remark: '' }), /why/);
+  assert.equal(undoProblem({ remark: '' }), null, 'no questions asked');
   assert.equal(undoProblem({ remark: 'released the wrong one' }), null);
   assert.match(DECISION_IN_FORCE_SQL('dd'), /NOT IN \('ARTWORK ALERT OK', 'UNDO'\)/);
   assert.match(DECISION_IN_FORCE_SQL('dd'), /undoes_id = dd\.id/);
@@ -336,6 +337,7 @@ test('the QA stamp says QA Approved only when every report on the card is releas
   const rel = { report_no: 'AVS-2026-0001', report_rev: 0, check_no: 1, status: 'HOLD', decision: 'RELEASE', decision_rev: 0, decision_check: 1 };
   assert.equal(qaStamp([]), null);
   assert.deepEqual([qaStamp([rel]).state, qaStamp([rel]).text], ['approved', 'QA Approved']);
+  assert.equal(qaStamp([{ report_no: 'AVS-2026-0009', status: 'HOLD' }]).text, 'QA Hold');
   assert.equal(qaStamp([rel, { report_no: 'AVS-2026-0002', status: 'PASS' }]).state, 'pending');
   assert.equal(qaStamp([{ report_no: 'AVS-2026-0003', status: 'REJECT' }]).state, 'rejected');
   assert.equal(qaStamp([{ report_no: 'AVS-2026-0004', status: 'HOLD' }]).state, 'hold');
@@ -353,4 +355,19 @@ test('the register: filters and a search that finds any text on the row', () => 
   assert.equal(rowMatches(['AVS-2026-0006'], 'jc0446'), false);
   assert.equal(rowMatches(['CI-JC-0446'], 'jc0446'), true);
   assert.equal(rowMatches(['x'], '   '), true);
+});
+
+import { stepTimes } from '../../client/src/lib/avs.js';
+test('where a check\'s time went: each step until the next, the last until it finished', () => {
+  const t = [
+    { step: 'Claude started', ms: 60000 }, { step: 'Reading the PO', ms: 300000 }, { step: 'Filing the report', ms: 120000 },
+  ];
+  assert.deepEqual(stepTimes({
+    finished_at: '2026-09-28T10:08:00Z',
+    progress_log: [
+      { p: 'Claude started', at: '2026-09-28T10:00:00Z' }, { p: 'Reading the PO: 02512', at: '2026-09-28T10:01:00Z' },
+      { p: 'Filing the report', at: '2026-09-28T10:06:00Z' }, { p: 'Report ready', at: '2026-09-28T10:08:00Z' },
+    ],
+  }), t);
+  assert.deepEqual(stepTimes({}), []);
 });

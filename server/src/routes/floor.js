@@ -14,6 +14,7 @@ import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { avsMandatorySql, qaStampsForCards } from '../avs-gate.js';
+import { markUncacheable } from '../data-tables.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
 import { internLights } from '../../../client/src/lib/floorLights.js';
@@ -1285,6 +1286,10 @@ r.get('/floor/:section', async (req, res, next) => {
       const st = qaStamps?.get(String(r.jc_number || '').trim().toUpperCase());
       return st ? { state: st.state, text: st.text, reports: st.lines.map(l => l.text).join(' ') } : null;
     };
+    // AVS rows change in Supabase with no announcement on the feed, so the
+    // printing page is never answered from a browser's memory: every refresh
+    // shows QA's stand at that moment.
+    if (section === 'printing') markUncacheable();
     if (section === 'printing' && queue.length) {
       qaStamps = await qaStampsForCards(q, one, queue.map(r => r.jc_number));
       for (const r of queue) r.qa_stamp = stampOf(r);

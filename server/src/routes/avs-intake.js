@@ -187,7 +187,7 @@ const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.
   s.created_at, s.drive_folder_path, s.drive_folder_url, s.queued_at, s.queued_by, s.fired_at, s.fire_status,
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
   s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason,
-  s.job_cards`;
+  s.job_cards, s.progress_log`;
 
 // One set, or the list: every set still in progress, and the newest
 // `perStatus` of each finished status (the page shows them by status, with

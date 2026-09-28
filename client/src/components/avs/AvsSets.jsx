@@ -22,7 +22,7 @@ import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
 import {
   AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod,
-  istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress,
+  elapsedText, istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepTimes,
 } from '../../lib/avs.js';
 import { fireText } from './AvsUpload.jsx';
 
@@ -224,6 +224,11 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                 {setGroupOf(s.status) === 'active' && <SetProgress set={s} now={now} />}
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
+                )}
+                {['done', 'failed'].includes(s.status) && stepTimes(s).length > 0 && (
+                  <div className="mt-0.5 text-[11px] text-slate-500" title="How long each step of the check took">
+                    Time by step: {stepTimes(s).map(x => `${x.step} ${elapsedText(x.ms)}`).join(' · ')}
+                  </div>
                 )}
                 {s.redo_reason && <div className="mt-0.5 text-[11px] text-violet-800">Why redone: {s.redo_reason}</div>}
                 {s.note && <div className="mt-0.5 text-[11px] italic text-slate-500">“{s.note}”</div>}
