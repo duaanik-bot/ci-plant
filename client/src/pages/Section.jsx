@@ -29,7 +29,7 @@ import {
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS, PLATE_RETURN_CONDITIONS, PLATE_CONDITION_TONES, PLATE_REPLACEMENT_REASONS } from '../sections.js';
 import StartAlarmDialog, { NO_ACKS } from '../components/StartAlarms.jsx';
 import AvsPrompt, { AvsGateBanner } from '../components/avs/AvsPrompt.jsx';
-import { AvsChip } from '../components/avs/AvsSwitch.jsx';
+import { AvsChip, QaStamp } from '../components/avs/AvsSwitch.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PacketsOpened from '../components/PacketsOpened.jsx';
@@ -1517,6 +1517,7 @@ export default function Section() {
                     is the question the operator asks out loud. Compact circle, so
                     the row height is untouched. */}
                 {r.plate_state && <PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact />}
+                {section === 'printing' && <QaStamp stamp={r.qa_stamp} />}
                 {r.wip && <WipChip on />}
                 {section === 'printing' && <AvsChip on={r.avs_mandatory} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
@@ -1709,6 +1710,7 @@ export default function Section() {
                       )}
                       {/* Shown in every state, including green — see the queue row. */}
                       {r.plate_state && <div className="mt-0.5"><PlateStatus state={r.plate_state} wear={r.plate_wear} wearRuns={r.plate_wear_runs} wearReplace={r.plate_wear_replace} compact /></div>}
+                      {section === 'printing' && r.qa_stamp && <div className="mt-1"><QaStamp stamp={r.qa_stamp} /></div>}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {section === 'printing' && r.avs_mandatory && <div className="mt-0.5"><AvsChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
@@ -2056,6 +2058,7 @@ export default function Section() {
                 <OutputChip number={r.output_number} />
                 {r.wip && <WipChip on />}
                 {section === 'printing' && <AvsChip on={r.avs_mandatory} />}
+                {section === 'printing' && <QaStamp stamp={r.qa_stamp} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">

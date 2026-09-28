@@ -305,3 +305,52 @@ test('finished sets are shown by time window, by when they ended (India time for
   assert.equal(setEndedAt({ cancelled_at: 'x', created_at: 'c' }), 'x');
   assert.match(istStamp('2026-09-28T10:35:00Z'), /28 Sept? 2026, 4:05 pm/i);
 });
+
+import {
+  AVS_REGISTER_FILTERS, DECISION_IN_FORCE_SQL, JOB_CARD_MATCH_SQL, decisionsInForce, jobCardNumbers, qaStamp, rowMatches, undoProblem,
+} from '../../client/src/lib/avs.js';
+
+test('an undo is a row of its own: the decision before it is in force again', () => {
+  const { list, last } = decisionsInForce([
+    { id: 5, decision: 'UNDO', undoes_id: 4 },
+    { id: 4, decision: 'RELEASE' },
+    { id: 3, decision: 'ARTWORK ALERT OK' },
+    { id: 2, decision: 'KEEP ON HOLD' },
+  ]);
+  assert.equal(last.id, 2);
+  assert.deepEqual(list.map(d => d.undone), [false, true, false, false]);
+  assert.equal(decisionsInForce([]).last, null);
+  assert.match(undoProblem({ remark: '' }), /why/);
+  assert.equal(undoProblem({ remark: 'released the wrong one' }), null);
+  assert.match(DECISION_IN_FORCE_SQL('dd'), /NOT IN \('ARTWORK ALERT OK', 'UNDO'\)/);
+  assert.match(DECISION_IN_FORCE_SQL('dd'), /undoes_id = dd\.id/);
+});
+
+test('a report may name several job cards; each one is found', () => {
+  assert.deepEqual(jobCardNumbers('CI-JC-0446, ci-jc-0447 + CI-GANG-JC-0126'), ['CI-JC-0446', 'CI-JC-0447', 'CI-GANG-JC-0126']);
+  assert.deepEqual(jobCardNumbers('NO JOB CARD'), []);
+  assert.match(JOB_CARD_MATCH_SQL('l.job_card', '$1'), /regexp_split_to_array/);
+});
+
+test('the QA stamp says QA Approved only when every report on the card is released', () => {
+  const rel = { report_no: 'AVS-2026-0001', report_rev: 0, check_no: 1, status: 'HOLD', decision: 'RELEASE', decision_rev: 0, decision_check: 1 };
+  assert.equal(qaStamp([]), null);
+  assert.deepEqual([qaStamp([rel]).state, qaStamp([rel]).text], ['approved', 'QA Approved']);
+  assert.equal(qaStamp([rel, { report_no: 'AVS-2026-0002', status: 'PASS' }]).state, 'pending');
+  assert.equal(qaStamp([{ report_no: 'AVS-2026-0003', status: 'REJECT' }]).state, 'rejected');
+  assert.equal(qaStamp([{ report_no: 'AVS-2026-0004', status: 'HOLD' }]).state, 'hold');
+  // Released on an older issue: not approved.
+  assert.equal(qaStamp([{ ...rel, report_rev: 1 }]).state, 'hold');
+});
+
+test('the register: filters and a search that finds any text on the row', () => {
+  const f = k => AVS_REGISTER_FILTERS.find(x => x.key === k).match;
+  assert.equal(f('open')({ case_state: 'waiting' }), true);
+  assert.equal(f('open')({ case_state: 'released' }), false);
+  assert.equal(f('released')({ case_state: 'released' }), true);
+  assert.equal(f('rejected')({ case_state: 'rejected' }), true);
+  assert.equal(rowMatches(['AVS-2026-0006', 'Levexx 1g Tablets', 'CI-JC-0446'], 'levexx 0446'), true);
+  assert.equal(rowMatches(['AVS-2026-0006'], 'jc0446'), false);
+  assert.equal(rowMatches(['CI-JC-0446'], 'jc0446'), true);
+  assert.equal(rowMatches(['x'], '   '), true);
+});

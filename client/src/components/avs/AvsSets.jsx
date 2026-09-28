@@ -207,7 +207,9 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                       <History size={11} /> Redo of {s.redo_report_no}
                     </span>
                   )}
-                  <span className="font-mono text-xs text-slate-600">{s.jc_number || 'no job card'}</span>
+                  <span className="font-mono text-xs text-slate-600">
+                    {(Array.isArray(s.job_cards) && s.job_cards.length > 1 ? s.job_cards.map(c => c.jc_number).join(', ') : s.jc_number) || 'no job card'}
+                  </span>
                   <span className="truncate text-sm text-slate-800">{s.product_hint || ''}</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-500">

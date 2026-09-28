@@ -16,14 +16,21 @@
 // new photos, checked as the next check of the same report number. The
 // register shows the latest check; the report keeps every earlier check, the
 // photo sets behind each, why each redo was asked for, and QA's decisions.
+//
+// The register (owner's requests, 28 Sep 2026): newest check on top; filters
+// All / Open / Released / Rejected; a search that finds any text on the row;
+// on each row the report PDF and an Action list — Approve / Release, Hold,
+// Reject, Undo the decision — for the logins that decide. Every action asks for
+// its remark and is kept in the decision trail; an undo adds a row, never
+// deletes one.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Camera, CheckCircle2, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, Download, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Undo2, XCircle } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
-  AVS_DECISIONS, AVS_REMARK_MAX, AVS_SET_ACTIVE, AVS_WHO_DECIDES, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
+  AVS_DECISIONS, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
   istStamp, reportLabel, setLabel,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
@@ -111,14 +118,16 @@ export default function Avs() {
 
   const rows = useMemo(() => (data?.reports || []).map(r => ({ ...r, id: r.report_no })), [data]);
   const kpis = useMemo(() => Object.fromEntries(Object.entries(KPI_ROWS).map(([k, f]) => [k, rows.filter(f).length])), [rows]);
-  const searched = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return rows;
-    return rows.filter(r => [r.report_no, r.product_name, r.product, r.customer, r.artwork_code, r.item_code, r.job_card, r.po_no, r.print_status, r.status]
-      .join(' ').toLowerCase().includes(t));
-  }, [rows, q]);
+  // Any text on the row: every field, the labels the row shows, and the date.
+  const searched = useMemo(() => rows.filter(r => rowMatches([
+    ...Object.values(r).filter(v => v == null || typeof v !== 'object'), reportLabel(r), CASE_STATE_LABEL[r.case_state],
+    r.last_decision ? decisionLabel(r.last_decision) : '', istStamp(r.issued_at), dateIn(r.checked_on),
+  ], q)), [rows, q]);
+  const [view, setView] = useState('all');
+  const viewOf = AVS_REGISTER_FILTERS.find(f => f.key === view) || AVS_REGISTER_FILTERS[0];
   const kpi = useKpiFilter('avs');
-  const filtered = kpi.apply(searched, KPI_ROWS);
+  const filtered = kpi.apply(searched.filter(viewOf.match), KPI_ROWS);
+  const [acting, setActing] = useState(null); // { row, action } — the row's Action list
   // Redo from a set's row (Report ready) or from the report itself.
   const redoFromSet = x => setUploading({ redo: {
     report_no: x.report_no, set_id: x.id, jc_number: x.jc_number, product: x.product_hint, status: x.result,
@@ -170,49 +179,74 @@ export default function Avs() {
           AVS reports are not set up on this database yet.
         </div>
       )}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {AVS_REGISTER_FILTERS.map(f => {
+          const n = searched.filter(f.match).length;
+          const on = view === f.key;
+          return (
+            <button key={f.key} type="button" onClick={() => setView(f.key)} aria-pressed={on}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 transition ${on
+                ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}>
+              {f.label}
+              <span className={`min-w-[1.4rem] rounded-full px-1.5 text-center text-xs tabular-nums ${on ? 'bg-white/20' : 'bg-slate-100'}`}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2">
         <DataTable
           exportName="avs-reports"
           searchValue={q} onSearchChange={setQ}
-          searchPlaceholder="Search product, AVS no., job card, PO, artwork code…"
+          searchPlaceholder="Search anything: product, AVS no., job card, PO, customer, result, decision, date…"
           rows={filtered}
-          // Newest check on top: it is the one QA has to act on.
-          defaultSort={{ key: 'report_no', dir: 'desc' }}
+          // Newest check on top — by when it was checked, so a new check of an
+          // old report comes up too. It is the one QA has to act on.
+          defaultSort={{ key: 'issued_at', dir: 'desc' }}
           onRowClick={r => open(r.report_no)}
           empty={loadError ? 'Server unreachable — nothing to show until it reconnects.'
             : data === null ? 'Loading AVS reports…'
             : 'No AVS reports yet. They appear here after the next check in Claude.'}
           columns={[
             { key: 'report_no', label: 'Report', export: r => reportLabel(r),
+              sortValue: r => `${r.report_no}|${String(r.check_no ?? 1).padStart(3, '0')}|${String(r.report_rev ?? 0).padStart(3, '0')}`,
               render: r => <span className="font-mono text-xs font-semibold text-slate-700">{reportLabel(r)}</span> },
-            { key: 'product_name', label: 'Product',
+            { key: 'product_name', label: 'Product', sortValue: r => String(r.product_name || r.product || '').toLowerCase(),
               render: r => (
                 <div className="min-w-0">
                   <div className="font-semibold text-slate-900">{r.product_name || r.product}</div>
                   <div className="text-xs text-slate-500">{r.artwork_code}{r.revision ? `-${r.revision}` : ''}{r.customer ? ` · ${r.customer}` : ''}</div>
                 </div>) },
-            { key: 'status', label: 'Result', render: r => <Result value={r.status} /> },
+            { key: 'status', label: 'Result', sortValue: r => ({ REJECT: 3, HOLD: 2, PASS: 1 }[r.status] ?? 0),
+              render: r => <Result value={r.status} /> },
             { key: 'case_state', label: 'Decision', export: r => CASE_STATE_LABEL[r.case_state],
+              sortValue: r => ({ open: 0, waiting: 1, rejected: 2, released: 3, closed: 4 }[r.case_state] ?? 9),
               render: r => (
                 <div className="flex flex-col gap-0.5">
                   <CaseChip state={r.case_state} />
                   {r.last_decision && <span className="text-[11px] text-slate-500">{decisionLabel(r.last_decision)} · {r.last_decided_by || '—'}</span>}
                 </div>) },
-            { key: 'open_points', label: 'Points to clear', align: 'right', export: r => r.open_points,
+            { key: 'open_points', label: 'Points to clear', align: 'right', export: r => r.open_points, sortValue: r => +r.open_points || 0,
               render: r => (+r.open_points > 0 ? <span className="font-semibold text-slate-800">{r.open_points}</span> : <span className="text-slate-300">—</span>) },
             { key: 'job_card', label: 'Job card', render: r => <span className="font-mono text-xs">{r.job_card || '—'}</span> },
-            { key: 'po_no', label: 'PO', export: r => r.po_no, render: r => <span className="font-mono text-xs">{shortPo(r.po_no)}</span> },
+            { key: 'po_no', label: 'PO', export: r => r.po_no, sortValue: r => shortPo(r.po_no), render: r => <span className="font-mono text-xs">{shortPo(r.po_no)}</span> },
             { key: 'print_status', label: 'Print status', render: r => <span className="text-xs text-slate-600">{r.print_status || '—'}</span> },
             // When this issue was filed, in India time: the register is newest first.
             { key: 'issued_at', label: 'Checked', export: r => istStamp(r.issued_at) || dateIn(r.checked_on),
+              sortValue: r => Date.parse(r.issued_at || r.checked_on) || 0,
               render: r => (
                 <div className="whitespace-nowrap">
                   <div>{r.issued_at ? istStamp(r.issued_at).replace(/, [^,]*$/, '') : dateIn(r.checked_on)}</div>
                   {r.issued_at && <div className="text-[11px] tabular-nums text-slate-500">{istStamp(r.issued_at).split(', ').pop()}</div>}
                 </div>) },
+            { key: '_actions', label: 'Action', sortable: false,
+              render: r => <RowActions r={r} canDecide={!!data?.can_decide} onAct={action => setActing({ row: r, action })} /> },
           ]}
         />
       </div>
+      {acting && (
+        <QuickDecision row={acting.row} action={acting.action} onClose={() => setActing(null)}
+          onSaved={() => { setActing(null); load(); }} />
+      )}
       {openNo && (
         <ReportModal no={openNo} onClose={() => open(null)} onSaved={load}
           canRedo={!!uploads?.can_upload} onRedo={redoFromReport} refreshKey={uploads} />
@@ -231,6 +265,7 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
   const [pick, setPick] = useState(null);
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
+  const [undoing, setUndoing] = useState(null); // a decision to undo
 
   const load = useCallback(() => api.get(`/avs/reports/${encodeURIComponent(no)}`)
     .then(d => { setDetail(d); setErr(null); })
@@ -344,6 +379,11 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
           </section>
 
           <RedoAndTrail no={no} r={r} detail={detail} canRedo={canRedo} onRedo={onRedo} />
+          {undoing && (
+            <QuickDecision action="UNDO" onClose={() => setUndoing(null)}
+              onSaved={async () => { setUndoing(null); await load(); onSaved?.(); }}
+              row={{ ...r, last_decision_id: undoing.id, last_decision: undoing.decision, last_decided_by: undoing.decided_by }} />
+          )}
 
           <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">QA decision</h3>
@@ -351,13 +391,28 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
               ? <p className="text-sm text-slate-500">No decision recorded yet.</p>
               : (
                 <ul className="space-y-1.5">
-                  {detail.decisions.map(d => (
-                    <li key={d.id} className="rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-slate-200">
-                      <b>{decisionLabel(d.decision)}</b>
-                      <span className="text-slate-500"> · {d.decided_by || '—'} · {istStamp(d.decided_at)} · on {reportLabel({ report_no: no, ...d })}</span>
-                      {d.remark && <div className="mt-0.5 text-slate-700">{d.remark}</div>}
-                    </li>
-                  ))}
+                  {detail.decisions.map(d => {
+                    const inForce = +detail.decisions_in_force === +d.id;
+                    const onLatest = +d.report_rev === +r.report_rev && +(d.check_no ?? 1) === +(r.check_no ?? 1);
+                    return (
+                      <li key={d.id} className={`rounded-lg px-3 py-2 text-sm ring-1 ${d.decision === 'UNDO' ? 'bg-slate-50 ring-slate-200' : inForce ? 'bg-white ring-emerald-300' : 'bg-white ring-slate-200'}`}>
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <span>
+                            <b className={d.undone ? 'text-slate-400 line-through' : ''}>{decisionLabel(d.decision)}</b>
+                            {d.undone && <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-500">Undone</span>}
+                            {inForce && <span className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-emerald-700">In force</span>}
+                            <span className="text-slate-500"> · {d.decided_by || '—'} · {istStamp(d.decided_at)} · on {reportLabel({ report_no: no, ...d })}</span>
+                          </span>
+                          {detail.can_decide && onLatest && !d.undone && d.decision !== 'UNDO' && (inForce || d.decision === 'ARTWORK ALERT OK') && r.case_state !== 'closed' && (
+                            <Button size="sm" variant="ghost" repeatable onClick={() => setUndoing(d)}>
+                              <span className="inline-flex items-center gap-1"><Undo2 size={12} /> Undo</span>
+                            </Button>
+                          )}
+                        </div>
+                        {d.remark && <div className="mt-0.5 text-slate-700">{d.decision === 'UNDO' ? 'Why: ' : ''}{d.remark}</div>}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 
@@ -405,6 +460,101 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
           </section>
         </div>
       )}
+    </Modal>
+  );
+}
+
+// The report PDF, straight from the row: open it, or download it.
+const pdfDownloadUrl = r => (r.drive_file_id ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(r.drive_file_id)}` : null);
+
+// The row's Action list: for the logins that decide. Undo only when a decision
+// is in force on this issue of the report.
+function RowActions({ r, canDecide, onAct }) {
+  const stop = e => e.stopPropagation();
+  const decidedHere = r.last_decision_id && +r.last_decision_rev === +r.report_rev && +(r.last_decision_check ?? 1) === +(r.check_no ?? 1);
+  const closed = r.case_state === 'closed';
+  return (
+    <div className="flex items-center gap-1.5" onClick={stop} onKeyDown={stop} role="presentation">
+      {r.drive_url && (
+        <a href={r.drive_url} target="_blank" rel="noreferrer" title="Open the report PDF"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
+          <FileText size={15} />
+        </a>
+      )}
+      {pdfDownloadUrl(r) && (
+        <a href={pdfDownloadUrl(r)} target="_blank" rel="noreferrer" title="Download the report PDF"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
+          <Download size={15} />
+        </a>
+      )}
+      {canDecide && !closed && (
+        <select value="" aria-label={`Action on ${reportLabel(r)}`}
+          onChange={e => { if (e.target.value) onAct(e.target.value); }}
+          className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 focus:border-[#0071F0] focus:outline-none">
+          <option value="">Action…</option>
+          <option value="RELEASE" disabled={r.status === 'REJECT'}>Approve / Release{r.status === 'REJECT' ? ' (needs a new check)' : ''}</option>
+          <option value="KEEP ON HOLD">Hold</option>
+          <option value="REJECT">Reject</option>
+          {decidedHere && <option value="UNDO">Undo: {decisionLabel(r.last_decision)}</option>}
+        </select>
+      )}
+    </div>
+  );
+}
+
+// One decision from the row, with its remark. Same rules and same trail as the
+// report's own QA decision.
+function QuickDecision({ row, action, onClose, onSaved }) {
+  const toast = useToast();
+  const [remark, setRemark] = useState('');
+  const [saving, setSaving] = useState(false);
+  const undo = action === 'UNDO';
+  const meta = AVS_DECISIONS.find(d => d.key === action);
+  const problem = undo ? undoProblem({ remark })
+    : decisionProblem({ decision: action, remark, status: row.status, hasAlert: false });
+  const title = undo ? `Undo "${decisionLabel(row.last_decision)}"` : action === 'RELEASE' ? 'Approve / Release' : meta?.label;
+  const save = async () => {
+    if (problem || saving) return;
+    setSaving(true);
+    try {
+      if (undo) {
+        await api.post(`/avs/reports/${encodeURIComponent(row.report_no)}/decisions/${row.last_decision_id}/undo`, { remark: remark.trim() });
+        toast.success(`${reportLabel(row)}: decision undone`);
+      } else {
+        await api.post(`/avs/reports/${encodeURIComponent(row.report_no)}/decisions`, {
+          decision: action, remark: remark.trim() || null, report_rev: row.report_rev, check_no: row.check_no,
+        });
+        toast.success(`${reportLabel(row)}: ${decisionLabel(action)}`);
+      }
+      onSaved?.();
+    } catch { /* api.js said why */ } finally { setSaving(false); }
+  };
+  return (
+    <Modal open onClose={() => { if (!saving) onClose(); }} title={`${title} · ${reportLabel(row)}`}
+      footer={<>
+        <Button variant="secondary" repeatable onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant={undo ? 'secondary' : DECISION_BUTTON[action] || 'solid'} onClick={save} disabled={!!problem || saving}>
+          <span className="inline-flex items-center gap-1.5">{undo && <Undo2 size={15} />}{saving ? 'Saving…' : `Confirm: ${title}`}</span>
+        </Button>
+      </>}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+          <div className="font-semibold text-slate-900">{row.product_name || row.product}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <Result value={row.status} /> <CaseChip state={row.case_state} />
+            <span className="font-mono">{row.job_card || '—'}</span>
+          </div>
+        </div>
+        {undo
+          ? <p className="text-sm text-slate-600">The decision stays in the trail, marked undone{row.last_decided_by ? ` (made by ${row.last_decided_by})` : ''}. The decision before it, if any, applies again. Printing locks again if this job needs AVS.</p>
+          : <p className="text-sm text-slate-600">{meta?.hint}</p>}
+        <label htmlFor="avs-quick-remark" className="block text-xs font-medium text-slate-600">
+          Remark {!undo && action === 'RELEASE' && row.status === 'PASS' ? '(optional)' : '(required)'} — saved with your name
+        </label>
+        <textarea id="avs-quick-remark" value={remark} maxLength={AVS_REMARK_MAX} onChange={e => setRemark(e.target.value)} autoFocus
+          className="min-h-[80px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
+        {problem && <p className="text-xs text-slate-500">{problem}</p>}
+      </div>
     </Modal>
   );
 }

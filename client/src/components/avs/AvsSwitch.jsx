@@ -24,6 +24,33 @@ export function AvsChip({ on, className = '' }) {
   );
 }
 
+// The QA stamp under a job card at the press: "QA Approved" when QA has
+// released every AVS report on the card (a decision undone no longer counts).
+// Only those two words — never colour or anything else. Short of approval, a
+// small plain tag says how it stands. stamp: row.qa_stamp from GET /floor/printing.
+const QA_TAG = {
+  hold: 'bg-amber-50 text-amber-800 ring-amber-200',
+  rejected: 'bg-red-50 text-red-700 ring-red-200',
+  pending: 'bg-slate-50 text-slate-600 ring-slate-200',
+};
+export function QaStamp({ stamp, className = '' }) {
+  if (!stamp) return null;
+  if (stamp.state === 'approved') {
+    return (
+      <span title={stamp.reports || 'QA Approved'} aria-label="QA Approved"
+        className={`inline-flex -rotate-3 select-none items-center rounded-md border-[3px] border-double border-emerald-700 px-2 py-0.5 text-[12px] font-black uppercase leading-none tracking-[0.12em] text-emerald-700 ${className}`}>
+        QA Approved
+      </span>
+    );
+  }
+  return (
+    <span title={stamp.reports || stamp.text}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${QA_TAG[stamp.state] || QA_TAG.pending} ${className}`}>
+      {stamp.text}
+    </span>
+  );
+}
+
 // value: current state. Exactly one of lineId / runId / jobCardId names the job.
 export default function AvsSwitch({ value, lineId, runId, jobCardId, onChanged, disabled = false, note }) {
   const toast = useToast();

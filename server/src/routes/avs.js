@@ -17,7 +17,8 @@ import { optionalText } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsGateForCard } from '../avs-gate.js';
 import {
-  AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, canDecideAvs, caseState, decisionProblem,
+  AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, DECISION_IN_FORCE_SQL, canDecideAvs, caseState, decisionProblem,
+  decisionsInForce, undoProblem,
 } from '../../../client/src/lib/avs.js';
 
 const r = Router();
@@ -26,14 +27,17 @@ const MISSING = new Set(['42P01', '3F000']); // undefined table / undefined sche
 const offWhenMissing = (res, next, empty) => e => (MISSING.has(e?.code) ? res.json(empty) : next(e));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-// The last decision on each report — one row per report_no. An artwork-alert
-// sign-off never decides a case, so it is left out here: taken as the "last
-// decision" it made a released report look open again.
+// The decision in force on each report — one row per report_no. An
+// artwork-alert sign-off never decides a case, so it is left out here: taken as
+// the "last decision" it made a released report look open again. An undone
+// decision and the UNDO row itself are left out too (lib/avs.js
+// DECISION_IN_FORCE_SQL), so an undo brings back the decision before it.
 const LAST_DECISION = `
-  SELECT DISTINCT ON (report_no) report_no, report_rev, check_no, decision, decided_by, remark, decided_at
-    FROM avs.decisions
-   WHERE decision <> 'ARTWORK ALERT OK'
-   ORDER BY report_no, decided_at DESC, id DESC`;
+  SELECT DISTINCT ON (dd.report_no) dd.id, dd.report_no, dd.report_rev, dd.check_no, dd.decision, dd.decided_by,
+         dd.remark, dd.decided_at
+    FROM avs.decisions dd
+   WHERE ${DECISION_IN_FORCE_SQL('dd')}
+   ORDER BY dd.report_no, dd.decided_at DESC, dd.id DESC`;
 
 // Every AVS answer is built from rows Claude writes straight into Supabase,
 // where no change is announced on the realtime feed, so none may be answered
@@ -46,10 +50,11 @@ r.get('/avs/reports', async (req, res, next) => {
     const rows = await q(`
       SELECT l.report_no, l.report_rev, l.check_no, l.status, l.product_name, l.product, l.customer,
              l.artwork_code, l.revision, l.item_code, l.headline, l.key_finding, l.po_no, l.po_date,
-             l.po_age_days, l.job_card, l.print_status, l.checked_on, l.issued_at, l.drive_url,
+             l.po_age_days, l.job_card, l.print_status, l.checked_on, l.issued_at, l.drive_url, l.drive_file_id,
              l.artwork_alerts,
              (SELECT count(*)::int FROM avs.problems p WHERE p.report_id = l.id AND p.result IN ('HOLD','REJECT')) AS open_points,
              EXISTS (SELECT 1 FROM avs.reports c WHERE c.report_no = l.report_no AND c.row_type = 'CLOSE') AS closed,
+             d.id AS last_decision_id, d.remark AS last_remark,
              d.decision AS last_decision, d.decided_by AS last_decided_by, d.decided_at AS last_decided_at,
              d.report_rev AS last_decision_rev, d.check_no AS last_decision_check
         FROM avs.latest_reports l
@@ -86,8 +91,9 @@ r.get('/avs/reports/:no', async (req, res, next) => {
                    substring(ref from 1 for 1), (substring(ref from 3))::int`, [report.id]),
       q(`SELECT report_rev, check_no, row_type, status, issued_at, report_file, note
            FROM avs.reports WHERE report_no = $1 ORDER BY check_no, report_rev, issued_at`, [no]),
-      q(`SELECT id, report_rev, check_no, decision, decided_by, decided_by_role, remark, decided_at, status_at_decision, source
-           FROM avs.decisions WHERE report_no = $1 ORDER BY decided_at DESC`, [no]),
+      q(`SELECT id, report_rev, check_no, decision, decided_by, decided_by_role, remark, decided_at, status_at_decision, source,
+                undoes_id
+           FROM avs.decisions WHERE report_no = $1 ORDER BY decided_at DESC, id DESC`, [no]),
       one(`SELECT note, issued_at FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' ORDER BY issued_at DESC LIMIT 1`, [no]),
       // The photo sets behind this report: the first check and every redo, with
       // who asked, why, and how each ended — the trail between the issues.
@@ -96,12 +102,13 @@ r.get('/avs/reports/:no', async (req, res, next) => {
            FROM avs.check_requests WHERE report_no = $1 OR redo_report_no = $1 ORDER BY id`, [no])
         .catch(e => (MISSING.has(e?.code) || e?.code === '42703' ? [] : Promise.reject(e))),
     ]);
-    const last = decisions.find(d => d.decision !== 'ARTWORK ALERT OK') || null;
+    const { list, last } = decisionsInForce(decisions);
     delete report.id;
     res.json({
+      decisions_in_force: last ? last.id : null,
       report: { ...report, closed: !!closedRow, closed_note: closedRow?.note ?? null,
         case_state: caseState({ ...report, closed: !!closedRow }, last) },
-      problems, history, decisions, can_decide: await mayDecide(req.user),
+      problems, history, decisions: list, can_decide: await mayDecide(req.user),
       sets, open_redo: sets.find(x => x.redo_report_no === no && ['uploading', 'queued', 'checking'].includes(x.status)) || null,
     });
   } catch (e) { next(e); }
@@ -151,6 +158,49 @@ r.post('/avs/reports/:no/decisions', async (req, res, next) => {
       RETURNING id, report_rev, check_no, decision, decided_by, decided_by_role, remark, decided_at, status_at_decision, source`,
       [no, report.report_rev, report.check_no, decision, req.user.name ?? null, req.user.id ?? null,
         req.user.role ?? null, remark ? remark.slice(0, AVS_REMARK_MAX) : null, report.status]);
+    res.status(201).json(saved);
+  } catch (e) { next(e); }
+});
+
+// ── Undo a decision ─────────────────────────────────────────────────────────
+// Only the decision in force on the latest issue (or its artwork-alert
+// sign-off), and never by deleting it: an UNDO row names it, with who, when and
+// why. The decision before it, if any, is in force again.
+r.post('/avs/reports/:no/decisions/:id/undo', async (req, res, next) => {
+  try {
+    const no = req.params.no;
+    if (!AVS_REPORT_NO.test(no)) throw fail(400, 'Not an AVS report number');
+    if (!(await mayDecide(req.user))) throw fail(403, AVS_WHO_DECIDES);
+    const id = Number(req.params.id);
+    const remark = optionalText(req.body?.remark);
+    const problem = undoProblem({ remark });
+    if (problem) throw fail(400, problem);
+    const target = Number.isInteger(id) && id > 0 && await one(`SELECT id, report_rev, check_no, decision FROM avs.decisions
+      WHERE id = $1 AND report_no = $2`, [id, no]);
+    if (!target) throw fail(404, 'Decision not found');
+    if (target.decision === 'UNDO') throw fail(409, 'An undo cannot be undone. Record the decision again.');
+    const report = await one('SELECT report_rev, check_no FROM avs.latest_reports WHERE report_no = $1', [no]);
+    if (!report || +report.report_rev !== +target.report_rev || +report.check_no !== +(target.check_no ?? 1)) {
+      throw fail(409, 'This decision was made on an earlier issue of the report; only a decision on the latest issue can be undone.');
+    }
+    if (target.decision !== 'ARTWORK ALERT OK') {
+      const inForce = await one(`SELECT dd.id FROM avs.decisions dd WHERE dd.report_no = $1 AND ${DECISION_IN_FORCE_SQL('dd')}
+        ORDER BY dd.decided_at DESC, dd.id DESC LIMIT 1`, [no]);
+      if (+inForce?.id !== +target.id) throw fail(409, 'Only the decision in force can be undone. Reload the report.');
+    }
+    let saved;
+    try {
+      saved = await one(`
+        INSERT INTO avs.decisions (report_no, report_rev, check_no, decision, undoes_id, decided_by, decided_by_user_id,
+                                   decided_by_role, remark, decided_at, source)
+        VALUES ($1, $2, $3, 'UNDO', $4, $5, $6, $7, $8, now(), 'ci-plant')
+        RETURNING id, report_rev, check_no, decision, undoes_id, decided_by, decided_by_role, remark, decided_at, source`,
+        [no, target.report_rev, target.check_no ?? 1, target.id, req.user.name ?? null, req.user.id ?? null,
+          req.user.role ?? null, remark.slice(0, AVS_REMARK_MAX)]);
+    } catch (e) {
+      if (e?.code === '23505') throw fail(409, 'This decision was already undone. Reload the report.');
+      throw e;
+    }
     res.status(201).json(saved);
   } catch (e) { next(e); }
 });

@@ -9,7 +9,7 @@
 // production database (it is created by migration, never by init()). A job with
 // the switch on, on a database without that schema, stays locked — the switch
 // means "QA must release it", and nothing here can release it.
-import { avsGate } from '../../client/src/lib/avs.js';
+import { DECISION_IN_FORCE_SQL, JOB_CARD_MATCH_SQL, avsGate, qaStamp } from '../../client/src/lib/avs.js';
 
 // Is AVS mandatory for this job card? A plain card reads its own line; a run
 // card (a gang parent or a combined run: no order line of its own) needs it when
@@ -22,8 +22,9 @@ export const avsMandatorySql = (jc = 'jc') => `(CASE
     ELSE EXISTS (SELECT 1 FROM order_lines avs_ol WHERE avs_ol.id = ${jc}.order_line_id AND avs_ol.avs_mandatory = 1)
   END)`;
 
-// Every report carrying this job card number, latest issue each, with the last
-// QA decision that is not an artwork-alert sign-off (that one never releases).
+// Every report carrying this job card number (a report may name several job
+// cards, comma-separated), latest issue each, with the QA decision in force: not
+// an artwork-alert sign-off (that one never releases), not undone.
 const REPORTS_FOR_CARD = `
   SELECT l.report_no, l.report_rev, l.check_no, l.status, l.product_name, l.issued_at,
          EXISTS (SELECT 1 FROM avs.reports c WHERE c.report_no = l.report_no AND c.row_type = 'CLOSE') AS closed,
@@ -33,10 +34,10 @@ const REPORTS_FOR_CARD = `
     LEFT JOIN LATERAL (
       SELECT dd.decision, dd.decided_by, dd.remark, dd.decided_at, dd.report_rev, dd.check_no
         FROM avs.decisions dd
-       WHERE dd.report_no = l.report_no AND dd.decision <> 'ARTWORK ALERT OK'
+       WHERE dd.report_no = l.report_no AND ${DECISION_IN_FORCE_SQL('dd')}
        ORDER BY dd.decided_at DESC, dd.id DESC
        LIMIT 1) d ON true
-   WHERE upper(btrim(l.job_card)) = upper(btrim($1))
+   WHERE ${JOB_CARD_MATCH_SQL('l.job_card', '$1')}
    ORDER BY l.report_no`;
 
 export const AVS_UNAVAILABLE = 'The AVS module is not set up on this database, so nothing can release this job. '
@@ -56,6 +57,31 @@ export async function avsGateForCard(qAll, qOne, jobCardId) {
   if (!has?.ok) return { ...base, released: false, reports: [], reason: AVS_UNAVAILABLE };
   const rows = await qAll(REPORTS_FOR_CARD, [card.jc_number]);
   return { ...base, ...avsGate(rows) };
+}
+
+// The QA stamp for many cards at once (the printing queue): card number
+// (upper case) → qaStamp(). Cards with no report are absent. Never throws for a
+// database without the avs schema: the queue shows no stamps then.
+export async function qaStampsForCards(qAll, qOne, jcNumbers) {
+  const out = new Map();
+  const nums = [...new Set((jcNumbers || []).filter(Boolean).map(x => String(x).trim().toUpperCase()))];
+  if (!nums.length) return out;
+  const has = await qOne(`SELECT to_regclass('avs.latest_reports') IS NOT NULL AS ok`).catch(() => null);
+  if (!has?.ok) return out;
+  const rows = await qAll(`
+    SELECT n.jc, l.report_no, l.report_rev, l.check_no, l.status,
+           EXISTS (SELECT 1 FROM avs.reports c WHERE c.report_no = l.report_no AND c.row_type = 'CLOSE') AS closed,
+           d.decision, d.decided_by, d.remark, d.report_rev AS decision_rev, d.check_no AS decision_check
+      FROM unnest($1::text[]) AS n(jc)
+      JOIN avs.latest_reports l ON ${JOB_CARD_MATCH_SQL('l.job_card', 'n.jc')}
+      LEFT JOIN LATERAL (
+        SELECT dd.decision, dd.decided_by, dd.remark, dd.report_rev, dd.check_no FROM avs.decisions dd
+         WHERE dd.report_no = l.report_no AND ${DECISION_IN_FORCE_SQL('dd')}
+         ORDER BY dd.decided_at DESC, dd.id DESC LIMIT 1) d ON true`, [nums]);
+  const by = new Map();
+  for (const r of rows) (by.get(r.jc) || by.set(r.jc, []).get(r.jc)).push(r);
+  for (const [jc, list] of by) out.set(jc, qaStamp(list));
+  return out;
 }
 
 // The refusal completion throws. Structured so the station can draw its own

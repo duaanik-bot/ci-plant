@@ -13,7 +13,7 @@ import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, own
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
-import { avsMandatorySql } from '../avs-gate.js';
+import { avsMandatorySql, qaStampsForCards } from '../avs-gate.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
 import { internLights } from '../../../client/src/lib/floorLights.js';
@@ -1277,6 +1277,16 @@ r.get('/floor/:section', async (req, res, next) => {
     // one list, so floor_pos is compared only within each lane (orderBoard) —
     // machine A's #1 and the pool's #1 are not the same claim on the top slot.
     queue = orderBoard(queue);
+    // The QA stamp at the press (owner's request, 28 Sep 2026): how QA stands on
+    // the card's AVS reports — "QA Approved" when every one is released. Only on
+    // the printing queue; a card with no report gets none.
+    if (section === 'printing' && queue.length) {
+      const stamps = await qaStampsForCards(q, one, queue.map(r => r.jc_number));
+      for (const r of queue) {
+        const st = stamps.get(String(r.jc_number || '').trim().toUpperCase());
+        r.qa_stamp = st ? { state: st.state, text: st.text, reports: st.lines.map(l => l.text).join(' ') } : null;
+      }
+    }
     // Press scope: keep only jobs on this operator's press.
     if (pressKeep) {
       for (let i = queue.length - 1; i >= 0; i--)

@@ -14,7 +14,7 @@
 export const AVS_STATUSES = ['PASS', 'HOLD', 'REJECT'];
 
 export const AVS_DECISIONS = [
-  { key: 'RELEASE', label: 'Release', done: 'Released',
+  { key: 'RELEASE', label: 'Approve / Release', done: 'Released',
     hint: 'Cartons may go on to the next stage or to dispatch.' },
   { key: 'KEEP ON HOLD', label: 'Keep on hold', done: 'Kept on hold',
     hint: 'Cartons stay on hold until the open points are cleared.' },
@@ -24,7 +24,30 @@ export const AVS_DECISIONS = [
     hint: 'Artwork / prepress confirmed the alert with the customer.' },
 ];
 export const AVS_DECISION_KEYS = AVS_DECISIONS.map(d => d.key);
-export const decisionLabel = key => AVS_DECISIONS.find(d => d.key === key)?.done ?? key;
+export const decisionLabel = key => (key === 'UNDO' ? 'Decision undone' : AVS_DECISIONS.find(d => d.key === key)?.done ?? key);
+
+// Undo. A decision is never edited or deleted: undoing it adds an 'UNDO' row
+// naming it (undoes_id), with who, when and why. The decision in force is the
+// newest one that is neither an artwork-alert sign-off, nor an UNDO row, nor
+// undone — so an undo brings back the decision before it, if any.
+export const AVS_UNDO_MIN = 5;
+export function undoProblem({ remark }) {
+  const t = String(remark ?? '').trim();
+  if (t.length < AVS_UNDO_MIN) return 'Write why the decision is being undone.';
+  if (t.length > AVS_REMARK_MAX) return `Keep the remark under ${AVS_REMARK_MAX} characters.`;
+  return null;
+}
+// decisions: newest first. Marks each undone one, and gives the one in force.
+export function decisionsInForce(decisions = []) {
+  const undone = new Set(decisions.filter(d => d.decision === 'UNDO' && d.undoes_id != null).map(d => String(d.undoes_id)));
+  const list = decisions.map(d => ({ ...d, undone: undone.has(String(d.id)) }));
+  const last = list.find(d => d.decision !== 'ARTWORK ALERT OK' && d.decision !== 'UNDO' && !d.undone) || null;
+  return { list, last };
+}
+// The SQL twin: decisions rows (alias) that count — used by the register, the
+// report and the printing lock, so all three agree on the decision in force.
+export const DECISION_IN_FORCE_SQL = (a = 'dd') => `${a}.decision NOT IN ('ARTWORK ALERT OK', 'UNDO')
+  AND NOT EXISTS (SELECT 1 FROM avs.decisions avs_u WHERE avs_u.undoes_id = ${a}.id)`;
 
 // Who records the final decision: the QA role, and every login given the AVS
 // decision right (users.avs_approver, ticked in Masters → Users: on 28 Sep 2026
@@ -91,6 +114,32 @@ export function reportLabel({ report_no, check_no = 1, report_rev = 0 }) {
 
 export const AVS_REPORT_NO = /^AVS-\d{4}-\d{4}$/;
 
+// ── The register: filters and search ────────────────────────────────────────
+export const AVS_REGISTER_FILTERS = [
+  { key: 'all', label: 'All', match: () => true },
+  { key: 'open', label: 'Open', match: r => r.case_state === 'open' || r.case_state === 'waiting' },
+  { key: 'released', label: 'Released', match: r => r.case_state === 'released' },
+  { key: 'rejected', label: 'Rejected', match: r => r.case_state === 'rejected' },
+];
+// Search by any text on the row: letters and digits only, so "0006", "avs 6",
+// "jc0446" or "levexx" all find what they should.
+const squash = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export function rowMatches(values, query) {
+  const words = String(query ?? '').toLowerCase().split(/\s+/).map(squash).filter(Boolean);
+  if (!words.length) return true;
+  const hay = values.map(squash).join('|');
+  return words.every(w => hay.includes(w));
+}
+
+// ── Job card numbers in a report ────────────────────────────────────────────
+// A report may name several job cards ("CI-JC-0446, CI-JC-0447"): the same
+// product in several orders or batches, checked from one photo set.
+export const jobCardNumbers = text => String(text ?? '').split(/[,;+&\s]+/).map(x => x.trim().toUpperCase())
+  .filter(x => /^CI-/.test(x));
+// The SQL twin: does the report's job_card name this card number ($n)?
+export const JOB_CARD_MATCH_SQL = (col, param) => `upper(btrim(${param})) = ANY (
+  regexp_split_to_array(upper(coalesce(${col}, '')), '[,;+&[:space:]]+'))`;
+
 // ── The printing lock ────────────────────────────────────────────────────────
 // Planning decides per job whether AVS is mandatory (off by default). When it
 // is, the PRINTING stage of the job's card cannot be completed until QA has
@@ -121,6 +170,18 @@ export function avsGateLine(r) {
   else if (r.status === 'REJECT') text = `${label} is REJECT. Correct the print and send new photos for the next check.`;
   else text = `${label} is HOLD. QA must clear its points and release it.`;
   return { report_no: r.report_no, label, status: r.status, state, decision: r.decision ?? null, text };
+}
+
+// The QA stamp at the press: approved when every report on the card is
+// released; otherwise how it stands. null when the card has no report.
+export function qaStamp(reports = []) {
+  if (!reports.length) return null;
+  const lines = reports.map(avsGateLine);
+  const waiting = lines.filter(l => l.state !== 'released');
+  if (!waiting.length) return { state: 'approved', text: 'QA Approved', lines };
+  if (waiting.some(l => l.state === 'rejected' || l.status === 'REJECT')) return { state: 'rejected', text: 'QA: Rejected', lines };
+  if (waiting.some(l => l.decision === 'KEEP ON HOLD' || l.status === 'HOLD')) return { state: 'hold', text: 'QA: On hold', lines };
+  return { state: 'pending', text: 'QA: Waiting', lines };
 }
 
 export function avsGate(reports = []) {

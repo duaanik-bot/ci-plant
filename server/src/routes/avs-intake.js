@@ -31,7 +31,7 @@ import { markUncacheable } from '../data-tables.js';
 import { avsMandatorySql } from '../avs-gate.js';
 import { postDrive } from '../avs-drive.js';
 import {
-  AVS_PHOTO_MAX_BYTES, AVS_REPORT_NO, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, photoProblem, redoProblem,
+  AVS_PHOTO_MAX_BYTES, AVS_REPORT_NO, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, jobCardNumbers, photoProblem, redoProblem,
   setLabel, setupProblem,
 } from '../../../client/src/lib/avs.js';
 
@@ -173,7 +173,8 @@ async function fireUnlessRunning(cfg, set, { force = false } = {}) {
     }
   }
   const out = await fireRoutine(cfg,
-    `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${set.jc_number})` : ''}`
+    `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${(Array.isArray(set.job_cards) && set.job_cards.length > 1
+      ? set.job_cards.map(c => c.jc_number) : [set.jc_number]).join(', ')})` : ''}`
     + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''} is waiting in avs.check_requests.`);
   await q(`UPDATE avs.check_requests SET fired_at = now(), fire_status = $2, fire_error = $3,
                   session_url = COALESCE($4, session_url), updated_at = now() WHERE id = $1`,
@@ -185,7 +186,8 @@ async function fireUnlessRunning(cfg, set, { force = false } = {}) {
 const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.note, s.created_by, s.created_by_user_id,
   s.created_at, s.drive_folder_path, s.drive_folder_url, s.queued_at, s.queued_by, s.fired_at, s.fire_status,
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
-  s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason`;
+  s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason,
+  s.job_cards`;
 
 // One set, or the list: every set still in progress, and the newest
 // `perStatus` of each finished status (the page shows them by status, with
@@ -248,30 +250,36 @@ r.get('/avs/job-cards', async (req, res, next) => {
          AND ($1 = '' OR jc.jc_number ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%'
               OR p.code ILIKE '%' || $1 || '%' OR gr.gang_number ILIKE '%' || $1 || '%')
        ORDER BY (pst.status IN ('in_progress', 'partially_completed', 'hold')) DESC NULLS LAST, jc.id DESC
-       LIMIT 30`, [text]);
+       LIMIT 50`, [text]);
     res.json(rows);
   } catch (e) { next(e); }
 });
 
 // ── Making a set ─────────────────────────────────────────────────────────────
+// One job card, or several (job_card_ids): the same product in several orders
+// or batches, or the cards of a gang, checked from one set of photos. All are
+// kept in job_cards, in the order chosen; job_card_id / jc_number are the first.
+export const AVS_SET_MAX_CARDS = 20;
 r.post('/avs/uploads', canUpload, async (req, res, next) => {
   try {
     const note = optionalText(req.body?.note);
     if (note && note.length > AVS_REMARK_MAX) throw fail(400, `Keep the note under ${AVS_REMARK_MAX} characters.`);
-    let jc = null;
-    const jcId = toId(req.body?.job_card_id);
-    if (jcId) {
-      jc = await one(`SELECT jc.id, jc.jc_number, p.name AS product_name FROM job_cards jc
-                        LEFT JOIN products p ON p.id = jc.product_id WHERE jc.id = $1`, [jcId]);
-      if (!jc) throw fail(404, 'Job card not found');
-    }
+    const asked = [...new Set([...(Array.isArray(req.body?.job_card_ids) ? req.body.job_card_ids : []), req.body?.job_card_id]
+      .map(toId).filter(Boolean))];
+    if (asked.length > AVS_SET_MAX_CARDS) throw fail(400, `Pick at most ${AVS_SET_MAX_CARDS} job cards for one set.`);
+    const found = asked.length ? await q(`SELECT jc.id, jc.jc_number, p.name AS product_name FROM job_cards jc
+                        LEFT JOIN products p ON p.id = jc.product_id WHERE jc.id = ANY($1)`, [asked]) : [];
+    if (found.length !== asked.length) throw fail(404, 'Job card not found');
+    const cards = asked.map(id => found.find(c => +c.id === +id));
+    const jc = cards[0] || null;
     const product = optionalText(req.body?.product_hint) || jc?.product_name || null;
     if (!jc && !product) throw fail(400, 'Pick the job card, or write the product name when there is none.');
     const set = await one(`INSERT INTO avs.check_requests
-        (status, job_card_id, jc_number, product_hint, note, created_by, created_by_user_id, created_by_role)
-      VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        (status, job_card_id, jc_number, product_hint, note, created_by, created_by_user_id, created_by_role, job_cards)
+      VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       [jc?.id ?? null, jc?.jc_number ?? null, product ? product.slice(0, 200) : null, note,
-        req.user.name ?? null, req.user.id ?? null, req.user.role ?? null]);
+        req.user.name ?? null, req.user.id ?? null, req.user.role ?? null,
+        cards.length ? JSON.stringify(cards.map(c => ({ id: +c.id, jc_number: c.jc_number, product_name: c.product_name ?? null }))) : null]);
     const [out] = await readSets({ id: set.id });
     res.status(201).json(out);
   } catch (e) { next(e); }
@@ -321,8 +329,9 @@ r.post('/avs/redo', canUpload, async (req, res, next) => {
       ? await one(`SELECT jc.id, jc.jc_number FROM job_cards jc WHERE jc.id = $1`, [from.job_card_id])
       : null;
     if (!jc && report.job_card) {
-      jc = await one(`SELECT id, jc_number FROM job_cards WHERE upper(jc_number) = upper($1) ORDER BY id DESC LIMIT 1`,
-        [String(report.job_card).trim()]);
+      const first = jobCardNumbers(report.job_card)[0];
+      jc = first ? await one(`SELECT id, jc_number FROM job_cards WHERE upper(jc_number) = $1 ORDER BY id DESC LIMIT 1`, [first])
+        : null;
     }
     const product = String(from?.product_hint || report.product_name || report.product || '').slice(0, 200) || null;
 
@@ -330,11 +339,12 @@ r.post('/avs/redo', canUpload, async (req, res, next) => {
     try {
       made = await one(`INSERT INTO avs.check_requests
           (status, job_card_id, jc_number, product_hint, note, created_by, created_by_user_id, created_by_role,
-           redo_report_no, redo_of_set_id, redo_reason)
-        VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+           redo_report_no, redo_of_set_id, redo_reason, job_cards)
+        VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [jc?.id ?? from?.job_card_id ?? null, jc?.jc_number ?? from?.jc_number ?? report.job_card ?? null, product, note,
           req.user.name ?? null, req.user.id ?? null, req.user.role ?? null,
-          reportNo, from?.id ?? null, reason.slice(0, AVS_REMARK_MAX)]);
+          reportNo, from?.id ?? null, reason.slice(0, AVS_REMARK_MAX),
+          Array.isArray(from?.job_cards) && from.job_cards.length ? JSON.stringify(from.job_cards) : null]);
     } catch (e) {
       // Two people pressed Redo at once: the unique index lets one through.
       if (e?.code === '23505') throw fail(409, `${reportNo} is already being checked again. Reload the page.`);
@@ -381,7 +391,9 @@ r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) =
     const giveBack = () => q(`UPDATE avs.check_requests SET next_seq = next_seq - 1
       WHERE id = $1 AND next_seq = $2`, [set.id, seq]).catch(() => {});
 
-    const folder = set.drive_folder_path || avsSetFolder({ id: set.id, day: istDay(set.created_at), jc_number: set.jc_number });
+    const extra = Array.isArray(set.job_cards) && set.job_cards.length > 1 ? ` +${set.job_cards.length - 1}` : '';
+    const folder = set.drive_folder_path
+      || avsSetFolder({ id: set.id, day: istDay(set.created_at), jc_number: set.jc_number ? `${set.jc_number}${extra}` : null });
     const name = `${String(seq).padStart(2, '0')} ${cleanName(file.originalname)}`;
     const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
     const capturedAt = Number.isFinite(Date.parse(req.body?.captured_at)) ? new Date(req.body.captured_at).toISOString() : null;

@@ -1,6 +1,7 @@
 // Upload photos for an AVS check, then Verify.
 //
-// 1. The job card (printing jobs first), or "no job card" with the product name.
+// 1. The job card (printing jobs first) — or several, ticked: the same product in
+//    several orders or batches, or a gang — or "no job card" with the product name.
 // 2. Photos: taken with the camera or chosen. Each one goes on its own to
 //    Google Drive (AVS CHECK/<date>/Set 0012 <job card>) when the Drive link is
 //    set up; until then CI Plant keeps it, and Claude files it in the AVS folder
@@ -64,7 +65,7 @@ export function savedText(saved, keptHere) {
 export default function AvsUploadDialog({ open, onClose, jobCard = null, resume = null, redo = null, onDone }) {
   const toast = useToast();
   const [step, setStep] = useState('pick');
-  const [card, setCard] = useState(null);
+  const [picked, setPicked] = useState([]); // the job cards ticked, in the order ticked
   const [noCard, setNoCard] = useState(false);
   const [product, setProduct] = useState('');
   const [note, setNote] = useState('');
@@ -79,7 +80,7 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
 
   // The upload queue is worked through outside React's render cycle.
   const form = useRef({});
-  form.current = { card, noCard, product, note };
+  form.current = { picked, noCard, product, note };
   const setRef = useRef(null);
   const queue = useRef([]);
   const files = useRef(new Map());
@@ -90,7 +91,7 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
 
   useEffect(() => {
     if (!open) return undefined;
-    setCard(jobCard); setNoCard(false); setProduct(''); setNote(''); setQuery(''); setCards(null);
+    setPicked(jobCard ? [jobCard] : []); setNoCard(false); setProduct(''); setNote(''); setQuery(''); setCards(null);
     setItems([]); setResult(null); setSending(false); setReason(''); setStarting(false);
     setSet(resume); setRef.current = resume;
     queue.current = []; files.current = new Map();
@@ -122,12 +123,28 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
 
   const mark = (key, patch) => setItems(list => list.map(x => (x.key === key ? { ...x, ...patch } : x)));
 
+  // Several job cards: tick them one by one, or all those the search shows.
+  const toggleCard = c => {
+    setNoCard(false);
+    setPicked(cur => (cur.some(x => +x.id === +c.id) ? cur.filter(x => +x.id !== +c.id) : [...cur, c]));
+  };
+  const shownIds = new Set((cards || []).map(c => +c.id));
+  const allShownPicked = !!cards?.length && cards.every(c => picked.some(x => +x.id === +c.id));
+  const someShownPicked = picked.some(x => shownIds.has(+x.id));
+  const pickShown = on => {
+    setNoCard(false);
+    setPicked(cur => (on
+      ? [...cur, ...(cards || []).filter(c => !cur.some(x => +x.id === +c.id))]
+      : cur.filter(x => !shownIds.has(+x.id))));
+  };
+  const mixedProducts = new Set(picked.map(c => c.product_name || '')).size > 1;
+
   // The set is made with the first photo, so an abandoned dialog leaves nothing.
   const ensureSet = async () => {
     if (setRef.current) return setRef.current;
     const f = form.current;
     const made = await api.post('/avs/uploads', {
-      job_card_id: f.noCard ? undefined : f.card?.id,
+      job_card_ids: f.noCard ? undefined : f.picked.map(c => c.id),
       product_hint: f.noCard ? f.product.trim() : undefined,
       note: f.note.trim() || undefined,
     });
@@ -196,6 +213,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
 
   const close = () => { if (!pending) onClose?.(); };
   const redoOf = set?.redo_report_no || redo?.report_no || null;
+  const jobList = (Array.isArray(set?.job_cards) && set.job_cards.length ? set.job_cards.map(c => c.jc_number)
+    : set?.jc_number ? [set.jc_number] : picked.map(c => c.jc_number)).join(', ');
 
   return (
     <Modal open={open} onClose={close} layer="nested" title={
@@ -220,7 +239,9 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
             </>
             : <>
               <Button variant="secondary" repeatable onClick={close}>Cancel</Button>
-              <Button repeatable onClick={() => setStep('photos')} disabled={noCard ? product.trim().length < 3 : !card}>Next: photos</Button>
+              <Button repeatable onClick={() => setStep('photos')} disabled={noCard ? product.trim().length < 3 : !picked.length}>
+                {picked.length > 1 ? `Next: photos (${picked.length} job cards)` : 'Next: photos'}
+              </Button>
             </>}>
       {step === 'redo' && redo && (
         <div className="space-y-3">
@@ -249,32 +270,67 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
       )}
       {step === 'pick' && (
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">Which job are these photos of?</p>
+          <p className="text-sm text-slate-600">Which job are these photos of? Tick every job card they cover — the same product in several orders or batches, or a gang.</p>
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
             <Search size={15} className="text-slate-400" />
             <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Job card, product or gang number"
               className="w-full bg-transparent text-sm outline-none" />
           </label>
+          {cards?.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <label className="inline-flex cursor-pointer items-center gap-2 font-semibold text-slate-700">
+                <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-violet-600"
+                  checked={allShownPicked} ref={el => { if (el) el.indeterminate = someShownPicked && !allShownPicked; }}
+                  onChange={() => pickShown(!allShownPicked)} />
+                {allShownPicked ? 'Deselect all shown' : `Select all shown (${cards.length})`}
+              </label>
+              <span className="flex items-center gap-2 text-slate-500">
+                {picked.length} selected
+                {picked.length > 0 && <button type="button" className="font-semibold text-violet-700 hover:underline" onClick={() => setPicked([])}>Clear</button>}
+              </span>
+            </div>
+          )}
+          {picked.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {picked.map(c => (
+                <button key={c.id} type="button" onClick={() => toggleCard(c)} title="Remove"
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-800 hover:bg-violet-200">
+                  {c.jc_number} <XCircle size={11} />
+                </button>
+              ))}
+            </div>
+          )}
+          {mixedProducts && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              These job cards are for different products ({[...new Set(picked.map(c => c.product_name || '—'))].join('; ')}).
+              One set should show one product — unless they print together in a gang.
+            </p>
+          )}
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {cards === null && <div className="p-3 text-sm text-slate-400">Loading…</div>}
             {cards?.length === 0 && <div className="p-3 text-sm text-slate-500">No open job card matches.</div>}
-            {cards?.map(c => (
-              <button key={c.id} type="button" onClick={() => { setCard(c); setNoCard(false); }}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm ring-1 ${card?.id === c.id ? 'bg-violet-50 ring-violet-300' : 'bg-white ring-slate-200 hover:bg-slate-50'}`}>
-                <span className="min-w-0">
-                  <span className="font-mono text-xs font-semibold text-slate-700">{c.jc_number}</span>
-                  {c.gang_number && <span className="ml-1 text-[11px] text-slate-500">({c.gang_number})</span>}
-                  <span className="block truncate text-slate-800">{c.product_name || '—'}</span>
-                </span>
-                <span className="flex shrink-0 flex-col items-end gap-0.5 text-[11px]">
-                  {['in_progress', 'partially_completed', 'hold'].includes(c.printing_status) && <span className="rounded-full bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700">Printing</span>}
-                  {c.avs_mandatory && <span className="rounded-full bg-violet-50 px-1.5 py-0.5 font-bold text-violet-700">AVS</span>}
-                </span>
-              </button>
-            ))}
+            {cards?.map(c => {
+              const on = picked.some(x => +x.id === +c.id);
+              return (
+                <label key={c.id}
+                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ring-1 ${on ? 'bg-violet-50 ring-violet-300' : 'bg-white ring-slate-200 hover:bg-slate-50'}`}>
+                  <input type="checkbox" className="h-4 w-4 shrink-0 rounded border-slate-300 text-violet-600" checked={on}
+                    onChange={() => toggleCard(c)} />
+                  <span className="min-w-0 flex-1">
+                    <span className="font-mono text-xs font-semibold text-slate-700">{c.jc_number}</span>
+                    {c.gang_number && <span className="ml-1 text-[11px] text-slate-500">({c.gang_number})</span>}
+                    <span className="block truncate text-slate-800">{c.product_name || '—'}</span>
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-0.5 text-[11px]">
+                    {['in_progress', 'partially_completed', 'hold'].includes(c.printing_status) && <span className="rounded-full bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700">Printing</span>}
+                    {c.avs_mandatory && <span className="rounded-full bg-violet-50 px-1.5 py-0.5 font-bold text-violet-700">AVS</span>}
+                  </span>
+                </label>
+              );
+            })}
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input type="checkbox" checked={noCard} onChange={e => { setNoCard(e.target.checked); if (e.target.checked) setCard(null); }} />
+            <input type="checkbox" checked={noCard} onChange={e => { setNoCard(e.target.checked); if (e.target.checked) setPicked([]); }} />
             No job card (old stock, a sample, a customer return)
           </label>
           {noCard && (
@@ -294,8 +350,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
           )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
             <span className="text-slate-500">Job: </span>
-            <span className="font-mono font-semibold">{set?.jc_number || card?.jc_number || 'no job card'}</span>
-            <span className="text-slate-700"> · {set?.product_hint || card?.product_name || product}</span>
+            <span className="font-mono font-semibold">{jobList || 'no job card'}</span>
+            <span className="text-slate-700"> · {set?.product_hint || picked[0]?.product_name || product}</span>
           </div>
           <ul className="list-disc space-y-0.5 pl-5 text-xs text-slate-600">
             <li>One product at a time: a printed sheet, or one carton opened flat.</li>

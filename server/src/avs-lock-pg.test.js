@@ -85,8 +85,13 @@ describe('the AVS printing lock — through the real app', {
   // the grants to Supabase's roles, which a plain Postgres does not have.
   const applyAvsPhotoSchema = async () => {
     await db.q('CREATE SCHEMA IF NOT EXISTS avs');
+    // avs.decisions as the Approval Desk made it, before CI Plant's migrations.
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.decisions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_no text NOT NULL,
+        report_rev integer, check_no integer, decision text NOT NULL
+          CONSTRAINT decisions_decision_check CHECK (decision IN ('RELEASE', 'KEEP ON HOLD', 'REJECT', 'ARTWORK ALERT OK')),
+        decided_by text, remark text, decided_at timestamptz NOT NULL DEFAULT now())`);
     for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql',
-      '20260928180000_avs_redo_verification.sql']) {
+      '20260928180000_avs_redo_verification.sql', '20260928190000_avs_undo_and_job_cards.sql']) {
       await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
         .replace(/REVOKE ALL[^;]*;/g, ''));
     }
@@ -179,6 +184,7 @@ describe('the AVS printing lock — through the real app', {
       CREATE TABLE IF NOT EXISTS avs.decisions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_no text NOT NULL,
         report_rev integer, check_no integer, decision text NOT NULL, decided_by text, remark text,
         decided_at timestamptz NOT NULL DEFAULT now());
+      ALTER TABLE avs.decisions ADD COLUMN IF NOT EXISTS undoes_id bigint;
       CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
         WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC;`);
     const job = await printingJob();
@@ -746,5 +752,71 @@ describe('the AVS printing lock — through the real app', {
     out = await call('qc', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: 'once more' });
     assert.equal(out.status, 409);
     assert.match(out.body.error, /closed/);
+  });
+  test('several job cards in one set; the lock and the QA stamp read each; an undo brings the lock back', async () => {
+    await applyAvsPhotoSchema();
+    await db.q('ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS drive_file_id text');
+    await db.q('ALTER TABLE avs.decisions ADD COLUMN IF NOT EXISTS decided_by_user_id integer');
+    await db.q(`CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
+        WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC`);
+    const a = await printingJob();
+    const b = await printingJob();
+    // One set for two job cards of the same product.
+    const made = await call('production', 'POST', '/avs/uploads', { job_card_ids: [b.cardId, a.cardId] });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.jc_number, b.jc, 'the first ticked is the set\'s job card');
+    assert.deepEqual(made.body.job_cards.map(c => c.jc_number), [b.jc, a.jc]);
+    const bad = await call('production', 'POST', '/avs/uploads', { job_card_ids: [a.cardId, 999999] });
+    assert.equal(bad.status, 404);
+
+    // Claude files one report naming both cards; AVS is on for card a.
+    await call('planner', 'POST', '/avs/switch', { line_id: a.lineId, on: true });
+    await startPrinting(a);
+    await db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status, product_name, job_card)
+      VALUES ('AVS-2026-0960', 0, 1, 'PASS', 'Two batches', $1)`, [`${b.jc}, ${a.jc}`]);
+    let out = await completePrinting(a);
+    assert.equal(out.status, 409, 'PASS alone does not release');
+    assert.match(out.body.avs.reason, /AVS-2026-0960 is PASS/);
+
+    // The printing queue shows how QA stands, per card.
+    let floor = await call('production', 'GET', '/floor/printing');
+    const rowOf = (f, job) => f.body.queue.find(r => r.jc_number === job.jc);
+    assert.equal(rowOf(floor, a)?.qa_stamp?.state, 'pending');
+
+    // QA approves: the stamp says QA Approved on both cards' rows, and printing completes... after an undo, it locks again.
+    const rel = await call('qc', 'POST', '/avs/reports/AVS-2026-0960/decisions', { decision: 'RELEASE', remark: 'ok', report_rev: 0, check_no: 1 });
+    assert.equal(rel.status, 201, JSON.stringify(rel.body));
+    floor = await call('production', 'GET', '/floor/printing');
+    assert.equal(rowOf(floor, a)?.qa_stamp?.state, 'approved');
+    assert.equal(rowOf(floor, a)?.qa_stamp?.text, 'QA Approved');
+    assert.equal(rowOf(floor, b)?.qa_stamp?.state, 'approved');
+
+    // Undo needs a reason, then brings the lock back — kept as a row, never deleted.
+    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: '' });
+    assert.equal(out.status, 400);
+    out = await call('production', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'wrong job' });
+    assert.equal(out.status, 403, 'the press does not decide');
+    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'released the wrong report' });
+    assert.equal(out.status, 201, JSON.stringify(out.body));
+    assert.equal(out.body.decision, 'UNDO');
+    out = await call('qc', 'POST', `/avs/reports/AVS-2026-0960/decisions/${rel.body.id}/undo`, { remark: 'again please' });
+    assert.equal(out.status, 409, 'undone once');
+    out = await completePrinting(a);
+    assert.equal(out.status, 409, 'the lock is back');
+    floor = await call('production', 'GET', '/floor/printing');
+    assert.equal(rowOf(floor, a)?.qa_stamp?.state, 'pending');
+    const detail = await call('qc', 'GET', '/avs/reports/AVS-2026-0960');
+    assert.deepEqual(detail.body.decisions.map(d => [d.decision, d.undone]), [['UNDO', false], ['RELEASE', true]]);
+    assert.equal(detail.body.decisions_in_force, null);
+    const list = await call('qc', 'GET', '/avs/reports');
+    const row = list.body.reports.find(x => x.report_no === 'AVS-2026-0960');
+    assert.equal(row.case_state, 'waiting', 'the register reads the decision in force');
+    assert.equal(await db.one(`SELECT count(*)::int AS n FROM avs.decisions WHERE report_no = 'AVS-2026-0960'`).then(x => x.n), 2);
+
+    // Released again: printing completes.
+    const again = await call('qc', 'POST', '/avs/reports/AVS-2026-0960/decisions', { decision: 'RELEASE', remark: 'checked again', report_rev: 0, check_no: 1 });
+    assert.equal(again.status, 201);
+    out = await completePrinting(a);
+    assert.equal(out.status, 200, JSON.stringify(out.body));
   });
 });
