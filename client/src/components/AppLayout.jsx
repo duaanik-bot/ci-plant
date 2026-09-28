@@ -136,6 +136,12 @@ function NotificationBell() {
   const [inbox, setInbox] = useState({ unread: 0, rows: [] });          // my notifications
   const [pend, setPend] = useState({ can_xs: false, can_mgt: false, xs: [], mgt: [] }); // live approvals waiting on ME
   const [deciding, setDeciding] = useState(null); // approval id with a decide call in flight
+  // Fluence MRP updates a customer's own login made, waiting for Colour
+  // Impressions management to acknowledge them — asked only by those who may.
+  const [mrpWait, setMrpWait] = useState({ rows: [], open: 0 });
+  const bellUser = auth.user;
+  const acksMrp = !isFluenceOnly(bellUser) && canAccess(bellUser, 'fluence')
+    && (bellUser?.role === 'admin' || Number(bellUser?.is_management) === 1);
   const ref = useRef(null);      // the trigger, in the header
   const popRef = useRef(null);   // the panel, portalled to <body>
   // ── This device's standing to be buzzed ─────────────────────────────────
@@ -170,6 +176,7 @@ function NotificationBell() {
   const loadPersonal = () => Promise.all([
     api.get('/notifications').then(setInbox).catch(() => {}),
     api.get('/approvals/pending').then(setPend).catch(() => {}),
+    acksMrp ? api.get('/fluence/mrp-changes?pending=1&limit=10').then(r => setMrpWait({ rows: r?.rows || [], open: r?.open || 0 })).catch(() => {}) : null,
   ]);
   useFallbackRefresh(load, { intervalMs: 300000 });
   useFallbackRefresh(loadPersonal, { intervalMs: 120000 });
@@ -193,7 +200,7 @@ function NotificationBell() {
     };
   }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
-  useRealtimeRefresh(loadPersonal, ['approval_requests'], { debounceMs: 1000 });
+  useRealtimeRefresh(loadPersonal, ['approval_requests', 'fluence_mrp_changes'], { debounceMs: 1000 });
 
   const openNotification = n => {
     api.post('/notifications/read', { ids: [n.id] }).then(loadPersonal).catch(() => {});
@@ -210,6 +217,15 @@ function NotificationBell() {
     if (to) nav(to);
   };
   const markAllRead = () => api.post('/notifications/read', { all: true }).then(loadPersonal).catch(() => {});
+  // "I have read it" — one MRP update, or all of them.
+  const ackMrp = async ids => {
+    setDeciding(ids ? `mrp-${ids[0]}` : 'mrp-all');
+    try {
+      const out = await api.post('/fluence/mrp-changes/ack', ids ? { ids } : { all: true });
+      toast.success(out.acknowledged === 1 ? 'MRP update acknowledged' : `${out.acknowledged} MRP updates acknowledged`);
+      await loadPersonal();
+    } catch { /* central toast already showed the error */ } finally { setDeciding(null); }
+  };
   const decideMgt = async (a, action) => {
     setDeciding(a.id);
     try {
@@ -257,7 +273,7 @@ function NotificationBell() {
   const completed = d?.closed_today?.jobs > 0
     ? [{ text: `${d.closed_today.jobs} job${d.closed_today.jobs > 1 ? 's' : ''} closed today — ${d.closed_today.cartons.toLocaleString('en-IN')} cartons to FG` }]
     : [];
-  const approvalsCount = pend.xs.length + pend.mgt.length;
+  const approvalsCount = pend.xs.length + pend.mgt.length + (acksMrp ? mrpWait.open : 0);
   const attention = inbox.unread + approvalsCount;
 
   const Group = ({ title, tone, icon: Icon, items, to }) => (
@@ -352,14 +368,53 @@ function NotificationBell() {
               );
             })()}
 
+            {/* Fluence MRP updates — a customer's own login changed an MRP; it stays
+                here until someone in management acknowledges it ("I have read it"). */}
+            {acksMrp && mrpWait.open > 0 && (
+              <div className="border-b border-slate-100 p-3" data-bell-mrp="1">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-50 text-amber-700"><ShieldAlert size={13} /></span>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Fluence MRP updates — to acknowledge</p>
+                  <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{mrpWait.open}</span>
+                </div>
+                {mrpWait.rows.slice(0, 5).map(m => (
+                  <div key={`mrp-${m.id}`} className="mt-1.5 flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2 text-xs text-slate-700 first:mt-0">
+                    <button onClick={() => { nav('/fluence?tab=mrp'); setOpen(false); }} className="min-w-0 flex-1 text-left">
+                      <span className="font-bold text-slate-900">{m.item_name || 'Item'}</span>{m.subject === 'kit_item' && m.kit_name ? ` in ${m.kit_name}` : ''}
+                      <span className="block font-semibold text-slate-800">
+                        {m.old_mrp == null ? 'no MRP' : `₹${Number(m.old_mrp).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} → {m.new_mrp == null ? 'no MRP' : `₹${Number(m.new_mrp).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500">{m.changed_by} · {fmt.dt(m.changed_at)}</span>
+                    </button>
+                    <PressButton disabled={deciding != null} onClick={() => ackMrp([m.id])} data-bell-mrp-ack={m.id}
+                      className="shrink-0 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                      Acknowledge
+                    </PressButton>
+                  </div>
+                ))}
+                <div className="mt-1.5 flex gap-1.5">
+                  {mrpWait.open > 1 && (
+                    <PressButton disabled={deciding != null} onClick={() => ackMrp(null)}
+                      className="flex-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                      Acknowledge all {mrpWait.open}
+                    </PressButton>
+                  )}
+                  <PressButton onClick={() => { nav('/fluence?tab=mrp'); setOpen(false); }}
+                    className="flex-1 rounded-lg bg-white/80 px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-white">
+                    Open MRP updates
+                  </PressButton>
+                </div>
+              </div>
+            )}
+
             {/* Approval desk — LIVE pending requests waiting on this login, not
                 stored notifications, so it can never show a stale ask. */}
-            {approvalsCount > 0 && (
+            {pend.xs.length + pend.mgt.length > 0 && (
               <div className="border-b border-slate-100 p-3">
                 <div className="mb-1.5 flex items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-50 text-amber-700"><ShieldAlert size={13} /></span>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Approvals — waiting on you</p>
-                  <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{approvalsCount}</span>
+                  <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{pend.xs.length + pend.mgt.length}</span>
                 </div>
                 {pend.xs.map(x => (
                   <button key={`xs-${x.id}`} onClick={() => { nav(`/extra-sheets?xs=${x.id}`); setOpen(false); }}
@@ -429,7 +484,8 @@ function NotificationBell() {
         count={countOf(attention)}
         tone={rung({ mentioned: false, waiting: approvalsCount })}
         title={[
-          approvalsCount > 0 ? `${plural(approvalsCount, 'approval')} waiting on you` : null,
+          pend.xs.length + pend.mgt.length > 0 ? `${plural(pend.xs.length + pend.mgt.length, 'approval')} waiting on you` : null,
+          acksMrp && mrpWait.open > 0 ? `${plural(mrpWait.open, 'Fluence MRP update')} to acknowledge` : null,
           inbox.unread > 0 ? plural(inbox.unread, 'unread notification') : null,
           critical.length > 0 ? plural(critical.length, 'critical plant alert') : null,
         ].filter(Boolean).join(' · ') || 'Nothing waiting on you'}

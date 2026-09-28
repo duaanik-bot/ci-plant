@@ -60,6 +60,8 @@ const OF_KIND = Object.freeze({
   fluence_change: 'alerts',
   // …and every file it downloads from the module (a list, a report, a print).
   fluence_download: 'alerts',
+  // …and every MRP it changes — flagged until management acknowledges it.
+  fluence_mrp: 'alerts',
   // A stage sent back one station. It files here rather than under `approvals`
   // because the receiving station has nothing to decide — the call was already
   // made upstream and this is the answer arriving. Same shape as

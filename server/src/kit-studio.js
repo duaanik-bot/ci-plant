@@ -81,6 +81,29 @@ const money = v => {
 
 // ── Splitting a document the page sent ──────────────────────────────────────
 
+// ─── A kit's size, which a customer's own login may not change ─────────────
+// The panel size (L × W × H), how sure we are of it, where it came from, and how
+// the cartons are arranged inside are Colour Impressions' to decide: the studio
+// shows them read-only to a Fluence login, and routes/kitstudio.js refuses a save
+// from one that changes any of them. What differs between the kit as the studio
+// showed it (`before`, the composed document) and the save that came back.
+const canon = v => {
+  if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+};
+export function sizeChanges(before, after) {
+  const b = before || {}, a = after || {};
+  const out = [];
+  if (['L', 'W', 'H'].some(k => dim(b[k]) !== dim(a[k]))) out.push('the panel size');
+  if (statusOf(b.sizeStatus) !== statusOf(a.sizeStatus)) out.push('the size status');
+  if ((text(b.sizeSource) ?? '') !== (text(a.sizeSource) ?? '')) out.push('where the size came from');
+  if (canon(b.layout ?? null) !== canon(a.layout ?? null)) out.push('the carton arrangement');
+  return out;
+}
+
 export function splitKit(doc) {
   const errors = [];
   const name = text(doc?.name);

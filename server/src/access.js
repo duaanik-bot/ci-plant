@@ -71,6 +71,8 @@ const TAB_ROUTES = [
   ['GET', /^\/fluence\/products$/, ['products', 'customer']],
   ['GET', /^\/fluence\/kits$/, ['customer']],
   ['GET', /^\/fluence\/changes$/, ['changes']],
+  ['GET', /^\/fluence\/mrp-changes$/, ['mrp']],
+  ['POST', /^\/fluence\/mrp-changes\/ack$/, ['mrp']],
   ['PUT', /^\/fluence\/(products|kits)\/[^/]+\/(kit|prescription|components)$/, KIT_EDIT_TABS],
   ['POST', /^\/fluence\/inner-products$/, ['inner']],
   ['PUT', /^\/fluence\/inner-products\/[^/]+$/, ['inner']],

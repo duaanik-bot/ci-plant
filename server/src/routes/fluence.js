@@ -18,7 +18,7 @@ import { dossierFor, needsMasters, mayUseTab } from '../access.js';
 import { KIT_EDIT_TABS } from '../../../client/src/modules.js';
 import {
   nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, rxChangedAfterFinalise,
-  rxLinesInStep, componentsSignature, kitChangeSummary,
+  rxLinesInStep, componentsSignature, kitChangeSummary, kitItemMrpChanges, mrpLine, mrpValue, sameMrp,
 } from '../../../client/src/lib/fluence.js';
 
 const r = Router();
@@ -47,6 +47,42 @@ export async function tellManagement(user, { kitId = null, subject, change, link
     refTable: kitId ? 'fluence_kits' : null,
     refId: kitId,
   }, qc);
+}
+
+// ── The MRP trail ────────────────────────────────────────────────────────────
+// Every change to an MRP the module keeps — an inner product's standard MRP, an
+// item's MRP in a kit — goes into fluence_mrp_changes, old → new, who and from
+// where, in the transaction that made it. A change from a customer's own login
+// waits there, flagged, until Colour Impressions management acknowledges it
+// (Fluence → MRP updates, or the notification centre), and management is told
+// at once. `changes`: [{ subject, innerProductId, kitId, itemName, kitName,
+// oldMrp, newMrp }]; one that did not really change is dropped. Exported for Kit
+// Studio's inner product save.
+export async function recordMrpChanges(changes, user, from, qc) {
+  const real = (changes || []).filter(c => !sameMrp(c.oldMrp, c.newMrp));
+  if (!real.length) return [];
+  const ids = [];
+  for (const c of real) {
+    const [row] = await qc(`
+      INSERT INTO fluence_mrp_changes
+        (subject, inner_product_id, kit_id, item_name, kit_name, old_mrp, new_mrp, changed_by, changed_by_id, outside, changed_from)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [c.subject, c.innerProductId ?? null, c.kitId ?? null, c.itemName ?? null, c.kitName ?? null,
+      mrpValue(c.oldMrp), mrpValue(c.newMrp), user.name, user.id ?? null, user.outside ? 1 : 0, from ?? null]);
+    ids.push(row.id);
+  }
+  if (user.outside) {
+    const users = await qc('SELECT id, active, is_management FROM users');
+    const lines = real.map(mrpLine);
+    await notify(notificationRecipients(users, 'is_management', user.id), {
+      kind: 'fluence_mrp',
+      title: `${real.length === 1 ? `MRP changed — ${lines[0]}` : `${real.length} MRPs changed`} — by ${user.name}`,
+      body: `${lines.slice(0, 6).join('\n')}${lines.length > 6 ? `\n…and ${lines.length - 6} more` : ''}\n`
+        + `Signed: ${user.name}. Acknowledge it under Fluence → MRP updates.`,
+      link: '/fluence?tab=mrp',
+    }, qc);
+  }
+  return ids;
 }
 
 // The same notice for a file a customer's login took out of the module — what it
@@ -575,6 +611,7 @@ async function saveKitAndRx({ kit, product, outer, body, user, from }, qc, oc) {
     await writeKitComponents(kit.id, components, user, qc);
     const after = await componentsSnapshot(kit.id, qc);
     await recordRevision({ kitId: kit.id, area: 'components', before: beforeComps, after, note, user, from }, qc);
+    await recordMrpChanges(kitItemMrpChanges(beforeComps, after, { kitId: kit.id, kitName: label }), user, from, qc);
     await audit('fluence_kit', kit.id, 'kit_components_updated',
       `${label} — ${after.length} inner product(s), saved with the prescription from ${FLUENCE_CONTEXTS[from]}`, qc, user.name);
     componentsChanged = true;
@@ -697,6 +734,7 @@ r.put('/fluence/products/:productId/components', canEditMaster, async (req, res,
       await writeKitComponents(kit.id, value.components, req.user, qc);
       const after = await componentsSnapshot(kit.id, qc);
       await recordRevision({ kitId: kit.id, area: 'components', before, after, note: fromPart(product, outer), user: req.user, from }, qc);
+      await recordMrpChanges(kitItemMrpChanges(before, after, { kitId: kit.id, kitName: `${product.code} ${product.name}` }), req.user, from, qc);
       await audit('fluence_kit', kit.id, 'kit_components_updated',
         `${product.code} ${product.name}${outer ? ` (part carton of ${outer.code})` : ''} — ${after.length} inner product(s), saved from ${FLUENCE_CONTEXTS[from]}`, qc, req.user.name);
       await keepRxInStep(kit.id, req.user, from, qc, oc);
@@ -710,6 +748,15 @@ r.put('/fluence/products/:productId/components', canEditMaster, async (req, res,
 
 // ── Inner product master ─────────────────────────────────────────────────────
 const INNER_FIELDS = ['name', 'kind', 'product_code', 'artwork_code', 'dosage_form', 'standard_mrp', 'packaging_info', 'remarks', 'active'];
+// How a change to an inner product reads in the audit line and the notice.
+export const INNER_LABEL = {
+  name: 'name', name_key: 'name', 'kind': 'item or packaging', product_code: 'product code', artwork_code: 'artwork code', dosage_form: 'dosage form',
+  standard_mrp: 'MRP', carton_l: 'carton L', carton_w: 'carton W', carton_h: 'carton H', packaging_info: 'packaging',
+  remarks: 'remarks', active: 'active', erp_product_id: 'ERP product',
+};
+export const innerChangeText = (k, from, to) => (k === 'standard_mrp'
+  ? `MRP: ${mrpValue(from) == null ? '—' : `₹${mrpValue(from)}`} → ${mrpValue(to) == null ? '—' : `₹${mrpValue(to)}`}`
+  : `${INNER_LABEL[k] || k}: ${from ?? '—'} → ${to ?? '—'}`);
 
 r.get('/fluence/inner-products', async (_req, res, next) => {
   try {
@@ -787,6 +834,8 @@ r.post('/fluence/inner-products', canEditMaster, async (req, res, next) => {
         value.active ?? null, req.user.name]);
       await audit('fluence_inner_product', created.id, 'create', created.name, qc, req.user.name);
       await tellManagement(req.user, { subject: `Inner product ${created.name}`, change: 'added to the inner product master', link: '/fluence?tab=inner' }, qc);
+      await recordMrpChanges([{ subject: 'inner_product', innerProductId: created.id, itemName: created.name, oldMrp: null, newMrp: created.standard_mrp }],
+        req.user, 'fluence_master', qc);
       return created;
     });
     res.status(201).json(row);
@@ -814,9 +863,13 @@ r.put('/fluence/inner-products/:id', canEditMaster, async (req, res, next) => {
         [before.id, ...keys.map(k => value[k]), req.user.name]);
       const changed = keys.filter(k => String(before[k] ?? '') !== String(updated[k] ?? ''));
       if (changed.length) {
-        const what = changed.map(k => `${k}: ${before[k] ?? '—'} → ${updated[k] ?? '—'}`).join('; ');
+        const what = changed.filter(k => k !== 'name_key').map(k => innerChangeText(k, before[k], updated[k])).join('; ');
         await audit('fluence_inner_product', before.id, 'update', what.slice(0, 1000), qc, req.user.name);
         await tellManagement(req.user, { subject: `Inner product ${updated.name}`, change: what.slice(0, 480), link: '/fluence?tab=inner' }, qc);
+        if (changed.includes('standard_mrp')) {
+          await recordMrpChanges([{ subject: 'inner_product', innerProductId: before.id, itemName: updated.name, oldMrp: before.standard_mrp, newMrp: updated.standard_mrp }],
+            req.user, 'fluence_master', qc);
+        }
       }
       return updated;
     });
@@ -932,6 +985,60 @@ r.post('/fluence/downloads', async (req, res, next) => {
         ref: out.ref,
       },
     });
+  } catch (e) { next(e); }
+});
+
+// ── MRP updates: the trail, and Colour Impressions' acknowledgment ──────────
+// Who acknowledges a customer's MRP update: Colour Impressions management — an
+// admin, or a login with the Management tick — never a customer's own login.
+async function acknowledgesMrp(req) {
+  if (!req.user || req.user.outside) return false;
+  if (req.user.role === 'admin') return true;
+  const u = await one('SELECT is_management FROM users WHERE id = $1', [req.user.id]);
+  return Number(u?.is_management) === 1;
+}
+const OPEN_MRP = 'outside = 1 AND ack_at IS NULL';
+
+r.get('/fluence/mrp-changes', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
+    const pending = req.query.pending === '1';
+    const rows = await q(`
+      SELECT id, subject, inner_product_id, kit_id, item_name, kit_name, old_mrp, new_mrp,
+             changed_by, outside, changed_from, changed_at, ack_at, ack_by
+      FROM fluence_mrp_changes ${pending ? `WHERE ${OPEN_MRP}` : ''}
+      ORDER BY changed_at DESC, id DESC LIMIT $1`, [limit]);
+    const [{ open }] = await q(`SELECT count(*)::int AS open FROM fluence_mrp_changes WHERE ${OPEN_MRP}`);
+    res.json({ rows, open, can_ack: await acknowledgesMrp(req) });
+  } catch (e) {
+    offWhenMissing(res, next, { rows: [], open: 0, can_ack: false })(e);
+  }
+});
+
+// "I have read it": one update, several, or every one still open. Signed with
+// who acknowledged and when; the flag clears for everyone.
+r.post('/fluence/mrp-changes/ack', async (req, res, next) => {
+  try {
+    if (!(await acknowledgesMrp(req))) {
+      throw fail(403, 'MRP updates are acknowledged by Colour Impressions management — an admin or a login with the Management tick.');
+    }
+    const all = req.body?.all === true;
+    const ids = idList(Array.isArray(req.body?.ids) ? req.body.ids.join(',') : req.body?.ids);
+    if (!all && !ids.length) throw fail(400, 'Say which MRP updates you have read.');
+    const out = await tx(async qc => {
+      const done = await qc(`
+        UPDATE fluence_mrp_changes SET ack_at = now(), ack_by = $1, ack_by_id = $2
+        WHERE ${OPEN_MRP}${all ? '' : ' AND id = ANY($3::int[])'} RETURNING id`,
+      all ? [req.user.name, req.user.id ?? null] : [req.user.name, req.user.id ?? null, ids]);
+      const [{ open }] = await qc(`SELECT count(*)::int AS open FROM fluence_mrp_changes WHERE ${OPEN_MRP}`);
+      if (done.length) {
+        await audit('fluence_mrp_changes', null, 'acknowledged', `${done.length} MRP update(s): ${done.map(d => d.id).join(', ')}`.slice(0, 1000), qc, req.user.name);
+      }
+      // Nothing left to acknowledge: this reader's MRP pings are read too.
+      if (!open) await qc(`UPDATE notifications SET read_at = now() WHERE user_id = $1 AND kind = 'fluence_mrp' AND read_at IS NULL`, [req.user.id]);
+      return { acknowledged: done.length, open };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

@@ -14,7 +14,7 @@ const root = new URL('../../', import.meta.url);
 const read = p => readFileSync(new URL(p, root), 'utf8');
 
 test('the tabs are the Fluence page\'s chips, in its order, and every Kit Studio view is one of them', () => {
-  assert.deepEqual(FLUENCE_TAB_KEYS, ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'settings']);
+  assert.deepEqual(FLUENCE_TAB_KEYS, ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'mrp', 'settings']);
   assert.deepEqual([...new Set(FLUENCE_TABS.map(t => t.group))], ['Kits', 'Masters', 'Records']);
   for (const t of FLUENCE_TABS) assert.ok(t.label && t.hint, t.key);
   const html = read('client/public/kit-studio-app/index.html');
@@ -135,7 +135,7 @@ test('Kit Studio: drafts only with New kit or Drafts, a new kit is New kit\'s, a
   assert.match(html, /\.no-drafts \[data-goto="drafts"\]/);
   const bridge = read('client/public/kit-studio-app/erp-bridge.js');
   assert.match(bridge, /views: function \(\) \{ return Array\.isArray\(me\.views\)/);
-  assert.match(bridge, /canArea: function \(area\) \{ return !me\.can \|\| !!me\.can\[area\]; \}/);
+  assert.match(bridge, /canArea: function \(area\) \{ return !me\.can \|\| !\(area in me\.can\) \|\| !!me\.can\[area\]; \}/);
   // A tab's refusal refuses that one thing — the studio does not turn view-only over it.
   assert.match(bridge, /if \(err && err\.status === 403 && !err\.refused\) e\.code = 'invalid_argument';/);
   assert.match(read('client/src/components/fluence/KitStudioFrame.jsx'), /status: e\.status, refused: true/);

@@ -95,7 +95,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 input[type=text],input[type=number],input[type=search],select,textarea{background-color:rgba(255,255,255,.75);border:1px solid rgba(29,29,31,.10);border-radius:12px;padding:8px 12px;min-width:0;width:100%;font-weight:500;font-size:14px;line-height:20px;color:var(--ink);
   box-shadow:var(--well);outline:none;transition:border-color .2s var(--ease),background-color .2s var(--ease),box-shadow .2s var(--ease)}
 input::placeholder,textarea::placeholder{color:var(--faint);font-weight:500}
-input[type=text]:hover,input[type=number]:hover,input[type=search]:hover,select:hover,textarea:hover{border-color:rgba(29,29,31,.18);background-color:rgba(255,255,255,.9)}
+input[type=text]:not(:disabled):hover,input[type=number]:not(:disabled):hover,input[type=search]:not(:disabled):hover,select:not(:disabled):hover,textarea:not(:disabled):hover{border-color:rgba(29,29,31,.18);background-color:rgba(255,255,255,.9)}
 input[type=text]:focus,input[type=number]:focus,input[type=search]:focus,select:focus,textarea:focus{border-color:var(--focus);background-color:#fff;box-shadow:0 0 0 3px rgba(10,132,255,.25),0 0 18px rgba(10,132,255,.25),0 2px 10px rgba(10,132,255,.14),inset 0 1px 2px rgba(29,29,31,.04)}
 select{appearance:none;-webkit-appearance:none;padding-right:28px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236E6E73' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;background-size:12px}
 textarea{resize:vertical;min-height:72px}
@@ -426,7 +426,12 @@ const VIEWS=['overview','kits','products','build','drafts','export'];
    drafts are New kit's and Drafts', Inner products their sizes, Export & settings the clearances.
    Outside the ERP — or before the ERP has answered — it is the role alone. */
 function can(area){ const X=window.kitStudioErp; return !!S.canEdit&&(!X||!X.canArea||X.canArea(area)); }
-const canCtx = c => can(c==='d'?'kits':'build');
+/* A kit on the list: its size and the arrangement of its cartons are changed only with
+   kit_size — a customer's own login sees them as Colour Impressions set them. */
+const canCtx = c => c==='d' ? can('kits')&&can('kit_size') : can('build');
+/* The size engine on a kit on the list — recommendation, size comparison, dies in hand,
+   the tightest box — is Colour Impressions' own; a customer's login does not see it. */
+function sizeTools(){ const X=window.kitStudioErp; return !X||!X.sizeTools||X.sizeTools(); }
 function viewList(){ const X=window.kitStudioErp, v=X&&X.views?X.views():null; return Array.isArray(v)?v:null; }
 function viewOk(v){ const vs=viewList(); return !vs||vs.includes(v); }
 let okView=S.view;
@@ -1228,11 +1233,11 @@ function wasteChip(w,suffix=''){
   return `<span class="wchip ${wLevel(w.pct)}" title="Cartons fill ${cm3(w.vol)} of ${cm3(w.box)} cm³ — ${Math.round(w.pct)}% of the box is empty">${Math.round(w.pct)}%${suffix}</span>`;
 }
 function tightestBox(r){ const o=(r&&r.opts||[]).filter(x=>x.style!=='classic').sort((a,b)=>a.vol-b.vol)[0]; return o?o.box:null; }
-function spaceBlock(items,size,r){
+function spaceBlock(items,size,r,tips=true){
   const w=spaceUse(items,size);
   if(!w) return `<div class="space"><h3>Space use</h3><p class="note" style="margin:0">Add a panel size to see how much of the box is empty.</p></div>`;
   if(w.pct==null) return `<div class="space"><h3>Space use</h3><p class="note" style="margin:0">${w.miss} product${w.miss>1?'s have':' has'} no inner size yet, so the empty space can’t be worked out.</p></div>`;
-  const fill=100-w.pct, tb=tightestBox(r), tw=tb?spaceUse(items,tb):null, better=tw&&tw.pct!=null&&(w.pct-tw.pct)>=3;
+  const fill=100-w.pct, tb=tips?tightestBox(r):null, tw=tb?spaceUse(items,tb):null, better=tw&&tw.pct!=null&&(w.pct-tw.pct)>=3;
   const tip=better?`<p class="note" style="margin:0">Tightest box for these cartons: <b class="mono">${dimTxt(tb)}</b> would be <b>${Math.round(tw.pct)}%</b> empty and ${cm3(w.box-tw.box)} cm³ smaller. That size already includes the +${S.settings.cL} / +${S.settings.cW} / +${S.settings.cH} mm clearance.</p>`
     :(tw&&tw.pct!=null?(tw.box>w.box?`<p class="note" style="margin:0">This box is already tighter than the smallest box the packing engine would suggest (${dimTxt(tb)}, ${Math.round(tw.pct)}% empty), so there’s little room to save.</p>`:`<p class="note" style="margin:0">Already close to the tightest box for these cartons (${dimTxt(tb)}, ${Math.round(tw.pct)}% empty). Part of the empty space is the clearance needed to pack.</p>`):'');
   return `<div class="space"><div class="row" style="justify-content:space-between"><h3>Space use</h3>${wasteChip(w,' empty')}</div>
@@ -1668,6 +1673,7 @@ function renderDrawerRaw(){
   const root=$('#drawerRoot'); const D=S.drawer; if(!D){ root.innerHTML=''; return; }
   const ro=!can(D.t==='prod'?'inner':'kits');
   if(D.t==='kit'){ const d=D.d, orig=S.kits.get(D.id)||{}; const r=recommend((d.items||[]).filter(i=>i.pid), null, D.id, undefined, D.layEdit, hasSize(d)?[{size:{L:+d.L,W:+d.W,H:+d.H},label:'This kit’s size now'}]:[]); if(r.stale) D.layEdit=null;
+    const sized=can('kit_size'), tools=sizeTools(), sro=ro||!sized;
     root.innerHTML=`<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="Kit ${esc(d.name)}">
       <div class="hd"><div><h2>${esc(orig.name||d.name)}</h2><div class="note">${[d.code?'Code '+esc(d.code):'',esc(d.fluenceName||''),d.origin==='new'?'new development':''].filter(Boolean).join(' · ')}</div></div><button class="x" data-close aria-label="Close">×</button></div>
       <div class="bd">
@@ -1679,17 +1685,17 @@ function renderDrawerRaw(){
           <label class="f">Kit status<select id="dSt" data-d="status" ${ro?'disabled':''}>${['Active','In development','Inactive'].map(s=>`<option ${d.status===s?'selected':''}>${s}</option>`).join('')}</select></label>
         </div>
         <div><h3>Panel size</h3><div class="lwh">
-          <label class="f">L (mm)<input type="number" id="dL" data-d="L" value="${esc(d.L??'')}" ${ro?'disabled':''}></label>
-          <label class="f">W (mm)<input type="number" id="dW" data-d="W" value="${esc(d.W??'')}" ${ro?'disabled':''}></label>
-          <label class="f">H (mm)<input type="number" id="dH" data-d="H" value="${esc(d.H??'')}" ${ro?'disabled':''}></label>
-          <label class="f">Size status<select id="dSS" data-d="sizeStatus" ${ro?'disabled':''}>${['CONFIRMED','VERIFY','PROPOSED','CONFLICT','MISSING'].map(s=>`<option ${d.sizeStatus===s?'selected':''}>${s}</option>`).join('')}</select></label>
-        </div>${d.sizeSource?`<p class="note">Source: ${esc(d.sizeSource)}</p>`:''}</div>
+          <label class="f">L (mm)<input type="number" id="dL" data-d="L" value="${esc(d.L??'')}" ${sro?'disabled':''}></label>
+          <label class="f">W (mm)<input type="number" id="dW" data-d="W" value="${esc(d.W??'')}" ${sro?'disabled':''}></label>
+          <label class="f">H (mm)<input type="number" id="dH" data-d="H" value="${esc(d.H??'')}" ${sro?'disabled':''}></label>
+          <label class="f">Size status<select id="dSS" data-d="sizeStatus" ${sro?'disabled':''}>${['CONFIRMED','VERIFY','PROPOSED','CONFLICT','MISSING'].map(s=>`<option ${d.sizeStatus===s?'selected':''}>${s}</option>`).join('')}</select></label>
+        </div>${d.sizeSource&&tools?`<p class="note">Source: ${esc(d.sizeSource)}</p>`:''}${!ro&&!sized?'<p class="note" data-size-locked>The panel size and the carton arrangement are set by Colour Impressions. MRPs, contents and the prescription are yours to change.</p>':''}</div>
         ${erpKitBlock(d,orig,ro)}
-        ${spaceBlock((d.items||[]).filter(i=>i.pid),d,r)}
+        ${spaceBlock((d.items||[]).filter(i=>i.pid),d,r,tools)}
         ${d.erp&&d.erp.kitId?kitContentsCard(d,ro):`<div><h3>Products (${(d.items||[]).reduce((s,i)=>s+(+i.q||1),0)} items · MRP ₹${Math.round(kitMrp(d)).toLocaleString('en-IN')})</h3>${itemsEditor(d.items||[],'d',ro)}</div>`}
-        ${recCard(r,{useBtn:true,disabled:ro,ctx:'d',cur:hasSize(d)?d:null})}
-        ${sizeTable(r,'d',hasSize(d)?d:null)}
-        ${layoutCard(r, hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null, hasSize(d)?'Carton orientation in this kit · top view':'Carton orientation · top view', 'd', ro)}
+        ${tools?recCard(r,{useBtn:true,disabled:sro,ctx:'d',cur:hasSize(d)?d:null}):''}
+        ${tools?sizeTable(r,'d',hasSize(d)?d:null):''}
+        ${tools||hasSize(d)?layoutCard(r, hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null, hasSize(d)?'Carton orientation in this kit · top view':'Carton orientation · top view', 'd', sro):''}
         <label class="f">Remarks<textarea id="dRem" data-d="remarks" ${ro?'disabled':''}>${esc(d.remarks||'')}</textarea></label>
         <div><h3>Change history</h3><div class="hist">${(orig.history||[]).length?(orig.history||[]).map(h=>`<div><b>${esc(who(h.by))}</b> · ${fmtDate(h.at)}<br>${esc(h.what)}</div>`).join(''):'<span>No edits since the import from the customer master.</span>'}</div></div>
         ${D.confirmDel?`<div class="confirmbox">Delete ${esc(d.name)} for everyone? This can’t be undone. <button class="btn danger sm" data-del-kit-yes>Delete</button><button class="btn sm" data-del-kit-no>Keep</button></div>`:''}
@@ -1808,7 +1814,7 @@ document.addEventListener('click', async e => {
     if((d.items||[]).some(i=>!i.pid && i.raw)){ toast('One product isn’t in the product list — pick it from the list or add it under Inner products'); return; }
     const after={...d,name:String(d.name).trim(),items:(d.items||[]).filter(i=>i.pid).map(i=>({pid:i.pid,q:Math.max(1,+i.q||1),mrp:i.mrp??S.products.get(i.pid)?.mrp??null})),L:num(d.L),W:num(d.W),H:num(d.H),code:d.code?(/^\d+$/.test(String(d.code))?+d.code:String(d.code)):null};
     delete after.history; delete after.updatedAt; delete after.updatedBy;
-    if(D.layEdit){ const rr=recommend(after.items,null,D.id,undefined,D.layEdit); if(rr.custom) after.layout=storeLayout(rr.layout); }
+    if(D.layEdit&&can('kit_size')){ const rr=recommend(after.items,null,D.id,undefined,D.layEdit); if(rr.custom) after.layout=storeLayout(rr.layout); }
     if(await saveDoc('kits',D.id,S.kits.get(D.id),after,true)) closeDrawer(); return; }
   if(ds.saveProd!==undefined){ const D=S.drawer, d=D.d;
     if(!String(d.name||'').trim()){ toast('Give the product a name'); return; }
@@ -2345,13 +2351,15 @@ function repData(ctx){
   else { const D=S.drawer; if(!D||D.t!=='kit') return null; const k=D.d; items=(k.items||[]).filter(i=>i.pid); excl=D.id;
     r=recommend(items,null,D.id,undefined,D.layEdit); sizeArg=hasSize(k)?{L:+k.L,W:+k.W,H:+k.H}:null;
     K={name:String(k.name||'').trim()||'Kit',code:k.code,family:k.family||'',status:k.status||'',remarks:String(k.remarks||'').trim(),origin:k.origin,sizeStatus:k.sizeStatus||'MISSING'}; }
-  const V=layView(r,sizeArg), box=V?V.box:(hasSize(sizeArg)?sizeArg:(r.win?r.win.size:null));
+  /* A kit on the list with no size, reported from a customer's login: no recommended size stands in. */
+  const noRec=ctx==='d'&&!sizeArg&&!sizeTools();
+  const V=noRec?null:layView(r,sizeArg), box=V?V.box:(hasSize(sizeArg)?sizeArg:(!noRec&&r.win?r.win.size:null));
   if(!box) K.sizeStatus='MISSING'; else if(ctx==='d'&&!sizeArg){ K.sizeStatus='PROPOSED'; K.recommended=true; }
   let basis='';
   if(ctx==='b') basis=r.win?`${r.win.basis}. ${r.win.note}`:'';
   else if(ctx.startsWith('dr:')) basis=K.basis||(r.win?`${r.win.basis}. ${r.win.note}`:'');
   else if(sizeArg) basis=K.sizeStatus==='CONFIRMED'?'Panel size on record, in production.':'Panel size on record.';
-  else if(r.win) basis=`Recommended by Kit Studio: ${r.win.basis}. ${r.win.note}`;
+  else if(r.win&&!noRec) basis=`Recommended by Kit Studio: ${r.win.basis}. ${r.win.note}`;
   let die='', newDie=false;
   if(box){ const {conf}=kitsWithSize(box,excl); const names=conf.slice(0,4).map(([,k])=>k.name).join(', ')+(conf.length>4?' and '+(conf.length-4)+' more':'');
     if(ctx==='d'&&K.sizeStatus==='CONFIRMED') die=`Existing die (this kit’s size)${conf.length?`, also used for ${conf.length} other kit${conf.length>1?'s':''}: ${names}`:''}.`;

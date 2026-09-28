@@ -22,12 +22,12 @@ import { Router } from 'express';
 import { q, tx } from '../db.js';
 import { audit, lockDocNumber, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
-import { keepRxInStep, tellManagement } from './fluence.js';
+import { keepRxInStep, tellManagement, recordMrpChanges, innerChangeText } from './fluence.js';
 import { needsMasters, mayUseTab, tabRefusal } from '../access.js';
 import { FLUENCE_TABS } from '../../../client/src/modules.js';
 import {
   validId, nameKey, dimsOf, sizeText, parseSizeText, sameCarton, masterDimsFor,
-  splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc,
+  splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc, sizeChanges,
   nextBillingCode, billingCodeOf, newProductRow, productInput, rankMatches,
 } from '../kit-studio.js';
 
@@ -110,17 +110,23 @@ function compose({ kits, fks, comps, prods, inners, drafts, settings }) {
 // decide which of the studio's views they open and where they may change
 // things — Kits changes a kit, New kit adds one, drafts are New kit's and
 // Drafts', Inner products their sizes, Export & settings the clearances.
+// A customer's own login sees a kit on the list with its size as Colour
+// Impressions set it: no size recommendation, size comparison or dies in hand
+// (size_tools), and its panel size and carton arrangement read-only (kit_size).
 function studioMe(req) {
   const edit = canEdit(req.user);
   const tab = key => mayUseTab(req.access, key);
+  const outside = req.user?.outside === true;
   return {
     name: req.user?.name ?? null,
     can_edit: edit,
     can_keep_products: keepsProducts(req),
     masters: req.access?.masters === true,
     views: FLUENCE_TABS.filter(t => t.view && tab(t.key)).map(t => t.view),
+    size_tools: !outside,
     can: {
       kits: edit && tab('kits'),
+      kit_size: edit && tab('kits') && !outside,
       build: edit && tab('build'),
       drafts: edit && (tab('build') || tab('drafts')),
       inner: edit && tab('inner'),
@@ -272,6 +278,9 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
     if (!validId(id)) throw fail(400, 'Not a valid kit id.');
     const { errors, row, items } = splitKit(req.body?.doc);
     if (errors.length) throw fail(400, errors.join(' '));
+    // The kit as a customer's own login was shown it — read before the
+    // transaction (the pool is one connection; composing inside would wait on it).
+    const shown = req.user?.outside ? await composeOne('kits', id) : null;
     const outcome = await tx(async (qc, oc) => {
       const cur = await oc('SELECT * FROM kit_studio_kits WHERE id = $1 FOR UPDATE', [id]);
       checkVersion(cur, req.body?.base_version, 'kit');
@@ -288,6 +297,14 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
       // Adding a kit is New kit's; changing one on the list is Kits' (the tabs ticked for the login).
       const tab = fk ? 'kits' : 'build';
       if (!mayUseTab(req.access, tab)) throw fail(403, tabRefusal([tab]));
+      // A kit on the list, saved from a customer's own login: its size and the
+      // arrangement of its cartons stay as Colour Impressions set them.
+      if (fk && req.user?.outside) {
+        const moved = sizeChanges(shown?.data, req.body?.doc);
+        if (moved.length) {
+          throw fail(403, `The panel size and the carton arrangement are set by Colour Impressions — this login cannot change ${moved.join(', ')}.`);
+        }
+      }
       if (fk && !cur) {
         const taken = await oc('SELECT id FROM kit_studio_kits WHERE fluence_kit_id = $1', [fk.id]);
         if (taken) throw fail(409, 'This Fluence kit is already open in the studio under another entry — reload the page.');
@@ -663,6 +680,8 @@ r.put('/kit-studio/products/:id', canEditStudio, async (req, res, next) => {
             VALUES ($1, $2, 'item', $3, $4, $5, $6, 'kit-studio', $7, $7) RETURNING *`,
           [row.name, nameKey(row.name), mrp, d?.L ?? null, d?.W ?? null, d?.H ?? null, req.user.name]);
           await audit('fluence_inner_product', inner.id, 'create', `${inner.name} — added in Kit Studio`, qc, req.user.name);
+          await recordMrpChanges([{ subject: 'inner_product', innerProductId: inner.id, itemName: inner.name, oldMrp: null, newMrp: inner.standard_mrp }],
+            req.user, FROM, qc);
         }
       }
       if (!cur) {
@@ -687,8 +706,12 @@ r.put('/kit-studio/products/:id', canEditStudio, async (req, res, next) => {
         await qc(`UPDATE fluence_inner_products SET ${sets}, updated_at = now(), updated_by = $${changed.length + 2} WHERE id = $1`,
           [inner.id, ...changed.map(k => want[k]), req.user.name]);
         await audit('fluence_inner_product', inner.id, 'update',
-          `from Kit Studio: ${changed.filter(k => k !== 'name_key').map(k => `${k}: ${inner[k] ?? '—'} → ${want[k] ?? '—'}`).join('; ')}`.slice(0, 1000),
+          `from Kit Studio: ${changed.filter(k => k !== 'name_key').map(k => innerChangeText(k, inner[k], want[k])).join('; ')}`.slice(0, 1000),
           qc, req.user.name);
+        if (changed.includes('standard_mrp')) {
+          await recordMrpChanges([{ subject: 'inner_product', innerProductId: inner.id, itemName: want.name ?? inner.name, oldMrp: inner.standard_mrp, newMrp: want.standard_mrp }],
+            req.user, FROM, qc);
+        }
       }
       if (inner.source !== 'kit-studio') row.name = inner.name; // a master product keeps the master's name
       const saved = await oc(`
@@ -701,7 +724,7 @@ r.put('/kit-studio/products/:id', canEditStudio, async (req, res, next) => {
           version = kit_studio_products.version + 1, updated_at = now(), updated_by = EXCLUDED.updated_by
         RETURNING version`,
       [id, inner.id, row.name, row.carton_l, row.carton_w, row.carton_h, row.size_status, JSON.stringify(row.data), req.user.name]);
-      const told = changed.filter(k => k !== 'name_key').map(k => `${k}: ${inner[k] ?? '—'} → ${want[k] ?? '—'}`);
+      const told = changed.filter(k => k !== 'name_key').map(k => innerChangeText(k, inner[k], want[k]));
       if (!cur || told.length) {
         await tellManagement(req.user, {
           subject: `Inner product ${row.name}`,

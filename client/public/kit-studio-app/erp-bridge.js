@@ -219,7 +219,10 @@
     // it opens (null until the ERP has answered = all) and, per area — kits,
     // build, drafts, inner, settings — whether it may change things there.
     views: function () { return Array.isArray(me.views) ? me.views.slice() : null; },
-    canArea: function (area) { return !me.can || !!me.can[area]; },
+    canArea: function (area) { return !me.can || !(area in me.can) || !!me.can[area]; },
+    // Does this login see the size engine on a kit on the list (recommendation,
+    // size comparison, dies in hand)? Not a customer's own login.
+    sizeTools: function () { return me.size_tools !== false; },
     // What the product-master dialog shows: next codes, likely products, and the
     // print spec of the kits offered to copy from (product ids).
     erpOptions: function (id, refs) {

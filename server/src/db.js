@@ -2821,4 +2821,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // master (kit_studio_*). Additive and idempotent like the file above, and
   // after it: its tables reference fluence_kits and fluence_inner_products.
   await pool.query(migration('20260926100000_kit_studio.sql'));
+
+  // The Fluence MRP trail — every change to an inner product's MRP or an item's
+  // MRP in a kit, and Colour Impressions' acknowledgment of a customer's change.
+  // Additive and idempotent; after the files above, whose tables it references.
+  await pool.query(migration('20260928160000_fluence_mrp_changes.sql'));
 }

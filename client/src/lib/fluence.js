@@ -384,3 +384,36 @@ export function kitChangeSummary(before, after, max = 480) {
   const text = out.join('; ') || 'saved with no change to the items or doses';
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
+
+// ─── The MRP trail ───────────────────────────────────────────────────────────
+// Every change to an MRP the Fluence module keeps — an inner product's standard
+// MRP, an item's MRP in a kit — is recorded old → new (fluence_mrp_changes). One
+// spelling of "the same MRP" for the recorder and the screens: to the paisa,
+// blank and absent alike.
+export const mrpValue = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
+export const sameMrp = (a, b) => mrpValue(a) === mrpValue(b);
+
+// The items whose MRP in a kit changed between two readings of its kit list
+// (rows with inner_product_id, name, mrp_in_kit). An item that joined or left
+// the kit is a change of contents, told by the kit's own history — not an MRP
+// update.
+export function kitItemMrpChanges(before, after, { kitId = null, kitName = null } = {}) {
+  const was = new Map((before || []).map(c => [Number(c.inner_product_id), c]));
+  const out = [];
+  for (const c of after || []) {
+    const b = was.get(Number(c.inner_product_id));
+    if (!b || sameMrp(b.mrp_in_kit, c.mrp_in_kit)) continue;
+    out.push({
+      subject: 'kit_item', kitId, kitName, innerProductId: Number(c.inner_product_id),
+      itemName: c.name ?? b.name ?? null, oldMrp: mrpValue(b.mrp_in_kit), newMrp: mrpValue(c.mrp_in_kit),
+    });
+  }
+  return out;
+}
+
+const rupees = v => (v == null ? 'no MRP' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+// "F-CAL D3 in NEW - M4: ₹200 → ₹221" — how a notice and the trail read one change.
+export function mrpLine(c) {
+  const where = c.subject === 'kit_item' && c.kitName ? ` in ${c.kitName}` : '';
+  return `${c.itemName || 'Item'}${where}: ${rupees(mrpValue(c.oldMrp))} → ${rupees(mrpValue(c.newMrp))}`;
+}

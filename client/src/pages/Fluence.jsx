@@ -26,6 +26,7 @@ import { Button, DataTable, GroupedTabs, KpiCard, KpiRow, Modal, PageHeader, Sea
 import { canAccess, canPlan, fluenceTabsOf, FLUENCE_TABS } from '../modules.js';
 import FluenceDrawer from '../components/fluence/FluenceDrawer.jsx';
 import { fluenceExportGate } from '../lib/fluenceDownloads.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import KitStudioFrame from '../components/fluence/KitStudioFrame.jsx';
 import { FLUENCE_CONTEXTS, kitListPrice, partLabel } from '../lib/fluence.js';
 
@@ -58,7 +59,18 @@ const GATE = {
   products: fluenceExportGate('Fluence products'),
   customer: fluenceExportGate('Customer kit list'),
   changes: fluenceExportGate('Fluence change log'),
+  mrp: fluenceExportGate('Fluence MRP updates'),
 };
+
+// An MRP to the paisa — an inner product's MRP is often not a round figure.
+const rs = v => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+// An MRP change, how far it moved: "+₹21 · +10.5%".
+function mrpDelta(r) {
+  if (r.old_mrp == null || r.new_mrp == null) return r.new_mrp == null ? 'MRP removed' : 'first MRP';
+  const d = Math.round((Number(r.new_mrp) - Number(r.old_mrp)) * 100) / 100;
+  const pct = Number(r.old_mrp) ? ` · ${d > 0 ? '+' : ''}${((d / Number(r.old_mrp)) * 100).toFixed(1)}%` : '';
+  return `${d > 0 ? '+' : d < 0 ? '−' : ''}${rs(Math.abs(d))}${pct}`;
+}
 
 export default function Fluence() {
   const toast = useToast();
@@ -108,8 +120,25 @@ export default function Fluence() {
     needsKits ? api.get('/fluence/kits').then(setKits) : null,
   ]).catch(() => {}), [needsProducts, needsKits]);
   const loadChanges = useCallback(() => api.get('/fluence/changes?limit=400').then(setChanges).catch(() => setChanges([])), []);
+  // MRP updates: every MRP change, and whether Colour Impressions has acknowledged it.
+  const [mrp, setMrp] = useState(null);          // { rows, open, can_ack }
+  const [mrpView, setMrpView] = useState('open');
+  const [acking, setAcking] = useState(null);
   useEffect(() => { if (fresh) load(); }, [fresh, load]);
   useEffect(() => { if (fresh && tab === 'changes') loadChanges(); }, [fresh, tab, loadChanges]);
+  const seesMrp = has('mrp');
+  const loadMrp = useCallback(() => api.get('/fluence/mrp-changes?limit=1000').then(setMrp).catch(() => setMrp({ rows: [], open: 0, can_ack: false })), []);
+  useEffect(() => { if (fresh && seesMrp) loadMrp(); }, [fresh, seesMrp, tab, loadMrp]);
+  useRealtimeRefresh(loadMrp, ['fluence_mrp_changes'], { enabled: fresh && seesMrp, debounceMs: 800 });
+  const ackMrp = async ids => {
+    setAcking(ids === 'all' ? 'all' : ids[0]);
+    try {
+      const out = await api.post('/fluence/mrp-changes/ack', ids === 'all' ? { all: true } : { ids });
+      toast.success(out.acknowledged === 1 ? 'MRP update acknowledged' : `${out.acknowledged} MRP updates acknowledged`);
+      await loadMrp();
+    } catch { /* the central toast names the refusal */ } finally { setAcking(null); }
+  };
+  const mrpRows = useMemo(() => (mrp?.rows || []).filter(r => mrpView === 'all' || (r.outside && !r.ack_at)), [mrp, mrpView]);
 
   // Links into the module: ?open=<product id> or ?kit=<kit id>[&view=history]
   // open the drawer — a notification about a change lands on the change itself.
@@ -173,6 +202,7 @@ export default function Fluence() {
   const studioTabs = allowed.filter(k => STUDIO_VIEW[k]);
   const tabLabel = t => t.key === 'drafts' && drafts ? `Drafts · ${drafts}`
     : t.key === 'customer' && kpi.kitsUnlinked ? `Customer list · ${kpi.kitsUnlinked} to link`
+    : t.key === 'mrp' && mrp?.open ? `MRP updates · ${mrp.open}`
     : t.label;
   const groups = GROUPS
     .map(g => ({ label: g, items: FLUENCE_TABS.filter(t => t.group === g && has(t.key)).map(t => ({ key: t.key, label: tabLabel(t) })) }))
@@ -356,6 +386,67 @@ export default function Fluence() {
               { key: 'from_ctx', label: 'From', render: c => <span className="text-xs text-gray-500">{c.from_ctx ? FLUENCE_CONTEXTS[c.from_ctx] || c.from_ctx : ''}</span> },
               { key: 'go', label: '', sortable: false, render: c => (c.kit_id ? (
                 <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); setDrawer({ kitId: c.kit_id, view: 'history' }); }}><History size={12} /> History</Button>) : null) },
+            ]} />
+        </>
+      )}
+
+      {tab === 'mrp' && (
+        <>
+          <p className="mb-3 text-xs text-gray-500">
+            Every change to an MRP kept here — an inner product’s standard MRP and each item’s MRP in a kit — with the old and the new price,
+            who changed it and from where. A change made from Fluence’s own login stays flagged here, and in the notification centre,
+            until Colour Impressions management acknowledges it.
+          </p>
+          <div className="mb-3 flex flex-wrap items-center gap-2" data-mrp-filters="1">
+            {[['open', `To acknowledge · ${mrp?.open ?? 0}`], ['all', 'All MRP changes']].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setMrpView(k)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${mrpView === k ? 'bg-green-700 text-white' : 'bg-white/70 text-[#515154] hover:bg-white'}`}>
+                {l}
+              </button>
+            ))}
+            <span className="flex-1" />
+            {mrp?.can_ack && mrp.open > 0 && (
+              <Button size="sm" variant="success" disabled={acking != null} onClick={() => ackMrp('all')} data-mrp-ack-all="1">
+                <CheckCircle2 size={12} /> Acknowledge all {mrp.open}
+              </Button>
+            )}
+          </div>
+          <DataTable searchable rows={mrpRows}
+            empty={!mrp ? 'Loading…' : mrpView === 'open' ? 'Nothing waiting — every MRP update from Fluence is acknowledged.' : 'No MRP changes recorded yet.'}
+            defaultSort={{ key: 'changed_at', dir: 'desc' }}
+            onRowClick={r => (r.kit_id ? setDrawer({ kitId: r.kit_id, view: 'history' }) : null)}
+            exportName="Fluence MRP Updates" exportSubtitle="Old and new MRP, who changed it, and its acknowledgment" exportGate={GATE.mrp}
+            columns={[
+              { key: 'changed_at', label: 'When', sortValue: r => new Date(r.changed_at).getTime(), export: r => fmt.dt(r.changed_at),
+                render: r => <span className="whitespace-nowrap text-xs tabular-nums">{fmt.dt(r.changed_at)}</span> },
+              { key: 'item_name', label: 'Item', export: r => r.item_name || '', render: r => <span className="text-xs font-semibold">{r.item_name || '—'}</span> },
+              { key: 'kit_name', label: 'Kit', export: r => (r.subject === 'kit_item' ? r.kit_name || '' : ''), render: r => (r.subject === 'kit_item' ? <span className="text-xs">{r.kit_name || '—'}</span> : <span className="text-xs text-gray-400">—</span>) },
+              { key: 'subject', label: 'MRP of', export: r => (r.subject === 'kit_item' ? 'MRP in kit' : 'Inner product MRP'),
+                render: r => <span className="text-xs">{r.subject === 'kit_item' ? 'MRP in kit' : 'Inner product MRP'}</span> },
+              { key: 'old_mrp', label: 'Old MRP', align: 'right', sortValue: r => r.old_mrp ?? -1, export: r => (r.old_mrp == null ? '' : r.old_mrp),
+                render: r => <span className="tabular-nums text-gray-500">{r.old_mrp == null ? '—' : rs(r.old_mrp)}</span> },
+              { key: 'new_mrp', label: 'New MRP', align: 'right', sortValue: r => r.new_mrp ?? -1, export: r => (r.new_mrp == null ? '' : r.new_mrp),
+                render: r => <span className="font-bold tabular-nums">{r.new_mrp == null ? '—' : rs(r.new_mrp)}</span> },
+              { key: 'change', label: 'Change', align: 'right', sortValue: r => (r.new_mrp ?? 0) - (r.old_mrp ?? 0), export: r => mrpDelta(r),
+                render: r => <span className="whitespace-nowrap text-xs font-semibold tabular-nums">{mrpDelta(r)}</span> },
+              { key: 'changed_by', label: 'Changed by', render: r => <span className="text-xs font-semibold">{r.changed_by}</span> },
+              { key: 'changed_from', label: 'From', export: r => FLUENCE_CONTEXTS[r.changed_from] || r.changed_from || '',
+                render: r => <span className="text-xs text-gray-500">{FLUENCE_CONTEXTS[r.changed_from] || r.changed_from || ''}</span> },
+              { key: 'ack_at', label: 'Acknowledged', sortValue: r => (!r.outside ? 2 : r.ack_at ? 1 : 0),
+                export: r => (!r.outside ? 'Colour Impressions change' : r.ack_at ? `${r.ack_by} · ${fmt.dt(r.ack_at)}` : 'Waiting'),
+                render: r => {
+                  if (!r.outside) return <span className="text-[11px] text-gray-400">Colour Impressions change</span>;
+                  if (r.ack_at) return <span className="text-[11px] font-semibold text-green-800">✓ {r.ack_by} · {fmt.dt(r.ack_at)}</span>;
+                  if (mrp?.can_ack) {
+                    return (
+                      <div onClick={e => e.stopPropagation()}>
+                        <Button size="sm" variant="success" className="whitespace-nowrap" disabled={acking != null} onClick={() => ackMrp([r.id])} data-mrp-ack={r.id}>
+                          <CheckCircle2 size={12} /> Acknowledge
+                        </Button>
+                      </div>);
+                  }
+                  return <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Waiting for Colour Impressions</span>;
+                } },
             ]} />
         </>
       )}

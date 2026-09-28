@@ -53,6 +53,7 @@ export const FLUENCE_TABS = [
   { key: 'products', label: 'Fluence products', group: 'Masters', hint: 'The FP cartons, with their kit and prescription' },
   { key: 'customer', label: 'Customer list', group: 'Masters', hint: 'The customer’s kit list and the carton each is printed as' },
   { key: 'changes', label: 'Change log', group: 'Records', hint: 'Every change, who made it, signed' },
+  { key: 'mrp', label: 'MRP updates', group: 'Records', hint: 'Every MRP change, old → new, and Colour Impressions’ acknowledgment' },
   { key: 'settings', label: 'Export & settings', group: 'Records', view: 'export', hint: 'Spreadsheet exports and the carton clearances' },
 ];
 export const FLUENCE_TAB_KEYS = FLUENCE_TABS.map(t => t.key);
