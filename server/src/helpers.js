@@ -4685,7 +4685,7 @@ export function printQueueEditBlock({ printingStatus, jcStatus, finalised = fals
 // and zero the line's reserved figure. Safe to call when there is none.
 export async function releaseFgReservation(lineId, qc = q, oc = one, user = null) {
   const cons = await qc(
-    `SELECT fc.id, fc.qty, fc.fg_lot_id, fl.lot_number, fl.product_id
+    `SELECT fc.id, fc.qty, fc.fg_lot_id, fl.lot_number, fl.product_id, fl.kind
      FROM fg_consumptions fc JOIN fg_lots fl ON fl.id = fc.fg_lot_id
      WHERE fc.order_line_id = $1`, [lineId]);
   if (!cons.length) return;
@@ -4696,6 +4696,10 @@ export async function releaseFgReservation(lineId, qc = q, oc = one, user = null
               SET consumed_qty = GREATEST(0, consumed_qty - $1),
                   status = CASE WHEN status='consumed' THEN 'verified' ELSE status END
               WHERE id=$2`, [c.qty, c.fg_lot_id]);
+    // Same rule as releaseFgConsumption: consuming a LEFTOVER box pushed its
+    // pieces into loose fg_stock so the order could dispatch them. The box is
+    // whole again now, so take them back out — or the cartons exist twice.
+    if (c.kind === 'leftover') await fgReceipt(c.product_id, -c.qty, 'fg_release', c.fg_lot_id, qc);
     await fgMove({
       ref_number: c.lot_number, fg_lot_id: c.fg_lot_id, product_id: c.product_id,
       order_line_id: lineId, order_id: line?.order_id, customer_id: ord?.customer_id,
