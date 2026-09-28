@@ -1,11 +1,13 @@
 // Artwork Verification → Setup (admin): the two links, set up once.
 //
 //   Drive link  — a Google Apps Script web app deployed from the Google account
-//                 that owns the AVS folder. CI Plant puts uploaded photos into
+//                 that owns the AVS folder (Colour Impressions: CI AVS in the
+//                 Drive of mppchd@gmail.com). CI Plant puts uploaded photos into
 //                 the folder through it, and Claude reads and files through it.
 //                 Until it is set up, CI Plant keeps the photos itself and Claude
 //                 fetches them from CI Plant (motionci.in) to file them.
-//   Claude link — the API trigger of the AVS routine at claude.ai/code/routines.
+//   Claude link — the API trigger of the AVS routine at claude.ai/code/routines
+//                 (Colour Impressions: "AVS check" on dua.anik15@gmail.com).
 //                 Verify calls it; Claude checks the queue in its own cloud
 //                 session, with the Mac and the Claude app closed.
 //
@@ -95,14 +97,14 @@ export default function AvsSetup({ open, onClose, onChanged }) {
         <div className="space-y-6 text-sm text-slate-700">
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 font-semibold text-slate-900"><HardDrive size={16} /> 1. Drive link — puts the photos in your AVS folder</h3>
+              <h3 className="flex items-center gap-2 font-semibold text-slate-900"><HardDrive size={16} /> 1. Drive link — puts the photos in CI AVS</h3>
               <Linked on={cfg.linked?.drive} />
             </div>
-            <p className="text-[12px] text-slate-500">Until this is set up, uploads still work: CI Plant keeps the photos, and Claude files them in the AVS folder when it checks.</p>
+            <p className="text-[12px] text-slate-500">Until this is set up, uploads still work: CI Plant keeps the photos, and Claude files them in CI AVS when it checks.</p>
             <ol className="list-decimal space-y-1 pl-5 text-[13px]">
-              <li>Signed in to Google as the owner of the AVS folder (dua.anik@gmail.com), open{' '}
+              <li>Signed in to Google as <b>mppchd@gmail.com</b>, the owner of CI AVS (in its Drive: Computers › CARTON PC MAIN › COLOUR IMPRESSION › CI AVS), open{' '}
                 <a className="text-[#0071F0] underline" href="https://script.google.com/home/projects/create" target="_blank" rel="noreferrer">script.google.com → New project</a>.</li>
-              <li>Delete what is in the editor, paste the script (button below), and press Save.</li>
+              <li>Delete what is in the editor, paste the script (button below), and press Save. The script finds CI AVS by its folder id (<code>ROOT_ID</code> near the top); if CI AVS is ever replaced by another folder, put that folder's id there (the last part of its Drive address).</li>
               <li>On the left, next to Services, press <b>+</b>, pick <b>Drive API</b>, press Add.</li>
               <li>Deploy → New deployment → gear icon → <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. Deploy, then Authorize access (Google says the app is unverified: it is your own script — Advanced → Go to project → Allow).</li>
               <li>Copy the <b>Web app URL</b> (ends in /exec), paste it here and press <b>Save</b>. CI Plant pairs with it by itself: there is no secret to copy.</li>
@@ -129,10 +131,10 @@ export default function AvsSetup({ open, onClose, onChanged }) {
               <Linked on={cfg.linked?.claude} />
             </div>
             <ol className="list-decimal space-y-1 pl-5 text-[13px]">
-              <li>Open <a className="text-[#0071F0] underline" href="https://claude.ai/code/routines" target="_blank" rel="noreferrer">claude.ai/code/routines <ExternalLink size={11} className="inline" /></a>, signed in with the Claude account you use for Cowork. If <b>AVS check</b> is listed (Claude can make it for you from Cowork), open it and go to step 5; otherwise press <b>New routine</b>, name it <b>AVS check</b>.</li>
+              <li>Open <a className="text-[#0071F0] underline" href="https://claude.ai/code/routines" target="_blank" rel="noreferrer">claude.ai/code/routines <ExternalLink size={11} className="inline" /></a>, signed in to Claude as <b>dua.anik15@gmail.com</b> (the company account that runs AVS). If <b>AVS check</b> is listed (Claude can make it for you from Cowork), open it and go to step 5; otherwise press <b>New routine</b>, name it <b>AVS check</b>.</li>
               <li>Instructions: paste the prompt (button below). Pick the strongest model in the list.</li>
               <li>Environment: create one called <b>AVS</b>. Network access: <b>Custom</b>, tick “Also include default list”, and add the three domains (button below). Setup script: paste the setup script (button below).</li>
-              <li>Connectors: keep <b>Supabase</b>, <b>Gmail</b> and <b>Google Drive</b>; remove the rest. No repository is needed; if the form insists on one, pick <b>duaanik-bot/ci-plant</b> (the check never changes it).</li>
+              <li>Connectors: keep <b>Supabase</b> (not read-only), <b>Gmail</b> and <b>Google Drive</b> (both signed in as mppchd@gmail.com); remove the rest. No repository is needed; if the form insists on one, pick <b>duaanik-bot/ci-plant</b> (the check never changes it).</li>
               <li>Trigger: <b>API</b>. Save the routine, open it again → the API trigger → copy the URL, press <b>Generate token</b> and copy the token (it is shown once).</li>
               <li>Paste both here and Save. <b>Send a test</b> starts one Claude run that only checks its connections (it counts as one routine run).</li>
             </ol>
@@ -151,7 +153,7 @@ export default function AvsSetup({ open, onClose, onChanged }) {
                 onClick={() => save({ routine_fire_url: fireUrl.trim(), routine_token: token.trim() })}>Save</Button>
               <Button size="sm" variant="secondary" disabled={!cfg.linked?.claude || testing === 'claude'} onClick={() => test('claude')}>Send a test</Button>
             </div>
-            <p className="text-[11px] text-slate-500">Claude runs on your account and your Claude usage; each Verify (or test) is one routine run. One run checks every set waiting.</p>
+            <p className="text-[11px] text-slate-500">Claude runs on the Claude plan of dua.anik15@gmail.com (no API credits); each Verify (or test) is one routine run. One run checks every set waiting.</p>
           </section>
         </div>
       )}

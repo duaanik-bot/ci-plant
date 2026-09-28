@@ -9,15 +9,16 @@ import { randomUUID } from 'node:crypto';
 // (DriveApp, Utilities, ContentService, LockService, PropertiesService, the Drive
 // API service): every answer CI Plant and the AVS routine depend on is checked here.
 const SRC = readFileSync(new URL('../../client/src/lib/avs-robot/drive-link.gs', import.meta.url), 'utf8');
+const ROOT_ID = (SRC.match(/^var ROOT_ID = '([^']*)';/m) || [])[1];
 
 function fakeDrive() {
   let n = 0;
   const id = () => `id${++n}`;
   const items = new Map();
   const iter = arr => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
-  function makeFolder(name, parent) {
+  function makeFolder(name, parent, fixedId) {
     const f = {
-      kind: 'folder', _id: id(), _name: name, _parents: parent ? [parent] : [], trashed: false,
+      kind: 'folder', _id: fixedId || id(), _name: name, _parents: parent ? [parent] : [], trashed: false,
       getId() { return this._id; }, getName() { return this._name; }, getUrl() { return `https://drive/${this._id}`; },
       getLastUpdated() { return new Date('2026-09-26T10:00:00Z'); }, isTrashed() { return this.trashed; },
       getParents() { return iter(this._parents); },
@@ -49,13 +50,21 @@ function fakeDrive() {
     items.set(f._id, f);
     return f;
   }
+  // Colour Impressions: CI AVS is not in My Drive but in a computer's backup
+  // (Computers > CARTON PC MAIN > COLOUR IMPRESSION, mppchd@gmail.com), so the
+  // link finds it by its id. The pilot's folder, found by path, sits in My Drive.
   const root = makeFolder('My Drive', null);
+  const pc = makeFolder('CARTON PC MAIN', null);
+  const company = makeFolder('COLOUR IMPRESSION', pc);
+  const avs = makeFolder('CI AVS', company, ROOT_ID);
+  const outside = makeFile('private.pdf', Buffer.from('secret stuff'), 'application/pdf', company);
   const business = makeFolder('01_Business', root);
-  const avs = makeFolder('AVS', business);
-  const outside = makeFile('private.pdf', Buffer.from('secret stuff'), 'application/pdf', business);
+  const pilot = makeFolder('AVS', business);
+  const noItem = () => new Error('No item with the given ID could be found. Or perhaps you do not have permission to access it.');
   const DriveApp = {
     getRootFolder: () => root,
-    getFileById: fid => { const f = items.get(fid); if (!f || f.kind !== 'file') throw new Error('No item with the given ID'); return f; },
+    getFolderById: fid => { const f = items.get(fid); if (!f || f.kind !== 'folder') throw noItem(); return f; },
+    getFileById: fid => { const f = items.get(fid); if (!f || f.kind !== 'file') throw noItem(); return f; },
   };
   const Utilities = {
     getUuid: () => randomUUID(),
@@ -73,16 +82,19 @@ function fakeDrive() {
     getProperty: k => (props.has(k) ? props.get(k) : null), setProperty: (k, v) => { props.set(k, String(v)); },
   }) };
   const Drive = { Files: { update: (_res, fid, blob) => { items.get(fid).bytes = Buffer.from(blob.bytes); } } };
-  return { DriveApp, Utilities, ContentService, LockService, PropertiesService, Drive, avs, outside, items, props };
+  return { DriveApp, Utilities, ContentService, LockService, PropertiesService, Drive, avs, pilot, outside, items, props };
 }
 
 // A deployed link, paired the way CI Plant pairs it (unless pair: false).
-function load({ withDriveApi = true, pair = true } = {}) {
+// rootId / rootPath stand for editing ROOT_ID / ROOT_PATH in Apps Script.
+function load({ withDriveApi = true, pair = true, rootId, rootPath } = {}) {
   const fake = fakeDrive();
   const ctx = { ...fake, JSON, String, Error, Date };
   if (!withDriveApi) delete ctx.Drive;
   vm.createContext(ctx);
   vm.runInContext(SRC, ctx);
+  if (rootId !== undefined) ctx.ROOT_ID = rootId;
+  if (rootPath !== undefined) ctx.ROOT_PATH = rootPath;
   const call = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).text);
   const secret = pair ? call({ op: 'pair' }).secret : null;
   return { ...fake, call, ctx, secret };
@@ -95,7 +107,7 @@ test('no secret in the code: the first pairing makes one, hands it out once, and
   const paired = d.call({ op: 'pair' });
   assert.equal(paired.ok, true);
   assert.match(paired.secret, /^[0-9a-f]{64}$/);
-  assert.equal(paired.root.name, 'AVS', 'pairing proves the AVS folder is there');
+  assert.equal(paired.root.name, 'CI AVS', 'pairing proves the AVS folder is there');
   const again = d.call({ op: 'pair' });
   assert.equal(again.ok, false, 'pairing is closed once done');
   assert.match(again.error, /Already paired/);
@@ -104,7 +116,7 @@ test('no secret in the code: the first pairing makes one, hands it out once, and
   assert.deepEqual(d.call({ secret: 'nope', op: 'ping' }), { ok: false, error: 'Wrong secret' });
   const ping = d.call({ secret: paired.secret, op: 'ping' });
   assert.equal(ping.ok, true);
-  assert.equal(ping.root.name, 'AVS');
+  assert.equal(ping.root.name, 'CI AVS');
   // A new secret only for a caller that has the current one; the old one stops working.
   assert.equal(d.call({ op: 'rotate' }).ok, false);
   const rotated = d.call({ op: 'rotate', secret: paired.secret });
@@ -117,12 +129,44 @@ test('no secret in the code: the first pairing makes one, hands it out once, and
 });
 
 test('pairing refuses when the AVS folder is not where the link looks, and pairs nothing', () => {
-  const d = load({ pair: false });
-  d.avs._name = 'AVS old';
-  const p = d.call({ op: 'pair' });
-  assert.equal(p.ok, false);
-  assert.match(p.error, /AVS folder not found/);
-  assert.equal(d.props.get('AVS_SECRET'), undefined);
+  // By id: an id that is not a folder this Google account can open.
+  const byId = load({ pair: false, rootId: 'not-a-folder-id' });
+  const p1 = byId.call({ op: 'pair' });
+  assert.equal(p1.ok, false);
+  assert.match(p1.error, /No item with the given ID/);
+  assert.equal(byId.props.get('AVS_SECRET'), undefined);
+  // By path (ROOT_ID empty): the folder was renamed.
+  const byPath = load({ pair: false, rootId: '', rootPath: '01_Business/AVS' });
+  byPath.pilot._name = 'AVS old';
+  const p2 = byPath.call({ op: 'pair' });
+  assert.equal(p2.ok, false);
+  assert.match(p2.error, /AVS folder not found at My Drive\/01_Business\/AVS/);
+  assert.equal(byPath.props.get('AVS_SECRET'), undefined);
+});
+
+test('the committed link points at CI AVS by its id, outside My Drive; ROOT_PATH is used only without an id', () => {
+  // CI AVS of Colour Impressions (mppchd@gmail.com, Computers > CARTON PC MAIN >
+  // COLOUR IMPRESSION): the same id as the deployed Apps Script.
+  assert.equal(ROOT_ID, '1UgRwZXlh5DeJnVgjmrZMtsACe5wjZJgO');
+  assert.match(SRC, /^var ROOT_PATH = 'CI AVS';$/m);
+  const d = load();
+  assert.equal(d.call({ secret: d.secret, op: 'ping' }).root.id, ROOT_ID);
+  // Found by id, so a rename does not break the link.
+  d.avs._name = 'CI AVS (renamed)';
+  const ping = d.call({ secret: d.secret, op: 'ping' });
+  assert.equal(ping.ok, true);
+  assert.equal(ping.root.id, ROOT_ID);
+  // A photo lands inside CI AVS, not in My Drive.
+  const put = d.call({ secret: d.secret, op: 'put', path: 'AVS CHECK/28-09-2026/Set 0006', name: '01 a.jpg',
+    base64: Buffer.from('j').toString('base64') });
+  assert.equal(put.ok, true);
+  const check = d.avs.children().find(x => x._name === 'AVS CHECK');
+  assert.ok(check, 'AVS CHECK is made inside CI AVS');
+  // Without an id, the path from My Drive decides.
+  const byPath = load({ rootId: '', rootPath: '01_Business/AVS' });
+  const p = byPath.call({ secret: byPath.secret, op: 'ping' });
+  assert.equal(p.ok, true);
+  assert.equal(p.root.id, byPath.pilot.getId());
 });
 
 test('a photo lands in a new dated folder, and the answer names the file and its folder', () => {

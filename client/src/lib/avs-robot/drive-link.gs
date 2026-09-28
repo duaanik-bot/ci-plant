@@ -27,7 +27,11 @@
  * secret, a new CI Plant): Project Settings > Script Properties > delete
  * AVS_SECRET, then press Save in CI Plant's Setup again.
  */
-var ROOT_PATH = '01_Business/AVS'; // the AVS folder, counted from My Drive
+// The AVS folder. ROOT_ID (the folder's id, the last part of its Drive address) wins when set;
+// otherwise ROOT_PATH is counted from My Drive.
+// Colour Impressions: CI AVS in Computers > CARTON PC MAIN > COLOUR IMPRESSION (mppchd@gmail.com).
+var ROOT_ID = '1UgRwZXlh5DeJnVgjmrZMtsACe5wjZJgO';
+var ROOT_PATH = 'CI AVS';
 
 function doGet() {
   return out_({ ok: true, service: 'CI Plant AVS Drive link' });
@@ -109,6 +113,10 @@ function out_(obj) {
 var ROOT_ = null;
 function root_() {
   if (ROOT_) return ROOT_;
+  if (ROOT_ID) {
+    ROOT_ = DriveApp.getFolderById(ROOT_ID);
+    return ROOT_;
+  }
   var f = DriveApp.getRootFolder();
   var names = ROOT_PATH.split('/');
   for (var i = 0; i < names.length; i++) {
