@@ -26,14 +26,18 @@ export const AVS_DECISIONS = [
 export const AVS_DECISION_KEYS = AVS_DECISIONS.map(d => d.key);
 export const decisionLabel = key => AVS_DECISIONS.find(d => d.key === key)?.done ?? key;
 
-// Who records the final decision: QA, and admin (requireRole lets admin through).
-// A management login (is_management) may also decide — checked on the server
-// from the database, never from the token.
+// Who records the final decision: the QA role, and every login given the AVS
+// decision right (users.avs_approver, ticked in Masters → Users: on 28 Sep 2026
+// the owner gave it to Administrator, Accounts, Planning and Plant, and the MD).
+// A flag, not role=admin: CTP and other plant logins are admins too, and
+// prepress must not release its own artwork. The server reads the flag from the
+// database, never from the token.
 export const AVS_DECISION_ROLES = ['qc'];
 export function canDecideAvs(user) {
   if (!user) return false;
-  return user.role === 'admin' || AVS_DECISION_ROLES.includes(user.role) || +user.is_management === 1;
+  return AVS_DECISION_ROLES.includes(user.role) || +user.avs_approver === 1;
 }
+export const AVS_WHO_DECIDES = 'Only QA and the logins given the AVS decision right (Masters › Users) can record the decision.';
 
 export const AVS_REMARK_MAX = 600;
 
@@ -241,6 +245,73 @@ export function setProgress(set) {
     case 'failed': return { pct: 100, label: 'Check failed', tone: 'red' };
     default: return { pct: 0, label: AVS_SET_STATUS_LABEL[set?.status] || String(set?.status || ''), tone: 'slate' };
   }
+}
+
+// ── Finished sets: a time window and a short list ───────────────────────────
+// Report ready, Check failed and Cancelled grow every day, so the page shows
+// one time window at a time (by when the set ended) and only the first few
+// rows until asked for the rest.
+export const AVS_PERIODS = [
+  { key: 'today', label: 'Today' },
+  { key: '7d', label: '7 days' },
+  { key: '30d', label: '30 days' },
+  { key: 'all', label: 'All' },
+];
+export const AVS_PERIOD_DEFAULT = '7d';
+export const AVS_SETS_SHOWN = 5;
+const IST_MS = 330 * 60 * 1000;
+// When a finished set ended: checked, cancelled, or (failing both) last touched.
+export const setEndedAt = s => s?.finished_at || s?.cancelled_at || s?.updated_at || s?.created_at || null;
+export function inPeriod(when, key, now = Date.now()) {
+  if (key === 'all') return true;
+  const t = Date.parse(when);
+  if (!Number.isFinite(t)) return false;
+  if (key === 'today') {
+    const startIst = Math.floor((now + IST_MS) / 86400000) * 86400000 - IST_MS; // midnight in India
+    return t >= startIst;
+  }
+  const days = key === '30d' ? 30 : 7;
+  return t >= now - days * 86400000;
+}
+// "28 Sep 2026, 4:05 pm" in India time.
+export function istStamp(when) {
+  const t = Date.parse(when);
+  if (!Number.isFinite(t)) return '';
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(t));
+}
+
+// ── Redo verification ────────────────────────────────────────────────────────
+// A report that is ready can be verified again with new photos. The redo is a
+// new photo set checked as the next check of the SAME report number (Check 2,
+// Check 3 ...): the register shows the latest check, and every earlier check —
+// its photos, its PDF, QA's decisions on it — stays on record. Why it is redone
+// is asked every time, and kept with the set.
+export const AVS_REDO_REASON_MIN = 5;
+export function redoProblem({ reason }) {
+  const t = String(reason ?? '').trim();
+  if (t.length < AVS_REDO_REASON_MIN) return 'Write why the check is being redone (at least a few words).';
+  if (t.length > AVS_REMARK_MAX) return `Keep the reason under ${AVS_REMARK_MAX} characters.`;
+  return null;
+}
+
+// The Report ready list shows one row per report: the newest set that checked
+// it. The sets of its earlier checks fold into that row as `earlier` (newest
+// first), so the face shows only the latest check and the trail stays one tap
+// away. Sets without a report number are left as they are.
+export function foldEarlierChecks(sets = []) {
+  const newest = new Map();
+  for (const s of sets) {
+    if (!s.report_no) continue;
+    const cur = newest.get(s.report_no);
+    if (!cur || +s.id > +cur.id) newest.set(s.report_no, s);
+  }
+  return sets
+    .filter(s => !s.report_no || newest.get(s.report_no) === s)
+    .map(s => (s.report_no
+      ? { ...s, earlier: sets.filter(x => x.report_no === s.report_no && x !== s).sort((a, b) => b.id - a.id) }
+      : s));
 }
 
 // One photo per request: Vercel's function body limit is 4.5 MB, so the page

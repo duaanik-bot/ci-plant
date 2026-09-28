@@ -11,14 +11,20 @@
 // are kept in CI Plant until the Drive link is set up) and, on Verify, Claude's
 // AVS routine checks them in its own cloud session. The
 // photo sets and their progress show under the KPI tiles (AvsSets).
+//
+// Redo verification (a set's row under Report ready, or the report itself):
+// new photos, checked as the next check of the same report number. The
+// register shows the latest check; the report keeps every earlier check, the
+// photo sets behind each, why each redo was asked for, and QA's decisions.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Camera, CheckCircle2, ExternalLink, FileText, Settings2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
-  AVS_DECISIONS, AVS_REMARK_MAX, AVS_SET_ACTIVE, CASE_STATE_LABEL, decisionLabel, decisionProblem, reportLabel,
+  AVS_DECISIONS, AVS_REMARK_MAX, AVS_SET_ACTIVE, AVS_WHO_DECIDES, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
+  istStamp, reportLabel, setLabel,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
 import AvsSets from '../components/avs/AvsSets.jsx';
@@ -79,13 +85,14 @@ export default function Avs() {
   // minute. A set that just finished brings its report into the register and
   // says where it went (its chip in the photo-set list).
   const [uploads, setUploads] = useState(null);
-  const [uploading, setUploading] = useState(null); // { resume? } — the upload dialog
+  const [uploading, setUploading] = useState(null); // { resume?, redo? } — the upload dialog
   const [setupOpen, setSetupOpen] = useState(false);
   const wasActive = useRef([]);
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
-  const loadUploads = useCallback(() => api.get('/avs/uploads').then(d => {
+  // Up to 100 of each finished status: the list shows them by time window.
+  const loadUploads = useCallback(() => api.get('/avs/uploads?per_status=100').then(d => {
     const sets = d.sets || [];
     const ended = sets.filter(x => wasActive.current.includes(x.id) && !AVS_SET_ACTIVE.includes(x.status));
     wasActive.current = sets.filter(x => AVS_SET_ACTIVE.includes(x.status)).map(x => x.id);
@@ -112,6 +119,15 @@ export default function Avs() {
   }, [rows, q]);
   const kpi = useKpiFilter('avs');
   const filtered = kpi.apply(searched, KPI_ROWS);
+  // Redo from a set's row (Report ready) or from the report itself.
+  const redoFromSet = x => setUploading({ redo: {
+    report_no: x.report_no, set_id: x.id, jc_number: x.jc_number, product: x.product_hint, status: x.result,
+    check_no: x.check_no ?? 1, label: reportLabel({ report_no: x.report_no, check_no: x.check_no ?? 1, report_rev: x.report_rev ?? 0 }),
+  } });
+  const redoFromReport = r => setUploading({ redo: {
+    report_no: r.report_no, jc_number: r.job_card, product: r.product_name || r.product, status: r.status,
+    check_no: r.check_no ?? 1, label: reportLabel(r),
+  } });
   const open = no => setParams(p => { const n = new URLSearchParams(p); if (no) n.set('open', no); else n.delete('open'); return n; }, { replace: true });
 
   return (
@@ -141,7 +157,7 @@ export default function Avs() {
           onClick={() => kpi.toggle('decided')} active={kpi.is('decided')} />
       </div>
       <AvsSets data={uploads} onChanged={loadUploads} onOpenReport={no => open(no)}
-        onContinue={s => setUploading({ resume: s })} onSetup={() => setSetupOpen(true)} />
+        onContinue={s => setUploading({ resume: s })} onSetup={() => setSetupOpen(true)} onRedo={redoFromSet} />
       <KpiFilterNotice filter={kpi} label={KPI_LABEL[kpi.key]} shown={filtered.length} total={searched.length} />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -187,21 +203,28 @@ export default function Avs() {
             { key: 'job_card', label: 'Job card', render: r => <span className="font-mono text-xs">{r.job_card || '—'}</span> },
             { key: 'po_no', label: 'PO', export: r => r.po_no, render: r => <span className="font-mono text-xs">{shortPo(r.po_no)}</span> },
             { key: 'print_status', label: 'Print status', render: r => <span className="text-xs text-slate-600">{r.print_status || '—'}</span> },
-            { key: 'checked_on', label: 'Checked', export: r => dateIn(r.checked_on), render: r => dateIn(r.checked_on) },
+            // When this issue was filed, in India time: the register is newest first.
+            { key: 'issued_at', label: 'Checked', export: r => istStamp(r.issued_at) || dateIn(r.checked_on),
+              render: r => (
+                <div className="whitespace-nowrap">
+                  <div>{r.issued_at ? istStamp(r.issued_at).replace(/, [^,]*$/, '') : dateIn(r.checked_on)}</div>
+                  {r.issued_at && <div className="text-[11px] tabular-nums text-slate-500">{istStamp(r.issued_at).split(', ').pop()}</div>}
+                </div>) },
           ]}
         />
       </div>
       {openNo && (
-        <ReportModal no={openNo} onClose={() => open(null)} onSaved={load} />
+        <ReportModal no={openNo} onClose={() => open(null)} onSaved={load}
+          canRedo={!!uploads?.can_upload} onRedo={redoFromReport} refreshKey={uploads} />
       )}
-      <AvsUploadDialog open={!!uploading} resume={uploading?.resume || null}
+      <AvsUploadDialog open={!!uploading} resume={uploading?.resume || null} redo={uploading?.redo || null}
         onClose={() => { setUploading(null); loadUploads(); }} onDone={() => loadUploads()} />
       {uploads?.is_admin && <AvsSetup open={setupOpen} onClose={() => setSetupOpen(false)} onChanged={loadUploads} />}
     </div>
   );
 }
 
-function ReportModal({ no, onClose, onSaved }) {
+function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey }) {
   const toast = useToast();
   const [detail, setDetail] = useState(null);
   const [err, setErr] = useState(null);
@@ -213,6 +236,8 @@ function ReportModal({ no, onClose, onSaved }) {
     .then(d => { setDetail(d); setErr(null); })
     .catch(e => setErr(e?.message || 'Could not load this report')), [no]);
   useEffect(() => { setDetail(null); setPick(null); setRemark(''); load(); }, [load]);
+  // A redo started or finished from here shows up without closing the report.
+  useEffect(() => { if (refreshKey) load(); }, [refreshKey, load]);
 
   const r = detail?.report;
   const problems = detail?.problems || [];
@@ -307,7 +332,7 @@ function ReportModal({ no, onClose, onSaved }) {
                     {detail.history.map((h, i) => (
                       <tr key={i} className="border-t border-slate-100 align-top">
                         <td className="py-1 pr-3 font-mono">{h.row_type === 'CLOSE' ? 'Closed' : reportLabel({ report_no: no, ...h })}</td>
-                        <td className="py-1 pr-3">{h.issued_at ? fmt.date(h.issued_at) : '—'}</td>
+                        <td className="py-1 pr-3 whitespace-nowrap">{h.issued_at ? istStamp(h.issued_at) : '—'}</td>
                         <td className="py-1 pr-3">{h.status ? <Result value={h.status} /> : '—'}</td>
                         <td className="py-1 text-slate-500">{h.note || ''}</td>
                       </tr>
@@ -318,6 +343,8 @@ function ReportModal({ no, onClose, onSaved }) {
             )}
           </section>
 
+          <RedoAndTrail no={no} r={r} detail={detail} canRedo={canRedo} onRedo={onRedo} />
+
           <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">QA decision</h3>
             {detail.decisions.length === 0
@@ -327,7 +354,7 @@ function ReportModal({ no, onClose, onSaved }) {
                   {detail.decisions.map(d => (
                     <li key={d.id} className="rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-slate-200">
                       <b>{decisionLabel(d.decision)}</b>
-                      <span className="text-slate-500"> · {d.decided_by || '—'} · {fmt.date(d.decided_at)} · on {reportLabel({ report_no: no, ...d })}</span>
+                      <span className="text-slate-500"> · {d.decided_by || '—'} · {istStamp(d.decided_at)} · on {reportLabel({ report_no: no, ...d })}</span>
                       {d.remark && <div className="mt-0.5 text-slate-700">{d.remark}</div>}
                     </li>
                   ))}
@@ -335,7 +362,7 @@ function ReportModal({ no, onClose, onSaved }) {
               )}
 
             {!detail.can_decide && (
-              <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500"><ShieldAlert size={14} /> Only QA or management can record the decision.</p>
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500"><ShieldAlert size={14} /> {AVS_WHO_DECIDES}</p>
             )}
             {detail.can_decide && r.case_state !== 'closed' && (
               <div className="mt-3 space-y-3">
@@ -379,6 +406,63 @@ function ReportModal({ no, onClose, onSaved }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+// Redo verification, and the photo sets behind the report: the first check and
+// every redo — who asked, why, when, and how each ended.
+function RedoAndTrail({ no, r, detail, canRedo, onRedo }) {
+  const sets = detail.sets || [];
+  const busy = detail.open_redo;
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Checks and photo sets</h3>
+        {canRedo && r.case_state !== 'closed' && !busy && (
+          <Button repeatable onClick={() => onRedo?.(r)}>
+            <span className="inline-flex items-center gap-1.5"><RotateCcw size={15} /> Redo verification</span>
+          </Button>
+        )}
+      </div>
+      {busy && (
+        <p className="mb-2 flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+          <History size={15} className="shrink-0" />
+          Being checked again: {setLabel(busy.id)} ({AVS_SET_STATUS_LABEL[busy.status]}), asked by {busy.created_by || '—'}. Reason: {busy.redo_reason}
+        </p>
+      )}
+      {r.case_state === 'closed' && <p className="mb-2 text-xs text-slate-500">This case was closed by the owner; it cannot be checked again.</p>}
+      {sets.length === 0
+        ? <p className="text-sm text-slate-500">This report was made from photos put in the AVS folder, not from a CI Plant photo set.</p>
+        : (
+          <ul className="space-y-1.5">
+            {sets.map(x => (
+              <li key={x.id} className="rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-slate-200">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs font-semibold text-slate-700">{setLabel(x.id)}</span>
+                  <span className="text-xs text-slate-600">
+                    {x.status === 'done' && x.report_no
+                      ? reportLabel({ report_no: no, check_no: x.check_no ?? 1, report_rev: x.report_rev ?? 0 })
+                      : AVS_SET_STATUS_LABEL[x.status] || x.status}
+                  </span>
+                  {x.result && <Result value={x.result} />}
+                  {x.redo_report_no && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Redo</span>}
+                  {x.drive_folder_url && (
+                    <a href={x.drive_folder_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
+                      <FolderOpen size={12} /> Photos
+                    </a>
+                  )}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-500">
+                  {x.created_by || '—'} · uploaded {istStamp(x.created_at)}{x.finished_at ? ` · checked ${istStamp(x.finished_at)}` : ''}
+                  {x.status === 'cancelled' ? ` · cancelled by ${x.cancelled_by || '—'}` : ''}
+                </div>
+                {x.redo_reason && <div className="mt-0.5 text-xs text-violet-800">Why redone: {x.redo_reason}</div>}
+                {x.robot_note && x.status !== 'uploading' && <div className="mt-0.5 text-xs text-slate-600">{x.robot_note}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+    </section>
   );
 }
 

@@ -1,0 +1,15 @@
+-- The AVS decision right: users.avs_approver.
+--
+-- APPLIED 2026-09-28 as the named migration `users_avs_approver` (the column;
+-- the grants below were set as data the same day).
+--
+-- Besides the QA role, a login with avs_approver = 1 may record QA's final
+-- decision on an AVS report in Artwork Verification (Release, Keep on hold,
+-- Reject cartons, Artwork alert checked). A flag, not role=admin: CTP and other
+-- plant logins are admins too, and prepress must not release its own artwork.
+-- It replaces the earlier rule "role admin or the management tick". Ticked in
+-- Masters → Users.
+--
+-- Owner's decision, 28 Sep 2026: the right goes to Administrator, Accounts,
+-- Planning and Plant (plant head), and to the MD.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avs_approver INTEGER NOT NULL DEFAULT 0;

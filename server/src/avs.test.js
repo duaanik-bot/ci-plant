@@ -52,10 +52,15 @@ test('case state follows the decision on the SAME issue only', () => {
 
 test('who decides: QA and admin by role, management by flag', () => {
   assert.equal(canDecideAvs({ role: 'qc' }), true);
-  assert.equal(canDecideAvs({ role: 'admin' }), true);
-  assert.equal(canDecideAvs({ role: 'viewer', is_management: 1 }), true);
+  // By the AVS decision right, never by role=admin or the management tick.
+  assert.equal(canDecideAvs({ role: 'admin' }), false, 'CTP is an admin login too');
+  assert.equal(canDecideAvs({ role: 'admin', avs_approver: 1 }), true);
+  assert.equal(canDecideAvs({ role: 'planner', avs_approver: 1 }), true);
+  assert.equal(canDecideAvs({ role: 'viewer', is_management: 1 }), false);
   assert.equal(canDecideAvs({ role: 'production' }), false);
   assert.equal(canDecideAvs(null), false);
+  const route = readFileSync(new URL('./routes/avs.js', import.meta.url), 'utf8');
+  assert.match(route, /SELECT avs_approver FROM users WHERE id = \$1 AND active = 1/, 'read fresh, not from the token');
 });
 
 test('report labels read the way the plant says them', () => {
@@ -247,4 +252,56 @@ test('the clock on a set: waiting, checking live, and how long a finished check 
   assert.equal(setClock({ status: 'uploading' }, now), null);
   // Not linked: the waiting bar says what starts it.
   assert.match(setProgress({ status: 'queued', fire_status: 'not_linked' }).label, /Cowork \(\/avs\)/);
+});
+
+import { AVS_REMARK_MAX, foldEarlierChecks, redoProblem } from '../../client/src/lib/avs.js';
+
+// ── Redo verification ────────────────────────────────────────────────────────
+test('a redo needs a reason, kept within the remark limit', () => {
+  assert.match(redoProblem({ reason: '' }), /why/);
+  assert.match(redoProblem({ reason: '  ok ' }), /why/);
+  assert.equal(redoProblem({ reason: 'board changed to 350 GSM' }), null);
+  assert.match(redoProblem({ reason: 'x'.repeat(AVS_REMARK_MAX + 1) }), /under/);
+});
+
+test('Report ready shows one row per report — the newest check — with the earlier ones folded under it', () => {
+  const sets = [
+    { id: 9, report_no: 'AVS-2026-0006', check_no: 2, result: 'PASS' },
+    { id: 7, report_no: 'AVS-2026-0007', check_no: 1, result: 'PASS' },
+    { id: 4, report_no: 'AVS-2026-0006', check_no: 1, result: 'HOLD' },
+    { id: 3, report_no: null },
+  ];
+  const out = foldEarlierChecks(sets);
+  assert.deepEqual(out.map(s => s.id), [9, 7, 3]);
+  assert.deepEqual(out[0].earlier.map(s => s.id), [4]);
+  assert.deepEqual(out[1].earlier, []);
+  assert.equal(out[2].earlier, undefined);
+});
+
+test('the redo route: a reason, the report\'s own number, one open redo at a time, never a closed case', () => {
+  const src = readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8');
+  const route = src.slice(src.indexOf("r.post('/avs/redo'"), src.indexOf('const istDay'));
+  assert.match(route, /canUpload/);
+  assert.match(route, /redoProblem\(\{ reason \}\)/);
+  assert.match(route, /row_type = 'CLOSE'/);
+  assert.match(route, /status IN \('uploading', 'queued', 'checking'\)/);
+  assert.match(route, /redo_report_no, redo_of_set_id, redo_reason/);
+  const sql = readFileSync(new URL('../../supabase/migrations/20260928180000_avs_redo_verification.sql', import.meta.url), 'utf8');
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS check_requests_one_open_redo/);
+});
+
+import { inPeriod, istStamp, setEndedAt } from '../../client/src/lib/avs.js';
+
+test('finished sets are shown by time window, by when they ended (India time for Today)', () => {
+  const now = Date.parse('2026-09-28T12:00:00Z'); // 17:30 IST
+  assert.equal(inPeriod('2026-09-27T19:00:00Z', 'today', now), true, '00:30 IST today');
+  assert.equal(inPeriod('2026-09-27T18:00:00Z', 'today', now), false, '23:30 IST yesterday');
+  assert.equal(inPeriod('2026-09-22T12:00:00Z', '7d', now), true);
+  assert.equal(inPeriod('2026-09-20T12:00:00Z', '7d', now), false);
+  assert.equal(inPeriod('2026-09-01T12:00:00Z', '30d', now), true);
+  assert.equal(inPeriod(null, 'all', now), true);
+  assert.equal(inPeriod(null, '7d', now), false);
+  assert.equal(setEndedAt({ finished_at: 'f', created_at: 'c' }), 'f');
+  assert.equal(setEndedAt({ cancelled_at: 'x', created_at: 'c' }), 'x');
+  assert.match(istStamp('2026-09-28T10:35:00Z'), /28 Sept? 2026, 4:05 pm/i);
 });

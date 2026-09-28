@@ -911,6 +911,7 @@ export default function Masters() {
       body.xs_approver = +editing.xs_approver ? 1 : 0;
       body.is_management = +editing.is_management ? 1 : 0;
       body.reverse_approver = +editing.reverse_approver ? 1 : 0;
+      body.avs_approver = +editing.avs_approver ? 1 : 0;
     }
     // Config-level guard (e.g. a duplicate board name) — surfaced as a plain
     // message here rather than as an opaque server failure after the fact.
@@ -1384,6 +1385,15 @@ export default function Masters() {
                     <span>
                       <span className="block font-semibold">Reverse approver (plant head)</span>
                       <span className="block text-[11px] text-slate-400">Needed only when sending a job back would return stock to the warehouse, or take it off the floor to Print Planning. Handing work back one station never needs this.</span>
+                    </span>
+                  </label>
+                  <label className={chip(+editing.avs_approver === 1)}>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={+editing.avs_approver === 1}
+                      onChange={e => setEditing(ed => ({ ...ed, avs_approver: e.target.checked ? 1 : 0 }))} />
+                    <span>
+                      <span className="block font-semibold">AVS decision (Artwork Verification)</span>
+                      <span className="block text-[11px] text-slate-400">May record QA's final decision on an AVS report: Release, Keep on hold, Reject cartons, Artwork alert checked. QA logins have it by their role.</span>
                     </span>
                   </label>
                   <label className={chip(+editing.is_management === 1)}>

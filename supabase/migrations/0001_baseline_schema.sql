@@ -2060,6 +2060,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_management INTEGER NOT NULL DEFAUL
 -- station is not gated — that is ordinary floor traffic. Same reasoning as
 -- xs_approver: a flag, not a role, so a role=admin plant login does not inherit it.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reverse_approver INTEGER NOT NULL DEFAULT 0;
+-- avs_approver: may record QA's final decision on an AVS report (Release, Keep
+-- on hold, Reject, Artwork alert checked) besides the QA role. A flag, not a
+-- role, for the same reason: CTP and other plant logins carry role=admin, and
+-- prepress must not release its own artwork. Edited in Masters → Users.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avs_approver INTEGER NOT NULL DEFAULT 0;
 -- Route the approve/reject decision back to the requester's bell. The display
 -- name column stays (it prints on the request card); the id targets the
 -- notification.

@@ -8,11 +8,22 @@
 //
 // Photos taken while the Drive link is not set up are kept in CI Plant until the
 // check files them in the AVS folder; the note under the chips says so plainly.
+//
+// Report ready shows one row per report — the newest check. Redo verification
+// on it starts a new set for the same job card; when that check is done, the
+// row moves to it and the earlier sets fold under "Earlier checks".
+//
+// The finished groups show one time window (Today, 7 days, 30 days, All; by
+// when the set ended) and the first few rows, with "Show all" for the rest, so
+// the list never pushes the register off the page.
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, Loader2, RefreshCw, Settings2, Timer, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Timer, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
-import { AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, setClock, setGroupOf, setLabel, setProgress } from '../../lib/avs.js';
+import {
+  AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod,
+  istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress,
+} from '../../lib/avs.js';
 import { fireText } from './AvsUpload.jsx';
 
 const TONE = {
@@ -88,16 +99,26 @@ function linkNote(linked) {
   return 'Claude is not linked yet: sets wait in the queue until a check is started from Cowork (/avs).';
 }
 
-export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onSetup }) {
+export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onSetup, onRedo }) {
   const toast = useToast();
   const [busy, setBusy] = useState(null);
   const [group, setGroup] = useState('active');
+  const [period, setPeriod] = useState(AVS_PERIOD_DEFAULT);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { setShowAll(false); }, [group, period]);
   const now = useNow((data?.sets || []).some(s => s.status === 'queued' || s.status === 'checking'));
   if (!data?.enabled) return null;
   const sets = data.sets || [];
   const counts = data.counts || {};
   const countOf = g => g.statuses.reduce((n, s) => n + (counts[s] ?? sets.filter(x => x.status === s).length), 0);
-  const shown = sets.filter(s => setGroupOf(s.status) === group);
+  const inGroup = sets.filter(s => setGroupOf(s.status) === group);
+  const folded = group === 'done' ? foldEarlierChecks(inGroup) : inGroup;
+  const finished = group !== 'active';
+  const inWindow = finished ? folded.filter(s => inPeriod(setEndedAt(s), period)) : folded;
+  const shown = showAll ? inWindow : inWindow.slice(0, AVS_SETS_SHOWN);
+  const hidden = inWindow.length - shown.length;
+  // A report being checked again: its redo set, so the row says so instead of offering Redo twice.
+  const openRedo = no => sets.find(x => x.redo_report_no === no && ['uploading', 'queued', 'checking'].includes(x.status));
   const bothLinked = !!(data.linked?.drive && data.linked?.claude);
   const note = linkNote(data.linked);
 
@@ -144,7 +165,26 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
           )}
         </div>
       )}
-      {shown.length === 0 && <p className="px-1 py-2 text-sm text-slate-500">{EMPTY[group]}</p>}
+      {finished && (
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="font-semibold text-slate-400">Show</span>
+          {AVS_PERIODS.map(p => (
+            <button key={p.key} type="button" onClick={() => setPeriod(p.key)} aria-pressed={period === p.key}
+              className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${period === p.key
+                ? 'bg-slate-800 text-white ring-slate-800' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}>
+              {p.label}
+            </button>
+          ))}
+          <span className="ml-1 text-slate-400">
+            {inWindow.length} of {folded.length}{group === 'done' ? ' reports' : ' sets'} loaded
+          </span>
+        </div>
+      )}
+      {shown.length === 0 && (
+        <p className="px-1 py-2 text-sm text-slate-500">
+          {finished && folded.length ? `Nothing in this time window. Pick a longer one to see older ${group === 'done' ? 'reports' : 'sets'}.` : EMPTY[group]}
+        </p>
+      )}
       <ul className="divide-y divide-slate-100">
         {shown.map(s => {
           const Icon = ICON[s.status] || Clock;
@@ -159,13 +199,23 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                     <Icon size={11} className={s.status === 'checking' ? 'animate-spin' : ''} /> {AVS_SET_STATUS_LABEL[s.status] || s.status}
                   </span>
                   {s.result && <span className={`text-[11px] font-bold ${RESULT_TONE[s.result] || ''}`}>{s.result}</span>}
+                  {s.report_no && s.status === 'done' && (
+                    <span className="font-mono text-[11px] text-slate-500">{reportLabel({ report_no: s.report_no, check_no: s.check_no ?? 1, report_rev: s.report_rev ?? 0 })}</span>
+                  )}
+                  {s.redo_report_no && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                      <History size={11} /> Redo of {s.redo_report_no}
+                    </span>
+                  )}
                   <span className="font-mono text-xs text-slate-600">{s.jc_number || 'no job card'}</span>
                   <span className="truncate text-sm text-slate-800">{s.product_hint || ''}</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-500">
                   {s.photos?.length || 0} photo{s.photos?.length === 1 ? '' : 's'}
                   {kept ? ` (${kept === s.photos.length ? 'all' : kept} kept in CI Plant until filed in Drive)` : ''}
-                  {' '}· {s.created_by || '—'} · {fmt.date(s.created_at)}
+                  {' '}· {s.created_by || '—'} · uploaded {istStamp(s.created_at) || fmt.date(s.created_at)}
+                  {s.finished_at && ['done', 'failed'].includes(s.status) ? ` · finished ${istStamp(s.finished_at)}` : ''}
+                  {s.status === 'cancelled' && s.cancelled_at ? ` · cancelled ${istStamp(s.cancelled_at)}${s.cancelled_by ? ` by ${s.cancelled_by}` : ''}` : ''}
                   {took ? ` · ${took.label} ${took.text}` : ''}
                   {s.status === 'queued' && s.fire_status === 'failed' && s.fire_error ? ` · ${s.fire_error}` : ''}
                 </div>
@@ -173,7 +223,22 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
                 )}
+                {s.redo_reason && <div className="mt-0.5 text-[11px] text-violet-800">Why redone: {s.redo_reason}</div>}
                 {s.note && <div className="mt-0.5 text-[11px] italic text-slate-500">“{s.note}”</div>}
+                {s.earlier?.length > 0 && (
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Earlier checks (kept on record):{' '}
+                    {s.earlier.map((x, i) => (
+                      <span key={x.id}>{i ? ' · ' : ''}{x.label}
+                        {x.check_no ? ` Check ${x.check_no}` : ''}{x.result ? ` ${x.result}` : ''}{x.finished_at ? ` · ${istStamp(x.finished_at)}` : ''}</span>
+                    ))}
+                  </div>
+                )}
+                {s.status === 'done' && s.report_no && openRedo(s.report_no) && (
+                  <div className="mt-1 text-[11px] font-semibold text-violet-700">
+                    Being checked again: {openRedo(s.report_no).label} ({AVS_SET_STATUS_LABEL[openRedo(s.report_no).status]}) — under In progress.
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                 {s.report_no && (
@@ -181,6 +246,12 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                 )}
                 {s.status === 'uploading' && (
                   <Button size="sm" variant="secondary" repeatable onClick={() => onContinue?.(s)}>Continue</Button>
+                )}
+                {data.can_upload && onRedo && s.status === 'done' && s.report_no && !openRedo(s.report_no) && (
+                  <Button size="sm" variant="secondary" repeatable onClick={() => onRedo(s)}
+                    title="Upload new photos and check this product again. The current report stays on record.">
+                    <span className="inline-flex items-center gap-1"><RotateCcw size={12} /> Redo verification</span>
+                  </Button>
                 )}
                 {data.can_retry && (s.status === 'failed' || (s.status === 'queued' && bothLinked)) && (
                   <Button size="sm" variant="secondary" disabled={busy === `${s.id}:retry`} onClick={() => act(s, 'retry')}>
@@ -207,6 +278,13 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
           );
         })}
       </ul>
+      {(hidden > 0 || (showAll && inWindow.length > AVS_SETS_SHOWN)) && (
+        <div className="mt-1 border-t border-slate-100 pt-2 text-center">
+          <Button size="sm" variant="ghost" repeatable onClick={() => setShowAll(v => !v)}>
+            {showAll ? `Show the first ${AVS_SETS_SHOWN} only` : `Show all ${inWindow.length} (${hidden} more)`}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

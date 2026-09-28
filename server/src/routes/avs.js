@@ -17,7 +17,7 @@ import { optionalText } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsGateForCard } from '../avs-gate.js';
 import {
-  AVS_REPORT_NO, AVS_REMARK_MAX, canDecideAvs, caseState, decisionProblem,
+  AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, canDecideAvs, caseState, decisionProblem,
 } from '../../../client/src/lib/avs.js';
 
 const r = Router();
@@ -80,7 +80,7 @@ r.get('/avs/reports/:no', async (req, res, next) => {
              date_folder, product_folder, drive_url, checked_on, issued_at, master_file, note
         FROM avs.latest_reports WHERE report_no = $1`, [no]);
     if (!report) throw fail(404, `${no} not found`);
-    const [problems, history, decisions, closedRow] = await Promise.all([
+    const [problems, history, decisions, closedRow, sets] = await Promise.all([
       q(`SELECT ref, result, title, detail, action, rows FROM avs.problems WHERE report_id = $1
           ORDER BY CASE result WHEN 'REJECT' THEN 0 WHEN 'HOLD' THEN 1 WHEN 'VERIFY' THEN 2 ELSE 3 END,
                    substring(ref from 1 for 1), (substring(ref from 3))::int`, [report.id]),
@@ -89,6 +89,12 @@ r.get('/avs/reports/:no', async (req, res, next) => {
       q(`SELECT id, report_rev, check_no, decision, decided_by, decided_by_role, remark, decided_at, status_at_decision, source
            FROM avs.decisions WHERE report_no = $1 ORDER BY decided_at DESC`, [no]),
       one(`SELECT note, issued_at FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' ORDER BY issued_at DESC LIMIT 1`, [no]),
+      // The photo sets behind this report: the first check and every redo, with
+      // who asked, why, and how each ended — the trail between the issues.
+      q(`SELECT id, status, jc_number, created_by, created_at, queued_at, finished_at, report_rev, check_no, result,
+                robot_note, redo_report_no, redo_of_set_id, redo_reason, drive_folder_url, cancelled_by, cancelled_at
+           FROM avs.check_requests WHERE report_no = $1 OR redo_report_no = $1 ORDER BY id`, [no])
+        .catch(e => (MISSING.has(e?.code) || e?.code === '42703' ? [] : Promise.reject(e))),
     ]);
     const last = decisions.find(d => d.decision !== 'ARTWORK ALERT OK') || null;
     delete report.id;
@@ -96,6 +102,7 @@ r.get('/avs/reports/:no', async (req, res, next) => {
       report: { ...report, closed: !!closedRow, closed_note: closedRow?.note ?? null,
         case_state: caseState({ ...report, closed: !!closedRow }, last) },
       problems, history, decisions, can_decide: await mayDecide(req.user),
+      sets, open_redo: sets.find(x => x.redo_report_no === no && ['uploading', 'queued', 'checking'].includes(x.status)) || null,
     });
   } catch (e) { next(e); }
 });
@@ -122,7 +129,7 @@ r.post('/avs/reports/:no/decisions', async (req, res, next) => {
   try {
     const no = req.params.no;
     if (!AVS_REPORT_NO.test(no)) throw fail(400, 'Not an AVS report number');
-    if (!(await mayDecide(req.user))) throw fail(403, 'Only QA or management can record an AVS decision');
+    if (!(await mayDecide(req.user))) throw fail(403, AVS_WHO_DECIDES);
     const report = await one(`
       SELECT report_no, report_rev, check_no, status, artwork_alerts,
              EXISTS (SELECT 1 FROM avs.problems p WHERE p.report_id = l.id AND p.result = 'VERIFY') AS has_alert
@@ -148,13 +155,13 @@ r.post('/avs/reports/:no/decisions', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// QA and admin by role; a management login by its flag, read fresh from the
-// database — a stale token can never grant it.
+// QA by role; everyone else by the AVS decision right (users.avs_approver),
+// read fresh from the database — a stale token can never grant it.
 async function mayDecide(user) {
   if (!user) return false;
   if (canDecideAvs({ role: user.role })) return true;
-  const row = await one('SELECT is_management FROM users WHERE id = $1 AND active = 1', [user.id]).catch(() => null);
-  return +(row?.is_management ?? 0) === 1;
+  const row = await one('SELECT avs_approver FROM users WHERE id = $1 AND active = 1', [user.id]).catch(() => null);
+  return canDecideAvs({ role: user.role, avs_approver: row?.avs_approver });
 }
 
 export default r;

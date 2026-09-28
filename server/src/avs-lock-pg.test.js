@@ -81,11 +81,12 @@ describe('the AVS printing lock — through the real app', {
     return { status: res.status, body: json };
   };
 
-  // The photo tables as production has them: both AVS photo migrations, minus
+  // The photo tables as production has them: the AVS photo migrations, minus
   // the grants to Supabase's roles, which a plain Postgres does not have.
   const applyAvsPhotoSchema = async () => {
     await db.q('CREATE SCHEMA IF NOT EXISTS avs');
-    for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql']) {
+    for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql',
+      '20260928180000_avs_redo_verification.sql']) {
       await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
         .replace(/REVOKE ALL[^;]*;/g, ''));
     }
@@ -656,5 +657,94 @@ describe('the AVS printing lock — through the real app', {
     } finally {
       drive.close();
     }
+  });
+  test('redo verification: a new set for the same job card, the next check of the same report, the trail kept', async () => {
+    await applyAvsPhotoSchema();
+    await setSettings({ drive_bridge_url: '', drive_bridge_secret: '', routine_fire_url: '', routine_token: '' });
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.reports (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_no text NOT NULL,
+        report_rev integer NOT NULL DEFAULT 0, check_no integer NOT NULL DEFAULT 1, row_type text NOT NULL DEFAULT 'REPORT',
+        status text, product_name text, job_card text, issued_at timestamptz DEFAULT now());
+      CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
+        WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC;`);
+    for (const c of ['product', 'customer', 'artwork_code', 'revision', 'item_code', 'headline', 'key_finding', 'po_no',
+      'print_status', 'drive_url', 'heading_line', 'summary', 'recommendation', 'po_result', 'print_headline',
+      'order_book_strip', 'ob_note', 'report_file', 'date_folder', 'product_folder', 'master_file', 'note']) {
+      await db.q(`ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS ${c} text`);
+    }
+    for (const c of ['po_date', 'checked_on']) await db.q(`ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS ${c} date`);
+    for (const c of ['po_age_days', 'po_qty', 'po_open_qty']) await db.q(`ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS ${c} integer`);
+    await db.q('ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS artwork_alerts jsonb');
+    await db.q('ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS check_log jsonb');
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.problems (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_id bigint,
+      ref text, result text, title text, detail text, action text, rows text)`);
+    await db.q(`CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
+        WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC`);
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.decisions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_no text NOT NULL,
+        report_rev integer, check_no integer, decision text NOT NULL, decided_by text, remark text,
+        decided_at timestamptz NOT NULL DEFAULT now())`);
+    for (const c of ['decided_by_role', 'source', 'status_at_decision']) {
+      await db.q(`ALTER TABLE avs.decisions ADD COLUMN IF NOT EXISTS ${c} text`);
+    }
+
+    // The first check: a set made for a job card, checked into AVS-2026-0950 HOLD.
+    const job = await printingJob();
+    const first = await call('production', 'POST', '/avs/uploads', { job_card_id: job.cardId });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    await db.q(`UPDATE avs.check_requests SET status = 'done', finished_at = now(), report_no = 'AVS-2026-0950',
+      report_rev = 0, check_no = 1, result = 'HOLD' WHERE id = $1`, [first.body.id]);
+    await db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status, product_name, job_card)
+      VALUES ('AVS-2026-0950', 0, 1, 'HOLD', 'Redo carton', $1)`, [job.jc]);
+
+    // No reason, no redo; a viewer-level role may not; an unknown report is not found.
+    let out = await call('production', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: '' });
+    assert.equal(out.status, 400);
+    out = await call('production', 'POST', '/avs/redo', { report_no: 'AVS-2026-0999', reason: 'new photos please' });
+    assert.equal(out.status, 404);
+
+    out = await call('production', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: 'board changed to 350 GSM' });
+    assert.equal(out.status, 201, JSON.stringify(out.body));
+    const redo = out.body;
+    assert.equal(redo.status, 'uploading');
+    assert.equal(redo.redo_report_no, 'AVS-2026-0950');
+    assert.equal(+redo.redo_of_set_id, +first.body.id, 'the check being redone');
+    assert.equal(redo.redo_reason, 'board changed to 350 GSM');
+    assert.equal(redo.jc_number, job.jc, 'the same job card');
+    assert.equal(redo.created_by, 'AVS production');
+
+    // Pressing Redo again while it takes photos hands the same set back.
+    out = await call('qc', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: 'second try' });
+    assert.equal(out.status, 200);
+    assert.equal(+out.body.id, +redo.id);
+    assert.equal(out.body.resumed, true);
+
+    // Once it is queued, a second redo is refused — and the database refuses it too.
+    await db.q(`UPDATE avs.check_requests SET status = 'queued' WHERE id = $1`, [redo.id]);
+    out = await call('qc', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: 'second try' });
+    assert.equal(out.status, 409);
+    await assert.rejects(db.q(`INSERT INTO avs.check_requests (status, redo_report_no, redo_reason)
+      VALUES ('uploading', 'AVS-2026-0950', 'x')`), /check_requests_one_open_redo/);
+    await assert.rejects(db.q(`INSERT INTO avs.check_requests (status, redo_report_no) VALUES ('done', 'AVS-2026-0950')`),
+      /check_requests_redo_reason_check/, 'a redo always carries its reason');
+
+    // Claude issues it as Check 2 of the same report: the register shows Check 2,
+    // the report keeps both sets with the reason.
+    await db.q(`UPDATE avs.check_requests SET status = 'done', finished_at = now(), report_no = 'AVS-2026-0950',
+      report_rev = 0, check_no = 2, result = 'PASS' WHERE id = $1`, [redo.id]);
+    await db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status, product_name, job_card)
+      VALUES ('AVS-2026-0950', 0, 2, 'PASS', 'Redo carton', $1)`, [job.jc]);
+    const detail = await call('qc', 'GET', '/avs/reports/AVS-2026-0950');
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.equal(detail.body.report.check_no, 2);
+    assert.equal(detail.body.report.status, 'PASS');
+    assert.deepEqual(detail.body.history.map(h => [h.check_no, h.status]), [[1, 'HOLD'], [2, 'PASS']]);
+    assert.deepEqual(detail.body.sets.map(x => [+x.id, x.check_no, x.redo_reason]),
+      [[+first.body.id, 1, null], [+redo.id, 2, 'board changed to 350 GSM']]);
+    assert.equal(detail.body.open_redo, null);
+
+    // A case the owner closed is never redone.
+    await db.q(`INSERT INTO avs.reports (report_no, row_type, note) VALUES ('AVS-2026-0950', 'CLOSE', 'closed by owner')`);
+    out = await call('qc', 'POST', '/avs/redo', { report_no: 'AVS-2026-0950', reason: 'once more' });
+    assert.equal(out.status, 409);
+    assert.match(out.body.error, /closed/);
   });
 });

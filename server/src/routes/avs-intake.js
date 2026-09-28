@@ -31,7 +31,8 @@ import { markUncacheable } from '../data-tables.js';
 import { avsMandatorySql } from '../avs-gate.js';
 import { postDrive } from '../avs-drive.js';
 import {
-  AVS_PHOTO_MAX_BYTES, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, photoProblem, setLabel, setupProblem,
+  AVS_PHOTO_MAX_BYTES, AVS_REPORT_NO, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, photoProblem, redoProblem,
+  setLabel, setupProblem,
 } from '../../../client/src/lib/avs.js';
 
 const r = Router();
@@ -172,7 +173,8 @@ async function fireUnlessRunning(cfg, set, { force = false } = {}) {
     }
   }
   const out = await fireRoutine(cfg,
-    `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${set.jc_number})` : ''} is waiting in avs.check_requests.`);
+    `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${set.jc_number})` : ''}`
+    + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''} is waiting in avs.check_requests.`);
   await q(`UPDATE avs.check_requests SET fired_at = now(), fire_status = $2, fire_error = $3,
                   session_url = COALESCE($4, session_url), updated_at = now() WHERE id = $1`,
     [set.id, out.status, out.ok ? null : out.error, out.session_url || null]);
@@ -183,7 +185,7 @@ async function fireUnlessRunning(cfg, set, { force = false } = {}) {
 const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.note, s.created_by, s.created_by_user_id,
   s.created_at, s.drive_folder_path, s.drive_folder_url, s.queued_at, s.queued_by, s.fired_at, s.fire_status,
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
-  s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at`;
+  s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason`;
 
 // One set, or the list: every set still in progress, and the newest
 // `perStatus` of each finished status (the page shows them by status, with
@@ -271,6 +273,74 @@ r.post('/avs/uploads', canUpload, async (req, res, next) => {
       [jc?.id ?? null, jc?.jc_number ?? null, product ? product.slice(0, 200) : null, note,
         req.user.name ?? null, req.user.id ?? null, req.user.role ?? null]);
     const [out] = await readSets({ id: set.id });
+    res.status(201).json(out);
+  } catch (e) { next(e); }
+});
+
+// ── Redo verification ────────────────────────────────────────────────────────
+// Verify a report's product again with new photos. A new photo set is made for
+// the same job card, marked as a redo of that report; the AVS check issues it
+// as the report's next check (Check 2, Check 3 ..., runbook rule 21), so the
+// register shows the latest check and every earlier one stays on record. The
+// reason is required and kept with the set. One redo per report at a time: an
+// open one still taking photos is handed back to go on with.
+r.post('/avs/redo', canUpload, async (req, res, next) => {
+  try {
+    const reportNo = String(req.body?.report_no ?? '').trim();
+    if (!AVS_REPORT_NO.test(reportNo)) throw fail(400, 'Not an AVS report number');
+    const reason = optionalText(req.body?.reason);
+    const problem = redoProblem({ reason });
+    if (problem) throw fail(400, problem);
+    const note = optionalText(req.body?.note);
+    if (note && note.length > AVS_REMARK_MAX) throw fail(400, `Keep the note under ${AVS_REMARK_MAX} characters.`);
+
+    const report = await one(`SELECT report_no, report_rev, check_no, status, product_name, product, job_card
+      FROM avs.latest_reports WHERE report_no = $1`, [reportNo]);
+    if (!report) throw fail(404, `${reportNo} not found`);
+    const closed = await one(`SELECT 1 AS x FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' LIMIT 1`, [reportNo]);
+    if (closed) throw fail(409, `${reportNo} was closed by the owner, so it cannot be checked again. Upload the photos as a new set.`);
+
+    const open = await one(`SELECT id, status FROM avs.check_requests
+      WHERE redo_report_no = $1 AND status IN ('uploading', 'queued', 'checking') ORDER BY id DESC LIMIT 1`, [reportNo]);
+    if (open?.status === 'uploading') {
+      const [out] = await readSets({ id: open.id });
+      return res.json({ ...out, resumed: true });
+    }
+    if (open) throw fail(409, `${reportNo} is already being checked again (${setLabel(open.id)}). Wait for its report.`);
+
+    // The check being redone: the set named, or the newest set that made this
+    // report. None when the report came from photos put in the AVS folder.
+    const fromId = toId(req.body?.set_id);
+    const from = fromId
+      ? await one('SELECT * FROM avs.check_requests WHERE id = $1 AND report_no = $2', [fromId, reportNo])
+      : await one(`SELECT * FROM avs.check_requests WHERE report_no = $1 AND status = 'done' ORDER BY id DESC LIMIT 1`, [reportNo]);
+    if (fromId && !from) throw fail(404, `${setLabel(fromId)} did not make ${reportNo}.`);
+
+    // The job card: the earlier set's, else the one the report names.
+    let jc = from?.job_card_id
+      ? await one(`SELECT jc.id, jc.jc_number FROM job_cards jc WHERE jc.id = $1`, [from.job_card_id])
+      : null;
+    if (!jc && report.job_card) {
+      jc = await one(`SELECT id, jc_number FROM job_cards WHERE upper(jc_number) = upper($1) ORDER BY id DESC LIMIT 1`,
+        [String(report.job_card).trim()]);
+    }
+    const product = String(from?.product_hint || report.product_name || report.product || '').slice(0, 200) || null;
+
+    let made;
+    try {
+      made = await one(`INSERT INTO avs.check_requests
+          (status, job_card_id, jc_number, product_hint, note, created_by, created_by_user_id, created_by_role,
+           redo_report_no, redo_of_set_id, redo_reason)
+        VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [jc?.id ?? from?.job_card_id ?? null, jc?.jc_number ?? from?.jc_number ?? report.job_card ?? null, product, note,
+          req.user.name ?? null, req.user.id ?? null, req.user.role ?? null,
+          reportNo, from?.id ?? null, reason.slice(0, AVS_REMARK_MAX)]);
+    } catch (e) {
+      // Two people pressed Redo at once: the unique index lets one through.
+      if (e?.code === '23505') throw fail(409, `${reportNo} is already being checked again. Reload the page.`);
+      throw e;
+    }
+    const [out] = await readSets({ id: made.id });
     res.status(201).json(out);
   } catch (e) { next(e); }
 });

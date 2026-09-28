@@ -8,11 +8,15 @@
 //    one under it goes as it is, with its camera data.
 // 3. Verify: the set joins the queue and Claude is started. The report then
 //    appears in Artwork Verification, where QA decides.
+//
+// Redo verification (redo = a report that is ready): first why it is redone,
+// then new photos for the same job card. The check issues them as the next
+// check of the same report number; the earlier check stays on record.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, ImagePlus, Loader2, ScanSearch, Search, Send, XCircle } from 'lucide-react';
+import { Camera, CheckCircle2, History, ImagePlus, Loader2, RotateCcw, ScanSearch, Search, Send, XCircle } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Modal, useToast } from '../ui.jsx';
-import { AVS_PHOTO_MAX_BYTES, AVS_REMARK_MAX, AVS_SET_MAX_PHOTOS, setLabel } from '../../lib/avs.js';
+import { AVS_PHOTO_MAX_BYTES, AVS_REMARK_MAX, AVS_SET_MAX_PHOTOS, redoProblem, setLabel } from '../../lib/avs.js';
 
 const LIMIT = AVS_PHOTO_MAX_BYTES - 64 * 1024;
 
@@ -56,7 +60,8 @@ export function savedText(saved, keptHere) {
 
 // jobCard: { id, jc_number, product_name } to skip the choice (the printing pop-up).
 // resume: a set still taking photos (Continue in the list).
-export default function AvsUploadDialog({ open, onClose, jobCard = null, resume = null, onDone }) {
+// redo: { report_no, label, status, check_no, product, jc_number, set_id } — verify that report again.
+export default function AvsUploadDialog({ open, onClose, jobCard = null, resume = null, redo = null, onDone }) {
   const toast = useToast();
   const [step, setStep] = useState('pick');
   const [card, setCard] = useState(null);
@@ -69,6 +74,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
   const [items, setItems] = useState([]);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
+  const [reason, setReason] = useState('');
+  const [starting, setStarting] = useState(false);
 
   // The upload queue is worked through outside React's render cycle.
   const form = useRef({});
@@ -84,12 +91,26 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
   useEffect(() => {
     if (!open) return undefined;
     setCard(jobCard); setNoCard(false); setProduct(''); setNote(''); setQuery(''); setCards(null);
-    setItems([]); setResult(null); setSending(false);
+    setItems([]); setResult(null); setSending(false); setReason(''); setStarting(false);
     setSet(resume); setRef.current = resume;
     queue.current = []; files.current = new Map();
-    setStep(resume || jobCard ? 'photos' : 'pick');
+    setStep(resume || jobCard ? 'photos' : redo ? 'redo' : 'pick');
     return () => { previews.current.forEach(u => URL.revokeObjectURL(u)); previews.current = []; };
-  }, [open, jobCard, resume]);
+  }, [open, jobCard, resume, redo]);
+
+  // Redo: the set is made here, with the reason, before any photo — the reason
+  // is part of the record even if no photo follows.
+  const startRedo = async () => {
+    if (starting || redoProblem({ reason })) return;
+    setStarting(true);
+    try {
+      const made = await api.post('/avs/redo', {
+        report_no: redo.report_no, set_id: redo.set_id || undefined, reason: reason.trim(), note: note.trim() || undefined,
+      });
+      if (made.resumed) toast.info(`${setLabel(made.id)} is already redoing ${redo.report_no}. Add the photos to it.`);
+      setRef.current = made; setSet(made); setStep('photos');
+    } catch { /* api.js said why */ } finally { setStarting(false); }
+  };
 
   const loadCards = useCallback(text => api.get(`/avs/job-cards?q=${encodeURIComponent(text || '')}`)
     .then(setCards).catch(() => setCards([])), []);
@@ -174,11 +195,13 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
   };
 
   const close = () => { if (!pending) onClose?.(); };
+  const redoOf = set?.redo_report_no || redo?.report_no || null;
 
   return (
     <Modal open={open} onClose={close} layer="nested" title={
       <span className="inline-flex items-center gap-2"><ScanSearch size={18} className="text-violet-600" />
-        {set ? `AVS photos · ${setLabel(set.id)}` : 'AVS photos'}</span>}
+        {redoOf ? `Redo verification · ${redoOf}${set ? ` · ${setLabel(set.id)}` : ''}`
+          : set ? `AVS photos · ${setLabel(set.id)}` : 'AVS photos'}</span>}
       footer={step === 'sent'
         ? <Button onClick={close}>Done</Button>
         : step === 'photos'
@@ -188,10 +211,42 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
               <span className="inline-flex items-center gap-1.5"><Send size={15} /> Verify with Claude</span>
             </Button>
           </>
-          : <>
-            <Button variant="secondary" repeatable onClick={close}>Cancel</Button>
-            <Button repeatable onClick={() => setStep('photos')} disabled={noCard ? product.trim().length < 3 : !card}>Next: photos</Button>
-          </>}>
+          : step === 'redo'
+            ? <>
+              <Button variant="secondary" repeatable onClick={close}>Cancel</Button>
+              <Button onClick={startRedo} disabled={starting || !!redoProblem({ reason })}>
+                <span className="inline-flex items-center gap-1.5"><RotateCcw size={15} /> {starting ? 'Starting…' : 'Next: new photos'}</span>
+              </Button>
+            </>
+            : <>
+              <Button variant="secondary" repeatable onClick={close}>Cancel</Button>
+              <Button repeatable onClick={() => setStep('photos')} disabled={noCard ? product.trim().length < 3 : !card}>Next: photos</Button>
+            </>}>
+      {step === 'redo' && redo && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm text-violet-900">
+            <div className="font-semibold">{redo.product || 'This product'} · {redo.label || redo.report_no}{redo.status ? ` · ${redo.status}` : ''}</div>
+            <div className="mt-0.5 text-xs">Job card <span className="font-mono">{redo.jc_number || 'none'}</span></div>
+          </div>
+          <ul className="list-disc space-y-1 pl-5 text-xs text-slate-600">
+            <li>Upload new photos of the carton. Claude checks them in full and issues <b>{redo.report_no} Check {(+redo.check_no || 1) + 1}</b>.</li>
+            <li>The register then shows only the new check. The current report, its photos and QA's decisions on it stay on record under the report's history.</li>
+            <li>QA decides again on the new check.</li>
+          </ul>
+          <div>
+            <label htmlFor="avs-redo-reason" className="block text-xs font-medium text-slate-600">Why is it being checked again? (required, saved with your name)</label>
+            <textarea id="avs-redo-reason" value={reason} onChange={e => setReason(e.target.value)} maxLength={AVS_REMARK_MAX} autoFocus
+              placeholder="e.g. corrected sheets after the plate change; board changed to 350 GSM; first photos were from WhatsApp"
+              className="mt-1 min-h-[72px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0071F0] focus:outline-none" />
+          </div>
+          <div>
+            <label htmlFor="avs-redo-note" className="block text-xs font-medium text-slate-600">Note for the check (optional)</label>
+            <input id="avs-redo-note" value={note} onChange={e => setNote(e.target.value)} maxLength={AVS_REMARK_MAX}
+              placeholder="e.g. PO 01992 PDF forwarded to mppchd today"
+              className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#0071F0] focus:outline-none" />
+          </div>
+        </div>
+      )}
       {step === 'pick' && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">Which job are these photos of?</p>
@@ -231,6 +286,12 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
 
       {step === 'photos' && (
         <div className="space-y-3">
+          {set?.redo_report_no && (
+            <div className="flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+              <History size={14} className="mt-0.5 shrink-0" />
+              <span>Redo of <b>{set.redo_report_no}</b>. Reason: {set.redo_reason}</span>
+            </div>
+          )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
             <span className="text-slate-500">Job: </span>
             <span className="font-mono font-semibold">{set?.jc_number || card?.jc_number || 'no job card'}</span>
