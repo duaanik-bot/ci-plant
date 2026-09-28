@@ -926,6 +926,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS modules JSONB;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS sections JSONB;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS machine_ids JSONB;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS landing_path TEXT;
+-- The Fluence module's tabs a login may open (Overview, Kits, New kit, Drafts,
+-- Inner products, Fluence products, Customer list, Change log, Export &
+-- settings): JSON array of tab keys (client/src/modules.js FLUENCE_TABS),
+-- NULL = every tab. Enforced by the API too (server/src/access.js).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fluence_tabs JSONB;
 -- Leftover offcut stock: a leftover is a board material carved from a parent
 -- board. One master per (source board, strip size); code LO-<srcId>-<L>X<W>.
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS code TEXT;

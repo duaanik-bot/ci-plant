@@ -18,7 +18,8 @@
 //
 // Who may do what is the server's call (routes/kitstudio.js): everyone who can
 // open the Fluence module may look; Planning roles may edit; the product master
-// stays with the Masters tick.
+// stays with the Masters tick. The Fluence tabs ticked for the login decide which
+// views the studio opens and where it may edit (the state's `me.views`, `me.can`).
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, auth } from '../../api.js';
 import { subscribeToDbChanges } from '../../lib/realtime.js';
@@ -39,7 +40,7 @@ function pathFor(coll, id) {
   return `/kit-studio/${seg}/${encodeURIComponent(id)}`;
 }
 
-export default function KitStudioFrame({ view, hidden = false, onView, onDrafts }) {
+export default function KitStudioFrame({ view, startView, hidden = false, onView, onDrafts }) {
   const [ready, setReady] = useState(false);
   const [height, setHeight] = useState(720);
   const [kitEditor, setKitEditor] = useState(null);   // { kitId, edit } — the Fluence drawer over the studio
@@ -50,8 +51,9 @@ export default function KitStudioFrame({ view, hidden = false, onView, onDrafts 
   const said = useRef({ onView, onDrafts });
   said.current = { onView, onDrafts };
   // The view the frame opens on — later ones are shown through its handle, so
-  // the frame is never reloaded by a tab click.
-  const firstView = useRef(view);
+  // the frame is never reloaded by a tab click. Opened from another tab, it
+  // starts on `startView`: the first studio view this login's ticked tabs open.
+  const firstView = useRef(view ?? startView);
 
   useEffect(() => {
     const listeners = new Set();
@@ -60,7 +62,7 @@ export default function KitStudioFrame({ view, hidden = false, onView, onDrafts 
         return send(op, p).catch(e => {
           // A refusal the studio explains itself: hand it over as it is, so the
           // message appears once, inside the studio, next to what was refused.
-          if (e?.data?.code === 'KIT_STUDIO_REFUSED') throw Object.assign(new Error(e.message), { status: e.status });
+          if (e?.data?.code === 'KIT_STUDIO_REFUSED') throw Object.assign(new Error(e.message), { status: e.status, refused: true });
           throw e;
         });
       },

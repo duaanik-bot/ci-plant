@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { api, fmt, auth } from '../../api.js';
 import { Button, Modal } from '../ui.jsx';
-import { canAccess, canPlan } from '../../modules.js';
+import { canAccess, canPlan, canEditFluenceKits, canOpenFluenceTab } from '../../modules.js';
 import { FLUENCE_CONTEXTS, REVIEW_CONTEXTS, rxState, qtyText, kitListPrice, partLabel, kitCartons } from '../../lib/fluence.js';
 import { RxLinesTable, RxGeneral, ProductRxTable, rxStampText } from './PrescriptionView.jsx';
 import KitRxEditor from './KitRxEditor.jsx';
@@ -132,7 +132,10 @@ export default function FluenceDrawer({
 
   const review = REVIEW_CONTEXTS.has(context);
   const user = auth.user;
-  const canEdit = canEditServer && canPlan(user);
+  // Editing a kit: the server's answer (role and the Fluence tabs ticked for the
+  // login) and the same rule here. An item's own details are the Inner products tab's.
+  const canEdit = canEditServer && canEditFluenceKits(user);
+  const editsInner = canPlan(user) && canOpenFluenceTab(user, 'inner');
 
   const load = useCallback(async (list) => {
     setError(null);
@@ -391,7 +394,7 @@ export default function FluenceDrawer({
                   {hasAnything ? (
                     <>
                       {rx && <p className="mb-2 text-[11px] font-semibold text-green-800">{rxStampText(rx)}</p>}
-                      <RxLinesTable rx={rx} components={components} onEditItem={canEdit ? setInnerEditing : null} />
+                      <RxLinesTable rx={rx} components={components} onEditItem={editsInner ? setInnerEditing : null} />
                       <RxGeneral rx={rx} />
                       {rxState(rx) !== 'full' && components.length > 0 && (
                         <p className="mt-2 text-[11px] text-[#6E6E73]">

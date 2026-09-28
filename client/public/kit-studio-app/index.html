@@ -51,6 +51,9 @@ body{color:var(--ink);font:14px/1.45 var(--f-body);margin:0;-webkit-font-smoothi
 .wrap{max-width:none;margin:0;padding:0 2px 40px}
 /* Inside the ERP's Fluence page the page's own tabs lead: the studio's title and tab bar step aside */
 .embed header.top,.embed nav.tabs{display:none!important}
+/* A view this login does not open (the Fluence tabs ticked for it): no way in. */
+.no-overview [data-v="overview"],.no-kits [data-v="kits"],.no-products [data-v="products"],.no-build [data-v="build"],.no-drafts [data-v="drafts"],.no-export [data-v="export"],
+.no-build [data-goto="build"],.no-build [data-new-draft],.no-drafts [data-goto="drafts"],.no-drafts [data-needs="drafts"],.no-kits [data-waste-list]{display:none!important}
 /* PageHeader: .module-page-title / .module-page-subtitle */
 header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;margin:0 0 16px}
 .brand h1{font:800 26px/1.25 var(--f-disp);letter-spacing:-.03em;margin:0;color:var(--ink)}
@@ -416,6 +419,18 @@ if(EMBED) document.documentElement.classList.add('embed');
 const VIEWS=['overview','kits','products','build','drafts','export'];
 // Opened on a tab: that view, not the one this browser last had open.
 { const v0=new URLSearchParams(location.search).get('view'); if(EMBED&&VIEWS.includes(v0)) S.view=v0; }
+/* Inside the ERP, the Fluence tabs ticked for this login (Masters → Users) choose which views it
+   opens and where it may change things, on top of its role: Kits changes a kit, New kit adds one,
+   drafts are New kit's and Drafts', Inner products their sizes, Export & settings the clearances.
+   Outside the ERP — or before the ERP has answered — it is the role alone. */
+function can(area){ const X=window.kitStudioErp; return !!S.canEdit&&(!X||!X.canArea||X.canArea(area)); }
+const canCtx = c => can(c==='d'?'kits':'build');
+function viewList(){ const X=window.kitStudioErp, v=X&&X.views?X.views():null; return Array.isArray(v)?v:null; }
+function viewOk(v){ const vs=viewList(); return !vs||vs.includes(v); }
+let okView=S.view;
+function holdView(){ const vs=viewList(); if(!vs) return;
+  if(!vs.includes(S.view)) S.view = vs.includes(okView) ? okView : (vs[0]||S.view);
+  okView=S.view; const el=document.documentElement; for(const v of VIEWS) el.classList.toggle('no-'+v, !vs.includes(v)); }
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -1263,7 +1278,7 @@ async function saveDoc(coll, id, before, after, isKit, msg){
 
 /* ---------- views ---------- */
 let busy=false, drag=null, d3=null, pendingR=false, noClickUntil=0, lastCard={k:'',t:0};
-function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ renderInner(); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); tellHost(); }
+function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ holdView(); renderInner(); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); tellHost(); }
 let toldView=null, toldDrafts=null;
 function tellHost(){ const X=window.kitStudioErp; if(!X||!X.viewChanged) return;
   const n=[...S.drafts.values()].filter(d=>!d.pushed).length; if(S.view===toldView&&n===toldDrafts) return;
@@ -1328,7 +1343,7 @@ function vOverview(){
     <div class="card tile"><div class="n">${(kc.MISSING||0)+(kc.CONFLICT||0)}</div><div class="l">kits without a usable size</div></div>
     <div class="card tile"><div class="n">${wAvg==null?'—':Math.round(wAvg)+'%'}</div><div class="l">average empty space in confirmed kits · ${wHi} kit${wHi===1?'':'s'} over 40%</div><div style="margin-top:8px"><button class="link" data-waste-list>See the emptiest kits →</button></div></div>
     <div class="card tile"><div class="n">${S.products.size}</div><div class="l">inner products · ${pc.CONFIRMED||0} sized</div>${statBar(pc,S.products.size)}</div>
-    <div class="card tile"><div class="n">${[...S.drafts.values()].filter(d=>!d.pushed).length}</div><div class="l">drafts in development${dev?` · ${dev} kit${dev>1?'s':''} in Kits marked in development`:''}</div><div style="margin-top:8px"><button class="link" data-goto="drafts">Open drafts →</button></div></div>
+    <div class="card tile" data-needs="drafts"><div class="n">${[...S.drafts.values()].filter(d=>!d.pushed).length}</div><div class="l">drafts in development${dev?` · ${dev} kit${dev>1?'s':''} in Kits marked in development`:''}</div><div style="margin-top:8px"><button class="link" data-goto="drafts">Open drafts →</button></div></div>
   </div>
   <div class="two">
     <section class="card pad"><h2>Kit sizes to decide</h2><p class="note">Conflicting, unverified or proposed sizes.</p>
@@ -1365,7 +1380,7 @@ function vKits(){
     ${seg('kor',S.kf.origin,[['ALL','All kits'],['MASTER','Customer master'],['NEW','New development'],['INACTIVE','Inactive']])}
     <span class="count">${rows.length} of ${S.kits.size}</span>
     <span style="flex:1"></span>
-    <button class="btn primary" data-goto="build" ${S.canEdit?'':'disabled'}>New kit</button>
+    <button class="btn primary" data-goto="build" ${can('build')?'':'disabled'}>New kit</button>
   </div>
   <div class="tablewrap"><table>
     <thead><tr><th>Kit</th><th>Code</th><th class="num">Items</th><th class="num">MRP ₹</th><th>Panel size (mm)</th><th class="num"><button class="thsort" data-ksort title="Sort by empty space">Empty space ${srt==='desc'?'▼':srt==='asc'?'▲':'↕'}</button></th><th>Size</th><th>Status</th></tr></thead>
@@ -1380,7 +1395,7 @@ function vProducts(){
     <input type="search" id="pq" placeholder="Search product" value="${esc(f.q)}" aria-label="Search products">
     ${seg('pst',f.st,[['ALL','All'],['CONFIRMED','Confirmed'],['VERIFY','Verify'],['MISSING','Missing']])}
     <span class="count">${rows.length} of ${S.products.size}</span><span style="flex:1"></span>
-    <button class="btn" data-new-prod ${S.canEdit?'':'disabled'}>Add product</button>
+    <button class="btn" data-new-prod ${can('inner')?'':'disabled'}>Add product</button>
   </div>
   <div class="tablewrap"><table>
     <thead><tr><th>Product</th><th class="num">MRP ₹</th><th>Inner panel size (mm)</th><th>Size</th><th class="num">Used in kits</th><th>Status</th></tr></thead>
@@ -1430,7 +1445,7 @@ function kitLinks(ids,n=4){
 }
 /* Top sizes and dies in hand as one-click buttons: a click locks that size in (size to save / this kit's size) */
 function sizePicks(r,opts){
-  const rk=r.rank, dis=!S.canEdit, cur=opts.cur&&hasSize(opts.cur)?key(opts.cur):null, recK=r.rec?key(r.rec.size):null, ctx=opts.ctx||'b';
+  const rk=r.rank, dis=!canCtx(opts.ctx||'b'), cur=opts.cur&&hasSize(opts.cur)?key(opts.cur):null, recK=r.rec?key(r.rec.size):null, ctx=opts.ctx||'b';
   const lockTxt=ctx==='d'?'kit size':'size to save';
   const pick=(x,label)=>{ const k=key(x.size), on=k===cur;
     return `<button class="btn sm pick ${on?'on':''}" data-use-size="${x.size.L},${x.size.W},${x.size.H}" ${dis?'disabled':''} aria-pressed="${on}" title="${on?`This is the ${lockTxt}`:`Lock in ${dimTxt(x.size)} as the ${lockTxt}`}">${label}<span class="mono">${dimTxt(x.size)}</span>${on?'<span class="lk">✓ locked</span>':''}</button>`; };
@@ -1471,7 +1486,7 @@ function recCard(r, opts={}){
 }
 function sizeTable(r,ctx,cur){
   const rk=r.rank; if(!rk||!rk.rows.length) return '';
-  const c=ctx==='d', ro=!S.canEdit, curK=hasSize(cur)?key(cur):null, recK=r.rec?key(r.rec.size):null;
+  const c=ctx==='d', ro=!canCtx(ctx), curK=hasSize(cur)?key(cur):null, recK=r.rec?key(r.rec.size):null;
   let rows=S.rankAll?rk.rows:rk.rows.filter(x=>(x.rank&&x.rank<=12)||x.userOnly||!x.ok);
   if(!S.rankAll&&curK&&!rows.some(x=>key(x.size)===curK)){ const c=rk.rows.find(x=>key(x.size)===curK); if(c) rows=rows.concat([c]); }
   if(S.rankRev) rows=[...rows].reverse();
@@ -1528,7 +1543,7 @@ function layoutCard(r, size, title, ctx, ro){
       !isRec&&r.rec?`<button class="btn sm primary" data-use-rec="${ctx}" title="Arrange the cartons inside the recommended box">Use recommended size ${dimTxt(r.rec.size)}</button>`:'',
       r.custom?`<button class="btn sm" data-lay-repack="${ctx}" title="Keep each carton's turn, re-arrange the rows for the smallest box">Re-pack rows</button>`:'',
       r.custom?`<button class="btn sm ghost" data-lay-reset="${ctx}">Back to recommendation</button>`:'',
-      ctx==='b'&&S.canEdit?`<button class="btn sm" data-save-draft>Save draft</button>`:''
+      ctx==='b'&&can('build')?`<button class="btn sm" data-save-draft>Save draft</button>`:''
     ].join('') : '';
   const k3=edit?ctx:'v'+ctx;
   return `<div class="card pad"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${title||'Carton orientation'}</h3>${badge}</div>
@@ -1550,7 +1565,7 @@ function vBuild(){
   if(r.stale) b.custom=null;
   const sim=similarKits(b.items, null);
   const chosen=b.choice || (r.win&&r.win.size) || null;
-  const ro=!S.canEdit, dr=b.draftId?S.drafts.get(b.draftId):null, dirty=bDirty();
+  const ro=!can('build'), dr=b.draftId?S.drafts.get(b.draftId):null, dirty=bDirty();
   const head=b.draftId?`<div class="drafthead" style="margin-bottom:14px"><span>Draft <b>${esc(dr?dr.name:b.name)}</b>${dr?` · last saved ${fmtDate(dr.updatedAt)} by ${esc(who(dr.updatedBy))}`:''}${dirty?' · <b>unsaved changes</b>':' · all changes saved'}${dr&&dr.pushed?' · already added to Kits':''}</span><span class="row" style="gap:6px"><button class="btn sm" data-goto="drafts">All drafts</button><button class="btn sm ghost" data-clear-build>Start a new kit</button>${ro?'':`<button class="btn sm danger-soft" data-del-open-draft>${TRASH}Delete draft</button>`}</span>${S.dDelOpen&&!ro?`<div class="confirmbox"><span>Delete the draft <b>${esc(dr?dr.name:b.name)}</b> for everyone? This can’t be undone.${dr&&dr.pushed?' The kit already in Kits stays.':''}</span> <button class="btn danger sm" data-del-open-draft-yes>Delete draft</button><button class="btn sm" data-del-open-draft-no>Keep</button></div>`:''}</div>`:'';
   return `${head}<div class="builder">
     <div class="grid">
@@ -1591,7 +1606,7 @@ function vBuild(){
     <div style="margin-top:16px">${sizeTable(r,'b',{L:b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''),W:b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''),H:b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:'')})}</div>`;
 }
 function vExport(){
-  const st=S.settings, ro=!S.canEdit;
+  const st=S.settings, ro=!can('settings');
   const nf=(id,label,v)=>`<label class="f">${label}<input type="number" id="${id}" value="${v}" ${ro?'disabled':''}></label>`;
   return `<div class="two">
     <section class="card pad grid"><h2>Export to Excel</h2>
@@ -1625,7 +1640,7 @@ function closeDrawer(){ S.drawer=null; HIST.d=[]; closeAsk(); if(S.sel&&S.sel.ct
 function renderDrawer(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(renderDrawer,0); return; } busy=true; try{ keepFocus(renderDrawerRaw); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); }
 function renderDrawerRaw(){
   const root=$('#drawerRoot'); const D=S.drawer; if(!D){ root.innerHTML=''; return; }
-  const ro=!S.canEdit;
+  const ro=!can(D.t==='prod'?'inner':'kits');
   if(D.t==='kit'){ const d=D.d, orig=S.kits.get(D.id)||{}; const r=recommend((d.items||[]).filter(i=>i.pid), null, D.id, undefined, D.layEdit, hasSize(d)?[{size:{L:+d.L,W:+d.W,H:+d.H},label:'This kit’s size now'}]:[]); if(r.stale) D.layEdit=null;
     root.innerHTML=`<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="Kit ${esc(d.name)}">
       <div class="hd"><div><h2>${esc(orig.name||d.name)}</h2><div class="note">${[d.code?'Code '+esc(d.code):'',esc(d.fluenceName||''),d.origin==='new'?'new development':''].filter(Boolean).join(' · ')}</div></div><button class="x" data-close aria-label="Close">×</button></div>
@@ -1749,7 +1764,7 @@ document.addEventListener('click', async e => {
     catch(err){ toast('Could not update the ERP: '+(err?.message||'try again')); t.disabled=false; } return; }
   if(ds.innerDetails!==undefined){ const D=S.drawer, X=window.kitStudioErp; if(D&&D.d.erp&&D.d.erp.innerId&&X&&X.openInnerProduct) X.openInnerProduct(D.d.erp.innerId); return; }
   if(ds.kitRx!==undefined){ const D=S.drawer, X=window.kitStudioErp; if(!D||!D.d.erp||!D.d.erp.kitId||!X||!X.openKitEditor) return;
-    X.openKitEditor(D.d.erp.kitId,{edit:S.canEdit}); return; }
+    X.openKitEditor(D.d.erp.kitId,{edit:can('kits')}); return; }
   if(ds.erpProduct!==undefined){ if(S.drawer&&S.drawer.id) pmOpen(S.drawer.id); return; }
   if(ds.pmClose!==undefined){ if(S.pm&&!S.pm.busy){ S.pm=null; renderModal(); } return; }
   if(ds.pmGo!==undefined){ pmGo(); return; }
@@ -1922,7 +1937,7 @@ function settleDrag(d){
 const hintSave = c => { if(c==='d'&&S.drawer&&!S.drawer.hinted){ S.drawer.hinted=true; toast('Moved — press Save changes to keep this arrangement',{undo:'d'}); } };
 document.addEventListener('pointerdown', e => {
   if(e.button!==0||!S.canEdit||S.ask) return; const g=e.target.closest&&e.target.closest('g[data-lsel]'); if(!g) return;
-  const ctx=g.dataset.lsel, G=GEOM[ctx]; if(!G) return;
+  const ctx=g.dataset.lsel, G=GEOM[ctx]; if(!G||!canCtx(ctx)) return;
   drag={g,svg:g.ownerSVGElement,ctx,G,r:+g.dataset.r,i:+g.dataset.i,sx:e.clientX,sy:e.clientY,p0:svgPt(g.ownerSVGElement,e),moved:false,id:e.pointerId,target:null,tk:''};
 });
 document.addEventListener('pointermove', e => {
@@ -2198,7 +2213,7 @@ async function runPush(){
   if(P.thenErp) setTimeout(()=>{ if(S.kits.get(kid)&&!S.pm) pmOpen(kid); },550);
 }
 function vDrafts(){
-  const f=S.df, ro=!S.canEdit;
+  const f=S.df, ro=!can('drafts');
   const all=[...S.drafts].sort((a,b)=>String(b[1].updatedAt||'').localeCompare(String(a[1].updatedAt||'')));
   const open=all.filter(([,d])=>!d.pushed), pushed=all.filter(([,d])=>d.pushed);
   const rows=f==='PUSHED'?pushed:f==='ALL'?all:open;
@@ -2462,7 +2477,7 @@ async function buildPdf(R,opt){
 window.kitStudio={
   // The page's tab chose a view. An open drawer stays open, as it does when the
   // studio's own tabs are used — unsaved edits in it are never dropped here.
-  show(v){ if(!VIEWS.includes(v)||S.view===v) return; S.view=v; try{localStorage.setItem('kst.view',v);}catch(_){} render(); window.scrollTo(0,0); },
+  show(v){ if(!VIEWS.includes(v)||!viewOk(v)||S.view===v) return; S.view=v; try{localStorage.setItem('kst.view',v);}catch(_){} render(); window.scrollTo(0,0); },
   openKit(id){ if(S.kits.has(id)) openKit(id); },
 };
 

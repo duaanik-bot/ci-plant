@@ -38,6 +38,44 @@ export const MODULES = [
 // a login given either opens the one module.
 export const FLUENCE_KEYS = ['fluence', 'kit_studio'];
 
+// The Fluence module's tabs — the chips along the top of its page, grouped as
+// the page shows them. users.fluence_tabs is NULL (= every tab) or an array of
+// these keys: Masters → Users ticks which tabs a login may open, like Live Floor's
+// stations. The server holds a login to the same ticks (server/src/access.js):
+// what only an unticked tab reads or changes is refused. `view` is the Kit Studio
+// view a tab shows (the studio runs inside the page).
+export const FLUENCE_TABS = [
+  { key: 'overview', label: 'Overview', group: 'Kits', view: 'overview', hint: 'Kit Studio at a glance' },
+  { key: 'kits', label: 'Kits', group: 'Kits', view: 'kits', hint: 'Each kit’s carton, arrangement, items and prescription' },
+  { key: 'build', label: 'New kit', group: 'Kits', view: 'build', hint: 'Design a new kit and add it to Kits' },
+  { key: 'drafts', label: 'Drafts', group: 'Kits', view: 'drafts', hint: 'Kits still being designed' },
+  { key: 'inner', label: 'Inner products', group: 'Masters', view: 'products', hint: 'Item sizes, codes, dosage form and packaging' },
+  { key: 'products', label: 'Fluence products', group: 'Masters', hint: 'The FP cartons, with their kit and prescription' },
+  { key: 'customer', label: 'Customer list', group: 'Masters', hint: 'The customer’s kit list and the carton each is printed as' },
+  { key: 'changes', label: 'Change log', group: 'Records', hint: 'Every change, who made it, signed' },
+  { key: 'settings', label: 'Export & settings', group: 'Records', view: 'export', hint: 'Spreadsheet exports and the carton clearances' },
+];
+export const FLUENCE_TAB_KEYS = FLUENCE_TABS.map(t => t.key);
+// The tabs a kit is opened from to change what is in it and its prescription
+// (the Fluence drawer's Edit): Kits, Fluence products and the Customer list.
+export const KIT_EDIT_TABS = ['kits', 'products', 'customer'];
+
+// The Fluence tabs this login may open, in the page's order. Admins, and a
+// login with no tab ticks at all (NULL), open every tab.
+export function fluenceTabsOf(user) {
+  if (!user) return [];
+  if (user.role === 'admin' || !Array.isArray(user.fluence_tabs)) return FLUENCE_TAB_KEYS.slice();
+  return FLUENCE_TAB_KEYS.filter(k => user.fluence_tabs.includes(k));
+}
+export function canOpenFluenceTab(user, key) {
+  return fluenceTabsOf(user).includes(key);
+}
+// May this login change what is in a kit and its prescription? A Planning role,
+// with a tab ticked that a kit is edited from.
+export function canEditFluenceKits(user) {
+  return canPlan(user) && KIT_EDIT_TABS.some(k => canOpenFluenceTab(user, k));
+}
+
 // A login whose ticked modules are ALL Fluence — a customer's own login. It
 // opens the Fluence module and nothing of Colour Impressions: not the shared
 // Cutting board a Planning or Production role otherwise reaches, not the bell,

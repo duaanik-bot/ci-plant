@@ -14,7 +14,8 @@ import { q, one, tx } from '../db.js';
 import { audit, notify } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import { notificationRecipients } from '../approvals.js';
-import { dossierFor, needsMasters } from '../access.js';
+import { dossierFor, needsMasters, mayUseTab } from '../access.js';
+import { KIT_EDIT_TABS } from '../../../client/src/modules.js';
 import {
   nameKey, normaliseRxPayload, normaliseComponentsPayload, normaliseDims, FLUENCE_CONTEXTS, rxChangedAfterFinalise,
   rxLinesInStep, componentsSignature, kitChangeSummary,
@@ -25,6 +26,9 @@ const r = Router();
 // master. Everyone signed in may review it.
 const canEditMaster = requireRole(...PLANNING_ROLES);
 const canEdit = user => user?.role === 'admin' || PLANNING_ROLES.includes(user?.role);
+// May this login change what is in a kit and its prescription? Its role, and a
+// Fluence tab ticked that a kit is edited from (Masters → Users; access.js).
+const editsKits = req => canEdit(req.user) && KIT_EDIT_TABS.some(t => mayUseTab(req.access, t));
 
 const fail = (status, message, body) => Object.assign(new Error(message), { status, ...(body ? { body } : {}) });
 
@@ -64,7 +68,7 @@ r.get('/fluence/scope', async (req, res, next) => {
       SELECT (SELECT COALESCE(json_agg(customer_id ORDER BY customer_id), '[]'::json) FROM fluence_customers) AS customer_ids,
              (SELECT COALESCE(json_agg(p.id ORDER BY p.id), '[]'::json)
                 FROM products p JOIN fluence_customers fc ON fc.customer_id = p.customer_id) AS product_ids`);
-    res.json({ enabled: true, can_edit: canEdit(req.user), customer_ids: row.customer_ids, product_ids: row.product_ids });
+    res.json({ enabled: true, can_edit: editsKits(req), customer_ids: row.customer_ids, product_ids: row.product_ids });
   } catch (e) {
     offWhenMissing(res, next, { enabled: false, can_edit: false, customer_ids: [], product_ids: [] })(e);
   }
@@ -209,7 +213,7 @@ r.get('/fluence/kits/:id/dossier', async (req, res, next) => {
     if (!(Number.isInteger(kitId) && kitId > 0)) throw fail(400, 'Not a valid kit.');
     const dossier = await loadKitDossier(kitId);
     if (!dossier) throw fail(404, 'This kit is no longer in the Fluence master — reload the page.');
-    res.json({ can_edit: canEdit(req.user), dossier: dossierFor(dossier, req.access) });
+    res.json({ can_edit: editsKits(req), dossier: dossierFor(dossier, req.access) });
   } catch (e) {
     offWhenMissing(res, next, { can_edit: false, dossier: null })(e);
   }
@@ -219,7 +223,7 @@ r.get('/fluence/dossiers', async (req, res, next) => {
   try {
     const ids = idList(req.query.product_ids);
     const dossiers = await loadDossiers(ids);
-    res.json({ can_edit: canEdit(req.user), dossiers: dossiers.map(d => dossierFor(d, req.access)), not_fluence: ids.filter(id => !dossiers.some(d => d.product.id === id)) });
+    res.json({ can_edit: editsKits(req), dossiers: dossiers.map(d => dossierFor(d, req.access)), not_fluence: ids.filter(id => !dossiers.some(d => d.product.id === id)) });
   } catch (e) {
     offWhenMissing(res, next, { can_edit: false, dossiers: [], not_fluence: [] })(e);
   }

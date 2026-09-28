@@ -9,7 +9,7 @@ import { q, one } from './db.js';
 import { withoutLedger } from './data-tables.js';
 import { audit } from './helpers.js';
 import { forgetAccess } from './access.js';
-import { isFluenceOnly } from '../../client/src/modules.js';
+import { isFluenceOnly, FLUENCE_TAB_KEYS } from '../../client/src/modules.js';
 
 // This module previously fell back to a hardcoded literal when JWT_SECRET was
 // unset, with no environment guard — so a deployment that forgot the variable
@@ -59,7 +59,7 @@ authRouter.get('/auth/me', (req, res, next) => {
   requireAuth(req, res, async () => {
     try {
       const user = await one(
-        'SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver FROM users WHERE id=$1',
+        'SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver FROM users WHERE id=$1',
         [req.user.id]);
       if (!user || !user.active) return res.status(401).json({ error: 'Account disabled' });
       res.json(userView(user));
@@ -74,6 +74,7 @@ function userView(u) {
     id: u.id, name: u.name, email: u.email, role: u.role,
     modules: u.modules ?? null,
     sections: u.sections ?? null,
+    fluence_tabs: u.fluence_tabs ?? null,
     machine_ids: u.machine_ids ?? null,
     landing_path: u.landing_path ?? null,
     // Approval grants — UI gating only; every server endpoint re-reads the
@@ -178,6 +179,12 @@ const cleanModules = m => {
 };
 // sections: same shape as modules (array of string keys, NULL = all).
 const cleanSections = cleanModules;
+// fluence_tabs: the Fluence module's tabs (modules.js FLUENCE_TABS), NULL = all.
+// Only known tab keys are kept, so a stale key can never open a tab added later.
+const cleanFluenceTabs = m => {
+  if (m == null || m === '' || !Array.isArray(m)) return null;
+  return JSON.stringify(FLUENCE_TAB_KEYS.filter(k => m.map(String).includes(k)));
+};
 // machine_ids: array of positive integers, NULL = all presses.
 const cleanMachineIds = m => {
   if (m == null || m === '') return null;
@@ -191,7 +198,7 @@ const cleanFlag = v => (+v ? 1 : 0);
 
 usersRouter.get('/users', requireRole(), async (_req, res, next) => {
   try {
-    res.json(await q('SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver, created_at FROM users ORDER BY name'));
+    res.json(await q('SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, created_at FROM users ORDER BY name'));
   } catch (e) { next(e); }
 });
 
@@ -202,14 +209,14 @@ usersRouter.post('/users', requireRole(), async (req, res, next) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const hash = bcrypt.hashSync(password, 10);
     const [u] = await q(
-      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver`,
+      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver, fluence_tabs)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver`,
       [name, email, hash, role || 'viewer',
        cleanModules(req.body.modules), cleanSections(req.body.sections),
        cleanMachineIds(req.body.machine_ids), cleanPath(req.body.landing_path),
        cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management),
-       cleanFlag(req.body.reverse_approver)]);
+       cleanFlag(req.body.reverse_approver), cleanFluenceTabs(req.body.fluence_tabs)]);
     // Standing chat rooms flagged auto_add (Plant Floor) take every new login
     // the moment it exists — nobody joins the plant and misses the plant. A
     // customer's login (only Fluence ticked) is not the plant, and joins none.
@@ -242,6 +249,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if (active != null) { sets.push(`active=$${i++}`); vals.push(active ? 1 : 0); }
     if ('modules' in req.body) { sets.push(`modules=$${i++}`); vals.push(cleanModules(req.body.modules)); }
     if ('sections' in req.body) { sets.push(`sections=$${i++}`); vals.push(cleanSections(req.body.sections)); }
+    if ('fluence_tabs' in req.body) { sets.push(`fluence_tabs=$${i++}`); vals.push(cleanFluenceTabs(req.body.fluence_tabs)); }
     if ('machine_ids' in req.body) { sets.push(`machine_ids=$${i++}`); vals.push(cleanMachineIds(req.body.machine_ids)); }
     if ('landing_path' in req.body) { sets.push(`landing_path=$${i++}`); vals.push(cleanPath(req.body.landing_path)); }
     if ('xs_approver' in req.body) { sets.push(`xs_approver=$${i++}`); vals.push(cleanFlag(req.body.xs_approver)); }
@@ -254,7 +262,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if (!sets.length) return res.json({});
     vals.push(req.params.id);
     const [u] = await q(
-      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver`, vals);
+      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver`, vals);
     await audit('user', +req.params.id, 'update', null, q, req.user.name);
     forgetAccess(+req.params.id);   // new ticks, a switch-off: at once, not in a few seconds
     res.json(u);

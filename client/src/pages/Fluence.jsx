@@ -14,21 +14,24 @@
 // Fluence drawer). Masters keeps what is printed and billed — the FP code, billing
 // code, carton MRP, size and spec — and each points at the other.
 //
+// Which tabs a login sees is ticked in Masters → Users (users.fluence_tabs,
+// modules.js FLUENCE_TABS); the server refuses what an unticked tab does.
+//
 // Fluence Pharmaceuticals only. Nothing here touches any other customer.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Boxes, CheckCircle2, History, Link2, Pill, Ruler, Unlink, AlertTriangle } from 'lucide-react';
-import { api, auth, fmt } from '../api.js';
+import { api, auth, currentUser, fmt } from '../api.js';
 import { Button, DataTable, GroupedTabs, KpiCard, KpiRow, Modal, PageHeader, SearchableSelect, useToast } from '../components/ui.jsx';
-import { canAccess, canPlan } from '../modules.js';
+import { canAccess, canPlan, fluenceTabsOf, FLUENCE_TABS } from '../modules.js';
 import FluenceDrawer from '../components/fluence/FluenceDrawer.jsx';
 import KitStudioFrame from '../components/fluence/KitStudioFrame.jsx';
 import { FLUENCE_CONTEXTS, kitListPrice, partLabel } from '../lib/fluence.js';
 
 // Tab → where it lives: a view of the studio in the frame, or a table here.
-const STUDIO_VIEW = { overview: 'overview', kits: 'kits', build: 'build', drafts: 'drafts', inner: 'products', settings: 'export' };
+const STUDIO_VIEW = Object.fromEntries(FLUENCE_TABS.filter(t => t.view).map(t => [t.key, t.view]));
 const TAB_OF_VIEW = Object.fromEntries(Object.entries(STUDIO_VIEW).map(([tab, view]) => [view, tab]));
-const TABS = ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'settings'];
+const GROUPS = [...new Set(FLUENCE_TABS.map(t => t.group))];
 
 const KIT_FILTERS = [
   { key: 'all', label: 'All' },
@@ -50,7 +53,21 @@ const CHANGE_LABEL = {
 export default function Fluence() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
+  // The login as the server has it now: its tabs may have been ticked
+  // differently since it signed in. Until that answer is in, the saved copy
+  // draws the page and nothing tab-dependent is asked for.
+  const [user, setUser] = useState(() => auth.user);
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    let live = true;
+    currentUser().then(u => live && setUser(u)).catch(() => {}).finally(() => live && setFresh(true));
+    return () => { live = false; };
+  }, []);
+  // The tabs ticked for this login, in the page's order — a tab it may not open
+  // is not shown, and a link to one lands on the first it may.
+  const allowed = useMemo(() => fluenceTabsOf(user), [user]);
+  const has = useCallback(k => allowed.includes(k), [allowed]);
+  const tab = allowed.includes(params.get('tab')) ? params.get('tab') : (allowed[0] ?? null);
   const setTab = useCallback(t => setParams(p => {
     const n = new URLSearchParams(p);
     n.set('tab', t);
@@ -68,18 +85,21 @@ export default function Fluence() {
   const [linkProduct, setLinkProduct] = useState('');
   const [unlinking, setUnlinking] = useState(null);
   const [busy, setBusy] = useState(false);
-  const user = auth.user;
   const canEdit = canPlan(user);
   // Which carton a customer kit is printed as is a product-master decision.
   const keepsProducts = canEdit && canAccess(user, 'masters');
 
+  // Only what the ticked tabs show is asked for: the product list is the
+  // Fluence products tab's (and the Customer list's link dialog), the kit list the Customer list's.
+  const needsProducts = has('products') || has('customer');
+  const needsKits = has('customer');
   const load = useCallback(() => Promise.all([
-    api.get('/fluence/products').then(setProducts),
-    api.get('/fluence/kits').then(setKits),
-  ]).catch(() => {}), []);
+    needsProducts ? api.get('/fluence/products').then(setProducts) : null,
+    needsKits ? api.get('/fluence/kits').then(setKits) : null,
+  ]).catch(() => {}), [needsProducts, needsKits]);
   const loadChanges = useCallback(() => api.get('/fluence/changes?limit=400').then(setChanges).catch(() => setChanges([])), []);
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (tab === 'changes') loadChanges(); }, [tab, loadChanges]);
+  useEffect(() => { if (fresh) load(); }, [fresh, load]);
+  useEffect(() => { if (fresh && tab === 'changes') loadChanges(); }, [fresh, tab, loadChanges]);
 
   // Links into the module: ?open=<product id> or ?kit=<kit id>[&view=history]
   // open the drawer — a notification about a change lands on the change itself.
@@ -139,17 +159,15 @@ export default function Fluence() {
 
   const kitRows = useMemo(() => (kits || []).filter(k => kitFilter === 'all' || kitState(k) === kitFilter), [kits, kitFilter]);
   const studioView = STUDIO_VIEW[tab] ?? null;
-  const groups = [
-    { label: 'Kits', items: [
-      { key: 'overview', label: 'Overview' }, { key: 'kits', label: 'Kits' }, { key: 'build', label: 'New kit' },
-      { key: 'drafts', label: drafts ? `Drafts · ${drafts}` : 'Drafts' },
-    ] },
-    { label: 'Masters', items: [
-      { key: 'inner', label: 'Inner products' }, { key: 'products', label: 'Fluence products' },
-      { key: 'customer', label: kpi.kitsUnlinked ? `Customer list · ${kpi.kitsUnlinked} to link` : 'Customer list' },
-    ] },
-    { label: 'Records', items: [{ key: 'changes', label: 'Change log' }, { key: 'settings', label: 'Export & settings' }] },
-  ];
+  // The studio runs while any of its tabs is ticked; it opens on the first of them.
+  const studioTabs = allowed.filter(k => STUDIO_VIEW[k]);
+  const tabLabel = t => t.key === 'drafts' && drafts ? `Drafts · ${drafts}`
+    : t.key === 'customer' && kpi.kitsUnlinked ? `Customer list · ${kpi.kitsUnlinked} to link`
+    : t.label;
+  const groups = GROUPS
+    .map(g => ({ label: g, items: FLUENCE_TABS.filter(t => t.group === g && has(t.key)).map(t => ({ key: t.key, label: tabLabel(t) })) }))
+    .filter(g => g.items.length);
+  const kpiCards = [has('customer'), has('inner')].filter(Boolean).length + 3;
 
   return (
     <div>
@@ -157,20 +175,29 @@ export default function Fluence() {
         title={<span className="inline-flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-700 text-white"><Pill size={16} /></span> Fluence</span>}
         subtitle="Kits, their prescriptions and cartons — Fluence Pharmaceuticals only. Sized and designed here, edited in one place, read live by every module." />
 
-      <GroupedTabs groups={groups} active={tab} onChange={setTab} />
+      {!allowed.length && (
+        <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          No Fluence tab is ticked for this login. Colour Impressions ticks the tabs a login may open in Masters → Users.
+        </p>
+      )}
 
-      {/* Kit Studio: always mounted once the page is open, shown on its tabs. */}
-      <KitStudioFrame view={studioView ?? undefined} hidden={!studioView}
-        onView={v => { const t = TAB_OF_VIEW[v]; if (t && t !== tab && STUDIO_VIEW[tab]) setTab(t); }}
-        onDrafts={setDrafts} />
+      {allowed.length > 0 && <GroupedTabs groups={groups} active={tab} onChange={setTab} />}
 
-      {!studioView && tab !== 'changes' && (
-        <KpiRow cols={5}>
+      {/* Kit Studio: always mounted once the page is open (while one of its tabs
+          is ticked), shown on its tabs. */}
+      {fresh && studioTabs.length > 0 && (
+        <KitStudioFrame view={studioView ?? undefined} startView={STUDIO_VIEW[studioTabs[0]]} hidden={!studioView}
+          onView={v => { const t = TAB_OF_VIEW[v]; if (t && t !== tab && STUDIO_VIEW[tab] && has(t)) setTab(t); }}
+          onDrafts={setDrafts} />
+      )}
+
+      {(tab === 'products' || tab === 'customer') && (
+        <KpiRow cols={kpiCards}>
           <KpiCard compact label="Fluence products" value={fmt.num(kpi.products)} sub={`${fmt.num(kpi.withKit)} with a kit${kpi.asPart ? ` · ${fmt.num(kpi.asPart)} parts` : ''}`} icon={Boxes} />
           <KpiCard compact label="Prescriptions" value={fmt.num(kpi.withRx + kpi.itemsOnly)} sub={`${fmt.num(kpi.products - kpi.withRx - kpi.itemsOnly)} blank · ${fmt.num(kpi.withRx)} with days`} icon={Pill} tone={kpi.withRx + kpi.itemsOnly ? 'good' : undefined} />
           <KpiCard compact label="Open orders, no Rx" value={fmt.num(kpi.openNoRx)} sub="products on live orders" icon={AlertTriangle} tone={kpi.openNoRx ? 'warn' : undefined} />
-          <KpiCard compact label="Customer kits not linked" value={fmt.num(kpi.kitsUnlinked)} sub={`${fmt.num(kpi.kitsSuggested)} with a suggestion`} icon={Link2} onClick={() => { setTab('customer'); setKitFilter('unlinked'); }} />
-          <KpiCard compact label="Carton sizes" value="Inner products" sub="sizes, codes and packaging" icon={Ruler} onClick={() => setTab('inner')} />
+          {has('customer') && <KpiCard compact label="Customer kits not linked" value={fmt.num(kpi.kitsUnlinked)} sub={`${fmt.num(kpi.kitsSuggested)} with a suggestion`} icon={Link2} onClick={() => { setTab('customer'); setKitFilter('unlinked'); }} />}
+          {has('inner') && <KpiCard compact label="Carton sizes" value="Inner products" sub="sizes, codes and packaging" icon={Ruler} onClick={() => setTab('inner')} />}
         </KpiRow>
       )}
 

@@ -77,10 +77,12 @@
   }
 
   // A refusal from the ERP, in the shape the studio already understands:
-  // `invalid_argument` = no edit rights, anything else = a message to show.
+  // `invalid_argument` = no edit rights at all (the role), anything else = a
+  // message to show. A refusal the studio explains itself (a tab not ticked, the
+  // Masters tick) is only that one thing refused — the rest stays editable.
   function studioError(err) {
     var e = new Error((err && err.message) || 'The ERP did not save that.');
-    if (err && err.status === 403) e.code = 'invalid_argument';
+    if (err && err.status === 403 && !err.refused) e.code = 'invalid_argument';
     e.status = err && err.status;
     return e;
   }
@@ -213,6 +215,11 @@
     canKeepProducts: function () { return !!me.can_keep_products; },
     // Has this login the Masters tick (a product's size is written there)?
     hasMasters: function () { return !!me.masters; },
+    // The Fluence tabs ticked for this login (Masters → Users): the studio views
+    // it opens (null until the ERP has answered = all) and, per area — kits,
+    // build, drafts, inner, settings — whether it may change things there.
+    views: function () { return Array.isArray(me.views) ? me.views.slice() : null; },
+    canArea: function (area) { return !me.can || !!me.can[area]; },
     // What the product-master dialog shows: next codes, likely products, and the
     // print spec of the kits offered to copy from (product ids).
     erpOptions: function (id, refs) {

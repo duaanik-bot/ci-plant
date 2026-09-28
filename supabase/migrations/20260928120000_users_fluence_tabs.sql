@@ -1,0 +1,16 @@
+-- The Fluence module's tabs, per login — Masters → Users ticks which of them a
+-- login may open, as it ticks Live Floor's stations.
+--
+--   users.fluence_tabs  JSON array of tab keys — overview, kits, build, drafts,
+--                       inner, products, customer, changes, settings
+--                       (client/src/modules.js FLUENCE_TABS) — or NULL for every
+--                       tab, which is what every existing login keeps.
+--
+-- The API holds a login to its ticks too (server/src/access.js): what only an
+-- unticked tab reads or changes is refused.
+--
+-- Additive only: one nullable column, no default, no table rewrite. Mirrored in
+-- server/src/db.js init() next to users.landing_path, and so in the baseline.
+-- APPLIED to colour-impressions-prod 2026-09-28 as the named migration
+-- `users_fluence_tabs`, before the code that reads it was deployed.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fluence_tabs JSONB;

@@ -387,7 +387,7 @@ test('an existing kit\'s contents are edited with its prescription, not in the s
   const html = read('client/public/kit-studio-app/index.html');
   // The drawer of a kit in the Fluence master reads its contents and hands over.
   assert.match(html, /d\.erp&&d\.erp\.kitId\?kitContentsCard\(d,ro\):/);
-  assert.match(html, /X\.openKitEditor\(D\.d\.erp\.kitId,\{edit:S\.canEdit\}\)/);
+  assert.match(html, /X\.openKitEditor\(D\.d\.erp\.kitId,\{edit:can\('kits'\)\}\)/, 'opened to edit only where the Kits tab is ticked');
   // Removing a carton would take an item out: not on such a kit.
   const rm = html.slice(html.indexOf('function removeSel(ctx){'), html.indexOf('function swapCols('));
   assert.match(rm, /^function removeSel\(ctx\)\{\n\s+if\(contentsLocked\(ctx\)\)\{ toast\(/);

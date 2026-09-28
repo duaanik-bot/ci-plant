@@ -3,8 +3,9 @@
 // actually known; the form never fills a guess.
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { api } from '../../api.js';
+import { api, auth } from '../../api.js';
 import { Button, Modal } from '../ui.jsx';
+import { canOpenFluenceTab, canPlan } from '../../modules.js';
 import { DOSE_FORMS, normaliseDims } from '../../lib/fluence.js';
 
 const box = 'h-9 w-full rounded-xl border border-[#1D1D1F]/[0.12] bg-white/85 px-2.5 text-sm font-medium text-[#1D1D1F] outline-none transition focus:border-[#0A84FF] focus:ring-2 focus:ring-[#0A84FF]/20';
@@ -31,6 +32,9 @@ export default function InnerProductForm({ open, item, onClose, onSaved }) {
 
   const set = (k, val) => setForm(f => ({ ...f, [k]: val }));
   const id = item?.inner_product_id ?? item?.id ?? null;
+  // The inner product master is kept from the Inner products tab: a Planning role
+  // with that tab ticked (Masters → Users). Anyone else reads it here.
+  const editable = canPlan(auth.user) && canOpenFluenceTab(auth.user, 'inner');
 
   const save = async () => {
     if (!String(form.name || '').trim()) { setError('The inner product needs a name.'); return; }
@@ -52,13 +56,14 @@ export default function InnerProductForm({ open, item, onClose, onSaved }) {
   return (
     <Modal open={open} onClose={onClose} layer="nested"
       title={id ? `Inner product — ${item?.name}` : 'New inner product'}
-      footer={<>
+      footer={editable ? <>
         <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button onClick={save} disabled={saving}>{saving && <Loader2 size={14} className="animate-spin" />} Save</Button>
-      </>}>
-      <div className="space-y-3">
+      </> : <Button variant="secondary" onClick={onClose}>Close</Button>}>
+      <fieldset disabled={!editable} className="min-w-0 space-y-3">
         <p className="rounded-xl bg-green-50 px-3 py-2 text-xs text-green-900">
-          Fluence inner product master. Changes apply to every kit that contains this item.
+          {editable ? 'Fluence inner product master. Changes apply to every kit that contains this item.'
+            : 'Fluence inner product master — view only. It is kept from the Inner products tab.'}
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="sm:col-span-2"><span className={lab}>Name *</span>
@@ -94,7 +99,7 @@ export default function InnerProductForm({ open, item, onClose, onSaved }) {
             <textarea rows={2} className={`${box} h-auto py-1.5`} value={form.remarks ?? ''} onChange={e => set('remarks', e.target.value)} /></label>
         </div>
         {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
-      </div>
+      </fieldset>
     </Modal>
   );
 }

@@ -6,7 +6,7 @@ import MasterHistory from '../components/MasterHistory.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
-import { MODULES, FLOOR_SECTIONS, isFluenceOnly } from '../modules.js';
+import { MODULES, FLOOR_SECTIONS, FLUENCE_TABS, FLUENCE_TAB_KEYS, isFluenceOnly } from '../modules.js';
 import { boardName, boardCode, takenCodesFor, identityOnSave } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
@@ -724,8 +724,12 @@ export default function Masters() {
           }
           if (k === 'modules') {
             if (r.role === 'admin') return <span className="text-xs font-semibold text-slate-500">All (admin)</span>;
-            if (r.modules == null) return <span className="text-xs font-semibold text-emerald-600">All modules</span>;
-            return <span className="text-xs font-semibold text-brand-700">{r.modules.length} of {MODULES.length} modules</span>;
+            // The Fluence tabs, when they are narrowed for this login.
+            const tabs = Array.isArray(r.fluence_tabs)
+              ? <span className="block text-[10px] font-semibold text-green-800">Fluence: {FLUENCE_TAB_KEYS.filter(t => r.fluence_tabs.includes(t)).length} of {FLUENCE_TABS.length} tabs</span>
+              : null;
+            if (r.modules == null) return <span className="text-xs font-semibold text-emerald-600">All modules{tabs}</span>;
+            return <span className="text-xs font-semibold text-brand-700">{r.modules.length} of {MODULES.length} modules{tabs}</span>;
           }
           if (k === 'customer_name' && cfg.endpoint === '/products') {
             if (!v) return <span className="text-gray-300">—</span>;
@@ -900,6 +904,7 @@ export default function Masters() {
     if (cfg.moduleAccess) {
       body.modules = Array.isArray(editing.modules) ? editing.modules : null;
       body.sections = Array.isArray(editing.sections) ? editing.sections : null;
+      body.fluence_tabs = Array.isArray(editing.fluence_tabs) ? editing.fluence_tabs : null;
       body.machine_ids = Array.isArray(editing.machine_ids) ? editing.machine_ids : null;
       body.landing_path = editing.landing_path || null;
       // Approval grants ride with the same save (0/1, like active).
@@ -1297,6 +1302,16 @@ export default function Masters() {
           const secCount = secRestricted ? editing.sections.length : FLOOR_SECTIONS.length;
           const printingOn = floorOn && secChecked('printing');
 
+          // Fluence tabs (the chips inside the Fluence module) — shown when Fluence is granted
+          const fluenceOn = modChecked('fluence') || (modRestricted && editing.modules.includes('kit_studio'));
+          const tabRestricted = Array.isArray(editing.fluence_tabs);
+          const tabChecked = k => !tabRestricted || editing.fluence_tabs.includes(k);
+          const toggleTab = k => setEditing(ed => {
+            const cur = Array.isArray(ed.fluence_tabs) ? ed.fluence_tabs : FLUENCE_TAB_KEYS;
+            return { ...ed, fluence_tabs: cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k] };
+          });
+          const tabCount = tabRestricted ? FLUENCE_TAB_KEYS.filter(k => editing.fluence_tabs.includes(k)).length : FLUENCE_TABS.length;
+
           // Presses — only meaningful when the Printing station is on
           const presses = (refs.machines || []).filter(m => m.type === 'printing' && (m.active == null || m.active));
           const mRestricted = Array.isArray(editing.machine_ids);
@@ -1317,7 +1332,7 @@ export default function Masters() {
           const applyTemplate = key => {
             const t = USER_TEMPLATES.find(x => x.key === key);
             if (!t) return;
-            setEditing(ed => ({ ...ed, role: t.role, modules: t.modules, sections: t.sections, machine_ids: t.machine_ids, landing_path: t.landing_path }));
+            setEditing(ed => ({ ...ed, role: t.role, modules: t.modules, sections: t.sections, fluence_tabs: t.fluence_tabs ?? null, machine_ids: t.machine_ids, landing_path: t.landing_path }));
           };
 
           const panel = 'rounded-2xl border border-slate-200 p-4';
@@ -1464,6 +1479,54 @@ export default function Masters() {
                       {secRestricted && secCount === 0 && (
                         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
                           No stations selected — this user will see an empty Live Floor.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Fluence tabs — the chips inside the Fluence module, shown when Fluence is granted */}
+                  {fluenceOn && (
+                    <div className={panel} data-fluence-tabs="1">
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Fluence Tabs</h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            {tabRestricted ? `${tabCount} of ${FLUENCE_TABS.length} tabs` : 'All tabs'}
+                          </span>
+                          {tabRestricted && (
+                            <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                              onClick={() => setEditing(ed => ({ ...ed, fluence_tabs: null }))}>
+                              All tabs
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mb-2 text-[11px] text-slate-500">
+                        The chips this login sees inside the Fluence module. An unticked tab is hidden, and what only it does is refused.
+                        The role still decides whether a ticked tab is view or edit.
+                      </p>
+                      <div className="space-y-2">
+                        {[...new Set(FLUENCE_TABS.map(t => t.group))].map(g => (
+                          <div key={g}>
+                            <div className="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{g}</div>
+                            <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                              {FLUENCE_TABS.filter(t => t.group === g).map(t => (
+                                <label key={t.key} className={chip(tabChecked(t.key)).replace('items-center', 'items-start')}>
+                                  <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                                    checked={tabChecked(t.key)} onChange={() => toggleTab(t.key)} data-fluence-tab={t.key} />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-semibold">{t.label}</span>
+                                    <span className="block text-[10px] text-slate-400">{t.hint}</span>
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {tabRestricted && tabCount === 0 && (
+                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                          No tabs selected — this login will open the Fluence module to an empty page.
                         </p>
                       )}
                     </div>

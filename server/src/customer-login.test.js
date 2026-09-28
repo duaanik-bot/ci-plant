@@ -75,6 +75,7 @@ test('the gate stands on every route after sign-in, and a switched-off login is 
 
 test('a customer\'s login signs every change with its ID', () => {
   assert.equal(signedName('Fluence Pharma', 'fluence01'), 'Fluence Pharma (ID fluence01)');
+  assert.equal(signedName('Fluence ', 'fluence01'), 'Fluence (ID fluence01)', 'a stray space in the name does not reach the signature');
   const access = read('server/src/access.js');
   assert.match(access, /if \(access\.outside\) \{\s*req\.user\.name = signedName\(u\.name, u\.email\);/);
 });

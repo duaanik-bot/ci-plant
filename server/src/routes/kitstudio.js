@@ -23,7 +23,8 @@ import { q, tx } from '../db.js';
 import { audit, lockDocNumber, nextProductCode, placeholderBoardId, productCodeTaken } from '../helpers.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import { keepRxInStep, tellManagement } from './fluence.js';
-import { needsMasters } from '../access.js';
+import { needsMasters, mayUseTab, tabRefusal } from '../access.js';
+import { FLUENCE_TABS } from '../../../client/src/modules.js';
 import {
   validId, nameKey, dimsOf, sizeText, parseSizeText, sameCarton, masterDimsFor,
   splitKit, splitProduct, splitDraft, splitSettings, kitDoc, productDoc,
@@ -104,12 +105,38 @@ function compose({ kits, fks, comps, prods, inners, drafts, settings }) {
   };
 }
 
+// Who is asking, and what the studio may offer them. The role decides whether
+// they edit at all; the Fluence tabs ticked for the login (Masters → Users)
+// decide which of the studio's views they open and where they may change
+// things — Kits changes a kit, New kit adds one, drafts are New kit's and
+// Drafts', Inner products their sizes, Export & settings the clearances.
+function studioMe(req) {
+  const edit = canEdit(req.user);
+  const tab = key => mayUseTab(req.access, key);
+  return {
+    name: req.user?.name ?? null,
+    can_edit: edit,
+    can_keep_products: keepsProducts(req),
+    masters: req.access?.masters === true,
+    views: FLUENCE_TABS.filter(t => t.view && tab(t.key)).map(t => t.view),
+    can: {
+      kits: edit && tab('kits'),
+      build: edit && tab('build'),
+      drafts: edit && (tab('build') || tab('drafts')),
+      inner: edit && tab('inner'),
+      settings: edit && tab('settings'),
+    },
+  };
+}
+// Drafts are the kits still being designed: a login sees them with New kit or Drafts ticked.
+const seesDrafts = req => mayUseTab(req.access, 'build') || mayUseTab(req.access, 'drafts');
+
 r.get('/kit-studio/state', async (req, res, next) => {
   try {
     const state = await loadState();
-    res.json({ ...state, me: { name: req.user?.name ?? null, can_edit: canEdit(req.user), can_keep_products: keepsProducts(req), masters: req.access?.masters === true } });
+    res.json({ ...state, drafts: seesDrafts(req) ? state.drafts : [], me: studioMe(req) });
   } catch (e) {
-    if (e?.code === MISSING_TABLE) return res.json({ kits: [], products: [], drafts: [], settings: null, me: { name: req.user?.name ?? null, can_edit: false, can_keep_products: false }, missing: true });
+    if (e?.code === MISSING_TABLE) return res.json({ kits: [], products: [], drafts: [], settings: null, me: { ...studioMe(req), can_edit: false, can_keep_products: false }, missing: true });
     next(e);
   }
 });
@@ -258,6 +285,9 @@ r.put('/kit-studio/kits/:id', canEditStudio, async (req, res, next) => {
       }
       let fk = fkId != null ? await oc(`${KIT_ROWS} WHERE fk.id = $1 FOR UPDATE OF fk`, [fkId]) : null;
       if (fkId != null && !fk) throw fail(409, 'This kit is no longer in the Fluence master — reload the page.');
+      // Adding a kit is New kit's; changing one on the list is Kits' (the tabs ticked for the login).
+      const tab = fk ? 'kits' : 'build';
+      if (!mayUseTab(req.access, tab)) throw fail(403, tabRefusal([tab]));
       if (fk && !cur) {
         const taken = await oc('SELECT id FROM kit_studio_kits WHERE fluence_kit_id = $1', [fk.id]);
         if (taken) throw fail(409, 'This Fluence kit is already open in the studio under another entry — reload the page.');

@@ -11,7 +11,7 @@ import {
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
 } from 'lucide-react';
-import { api, auth, fmt } from '../api.js';
+import { api, auth, currentUser, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
@@ -808,10 +808,7 @@ export default function AppLayout() {
   // Refresh the signed-in user on load — module-access changes made in
   // Masters → Users apply on the next page load, no re-login needed.
   useEffect(() => {
-    api.get('/auth/me').then(u => {
-      auth.set({ token: auth.token, user: u });
-      setUser(u);
-    }).catch(() => {});
+    currentUser().then(setUser).catch(() => {});
   }, []);
 
   const groups = NAV.map(g => ({

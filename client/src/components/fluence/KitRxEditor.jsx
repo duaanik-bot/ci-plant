@@ -16,7 +16,8 @@
 // colleague's save in the meantime is refused instead of overwritten.
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, CornerDownRight, Loader2, MoreHorizontal, PackageMinus, Pencil, Plus, RefreshCw, Trash2, Type } from 'lucide-react';
-import { api, fmt } from '../../api.js';
+import { api, auth, fmt } from '../../api.js';
+import { canOpenFluenceTab } from '../../modules.js';
 import { Button, SearchableSelect } from '../ui.jsx';
 import InnerProductForm from './InnerProductForm.jsx';
 import {
@@ -109,6 +110,8 @@ export default function KitRxEditor({ dossier, context, onCancel, onSaved, onDir
   const [creating, setCreating] = useState(false);
   const [itemForm, setItemForm] = useState(null);
   const [adder, setAdder] = useState(0);               // remounts the add-item search empty
+  // The inner product master (new items, an item's own details) is the Inner products tab's.
+  const keepsInner = canOpenFluenceTab(auth.user, 'inner');
 
   const loadInner = () => api.get('/fluence/inner-products').then(setInner).catch(e => setError(e.message));
   useEffect(() => { loadInner(); }, []);
@@ -399,7 +402,7 @@ export default function KitRxEditor({ dossier, context, onCancel, onSaved, onDir
                             </p>
                             <Button size="sm" variant="ghost" onClick={() => move(row, -1)} disabled={i === 0}><ArrowUp size={12} /> Up</Button>
                             <Button size="sm" variant="ghost" onClick={() => move(row, 1)} disabled={i === form.rows.length - 1}><ArrowDown size={12} /> Down</Button>
-                            {first && item && (
+                            {first && item && keepsInner && (
                               <Button size="sm" variant="ghost" onClick={() => setItemForm(item)} title="Carton size, codes, dosage form — for every kit that holds it">
                                 <Pencil size={12} /> Item details
                               </Button>
@@ -447,7 +450,7 @@ export default function KitRxEditor({ dossier, context, onCancel, onSaved, onDir
             <p className="flex h-10 items-center gap-2 text-xs text-[#86868B]"><Loader2 size={13} className="animate-spin" /> Loading the inner product master…</p>
           )}
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setCreating(true)}><Plus size={13} /> New inner product…</Button>
+        {keepsInner && <Button size="sm" variant="ghost" onClick={() => setCreating(true)}><Plus size={13} /> New inner product…</Button>}
         <Button size="sm" variant="ghost" onClick={addFreeLine} title="A line the card prints for something that is not an item in the box"><Type size={13} /> Line for something not in the kit</Button>
       </div>
 

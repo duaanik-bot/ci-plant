@@ -163,6 +163,25 @@ async function send(method, url, body) {
   return data;
 }
 
+// The signed-in user as the server has it now. Masters → Users changes a login's
+// ticks (modules, stations, Fluence tabs) while it is signed in, so the copy saved
+// at sign-in is only a first guess. Asked once per page load and sign-in: the app
+// shell asks on load, and a screen whose requests depend on the ticks waits for
+// the same answer instead of asking with the saved copy and being refused.
+let freshUser = null;
+export function currentUser() {
+  const token = auth.token;
+  if (!freshUser || freshUser.token !== token) {
+    const p = request('GET', '/auth/me').then(u => {
+      if (auth.token === token) auth.set({ token, user: u });
+      return u;
+    });
+    freshUser = { token, p };
+    p.catch(() => { if (freshUser?.p === p) freshUser = null; });
+  }
+  return freshUser.p;
+}
+
 export const api = {
   get: url => request('GET', url),
   post: (url, body) => request('POST', url, body),
