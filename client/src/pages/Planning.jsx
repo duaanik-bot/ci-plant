@@ -4370,6 +4370,20 @@ export default function Planning() {
               </p>
             )}
 
+            {/* AVS — decided here, per job, up top where it can't be missed. Off
+                by default. On: printing of this job can be completed only after
+                QA releases it in Artwork Verification. A gang or combined run
+                decides it once, in the Gang Engine. */}
+            {planLine.gang_run_id
+              ? (
+                <p className="flex items-center gap-2 rounded-2xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <ScanSearch size={18} className="shrink-0 text-slate-400" />
+                  <span><b className="text-slate-800">AVS check mandatory</b> — this job prints in a run with other orders, so AVS is switched on the run (Gang Engine).</span>
+                </p>
+              )
+              : <AvsSwitch value={planLine.avs_mandatory} lineId={planLine.id}
+                  onChanged={on => { setPlanLine(p => (p ? { ...p, avs_mandatory: on ? 1 : 0 } : p)); load(); }} />}
+
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)]">
               {/* ── LEFT: the plan the operator edits ── */}
               <div className="min-w-0 space-y-4">
@@ -4740,15 +4754,6 @@ export default function Planning() {
                   </Field>
                 </Card>
 
-                {/* AVS — decided here, per job. On: printing of this job can be
-                    completed only after QA releases it in Artwork Verification.
-                    A gang or combined run decides it once, in the Gang Engine. */}
-                <Card icon={ScanSearch} title="AVS check" sub="before printing can be completed">
-                  {planLine.gang_run_id
-                    ? <p className="text-xs text-slate-500">This job prints in a run with other orders, so AVS is switched on the run (Gang Engine).</p>
-                    : <AvsSwitch value={planLine.avs_mandatory} lineId={planLine.id}
-                        onChanged={on => { setPlanLine(p => (p ? { ...p, avs_mandatory: on ? 1 : 0 } : p)); load(); }} />}
-                </Card>
               </div>
 
               {/* ── RIGHT: warehouse intelligence ── */}

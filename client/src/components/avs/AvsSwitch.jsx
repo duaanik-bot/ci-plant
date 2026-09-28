@@ -6,7 +6,7 @@
 // switches its own lock off. Switching it off once printing has started needs a
 // reason: the server answers AVS_REASON_REQUIRED, this asks for the reason and
 // sends the switch again with it.
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ScanSearch } from 'lucide-react';
 import { api, auth } from '../../api.js';
 import { Button, Modal, useToast } from '../ui.jsx';
@@ -30,6 +30,7 @@ export default function AvsSwitch({ value, lineId, runId, jobCardId, onChanged, 
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(null);
   const [reason, setReason] = useState('');
+  const switchId = useId();
   const on = !!value && +value !== 0;
   const editable = canSwitchAvs(auth.user) && !disabled;
   const target = lineId ? { line_id: lineId } : runId ? { gang_run_id: runId } : { job_card_id: jobCardId };
@@ -49,25 +50,42 @@ export default function AvsSwitch({ value, lineId, runId, jobCardId, onChanged, 
     } finally { setBusy(false); }
   };
 
-  const seg = active => `flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${active}`;
+  // One large on/off switch, so Planning sees at a glance whether this job
+  // waits for QA's AVS release. Off (grey) by default; on turns it violet.
+  const help = note || (on
+    ? 'Printing can be completed only after QA releases this job in Artwork Verification.'
+    : 'Off: printing completes without an AVS release. Switch on to make the AVS check mandatory.');
   return (
     <div>
-      <div className="flex rounded-xl bg-slate-100 p-1 text-[11px] font-semibold">
-        <button type="button" disabled={!editable || busy} onClick={() => on && send(false)}
-          className={seg(!on ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
-          AVS not needed
-        </button>
-        <button type="button" disabled={!editable || busy} onClick={() => !on && send(true)}
-          className={seg(on ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
-          <span className="inline-flex items-center gap-1"><ScanSearch size={12} /> AVS mandatory</span>
-        </button>
+      <div className={`flex items-center gap-4 rounded-2xl border-2 px-4 py-3 transition-colors ${on
+        ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
+        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${on
+          ? 'bg-violet-600 text-white' : 'bg-white text-slate-400 ring-1 ring-slate-200'}`}>
+          <ScanSearch size={22} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div id={`${switchId}-label`} className="text-base font-bold text-slate-900">AVS check mandatory</div>
+          <p className={`mt-0.5 text-xs ${on ? 'text-violet-800' : 'text-slate-500'}`}>
+            {help}
+            {!canSwitchAvs(auth.user) && ' Planning decides this.'}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <button type="button" role="switch" aria-checked={on} aria-labelledby={`${switchId}-label`}
+            disabled={!editable || busy} onClick={() => send(!on)}
+            title={on ? 'Switch AVS off for this job' : 'Make the AVS check mandatory for this job'}
+            className={`relative inline-flex h-10 w-[76px] items-center rounded-full transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-60 ${on
+              ? 'bg-violet-600' : 'bg-slate-300'}`}>
+            <span className={`absolute text-[11px] font-extrabold tracking-wide ${on ? 'left-3 text-white' : 'right-3 text-slate-600'}`}>
+              {on ? 'ON' : 'OFF'}
+            </span>
+            <span className={`absolute top-1 h-8 w-8 rounded-full bg-white shadow-md transition-all ${on ? 'left-[40px]' : 'left-1'}`} />
+          </button>
+          <span className={`text-[10px] font-bold uppercase tracking-wide ${on ? 'text-violet-700' : 'text-slate-400'}`}>
+            {busy ? 'Saving…' : on ? 'Mandatory' : 'Not needed'}
+          </span>
+        </div>
       </div>
-      <p className="mt-1 text-[10px] text-slate-400">
-        {note || (on
-          ? 'Printing can be completed only after QA releases this job in Artwork Verification.'
-          : 'Printing completes without an AVS release.')}
-        {!canSwitchAvs(auth.user) && ' Planning decides this.'}
-      </p>
 
       <Modal open={!!asking} onClose={() => { if (!busy) { setAsking(null); setReason(''); } }}
         title="Switch AVS off for this job?"
