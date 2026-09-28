@@ -560,4 +560,101 @@ describe('the AVS printing lock — through the real app', {
       link.close();
     }
   });
+
+  // ── Google loses the Drive link's answer (seen on 28 Sep 2026) ─────────────
+  // Apps Script now and then bounces its answer back to /exec, which gives the
+  // link's GET page: the put ran and the photo is in Drive, but its id never
+  // came back. CI Plant tries again, taking the file the first try filed; when
+  // every answer is lost the photo is kept here — never recorded as filed
+  // without its Drive id.
+  test('an answer Google lost is tried again, and never recorded as a filed photo', async () => {
+    const http = await import('node:http');
+    const files = new Map();
+    const results = new Map();
+    const posts = [];
+    let lose = 1;
+    const drive = http.createServer((req, res) => {
+      const port = drive.address().port;
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => {
+          const j = JSON.parse(body);
+          posts.push(j);
+          const size = Buffer.from(j.base64 || '', 'base64').length;
+          const had = files.get(j.name);
+          let answer;
+          if (had && j.ifExists === 'reuse') {
+            answer = { ok: true, existed: true, id: had.id, name: j.name, size: had.size, url: `https://drive.test/${had.id}` };
+          } else if (had) {
+            answer = { ok: false, error: `A file with this name is already there: ${j.name}` };
+          } else {
+            const id = `g${files.size + 1}`;
+            files.set(j.name, { id, size });
+            answer = { ok: true, created: true, id, name: j.name, size, url: `https://drive.test/${id}`,
+              parent: { id: 'folder9', name: j.path.split('/').pop(), url: 'https://drive.test/folder9' } };
+          }
+          const key = String(results.size + 1);
+          results.set(key, answer);
+          res.writeHead(302, { Location: `http://127.0.0.1:${port}/echo?k=${key}` });
+          res.end();
+        });
+      } else if (req.url.startsWith('/echo')) {
+        if (lose > 0) {
+          lose -= 1;
+          res.writeHead(302, { Location: `http://127.0.0.1:${port}/exec` });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(results.get(new URL(req.url, 'http://x').searchParams.get('k'))));
+      } else {
+        // The link's GET page (doGet), where a bounced answer lands.
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, service: 'CI Plant AVS Drive link' }));
+      }
+    });
+    await new Promise(r => drive.listen(0, '127.0.0.1', r));
+    try {
+      await applyAvsPhotoSchema();
+      await setSettings({ drive_bridge_url: `http://127.0.0.1:${drive.address().port}/exec`, drive_bridge_secret: 'test-secret',
+        routine_fire_url: '', routine_token: '' });
+      const job = await printingJob();
+      const made = await call('production', 'POST', '/avs/uploads', { job_card_id: job.cardId });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      const photo = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 3000 }, (_, i) => (i * 13) % 256)]);
+      const send = async name => {
+        const fd = new FormData();
+        fd.append('file', new Blob([photo], { type: 'image/jpeg' }), name);
+        const res = await fetch(`${base}/avs/uploads/${made.body.id}/photos`, {
+          method: 'POST', headers: { authorization: `Bearer ${tokens.production}` }, body: fd });
+        return { status: res.status, body: await res.json() };
+      };
+
+      // The first answer is lost; the second try finds the photo the first one filed.
+      const up = await send('IMG_0100.JPG');
+      assert.equal(up.status, 201, JSON.stringify(up.body));
+      assert.equal(posts.length, 2);
+      assert.equal(posts[0].ifExists, undefined);
+      assert.equal(posts[1].ifExists, 'reuse');
+      assert.equal(files.size, 1, 'one file in Drive, not two');
+      assert.equal(up.body.last_photo.stored, 'drive');
+      const row = await db.one('SELECT drive_file_id, stored FROM avs.check_photos WHERE request_id = $1 AND seq = 1', [made.body.id]);
+      assert.equal(row.drive_file_id, 'g1');
+      assert.equal(row.stored, 'drive');
+
+      // Every answer lost: kept here, byte for byte, with the reason.
+      lose = 99;
+      const kept = await send('IMG_0101.JPG');
+      assert.equal(kept.status, 201, JSON.stringify(kept.body));
+      assert.equal(kept.body.last_photo.stored, 'ci_plant');
+      assert.equal(kept.body.last_photo.drive_error, 'Google lost the Drive link\'s answer on the way back', 'a short reason on the tile');
+      const row2 = await db.one(`SELECT p.drive_file_id, b.bytes FROM avs.check_photos p
+        JOIN avs.check_photo_bytes b ON b.photo_id = p.id WHERE p.request_id = $1 AND p.seq = 2`, [made.body.id]);
+      assert.equal(row2.drive_file_id, null);
+      assert.deepEqual(row2.bytes, photo);
+    } finally {
+      drive.close();
+    }
+  });
 });

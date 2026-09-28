@@ -29,6 +29,7 @@ import { optionalText } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsMandatorySql } from '../avs-gate.js';
+import { postDrive } from '../avs-drive.js';
 import {
   AVS_PHOTO_MAX_BYTES, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, photoProblem, setLabel, setupProblem,
 } from '../../../client/src/lib/avs.js';
@@ -88,46 +89,23 @@ const linked = cfg => ({
 });
 
 // ── The Drive link ───────────────────────────────────────────────────────────
-// One POST per call; Apps Script answers through a redirect, which fetch follows.
+// One POST per call (avs-drive.js: an answer Google lost on the way is never
+// taken as the answer, and the call is tried again while there is time).
 // The secret it checks is made by the link itself when CI Plant pairs with it
 // (pairDrive below), so nobody ever copies a secret by hand.
-export async function callDrive(cfg, payload, { timeoutMs = 25000 } = {}) {
+export async function callDrive(cfg, payload, opts = {}) {
   if (!cfg.drive_bridge_url || !cfg.drive_bridge_secret) {
     throw fail(503, 'The Google Drive link for AVS is not set up yet. An admin sets it up in Artwork Verification → Setup.');
   }
-  return postDrive(cfg.drive_bridge_url, { secret: cfg.drive_bridge_secret, ...payload }, { timeoutMs });
-}
-
-async function postDrive(url, body, { timeoutMs = 25000 } = {}) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body),
-      redirect: 'follow',
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      throw fail(502, 'Google Drive did not answer as expected. Check the Drive link is deployed as a Web app with access "Anyone".');
-    }
-    if (!data.ok) throw fail(502, `Google Drive refused: ${data.error || 'no reason given'}`);
-    return data;
-  } catch (e) {
-    if (e.name === 'AbortError') throw fail(504, 'Google Drive took too long to answer. Try again.');
-    throw e;
-  } finally { clearTimeout(timer); }
+  return postDrive(cfg.drive_bridge_url, { secret: cfg.drive_bridge_secret, ...payload }, opts);
 }
 
 // Pair with a freshly deployed link: its first "pair" answer carries the secret
-// it made, and it refuses to pair again.
+// it made, and it refuses to pair again (so pairing is never tried twice).
 async function pairDrive(url, user) {
   let out;
   try {
-    out = await postDrive(url, { op: 'pair' });
+    out = await postDrive(url, { op: 'pair' }, { tries: 1 });
   } catch (e) {
     if (/Already paired/.test(e.message)) {
       throw fail(409, 'This Drive link is already paired with something else. In Apps Script: Project Settings > Script Properties > '
@@ -340,13 +318,19 @@ r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) =
     const cfg = await settings();
 
     // Google Drive when the Drive link is set up. Otherwise — or when Drive
-    // refuses — CI Plant keeps the photo until the AVS check files it in Drive.
+    // refuses, or its answer is lost — CI Plant keeps the photo until the AVS
+    // check files it in Drive. A second try (the first answer lost on the way)
+    // takes the file the first one may have filed, only when it is this photo
+    // by its size; a Drive file is recorded only with its id.
     let put = null;
     let driveError = null;
     if (linked(cfg).drive) {
       try {
-        put = await callDrive(cfg, { op: 'put', path: folder, name, mime, base64: file.buffer.toString('base64') });
-      } catch (e) { driveError = e.message; }
+        put = await callDrive(cfg, { op: 'put', path: folder, name, mime, base64: file.buffer.toString('base64') },
+          { again: { ifExists: 'reuse' } });
+        if (!put?.id) { driveError = 'Google Drive gave no file id'; put = null; }
+        else if (Number(put.size) !== file.size) { driveError = `Google Drive already has a different file named ${name}`; put = null; }
+      } catch (e) { driveError = e.reason || e.message; }
     }
     if (!put) {
       const kept = await one(`SELECT COALESCE(sum(size_bytes), 0)::bigint AS n FROM avs.check_photos WHERE stored = 'ci_plant'`);
@@ -481,12 +465,29 @@ r.post('/avs/setup/pair-drive', isAdmin, async (req, res, next) => {
 });
 
 // A new secret, made by the link itself and saved here; nothing to paste.
+// Tried once: a second try would carry the secret the first one replaced.
 r.post('/avs/setup/new-secret', isAdmin, async (req, res, next) => {
   try {
-    const out = await callDrive(await settings(), { op: 'rotate' });
-    if (!/^[0-9a-f]{32,128}$/.test(String(out.secret || ''))) throw fail(502, 'Google Drive sent no usable secret.');
-    await saveSetting('drive_bridge_secret', out.secret, `rotated by ${req.user.name || 'admin'} ${new Date().toISOString()}`);
-    res.json({ ok: true });
+    const cfg = await settings();
+    let out = null;
+    let problem = null;
+    try { out = await callDrive(cfg, { op: 'rotate' }, { tries: 1 }); } catch (e) { problem = e; }
+    if (/^[0-9a-f]{32,128}$/.test(String(out?.secret || ''))) {
+      await saveSetting('drive_bridge_secret', out.secret, `rotated by ${req.user.name || 'admin'} ${new Date().toISOString()}`);
+      return res.json({ ok: true });
+    }
+    // No new secret came back. If the link made one anyway (its answer lost on
+    // the way), the saved secret no longer opens it: a ping tells which.
+    let stillWorks = null;
+    try { await callDrive(cfg, { op: 'ping' }); stillWorks = true; } catch (e) { if (/Wrong secret/.test(e.message)) stillWorks = false; }
+    if (stillWorks === false) {
+      await saveSetting('drive_bridge_secret', '', `new secret lost on the way ${new Date().toISOString()}`);
+      throw fail(502, 'The Drive link made a new secret, but Google lost its answer on the way. In Apps Script: Project Settings > '
+        + 'Script Properties > delete AVS_SECRET, then press Pair again here.');
+    }
+    const why = problem?.message || 'Google Drive sent no usable secret.';
+    throw fail(problem?.status || 502, stillWorks ? `${why} Nothing changed: the saved secret still works. Try again.`
+      : `${why} Press Test to see whether the Drive link still works.`);
   } catch (e) { next(e); }
 });
 
