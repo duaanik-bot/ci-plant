@@ -564,13 +564,21 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
             { key: 'packing', label: 'Packing',
               render: l => (
                 <span className="text-xs text-slate-500">
-                  {l.packed_total > 0
+                  {/* Completed from stock in Planning — no job card, no packing
+                      record; the boxes it ships are named under FG in Stock. */}
+                  {!l.job_card_id && +l.reserved_qty > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                      title="Filled from FG boxes in Planning — undo from Planning → From Stock until it is despatched">
+                      <Boxes size={12} /> From stock
+                    </span>
+                  ) : l.packed_total > 0
                     ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {fmt.num(l.packed_total)} pcs in {l.pack_boxes} boxes</span>
                     : l.pack_boxes
                       ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {l.pack_boxes} boxes{l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}</span>
                       : <span className="text-slate-300">—</span>}
                 </span>),
-              export: l => (l.packed_total > 0 ? `${fmt.num(l.packed_total)} pcs in ${l.pack_boxes} boxes`
+              export: l => (!l.job_card_id && +l.reserved_qty > 0 ? 'From stock'
+                : l.packed_total > 0 ? `${fmt.num(l.packed_total)} pcs in ${l.pack_boxes} boxes`
                 : l.pack_boxes ? `${l.pack_boxes} boxes${l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}` : '—') },
             { key: 'qty', label: 'Ordered', align: 'right', card: 'metric',
               render: l => <span className="tabular-nums">{fmt.num(l.qty)}</span>, export: l => fmt.num(l.qty) },

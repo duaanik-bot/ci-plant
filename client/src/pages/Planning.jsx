@@ -24,6 +24,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
+import StockFulfilled from '../components/StockFulfilled.jsx';
 import { OverIssueHint, useOverIssueGuard } from '../components/OverIssueAlarm.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
 import { gangShortView } from '../lib/gangShort.js';
@@ -316,6 +317,20 @@ function ReadinessCell({ readiness, light }) {
 // it in place rather than leaving the correction to a sentence further down the
 // card, which is how one card came to print two different numbers under the
 // word "free".
+// Use FG Stock's opening ticks: take boxes in the order offered until the
+// balance is covered, the last one only as far as it is needed; every other
+// box is offered unticked ("keep") at what the order could still take.
+function autoPicks(lots, balance) {
+  let need = Math.max(0, +balance || 0);
+  const picks = {};
+  for (const l of lots) {
+    const take = Math.min(l.remaining, need);
+    picks[l.id] = take > 0 ? { on: true, qty: String(take) } : { on: false, qty: String(Math.min(l.remaining, +balance || l.remaining)) };
+    need -= take;
+  }
+  return picks;
+}
+
 function Stat({ label, value, accent = 'text-slate-900', small, wrap, hint }) {
   return (
     <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2">
@@ -528,6 +543,8 @@ export default function Planning() {
   const [smartAll, setSmartAll] = useState(false);
   const [consumeLot, setConsumeLot] = useState(null); // { lot, qty } — confirm FG consumption
   const [fgUse, setFgUse] = useState(null);
+  const [fgConfirm, setFgConfirm] = useState(false); // "this completes your order" ask
+  const [fgBusy, setFgBusy] = useState(false);
   const [retiring, setRetiring] = useState(null);   // { lot, reason } armed retire in the Use FG dialog // "Use FG Stock" popup straight from the queue
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
   const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
@@ -3150,22 +3167,26 @@ export default function Planning() {
     try {
       const d = await api.get(`/order-lines/${l.id}/fg-match`);
       if (!d.lots.length) { toast.info('No verified FG stock matches this order right now'); return; }
-      const first = d.lots[0];
-      setFgUse({
-        ...d, lotId: first.id,
-        qty: String(Math.min(first.remaining, d.line.balance_to_produce)),
-        remarks: '',
-      });
+      setFgUse({ ...d, picks: autoPicks(d.lots, d.line.balance_to_produce), focusId: d.lots[0].id, remarks: '' });
     } catch (e) { toast.error(e.message || 'Could not load FG stock'); }
   };
+  // One call for both outcomes: the server reserves every ticked box in one
+  // transaction and, when they cover the balance, hands the order to Dispatch.
+  // Returns the promise so ConfirmDialog holds its buttons until it settles.
   const doFgUse = async () => {
-    const lot = fgUse.lots.find(l => l.id === fgUse.lotId);
-    const updated = await api.post(`/order-lines/${fgUse.line.id}/consume-fg`, {
-      lot_id: fgUse.lotId, qty: +fgUse.qty, remarks: fgUse.remarks || undefined,
-    });
-    toast.success(`${fmt.num(+fgUse.qty)} pcs consumed from ${lot.lot_number} — balance to produce ${fmt.num(Math.max(0, updated.qty - updated.fg_consumed_qty))}`);
-    setFgUse(null);
-    load();
+    const picks = fgUse.lots.filter(l => fgUse.picks[l.id]?.on).map(l => ({ lot_id: l.id, qty: +fgUse.picks[l.id].qty }));
+    setFgBusy(true);
+    try {
+      const r = await api.post(`/order-lines/${fgUse.line.id}/fulfil-from-stock`, { picks, remarks: fgUse.remarks || undefined });
+      const pcs = picks.reduce((s, p) => s + p.qty, 0);
+      if (r.completed) toast.success(`${fgUse.line.po_number} completed from stock — ${fmt.num(pcs)} pcs sent to Dispatch & Invoice`);
+      else toast.success(`${fmt.num(pcs)} pcs reserved from ${fmt.count(picks.length, 'box', 'boxes')} — balance to produce ${fmt.num(r.balance_to_produce)}`);
+      for (const w of r.warnings || []) toast.info(w);
+      setFgUse(null);
+      setFgConfirm(false);
+      load();
+    } catch (e) { if (!e.data) toast.error(e.message || 'Could not use the FG stock'); throw e; }
+    finally { setFgBusy(false); }
   };
 
   // Give the reserved FG back — the line's balance goes up again and the box
@@ -3346,7 +3367,10 @@ export default function Planning() {
         // of the whole list before that.
         { key: 'completed', label: 'Completed', count: (wantDone && doneReady) || !servedCounts ? completed.length : servedCounts.completed },
         { key: 'all', label: 'All', count: (wantDone && doneReady) || !servedCounts ? lines.length : servedCounts.all },
+        // Orders our FG boxes filled — sent straight to Dispatch, undoable here.
+        { key: 'from_stock', label: 'From Stock' },
       ]} />
+      {tab === 'from_stock' ? <StockFulfilled canUndo={canPlanRole} onChanged={load} /> : (<>
 
       {/* Set-type zones — the planner's triage of the tab above. One row of
           sub-chips, deliberately lighter than the tab rail: tabs are where a
@@ -4191,6 +4215,7 @@ export default function Planning() {
             { label: 'Parent sheets', value: fmt.num(flat.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0)) },
           ];
         }} />
+      </>)}
 
       {/* ── Planning Engine ── */}
       <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || lockShortConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt || overIssue.dialog) return; dismissEngine(); }}
@@ -5327,23 +5352,47 @@ export default function Planning() {
         )}
       </Modal>
 
-      {/* ── Use FG Stock (from the Planning Queue) ── */}
+      {/* ── Use FG Stock (from the Planning Queue) ──
+          A box picker: every matching FG box carries a tick — ticked = despatch
+          it against this order, unticked = keep it on the shelf. When the ticks
+          cover the whole balance the order needs no planning at all, and the
+          confirm hands it straight to Dispatch & Invoice (fulfil-from-stock). */}
       {(() => {
-        const lot = fgUse?.lots.find(l => l.id === fgUse.lotId);
         const bal = fgUse?.line.balance_to_produce ?? 0;
-        const maxConsume = lot ? Math.min(lot.remaining, bal) : 0;
-        const qtyNum = +fgUse?.qty || 0;
-        const valid = qtyNum > 0 && qtyNum <= maxConsume;
+        const picks = fgUse?.picks || {};
+        const ticked = (fgUse?.lots || []).filter(l => picks[l.id]?.on);
+        const qtyOf = l => +picks[l.id]?.qty || 0;
+        const total = ticked.reduce((s, l) => s + qtyOf(l), 0);
+        const badBox = ticked.find(l => !Number.isInteger(qtyOf(l)) || qtyOf(l) <= 0 || qtyOf(l) > l.remaining);
+        const over = total > bal;
+        const valid = ticked.length > 0 && !badBox && !over;
+        const completes = valid && total >= bal && bal > 0;
+        const lot = fgUse?.lots.find(l => l.id === fgUse.focusId) || fgUse?.lots[0];
         const RETIRE_REASONS = ['Obsolete artwork', 'Customer on hold', 'Quality under review', 'Held for a specific order'];
-const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork_code: 'Party Artwork Code', product_code: 'Product Code' };
+        const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork_code: 'Party Artwork Code', product_code: 'Product Code' };
         const MOVE_LABEL = { opening_stock: 'Opening Stock', production_receipt: 'Production Receipt', stock_consumption: 'Stock Consumption', excess_stock: 'Excess Stock', manual_adjustment: 'Manual Adjustment' };
+        const setPick = (id, patch) => setFgUse(f => ({ ...f, picks: { ...f.picks, [id]: { ...f.picks[id], ...patch } } }));
+        const toggleBox = l => {
+          if (picks[l.id]?.on) return setPick(l.id, { on: false });
+          // Ticking a box offers what is still needed after the other ticks.
+          const others = ticked.filter(t => t.id !== l.id).reduce((s, t) => s + qtyOf(t), 0);
+          const need = Math.max(0, bal - others);
+          return setPick(l.id, { on: true, qty: String(Math.min(l.remaining, need || l.remaining)) });
+        };
         return (
-          <Modal wide open={!!fgUse} onClose={() => setFgUse(null)} title="Use FG Stock"
+          <>
+          <Modal wide open={!!fgUse} onClose={() => { if (!fgBusy) setFgUse(null); }} title="Use FG Stock"
             footer={<>
-              <Button variant="secondary" onClick={() => setFgUse(null)}>Cancel</Button>
-              <Button variant="success" onClick={doFgUse} disabled={!valid}>
-                Consume {fmt.num(qtyNum)} pcs{lot ? ` from ${lot.lot_number}` : ''}
-              </Button>
+              <Button variant="secondary" onClick={() => setFgUse(null)} disabled={fgBusy}>Cancel</Button>
+              {completes ? (
+                <Button variant="success" onClick={() => setFgConfirm(true)} disabled={fgBusy}>
+                  <Truck size={14} /> Complete order from stock · {fmt.count(ticked.length, 'box', 'boxes')}
+                </Button>
+              ) : (
+                <Button variant="success" onClick={() => doFgUse().catch(() => {})} disabled={!valid || fgBusy}>
+                  Reserve {fmt.num(total)} pcs from {fmt.count(ticked.length, 'box', 'boxes')}
+                </Button>
+              )}
             </>}>
             {fgUse && lot && (
               <div className="space-y-4">
@@ -5367,36 +5416,59 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                   </p>
                 )}
 
-                {/* Stock reference picker — one row per matching FG lot */}
+                {/* Box picker — one row per matching FG box: tick to despatch, untick to keep */}
                 <div>
-                  <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    FG Stock Reference{fgUse.lots.length > 1 ? ` — ${fgUse.lots.length} matches` : ''}
+                  <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      FG Boxes{fgUse.lots.length > 1 ? ` — ${fgUse.lots.length} match` : ''} · tick to despatch, untick to keep
+                    </span>
+                    <span className="flex gap-2 text-[11px] font-semibold">
+                      <button type="button" className="text-[#0A84FF] hover:underline"
+                        onClick={() => setFgUse(f => ({ ...f, picks: autoPicks(f.lots, bal) }))}>Fill the order</button>
+                      <button type="button" className="text-slate-500 hover:underline"
+                        onClick={() => setFgUse(f => ({ ...f, picks: Object.fromEntries(f.lots.map(l => [l.id, { ...f.picks[l.id], on: false }])) }))}>Keep all</button>
+                    </span>
                   </div>
                   <div className="space-y-1.5">
-                    {/* The row is a div, not a button — retire is its own control
-                        and a button cannot legally nest inside another. */}
-                    {fgUse.lots.map(l => (
-                      <div key={l.id} className="flex items-stretch gap-1.5">
-                        <button type="button"
-                          onClick={() => setFgUse(f => ({ ...f, lotId: l.id, qty: String(Math.min(l.remaining, bal)) }))}
-                          className={`flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs transition
-                            ${l.id === fgUse.lotId ? 'bg-[#0A84FF]/[0.08] ring-1 ring-[#0A84FF]/30' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                          <span className="font-bold text-slate-800">{l.lot_number}</span>
-                          {l.box_number && <span className="rounded bg-slate-200/70 px-1.5 py-px font-mono text-[10px] font-semibold text-slate-600">{l.box_number}</span>}
-                          {l.kind === 'leftover' && <span className="rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">leftover</span>}
-                          <span className="tabular-nums text-slate-500">{fmt.num(l.remaining)} pcs available</span>
-                          {l.source_batch && <span className="text-[10px] text-slate-400">batch {l.source_batch}</span>}
-                          <span className="ml-auto rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                            matched · {matchLabel[l.matched_by]}
-                          </span>
-                        </button>
-                        <button type="button" onClick={() => setRetiring({ lot: l, reason: '' })}
-                          title="Retire this stock — it stays in the warehouse but planning stops offering it"
-                          className="shrink-0 rounded-xl border border-slate-200 px-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700">
-                          retire
-                        </button>
-                      </div>
-                    ))}
+                    {fgUse.lots.map(l => {
+                      const on = !!picks[l.id]?.on;
+                      const q0 = qtyOf(l);
+                      const bad = on && (!Number.isInteger(q0) || q0 <= 0 || q0 > l.remaining);
+                      return (
+                        <div key={l.id} className={`flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs transition
+                          ${on ? 'bg-emerald-50 ring-1 ring-emerald-300' : 'bg-slate-50'}
+                          ${l.id === lot.id ? 'outline outline-1 outline-[#0A84FF]/30' : ''}`}>
+                          <input type="checkbox" className="h-4 w-4 shrink-0 accent-[#16a34a]" checked={on}
+                            aria-label={`Despatch ${l.box_number || l.lot_number}`} onChange={() => toggleBox(l)} />
+                          <button type="button" onClick={() => setFgUse(f => ({ ...f, focusId: l.id }))}
+                            className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left">
+                            <span className="font-bold text-slate-800">{l.lot_number}</span>
+                            {l.box_number && <span className="rounded bg-slate-200/70 px-1.5 py-px font-mono text-[10px] font-semibold text-slate-600">{l.box_number}</span>}
+                            {l.kind === 'leftover' && <span className="rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-700">leftover</span>}
+                            <span className="tabular-nums text-slate-500">{fmt.num(l.remaining)} pcs in box</span>
+                            {l.source_batch && <span className="text-[10px] text-slate-400">batch {l.source_batch}</span>}
+                            <span className="rounded-full bg-slate-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                              matched · {matchLabel[l.matched_by]}
+                            </span>
+                          </button>
+                          {on ? (
+                            <span className="flex items-center gap-1">
+                              <Input type="number" min="1" max={l.remaining} value={picks[l.id].qty}
+                                className={`!h-8 w-24 text-right tabular-nums ${bad ? '!border-red-400' : ''}`}
+                                onChange={e => setPick(l.id, { qty: e.target.value })} />
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">despatch</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">keep</span>
+                          )}
+                          <button type="button" onClick={() => setRetiring({ lot: l, reason: '' })}
+                            title="Retire this stock — it stays in the warehouse but planning stops offering it"
+                            className="shrink-0 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700">
+                            retire
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                   {retiring && (
                     <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5">
@@ -5425,37 +5497,39 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                   )}
                 </div>
 
-                {/* Consume + remarks */}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Quantity to Consume" required
-                    hint={`Max ${fmt.num(maxConsume)} — capped by ${lot.remaining <= bal ? 'stock' : 'order balance'}`}>
-                    <Input type="number" min="1" max={maxConsume} value={fgUse.qty}
-                      onChange={e => setFgUse({ ...fgUse, qty: e.target.value })} autoFocus />
-                  </Field>
-                  <Field label="Remarks">
-                    <Input value={fgUse.remarks} placeholder="Optional note recorded in the ledger"
-                      onChange={e => setFgUse({ ...fgUse, remarks: e.target.value })} />
-                  </Field>
-                </div>
-                {qtyNum > maxConsume && (
+                <Field label="Remarks">
+                  <Input value={fgUse.remarks} placeholder="Optional note recorded in the ledger and the audit trail"
+                    onChange={e => setFgUse({ ...fgUse, remarks: e.target.value })} />
+                </Field>
+                {badBox && (
                   <p className="text-[11px] font-semibold text-red-600">
-                    Cannot consume {fmt.num(qtyNum)} — only {fmt.num(maxConsume)} can be used against this order.
+                    {badBox.box_number || badBox.lot_number}: enter a whole quantity between 1 and {fmt.num(badBox.remaining)}.
+                  </p>
+                )}
+                {over && (
+                  <p className="text-[11px] font-semibold text-red-600">
+                    Ticked {fmt.num(total)} — only {fmt.num(bal)} are left to cover on this order. Lower a quantity or untick a box.
                   </p>
                 )}
 
                 {/* Live result */}
-                <div className="grid grid-cols-3 gap-2">
-                  <Stat label="FG Ref After" value={fmt.num(Math.max(0, lot.remaining - qtyNum))} accent="text-emerald-600" />
-                  <Stat label="FG Consumed (after)" value={fmt.num(fgUse.line.fg_consumed_qty + qtyNum)} accent="text-violet-600" />
-                  <Stat label="Remaining for Production" value={fmt.num(Math.max(0, bal - qtyNum))} accent="text-brand-600" />
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Stat label="Boxes to Despatch" value={`${ticked.length} of ${fgUse.lots.length}`} accent="text-emerald-600" />
+                  <Stat label="Pcs from Stock" value={fmt.num(total)} accent="text-emerald-600" />
+                  <Stat label="FG Consumed (after)" value={fmt.num(fgUse.line.fg_consumed_qty + total)} accent="text-violet-600" />
+                  <Stat label="Remaining for Production" value={fmt.num(Math.max(0, bal - total))} accent="text-brand-600" />
                 </div>
-                {qtyNum >= bal && qtyNum > 0 && (
+                {completes ? (
                   <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
-                    This covers the full order balance — no production will be required for this line.
+                    These boxes complete the order — no planning or production is needed. It goes straight to Dispatch &amp; Invoice.
+                  </p>
+                ) : valid && (
+                  <p className="text-[11px] text-slate-400">
+                    Reserving keeps the order in planning — production makes only the remaining {fmt.num(Math.max(0, bal - total))}.
                   </p>
                 )}
 
-                {/* Movement trail for the selected reference */}
+                {/* Movement trail for the focused box */}
                 {fgUse.ledger.filter(m => m.ref_number === lot.lot_number).length > 0 && (
                   <div>
                     <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">Movement history — {lot.lot_number}</div>
@@ -5483,11 +5557,18 @@ const matchLabel = { internal_carton_code: 'Internal Carton Code', party_artwork
                   </div>
                 )}
                 <p className="text-[11px] text-slate-400">
-                  Consuming reserves this stock against the order: the reference balance drops now, production only makes the remainder, and every move is recorded in the FG Warehouse ledger.
+                  Ticked boxes are reserved against the order: each box's balance drops now and every move is recorded in the FG Warehouse ledger.
+                  An order completed from stock can be sent back from Planning → From Stock until it is despatched.
                 </p>
               </div>
             )}
           </Modal>
+          <ConfirmDialog open={fgConfirm} onClose={() => setFgConfirm(false)}
+            onConfirm={() => doFgUse()}
+            title="This completes your order"
+            confirmLabel="Push to Dispatch & Accounts"
+            message={fgUse ? `These ${fmt.count(ticked.length, 'box', 'boxes')} (${fmt.num(total)} pcs) complete ${fgUse.line.po_number} · ${fgUse.line.product_name}, so there is no need for further planning. It goes straight to Dispatch & Invoice — no job card, no production — and any board plan or holds on it are released. Every step stays in the audit trail, and you can undo it from Planning → From Stock until it is despatched.` : ''} />
+          </>
         );
       })()}
 

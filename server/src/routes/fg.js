@@ -4,8 +4,9 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, lockDocNumbers, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption } from '../helpers.js';
+import { audit, nextNumber, lockDocNumbers, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption, consumeFgLot, forceLineStatus, unbankPlanningLeftover } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { normalisePicks, fulfilBlock, completesOrder, undoBlock, STOCK_FULFIL_ACTION, STOCK_UNDO_ACTION } from '../stock-fulfil.js';
 
 const r = Router();
 const canStore = requireRole('planner', 'dispatch', 'production');
@@ -276,68 +277,156 @@ r.post('/order-lines/:id/consume-fg', canPlan, async (req, res, next) => {
       const jc = await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]);
       if (jc) throw Object.assign(new Error('A job card already exists for this line — adjust the job card instead'), { status: 409 });
 
-      const lot = await oc('SELECT * FROM fg_lots WHERE id=$1 FOR UPDATE', [lot_id]);
-      if (!lot) throw Object.assign(new Error('FG lot not found'), { status: 404 });
-      if (lot.status !== 'verified')
-        throw Object.assign(new Error('Lot must pass physical verification before consumption'), { status: 409 });
-      // The lot's finished good must match the line by the code hierarchy
-      // (Internal Carton Code → Party Artwork Code → Product Code).
-      const match = await oc(`
-        SELECT 1 FROM products p, products fp
-        WHERE p.id=$1 AND fp.id=$2 AND ${fgMatchPredicate()}`, [line.product_id, lot.product_id]);
-      if (!match)
-        throw Object.assign(new Error('Lot product does not match this order line'), { status: 409 });
-      const remaining = lot.qty - lot.consumed_qty;
-      if (+qty > remaining)
-        throw Object.assign(new Error(`Only ${remaining} pieces remain in ${lot.lot_number}`), { status: 409 });
-      const balance = netProduceQty(line);
-      if (+qty > balance)
-        throw Object.assign(new Error(`Only ${balance} pieces are left to cover on this line`), { status: 409 });
-
-      await qc('INSERT INTO fg_consumptions (fg_lot_id, order_line_id, qty, user_name, remarks) VALUES ($1,$2,$3,$4,$5)',
-        [lot.id, line.id, +qty, req.user.name, remarks || null]);
-      const newConsumed = lot.consumed_qty + +qty;
-      await qc(`UPDATE fg_lots SET consumed_qty=$1, status=CASE WHEN $1 >= qty THEN 'consumed' ELSE status END WHERE id=$2`,
-        [newConsumed, lot.id]);
-      // A leftover box is physical stock held OUT of loose fg_stock. Allocating
-      // it to an order returns that qty to fg_stock so the order can dispatch it.
-      if (lot.kind === 'leftover') await fgReceipt(lot.product_id, +qty, 'leftover_consume', lot.id, qc);
-      await qc('UPDATE order_lines SET fg_consumed_qty = fg_consumed_qty + $1 WHERE id=$2', [+qty, line.id]);
-
-      // FG Warehouse ledger — the reservation deducts from this stock reference.
-      const ord = await oc('SELECT order_id FROM order_lines WHERE id=$1', [line.id]);
-      const cust = await oc(`SELECT o.customer_id FROM orders o WHERE o.id=$1`, [ord?.order_id]);
-      await fgMove({
-        ref_number: lot.lot_number, fg_lot_id: lot.id, product_id: lot.product_id,
-        order_line_id: line.id, order_id: ord?.order_id, customer_id: cust?.customer_id,
-        qty_out: +qty, movement_type: 'stock_consumption', source_module: 'planning',
-        created_by: req.user.name, remarks: remarks || null,
-      }, qc, oc);
-
-      // Re-plan the material requirement on the reduced balance.
-      const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
-      if (fresh.sheets_required != null) {
-        const master = await oc('SELECT * FROM products WHERE id=$1', [fresh.product_id]);
-        const product = effectiveProduct(master, fresh);
-        const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
-        const sheets = sheetsRequired(product, netProduceQty(fresh));
-        const fit = childFit(board, product);
-        await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
-          [sheets, parentSheetsRequired(sheets, fit.count), fresh.id]);
-        // Same invariant as plan-save: a mix row's ups/covers are frozen
-        // against the cut plan that produced them. FG just reduced the board
-        // requirement out from under any such plan, so a frozen mix would
-        // balance against a number that no longer exists — clear it and make
-        // the planner rebuild it, rather than leaving a silent misbalance.
-        await clearMixPlan(line.id, qc, req.user.name,
-          `${qty} pcs consumed from ${lot.lot_number} — board requirement re-derived`);
-      }
-      await audit('order_line', line.id, 'fg_consume',
-        `${qty} pcs from ${lot.lot_number} — balance to produce ${netProduceQty({ ...line, fg_consumed_qty: (line.fg_consumed_qty || 0) + +qty })}`,
-        qc, req.user.name);
-      await audit('fg_lot', lot.id, 'consume', `${qty} pcs against order line ${line.id}`, qc, req.user.name);
+      // Every lot-side check, the reservation, the ledger row and the re-plan
+      // live in consumeFgLot — shared with Complete-from-Stock.
+      await consumeFgLot({ line, lotId: lot_id, qty: +qty, remarks }, qc, oc, req.user.name);
     });
     res.json(await one('SELECT * FROM order_lines WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// ── Complete from Stock ────────────────────────────────────────────────────
+// The planner ticks the FG boxes that fill an order. Every box is reserved
+// through consumeFgLot — the same steps as consume-fg — in ONE transaction.
+// When the ticks cover the whole balance the order needs no planning at all:
+// the plan is voided (board holds, unbought PRs, banked offcuts, mix) and the
+// line goes straight to 'produced', which is exactly what Ready to Dispatch
+// reads, so challan → invoice follow the normal Dispatch & Invoice path.
+// Fewer ticks than the balance is simply a multi-box consume; the line stays
+// in planning for the rest. Undo: POST /order-lines/:id/return-to-planning.
+r.post('/order-lines/:id/fulfil-from-stock', canPlan, async (req, res, next) => {
+  try {
+    const picks = normalisePicks(req.body.picks);
+    const remarks = String(req.body.remarks || '').trim() || null;
+    const user = req.user.name;
+    const out = await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
+      const jc = line ? await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]) : null;
+      const balanceBefore = line ? netProduceQty(line) : 0;
+      const block = fulfilBlock(line, { hasJobCard: !!jc, completing: completesOrder(balanceBefore, picks) });
+      if (block) throw Object.assign(new Error(block), { status: line ? 409 : 404 });
+      if (balanceBefore <= 0)
+        throw Object.assign(new Error('Nothing is left to make on this line'), { status: 409 });
+
+      const boxes = [];
+      for (const p of picks) {
+        const { lot } = await consumeFgLot({ line, lotId: p.lot_id, qty: p.qty, remarks }, qc, oc, user);
+        boxes.push(`${lot.box_number || lot.lot_number} × ${p.qty}`);
+      }
+      const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+      const balance = netProduceQty(fresh);
+      if (!completesOrder(balanceBefore, picks) || balance > 0)
+        return { completed: false, balance_to_produce: balance, warnings: [] };
+
+      // Nothing is being made, so nothing the plan claimed may stay claimed.
+      // The same unwinding rollbackLine does for a voided plan (its steps 3, 4
+      // and 6) — minus the FG release, which is the whole point here, and
+      // minus spec/artwork, which describe the carton, not the plan.
+      const warnings = [];
+      const freed = await qc(
+        `UPDATE board_allocations
+            SET status='released', released_by=$2, released_at=now(), release_reason=$3
+          WHERE order_line_id=$1 AND status='active' AND job_board_mix_id IS NULL
+          RETURNING material_id, qty, source`,
+        [line.id, user, 'order completed from FG stock — nothing to make']);
+      for (const a of freed)
+        await audit('materials', a.material_id, 'board_hold_released',
+          `${a.qty} sheets released from order line #${line.id} — completed from FG stock`, qc, user);
+      const prs = await qc(
+        'DELETE FROM requisitions WHERE order_line_id=$1 AND purchase_order_id IS NULL RETURNING id', [line.id]);
+      if (prs.length) await audit('order_line', line.id, 'pr_removed',
+        `${prs.length} requisition(s) not yet ordered removed — completed from FG stock`, qc, user);
+      const onPo = await oc(
+        'SELECT COUNT(*)::int AS n FROM requisitions WHERE order_line_id=$1 AND purchase_order_id IS NOT NULL', [line.id]);
+      if (onPo.n) warnings.push(`${onPo.n} requisition(s) on this line are already on a purchase order — cancel them in Procurement if the board is no longer wanted`);
+      await unbankPlanningLeftover(line.id, qc, oc, user, 'completed from FG stock');
+      await clearMixPlan(line.id, qc, user, 'completed from FG stock — nothing to make');
+      await qc(`UPDATE order_lines SET machine_id=NULL, planned_date=NULL, sheets_required=NULL,
+                  parent_sheets_required=NULL, wastage_sheets=NULL, leftover_plan=NULL
+                WHERE id=$1`, [line.id]);
+
+      // Straight to Dispatch. 'produced' is not a planning transition, so it is
+      // forced — and forcing is what writes the ':manual' audit row with why.
+      const why = `Completed from FG stock — ${boxes.join(', ')}${remarks ? ` · ${remarks}` : ''}`;
+      await forceLineStatus(line.id, 'produced', why, qc, oc, user);
+      await audit('order_line', line.id, STOCK_FULFIL_ACTION, why, qc, user);
+
+      // Ready to Dispatch shows a line only while its product has LOOSE stock.
+      // A box matched by carton/artwork code but booked under another product
+      // lands in that product's pool — say so rather than let the line vanish.
+      const loose = await oc('SELECT COALESCE(qty,0)::int AS n FROM fg_stock WHERE product_id=$1', [line.product_id]);
+      const owed = Math.max(0, line.qty - (+line.dispatched_qty || 0));
+      if ((loose?.n ?? 0) < owed)
+        warnings.push(`Only ${loose?.n ?? 0} pcs of this product are loose in FG against ${owed} owed — check the boxes' product in the FG store before despatch`);
+      return { completed: true, balance_to_produce: 0, warnings };
+    });
+    res.json({ ok: true, ...out, line: await one('SELECT * FROM order_lines WHERE id=$1', [req.params.id]) });
+  } catch (e) { next(e); }
+});
+
+// Undo a Complete-from-Stock: the line leaves Dispatch and goes back to To
+// Plan. `release` lists the reservations (fg_consumptions ids) to hand back to
+// the shelf; any not listed stay booked to the line, so the planner can amend
+// the quantities rather than start over. Refused once anything has despatched.
+r.post('/order-lines/:id/return-to-planning', canPlan, async (req, res, next) => {
+  try {
+    const release = Array.isArray(req.body.release) ? [...new Set(req.body.release.map(Number).filter(Boolean))] : [];
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to send this order back to planning' });
+    const user = req.user.name;
+    const out = await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
+      const jc = line ? await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]) : null;
+      const marked = line ? await oc(
+        `SELECT 1 FROM audit_log WHERE entity='order_line' AND entity_id=$1 AND action=$2 LIMIT 1`,
+        [line.id, STOCK_FULFIL_ACTION]) : null;
+      const block = undoBlock(line, { hasJobCard: !!jc, reservedQty: +line?.fg_consumed_qty || 0, markedFromStock: !!marked });
+      if (block) throw Object.assign(new Error(block), { status: line ? 409 : 404 });
+
+      await forceLineStatus(line.id, 'pending', `Back to planning from Dispatch — ${reason}`, qc, oc, user);
+      let released = 0;
+      for (const id of release) {
+        const r0 = await releaseFgConsumption({ lineId: line.id, consumptionId: id }, qc, oc, user);
+        released += r0.released;
+      }
+      const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+      await audit('order_line', line.id, STOCK_UNDO_ACTION,
+        `${reason} — ${released} pcs released to stock, ${fresh.fg_consumed_qty} pcs still reserved · balance to produce ${netProduceQty(fresh)}`,
+        qc, user);
+      return { released, kept: fresh.fg_consumed_qty, balance_to_produce: netProduceQty(fresh) };
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) { next(e); }
+});
+
+// Planning → From Stock: every order line completed from stock, newest first,
+// with the boxes booked to it and who sent it. Read off the audit marker, so a
+// produced line from a job card or a shortage close can never appear here.
+r.get('/planning/from-stock', async (_req, res, next) => {
+  try {
+    res.json(await q(`
+      WITH marked AS (
+        SELECT entity_id AS line_id, MAX(id) AS audit_id FROM audit_log
+        WHERE entity='order_line' AND action=$1 GROUP BY entity_id)
+      SELECT ol.id, ol.qty, ol.dispatched_qty, ol.fg_consumed_qty, ol.status, ol.order_id,
+             o.po_number, o.delivery_date, c.name AS customer_name,
+             p.code AS product_code, p.name AS product_name,
+             a.created_at AS fulfilled_at, a.user_name AS fulfilled_by, a.detail AS fulfil_detail,
+             COALESCE((SELECT json_agg(json_build_object(
+                        'id', fc.id, 'qty', fc.qty, 'lot_number', fl.lot_number, 'box_number', fl.box_number,
+                        'kind', fl.kind, 'remarks', fc.remarks) ORDER BY fc.id)
+                       FROM fg_consumptions fc JOIN fg_lots fl ON fl.id = fc.fg_lot_id
+                       WHERE fc.order_line_id = ol.id), '[]'::json) AS boxes
+      FROM marked m
+      JOIN audit_log a ON a.id = m.audit_id
+      JOIN order_lines ol ON ol.id = m.line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN products p ON p.id = ol.product_id
+      WHERE ol.status IN ('produced', 'dispatched')
+        AND NOT EXISTS (SELECT 1 FROM job_cards jc WHERE jc.order_line_id = ol.id)
+      ORDER BY a.id DESC
+      LIMIT 300`, [STOCK_FULFIL_ACTION]));
   } catch (e) { next(e); }
 });
 

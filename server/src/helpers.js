@@ -2424,6 +2424,77 @@ export async function releaseFgConsumption({ lineId, consumptionId }, qc, oc, us
   return { released, balance_to_produce: netProduceQty(fresh) };
 }
 
+// Reserve `qty` pieces of one verified FG lot against an order line — the body
+// of POST /order-lines/:id/consume-fg, lifted so Complete-from-Stock can take
+// several boxes in ONE transaction through the very same steps. The caller has
+// already locked the line (FOR UPDATE) and checked it is still in planning with
+// no job card; everything about the LOT is checked here. Pass the line as the
+// caller read it — its fg_consumed_qty is re-read below, never trusted.
+export async function consumeFgLot({ line, lotId, qty, remarks = null }, qc, oc, user) {
+  qty = +qty;
+  const lot = await oc('SELECT * FROM fg_lots WHERE id=$1 FOR UPDATE', [lotId]);
+  if (!lot) throw Object.assign(new Error('FG lot not found'), { status: 404 });
+  if (lot.status !== 'verified')
+    throw Object.assign(new Error('Lot must pass physical verification before consumption'), { status: 409 });
+  // The lot's finished good must match the line by the code hierarchy
+  // (Internal Carton Code → Party Artwork Code → Product Code).
+  const match = await oc(`
+    SELECT 1 FROM products p, products fp
+    WHERE p.id=$1 AND fp.id=$2 AND ${fgMatchPredicate()}`, [line.product_id, lot.product_id]);
+  if (!match)
+    throw Object.assign(new Error('Lot product does not match this order line'), { status: 409 });
+  const remaining = lot.qty - lot.consumed_qty;
+  if (qty > remaining)
+    throw Object.assign(new Error(`Only ${remaining} pieces remain in ${lot.lot_number}`), { status: 409 });
+  const cur = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+  const balance = netProduceQty(cur);
+  if (qty > balance)
+    throw Object.assign(new Error(`Only ${balance} pieces are left to cover on this line`), { status: 409 });
+
+  await qc('INSERT INTO fg_consumptions (fg_lot_id, order_line_id, qty, user_name, remarks) VALUES ($1,$2,$3,$4,$5)',
+    [lot.id, cur.id, qty, user, remarks || null]);
+  const newConsumed = lot.consumed_qty + qty;
+  await qc(`UPDATE fg_lots SET consumed_qty=$1, status=CASE WHEN $1 >= qty THEN 'consumed' ELSE status END WHERE id=$2`,
+    [newConsumed, lot.id]);
+  // A leftover box is physical stock held OUT of loose fg_stock. Allocating
+  // it to an order returns that qty to fg_stock so the order can dispatch it.
+  if (lot.kind === 'leftover') await fgReceipt(lot.product_id, qty, 'leftover_consume', lot.id, qc);
+  await qc('UPDATE order_lines SET fg_consumed_qty = fg_consumed_qty + $1 WHERE id=$2', [qty, cur.id]);
+
+  // FG Warehouse ledger — the reservation deducts from this stock reference.
+  const cust = await oc(`SELECT o.customer_id FROM orders o WHERE o.id=$1`, [cur.order_id]);
+  await fgMove({
+    ref_number: lot.lot_number, fg_lot_id: lot.id, product_id: lot.product_id,
+    order_line_id: cur.id, order_id: cur.order_id, customer_id: cust?.customer_id,
+    qty_out: qty, movement_type: 'stock_consumption', source_module: 'planning',
+    created_by: user, remarks: remarks || null,
+  }, qc, oc);
+
+  // Re-plan the material requirement on the reduced balance.
+  const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [cur.id]);
+  if (fresh.sheets_required != null) {
+    const master = await oc('SELECT * FROM products WHERE id=$1', [fresh.product_id]);
+    const product = effectiveProduct(master, fresh);
+    const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
+    const sheets = sheetsRequired(product, netProduceQty(fresh));
+    const fit = childFit(board, product);
+    await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
+      [sheets, parentSheetsRequired(sheets, fit.count), fresh.id]);
+    // Same invariant as plan-save: a mix row's ups/covers are frozen
+    // against the cut plan that produced them. FG just reduced the board
+    // requirement out from under any such plan, so a frozen mix would
+    // balance against a number that no longer exists — clear it and make
+    // the planner rebuild it, rather than leaving a silent misbalance.
+    await clearMixPlan(cur.id, qc, user,
+      `${qty} pcs consumed from ${lot.lot_number} — board requirement re-derived`);
+  }
+  await audit('order_line', cur.id, 'fg_consume',
+    `${qty} pcs from ${lot.lot_number} — balance to produce ${netProduceQty(fresh)}`,
+    qc, user);
+  await audit('fg_lot', lot.id, 'consume', `${qty} pcs against order line ${cur.id}`, qc, user);
+  return { lot, fresh };
+}
+
 // Classify a coating/finish into the production stage it needs. Handles both
 // the legacy enum (aqueous/uv/matt_lam/gloss_lam) and the real finish labels
 // from the plant master (e.g. "Aqueous Varnish (Gloss)", "Full UV Coating",
