@@ -25,7 +25,7 @@
 // deletes one.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Camera, CheckCircle2, Download, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Undo2, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, Download, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Trash2, Undo2, XCircle } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -36,6 +36,7 @@ import {
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
 import AvsSets, { TotalTime } from '../components/avs/AvsSets.jsx';
 import AvsSetup from '../components/avs/AvsSetup.jsx';
+import { AuditTrail, CancelDialog, DeleteDialog } from '../components/avs/AvsStop.jsx';
 
 const RESULT_TONE = {
   REJECT: 'bg-red-50 text-red-700 ring-red-200',
@@ -137,6 +138,9 @@ export default function Avs() {
     report_no: r.report_no, jc_number: r.job_card, product: r.product_name || r.product, status: r.status,
     check_no: r.check_no ?? 1, label: reportLabel(r),
   } });
+  // Cancel a set (also while Claude checks it); delete a set or a report, and redo.
+  const [cancelling, setCancelling] = useState(null);
+  const [deleting, setDeleting] = useState(null); // { kind: 'set', set } | { kind: 'report', report }
   const open = no => setParams(p => { const n = new URLSearchParams(p); if (no) n.set('open', no); else n.delete('open'); return n; }, { replace: true });
 
   return (
@@ -166,7 +170,9 @@ export default function Avs() {
           onClick={() => kpi.toggle('decided')} active={kpi.is('decided')} />
       </div>
       <AvsSets data={uploads} onChanged={loadUploads} onOpenReport={no => open(no)}
-        onContinue={s => setUploading({ resume: s })} onSetup={() => setSetupOpen(true)} onRedo={redoFromSet} />
+        onContinue={s => setUploading({ resume: s })} onSetup={() => setSetupOpen(true)} onRedo={redoFromSet}
+        onCancel={s => setCancelling(s)} onDelete={s => setDeleting({ kind: 'set', set: s })}
+        onDeleteReport={report => setDeleting({ kind: 'report', report })} />
       <KpiFilterNotice filter={kpi} label={KPI_LABEL[kpi.key]} shown={filtered.length} total={searched.length} />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -260,7 +266,22 @@ export default function Avs() {
       )}
       {openNo && (
         <ReportModal no={openNo} onClose={() => open(null)} onSaved={load}
-          canRedo={!!uploads?.can_upload} onRedo={redoFromReport} refreshKey={uploads} />
+          canRedo={!!uploads?.can_upload} onRedo={redoFromReport} refreshKey={uploads}
+          canDelete={!!uploads?.can_delete} onDelete={report => { open(null); setDeleting({ kind: 'report', report }); }} />
+      )}
+      {cancelling && (
+        <CancelDialog set={cancelling} onClose={() => setCancelling(null)}
+          onDone={() => { setCancelling(null); loadUploads(); }} />
+      )}
+      {deleting && (
+        <DeleteDialog target={deleting} onClose={() => { setDeleting(null); loadUploads(); load(); }}
+          onDone={() => { loadUploads(); load(); }}
+          onRedo={fresh => setUploading({ resume: fresh })} />
+      )}
+      {uploads?.enabled && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-3">
+          <AuditTrail refreshKey={uploads} />
+        </div>
       )}
       <AvsUploadDialog open={!!uploading} resume={uploading?.resume || null} redo={uploading?.redo || null}
         onClose={() => { setUploading(null); loadUploads(); }} onDone={() => loadUploads()} />
@@ -269,7 +290,7 @@ export default function Avs() {
   );
 }
 
-function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey }) {
+function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey, canDelete = false, onDelete }) {
   const toast = useToast();
   const [detail, setDetail] = useState(null);
   const [err, setErr] = useState(null);
@@ -390,6 +411,16 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
           </section>
 
           <RedoAndTrail no={no} r={r} detail={detail} canRedo={canRedo} onRedo={onRedo} />
+
+          <section className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-3">
+            <div className="min-w-[14rem] flex-1"><AuditTrail reportNo={no} refreshKey={detail} /></div>
+            {canDelete && (
+              <Button size="sm" variant="secondary" repeatable onClick={() => onDelete?.(r)}
+                title="Delete this report and its whole verification (kept on record), and redo it if you like">
+                <span className="inline-flex items-center gap-1.5 text-red-700"><Trash2 size={14} /> Delete report / redo</span>
+              </Button>
+            )}
+          </section>
 
 
           <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">

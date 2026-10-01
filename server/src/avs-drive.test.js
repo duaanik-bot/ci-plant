@@ -83,10 +83,13 @@ test('pairing and a new secret are tried once: a second try would carry a secret
 
 test('an upload records a Drive file only with its id and this photo\'s size', () => {
   const src = readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8');
-  const route = src.slice(src.indexOf("r.post('/avs/uploads/:id/photos'"), src.indexOf("r.post('/avs/uploads/:id/verify'"));
+  // Every photo — uploaded, or carried over from a deleted check — goes through addPhoto.
+  const route = src.slice(src.indexOf('async function addPhoto('), src.indexOf("r.post('/avs/uploads/:id/verify'"));
   assert.match(route, /\{ again: \{ ifExists: 'reuse' \} \}/);
   assert.match(route, /if \(!put\?\.id\) \{ driveError = [^;]+; put = null; \}/);
-  assert.match(route, /else if \(Number\(put\.size\) !== file\.size\) \{ driveError = [^;]+; put = null; \}/);
+  assert.match(route, /else if \(Number\(put\.size\) !== size\) \{ driveError = [^;]+; put = null; \}/);
+  assert.match(route, /const size = buffer\.length;/);
+  assert.match(route, /await addPhoto\(set, \{ buffer: file\.buffer/, 'the upload route saves through it');
 });
 
 test('time runs out: the call stops, with no half answer', async () => {

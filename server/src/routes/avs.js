@@ -3,24 +3,29 @@
 // The carton checks run in Claude (Cowork): photos of a printed sheet are
 // compared with the approved artwork, the customer's PO and our order book, and
 // each report is written to the Supabase schema `avs` — its own schema, apart
-// from the plant tables in public. This router only READS those reports and
-// WRITES one thing: QA's final decision (Release / Keep on hold / Reject /
-// Artwork alert checked) into avs.decisions. The next check reads the decisions
-// straight from there.
+// from the plant tables in public. This router READS those reports and WRITES
+// QA's final decision (Release / Keep on hold / Reject / Artwork alert checked)
+// into avs.decisions — the next check reads the decisions straight from there —
+// and a report's deletion (avs.deleted_reports, with its sets marked deleted),
+// each with its line in the audit trail avs.audit_log. A deleted report is
+// never erased: it leaves avs.latest_reports, so the register and the printing
+// lock stop seeing it, and its number is void.
 //
 // The avs schema is created on the production database by migration, not by
 // init(): a local database without it answers every read with an empty,
 // switched-off module instead of a 500.
 import { Router } from 'express';
-import { q, one } from '../db.js';
+import { q, one, tx } from '../db.js';
 import { optionalText } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsGateForCard } from '../avs-gate.js';
 import {
   AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, DECISION_IN_FORCE_SQL, SEVERITY_SQL, canDecideAvs, caseState,
-  decisionProblem, decisionsInForce, pdfStamp, undoProblem,
+  decisionProblem, decisionsInForce, pdfStamp, reasonProblem, undoProblem,
 } from '../../../client/src/lib/avs.js';
-import { avsSettings, callDrive } from './avs-intake.js';
+import { avsSettings, callDrive, cancelSet, makeReplacement, readSets } from './avs-intake.js';
+import { avsAudit, avsAuditSoft } from '../avs-audit.js';
+import { requireRole } from '../auth.js';
 import { stampPdf } from '../avs-stamp.js';
 
 const r = Router();
@@ -100,7 +105,15 @@ r.get('/avs/reports/:no', async (req, res, next) => {
              print_headline, order_book_strip, ob_note, artwork_alerts, check_log, report_file,
              date_folder, product_folder, drive_url, checked_on, issued_at, master_file, note
         FROM avs.latest_reports WHERE report_no = $1`, [no]);
-    if (!report) throw fail(404, `${no} not found`);
+    if (!report) {
+      const gone = await one(`SELECT deleted_at, deleted_by, reason FROM avs.deleted_reports WHERE report_no = $1`, [no])
+        .catch(() => null);
+      if (gone) {
+        throw fail(410, `${no} was deleted by ${gone.deleted_by || 'someone'} on ${new Date(gone.deleted_at).toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata' })}: ${gone.reason}. See the audit trail.`);
+      }
+      throw fail(404, `${no} not found`);
+    }
     const [problems, history, decisions, closedRow, sets] = await Promise.all([
       q(`SELECT ref, result, title, detail, action, rows, ${SEVERITY_SQL('avs.problems')} AS severity FROM avs.problems WHERE report_id = $1
           ORDER BY CASE result WHEN 'REJECT' THEN 0 WHEN 'HOLD' THEN 1 WHEN 'VERIFY' THEN 2 ELSE 3 END,
@@ -174,6 +187,8 @@ r.post('/avs/reports/:no/decisions', async (req, res, next) => {
       RETURNING id, report_rev, check_no, decision, decided_by, decided_by_role, remark, decided_at, status_at_decision, source`,
       [no, report.report_rev, report.check_no, decision, req.user.name ?? null, req.user.id ?? null,
         req.user.role ?? null, remark ? remark.slice(0, AVS_REMARK_MAX) : null, report.status]);
+    await avsAuditSoft(q, { action: 'DECISION', reportNo: no, user: req.user, reason: remark,
+      details: { decision, decision_id: +saved.id, report_rev: report.report_rev, check_no: report.check_no, status: report.status } });
     res.status(201).json(saved);
   } catch (e) { next(e); }
 });
@@ -217,8 +232,96 @@ r.post('/avs/reports/:no/decisions/:id/undo', async (req, res, next) => {
       if (e?.code === '23505') throw fail(409, 'This decision was already undone. Reload the report.');
       throw e;
     }
+    await avsAuditSoft(q, { action: 'DECISION_UNDONE', reportNo: no, user: req.user, reason: remark,
+      details: { undone: target.decision, undone_id: +target.id, decision_id: +saved.id } });
     res.status(201).json(saved);
   } catch (e) { next(e); }
+});
+
+// ── Delete a report (and, if asked, start it again) ─────────────────────────
+// Anyone who may upload photos (owner's choice, 1 Oct 2026), with a reason.
+// The whole verification goes: every check of the report number and every
+// photo set behind it (a running redo is cancelled). Nothing is erased — the
+// rows, the PDF in Drive and QA's decisions stay on record, and the number is
+// void (avs.deleted_reports; the database refuses a new issue under it). A
+// report QA released is deleted only after the release is undone, so a
+// printing release never disappears by accident.
+// redo: a fresh set for the same job cards with the newest check's photos
+// carried over (the page carries them one by one), checked under a NEW number.
+const canDelete = requireRole('qc', 'production', 'planner');
+r.post('/avs/reports/:no/delete', canDelete, async (req, res, next) => {
+  try {
+    const no = req.params.no;
+    if (!AVS_REPORT_NO.test(no)) throw fail(400, 'Not an AVS report number');
+    const reason = optionalText(req.body?.reason);
+    const problem = reasonProblem(reason, 'Write why the report is deleted');
+    if (problem) throw fail(400, problem);
+    const redo = !!req.body?.redo;
+    const report = await one(`SELECT report_no, report_rev, check_no, status, product_name, product, customer, job_card,
+                                     headline, drive_url, issued_at FROM avs.latest_reports WHERE report_no = $1`, [no]);
+    if (!report) throw fail(404, `${no} not found (or already deleted)`);
+    const inForce = await one(`${LAST_DECISION.replace('ORDER BY dd.report_no', 'AND dd.report_no = $1 ORDER BY dd.report_no')}`, [no]);
+    if (inForce?.decision === 'RELEASE') {
+      throw fail(409, `QA released ${no} (${inForce.decided_by || '—'}). Undo the release first, then delete the report.`);
+    }
+    const out = await tx(async (qc, oc) => {
+      const sets = await qc(`SELECT * FROM avs.check_requests WHERE (report_no = $1 OR redo_report_no = $1) AND deleted_at IS NULL
+        ORDER BY id`, [no]);
+      const stopped = [];
+      for (const set of sets) {
+        const c = await cancelSet(qc, set, req.user, `Report ${no} deleted: ${reason}`);
+        if (c.length) stopped.push(+set.id);
+      }
+      const checks = await qc(`SELECT check_no, report_rev, status, issued_at FROM avs.reports WHERE report_no = $1 AND row_type = 'REPORT'
+        ORDER BY check_no, report_rev`, [no]);
+      try {
+        await qc(`INSERT INTO avs.deleted_reports (report_no, deleted_by, deleted_by_user_id, deleted_by_role, reason, snapshot)
+                  VALUES ($1, $2, $3, $4, $5, $6)`,
+        [no, req.user.name ?? null, req.user.id ?? null, req.user.role ?? null, reason.slice(0, AVS_REMARK_MAX),
+          JSON.stringify({ latest: report, decision_in_force: inForce || null, checks, sets: sets.map(x => +x.id) })]);
+      } catch (e) {
+        if (e?.code === '23505') throw fail(409, `${no} was already deleted. Reload the page.`);
+        throw e;
+      }
+      if (sets.length) {
+        await qc(`UPDATE avs.check_requests SET deleted_at = now(), deleted_by = $2, deleted_by_user_id = $3, delete_reason = $4,
+            updated_at = now() WHERE id = ANY($1) AND deleted_at IS NULL`,
+        [sets.map(x => x.id), req.user.name ?? null, req.user.id ?? null, `Report ${no} deleted: ${reason}`.slice(0, AVS_REMARK_MAX)]);
+      }
+      await avsAudit(qc, { action: 'REPORT_DELETED', reportNo: no, user: req.user, reason,
+        details: { status: report.status, check_no: report.check_no, report_rev: report.report_rev, product: report.product_name || report.product,
+          job_card: report.job_card, sets: sets.map(x => +x.id), stopped_while_running: stopped, drive_url: report.drive_url, redo } });
+      if (!redo) return null;
+      const from = [...sets].reverse().find(x => x.status === 'done') || sets[sets.length - 1] || null;
+      return makeReplacement(qc, { from, reportNo: no, report, user: req.user, reason });
+    });
+    const [replacement] = out ? await readSets({ id: out.id }) : [null];
+    res.json({ deleted: no, replacement, carry: out?.carry || [] });
+  } catch (e) { next(e); }
+});
+
+// ── The audit trail ─────────────────────────────────────────────────────────
+// Newest first: for one report, one set, or everything (limit up to 500).
+r.get('/avs/audit', async (req, res, next) => {
+  try {
+    const no = req.query.report_no ? String(req.query.report_no) : null;
+    if (no && !AVS_REPORT_NO.test(no)) throw fail(400, 'Not an AVS report number');
+    const setId = Number(req.query.set_id) > 0 ? Number(req.query.set_id) : null;
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    // A report's trail also takes in its sets' lines, and the redo that replaced it.
+    const rows = await q(`
+      SELECT a.id, a.at, a.action, a.report_no, a.set_id, a.actor, a.actor_role, a.reason, a.details
+        FROM avs.audit_log a
+       WHERE ($1::text IS NULL OR a.report_no = $1
+              OR a.set_id IN (SELECT id FROM avs.check_requests WHERE report_no = $1 OR redo_report_no = $1 OR replaces_report_no = $1))
+         AND ($2::bigint IS NULL OR a.set_id = $2)
+       ORDER BY a.at DESC, a.id DESC LIMIT $3`, [no, setId, limit]);
+    const deleted = no ? await one(`SELECT report_no, deleted_at, deleted_by, deleted_by_role, reason FROM avs.deleted_reports
+      WHERE report_no = $1`, [no]) : null;
+    res.json({ enabled: true, entries: rows, deleted });
+  } catch (e) {
+    offWhenMissing(res, next, { enabled: false, entries: [], deleted: null })(e);
+  }
 });
 
 // QA by role; everyone else by the AVS decision right (users.avs_approver),

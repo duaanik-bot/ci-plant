@@ -92,7 +92,8 @@ describe('the AVS printing lock — through the real app', {
         decided_by text, remark text, decided_at timestamptz NOT NULL DEFAULT now())`);
     for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql',
       '20260928180000_avs_redo_verification.sql', '20260928190000_avs_undo_and_job_cards.sql',
-      '20260928200000_avs_progress_log.sql', '20261001150000_avs_office_runner.sql']) {
+      '20260928200000_avs_progress_log.sql', '20261001150000_avs_office_runner.sql',
+      '20261001180000_avs_cancel_delete_audit.sql']) {
       await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
         .replace(/REVOKE ALL[^;]*;/g, ''));
     }
@@ -343,10 +344,13 @@ describe('the AVS printing lock — through the real app', {
       assert.equal(retry.body.fire.status, 'fired');
       assert.equal(got.fires.length, 3);
 
-      // Verify twice is refused; Cancel works only before Claude takes it.
+      // Verify twice is refused. Cancel works even after Claude took it (1 Oct 2026), always with a reason.
       assert.equal((await call('production', 'POST', `/avs/uploads/${made.body.id}/verify`)).status, 409);
       await db.q(`UPDATE avs.check_requests SET status='checking', claimed_at=now() WHERE id=$1`, [made.body.id]);
-      assert.equal((await call('production', 'POST', `/avs/uploads/${made.body.id}/cancel`)).status, 409);
+      assert.equal((await call('production', 'POST', `/avs/uploads/${made.body.id}/cancel`)).status, 400);
+      const stop = await call('production', 'POST', `/avs/uploads/${made.body.id}/cancel`, { reason: 'Started by mistake' });
+      assert.equal(stop.status, 200, JSON.stringify(stop.body));
+      assert.equal(stop.body.stopped_while_checking, true);
 
       const list = await call('production', 'GET', '/avs/uploads');
       assert.equal(list.status, 200);
@@ -378,6 +382,8 @@ describe('the AVS printing lock — through the real app', {
       await applyAvsPhotoSchema();
       // Nothing else in the queue for this test (put back at the end).
       const parked = await db.q(`SELECT id, status FROM avs.check_requests WHERE status IN ('queued', 'checking')`);
+      // Parked by hand, so the stop guard (a cancelled set takes no more writes) is off while parked.
+      await db.q('ALTER TABLE avs.check_requests DISABLE TRIGGER check_requests_a_stopped_guard');
       await db.q(`UPDATE avs.check_requests SET status = 'cancelled' WHERE id = ANY($1)`, [parked.map(x => x.id)]);
       const mine = [];
       await setSettings({
@@ -449,6 +455,7 @@ describe('the AVS printing lock — through the real app', {
       await setSettings({ local_runner_seen_at: '', robot_key: '' });
       await db.q('DELETE FROM avs.check_requests WHERE id = ANY($1)', [mine]);
       for (const x of parked) await db.q('UPDATE avs.check_requests SET status = $2 WHERE id = $1', [x.id, x.status]);
+      await db.q('ALTER TABLE avs.check_requests ENABLE TRIGGER check_requests_a_stopped_guard');
     } finally {
       routine.close();
     }
@@ -582,12 +589,15 @@ describe('the AVS printing lock — through the real app', {
     // The list the chips are drawn from: every set in progress, the newest
     // finished ones of each status, and counts of all of them.
     const all = await call('production', 'GET', '/avs/uploads');
-    assert.equal(all.body.counts.done, 2);
+    // (The set cancelled while checking in the Drive test stays cancelled: one done, not two.)
+    assert.equal(all.body.counts.done, 1);
+    assert.equal(all.body.counts.cancelled >= 1, true);
     assert.equal(all.body.counts.queued, 2);
     const newest = await call('production', 'GET', '/avs/uploads?per_status=1');
     assert.equal(newest.body.sets.filter(x => x.status === 'done').length, 1, 'only the newest finished set of each status');
     assert.equal(newest.body.sets.filter(x => x.status === 'queued').length, 2, 'every set still in progress');
-    assert.equal(newest.body.counts.done, 2, 'the chip still counts them all');
+    assert.equal(newest.body.counts.cancelled, all.body.counts.cancelled, 'the chip still counts them all');
+    assert.equal(newest.body.sets.filter(x => x.status === 'cancelled').length, 1);
   });
 
   // ── Setup: CI Plant pairs with the Drive link ──────────────────────────────
@@ -778,6 +788,7 @@ describe('the AVS printing lock — through the real app', {
     await db.q('ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS check_log jsonb');
     await db.q(`CREATE TABLE IF NOT EXISTS avs.problems (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_id bigint,
       ref text, result text, title text, detail text, action text, rows text)`);
+    await db.q('ALTER TABLE avs.problems ADD COLUMN IF NOT EXISTS severity text');
     await db.q(`CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
         WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC`);
     await db.q(`CREATE TABLE IF NOT EXISTS avs.decisions (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, report_no text NOT NULL,
@@ -918,5 +929,147 @@ describe('the AVS printing lock — through the real app', {
     await db.q(`UPDATE avs.check_requests SET note = 'x' WHERE id = $1`, [made.body.id]);
     const log = (await db.one('SELECT progress_log FROM avs.check_requests WHERE id = $1', [made.body.id])).progress_log;
     assert.deepEqual(log.map(x => x.p), ['Claude started', 'Reading the PO: 02512']);
+  });
+  test('cancel stops a running check; delete hides a set or a whole report; redo carries the photos; all in the audit trail', async () => {
+    await applyAvsPhotoSchema();
+    await setSettings({ drive_bridge_url: '', drive_bridge_secret: '', routine_fire_url: '', routine_token: '' });
+    for (const c of ['drive_file_id', 'drive_url', 'customer', 'headline', 'product']) {
+      await db.q(`ALTER TABLE avs.reports ADD COLUMN IF NOT EXISTS ${c} text`);
+    }
+    await db.q('ALTER TABLE avs.decisions ADD COLUMN IF NOT EXISTS decided_by_user_id integer');
+    await db.q(`CREATE OR REPLACE VIEW avs.latest_reports AS SELECT DISTINCT ON (report_no) * FROM avs.reports
+        WHERE row_type = 'REPORT' ORDER BY report_no, check_no DESC, report_rev DESC`);
+    await db.q(fs.readFileSync(new URL('../../supabase/migrations/20261001180000_avs_cancel_delete_audit.sql', import.meta.url), 'utf8')
+      .replace(/REVOKE ALL[^;]*;/g, ''));
+
+    const photoOf = n => Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 3000 + n }, (_, i) => (i * (n + 3)) % 256)]);
+    const addPhoto = async (setId, n) => {
+      const fd = new FormData();
+      fd.append('file', new Blob([photoOf(n)], { type: 'image/jpeg' }), `IMG_${n}.jpg`);
+      const res = await fetch(`${base}/avs/uploads/${setId}/photos`, {
+        method: 'POST', headers: { authorization: `Bearer ${tokens.production}` }, body: fd });
+      return { status: res.status, body: await res.json() };
+    };
+    const newSet = async (job, photos) => {
+      const made = await call('production', 'POST', '/avs/uploads', { job_card_id: job.cardId });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      for (const n of photos) assert.equal((await addPhoto(made.body.id, n)).status, 201);
+      return made.body.id;
+    };
+
+    // ── 1. Cancel while Claude is checking: the run's later writes are refused.
+    const job = await printingJob();
+    const s1 = await newSet(job, [1, 2]);
+    assert.equal((await call('production', 'POST', `/avs/uploads/${s1}/verify`, {})).status, 200);
+    await db.q(`UPDATE avs.check_requests SET status = 'checking', claimed_at = now(), progress = 'Reading the photos' WHERE id = $1`, [s1]);
+    let out = await call('production', 'POST', `/avs/uploads/${s1}/cancel`, {});
+    assert.equal(out.status, 400, 'a reason is required');
+    out = await call('production', 'POST', `/avs/uploads/${s1}/cancel`, { reason: 'Taking too long' });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal(out.body.status, 'cancelled');
+    assert.equal(out.body.stopped_while_checking, true);
+    assert.equal(out.body.cancel_reason, 'Taking too long');
+    assert.equal(out.body.cancelled_by, 'AVS production');
+    await assert.rejects(db.q(`UPDATE avs.check_requests SET progress = 'Reading the PO' WHERE id = $1`, [s1]), /AVS_CANCELLED/);
+    await assert.rejects(db.q(`UPDATE avs.check_photos SET filed_at = now() WHERE request_id = $1`, [s1]), /AVS_CANCELLED/);
+    // The run's final write — report and set in one statement list — is refused whole.
+    await assert.rejects(db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status, product_name, job_card)
+        VALUES ('AVS-2026-0971', 0, 1, 'PASS', 'Cancelled carton', '${job.jc}');
+      UPDATE avs.check_requests SET status = 'done', report_no = 'AVS-2026-0971', result = 'PASS', finished_at = now() WHERE id = ${s1};`),
+    /AVS_CANCELLED/);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM avs.reports WHERE report_no = 'AVS-2026-0971'`)).n, 0, 'no report appears');
+    assert.equal((await db.one('SELECT status FROM avs.check_requests WHERE id = $1', [s1])).status, 'cancelled');
+    out = await call('production', 'POST', `/avs/uploads/${s1}/cancel`, { reason: 'again' });
+    assert.equal(out.status, 409, 'cancelled once');
+    out = await call('qc', 'POST', `/avs/uploads/${s1}/retry`, {});
+    assert.equal(out.status, 409, 'a cancelled set is not sent again');
+
+    // ── 2. A failed check: deleted and redone with the same photos.
+    const s2 = await newSet(job, [3]);
+    await db.q(`UPDATE avs.check_requests SET status = 'failed', robot_note = 'Master not found' WHERE id = $1`, [s2]);
+    out = await call('production', 'POST', `/avs/uploads/${s2}/delete`, { reason: 'x' });
+    assert.equal(out.status, 400, 'a reason is required');
+    out = await call('production', 'POST', `/avs/uploads/${s2}/delete`, { reason: 'Check failed, redo it', redo: true });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.ok(out.body.deleted.deleted_at);
+    assert.equal(out.body.deleted.delete_reason, 'Check failed, redo it');
+    const r2 = out.body.replacement;
+    assert.equal(r2.status, 'uploading');
+    assert.equal(+r2.replaces_set_id, s2);
+    assert.equal(r2.jc_number, job.jc);
+    assert.equal(out.body.carry.length, 1);
+    let c = await call('production', 'POST', `/avs/uploads/${r2.id}/carry`, { photo_id: out.body.carry[0] });
+    assert.equal(c.status, 201, JSON.stringify(c.body));
+    assert.equal(c.body.photos.length, 1);
+    assert.equal(c.body.photos[0].stored, 'ci_plant');
+    c = await call('production', 'POST', `/avs/uploads/${r2.id}/carry`, { photo_id: out.body.carry[0] });
+    assert.equal(c.body.last_photo.already, true, 'carried once');
+    const [srcSha, newSha] = await Promise.all([
+      db.one('SELECT sha256 FROM avs.check_photos WHERE request_id = $1', [s2]),
+      db.one('SELECT sha256 FROM avs.check_photos WHERE request_id = $1', [r2.id])]);
+    assert.equal(newSha.sha256, srcSha.sha256, 'the same photo, byte for byte');
+    c = await call('production', 'POST', `/avs/uploads/${s1}/carry`, { photo_id: out.body.carry[0] });
+    assert.equal(c.status, 409, 'not into a cancelled set');
+    const plain = await newSet(job, []);
+    c = await call('production', 'POST', `/avs/uploads/${plain}/carry`, { photo_id: out.body.carry[0] });
+    assert.equal(c.status, 409, 'only into a set made to replace a deleted check');
+    assert.equal((await call('production', 'POST', `/avs/uploads/${plain}/delete`, { reason: 'Started by mistake' })).status, 200);
+    assert.equal((await addPhoto(r2.id, 9)).status, 201, 'more photos can be added');
+    out = await call('qc', 'POST', `/avs/uploads/${s2}/retry`, {});
+    assert.equal(out.status, 409, 'a deleted set is never sent again');
+    await assert.rejects(db.q(`UPDATE avs.check_requests SET status = 'checking' WHERE id = $1`, [s2]), /AVS_CANCELLED/);
+    const list = await call('production', 'GET', '/avs/uploads');
+    assert.ok(!list.body.sets.some(x => +x.id === s2), 'a deleted set leaves the list');
+    assert.ok(list.body.deleted.some(x => +x.id === s2), '…and is under Deleted');
+    assert.equal(list.body.counts.deleted, 2, 'the failed set and the empty one');
+    assert.equal(list.body.can_delete, true);
+
+    // ── 3. A whole report: refused while released, then deleted and redone.
+    const s3 = await newSet(job, [4, 5]);
+    await db.q(`UPDATE avs.check_requests SET status = 'done', finished_at = now(), report_no = 'AVS-2026-0970', report_rev = 0,
+      check_no = 1, result = 'HOLD' WHERE id = $1`, [s3]);
+    await db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status, product_name, job_card)
+      VALUES ('AVS-2026-0970', 0, 1, 'HOLD', 'Wrong master carton', $1)`, [job.jc]);
+    out = await call('production', 'POST', `/avs/uploads/${s3}/delete`, { reason: 'wrong master picked' });
+    assert.equal(out.status, 409, 'a set with a report goes with its report');
+    const rel = await call('qc', 'POST', '/avs/reports/AVS-2026-0970/decisions', { decision: 'RELEASE', remark: 'ok by QA', report_rev: 0, check_no: 1 });
+    assert.equal(rel.status, 201, JSON.stringify(rel.body));
+    out = await call('production', 'POST', '/avs/reports/AVS-2026-0970/delete', { reason: 'Wrong master picked' });
+    assert.equal(out.status, 409);
+    assert.match(out.body.error, /Undo the release first/);
+    assert.equal((await call('qc', 'POST', `/avs/reports/AVS-2026-0970/decisions/${rel.body.id}/undo`, { remark: 'to delete' })).status, 201);
+    out = await call('production', 'POST', '/avs/reports/AVS-2026-0970/delete', { reason: 'Wrong master / PO picked by the check', redo: true });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal(out.body.replacement.replaces_report_no, 'AVS-2026-0970');
+    assert.equal(+out.body.replacement.replaces_set_id, s3);
+    assert.equal(out.body.carry.length, 2, 'the newest check\'s photos');
+    let got = await call('qc', 'GET', '/avs/reports/AVS-2026-0970');
+    assert.equal(got.status, 410);
+    assert.match(got.body.error, /deleted by AVS production/);
+    const reg = await call('qc', 'GET', '/avs/reports');
+    assert.ok(!reg.body.reports.some(x => x.report_no === 'AVS-2026-0970'), 'it leaves the register');
+    assert.ok((await db.one('SELECT deleted_at FROM avs.check_requests WHERE id = $1', [s3])).deleted_at, 'its sets go with it');
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM avs.reports WHERE report_no = 'AVS-2026-0970'`)).n, 1, 'kept on record');
+    await assert.rejects(db.q(`INSERT INTO avs.reports (report_no, report_rev, check_no, status) VALUES ('AVS-2026-0970', 0, 2, 'PASS')`),
+      /AVS_DELETED/, 'the number is void');
+    out = await call('production', 'POST', '/avs/reports/AVS-2026-0970/delete', { reason: 'again please' });
+    assert.equal(out.status, 404);
+    out = await call('production', 'POST', '/avs/redo', { report_no: 'AVS-2026-0970', reason: 'next check please' });
+    assert.equal(out.status, 404, 'a deleted report is never checked again under its number');
+
+    // ── 4. The audit trail: every step, append only.
+    const trail = await call('qc', 'GET', '/avs/audit?report_no=AVS-2026-0970');
+    assert.equal(trail.status, 200, JSON.stringify(trail.body));
+    const actions = trail.body.entries.map(e => e.action);
+    for (const a of ['REPORT_DELETED', 'REDO_STARTED', 'DECISION', 'DECISION_UNDONE', 'SET_CREATED']) assert.ok(actions.includes(a), a);
+    assert.equal(trail.body.deleted.reason, 'Wrong master / PO picked by the check');
+    const all = (await call('qc', 'GET', '/avs/audit')).body.entries;
+    const cancel = all.find(e => e.action === 'SET_CANCELLED' && +e.set_id === s1);
+    assert.equal(cancel.details.was, 'checking');
+    assert.equal(cancel.actor, 'AVS production');
+    assert.ok(all.some(e => e.action === 'SET_DELETED' && +e.set_id === s2 && e.reason === 'Check failed, redo it'));
+    assert.ok(all.some(e => e.action === 'PHOTOS_CARRIED' && +e.set_id === +r2.id));
+    await assert.rejects(db.q(`UPDATE avs.audit_log SET reason = 'changed'`), /append only/);
+    await assert.rejects(db.q('DELETE FROM avs.audit_log'), /append only/);
   });
 });

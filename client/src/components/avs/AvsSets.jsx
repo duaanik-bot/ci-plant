@@ -19,15 +19,21 @@
 // a spinner on the step running now, and how long each took (owner's request,
 // 1 Oct 2026; lib/avs.js totalTime, stepChecklist).
 //
+// Cancel works at any stage before the report — also while Claude is checking
+// (it is stopped). Any set without a report can be deleted, and "Delete and
+// redo" starts a new set with the same photos; a set that made a report is
+// deleted with its report. Deleted sets are under the Deleted chip, with who,
+// when and why (owner's request, 1 Oct 2026; components/avs/AvsStop.jsx).
+//
 // The finished groups show one time window (Today, 7 days, 30 days, All; by
 // when the set ended) and the first few rows, with "Show all" for the rest, so
 // the list never pushes the register off the page.
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Timer, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Square, Timer, Trash2, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
 import {
-  AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod,
+  AVS_CANCELLABLE, AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod, setDeletable,
   elapsedText, istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepChecklist, totalTime,
 } from '../../lib/avs.js';
 import { fireText } from './AvsUpload.jsx';
@@ -41,6 +47,7 @@ const RESULT_TONE = { PASS: 'text-emerald-700', HOLD: 'text-amber-700', REJECT: 
 const CHIP_ON = {
   active: 'bg-violet-600 text-white ring-violet-600', done: 'bg-emerald-600 text-white ring-emerald-600',
   failed: 'bg-red-600 text-white ring-red-600', cancelled: 'bg-slate-600 text-white ring-slate-600',
+  deleted: 'bg-slate-800 text-white ring-slate-800',
 };
 const BAR = {
   slate: 'bg-slate-400', sky: 'bg-sky-500', amber: 'bg-amber-500', violet: 'bg-violet-500', emerald: 'bg-emerald-500', red: 'bg-red-500',
@@ -62,6 +69,7 @@ const EMPTY = {
   done: 'No report from a photo set yet.',
   failed: 'No failed checks.',
   cancelled: 'Nothing cancelled.',
+  deleted: 'Nothing deleted.',
 };
 
 function SetProgress({ set, now }) {
@@ -151,7 +159,7 @@ function linkNote(linked) {
   return 'Claude is not linked yet: sets wait in the queue until a check is started from Cowork (/avs).';
 }
 
-export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onSetup, onRedo }) {
+export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onSetup, onRedo, onCancel, onDelete, onDeleteReport }) {
   const toast = useToast();
   const [busy, setBusy] = useState(null);
   const [group, setGroup] = useState('active');
@@ -165,10 +173,10 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
   const sets = data.sets || [];
   const counts = data.counts || {};
   const countOf = g => g.statuses.reduce((n, s) => n + (counts[s] ?? sets.filter(x => x.status === s).length), 0);
-  const inGroup = sets.filter(s => setGroupOf(s.status) === group);
+  const inGroup = group === 'deleted' ? (data.deleted || []) : sets.filter(s => setGroupOf(s.status) === group);
   const folded = group === 'done' ? foldEarlierChecks(inGroup) : inGroup;
   const finished = group !== 'active';
-  const inWindow = finished ? folded.filter(s => inPeriod(setEndedAt(s), period)) : folded;
+  const inWindow = finished ? folded.filter(s => inPeriod(group === 'deleted' ? s.deleted_at : setEndedAt(s), period)) : folded;
   const shown = showAll ? inWindow : inWindow.slice(0, AVS_SETS_SHOWN);
   const hidden = inWindow.length - shown.length;
   // A report being checked again: its redo set, so the row says so instead of offering Redo twice.
@@ -181,7 +189,6 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
     try {
       const out = await api.post(`/avs/uploads/${set.id}/${verb}`, {});
       if (verb === 'retry') toast.info(fireText(out.fire));
-      else toast.info(`${set.label} cancelled`);
       onChanged?.();
     } catch { /* api.js said why */ } finally { setBusy(null); }
   };
@@ -271,7 +278,8 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   {kept ? ` (${kept === s.photos.length ? 'all' : kept} kept in CI Plant until filed in Drive)` : ''}
                   {' '}· {s.created_by || '—'} · uploaded {istStamp(s.created_at) || fmt.date(s.created_at)}
                   {s.finished_at && ['done', 'failed'].includes(s.status) ? ` · finished ${istStamp(s.finished_at)}` : ''}
-                  {s.status === 'cancelled' && s.cancelled_at ? ` · cancelled ${istStamp(s.cancelled_at)}${s.cancelled_by ? ` by ${s.cancelled_by}` : ''}` : ''}
+                  {s.status === 'cancelled' && s.cancelled_at ? ` · cancelled ${istStamp(s.cancelled_at)}${s.cancelled_by ? ` by ${s.cancelled_by}` : ''}`
+                    + `${s.cancelled_status === 'checking' ? ' while Claude was checking' : ''}` : ''}
                   {took ? ` · ${took.label} ${took.text}` : ''}
                   {s.status === 'queued' && s.fire_status === 'failed' && s.fire_error ? ` · ${s.fire_error}` : ''}
                 </div>
@@ -297,6 +305,17 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
                 )}
                 {s.redo_reason && <div className="mt-0.5 text-[11px] text-violet-800">Why redone: {s.redo_reason}</div>}
+                {s.cancel_reason && !s.deleted_at && <div className="mt-0.5 text-[11px] text-amber-800">Why cancelled: {s.cancel_reason}</div>}
+                {s.deleted_at && (
+                  <div className="mt-0.5 text-[11px] text-red-700">
+                    Deleted {istStamp(s.deleted_at)}{s.deleted_by ? ` by ${s.deleted_by}` : ''}: {s.delete_reason}
+                  </div>
+                )}
+                {(s.replaces_report_no || s.replaces_set_id) && (
+                  <div className="mt-0.5 text-[11px] text-violet-800">
+                    Redo of deleted {s.replaces_report_no || setLabel(s.replaces_set_id)} — gets a new report number
+                  </div>
+                )}
                 {s.note && <div className="mt-0.5 text-[11px] italic text-slate-500">“{s.note}”</div>}
                 {s.earlier?.length > 0 && (
                   <div className="mt-1 text-[11px] text-slate-500">
@@ -314,10 +333,10 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                 )}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                {s.report_no && (
+                {s.report_no && !s.deleted_at && (
                   <Button size="sm" repeatable onClick={() => onOpenReport?.(s.report_no)}>Open {s.report_no}</Button>
                 )}
-                {s.status === 'uploading' && (
+                {s.status === 'uploading' && !s.deleted_at && (
                   <Button size="sm" variant="secondary" repeatable onClick={() => onContinue?.(s)}>Continue</Button>
                 )}
                 {data.can_upload && onRedo && s.status === 'done' && s.report_no && !openRedo(s.report_no) && (
@@ -326,13 +345,30 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                     <span className="inline-flex items-center gap-1"><RotateCcw size={12} /> Redo verification</span>
                   </Button>
                 )}
-                {data.can_retry && (s.status === 'failed' || (s.status === 'queued' && bothLinked)) && (
+                {data.can_retry && !s.deleted_at && (s.status === 'failed' || (s.status === 'queued' && bothLinked)) && (
                   <Button size="sm" variant="secondary" disabled={busy === `${s.id}:retry`} onClick={() => act(s, 'retry')}>
                     <span className="inline-flex items-center gap-1"><RefreshCw size={12} /> Try again</span>
                   </Button>
                 )}
-                {['uploading', 'queued'].includes(s.status) && (
-                  <Button size="sm" variant="ghost" disabled={busy === `${s.id}:cancel`} onClick={() => act(s, 'cancel')}>Cancel</Button>
+                {data.can_upload && onCancel && !s.deleted_at && AVS_CANCELLABLE.includes(s.status) && (
+                  <Button size="sm" variant="ghost" repeatable onClick={() => onCancel(s)}
+                    title={s.status === 'checking' ? 'Stop Claude\'s check on this set' : 'Cancel this set'}>
+                    <span className="inline-flex items-center gap-1"><Square size={11} /> {s.status === 'checking' ? 'Stop' : 'Cancel'}</span>
+                  </Button>
+                )}
+                {data.can_delete && onDelete && setDeletable(s) && s.status !== 'uploading' && (
+                  <Button size="sm" variant="ghost" repeatable onClick={() => onDelete(s)}
+                    title="Delete this check (kept on record) and, if you like, redo it with the same photos">
+                    <span className="inline-flex items-center gap-1 text-red-700"><Trash2 size={12} /> Delete{s.status === 'failed' || s.status === 'cancelled' ? ' / redo' : ''}</span>
+                  </Button>
+                )}
+                {data.can_delete && onDeleteReport && s.status === 'done' && s.report_no && !s.deleted_at && (
+                  <Button size="sm" variant="ghost" repeatable onClick={() => onDeleteReport({
+                    report_no: s.report_no, product_name: s.product_hint, status: s.result, job_card: s.jc_number,
+                    check_no: s.check_no ?? 1, report_rev: s.report_rev ?? 0,
+                  })} title="Delete this report and its whole verification (kept on record), then redo it">
+                    <span className="inline-flex items-center gap-1 text-red-700"><Trash2 size={12} /> Delete report</span>
+                  </Button>
                 )}
                 {s.drive_folder_url && (
                   <a href={s.drive_folder_url} target="_blank" rel="noreferrer" title="Photos in Google Drive"

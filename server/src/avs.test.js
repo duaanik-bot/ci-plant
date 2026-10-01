@@ -69,10 +69,12 @@ test('report labels read the way the plant says them', () => {
   assert.equal(reportLabel({ report_no: 'AVS-2026-0003', report_rev: 0, check_no: 2 }), 'AVS-2026-0003 Check 2');
 });
 
-test('the AVS router writes only avs.decisions, never a plant table', () => {
+test('the AVS router writes only QA decisions and report deletions, never a plant table', () => {
   const src = readFileSync(new URL('./routes/avs.js', import.meta.url), 'utf8');
   const writes = [...src.matchAll(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_.]+)/gi)].map(m => m[2].toLowerCase());
-  assert.deepEqual([...new Set(writes)], ['avs.decisions']);
+  assert.deepEqual([...new Set(writes)].sort(), ['avs.check_requests', 'avs.decisions', 'avs.deleted_reports']);
+  assert.doesNotMatch(src, /\bDELETE\s+FROM\b/i, 'a deleted report is marked, never erased');
+  assert.deepEqual(writesIn('./avs-audit.js'), ['avs.audit_log']);
 });
 
 // ── The printing lock ────────────────────────────────────────────────────────
@@ -163,8 +165,8 @@ test('the AVS switch writes only the job\'s switch; the photo sets only their ow
 // ── Photos kept in CI Plant while the Drive link is not set up ──────────────
 test('an upload never needs the Drive link: without it the photo is kept in CI Plant', () => {
   const src = readFileSync(new URL('./routes/avs-intake.js', import.meta.url), 'utf8');
-  const route = src.slice(src.indexOf("r.post('/avs/uploads/:id/photos'"), src.indexOf("r.post('/avs/uploads/:id/verify'"));
-  assert.match(route, /if \(linked\(cfg\)\.drive\) \{\s*try \{\s*put = await callDrive\(/, 'Drive is tried only when linked, and its refusal is caught');
+  const route = src.slice(src.indexOf('async function addPhoto('), src.indexOf("r.post('/avs/uploads/:id/verify'"));
+  assert.match(route, /if \(linked\(cfg\)\.drive && !keepOnly\) \{\s*try \{\s*put = await callDrive\(/, 'Drive is tried only when linked, and its refusal is caught');
   assert.match(route, /INSERT INTO avs\.check_photo_bytes/, 'otherwise the photo itself is kept');
   assert.match(route, /await tx\(/, 'the photo row and its bytes are saved together or not at all');
   assert.match(route, /keptMaxBytes\(\)/, 'with a ceiling, so a check that never runs cannot fill the database');
@@ -484,4 +486,51 @@ test('stampPdf draws on every page and leaves an undecided PDF untouched', async
   assert.equal(back.getPageCount(), 2);
   assert.match(back.getSubject(), /^RELEASED BY QA Anik Dua \(MD\)/);
   assert.ok(out.length > plain.length);
+});
+
+// ── Cancel, delete and redo (1 Oct 2026) ────────────────────────────────────
+import { reasonProblem, setDeletable, stepChecklist as steps, AVS_CANCELLABLE, auditLabel } from '../../client/src/lib/avs.js';
+
+test('cancel and delete always carry a reason; a set with a report is deleted with its report', () => {
+  assert.ok(reasonProblem(''));
+  assert.ok(reasonProblem('  x '));
+  assert.equal(reasonProblem('Wrong photos'), null);
+  assert.ok(reasonProblem('x'.repeat(700)));
+  assert.deepEqual(AVS_CANCELLABLE, ['uploading', 'queued', 'checking'], 'a check can be stopped while Claude works on it');
+  assert.equal(setDeletable({ status: 'failed' }), true);
+  assert.equal(setDeletable({ status: 'checking' }), true);
+  assert.equal(setDeletable({ status: 'done' }), false);
+  assert.equal(setDeletable({ status: 'failed', deleted_at: '2026-10-01' }), false);
+  assert.equal(auditLabel('REPORT_DELETED'), 'Report deleted');
+});
+
+test('a set cancelled while checking shows where it stopped', () => {
+  const t0 = Date.parse('2026-10-01T05:00:00Z');
+  const at = m => new Date(t0 + m * 60000).toISOString();
+  const rows = steps({ status: 'cancelled', created_at: at(0), queued_at: at(1), claimed_at: at(3), progress: 'Reading the PO',
+    progress_log: [{ p: 'Claude started', at: at(3) }, { p: 'Reading the photos', at: at(4) }, { p: 'Reading the PO', at: at(6) }] }, t0 + 9 * 60000);
+  const by = Object.fromEntries(rows.map(r => [r.label, r.state]));
+  assert.equal(by['Reading the photos'], 'done');
+  assert.equal(by['Reading the PO'], 'failed');
+  assert.equal(by['Writing the report'], 'pending');
+  assert.equal(rows.at(-1).label, 'Cancelled');
+});
+
+test('the database stops a cancelled run and voids a deleted report; the trail is append only', () => {
+  const sql = readFileSync(new URL('../../supabase/migrations/20261001180000_avs_cancel_delete_audit.sql', import.meta.url), 'utf8');
+  assert.match(sql, /RAISE EXCEPTION 'AVS_CANCELLED:/);
+  assert.match(sql, /RAISE EXCEPTION 'AVS_DELETED:/);
+  assert.match(sql, /BEFORE UPDATE OR DELETE ON avs\.audit_log/);
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM avs\.deleted_reports dr WHERE dr\.report_no = reports\.report_no\)/,
+    'a deleted report leaves avs.latest_reports: the register and the printing lock');
+  assert.match(sql, /REVOKE ALL ON avs\.audit_log, avs\.deleted_reports FROM anon, authenticated/);
+  const route = readFileSync(new URL('./routes/avs.js', import.meta.url), 'utf8');
+  assert.match(route, /Undo the release first/, 'a released report is not deleted by accident');
+});
+
+test('the routine stops on AVS_CANCELLED and never reuses a deleted number', () => {
+  const prompt = readFileSync(new URL('../../client/src/lib/avs-robot/routine-prompt.md', import.meta.url), 'utf8');
+  assert.match(prompt, /AVS_CANCELLED/);
+  assert.match(prompt, /avs\.deleted_reports/);
+  assert.match(prompt, /replaces_report_no/);
 });

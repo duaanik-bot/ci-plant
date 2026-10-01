@@ -302,7 +302,8 @@ export function avsSwitchProblem({ on, reason, printing = null }) {
 
 // ── Photo sets uploaded from CI Plant for Claude to check ───────────────────
 // uploading → (Verify) queued → (Claude picks it up) checking → done | failed.
-// A set can be cancelled while it is still uploading or queued.
+// A set can be cancelled at any stage before its report, even while Claude is
+// checking it; any set without a report can be deleted (and redone).
 export const AVS_SET_STATUS_LABEL = {
   uploading: 'Adding photos', queued: 'Waiting for Claude', checking: 'Claude is checking',
   done: 'Report ready', failed: 'Check failed', cancelled: 'Cancelled',
@@ -317,6 +318,9 @@ export const AVS_SET_GROUPS = [
   { key: 'done', label: 'Report ready', statuses: ['done'] },
   { key: 'failed', label: 'Check failed', statuses: ['failed'] },
   { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
+  // Deleted sets come in their own list (GET /avs/uploads `deleted`), whatever
+  // their status was; they never count in the groups above.
+  { key: 'deleted', label: 'Deleted', statuses: [] },
 ];
 export const setGroupOf = status => AVS_SET_GROUPS.find(g => g.statuses.includes(status))?.key ?? 'active';
 
@@ -440,7 +444,7 @@ export function stepChecklist(set, now = Date.now()) {
   const queueState = status === 'uploading' ? 'pending'
     : status === 'queued' ? 'current'
       : claimed != null || status === 'checking' || status === 'done' ? 'done'
-        : status === 'failed' ? 'failed' : 'pending';
+        : status === 'failed' || (status === 'cancelled' && queued != null) ? 'failed' : 'pending';
   rows.push({
     key: 'queue', label: 'Waiting for Claude to start', state: queueState,
     ms: queueState === 'current' ? span(queued, now) : span(queued, claimed),
@@ -455,7 +459,7 @@ export function stepChecklist(set, now = Date.now()) {
     if (checkStarted) {
       if (status === 'done') state = 'done';
       else if (status === 'checking') state = reachedIdx < 0 ? (i === 0 ? 'current' : 'pending') : i < reachedIdx ? 'done' : i === reachedIdx ? 'current' : 'pending';
-      else if (status === 'failed') state = i < reachedIdx ? 'done' : i === reachedIdx ? 'failed' : 'pending';
+      else if (status === 'failed' || status === 'cancelled') state = i < reachedIdx ? 'done' : i === reachedIdx ? 'failed' : 'pending';
     }
     const from = started[i];
     rows.push({
@@ -562,6 +566,53 @@ export function foldEarlierChecks(sets = []) {
       ? { ...s, earlier: sets.filter(x => x.report_no === s.report_no && x !== s).sort((a, b) => b.id - a.id) }
       : s));
 }
+
+// ── Cancel, delete and redo (owner's request, 1 Oct 2026) ──────────────────
+// Cancel stops a set at any stage before its report, including while Claude is
+// checking it (the database refuses the run's later writes, migration
+// avs_cancel_delete_audit). Delete hides a set, or a whole report with every
+// check behind it, so the product can be verified again from scratch; nothing
+// is erased, and every step goes into the audit trail (avs.audit_log) with
+// who, when and why. Redo after a delete is a fresh check with a new report
+// number, starting from the same photos; more can be added.
+export const AVS_CANCELLABLE = ['uploading', 'queued', 'checking'];
+export const AVS_REASON_MIN = 3;
+export function reasonProblem(reason, what = 'Write the reason') {
+  const t = String(reason ?? '').trim();
+  if (t.length < AVS_REASON_MIN) return `${what} (a few words).`;
+  if (t.length > AVS_REMARK_MAX) return `Keep the reason under ${AVS_REMARK_MAX} characters.`;
+  return null;
+}
+// A set can be deleted unless it made a report: then the report is deleted.
+export const setDeletable = s => !!s && !s.deleted_at && s.status !== 'done';
+export const AVS_CANCEL_PRESETS = [
+  'Wrong job card picked',
+  'Wrong or unclear photos',
+  'Taking too long',
+  'Started by mistake',
+  'Will redo with better photos',
+];
+export const AVS_DELETE_PRESETS = [
+  'Check failed, redo it',
+  'Wrong job card or product',
+  'Wrong or unclear photos',
+  'Wrong master / PO picked by the check',
+  'Duplicate check',
+  'Started by mistake',
+];
+export const AVS_AUDIT_LABEL = {
+  SET_CREATED: 'Photo set started',
+  SET_VERIFIED: 'Sent for checking (Verify)',
+  SET_RETRIED: 'Sent again (Try again)',
+  SET_CANCELLED: 'Cancelled',
+  SET_DELETED: 'Photo set deleted',
+  REPORT_DELETED: 'Report deleted',
+  REDO_STARTED: 'Redo started',
+  PHOTOS_CARRIED: 'Photos carried over',
+  DECISION: 'QA decision',
+  DECISION_UNDONE: 'Decision undone',
+};
+export const auditLabel = a => AVS_AUDIT_LABEL[a] || String(a || '');
 
 // One photo per request: Vercel's function body limit is 4.5 MB, so the page
 // shrinks anything larger before sending it (see AvsUpload.jsx).

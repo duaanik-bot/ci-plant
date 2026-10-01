@@ -18,8 +18,16 @@
 //   3. Claude writes the report to avs.reports / avs.problems (it shows on this
 //      page) and marks the set done (runbook section 3). QA then decides here.
 //
-// This router writes avs.check_requests, avs.check_photos, avs.check_photo_bytes
-// and avs.settings only, and deletes nothing.
+//   4. Cancel stops a set at any stage before its report — even while Claude is
+//      checking it: the database then refuses the run's later writes
+//      (AVS_CANCELLED). Delete hides a set (or, in routes/avs.js, a whole
+//      report) so it can be done again; "Delete and redo" starts a new set for
+//      the same job cards and carries the same photos over (carry, below). Every
+//      step is written to the audit trail, avs.audit_log (avs-audit.js).
+//
+// This router writes avs.check_requests, avs.check_photos, avs.check_photo_bytes,
+// avs.settings and avs.audit_log only, and deletes no row: a deleted set keeps
+// every row and photo, marked deleted with who, when and why.
 // The two links live in avs.settings (admin only; the token is never sent back).
 import { Router } from 'express';
 import crypto from 'node:crypto';
@@ -30,9 +38,10 @@ import { requireRole } from '../auth.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsMandatorySql } from '../avs-gate.js';
 import { postDrive } from '../avs-drive.js';
+import { avsAudit, avsAuditSoft } from '../avs-audit.js';
 import {
-  AVS_PHOTO_MAX_BYTES, AVS_REPORT_NO, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, jobCardNumbers, photoProblem, redoProblem,
-  setLabel, setupProblem,
+  AVS_CANCELLABLE, AVS_PHOTO_MAX_BYTES, AVS_REPORT_NO, AVS_SET_MAX_PHOTOS, AVS_REMARK_MAX, avsSetFolder, jobCardNumbers, photoProblem,
+  reasonProblem, redoProblem, setLabel, setupProblem,
 } from '../../../client/src/lib/avs.js';
 
 const r = Router();
@@ -208,7 +217,9 @@ async function fireUnlessRunning(cfg, set, { cloud = false } = {}) {
   const out = await fireRoutine(cfg,
     `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${(Array.isArray(set.job_cards) && set.job_cards.length > 1
       ? set.job_cards.map(c => c.jc_number) : [set.jc_number]).join(', ')})` : ''}`
-    + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''} is waiting in avs.check_requests (set id ${set.id}).`);
+    + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''}`
+    + `${set.replaces_report_no || set.replaces_set_id ? `, a fresh check (new report number) replacing deleted ${set.replaces_report_no
+      || setLabel(set.replaces_set_id)},` : ''} is waiting in avs.check_requests (set id ${set.id}).`);
   await q(`UPDATE avs.check_requests SET fired_at = now(), fire_status = $2, fire_error = $3,
                   session_url = COALESCE($4, session_url), updated_at = now() WHERE id = $1`,
     [set.id, out.status, out.ok ? null : out.error, out.session_url || null]);
@@ -220,16 +231,23 @@ const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.
   s.created_at, s.drive_folder_path, s.drive_folder_url, s.queued_at, s.queued_by, s.fired_at, s.fire_status,
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
   s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason,
-  s.job_cards, s.progress_log`;
+  s.job_cards, s.progress_log, s.cancel_reason, s.cancelled_status, s.deleted_at, s.deleted_by, s.delete_reason,
+  s.replaces_set_id, s.replaces_report_no`;
 
 // One set, or the list: every set still in progress, and the newest
 // `perStatus` of each finished status (the page shows them by status, with
 // chips counting all of them).
-async function readSets({ id = null, perStatus = 25 } = {}) {
+// Deleted sets are left out of the list; `deleted: true` gives the newest of
+// them instead (the Deleted chip).
+export async function readSets({ id = null, perStatus = 25, deleted = false } = {}) {
   const sets = id
     ? await q(`SELECT ${SET_COLS} FROM avs.check_requests s WHERE s.id = $1`, [id])
-    : await q(`SELECT ${SET_COLS} FROM (
-          SELECT *, row_number() OVER (PARTITION BY status ORDER BY id DESC) AS nth FROM avs.check_requests) s
+    : deleted
+      ? await q(`SELECT ${SET_COLS} FROM avs.check_requests s WHERE s.deleted_at IS NOT NULL ORDER BY s.deleted_at DESC, s.id DESC
+          LIMIT $1`, [perStatus])
+      : await q(`SELECT ${SET_COLS} FROM (
+          SELECT *, row_number() OVER (PARTITION BY status ORDER BY id DESC) AS nth FROM avs.check_requests
+           WHERE deleted_at IS NULL) s
         WHERE s.status IN ('uploading', 'queued', 'checking') OR s.nth <= $1 ORDER BY s.id DESC`, [perStatus]);
   if (!sets.length) return [];
   const photos = await q(`SELECT id, request_id, seq, file_name, mime, size_bytes, captured_at, drive_url, uploaded_at,
@@ -238,7 +256,9 @@ async function readSets({ id = null, perStatus = 25 } = {}) {
   return sets.map(s => ({ ...s, label: setLabel(s.id), photos: photos.filter(p => +p.request_id === +s.id) }));
 }
 
-const mayManage = (user, set) => user?.role === 'admin' || user?.role === 'qc' || +set.created_by_user_id === +user?.id;
+// Cancel and delete: anyone who may upload (owner's choice, 1 Oct 2026); the
+// reason is required and every step is in the audit trail.
+const UPLOAD_ROLES = ['admin', 'qc', 'production', 'planner'];
 
 const offWhenMissing = (res, next, empty) => e => (MISSING.has(e?.code) ? res.json(empty) : next(e));
 
@@ -247,20 +267,25 @@ r.get('/avs/uploads', async (req, res, next) => {
     markUncacheable();
     // A set the office runner did not start in time goes to the cloud now.
     await cloudFallback().catch(e => console.warn('[avs] cloud fallback:', e.message));
-    const [cfg, sets, counts] = await Promise.all([
+    const per = Math.min(100, toId(req.query.per_status) || 25);
+    const [cfg, sets, deleted, counts] = await Promise.all([
       settings(),
-      readSets({ perStatus: Math.min(100, toId(req.query.per_status) || 25) }),
-      q('SELECT status, count(*)::int AS n FROM avs.check_requests GROUP BY status'),
+      readSets({ perStatus: per }),
+      readSets({ perStatus: per, deleted: true }),
+      q(`SELECT CASE WHEN deleted_at IS NULL THEN status ELSE 'deleted' END AS status, count(*)::int AS n
+           FROM avs.check_requests GROUP BY 1`),
     ]);
     const role = req.user?.role;
     res.json({
       enabled: true,
       linked: linked(cfg),
       counts: Object.fromEntries(counts.map(x => [x.status, x.n])),
-      can_upload: ['admin', 'qc', 'production', 'planner'].includes(role),
+      can_upload: UPLOAD_ROLES.includes(role),
+      can_delete: UPLOAD_ROLES.includes(role),
       can_retry: ['admin', 'qc', 'planner'].includes(role),
       is_admin: role === 'admin',
       sets,
+      deleted,
     });
   } catch (e) {
     offWhenMissing(res, next, { enabled: false, linked: { drive: false, claude: false }, can_upload: false, counts: {}, sets: [] })(e);
@@ -315,6 +340,8 @@ r.post('/avs/uploads', canUpload, async (req, res, next) => {
       [jc?.id ?? null, jc?.jc_number ?? null, product ? product.slice(0, 200) : null, note,
         req.user.name ?? null, req.user.id ?? null, req.user.role ?? null,
         cards.length ? JSON.stringify(cards.map(c => ({ id: +c.id, jc_number: c.jc_number, product_name: c.product_name ?? null }))) : null]);
+    await avsAuditSoft(q, { action: 'SET_CREATED', setId: set.id, user: req.user,
+      details: { job_cards: cards.map(c => c.jc_number), product: product || null } });
     const [out] = await readSets({ id: set.id });
     res.status(201).json(out);
   } catch (e) { next(e); }
@@ -344,7 +371,7 @@ r.post('/avs/redo', canUpload, async (req, res, next) => {
     if (closed) throw fail(409, `${reportNo} was closed by the owner, so it cannot be checked again. Upload the photos as a new set.`);
 
     const open = await one(`SELECT id, status FROM avs.check_requests
-      WHERE redo_report_no = $1 AND status IN ('uploading', 'queued', 'checking') ORDER BY id DESC LIMIT 1`, [reportNo]);
+      WHERE redo_report_no = $1 AND status IN ('uploading', 'queued', 'checking') AND deleted_at IS NULL ORDER BY id DESC LIMIT 1`, [reportNo]);
     if (open?.status === 'uploading') {
       const [out] = await readSets({ id: open.id });
       return res.json({ ...out, resumed: true });
@@ -385,6 +412,8 @@ r.post('/avs/redo', canUpload, async (req, res, next) => {
       if (e?.code === '23505') throw fail(409, `${reportNo} is already being checked again. Reload the page.`);
       throw e;
     }
+    await avsAuditSoft(q, { action: 'REDO_STARTED', reportNo, setId: made.id, user: req.user, reason,
+      details: { redo: 'next check of the same report', redo_of_set_id: from?.id ?? null } });
     const [out] = await readSets({ id: made.id });
     res.status(201).json(out);
   } catch (e) { next(e); }
@@ -401,12 +430,75 @@ const photoMime = file => {
 };
 const cleanName = name => String(name || 'photo.jpg').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim().slice(-80) || 'photo.jpg';
 
-// One photo per call: on to Google Drive, or kept here until the check files it.
+// One photo into an open set: on to Google Drive, or kept here until the check
+// files it. `keepOnly` keeps it in CI Plant without trying Drive (a photo
+// carried over from a deleted check: one Drive call per request is enough).
+async function addPhoto(set, { buffer, originalname, mime, capturedAt = null, user, keepOnly = false }) {
+  const size = buffer.length;
+  const count = await one('SELECT count(*)::int AS n FROM avs.check_photos WHERE request_id = $1', [set.id]);
+  if (count.n >= AVS_SET_MAX_PHOTOS) throw fail(409, `A set holds at most ${AVS_SET_MAX_PHOTOS} photos. Start a new set for more.`);
+  // Reserve the photo's number first: two phones adding to one set never
+  // collide. A photo that is not saved gives its number back (below).
+  const seqRow = await one(`UPDATE avs.check_requests SET next_seq = next_seq + 1, updated_at = now()
+    WHERE id = $1 AND status = 'uploading' AND deleted_at IS NULL RETURNING next_seq`, [set.id]);
+  if (!seqRow) throw fail(409, `${setLabel(set.id)} was already sent for checking, cancelled or deleted.`);
+  const seq = +seqRow.next_seq;
+  const giveBack = () => q(`UPDATE avs.check_requests SET next_seq = next_seq - 1
+    WHERE id = $1 AND next_seq = $2`, [set.id, seq]).catch(() => {});
+
+  const extra = Array.isArray(set.job_cards) && set.job_cards.length > 1 ? ` +${set.job_cards.length - 1}` : '';
+  const folder = set.drive_folder_path
+    || avsSetFolder({ id: set.id, day: istDay(set.created_at), jc_number: set.jc_number ? `${set.jc_number}${extra}` : null });
+  const name = `${String(seq).padStart(2, '0')} ${cleanName(originalname)}`;
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+  const cfg = await settings();
+
+  // Google Drive when the Drive link is set up. Otherwise — or when Drive
+  // refuses, or its answer is lost — CI Plant keeps the photo until the AVS
+  // check files it in Drive. A second try (the first answer lost on the way)
+  // takes the file the first one may have filed, only when it is this photo
+  // by its size; a Drive file is recorded only with its id.
+  let put = null;
+  let driveError = null;
+  if (linked(cfg).drive && !keepOnly) {
+    try {
+      put = await callDrive(cfg, { op: 'put', path: folder, name, mime, base64: buffer.toString('base64') },
+        { again: { ifExists: 'reuse' } });
+      if (!put?.id) { driveError = 'Google Drive gave no file id'; put = null; }
+      else if (Number(put.size) !== size) { driveError = `Google Drive already has a different file named ${name}`; put = null; }
+    } catch (e) { driveError = e.reason || e.message; }
+  }
+  if (!put) {
+    const kept = await one(`SELECT COALESCE(sum(size_bytes), 0)::bigint AS n FROM avs.check_photos WHERE stored = 'ci_plant'`);
+    if (Number(kept.n) + size > keptMaxBytes()) {
+      await giveBack();
+      throw fail(503, `CI Plant is already holding ${sizeText(Number(kept.n))} of AVS photos that wait to be filed in Google Drive, `
+        + 'its limit. Ask the admin to run the AVS check (it files them) or to set up the Drive link, then add this photo again.');
+    }
+  }
+  try {
+    await tx(async (qc, oc) => {
+      const photo = await oc(`INSERT INTO avs.check_photos (request_id, seq, file_name, original_name, mime, size_bytes, sha256,
+                                                            captured_at, drive_file_id, drive_url, uploaded_by, stored)
+                              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+        [set.id, seq, name, String(originalname || '').slice(0, 200), mime, size, sha256,
+          capturedAt, put?.id || null, put?.url || null, user?.name ?? null, put ? 'drive' : 'ci_plant']);
+      if (!put) await qc('INSERT INTO avs.check_photo_bytes (photo_id, bytes) VALUES ($1, $2)', [photo.id, buffer]);
+    });
+  } catch (e) { await giveBack(); throw e; }
+  await q(`UPDATE avs.check_requests SET drive_folder_path = $2,
+                  drive_folder_id = COALESCE($3, drive_folder_id), drive_folder_url = COALESCE($4, drive_folder_url),
+                  updated_at = now() WHERE id = $1`,
+    [set.id, folder, put?.parent?.id || null, put?.parent?.url || null]);
+  if (!put) await ensureRobotKey(cfg);
+  return { seq, stored: put ? 'drive' : 'ci_plant', drive_error: driveError };
+}
+
 r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) => {
   try {
     const id = toId(req.params.id);
     const set = id && await one('SELECT * FROM avs.check_requests WHERE id = $1', [id]);
-    if (!set) throw fail(404, 'Photo set not found');
+    if (!set || set.deleted_at) throw fail(404, 'Photo set not found');
     // Anyone who may upload may add to an open set: a press tablet is shared.
     if (set.status !== 'uploading') throw fail(409, `${setLabel(set.id)} was already sent for checking. Start a new set for more photos.`);
     const file = req.file;
@@ -414,66 +506,10 @@ r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) =
     const mime = photoMime(file);
     const problem = photoProblem({ size: file.size, type: mime });
     if (problem) throw fail(400, problem);
-
-    const count = await one('SELECT count(*)::int AS n FROM avs.check_photos WHERE request_id = $1', [set.id]);
-    if (count.n >= AVS_SET_MAX_PHOTOS) throw fail(409, `A set holds at most ${AVS_SET_MAX_PHOTOS} photos. Start a new set for more.`);
-    // Reserve the photo's number first: two phones adding to one set never
-    // collide. A photo that is not saved gives its number back (below).
-    const seqRow = await one(`UPDATE avs.check_requests SET next_seq = next_seq + 1, updated_at = now()
-      WHERE id = $1 AND status = 'uploading' RETURNING next_seq`, [set.id]);
-    if (!seqRow) throw fail(409, `${setLabel(set.id)} was already sent for checking.`);
-    const seq = +seqRow.next_seq;
-    const giveBack = () => q(`UPDATE avs.check_requests SET next_seq = next_seq - 1
-      WHERE id = $1 AND next_seq = $2`, [set.id, seq]).catch(() => {});
-
-    const extra = Array.isArray(set.job_cards) && set.job_cards.length > 1 ? ` +${set.job_cards.length - 1}` : '';
-    const folder = set.drive_folder_path
-      || avsSetFolder({ id: set.id, day: istDay(set.created_at), jc_number: set.jc_number ? `${set.jc_number}${extra}` : null });
-    const name = `${String(seq).padStart(2, '0')} ${cleanName(file.originalname)}`;
-    const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
     const capturedAt = Number.isFinite(Date.parse(req.body?.captured_at)) ? new Date(req.body.captured_at).toISOString() : null;
-    const cfg = await settings();
-
-    // Google Drive when the Drive link is set up. Otherwise — or when Drive
-    // refuses, or its answer is lost — CI Plant keeps the photo until the AVS
-    // check files it in Drive. A second try (the first answer lost on the way)
-    // takes the file the first one may have filed, only when it is this photo
-    // by its size; a Drive file is recorded only with its id.
-    let put = null;
-    let driveError = null;
-    if (linked(cfg).drive) {
-      try {
-        put = await callDrive(cfg, { op: 'put', path: folder, name, mime, base64: file.buffer.toString('base64') },
-          { again: { ifExists: 'reuse' } });
-        if (!put?.id) { driveError = 'Google Drive gave no file id'; put = null; }
-        else if (Number(put.size) !== file.size) { driveError = `Google Drive already has a different file named ${name}`; put = null; }
-      } catch (e) { driveError = e.reason || e.message; }
-    }
-    if (!put) {
-      const kept = await one(`SELECT COALESCE(sum(size_bytes), 0)::bigint AS n FROM avs.check_photos WHERE stored = 'ci_plant'`);
-      if (Number(kept.n) + file.size > keptMaxBytes()) {
-        await giveBack();
-        throw fail(503, `CI Plant is already holding ${sizeText(Number(kept.n))} of AVS photos that wait to be filed in Google Drive, `
-          + 'its limit. Ask the admin to run the AVS check (it files them) or to set up the Drive link, then add this photo again.');
-      }
-    }
-    try {
-      await tx(async (qc, oc) => {
-        const photo = await oc(`INSERT INTO avs.check_photos (request_id, seq, file_name, original_name, mime, size_bytes, sha256,
-                                                              captured_at, drive_file_id, drive_url, uploaded_by, stored)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-          [set.id, seq, name, String(file.originalname || '').slice(0, 200), mime, file.size, sha256,
-            capturedAt, put?.id || null, put?.url || null, req.user.name ?? null, put ? 'drive' : 'ci_plant']);
-        if (!put) await qc('INSERT INTO avs.check_photo_bytes (photo_id, bytes) VALUES ($1, $2)', [photo.id, file.buffer]);
-      });
-    } catch (e) { await giveBack(); throw e; }
-    await q(`UPDATE avs.check_requests SET drive_folder_path = $2,
-                    drive_folder_id = COALESCE($3, drive_folder_id), drive_folder_url = COALESCE($4, drive_folder_url),
-                    updated_at = now() WHERE id = $1`,
-      [set.id, folder, put?.parent?.id || null, put?.parent?.url || null]);
-    if (!put) await ensureRobotKey(cfg);
+    const last = await addPhoto(set, { buffer: file.buffer, originalname: file.originalname, mime, capturedAt, user: req.user });
     const [out] = await readSets({ id: set.id });
-    res.status(201).json({ ...out, last_photo: { seq, stored: put ? 'drive' : 'ci_plant', drive_error: driveError } });
+    res.status(201).json({ ...out, last_photo: last });
   } catch (e) { next(e); }
 });
 
@@ -482,13 +518,15 @@ r.post('/avs/uploads/:id/verify', canUpload, async (req, res, next) => {
   try {
     const id = toId(req.params.id);
     const set = id && await one('SELECT * FROM avs.check_requests WHERE id = $1', [id]);
-    if (!set) throw fail(404, 'Photo set not found');
+    if (!set || set.deleted_at) throw fail(404, 'Photo set not found');
     if (set.status !== 'uploading') throw fail(409, `${setLabel(set.id)} was already sent for checking.`);
     const count = await one('SELECT count(*)::int AS n FROM avs.check_photos WHERE request_id = $1', [set.id]);
     if (!count.n) throw fail(400, 'Add at least one photo before pressing Verify.');
     const queued = await one(`UPDATE avs.check_requests SET status = 'queued', queued_at = now(), queued_by = $2, updated_at = now()
-      WHERE id = $1 AND status = 'uploading' RETURNING *`, [set.id, req.user.name ?? null]);
+      WHERE id = $1 AND status = 'uploading' AND deleted_at IS NULL RETURNING *`, [set.id, req.user.name ?? null]);
     if (!queued) throw fail(409, `${setLabel(set.id)} was already sent for checking.`);
+    await avsAuditSoft(q, { action: 'SET_VERIFIED', setId: set.id, reportNo: set.redo_report_no || null, user: req.user,
+      details: { photos: count.n } });
     const fire = await fireUnlessRunning(await settings(), queued);
     const [out] = await readSets({ id: set.id });
     res.json({ set: out, fire });
@@ -502,25 +540,151 @@ r.post('/avs/uploads/:id/retry', canRetry, async (req, res, next) => {
     const set = id && await one(`UPDATE avs.check_requests
         SET status = 'queued', queued_at = COALESCE(queued_at, now()), queued_by = COALESCE(queued_by, $2),
             robot_note = CASE WHEN status = 'failed' THEN NULL ELSE robot_note END, updated_at = now()
-      WHERE id = $1 AND status IN ('queued', 'failed') RETURNING *`, [id, req.user.name ?? null]);
+      WHERE id = $1 AND status IN ('queued', 'failed') AND deleted_at IS NULL RETURNING *`, [id, req.user.name ?? null]);
     if (!set) throw fail(409, 'Only a set that is waiting for Claude, or whose check failed, can be sent again.');
+    await avsAuditSoft(q, { action: 'SET_RETRIED', setId: set.id, user: req.user });
     const fire = await fireUnlessRunning(await settings(), set);
     const [out] = await readSets({ id: set.id });
     res.json({ set: out, fire });
   } catch (e) { next(e); }
 });
 
+// ── Cancel: stop a set at any stage before its report ───────────────────────
+// Also while Claude is checking it. Claude's run cannot be switched off from
+// here, so the database stops it: every later write of the run to this set or
+// its photos is refused (AVS_CANCELLED, migration avs_cancel_delete_audit), and
+// the routine stops on that answer. Its final write — report, problems, photos
+// and set in one statement — is refused with it, so no report appears.
+export async function cancelSet(run, set, user, reason) {
+  return run(`UPDATE avs.check_requests SET status = 'cancelled', cancelled_status = status, cancelled_at = now(),
+      cancelled_by = $2, cancel_reason = $3, updated_at = now()
+    WHERE id = $1 AND status = ANY($4) AND deleted_at IS NULL RETURNING id, cancelled_status`,
+  [set.id, user?.name ?? null, String(reason).slice(0, AVS_REMARK_MAX), AVS_CANCELLABLE]);
+}
+
 r.post('/avs/uploads/:id/cancel', canUpload, async (req, res, next) => {
   try {
     const id = toId(req.params.id);
     const set = id && await one('SELECT * FROM avs.check_requests WHERE id = $1', [id]);
-    if (!set) throw fail(404, 'Photo set not found');
-    if (!mayManage(req.user, set)) throw fail(403, 'Only the person who started this set, QA or an admin can cancel it.');
-    const done = await one(`UPDATE avs.check_requests SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
-        updated_at = now() WHERE id = $1 AND status IN ('uploading', 'queued') RETURNING id`, [set.id, req.user.name ?? null]);
-    if (!done) throw fail(409, 'Claude has already started on this set, so it can no longer be cancelled.');
+    if (!set || set.deleted_at) throw fail(404, 'Photo set not found');
+    const reason = optionalText(req.body?.reason);
+    const problem = reasonProblem(reason, 'Write why it is cancelled');
+    if (problem) throw fail(400, problem);
+    const done = await tx(async (qc) => {
+      const rows = await cancelSet(qc, set, req.user, reason);
+      if (rows.length) {
+        await avsAudit(qc, { action: 'SET_CANCELLED', setId: set.id, reportNo: set.redo_report_no || null, user: req.user, reason,
+          details: { was: rows[0].cancelled_status, progress: set.progress || null } });
+      }
+      return rows[0] || null;
+    });
+    if (!done) {
+      throw fail(409, set.status === 'done' ? `${setLabel(set.id)} already has its report (${set.report_no}). Delete the report to do it again.`
+        : `${setLabel(set.id)} is already ${set.status}.`);
+    }
     const [out] = await readSets({ id: set.id });
-    res.json(out);
+    res.json({ ...out, stopped_while_checking: done.cancelled_status === 'checking' });
+  } catch (e) { next(e); }
+});
+
+// ── A new set to do a deleted check again ───────────────────────────────────
+// Same job cards and product, marked as replacing the deleted set / report.
+// It starts as 'uploading', so more photos can be added before Verify; the
+// photos of `from` are carried over one by one by the page (carry, below).
+// The check issues it under a NEW report number (routine-prompt.md).
+export async function makeReplacement(run, { from = null, reportNo = null, report = null, user, reason }) {
+  let jc = from?.job_card_id ? { id: from.job_card_id, jc_number: from.jc_number } : null;
+  if (!jc && report?.job_card) {
+    const first = jobCardNumbers(report.job_card)[0];
+    const [row] = first ? await run(`SELECT id, jc_number FROM job_cards WHERE upper(jc_number) = $1 ORDER BY id DESC LIMIT 1`, [first]) : [];
+    jc = row || null;
+  }
+  const product = String(from?.product_hint || report?.product_name || report?.product || '').slice(0, 200) || null;
+  const [made] = await run(`INSERT INTO avs.check_requests
+      (status, job_card_id, jc_number, product_hint, note, created_by, created_by_user_id, created_by_role, job_cards,
+       replaces_set_id, replaces_report_no)
+    VALUES ('uploading', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+  [jc?.id ?? null, jc?.jc_number ?? report?.job_card ?? null, product,
+    `Redo after delete (${reportNo || setLabel(from?.id)}): ${String(reason).slice(0, 400)}`,
+    user?.name ?? null, user?.id ?? null, user?.role ?? null,
+    Array.isArray(from?.job_cards) && from.job_cards.length ? JSON.stringify(from.job_cards) : null,
+    from?.id ?? null, reportNo]);
+  await avsAudit(run, { action: 'REDO_STARTED', reportNo, setId: made.id, user, reason,
+    details: { redo: 'fresh check after delete, new report number', replaces_set_id: from?.id ?? null, replaces_report_no: reportNo } });
+  const carry = from ? await run('SELECT id FROM avs.check_photos WHERE request_id = $1 ORDER BY seq', [from.id]) : [];
+  return { id: made.id, carry: carry.map(x => +x.id) };
+}
+
+// ── Delete a photo set (and, if asked, start it again) ──────────────────────
+// Any set without a report; a running one is cancelled first. Nothing is
+// erased: the set and its photos stay, marked deleted with who, when and why,
+// and leave the lists (the Deleted chip shows them). A set that made a report
+// is deleted with its report (routes/avs.js).
+r.post('/avs/uploads/:id/delete', canUpload, async (req, res, next) => {
+  try {
+    const id = toId(req.params.id);
+    const set = id && await one('SELECT * FROM avs.check_requests WHERE id = $1', [id]);
+    if (!set || set.deleted_at) throw fail(404, 'Photo set not found');
+    if (set.status === 'done') {
+      throw fail(409, `${setLabel(set.id)} made ${set.report_no || 'a report'}. Delete the report instead; its sets go with it.`);
+    }
+    const reason = optionalText(req.body?.reason);
+    const problem = reasonProblem(reason, 'Write why it is deleted');
+    if (problem) throw fail(400, problem);
+    const redo = !!req.body?.redo;
+    const out = await tx(async (qc) => {
+      const stopped = await cancelSet(qc, set, req.user, reason);
+      const rows = await qc(`UPDATE avs.check_requests SET deleted_at = now(), deleted_by = $2, deleted_by_user_id = $3,
+          delete_reason = $4, updated_at = now() WHERE id = $1 AND deleted_at IS NULL AND status <> 'done' RETURNING id`,
+      [set.id, req.user.name ?? null, req.user.id ?? null, reason.slice(0, AVS_REMARK_MAX)]);
+      if (!rows.length) throw fail(409, `${setLabel(set.id)} changed meanwhile. Reload the page.`);
+      await avsAudit(qc, { action: 'SET_DELETED', setId: set.id, reportNo: set.redo_report_no || null, user: req.user, reason,
+        details: { status: set.status, stopped_while: stopped[0]?.cancelled_status || null, redo } });
+      return redo ? makeReplacement(qc, { from: set, user: req.user, reason }) : null;
+    });
+    const [gone] = await readSets({ id: set.id });
+    const [replacement] = out ? await readSets({ id: out.id }) : [null];
+    res.json({ deleted: gone, replacement, carry: out?.carry || [] });
+  } catch (e) { next(e); }
+});
+
+// ── Carry one photo of the deleted check into its replacement ───────────────
+// One photo per call (Vercel's time and size limits). A photo CI Plant still
+// keeps is copied here; one in Drive is read through the Drive link and kept
+// in CI Plant, and the check files it in the new set's folder (runbook 2C.3).
+// Safe to repeat: a photo already carried is not added twice.
+r.post('/avs/uploads/:id/carry', canUpload, async (req, res, next) => {
+  try {
+    const id = toId(req.params.id);
+    const set = id && await one('SELECT * FROM avs.check_requests WHERE id = $1', [id]);
+    if (!set || set.deleted_at) throw fail(404, 'Photo set not found');
+    if (set.status !== 'uploading') throw fail(409, `${setLabel(set.id)} was already sent for checking.`);
+    if (!set.replaces_set_id) throw fail(409, `${setLabel(set.id)} does not replace a deleted check.`);
+    const photoId = toId(req.body?.photo_id);
+    const src = photoId && await one(`SELECT p.*, b.bytes FROM avs.check_photos p
+        LEFT JOIN avs.check_photo_bytes b ON b.photo_id = p.id WHERE p.id = $1 AND p.request_id = $2`, [photoId, set.replaces_set_id]);
+    if (!src) throw fail(404, `That photo is not in ${setLabel(set.replaces_set_id)}.`);
+    const already = await one('SELECT seq FROM avs.check_photos WHERE request_id = $1 AND sha256 = $2', [set.id, src.sha256]);
+    if (already) {
+      const [out] = await readSets({ id: set.id });
+      return res.json({ ...out, last_photo: { seq: already.seq, already: true } });
+    }
+    let buffer = src.bytes ? Buffer.from(src.bytes) : null;
+    if (!buffer) {
+      if (!src.drive_file_id) throw fail(410, `Photo ${src.seq} of ${setLabel(src.request_id)} is neither in CI Plant nor in Drive.`);
+      const got = await callDrive(await settings(), { op: 'get', id: src.drive_file_id }, { timeoutMs: 25000, tries: 2 });
+      buffer = Buffer.from(got.base64 || '', 'base64');
+    }
+    if (!buffer.length) throw fail(502, 'Google Drive sent an empty photo');
+    if (src.sha256 && crypto.createHash('sha256').update(buffer).digest('hex') !== src.sha256) {
+      throw fail(502, `Photo ${src.seq} came back different from the one uploaded; add it again by hand.`);
+    }
+    const name = String(src.original_name || src.file_name || 'photo.jpg').replace(/^\d{2} /, '');
+    const last = await addPhoto(set, { buffer, originalname: name, mime: src.mime, capturedAt: src.captured_at, user: req.user, keepOnly: true });
+    await avsAuditSoft(q, { action: 'PHOTOS_CARRIED', setId: set.id, reportNo: set.replaces_report_no, user: req.user,
+      details: { from_set: +src.request_id, from_photo: +src.id, seq: last.seq } });
+    const [out] = await readSets({ id: set.id });
+    res.status(201).json({ ...out, last_photo: last });
   } catch (e) { next(e); }
 });
 
