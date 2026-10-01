@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.2.0",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.1.200",
     "pg": "^8.13.1",
     "web-push": "^3.6.7"

@@ -26,12 +26,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Camera, CheckCircle2, Download, ExternalLink, FileText, FolderOpen, History, RotateCcw, Settings2, ShieldAlert, ShieldCheck, Undo2, XCircle } from 'lucide-react';
-import { api, fmt } from '../api.js';
+import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
   AVS_DECISIONS, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_REMARK_PRESETS, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
-  istStamp, reportLabel, setLabel,
+  istStamp, reportLabel, setLabel, AVS_SEVERITIES, AVS_SEVERITY_LABEL, elapsedText, problemSeverity, reportTime,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
 import AvsSets, { TotalTime } from '../components/avs/AvsSets.jsx';
@@ -225,8 +225,16 @@ export default function Avs() {
                   <CaseChip state={r.case_state} />
                   {r.last_decision && <span className="text-[11px] text-slate-500">{decisionLabel(r.last_decision)} · {r.last_decided_by || '—'}</span>}
                 </div>) },
-            { key: 'open_points', label: 'Points to clear', align: 'right', export: r => r.open_points, sortValue: r => +r.open_points || 0,
-              render: r => (+r.open_points > 0 ? <span className="font-semibold text-slate-800">{r.open_points}</span> : <span className="text-slate-300">—</span>) },
+            // How many points QA must clear, and how serious they are (Critical / Major / Minor).
+            { key: 'open_points', label: 'Points to clear', align: 'right',
+              export: r => `${r.open_points || 0}${+r.open_points ? ` (${AVS_SEVERITIES.filter(k => +r[k.toLowerCase()]).map(k => `${r[k.toLowerCase()]} ${AVS_SEVERITY_LABEL[k]}`).join(', ')})` : ''}`,
+              sortValue: r => (+r.critical || 0) * 10000 + (+r.major || 0) * 100 + (+r.minor || 0),
+              render: r => (+r.open_points > 0 ? <SeverityCounts r={r} /> : <span className="text-slate-300">—</span>) },
+            // From Verify in CI Plant to the report (the photo set behind this issue).
+            { key: 'time_taken', label: 'Time taken', align: 'right',
+              export: r => (reportTime(r) ? elapsedText(reportTime(r).totalMs) : ''),
+              sortValue: r => reportTime(r)?.totalMs ?? -1,
+              render: r => <TimeTaken r={r} /> },
             { key: 'job_card', label: 'Job card', render: r => <span className="font-mono text-xs">{r.job_card || '—'}</span> },
             { key: 'po_no', label: 'PO', export: r => r.po_no, sortValue: r => shortPo(r.po_no), render: r => <span className="font-mono text-xs">{shortPo(r.po_no)}</span> },
             { key: 'print_status', label: 'Print status', render: r => <span className="text-xs text-slate-600">{r.print_status || '—'}</span> },
@@ -335,6 +343,7 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
                     <span className="font-mono text-xs font-bold text-slate-500">{p.ref}</span>
                     <span className="text-sm font-semibold text-slate-900">{p.title}</span>
                     <Result value={p.result} />
+                    {problemSeverity(p) && <SeverityChip value={problemSeverity(p)} />}
                   </div>
                   {p.detail && <p className="mt-1 text-[13px] leading-relaxed text-slate-600">{p.detail}</p>}
                   {p.action && <p className="mt-1 text-[13px] leading-relaxed text-slate-800"><b>Do:</b> {p.action}</p>}
@@ -357,7 +366,7 @@ function ReportModal({ no, onClose, onSaved, canRedo = false, onRedo, refreshKey
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Full report</h3>
             <div className="flex flex-wrap items-center gap-3">
               {r.drive_url
-                ? <a href={r.drive_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#0071F0] px-3 py-2 text-sm font-semibold text-white"><FileText size={15} /> Open report PDF <ExternalLink size={13} /></a>
+                ? <a href={r.drive_url} onClick={e => { e.preventDefault(); openPdf(r); }} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#0071F0] px-3 py-2 text-sm font-semibold text-white"><FileText size={15} /> Open report PDF <ExternalLink size={13} /></a>
                 : <span className="text-sm text-slate-500">PDF link not added yet.</span>}
               {r.report_file && <span className="text-xs text-slate-500">{r.date_folder ? `${r.date_folder}/${r.product_folder}/` : ''}{r.report_file}</span>}
             </div>
@@ -491,6 +500,67 @@ async function undoDecision(reportNo, decisionId, toast) {
 // The report PDF, straight from the row: open it, or download it.
 const pdfDownloadUrl = r => (r.drive_file_id ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(r.drive_file_id)}` : null);
 
+// The PDF comes from CI Plant, with QA's decision stamped on it once QA has
+// decided this issue ("RELEASED BY QA ..."; server avs-stamp.js). If CI Plant
+// cannot fetch it, the Drive copy opens instead (filed before QA decided).
+async function openPdf(r, { download = false } = {}) {
+  const win = download ? null : window.open('', '_blank');
+  try {
+    const res = await fetch(`/api/avs/reports/${encodeURIComponent(r.report_no)}/pdf${download ? '?download=1' : ''}`, {
+      headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const url = URL.createObjectURL(await res.blob());
+    if (download) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${reportLabel(r)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else if (win) win.location.href = url;
+    else window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch {
+    const fallback = download ? pdfDownloadUrl(r) : r.drive_url;
+    if (win) { if (fallback) win.location.href = fallback; else win.close(); } else if (fallback) window.open(fallback, '_blank');
+  }
+}
+
+const SEVERITY_TONE = {
+  CRITICAL: 'bg-red-600 text-white', MAJOR: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300', MINOR: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
+};
+function SeverityChip({ value, n = null }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-bold uppercase tracking-wide ${SEVERITY_TONE[value] || ''}`}>
+      {n != null ? `${n} ` : ''}{AVS_SEVERITY_LABEL[value]}
+    </span>
+  );
+}
+// The Points to clear cell: the number, then how many are Critical, Major, Minor.
+function SeverityCounts({ r }) {
+  const parts = AVS_SEVERITIES.map(k => [k, +r[k.toLowerCase()] || 0]).filter(([, n]) => n > 0);
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <span className="font-semibold text-slate-800">{r.open_points}</span>
+      <span className="flex flex-wrap justify-end gap-1">{parts.map(([k, n]) => <SeverityChip key={k} value={k} n={n} />)}</span>
+    </div>
+  );
+}
+// Time taken: Verify to the report, with the wait for Claude and the check.
+function TimeTaken({ r }) {
+  const t = reportTime(r);
+  if (!t) return <span className="text-[11px] text-slate-400" title="Made in Cowork, not from a CI Plant photo set">—</span>;
+  return (
+    <div className="whitespace-nowrap text-right" title="From Verify in CI Plant to the report">
+      <div className="font-semibold tabular-nums text-slate-800">{elapsedText(t.totalMs)}</div>
+      {t.checkMs != null && (
+        <div className="text-[11px] tabular-nums text-slate-500">wait {elapsedText(t.waitMs)} · check {elapsedText(t.checkMs)}</div>
+      )}
+    </div>
+  );
+}
+
 // The row's Action list: for the logins that decide. Undo only when a decision
 // is in force on this issue of the report.
 function RowActions({ r, canDecide, onAct }) {
@@ -500,13 +570,13 @@ function RowActions({ r, canDecide, onAct }) {
   return (
     <div className="flex items-center gap-1.5" onClick={stop} onKeyDown={stop} role="presentation">
       {r.drive_url && (
-        <a href={r.drive_url} target="_blank" rel="noreferrer" title="Open the report PDF"
+        <a href={r.drive_url} onClick={e => { e.preventDefault(); openPdf(r); }} target="_blank" rel="noreferrer" title="Open the report PDF"
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
           <FileText size={15} />
         </a>
       )}
       {pdfDownloadUrl(r) && (
-        <a href={pdfDownloadUrl(r)} target="_blank" rel="noreferrer" title="Download the report PDF"
+        <a href={pdfDownloadUrl(r)} onClick={e => { e.preventDefault(); openPdf(r, { download: true }); }} target="_blank" rel="noreferrer" title="Download the report PDF"
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
           <Download size={15} />
         </a>

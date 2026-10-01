@@ -143,6 +143,56 @@ export function reportLabel({ report_no, check_no = 1, report_rev = 0 }) {
 
 export const AVS_REPORT_NO = /^AVS-\d{4}-\d{4}$/;
 
+// ── How serious each point is (owner's request, 1 Oct 2026; runbook rule 24) ─
+// Every HOLD / REJECT point of a report is CRITICAL, MAJOR or MINOR:
+//   CRITICAL  could put a wrong or unsafe pack on the market: wrong or old
+//             artwork, wrong product, strength or composition, missing or wrong
+//             mandatory text, wrong barcode, another product mixed in. REJECT.
+//   MAJOR     the print or the material does not meet the PO or the approved
+//             artwork, or a key fact could not be verified: board / GSM /
+//             varnish differs, a print defect touching text, MRP or batch area,
+//             extra print, quantity over the PO, PO expired or unread, approval
+//             or master not on file. HOLD.
+//   MINOR     records and housekeeping, nothing wrong on the carton itself: job
+//             card or printing log, rates, item master entries, duplicates,
+//             photo coverage or glare, prepress numbers. HOLD.
+// Claude writes avs.problems.severity; a point written before the column
+// existed (or without it) counts as REJECT → CRITICAL, D- → MAJOR, R- → MINOR.
+export const AVS_SEVERITIES = ['CRITICAL', 'MAJOR', 'MINOR'];
+export const AVS_SEVERITY_LABEL = { CRITICAL: 'Critical', MAJOR: 'Major', MINOR: 'Minor' };
+export function problemSeverity(p) {
+  const s = String(p?.severity || '').toUpperCase();
+  if (AVS_SEVERITIES.includes(s)) return s;
+  if (p?.result === 'REJECT') return 'CRITICAL';
+  if (p?.result === 'HOLD') return /^D-/.test(String(p?.ref || '')) ? 'MAJOR' : 'MINOR';
+  return null;
+}
+export const SEVERITY_SQL = a => `COALESCE(${a}.severity, CASE WHEN ${a}.result = 'REJECT' THEN 'CRITICAL'
+  WHEN ${a}.ref LIKE 'D-%' THEN 'MAJOR' ELSE 'MINOR' END)`;
+
+// Time taken for a report (owner's request, 1 Oct 2026): the photo set behind
+// this issue, from Verify to the report. Null for a report made in Cowork.
+export function reportTime(r) {
+  const q = Date.parse(r?.set_queued_at), f = Date.parse(r?.set_finished_at), c = Date.parse(r?.set_claimed_at);
+  if (!Number.isFinite(q) || !Number.isFinite(f)) return null;
+  return { totalMs: Math.max(0, f - q), waitMs: Number.isFinite(c) ? Math.max(0, c - q) : null,
+    checkMs: Number.isFinite(c) ? Math.max(0, f - c) : null };
+}
+
+// The stamp on the report PDF once QA has decided this issue (owner's request,
+// 1 Oct 2026): RELEASED, REJECTED or ON HOLD, with who, when and the remark.
+// Nothing for an issue no decision is in force on.
+export function pdfStamp(state, d) {
+  const when = d?.decided_at ? istStamp(d.decided_at) : '';
+  const by = d?.decided_by || '';
+  const words = state === 'released' ? 'RELEASED BY QA'
+    : state === 'rejected' ? 'REJECTED BY QA'
+      : d?.decision === 'KEEP ON HOLD' ? 'KEPT ON HOLD BY QA' : null;
+  if (!words) return null;
+  return { words, tone: state === 'released' ? 'green' : state === 'rejected' ? 'red' : 'amber',
+    line: [by, when ? `${when} IST` : ''].filter(Boolean).join(' · '), remark: String(d?.remark || '').trim() };
+}
+
 // ── The register: filters and search ────────────────────────────────────────
 export const AVS_REGISTER_FILTERS = [
   { key: 'all', label: 'All', match: () => true },

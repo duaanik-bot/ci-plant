@@ -17,9 +17,11 @@ import { optionalText } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { avsGateForCard } from '../avs-gate.js';
 import {
-  AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, DECISION_IN_FORCE_SQL, canDecideAvs, caseState, decisionProblem,
-  decisionsInForce, undoProblem,
+  AVS_REPORT_NO, AVS_REMARK_MAX, AVS_WHO_DECIDES, DECISION_IN_FORCE_SQL, SEVERITY_SQL, canDecideAvs, caseState,
+  decisionProblem, decisionsInForce, pdfStamp, undoProblem,
 } from '../../../client/src/lib/avs.js';
+import { avsSettings, callDrive } from './avs-intake.js';
+import { stampPdf } from '../avs-stamp.js';
 
 const r = Router();
 
@@ -53,12 +55,26 @@ r.get('/avs/reports', async (req, res, next) => {
              l.po_age_days, l.job_card, l.print_status, l.checked_on, l.issued_at, l.drive_url, l.drive_file_id,
              l.artwork_alerts,
              (SELECT count(*)::int FROM avs.problems p WHERE p.report_id = l.id AND p.result IN ('HOLD','REJECT')) AS open_points,
+             sv.critical, sv.major, sv.minor,
+             t.queued_at AS set_queued_at, t.claimed_at AS set_claimed_at, t.finished_at AS set_finished_at,
              EXISTS (SELECT 1 FROM avs.reports c WHERE c.report_no = l.report_no AND c.row_type = 'CLOSE') AS closed,
              d.id AS last_decision_id, d.remark AS last_remark,
              d.decision AS last_decision, d.decided_by AS last_decided_by, d.decided_at AS last_decided_at,
              d.report_rev AS last_decision_rev, d.check_no AS last_decision_check
         FROM avs.latest_reports l
         LEFT JOIN (${LAST_DECISION}) d ON d.report_no = l.report_no
+        -- How serious the points to clear are (lib/avs.js SEVERITY_SQL).
+        LEFT JOIN LATERAL (
+          SELECT count(*) FILTER (WHERE sev = 'CRITICAL')::int AS critical,
+                 count(*) FILTER (WHERE sev = 'MAJOR')::int AS major,
+                 count(*) FILTER (WHERE sev = 'MINOR')::int AS minor
+            FROM (SELECT ${SEVERITY_SQL('p')} AS sev FROM avs.problems p
+                   WHERE p.report_id = l.id AND p.result IN ('HOLD','REJECT')) x) sv ON true
+        -- The photo set behind this issue: how long it took from Verify to the report.
+        LEFT JOIN LATERAL (
+          SELECT c.queued_at, c.claimed_at, c.finished_at FROM avs.check_requests c
+           WHERE c.status = 'done' AND c.report_no = l.report_no AND COALESCE(c.check_no, 1) = COALESCE(l.check_no, 1)
+           ORDER BY c.id DESC LIMIT 1) t ON true
        ORDER BY l.report_no DESC`);
     const reports = rows.map(x => ({
       ...x,
@@ -86,7 +102,7 @@ r.get('/avs/reports/:no', async (req, res, next) => {
         FROM avs.latest_reports WHERE report_no = $1`, [no]);
     if (!report) throw fail(404, `${no} not found`);
     const [problems, history, decisions, closedRow, sets] = await Promise.all([
-      q(`SELECT ref, result, title, detail, action, rows FROM avs.problems WHERE report_id = $1
+      q(`SELECT ref, result, title, detail, action, rows, ${SEVERITY_SQL('avs.problems')} AS severity FROM avs.problems WHERE report_id = $1
           ORDER BY CASE result WHEN 'REJECT' THEN 0 WHEN 'HOLD' THEN 1 WHEN 'VERIFY' THEN 2 ELSE 3 END,
                    substring(ref from 1 for 1), (substring(ref from 3))::int`, [report.id]),
       q(`SELECT report_rev, check_no, row_type, status, issued_at, report_file, note
@@ -213,5 +229,40 @@ async function mayDecide(user) {
   const row = await one('SELECT avs_approver FROM users WHERE id = $1 AND active = 1', [user.id]).catch(() => null);
   return canDecideAvs({ role: user.role, avs_approver: row?.avs_approver });
 }
+
+// ── The report PDF, with QA's decision stamped on it ────────────────────────
+// Read through the Drive link (the PDF lives in CI AVS) and returned from CI
+// Plant, so the people who open it see "RELEASED BY QA" (or rejected / kept on
+// hold) once QA has decided this issue. Without a decision it is the PDF as
+// filed. A PDF too big for one answer is not served here: the page then opens
+// the Drive copy.
+const PDF_MAX = 4 * 1024 * 1024;
+r.get('/avs/reports/:no/pdf', async (req, res, next) => {
+  try {
+    const no = req.params.no;
+    if (!AVS_REPORT_NO.test(no)) throw fail(400, 'Not an AVS report number');
+    const report = await one(`SELECT report_no, report_rev, check_no, status, drive_file_id, report_file
+                                FROM avs.latest_reports WHERE report_no = $1`, [no]);
+    if (!report) throw fail(404, `${no} not found`);
+    if (!report.drive_file_id) throw fail(404, `The PDF of ${no} is not linked yet`);
+    const [last, closed] = await Promise.all([
+      one(`${LAST_DECISION.replace('ORDER BY dd.report_no', 'AND dd.report_no = $1 ORDER BY dd.report_no')}`, [no]),
+      one(`SELECT 1 AS x FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' LIMIT 1`, [no]),
+    ]);
+    const state = caseState({ ...report, closed: !!closed }, last || null);
+    const sameIssue = last && +last.report_rev === +report.report_rev && +(last.check_no ?? 1) === +(report.check_no ?? 1);
+    const stamp = pdfStamp(state, sameIssue ? last : null);
+    const got = await callDrive(await avsSettings(), { op: 'get', id: report.drive_file_id }, { timeoutMs: 24000, tries: 2 });
+    const bytes = Buffer.from(got.base64 || '', 'base64');
+    if (!bytes.length) throw fail(502, 'Google Drive sent an empty file');
+    const out = Buffer.from(await stampPdf(bytes, stamp));
+    if (out.length > PDF_MAX) throw fail(413, 'The PDF is too big to send from CI Plant; open it in Drive');
+    const name = String(report.report_file || `${no}.pdf`).replace(/[^\w .()+-]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="${name}"`);
+    res.setHeader('X-AVS-Stamp', stamp ? stamp.words : 'none');
+    res.end(out);
+  } catch (e) { next(e); }
+});
 
 export default r;

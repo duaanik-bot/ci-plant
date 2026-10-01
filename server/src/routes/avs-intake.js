@@ -62,6 +62,8 @@ const uploadOne = (req, res, next) => upload.single('file')(req, res, err => {
 // ── Settings: the Drive link and the Claude link ────────────────────────────
 const SETTING_KEYS = ['drive_bridge_url', 'drive_bridge_secret', 'routine_fire_url', 'routine_token', 'robot_key'];
 
+export async function avsSettings() { return settings(); }
+
 async function settings() {
   const rows = await q('SELECT key, value FROM avs.settings WHERE key = ANY($1)', [SETTING_KEYS]);
   return Object.fromEntries(rows.map(x => [x.key, x.value || '']));

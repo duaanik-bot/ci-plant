@@ -437,3 +437,49 @@ test('the step checklist: green ticks behind, the running step, nothing ahead', 
   const kept = stepChecklist({ ...set, progress: 'Filing the photos', progress_log: [{ p: 'Claude started', at: '2026-10-01T06:02:00Z' }, { p: 'Filing the photos', at: '2026-10-01T06:02:30Z' }] }, now);
   assert.equal(kept.find(r => r.label === 'Filing the photos').state, 'current');
 });
+
+// ── Severity, time taken and the decision stamp (owner's request, 1 Oct 2026) ─
+import { AVS_SEVERITIES, SEVERITY_SQL, pdfStamp, problemSeverity, reportTime } from '../../client/src/lib/avs.js';
+import { stampPdf } from './avs-stamp.js';
+import { PDFDocument } from 'pdf-lib';
+
+test('each point to clear is Critical, Major or Minor; old points get REJECT → Critical, D- → Major, R- → Minor', () => {
+  assert.deepEqual(AVS_SEVERITIES, ['CRITICAL', 'MAJOR', 'MINOR']);
+  assert.equal(problemSeverity({ ref: 'R-3', result: 'HOLD', severity: 'major' }), 'MAJOR', 'what Claude wrote wins');
+  assert.equal(problemSeverity({ ref: 'D-001', result: 'REJECT' }), 'CRITICAL');
+  assert.equal(problemSeverity({ ref: 'D-002', result: 'HOLD' }), 'MAJOR');
+  assert.equal(problemSeverity({ ref: 'R-2', result: 'HOLD' }), 'MINOR');
+  assert.equal(problemSeverity({ ref: 'A-1', result: 'VERIFY' }), null, 'an artwork alert is not a point to clear');
+  assert.match(SEVERITY_SQL('p'), /COALESCE\(p\.severity/);
+});
+
+test('time taken for a report: Verify to the report, from its photo set; none for a Cowork report', () => {
+  assert.deepEqual(reportTime({ set_queued_at: '2026-10-01T06:26:21Z', set_claimed_at: '2026-10-01T06:26:57Z', set_finished_at: '2026-10-01T06:36:45Z' }),
+    { totalMs: 624_000, waitMs: 36_000, checkMs: 588_000 });
+  assert.equal(reportTime({}), null);
+});
+
+test('the PDF stamp follows QA\'s decision on this issue', () => {
+  const d = { decision: 'RELEASE', decided_by: 'Plant', decided_at: '2026-10-01T06:50:00Z', remark: 'Board GSM accepted by customer' };
+  const s = pdfStamp('released', d);
+  assert.equal(s.words, 'RELEASED BY QA');
+  assert.equal(s.tone, 'green');
+  assert.match(s.line, /^Plant · 01 Oct 2026, 12:20 pm IST$/);
+  assert.equal(s.remark, 'Board GSM accepted by customer');
+  assert.equal(pdfStamp('rejected', { decision: 'REJECT' }).words, 'REJECTED BY QA');
+  assert.equal(pdfStamp('open', { decision: 'KEEP ON HOLD' }).words, 'KEPT ON HOLD BY QA');
+  assert.equal(pdfStamp('open', null), null, 'no decision, no stamp');
+  assert.equal(pdfStamp('waiting', null), null);
+});
+
+test('stampPdf draws on every page and leaves an undecided PDF untouched', async () => {
+  const doc = await PDFDocument.create();
+  doc.addPage([595, 842]); doc.addPage([595, 842]);
+  const plain = await doc.save();
+  assert.equal(await stampPdf(plain, null), plain);
+  const out = await stampPdf(plain, pdfStamp('released', { decision: 'RELEASE', decided_by: 'Anik Dua (MD)', decided_at: '2026-10-01T06:50:00Z', remark: 'OK – ₹ rate checked' }));
+  const back = await PDFDocument.load(out);
+  assert.equal(back.getPageCount(), 2);
+  assert.match(back.getSubject(), /^RELEASED BY QA Anik Dua \(MD\)/);
+  assert.ok(out.length > plain.length);
+});
