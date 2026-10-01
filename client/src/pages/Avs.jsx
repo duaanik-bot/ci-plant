@@ -34,7 +34,7 @@ import {
   istStamp, reportLabel, setLabel,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
-import AvsSets from '../components/avs/AvsSets.jsx';
+import AvsSets, { TotalTime } from '../components/avs/AvsSets.jsx';
 import AvsSetup from '../components/avs/AvsSetup.jsx';
 
 const RESULT_TONE = {
@@ -639,6 +639,7 @@ function RedoAndTrail({ no, r, detail, canRedo, onRedo }) {
                   {x.created_by || '—'} · uploaded {istStamp(x.created_at)}{x.finished_at ? ` · checked ${istStamp(x.finished_at)}` : ''}
                   {x.status === 'cancelled' ? ` · cancelled by ${x.cancelled_by || '—'}` : ''}
                 </div>
+                <TotalTime set={x} />
                 {x.redo_reason && <div className="mt-0.5 text-xs text-violet-800">Why redone: {x.redo_reason}</div>}
                 {x.robot_note && x.status !== 'uploading' && <div className="mt-0.5 text-xs text-slate-600">{x.robot_note}</div>}
               </li>

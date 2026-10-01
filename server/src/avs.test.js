@@ -371,3 +371,69 @@ test('where a check\'s time went: each step until the next, the last until it fi
   }), t);
   assert.deepEqual(stepTimes({}), []);
 });
+
+// ── Total time and the step checklist (owner's request, 1 Oct 2026) ──────────
+import { stepChecklist, totalTime } from '../../client/src/lib/avs.js';
+
+test('total time to verify: from Verify to the report, split into waiting and checking; live while in progress', () => {
+  const done = totalTime({ status: 'done', queued_at: '2026-10-01T06:00:00Z', claimed_at: '2026-10-01T06:06:10Z', finished_at: '2026-10-01T06:18:40Z' });
+  assert.deepEqual(done, { live: false, totalMs: 1_120_000, waitMs: 370_000, checkMs: 750_000 });
+  const now = Date.parse('2026-10-01T06:05:00Z');
+  const waiting = totalTime({ status: 'queued', queued_at: '2026-10-01T06:00:00Z' }, now);
+  assert.deepEqual(waiting, { live: true, totalMs: 300_000, waitMs: 300_000, checkMs: null });
+  const checking = totalTime({ status: 'checking', queued_at: '2026-10-01T06:00:00Z', claimed_at: '2026-10-01T06:02:00Z' }, now);
+  assert.equal(checking.totalMs, 300_000);
+  assert.equal(checking.checkMs, 180_000);
+  assert.equal(totalTime({ status: 'uploading' }), null, 'no total before Verify');
+  assert.equal(totalTime({ status: 'cancelled', queued_at: '2026-10-01T06:00:00Z' }), null);
+  assert.equal(totalTime({ status: 'done', queued_at: '2026-10-01T06:00:00Z' }), null, 'no finish time, no total');
+});
+
+test('the step checklist: green ticks behind, the running step, nothing ahead', () => {
+  const now = Date.parse('2026-10-01T06:10:00Z');
+  const set = {
+    status: 'checking', created_at: '2026-10-01T05:58:00Z', queued_at: '2026-10-01T06:00:00Z', claimed_at: '2026-10-01T06:02:00Z',
+    progress: 'Reading the PO: 02037',
+    progress_log: [
+      { p: 'Claude started', at: '2026-10-01T06:02:00Z' },
+      { p: 'Reading the photos', at: '2026-10-01T06:03:00Z' },
+      { p: 'Finding the approved master: PMC-N042-R0', at: '2026-10-01T06:05:00Z' },
+      { p: 'Reading the PO: 02037', at: '2026-10-01T06:08:00Z' },
+    ],
+  };
+  const rows = stepChecklist(set, now);
+  const by = Object.fromEntries(rows.map(r => [r.label, r]));
+  assert.equal(by['Photos uploaded'].state, 'done');
+  assert.equal(by['Photos uploaded'].ms, 120_000);
+  assert.equal(by['Waiting for Claude to start'].state, 'done');
+  assert.equal(by['Waiting for Claude to start'].ms, 120_000);
+  assert.equal(by['Claude started'].state, 'done');
+  assert.equal(by['Reading the photos'].ms, 120_000);
+  assert.equal(by['Finding the approved master'].state, 'done');
+  assert.equal(by['Finding the approved master'].ms, 180_000);
+  assert.equal(by['Reading the PO'].state, 'current');
+  assert.equal(by['Reading the PO'].ms, 120_000, 'the running step counts up to now');
+  assert.equal(by['Checking the order book'].state, 'pending');
+  assert.equal(by['Report ready'].state, 'pending');
+  assert.ok(!by['Filing the photos'], 'filing the photos is listed only when the check did it');
+  assert.deepEqual(rows.map(r => r.label).slice(0, 3), ['Photos uploaded', 'Waiting for Claude to start', 'Claude started']);
+
+  const done = stepChecklist({ ...set, status: 'done', progress: 'Report ready', finished_at: '2026-10-01T06:20:00Z' }, now);
+  assert.ok(done.every(r => r.state === 'done'), 'a finished check ticks every step');
+  assert.equal(done.at(-1).label, 'Report ready');
+
+  const failed = stepChecklist({ ...set, status: 'failed', progress: 'Not checked', finished_at: '2026-10-01T06:09:00Z' }, now);
+  const f = Object.fromEntries(failed.map(r => [r.label, r.state]));
+  assert.equal(f['Finding the approved master'], 'done');
+  assert.equal(f['Reading the PO'], 'failed', 'the step it stopped at is marked');
+  assert.equal(f['Comparing the panels'], 'pending');
+  assert.equal(failed.at(-1).label, 'Check failed');
+
+  const queued = stepChecklist({ status: 'queued', created_at: '2026-10-01T05:58:00Z', queued_at: '2026-10-01T06:00:00Z' }, now);
+  assert.equal(queued[1].state, 'current');
+  assert.equal(queued[1].ms, 600_000);
+  assert.ok(queued.slice(2).every(r => r.state === 'pending'));
+
+  const kept = stepChecklist({ ...set, progress: 'Filing the photos', progress_log: [{ p: 'Claude started', at: '2026-10-01T06:02:00Z' }, { p: 'Filing the photos', at: '2026-10-01T06:02:30Z' }] }, now);
+  assert.equal(kept.find(r => r.label === 'Filing the photos').state, 'current');
+});

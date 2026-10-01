@@ -326,6 +326,101 @@ export function stepTimes(set) {
   }).filter(x => x.ms != null && x.step && !/^report ready$|^not checked$/i.test(x.step));
 }
 
+// Total time to process a verification (owner's request, 1 Oct 2026): from the
+// moment Verify sent the set (queued_at) to the report (finished_at), split into
+// the wait for Claude to start (queued → claimed) and the check itself
+// (claimed → finished). While a set is in progress the total runs live.
+export function totalTime(set, now = Date.now()) {
+  const at = v => (v ? Date.parse(v) : NaN);
+  const queued = at(set?.queued_at);
+  const claimed = at(set?.claimed_at);
+  const finished = at(set?.finished_at);
+  if (!Number.isFinite(queued)) return null;
+  const ended = ['done', 'failed'].includes(set?.status);
+  if (!ended && !AVS_SET_ACTIVE.includes(set?.status)) return null;
+  if (ended && !Number.isFinite(finished)) return null;
+  const end = ended ? finished : now;
+  const waitEnd = Number.isFinite(claimed) ? claimed : end;
+  return {
+    live: !ended,
+    totalMs: Math.max(0, end - queued),
+    waitMs: Math.max(0, waitEnd - queued),
+    checkMs: Number.isFinite(claimed) ? Math.max(0, end - claimed) : null,
+  };
+}
+
+// Every step of a set as a checklist (owner's request, 1 Oct 2026): photos
+// uploaded → waiting for Claude → each step of the check (AVS_CHECK_STEPS) →
+// report ready. Each step is 'done' (green tick), 'current' (running now),
+// 'failed', or 'pending', with how long it took (from progress_log, stamped by
+// the database) or has been running. "Filing the photos" is listed only when
+// the check did it (CI Plant kept some photos).
+export function stepChecklist(set, now = Date.now()) {
+  const at = v => { const t = v ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : null; };
+  const status = set?.status;
+  const log = (Array.isArray(set?.progress_log) ? set.progress_log : [])
+    .map(x => ({ low: String(x?.p || '').toLowerCase(), t: at(x?.at) }));
+  const idxOf = low => AVS_CHECK_STEPS.findIndex(s => low.startsWith(s.words.toLowerCase()));
+  const finished = at(set?.finished_at);
+  const endOfCheck = finished ?? (AVS_SET_ACTIVE.includes(status) ? now : null);
+  // When each check step started (first stamp), and when the next stamp came.
+  const started = AVS_CHECK_STEPS.map(() => null);
+  log.forEach(x => { const i = idxOf(x.low); if (i >= 0 && started[i] == null) started[i] = x.t; });
+  const nextStamp = t => {
+    const later = log.map(x => x.t).filter(v => v != null && t != null && v > t);
+    return later.length ? Math.min(...later) : endOfCheck;
+  };
+  const curText = String(set?.progress || '').toLowerCase();
+  const reachedIdx = status === 'checking'
+    ? idxOf(curText)
+    : Math.max(-1, ...log.map(x => idxOf(x.low)));
+  const claimed = at(set?.claimed_at);
+  const queued = at(set?.queued_at);
+  const created = at(set?.created_at);
+  const span = (a, b) => (a != null && b != null ? Math.max(0, b - a) : null);
+
+  const rows = [];
+  // 1 Photos uploaded
+  rows.push({
+    key: 'photos', label: 'Photos uploaded',
+    state: status === 'uploading' ? 'current' : 'done',
+    ms: status === 'uploading' ? span(created, now) : span(created, queued),
+  });
+  // 2 Waiting for Claude to start
+  const queueState = status === 'uploading' ? 'pending'
+    : status === 'queued' ? 'current'
+      : claimed != null || status === 'checking' || status === 'done' ? 'done'
+        : status === 'failed' ? 'failed' : 'pending';
+  rows.push({
+    key: 'queue', label: 'Waiting for Claude to start', state: queueState,
+    ms: queueState === 'current' ? span(queued, now) : span(queued, claimed),
+  });
+  // 3 The check's own steps
+  const checkStarted = claimed != null || status === 'checking';
+  AVS_CHECK_STEPS.forEach((s, i) => {
+    const optional = s.words === 'Filing the photos';
+    const seen = started[i] != null || (status === 'checking' && i === reachedIdx);
+    if (optional && !seen) return;
+    let state = 'pending';
+    if (checkStarted) {
+      if (status === 'done') state = 'done';
+      else if (status === 'checking') state = reachedIdx < 0 ? (i === 0 ? 'current' : 'pending') : i < reachedIdx ? 'done' : i === reachedIdx ? 'current' : 'pending';
+      else if (status === 'failed') state = i < reachedIdx ? 'done' : i === reachedIdx ? 'failed' : 'pending';
+    }
+    const from = started[i];
+    rows.push({
+      key: `step${i}`, label: s.words, state,
+      ms: from != null && state !== 'pending' ? span(from, state === 'current' ? now : nextStamp(from)) : null,
+    });
+  });
+  // 4 The end
+  rows.push({
+    key: 'ready', label: status === 'failed' ? 'Check failed' : status === 'cancelled' ? 'Cancelled' : 'Report ready',
+    state: status === 'done' ? 'done' : status === 'failed' || status === 'cancelled' ? 'failed' : 'pending', ms: null,
+  });
+  return rows;
+}
+
 // Where a set stands, as one bar: adding photos 5% → waiting for Claude 10% →
 // the check's steps 15–95% → report ready 100%.
 export function setProgress(set) {

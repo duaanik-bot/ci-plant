@@ -13,16 +13,22 @@
 // on it starts a new set for the same job card; when that check is done, the
 // row moves to it and the earlier sets fold under "Earlier checks".
 //
+// Every set shows its total time underneath (from Verify to the report, split
+// into waiting for Claude and checking; live while in progress), and a click on
+// a set (or "Steps") opens its steps with a green tick for each one finished,
+// a spinner on the step running now, and how long each took (owner's request,
+// 1 Oct 2026; lib/avs.js totalTime, stepChecklist).
+//
 // The finished groups show one time window (Today, 7 days, 30 days, All; by
 // when the set ended) and the first few rows, with "Show all" for the rest, so
 // the list never pushes the register off the page.
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Timer, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Timer, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
 import {
   AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod,
-  elapsedText, istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepTimes,
+  elapsedText, istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepChecklist, totalTime,
 } from '../../lib/avs.js';
 import { fireText } from './AvsUpload.jsx';
 
@@ -87,6 +93,52 @@ function SetProgress({ set, now }) {
   );
 }
 
+// Total time to process the verification, under the set: from Verify to the
+// report, with the wait for Claude and the check itself. Live while in progress.
+export function TotalTime({ set, now, compact = false }) {
+  const t = totalTime(set, now);
+  if (!t) return null;
+  return (
+    <div className={`mt-1.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-2.5 py-1 text-[11px] ring-1 ${t.live
+      ? 'bg-violet-50 text-violet-900 ring-violet-200' : 'bg-slate-50 text-slate-700 ring-slate-200'}`}>
+      <span className="inline-flex items-center gap-1 font-semibold">
+        <Timer size={12} className={t.live ? 'text-violet-500' : 'text-slate-500'} />
+        {t.live ? 'Total so far' : 'Total time to verify'}: <span className="tabular-nums">{elapsedText(t.totalMs)}</span>
+      </span>
+      {!compact && <span className="tabular-nums text-slate-500">waiting for Claude {elapsedText(t.waitMs)}</span>}
+      {!compact && t.checkMs != null && <span className="tabular-nums text-slate-500">checking {elapsedText(t.checkMs)}</span>}
+    </div>
+  );
+}
+
+const STEP_ICON = {
+  done: <CheckCircle2 size={15} className="text-emerald-600" aria-label="done" />,
+  current: <Loader2 size={15} className="animate-spin text-violet-600" aria-label="running now" />,
+  failed: <XCircle size={15} className="text-red-600" aria-label="failed" />,
+  pending: <Circle size={15} className="text-slate-300" aria-label="not started" />,
+};
+
+// The set's steps: a green tick for each one finished, the one running now,
+// and how long each took.
+export function StepList({ set, now }) {
+  const rows = stepChecklist(set, now);
+  return (
+    <ol className="mt-2 max-w-2xl space-y-0.5 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200" aria-label={`${setLabel(set.id)}: steps`}>
+      {rows.map(r => (
+        <li key={r.key} className="flex items-center justify-between gap-3 text-xs">
+          <span className="flex min-w-0 items-center gap-2">
+            {STEP_ICON[r.state]}
+            <span className={r.state === 'pending' ? 'text-slate-400' : r.state === 'current' ? 'font-semibold text-violet-800'
+              : r.state === 'failed' ? 'font-semibold text-red-700' : 'text-slate-700'}>{r.label}</span>
+            {r.state === 'current' && <span className="rounded-full bg-violet-100 px-1.5 text-[10px] font-semibold text-violet-700">now</span>}
+          </span>
+          <span className="shrink-0 tabular-nums text-[11px] text-slate-500">{r.ms != null ? elapsedText(r.ms) : ''}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 // What the two links mean for the people using the page, in one sentence.
 function linkNote(linked) {
   const drive = !!linked?.drive;
@@ -105,6 +157,8 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
   const [group, setGroup] = useState('active');
   const [period, setPeriod] = useState(AVS_PERIOD_DEFAULT);
   const [showAll, setShowAll] = useState(false);
+  const [openSteps, setOpenSteps] = useState(() => new Set());
+  const toggleSteps = id => setOpenSteps(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   useEffect(() => { setShowAll(false); }, [group, period]);
   const now = useNow((data?.sets || []).some(s => s.status === 'queued' || s.status === 'checking'));
   if (!data?.enabled) return null;
@@ -221,14 +275,26 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   {took ? ` · ${took.label} ${took.text}` : ''}
                   {s.status === 'queued' && s.fire_status === 'failed' && s.fire_error ? ` · ${s.fire_error}` : ''}
                 </div>
-                {setGroupOf(s.status) === 'active' && <SetProgress set={s} now={now} />}
+                {setGroupOf(s.status) === 'active' && (
+                  <div role="button" tabIndex={0} onClick={() => toggleSteps(s.id)} aria-expanded={openSteps.has(s.id)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSteps(s.id); } }}
+                    title="Click to see where this check is, step by step"
+                    className="w-full max-w-2xl cursor-pointer rounded-lg hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
+                    <SetProgress set={s} now={now} />
+                  </div>
+                )}
+                {s.status !== 'cancelled' && s.status !== 'uploading' && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <TotalTime set={s} now={now} />
+                    <button type="button" onClick={() => toggleSteps(s.id)} aria-expanded={openSteps.has(s.id)}
+                      className="mt-1.5 inline-flex items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-50">
+                      {openSteps.has(s.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Steps
+                    </button>
+                  </div>
+                )}
+                {openSteps.has(s.id) && <StepList set={s} now={now} />}
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
-                )}
-                {['done', 'failed'].includes(s.status) && stepTimes(s).length > 0 && (
-                  <div className="mt-0.5 text-[11px] text-slate-500" title="How long each step of the check took">
-                    Time by step: {stepTimes(s).map(x => `${x.step} ${elapsedText(x.ms)}`).join(' · ')}
-                  </div>
                 )}
                 {s.redo_reason && <div className="mt-0.5 text-[11px] text-violet-800">Why redone: {s.redo_reason}</div>}
                 {s.note && <div className="mt-0.5 text-[11px] italic text-slate-500">“{s.note}”</div>}

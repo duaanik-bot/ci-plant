@@ -97,7 +97,7 @@ r.get('/avs/reports/:no', async (req, res, next) => {
       one(`SELECT note, issued_at FROM avs.reports WHERE report_no = $1 AND row_type = 'CLOSE' ORDER BY issued_at DESC LIMIT 1`, [no]),
       // The photo sets behind this report: the first check and every redo, with
       // who asked, why, and how each ended — the trail between the issues.
-      q(`SELECT id, status, jc_number, created_by, created_at, queued_at, finished_at, report_rev, check_no, result,
+      q(`SELECT id, status, jc_number, created_by, created_at, queued_at, claimed_at, finished_at, report_rev, check_no, result,
                 robot_note, redo_report_no, redo_of_set_id, redo_reason, drive_folder_url, cancelled_by, cancelled_at
            FROM avs.check_requests WHERE report_no = $1 OR redo_report_no = $1 ORDER BY id`, [no])
         .catch(e => (MISSING.has(e?.code) || e?.code === '42703' ? [] : Promise.reject(e))),
