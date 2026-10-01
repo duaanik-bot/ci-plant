@@ -54,7 +54,7 @@ test('the studio shows a customer\'s login the kit\'s size, not the size engine,
   assert.match(html, /\$\{tools\?sizeTable\(r,'d',hasSize\(d\)\?d:null\):''\}/, 'no size comparison');
   assert.match(html, /spaceBlock\(\(d\.items\|\|\[\]\)\.filter\(i=>i\.pid\),d,r,tools\)/, 'no tightest-box advice');
   assert.match(html, /'Carton orientation · top view', 'd', sro\):''\}/, 'the arrangement shows, read-only');
-  assert.match(html, /if\(D\.layEdit&&can\('kit_size'\)\)\{/, 'a save from such a login sends the arrangement back as it was');
+  assert.match(html, /if\(can\('kit_size'\)\)\{\n\s+if\(D\.layEdit\)\{/, 'a save from such a login sends the arrangement back as it was — only kit_size stores or clears it');
   assert.match(html, /const noRec=ctx==='d'&&!sizeArg&&!sizeTools\(\);/, 'its kit report never stands a recommended size in');
   assert.match(html, /data-size-locked>The panel size and the carton arrangement are set by Colour Impressions\. MRPs, contents and the prescription are yours to change\./);
   const bridge = read('client/public/kit-studio-app/erp-bridge.js');
