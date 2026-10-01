@@ -479,7 +479,7 @@ export function setProgress(set) {
     case 'uploading': return { pct: 5, label: 'Adding photos', tone: 'slate' };
     case 'queued': return set.fire_status === 'not_linked'
       ? { pct: 10, label: 'Waiting: start the check from Cowork (/avs)', tone: 'amber' }
-      : { pct: 10, label: 'Waiting for Claude', tone: 'sky' };
+      : { pct: 10, label: set.fire_status === 'local' ? 'Waiting for Claude (office computer)' : 'Waiting for Claude', tone: 'sky' };
     case 'checking': {
       const low = text.toLowerCase();
       const at = AVS_CHECK_STEPS.findIndex(s => low.startsWith(s.words.toLowerCase()));

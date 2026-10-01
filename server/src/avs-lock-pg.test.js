@@ -92,7 +92,7 @@ describe('the AVS printing lock — through the real app', {
         decided_by text, remark text, decided_at timestamptz NOT NULL DEFAULT now())`);
     for (const f of ['20260926140100_avs_photo_sets.sql', '20260926170000_avs_photos_kept_in_ci_plant.sql',
       '20260928180000_avs_redo_verification.sql', '20260928190000_avs_undo_and_job_cards.sql',
-      '20260928200000_avs_progress_log.sql']) {
+      '20260928200000_avs_progress_log.sql', '20261001150000_avs_office_runner.sql']) {
       await db.q(fs.readFileSync(new URL(`../../supabase/migrations/${f}`, import.meta.url), 'utf8')
         .replace(/REVOKE ALL[^;]*;/g, ''));
     }
@@ -357,6 +357,99 @@ describe('the AVS printing lock — through the real app', {
       assert.equal((await call('production', 'GET', '/avs/setup')).status, 403);
     } finally {
       drive.close(); routine.close();
+    }
+  });
+
+  test('the office runner: Verify leaves the set to it; the cloud is fired only when it does not start in time', async () => {
+    const http = await import('node:http');
+    const fires = [];
+    const routine = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        fires.push(JSON.parse(body));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ claude_code_session_url: 'https://claude.ai/code/session_fallback' }));
+      });
+    });
+    await new Promise(r => routine.listen(0, '127.0.0.1', r));
+    try {
+      await applyAvsPhotoSchema();
+      // Nothing else in the queue for this test (put back at the end).
+      const parked = await db.q(`SELECT id, status FROM avs.check_requests WHERE status IN ('queued', 'checking')`);
+      await db.q(`UPDATE avs.check_requests SET status = 'cancelled' WHERE id = ANY($1)`, [parked.map(x => x.id)]);
+      const mine = [];
+      await setSettings({
+        drive_bridge_url: 'https://drive.invalid/exec', drive_bridge_secret: 'test-secret',
+        routine_fire_url: `http://127.0.0.1:${routine.address().port}/fire`, routine_token: 'sk-ant-test-token',
+        robot_key: 'runner-key', local_runner_seen_at: '',
+      });
+      const newSet = async () => {
+        const s = await db.one(`INSERT INTO avs.check_requests (status, product_hint, next_seq) VALUES ('uploading', 'Runner test', 1) RETURNING id`);
+        await db.q(`INSERT INTO avs.check_photos (request_id, seq, file_name) VALUES ($1, 1, 'a.jpg')`, [s.id]);
+        mine.push(s.id);
+        return s.id;
+      };
+      const ask = (key = 'runner-key') => fetch(`${base}/avs/robot/queue`, { headers: { 'x-avs-robot-key': key, 'x-avs-runner': 'CARTON PC MAIN' } })
+        .then(async r => ({ status: r.status, body: await r.json() }));
+
+      assert.equal((await ask('wrong')).status, 401, 'the key is checked');
+
+      // Runner silent: Verify fires the cloud routine as before.
+      const a = await newSet();
+      const va = await call('production', 'POST', `/avs/uploads/${a}/verify`);
+      assert.equal(va.body.fire.status, 'fired');
+      assert.equal(fires.length, 1);
+      await db.q(`UPDATE avs.check_requests SET status = 'done' WHERE id = $1`, [a]);
+
+      // Runner alive: Verify leaves the set to it, no cloud run spent.
+      const first = await ask();
+      assert.equal(first.status, 200);
+      assert.deepEqual(first.body.queued, []);
+      const seen = await db.one(`SELECT value, note FROM avs.settings WHERE key = 'local_runner_seen_at'`);
+      assert.ok(Date.now() - Date.parse(seen.value) < 5000);
+      assert.match(seen.note, /CARTON PC MAIN/);
+      const b = await newSet();
+      const vb = await call('production', 'POST', `/avs/uploads/${b}/verify`);
+      assert.equal(vb.body.fire.status, 'local');
+      assert.equal(vb.body.set.fire_status, 'local');
+      assert.equal(fires.length, 1, 'no cloud run');
+      const got = await ask();
+      assert.deepEqual(got.body.queued.map(x => +x.id), [b]);
+
+      // Started in time (claimed): nothing goes to the cloud.
+      await db.q(`UPDATE avs.check_requests SET fired_at = now() - interval '10 minutes' WHERE id = $1`, [b]);
+      const c = await newSet();
+      await call('production', 'POST', `/avs/uploads/${c}/verify`);
+      await db.q(`UPDATE avs.check_requests SET status = 'checking', claimed_at = now() WHERE id = $1`, [b]);
+      await db.q(`UPDATE avs.check_requests SET fired_at = now() - interval '10 minutes' WHERE id = $1`, [c]);
+      await call('production', 'GET', '/avs/uploads');
+      assert.equal(fires.length, 1, 'set c waits for the run already checking set b');
+      assert.equal((await db.one('SELECT fire_status FROM avs.check_requests WHERE id = $1', [c])).fire_status, 'local');
+
+      // The runner never started it: after the grace time the page's next look fires the cloud, once.
+      await db.q(`UPDATE avs.check_requests SET status = 'done' WHERE id = $1`, [b]);
+      const d = await newSet();
+      await call('production', 'POST', `/avs/uploads/${d}/verify`);
+      await db.q(`UPDATE avs.check_requests SET fired_at = now() - interval '4 minutes' WHERE id = ANY($1)`, [[c, d]]);
+      await Promise.all([call('production', 'GET', '/avs/uploads'), call('qc', 'GET', '/avs/uploads')]);
+      assert.equal(fires.length, 2, 'one cloud run for both late sets');
+      const late = await db.q('SELECT id, fire_status, session_url FROM avs.check_requests WHERE id = ANY($1) ORDER BY id', [[c, d]]);
+      assert.deepEqual(late.map(x => x.fire_status), ['fired', 'joined']);
+      assert.equal(late[0].session_url, 'https://claude.ai/code/session_fallback');
+      assert.deepEqual((await ask()).body.queued, [], 'the runner no longer sees them');
+
+      // Runner silent again (heartbeat old): Verify goes to the cloud.
+      await db.q(`UPDATE avs.check_requests SET status = 'done' WHERE id = ANY($1)`, [[c, d]]);
+      await setSettings({ local_runner_seen_at: new Date(Date.now() - 120000).toISOString() });
+      const e = await newSet();
+      assert.equal((await call('production', 'POST', `/avs/uploads/${e}/verify`)).body.fire.status, 'fired');
+      await db.q(`UPDATE avs.check_requests SET status = 'done' WHERE id = $1`, [e]);
+      await setSettings({ local_runner_seen_at: '', robot_key: '' });
+      await db.q('DELETE FROM avs.check_requests WHERE id = ANY($1)', [mine]);
+      for (const x of parked) await db.q('UPDATE avs.check_requests SET status = $2 WHERE id = $1', [x.id, x.status]);
+    } finally {
+      routine.close();
     }
   });
 

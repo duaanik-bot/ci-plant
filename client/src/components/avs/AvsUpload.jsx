@@ -42,6 +42,7 @@ async function fitPhoto(file) {
 export const FIRE_TEXT = {
   fired: 'Claude has started checking. The report appears in Artwork Verification when it is done.',
   joined: 'Claude is already checking other photos and will check these in the same run.',
+  local: 'The office computer is starting Claude now. The report appears in Artwork Verification when it is done.',
 };
 // Not linked: the set waits for a check started in Cowork (/avs), which also
 // files any photos CI Plant kept.

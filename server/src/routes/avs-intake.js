@@ -152,17 +152,57 @@ export async function fireRoutine(cfg, text, { timeoutMs = 15000 } = {}) {
   } finally { clearTimeout(timer); }
 }
 
+// ── The office runner ────────────────────────────────────────────────────────
+// A small program on an office Mac (CARTON PC MAIN; CI AVS/_SYSTEM/setup/
+// local-runner) asks GET /api/avs/robot/queue every few seconds
+// (routes/avs-robot.js) and starts Claude on that Mac within seconds, on the
+// same company plan — no cloud start-up wait. While it has asked within
+// RUNNER_ALIVE_S, Verify leaves the set to it (fire_status 'local') and spends
+// no cloud run. If the set is still not claimed RUNNER_GRACE_MIN after that and
+// nothing else is being checked, the cloud routine is fired after all
+// (cloudFallback, run whenever the page or the runner asks).
+export const RUNNER_ALIVE_S = 45;
+export const RUNNER_GRACE_MIN = 3;
+
+export async function runnerAlive() {
+  const row = await one(`SELECT value FROM avs.settings WHERE key = 'local_runner_seen_at'`);
+  const t = Date.parse(row?.value || '');
+  return Number.isFinite(t) && Date.now() - t < RUNNER_ALIVE_S * 1000;
+}
+
+// Sets the office runner did not start in time go to the cloud routine. The
+// sets are marked 'fallback' first, so two pages asking at once fire only once.
+export async function cloudFallback() {
+  const late = await q(`UPDATE avs.check_requests s SET fire_status = 'fallback', updated_at = now()
+     WHERE s.status = 'queued' AND s.fire_status = 'local' AND s.fired_at < now() - make_interval(mins => $1)
+       AND NOT EXISTS (SELECT 1 FROM avs.check_requests c WHERE c.status = 'checking' AND c.claimed_at > now() - interval '3 hours')
+     RETURNING s.*`, [RUNNER_GRACE_MIN]);
+  if (!late.length) return null;
+  const out = await fireUnlessRunning(await settings(), late[0], { cloud: true });
+  const rest = late.slice(1).map(x => x.id);
+  if (rest.length) {
+    await q(`UPDATE avs.check_requests SET fire_status = $2, fire_error = $3, updated_at = now() WHERE id = ANY($1)`,
+      [rest, out.ok ? 'joined' : out.status, out.ok ? null : out.error]);
+  }
+  return out;
+}
+
 // One Claude run checks every set in the queue, so a run already checking (or
 // fired a moment ago and not yet started) is joined, not fired again. The cloud
 // run reaches the AVS folder only through the Drive link: without it no run is
 // spent, and the set waits for a check started in Cowork (runbook 2C.7).
-async function fireUnlessRunning(cfg, set, { force = false } = {}) {
+async function fireUnlessRunning(cfg, set, { force = false, cloud = false } = {}) {
   const links = linked(cfg);
   if (links.claude && !links.drive) {
     const error = 'The Drive link is not set up, so Claude cannot reach the AVS folder from the cloud';
     await q(`UPDATE avs.check_requests SET fire_status = 'not_linked', fire_error = $2, updated_at = now() WHERE id = $1`,
       [set.id, error]);
     return { ok: false, status: 'not_linked', error };
+  }
+  if (!cloud && links.drive && await runnerAlive()) {
+    await q(`UPDATE avs.check_requests SET fire_status = 'local', fired_at = now(), fire_error = NULL, updated_at = now()
+      WHERE id = $1`, [set.id]);
+    return { ok: true, status: 'local' };
   }
   if (!force) {
     const busy = await one(`SELECT id FROM avs.check_requests
@@ -214,6 +254,8 @@ const offWhenMissing = (res, next, empty) => e => (MISSING.has(e?.code) ? res.js
 r.get('/avs/uploads', async (req, res, next) => {
   try {
     markUncacheable();
+    // A set the office runner did not start in time goes to the cloud now.
+    await cloudFallback().catch(e => console.warn('[avs] cloud fallback:', e.message));
     const [cfg, sets, counts] = await Promise.all([
       settings(),
       readSets({ perStatus: Math.min(100, toId(req.query.per_status) || 25) }),

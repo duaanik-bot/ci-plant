@@ -172,7 +172,9 @@ test('an upload never needs the Drive link: without it the photo is kept in CI P
 
 test('the check fetches a kept photo with its key and changes nothing', () => {
   const src = readFileSync(new URL('./routes/avs-robot.js', import.meta.url), 'utf8');
-  assert.deepEqual(writesIn('./routes/avs-robot.js'), []);
+  // Its one write: the office runner's heartbeat (GET /avs/robot/queue).
+  assert.deepEqual(writesIn('./routes/avs-robot.js'), ['avs.settings']);
+  assert.match(src, /VALUES \('local_runner_seen_at'/);
   assert.match(src, /timingSafeEqual/);
   assert.match(src, /'Cache-Control', 'no-store'/);
   // Outside the ERP login (the check has none), but inside the statement ledger.

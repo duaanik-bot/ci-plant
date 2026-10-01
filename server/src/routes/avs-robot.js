@@ -7,13 +7,17 @@
 // Supabase (stored = 'drive'), which drops the kept copy.
 //
 //   GET /api/avs/robot/photos/:id      header  x-avs-robot-key: <avs.settings robot_key>
+//   GET /api/avs/robot/queue           the office runner (CARTON PC MAIN) asks
+//                                      every few seconds: it says it is alive and
+//                                      gets the sets Verify left to it.
 //
 // Read-only. The key is made by CI Plant with the first kept photo and lives
 // only in avs.settings, which the check reads through the Supabase connector;
 // it is never sent to a browser. Mounted before requireAuth (app.js).
 import { Router } from 'express';
 import crypto from 'node:crypto';
-import { one } from '../db.js';
+import { one, q } from '../db.js';
+import { cloudFallback } from './avs-intake.js';
 import { markUncacheable } from '../data-tables.js';
 
 const r = Router();
@@ -26,12 +30,40 @@ const sameKey = (given, real) => {
   return crypto.timingSafeEqual(digest(given), digest(real));
 };
 
+const keyOk = async req => {
+  const key = await one(`SELECT value FROM avs.settings WHERE key = 'robot_key'`);
+  return sameKey(req.get('x-avs-robot-key'), key?.value);
+};
+
+// The office runner: records that it is alive (avs.settings local_runner_seen_at,
+// which Verify reads), and gets the sets waiting for it. A set it did not
+// start in time has gone to the cloud routine by then (cloudFallback).
+r.get('/avs/robot/queue', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    const who = String(req.get('x-avs-runner') || 'office runner').replace(/[^\w .@()-]/g, '').slice(0, 60);
+    await q(`INSERT INTO avs.settings (key, value, note) VALUES ('local_runner_seen_at', $1, $2)
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, note = EXCLUDED.note`,
+      [new Date().toISOString(), `last asked by ${who}`]);
+    await cloudFallback().catch(e => console.warn('[avs] cloud fallback:', e.message));
+    const sets = await q(`SELECT id, queued_at, jc_number FROM avs.check_requests
+       WHERE status = 'queued' AND fire_status = 'local' ORDER BY id`);
+    const checking = await one(`SELECT count(*)::int AS n FROM avs.check_requests
+       WHERE status = 'checking' AND claimed_at > now() - interval '3 hours'`);
+    res.json({ ok: true, queued: sets, checking: checking.n, now: new Date().toISOString() });
+  } catch (e) {
+    if (MISSING.has(e?.code)) return res.status(404).json({ error: 'AVS is not set up on this database.' });
+    next(e);
+  }
+});
+
 r.get('/avs/robot/photos/:id', async (req, res, next) => {
   try {
     markUncacheable();
     res.set('Cache-Control', 'no-store');
-    const key = await one(`SELECT value FROM avs.settings WHERE key = 'robot_key'`);
-    if (!sameKey(req.get('x-avs-robot-key'), key?.value)) {
+    if (!await keyOk(req)) {
       return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
     }
     const id = Number(req.params.id);
