@@ -129,7 +129,31 @@ test('the studio: blocks are kept, moved and drawn; the typed size gets its own 
   assert.match(html, /function setLayEdit\(ctx,v\)\{ if\(v&&v\.lanes\) v\.lanes=normLanes\(v\.lanes\);/, 'every change keeps the rows in order');
   for (const a of ["b('sideL','◀ Left side'", "b('sideR','Right side ▶'", "data-use-typed=", "act:{label:"]) assert.ok(html.includes(a), a);
   assert.match(html, /\$\{T\?yourSize\(r,T,opts\):w\?/, 'a typed size: the Your size card');
-  assert.match(html, /recCard\(r,\{pick:true,sel:b\.opt,ctx:'b',cur,picked:!!\(typed\|\|b\.choice\),typed,step:2,id:'cardBox'\}\)/);
+  assert.match(html, /recCard\(r,\{pick:true,sel:b\.opt,ctx:'b',cur,picked:!!\(typed\|\|b\.choice\),typed,mine,step:2,id:'cardBox'\}\)/);
   assert.match(html, /if\(ds\.useTyped\)\{ const \[L,W,H\]=ds\.useTyped\.split\(','\)\.map\(Number\); typeBox\(\{L,W,H\}\); return; \}/);
   assert.match(html, /return spotAt\(G,p,\{onto:!d\.multi,/, 'the top view and the 3D view drop by the same rules');
+});
+
+test('a size made by hand is ranked with ours by empty space, kept in a list, and never becomes our recommendation', () => {
+  // the page's own ranking, with three confirmed dies and one size made by hand
+  const kits = new Map([['k1', { sizeStatus: 'CONFIRMED', L: 138, W: 96, H: 108 }], ['k2', { sizeStatus: 'CONFIRMED', L: 160, W: 100, H: 120 }], ['k3', { sizeStatus: 'CONFIRMED', L: 120, W: 60, H: 108 }]]);
+  const rb = { S: { settings: ST, kits }, hasSize: o => !!o && +o.L > 0 && +o.W > 0 && +o.H > 0, key: o => `${o.L}×${o.W}×${o.H}` };
+  vm.createContext(rb);
+  vm.runInContext(read('client/public/kit-studio-app/kit-pack.js'), rb);
+  const R = vm.runInContext(`const {hasStack,colItems,FL,FD,FH,orientDims,dep,packLanes}=KitPack;
+${between('/* the arrangement\'s size:', 'const cloneLanes')}
+${between('const fitCache=new Map();', 'function recommend(')}
+({rankSizes})`, rb);
+  const units = [...['a', 'b', 'c', 'd', 'e'].map(p => ({ pid: p, name: p, t: 15, m: 75, b: 102 })), { pid: 's', name: 'S', t: 15, m: 65, b: 92 }];
+  const rk = J(R.rankSizes(units, [], [{ size: { L: 125, W: 78, H: 108 }, label: 'Your size', user: true }], 'waste'));
+  const mine = rk.rows.find(x => x.userOnly);
+  assert.ok(mine && mine.ok, 'your size fits (one carton beside the rows)');
+  assert.equal(typeof mine.rank, 'number', 'and it has a rank like any other size');
+  assert.deepEqual(rk.rows.filter(x => x.ok).map(x => x.rank), rk.rows.filter(x => x.ok).map((_, i) => i + 1), 'ranks run 1, 2, 3 … over every size that fits');
+  assert.equal(rk.okCount, rk.rows.filter(x => x.ok).length);
+  assert.ok(rk.rows.find(x => x.userOnly).rank < rk.rows.find(x => x.size.L === 160).rank, 'less empty space ranks higher');
+  // the studio: our pick is the best of ours; your sizes are listed, saved with the draft, and can be taken off the list
+  assert.match(html, /rk\.rows\.find\(x=>x\.rank&&!x\.userOnly&&!x\.tight\)\|\|rk\.rows\.find\(x=>x\.rank&&!x\.userOnly\)/);
+  assert.match(html, /let n=0; rows\.forEach\(r=>\{ r\.rank=r\.ok\?\+\+n:null; \}\);/);
+  for (const a of ['function mineList(r,opts)', 'data-mine-del=', 'mySizes:(b.mine||[]).filter(hasSize)', "mine:Array.isArray(d.mySizes)", "'<span class=\"tag yours\">your size</span>'", 'minePending=true;', 'addMine(size);', 'flushMine(); const b=S.build']) assert.ok(html.includes(a), a);
 });

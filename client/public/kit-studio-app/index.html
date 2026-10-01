@@ -312,6 +312,11 @@ th .thsort:hover{color:var(--ink)}
 .btn.pick{display:inline-flex;align-items:center;gap:6px}
 .btn.pick .rk{font:600 11px var(--f-mono);color:var(--muted)}
 .btn.pick .star{color:var(--accent)}
+.btn.pick .yrs,.ctab .tag.yours{background:var(--new-bg);color:var(--new)}
+.btn.pick .yrs{font:700 9.5px var(--f-body);text-transform:uppercase;letter-spacing:.04em;padding:1px 6px;border-radius:999px}
+.mine{display:inline-flex;align-items:center;gap:2px}
+.mine .x{width:22px;height:22px;border-radius:50%;border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1}
+.mine .x:hover{background:var(--bad-bg);color:var(--bad)}
 .btn.pick.on{background:var(--accent-soft);border-color:rgba(10,132,255,.5);box-shadow:inset 0 0 0 1px rgba(10,132,255,.5);color:var(--ink)}
 .btn.pick .lk{font:700 10px var(--f-body);text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
 .pkm{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px}
@@ -489,7 +494,7 @@ h2 .stepn{width:22px;height:22px;font-size:12px;vertical-align:2px}
 const DEF = {cL:4,cW:3,cH:10,dLmin:2,dLmax:6,dWmin:3,dWmax:9,dHmin:6,dHmax:10};
 const FAMILIES = ['Hair Fact','Skin Fact','Dr. Fact','Pro Fact','Skin Topico'];
 const DSTAT = ['In development','Dummy sent','Approved'];
-const blankBuild = () => ({name:'',family:'',style:'',items:[],choice:null,opt:null,custom:null,ovr:{L:'',W:'',H:''},status:'In development',notes:'',draftId:null,savedSig:null});
+const blankBuild = () => ({name:'',family:'',style:'',items:[],choice:null,opt:null,custom:null,ovr:{L:'',W:'',H:''},status:'In development',notes:'',draftId:null,savedSig:null,mine:[]});
 const S = {products:new Map(), kits:new Map(), drafts:new Map(), settings:{...DEF}, loadedP:false, loadedK:false, loadedD:false, df:'OPEN',
   view:'overview', canEdit:false, me:null, names:{}, db:null, user:null, dl:null,
   kf:{q:'',st:'ALL',origin:'ALL'}, pf:{q:'',st:'ALL'}, drawer:null,
@@ -857,7 +862,7 @@ function rankSizes(units,opts,extra,mode){
   }
   const cmp=mode==='die'?(a,b)=>(!!b.die.length-!!a.die.length)||a.empty-b.empty:(a,b)=>a.empty-b.empty||(!!b.die.length-!!a.die.length);
   rows.sort((a,b)=>(b.ok-a.ok)||(a.tight-b.tight)||cmp(a,b)||a.size.H-b.size.H);
-  let n=0; rows.forEach(r=>{ r.rank=r.ok&&!r.userOnly?++n:null; });
+  let n=0; rows.forEach(r=>{ r.rank=r.ok?++n:null; });   // a size made by hand is ranked with ours, so its empty space can be compared
   near.sort((a,b)=>a.need-b.need||b.die.length-a.die.length||a.empty-b.empty);
   return {rows,cv,okCount:n,dieCount:rows.filter(r=>r.rank&&r.die.length).length,mode,near};
 }
@@ -892,11 +897,12 @@ function recommend(items, styleId, excludeId, optIdx, custom, extraSizes){
   const rk=rankSizes(units,opts,extra,rankMode()); out.rank=rk;
   for(const x of rk.rows) if(!x.ok&&!x.userOnly) out.steps.push({k:'✗',txt:`${esc(x.src.join(' · '))} (${dimTxt(x.size)}) was checked and rejected — ${esc(fitNote(x.fit))}`});
   const modeTxt=rk.mode==='die'?'die in hand first, then least empty space':'least empty space';
-  const top=(styleRec&&rk.rows.find(x=>x.ok&&key(x.size)===key(styleSize)))||rk.rows.find(x=>x.rank&&!x.tight)||rk.rows.find(x=>x.rank);
+  const top=(styleRec&&rk.rows.find(x=>x.ok&&key(x.size)===key(styleSize)))||rk.rows.find(x=>x.rank&&!x.userOnly&&!x.tight)||rk.rows.find(x=>x.rank&&!x.userOnly);   // ours, never a size typed by hand
+  const above=top?rk.rows.filter(x=>x.userOnly&&x.rank&&x.rank<top.rank).length:0;
   if(top){ const dieTxt=top.die.length?`Die in hand — ${top.die.length} confirmed kit${top.die.length>1?'s':''} already use this size.`:'No die available — a new die and one dummy are needed.';
-    rec={size:top.size,basis:styleRec&&key(top.size)===key(styleSize)?styleRec.basis:`Rank 1 of ${rk.okCount} sizes (${modeTxt})`,
+    rec={size:top.size,basis:styleRec&&key(top.size)===key(styleSize)?styleRec.basis:`Rank ${top.rank} of ${rk.okCount} sizes (${modeTxt})${above?` — ${above===1?'a size':`${above} sizes`} of yours rank${above===1?'s':''} above it`:''}`,
       note:`${Math.round(top.empty)}% empty space (${cm3(top.box-rk.cv)} of ${cm3(top.box)} cm³). ${dieTxt}`,kind:top.die.length?'die':'new',layout:top.fit.lay,fit:top.fit,conf:top.tight?'MEDIUM':'HIGH',row:top};
-    out.steps.push({k:'R',txt:`Compared <b>${rk.okCount}</b> box sizes that fit these cartons (${rk.dieCount} with a die in hand, ${rk.okCount-rk.dieCount} needing a new die), ranked by ${modeTxt}. Rank 1: <b>${dimTxt(top.size)}</b>, ${Math.round(top.empty)}% empty, ${top.die.length?'die in hand':'no die'}.`}); }
+    out.steps.push({k:'R',txt:`Compared <b>${rk.okCount}</b> box sizes that fit these cartons (${rk.dieCount} with a die in hand, ${rk.okCount-rk.dieCount} needing a new die), ranked by ${modeTxt}. Our pick: <b>${dimTxt(top.size)}</b> (#${top.rank}), ${Math.round(top.empty)}% empty, ${top.die.length?'die in hand':'no die'}.${above?` ${above===1?'A size':`${above} sizes`} you made rank${above===1?'s':''} above it.`:''}`}); }
   else { const ev=opts.map((o,i)=>({o,w:winFor(o,excludeId,'Packing layout'),i})); const best=ev[0]; const ft=fitToSize(units,best.w.size); rec={...best.w,layout:(ft&&ft.lay)||best.o,fit:ft,conf:'HIGH'}; out.recOpt=best.i; }
   out.rec=rec;
 
@@ -1157,7 +1163,7 @@ function histOwner(ctx){ return ctx==='b'?S.build:(S.drawer&&S.drawer.t==='kit'?
 function snapOf(ctx,what,opt={}){
   if(ctx==='b'){ const b=S.build;
     return {what,owner:b,items:jclone(b.items),custom:snapLay('b'),sel:jclone(S.sel),choice:b.choice?{...b.choice}:null,ovr:{...b.ovr},opt:b.opt,style:b.style,
-      whole:opt.whole?{name:b.name,family:b.family,status:b.status,notes:b.notes,draftId:b.draftId,savedSig:b.savedSig}:null}; }
+      whole:opt.whole?{name:b.name,family:b.family,status:b.status,notes:b.notes,draftId:b.draftId,savedSig:b.savedSig,mine:jclone(b.mine||[])}:null}; }
   const D=S.drawer; if(!D||D.t!=='kit') return null;
   return {what,owner:D.id,items:jclone(D.d.items||[]),custom:snapLay('d'),sel:jclone(S.sel),size:opt.size?{L:D.d.L,W:D.d.W,H:D.d.H,sizeStatus:D.d.sizeStatus}:null};
 }
@@ -1198,7 +1204,7 @@ function histBtns(ctx,ro){
    (null): the cartons are re-packed for it — standing as always; lying flat, turned or stacked where that is what fits.
    Undo takes it back. */
 function pickBox(size,what){
-  const b=S.build, before=capturePos('b'), box=size?{L:+size.L,W:+size.W,H:+size.H}:null;
+  flushMine(); const b=S.build, before=capturePos('b'), box=size?{L:+size.L,W:+size.W,H:+size.H}:null;
   pushHist('b',what||`choosing the box ${dimTxt(box)}`);
   b.choice=box; b.ovr={L:'',W:'',H:''}; b.custom=null; b.opt=null; S.sel=null; render(); playFlip('b',before);
   const ft=box?fitToSize(unitsOf(b.items.filter(i=>i.pid)),box):null;
@@ -1206,10 +1212,21 @@ function pickBox(size,what){
     :ft&&ft.lay?`Box ${dimTxt(box)} chosen — the cartons are re-packed for it${ft.house?'':', '+ft.way.toLowerCase()}`
     :`Box ${dimTxt(box)} chosen — but the cartons don’t go into it`,{undo:'b'});
 }
+/* New kit: the sizes made by hand for it — typed, or an amended one picked — kept as a short list (newest first), so each
+   stays in Top sizes and the size comparison, ranked with ours by empty space. Saved with the draft. */
+const MINE_MAX=8;
+function addMine(size){ const b=S.build, z={L:+size.L,W:+size.W,H:+size.H}; if(!hasSize(z)) return; b.mine=[z,...(b.mine||[]).filter(s2=>key(s2)!==key(z))].slice(0,MINE_MAX); }
+/* A size typed by hand joins the list once the typing is done — when L, W and H are left, or another size is picked —
+   so the sizes passed through on the way (one side typed, the others not yet) don't. Till then it shows as the one in use. */
+let minePending=false;
+function flushMine(){ if(!minePending) return; minePending=false; const o=S.build.ovr; if(o.L!==''&&o.W!==''&&o.H!==''){ addMine(o); keepBuild(); } }
+document.addEventListener('focusin',e=>{ if(minePending&&!(e.target&&/^b[LWH]$/.test(e.target.id||''))) flushMine(); });
+document.addEventListener('pointerdown',e=>{ if(minePending&&!(e.target&&e.target.closest&&e.target.closest('#bL,#bW,#bH'))) flushMine(); },true);
+function mySizes(b,typed){ const m=(b.mine||[]).filter(hasSize); return typed&&!m.some(z=>key(z)===key(typed))?[typed,...m]:m; }
 /* A size made the new kit's own (an amended one picked on the Your size card): as if typed — the cartons re-pack for it */
 function typeBox(size){
-  const b=S.build, before=capturePos('b'); pushHist('b',`typing the box ${dimTxt(size)}`);
-  b.ovr={L:String(size.L),W:String(size.W),H:String(size.H)}; b.choice=null; b.custom=null; b.opt=null; S.sel=null; render(); playFlip('b',before);
+  flushMine(); const b=S.build, before=capturePos('b'); pushHist('b',`typing the box ${dimTxt(size)}`);
+  b.ovr={L:String(size.L),W:String(size.W),H:String(size.H)}; b.choice=null; b.custom=null; b.opt=null; S.sel=null; addMine(size); render(); playFlip('b',before);
   const ft=fitToSize(unitsOf(b.items.filter(i=>i.pid)),size), ok=ft&&ft.lay&&ft.status!=='nofit'&&ft.status!=='short';
   toast(ok?`Your size is now ${dimTxt(size)} — the cartons are re-packed for it${ft.house?'':', '+ft.way.toLowerCase()}`:`Your size is now ${dimTxt(size)} — but the cartons don’t go into it`,{undo:'b'});
 }
@@ -1892,7 +1909,8 @@ function sizePicks(r,opts){
   const near=(rk.near||[]).slice(0,4);
   const curRow=cur&&rk.rows.find(x=>key(x.size)===cur);
   return `<h3 style="margin-top:14px">Top sizes <span class="note" style="font-weight:400">· ${ctx==='b'?'click one to use it — the cartons re-pack for it':'click one to lock it in'}</span></h3>
-    <div class="alt sizepick">${top.map(x=>`<span class="pk">${pick(x,`<span class="rk">#${x.rank}</span>${key(x.size)===recK?'<span class="star">★</span>':''}`)}<span class="pkm">${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${how(x)}${x.tight?'<span class="note">tight</span>':''}</span></span>`).join('')}</div>
+    <div class="alt sizepick">${top.map(x=>`<span class="pk">${pick(x,`<span class="rk">#${x.rank}</span>${key(x.size)===recK?'<span class="star">★</span>':''}${x.userOnly&&ctx==='b'?'<span class="yrs">yours</span>':''}`)}<span class="pkm">${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${how(x)}${x.tight?'<span class="note">tight</span>':''}</span></span>`).join('')}</div>
+    ${mineList(r,opts)}
     ${cur&&!opts.typed&&!top.some(x=>key(x.size)===cur)?`<p class="note" style="margin:6px 0 0">${ctx==='d'?'Locked':opts.picked?'Chosen':'In use'}: <b class="mono">${dimTxt(opts.cur)}</b>${curRow?(curRow.rank?` (rank #${curRow.rank} of ${rk.okCount}, ${Math.round(curRow.empty)}% empty)`:curRow.ok?` (${Math.round(curRow.empty)}% empty)`:' (the cartons don’t fit at their listed sizes)'):(()=>{ const nr=(rk.near||[]).find(x=>key(x.size)===cur); return nr?` — a die in hand, but it needs ${nr.need} mm more width at the listed inner sizes. Check it with a sample first`:''; })()}.</p>`:''}
     <h3 style="margin-top:14px">Dies in hand to check</h3>
     ${dies.length?`<p class="note" style="margin:0 0 6px">Dies we already have that fit these cartons, best first. Open a kit below to see its sample, or click the size to lock it in.</p>
@@ -1945,6 +1963,18 @@ function yourSize(r,T,opts){
     <div class="dielist">${am.map(a=>`<div class="dr"><button class="btn sm pick" data-use-typed="${a.size.L},${a.size.W},${a.size.H}" ${dis?'disabled':''} title="Make ${dimTxt(a.size)} your size — the cartons re-pack for it"><span class="mono">${dimTxt(a.size)}</span></button><span class="pkm"><b>${esc(a.label)}</b>${pct(Math.max(0,(a.size.L*a.size.W*a.size.H-cv)/(a.size.L*a.size.W*a.size.H)*100))}${tag(a.fit)}${rec&&key(rec.size)===key(a.size)?'<span class="dieb yes">★ our recommendation too</span>':''}</span>${a.why?`<div class="dk">${a.why}</div>`:''}</div>`).join('')}</div>`:''}
     ${rec&&!isRec&&!am.some(a=>key(a.size)===key(rec.size))?`<p class="note" style="margin:10px 0 0">Our recommendation is <b class="mono">${dimTxt(rec.size)}</b> — ${esc(rec.basis)}. <button class="btn sm" data-use-size="${rec.size.L},${rec.size.W},${rec.size.H}" ${dis?'disabled':''} title="Use our recommended size instead of yours">Use it</button></p>`:''}`;
 }
+/* New kit: the sizes made by hand, each with where it ranks among all the sizes and how much of it is empty — click one to
+   use it again, × to take it off the list */
+function mineList(r,opts){
+  const mine=opts.mine||[]; if(opts.ctx&&opts.ctx!=='b'||!mine.length) return '';
+  const rk=r.rank, dis=!canCtx('b'), T=opts.typed, cur=opts.cur&&hasSize(opts.cur)?key(opts.cur):null;
+  const pct=x=>`<span class="pp ${x.empty<25?'lo':x.empty<=40?'mid':'hi'}">${Math.round(x.empty)}% empty</span>`;
+  const how=x=>x.fit&&x.fit.house===false?`<span class="pp mid" title="${esc(x.fit.way)}">${x.fit.stacked?'stacked':x.fit.side?`${x.fit.side} beside the rows`:'laid differently'}</span>`:'';
+  return `<h3 style="margin-top:14px">Your sizes <span class="note" style="font-weight:400">· made by you, ranked with ours — click one to use it</span></h3>
+    <div class="alt sizepick">${mine.map(z=>{ const x=rk&&rk.rows.find(y=>key(y.size)===key(z)), on=key(z)===cur, inUse=on&&T&&key(z)===key(T);
+      return `<span class="pk"><span class="mine"><button class="btn sm pick ${on?'on':''}" data-use-typed="${z.L},${z.W},${z.H}" ${dis?'disabled':''} aria-pressed="${on}" title="${on?'This is the box for this kit':`Use ${dimTxt(z)} — the cartons re-pack for it`}">${x&&x.rank?`<span class="rk">#${x.rank}</span>`:''}<span class="mono">${dimTxt(z)}</span>${on?`<span class="lk">${opts.picked?'✓ chosen':'✓ in use'}</span>`:''}</button>${inUse||dis?'':`<button class="x" data-mine-del="${z.L},${z.W},${z.H}" title="Take ${dimTxt(z)} off your list" aria-label="Take ${dimTxt(z)} off your list">×</button>`}</span>
+        <span class="pkm">${x&&x.ok?`${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${how(x)}${x.tight?'<span class="note">tight</span>':''}`:'<span class="pp hi">the cartons don’t go in</span>'}</span></span>`; }).join('')}</div>`;
+}
 function recCard(r, opts={}){
   if(!r.f.n) return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><h3>${opts.step?`<span class="stepn">${opts.step}</span>`:''}Recommended panel size</h3><p class="muted">Add products to see the size.</p></div>`;
   const w=r.win, rec=r.rec; const inc=!r.f.allSized, T=opts.typed&&r.f.allSized&&r.units&&r.units.length?opts.typed:null;
@@ -1973,12 +2003,12 @@ function sizeTable(r,ctx,cur){
   return `<section class="card pad" id="cmp-${ctx}">
     <div class="row" style="justify-content:space-between"><h2 style="margin:0">Size comparison</h2>
       <span class="row" style="gap:6px">${seg('rank',rk.mode,[['waste','Least empty space'],['die','Die in hand first']])}<button class="btn sm" data-rank-rev title="Flip the order">${S.rankRev?'Worst first ↑':'Best first ↓'}</button></span></div>
-    <p class="note" style="margin:8px 0 10px">Cartons: ${r.f.n} item${r.f.n>1?'s':''}, ${cm3(rk.cv)} cm³ in total. <b>${rk.okCount}</b> box sizes fit them: <b>${rk.dieCount}</b> with a die in hand and <b>${rk.okCount-rk.dieCount}</b> that need a new die. Ranked by ${modeTxt}; rank 1 is the recommendation. Empty space = box volume the cartons don’t fill.</p>
+    <p class="note" style="margin:8px 0 10px">Cartons: ${r.f.n} item${r.f.n>1?'s':''}, ${cm3(rk.cv)} cm³ in total. <b>${rk.okCount}</b> box sizes fit them: <b>${rk.dieCount}</b> with a die in hand and <b>${rk.okCount-rk.dieCount}</b> that need a new die. Ranked by ${modeTxt}; ★ is our recommendation${ctx==='d'?'':', and the sizes you made are ranked with ours'}. Empty space = box volume the cartons don’t fill.</p>
     <div class="tablewrap"><table class="ctab"><thead><tr><th>Rank</th><th>Box size L × W × H (mm)</th><th>Die</th>${c?'':'<th class="num">Box volume</th>'}<th>Empty space</th>${c?'':'<th>Fit · spare L / W / H</th><th>Where the size comes from</th>'}<th></th></tr></thead><tbody>
     ${rows.map(x=>{ const k=key(x.size), isRec=k===recK, isCur=k===curK;
       return `<tr class="${isRec?'top':''} ${isCur?'cur':''} ${x.ok?'':'nofit'}">
         <td class="rk">${x.rank?'#'+x.rank:'—'}</td>
-        <td><span class="dims">${dimTxt(x.size)}</span><div>${isRec?'<span class="tag rec">★ recommended</span>':''}${isCur?`<span class="tag cur">${ctx==='d'?'this kit now':'size to save'}</span>`:''}</div>${c?`<div class="srcn mono">${x.ok?`spare ${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' · tight':''}`:'doesn’t fit'}</div>${x.ok&&x.fit.house===false?`<div class="srcn">${esc(x.fit.way)}</div>`:''}`:''}${c&&x.src.some(t=>t!=='Die in hand')?`<div class="srcn">${esc(x.src.filter(t=>t!=='Die in hand').join(' · '))}</div>`:''}</td>
+        <td><span class="dims">${dimTxt(x.size)}</span><div>${isRec?'<span class="tag rec">★ recommended</span>':''}${isCur?`<span class="tag cur">${ctx==='d'?'this kit now':'size to save'}</span>`:''}${x.userOnly&&ctx!=='d'?'<span class="tag yours">your size</span>':''}</div>${c?`<div class="srcn mono">${x.ok?`spare ${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' · tight':''}`:'doesn’t fit'}</div>${x.ok&&x.fit.house===false?`<div class="srcn">${esc(x.fit.way)}</div>`:''}`:''}${c&&x.src.some(t=>t!=='Die in hand')?`<div class="srcn">${esc(x.src.filter(t=>t!=='Die in hand').join(' · '))}</div>`:''}</td>
         <td class="diec">${x.die.length?`<span class="dieb yes">✓ Die in hand</span><div class="note" title="${esc(x.die.map(id=>S.kits.get(id)?.name||id).join(', '))}">${x.die.length} kit${x.die.length>1?'s':''}: ${names(x.die)}</div>`:`<span class="dieb no">✗ No die available</span><div class="note">new die + one dummy${x.other.length?` · ${x.other.length} unconfirmed kit${x.other.length>1?'s':''} use it`:''}</div>`}</td>
         ${c?'':`<td class="num mono">${cm3(x.box)} cm³</td>`}
         <td>${x.ok?`${wasteChip({pct:x.empty,vol:rk.cv,box:x.box})}<span class="ebar"><span style="width:${(100-x.empty).toFixed(1)}%;background:${colr(x.empty)}"></span></span><div class="note">${cm3(x.box-rk.cv)} cm³ empty${c?` of ${cm3(x.box)} cm³`:''}</div>`:`<span class="note">—${c?` · box ${cm3(x.box)} cm³`:''}</span>`}</td>
@@ -2079,7 +2109,8 @@ function kitBar(b,r,typed,ro,dirty){
 }
 function vBuild(){
   const b=S.build, typed=(b.ovr.L!==''&&b.ovr.W!==''&&b.ovr.H!=='')?{L:+b.ovr.L,W:+b.ovr.W,H:+b.ovr.H}:null;
-  const r=recommend(b.items.filter(i=>i.pid), kidByName(b.style)||null, null, b.opt, b.custom, typed?[{size:typed,label:'Size you typed'}]:[]);
+  const mine=mySizes(b,typed);
+  const r=recommend(b.items.filter(i=>i.pid), kidByName(b.style)||null, null, b.opt, b.custom, mine.map(z=>({size:z,label:typed&&key(z)===key(typed)?'Your size, in use':'Your size'})));
   if(r.stale) b.custom=null;
   const sim=similarKits(b.items, null);
   const chosen=b.choice || (r.win&&r.win.size) || null;
@@ -2109,7 +2140,7 @@ function vBuild(){
       </section>
     </div>
     <div class="grid sticky">
-      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur,picked:!!(typed||b.choice),typed,step:2,id:'cardBox'})}
+      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur,picked:!!(typed||b.choice),typed,mine,step:2,id:'cardBox'})}
       <section class="card pad grid" id="cardSave"><h3><span class="stepn">4</span>Save the kit · size to save</h3>
         <div class="lwh">
           <label class="f">L<input type="number" id="bL" value="${esc(cur.L)}" ${ro?'disabled':''}></label>
@@ -2265,6 +2296,7 @@ document.addEventListener('click', async e => {
   if(ds.delOpenDraftYes!==undefined){ const id=S.build.draftId; S.dDelOpen=false; if(id) delDraft(id,{clear:true}); else render(); return; }
   if(ds.newDraft!==undefined){ if(S.build.draftId&&!bDirty()){ S.build=blankBuild(); resetHist('b'); } S.view='build'; render(); return; }
   if(ds.useTyped){ const [L,W,H]=ds.useTyped.split(',').map(Number); typeBox({L,W,H}); return; }
+  if(ds.mineDel){ const k=key(Object.fromEntries(['L','W','H'].map((d,i)=>[d,+ds.mineDel.split(',')[i]]))); S.build.mine=(S.build.mine||[]).filter(z=>key(z)!==k); render(); toast(`${ds.mineDel.split(',').join(' × ')} is off your list`); return; }
   if(ds.useSize){ const [L,W,H]=ds.useSize.split(',').map(Number);
     if(S.drawer&&S.drawer.t==='kit'&&t.closest('.drawer')){ const D=S.drawer, o=S.kits.get(D.id)||{}; pushHist('d',`choosing the box ${dimTxt({L,W,H})}`,{size:true}); Object.assign(D.d,{L,W,H}); D.layEdit=null; S.sel=null;
       if(hasSize(o)&&key(o)===key(D.d)) D.d.sizeStatus=o.sizeStatus||D.d.sizeStatus; else if(D.d.sizeStatus!=='PROPOSED'&&D.d.sizeStatus!=='VERIFY') D.d.sizeStatus='PROPOSED';
@@ -2354,7 +2386,7 @@ document.addEventListener('change', e => {
     // one side typed: the other two are the ones on screen, so the size typed is whole
     if(o[t.id.slice(1)]!=='') for(const k of ['L','W','H']) if(o[k]===''){ const v=($('#b'+k)||{}).value; if(v) o[k]=v; }
     const whole=o.L!==''&&o.W!==''&&o.H!=='';
-    if(held&&held.ctx==='b'&&held.s&&JSON.stringify(held.s.ovr)!==JSON.stringify(o)){ held.s.what=whole?`typing the box ${o.L} × ${o.W} × ${o.H}`:'typing a box size'; useHeld('b'); if(whole){ S.build.custom=null; S.sel=null; } }
+    if(held&&held.ctx==='b'&&held.s&&JSON.stringify(held.s.ovr)!==JSON.stringify(o)){ held.s.what=whole?`typing the box ${o.L} × ${o.W} × ${o.H}`:'typing a box size'; useHeld('b'); if(whole){ S.build.custom=null; S.sel=null; minePending=true; } }
     softRender('b'); }
   if(t.id==='bStat') S.build.status=t.value;
   if(t.dataset.dstatus) setDraftStatus(t.dataset.dstatus,t.value);
@@ -2806,7 +2838,7 @@ function insertItem(prefix,i,fromQty){
 }
 
 /* ---------- drafts: kits in development, kept out of Kits until pushed ---------- */
-function sigB(b=S.build){ return JSON.stringify([b.name.trim(),b.family.trim(),b.style,b.status,b.notes,b.items.map(i=>[i.pid,i.pid?'':(i.raw||''),+i.q||1]),b.choice,b.ovr,b.opt,b.custom?b.custom.lanes.map(l=>[l.col||0,...l.items.map(x=>[(x.stack||[]).map(z=>[z.pid,z.orient||'edge',!!z.rot]),x.pid,x.orient||'edge',!!x.rot,!!x.group])]):null,b.custom&&b.custom.tray?b.custom.tray.map(z=>[z.pid,z.orient||'edge',!!z.rot]):null]); }
+function sigB(b=S.build){ return JSON.stringify([b.name.trim(),b.family.trim(),b.style,b.status,b.notes,b.items.map(i=>[i.pid,i.pid?'':(i.raw||''),+i.q||1]),b.choice,b.ovr,b.opt,b.custom?b.custom.lanes.map(l=>[l.col||0,...l.items.map(x=>[(x.stack||[]).map(z=>[z.pid,z.orient||'edge',!!z.rot]),x.pid,x.orient||'edge',!!x.rot,!!x.group])]):null,b.custom&&b.custom.tray?b.custom.tray.map(z=>[z.pid,z.orient||'edge',!!z.rot]):null,(b.mine||[]).map(key)]); }
 function bDirty(){ const b=S.build; return b.savedSig!==null ? sigB()!==b.savedSig : (b.name.trim()!==''||b.items.some(i=>i.pid||i.raw)); }
 function buildSnapshot(){
   const b=S.build, items=b.items.filter(i=>i.pid);
@@ -2830,11 +2862,11 @@ function buildReady(){ const b=S.build;
   if(!b.items.some(i=>i.pid)){ toast('Add at least one product'); return false; }
   return true; }
 async function saveDraft(){
-  const b=S.build; if(!buildReady()) return;
+  flushMine(); const b=S.build; if(!buildReady()) return;
   const dup=[...S.drafts].find(([id,d])=>id!==b.draftId&&!d.pushed&&nrm(d.name)===nrm(b.name));
   if(dup){ toast('Another draft already has this name — open it from Drafts or rename this one'); return; }
   const snap=buildSnapshot(), id=b.draftId||('d'+Date.now().toString(36)), before=b.draftId?(S.drafts.get(b.draftId)||null):null, now=new Date().toISOString();
-  const doc={name:b.name.trim(),family:b.family.trim(),style:b.style||'',status:b.status||'In development',notes:b.notes||'',items:snap.items,L:snap.L,W:snap.W,H:snap.H,layout:snap.layout,custom:snap.custom,sizeBasis:snap.sizeBasis,
+  const doc={name:b.name.trim(),family:b.family.trim(),style:b.style||'',status:b.status||'In development',notes:b.notes||'',items:snap.items,L:snap.L,W:snap.W,H:snap.H,layout:snap.layout,custom:snap.custom,sizeBasis:snap.sizeBasis,mySizes:(b.mine||[]).filter(hasSize),
     createdAt:before?.createdAt||now,createdBy:before?before.createdBy??null:(S.me||null),pushed:before?.pushed||null};
   const ok=await saveDoc('drafts',id,before,doc,true,before?'Draft saved':'Saved to Drafts');
   if(ok||before){ S.build.draftId=id; S.build.savedSig=sigB(); render(); }
@@ -2844,7 +2876,7 @@ function openDraft(id,force){
   if(!force&&S.build.draftId!==id&&bDirty()){ S.dOpenAsk=id; S.dDel=null; render(); return; }
   const items=(d.items||[]).map(i=>({pid:i.pid,q:i.q||1,mrp:i.mrp}));
   const custom=d.custom&&d.layout?loadLayout(d.layout,items):null;
-  S.build={...blankBuild(),name:d.name||'',family:d.family||'',style:d.style||'',status:d.status||'In development',notes:d.notes||'',items,custom,choice:hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null,draftId:id};
+  S.build={...blankBuild(),name:d.name||'',family:d.family||'',style:d.style||'',status:d.status||'In development',notes:d.notes||'',items,custom,choice:hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null,draftId:id,mine:Array.isArray(d.mySizes)?d.mySizes.filter(hasSize).map(z=>({L:+z.L,W:+z.W,H:+z.H})):[]};
   S.build.savedSig=sigB(); resetHist('b'); S.dOpenAsk=null; S.dDelOpen=false; S.sel=null; S.view='build'; try{ localStorage.setItem('kst.view','build'); }catch(_){}
   render(); window.scrollTo({top:0});
 }
