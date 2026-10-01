@@ -178,20 +178,21 @@ export async function cloudFallback() {
        AND NOT EXISTS (SELECT 1 FROM avs.check_requests c WHERE c.status = 'checking' AND c.claimed_at > now() - interval '3 hours')
      RETURNING s.*`, [RUNNER_GRACE_MIN]);
   if (!late.length) return null;
-  const out = await fireUnlessRunning(await settings(), late[0], { cloud: true });
-  const rest = late.slice(1).map(x => x.id);
-  if (rest.length) {
-    await q(`UPDATE avs.check_requests SET fire_status = $2, fire_error = $3, updated_at = now() WHERE id = ANY($1)`,
-      [rest, out.ok ? 'joined' : out.status, out.ok ? null : out.error]);
-  }
+  const cfg = await settings();
+  let out = null;
+  for (const set of late) out = await fireUnlessRunning(cfg, set, { cloud: true });
   return out;
 }
 
-// One Claude run checks every set in the queue, so a run already checking (or
-// fired a moment ago and not yet started) is joined, not fired again. The cloud
-// run reaches the AVS folder only through the Drive link: without it no run is
-// spent, and the set waits for a check started in Cowork (runbook 2C.7).
-async function fireUnlessRunning(cfg, set, { force = false, cloud = false } = {}) {
+// Every set gets its own run (since 1 Oct 2026): sets sent together are checked
+// side by side instead of waiting in line behind one run. Each run claims its
+// own set first (routine-prompt.md step 0) and takes the Drive lock only while
+// it numbers and files its report (runbook 2C.2). A set whose run did not start
+// (the daily run cap, a network error) is picked up by the next run that ends
+// (runbook 2C.6 step 1). The cloud run reaches the AVS folder only through the
+// Drive link: without it no run is spent, and the set waits for a check started
+// in Cowork (runbook 2C.7).
+async function fireUnlessRunning(cfg, set, { cloud = false } = {}) {
   const links = linked(cfg);
   if (links.claude && !links.drive) {
     const error = 'The Drive link is not set up, so Claude cannot reach the AVS folder from the cloud';
@@ -204,20 +205,10 @@ async function fireUnlessRunning(cfg, set, { force = false, cloud = false } = {}
       WHERE id = $1`, [set.id]);
     return { ok: true, status: 'local' };
   }
-  if (!force) {
-    const busy = await one(`SELECT id FROM avs.check_requests
-      WHERE (status = 'checking' AND claimed_at > now() - interval '3 hours')
-         OR (status = 'queued' AND fire_status = 'fired' AND fired_at > now() - interval '20 minutes' AND id <> $1)
-      LIMIT 1`, [set.id]);
-    if (busy) {
-      await q(`UPDATE avs.check_requests SET fire_status = 'joined', fire_error = NULL, updated_at = now() WHERE id = $1`, [set.id]);
-      return { ok: true, status: 'joined' };
-    }
-  }
   const out = await fireRoutine(cfg,
     `CI Plant: AVS ${setLabel(set.id)}${set.jc_number ? ` (job card ${(Array.isArray(set.job_cards) && set.job_cards.length > 1
       ? set.job_cards.map(c => c.jc_number) : [set.jc_number]).join(', ')})` : ''}`
-    + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''} is waiting in avs.check_requests.`);
+    + `${set.redo_report_no ? `, a redo of ${set.redo_report_no},` : ''} is waiting in avs.check_requests (set id ${set.id}).`);
   await q(`UPDATE avs.check_requests SET fired_at = now(), fire_status = $2, fire_error = $3,
                   session_url = COALESCE($4, session_url), updated_at = now() WHERE id = $1`,
     [set.id, out.status, out.ok ? null : out.error, out.session_url || null]);
@@ -513,7 +504,7 @@ r.post('/avs/uploads/:id/retry', canRetry, async (req, res, next) => {
             robot_note = CASE WHEN status = 'failed' THEN NULL ELSE robot_note END, updated_at = now()
       WHERE id = $1 AND status IN ('queued', 'failed') RETURNING *`, [id, req.user.name ?? null]);
     if (!set) throw fail(409, 'Only a set that is waiting for Claude, or whose check failed, can be sent again.');
-    const fire = await fireUnlessRunning(await settings(), set, { force: true });
+    const fire = await fireUnlessRunning(await settings(), set);
     const [out] = await readSets({ id: set.id });
     res.json({ set: out, fire });
   } catch (e) { next(e); }

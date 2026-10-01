@@ -329,18 +329,19 @@ describe('the AVS printing lock — through the real app', {
       assert.equal(fire.version, '2023-06-01');
       assert.match(fire.body.text, /Set \d{4} \(job card CI-JC-9\d{3}\) is waiting/);
 
-      // A second set moments later joins the run already fired: no second run.
+      // A second set moments later gets its own run: sets are checked side by side.
       const second = await call('qc', 'POST', '/avs/uploads', { product_hint: 'Old stock carton' });
       const fd2 = new FormData();
       fd2.append('file', new Blob([photo], { type: 'image/jpeg' }), 'b.jpg');
       await fetch(`${base}/avs/uploads/${second.body.id}/photos`, { method: 'POST', headers: { authorization: `Bearer ${tokens.qc}` }, body: fd2 });
       const v2 = await call('qc', 'POST', `/avs/uploads/${second.body.id}/verify`);
-      assert.equal(v2.body.fire.status, 'joined');
-      assert.equal(got.fires.length, 1);
-      // Try again fires regardless.
+      assert.equal(v2.body.fire.status, 'fired');
+      assert.equal(got.fires.length, 2);
+      assert.match(got.fires.at(-1).body.text, new RegExp(`\\(set id ${second.body.id}\\)\\.$`), 'the run is told its own set');
+      // Try again fires again.
       const retry = await call('qc', 'POST', `/avs/uploads/${second.body.id}/retry`);
       assert.equal(retry.body.fire.status, 'fired');
-      assert.equal(got.fires.length, 2);
+      assert.equal(got.fires.length, 3);
 
       // Verify twice is refused; Cancel works only before Claude takes it.
       assert.equal((await call('production', 'POST', `/avs/uploads/${made.body.id}/verify`)).status, 409);
@@ -433,9 +434,9 @@ describe('the AVS printing lock — through the real app', {
       await call('production', 'POST', `/avs/uploads/${d}/verify`);
       await db.q(`UPDATE avs.check_requests SET fired_at = now() - interval '4 minutes' WHERE id = ANY($1)`, [[c, d]]);
       await Promise.all([call('production', 'GET', '/avs/uploads'), call('qc', 'GET', '/avs/uploads')]);
-      assert.equal(fires.length, 2, 'one cloud run for both late sets');
+      assert.equal(fires.length, 3, 'one cloud run for each late set, and only once');
       const late = await db.q('SELECT id, fire_status, session_url FROM avs.check_requests WHERE id = ANY($1) ORDER BY id', [[c, d]]);
-      assert.deepEqual(late.map(x => x.fire_status), ['fired', 'joined']);
+      assert.deepEqual(late.map(x => x.fire_status), ['fired', 'fired']);
       assert.equal(late[0].session_url, 'https://claude.ai/code/session_fallback');
       assert.deepEqual((await ask()).body.queued, [], 'the runner no longer sees them');
 

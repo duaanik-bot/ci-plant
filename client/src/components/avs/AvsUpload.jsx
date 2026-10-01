@@ -41,6 +41,7 @@ async function fitPhoto(file) {
 
 export const FIRE_TEXT = {
   fired: 'Claude has started checking. The report appears in Artwork Verification when it is done.',
+  // Older sets only: since 1 Oct 2026 every set gets its own run.
   joined: 'Claude is already checking other photos and will check these in the same run.',
   local: 'The office computer is starting Claude now. The report appears in Artwork Verification when it is done.',
 };
