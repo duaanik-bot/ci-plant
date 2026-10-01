@@ -46,12 +46,27 @@ async function detectCustomer(headerText) {
 }
 
 async function matchAll(customerId, rawLines) {
+  // A part of a carton made in parts stays a candidate HERE, so a row naming one
+  // is known for what it is: never auto-matched, never quietly re-matched to the
+  // nearest carton — it comes back suggesting its carton(s), with a note. A PO
+  // listing a carton's parts as rows is how PO 02545 booked its carton twice.
+  // Parts come LAST, so a code or item code a part shares with its carton
+  // (cloned masters) is found on the carton first. (The sister-customer list
+  // below offers neither a part nor a carton made in parts — a move would 409.)
   const products = await q(`
     SELECT p.id, p.name, p.code, p.rate, p.spec_incomplete,
            p.party_item_code, p.party_artwork_code,
            COALESCE(p.gst_pct, gr.rate, 12) AS gst
     FROM products p LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
-    WHERE p.customer_id=$1 AND p.active=1`, [customerId]);
+    WHERE p.customer_id=$1 AND p.active=1
+    ORDER BY EXISTS (SELECT 1 FROM product_parts pp WHERE pp.part_product_id = p.id), p.id`, [customerId]);
+  // This customer's parts, each with the carton(s) it belongs to (a part and its
+  // cartons share a customer — carton-parts.js contract C1).
+  const partOf = await q(`
+    SELECT pp.part_product_id, pp.label, op.id AS outer_id, op.code AS outer_code
+    FROM product_parts pp JOIN products op ON op.id = pp.outer_product_id
+    WHERE op.customer_id=$1
+    ORDER BY op.code, op.id`, [customerId]);
   const aliases = await q('SELECT alias_norm, product_id FROM product_aliases WHERE customer_id=$1', [customerId]);
   const info = Object.fromEntries(products.map(p => [p.id, p]));
   const enrich = s => (s ? {
@@ -64,6 +79,21 @@ async function matchAll(customerId, rawLines) {
   } : null);
   const lines = rawLines.map(l => {
     const m = matchLine(l.raw_text, products, aliases);
+    // The row's best hit — the auto-match, else the top suggestion — is a part.
+    const hit = m.best ?? m.suggestions[0];
+    const outers = hit ? partOf.filter(o => o.part_product_id === hit.product_id) : [];
+    if (outers.length) {
+      // Its cartons that can be ordered (active, so in this customer's list).
+      const cartons = outers.filter(o => info[o.outer_id]);
+      const labels = new Map();
+      for (const o of outers) labels.set(o.label, [...(labels.get(o.label) || []), o.outer_code]);
+      const named = [...labels].map(([label, codes]) => `${label} of ${codes.join(', ')}`).join('; ');
+      return { ...l, match: {
+        status: cartons.length ? 'suggested' : 'none', best: null,
+        suggestions: cartons.map(o => ({ ...enrich({ product_id: o.outer_id, confidence: hit.confidence }), part_label: o.label })),
+        part_note: `${named} — a carton made in parts is ordered once, as the carton`,
+      } };
+    }
     return { ...l, match: { status: m.status, best: enrich(m.best), suggestions: m.suggestions.map(enrich) } };
   });
   await attachForeignMatches(customerId, lines);
@@ -88,7 +118,9 @@ async function attachForeignMatches(customerId, lines) {
     FROM products p
     JOIN customers c ON c.id = p.customer_id AND c.active=1
     LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
-    WHERE p.customer_id <> $1 AND p.active=1`, [customerId]);
+    WHERE p.customer_id <> $1 AND p.active=1
+      AND NOT EXISTS (SELECT 1 FROM product_parts pp WHERE pp.part_product_id = p.id)
+      AND NOT EXISTS (SELECT 1 FROM product_parts pp WHERE pp.outer_product_id = p.id)`, [customerId]);
   if (!foreign.length) return;
   const info = Object.fromEntries(foreign.map(p => [p.id, p]));
   for (const l of misses) {

@@ -26,11 +26,20 @@ export default function ShadeCardForm({ meta, onClose, onCreated, toast }) {
   // /sales/pendency instead — the same source Orders.jsx's Pendency tab reads.
   // Its demand filter already excludes cancelled, dispatched and fully-shipped
   // lines server-side: a shade card for work that has shipped is not a thing
-  // anyone needs.
+  // anyone needs. Pendency lists a carton made in parts once, as the carton;
+  // its PARTS are what is printed, so each part's own line follows its carton
+  // here, named by it ("SW-715 → Part 1") — unless it is already pasted
+  // (status 'dispatched'): its printing is done.
   useEffect(() => {
     api.get('/sales/pendency').then(({ lines: ls }) => {
-      setLines((ls || []).map(l => ({ id: l.line_id, po_number: l.po_number, customer_name: l.customer_name,
-                 product_name: l.product_name, product_code: l.product_code, qty: l.qty })));
+      setLines((ls || []).flatMap(l => [
+        { id: l.line_id, po_number: l.po_number, customer_name: l.customer_name,
+          product_name: l.product_name, product_code: l.product_code, qty: l.qty },
+        ...(l.parts || []).filter(p => p.line_id && p.status !== 'dispatched').map(p => ({
+          id: p.line_id, po_number: l.po_number, customer_name: l.customer_name,
+          product_name: `${l.product_code} → ${p.label}`, product_code: p.code, qty: p.qty,
+        })),
+      ]));
     }).catch(() => toast.error('Could not load sales orders'));
   }, []);
 

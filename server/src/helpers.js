@@ -9,6 +9,8 @@ import { looseAfter, looseFloor } from './packet-plan.js';
 import { issuableFor, stockHoldBudget } from './board-allocation.js';
 // plates.js imports nothing from here, so this direction stays acyclic.
 import { plateWearSummary } from './plates.js';
+// carton-parts.js imports only stage-runs.js (itself import-free) — acyclic too.
+import { partStages, partsChangeBlock } from './carton-parts.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
@@ -3581,15 +3583,39 @@ export async function lineIdsClosedBy(jc, qc = q) {
 export const isRunCard = jc => !!jc?.gang_run_id && !jc?.order_line_id;
 export const isSplitChild = jc => !!jc?.parent_job_card_id;
 
+// A carton line's part lines, each with its floor label — the one spelling,
+// shared by the rollback guard, the cancel route and syncPartLines. jc_status
+// is the part's own card: a die-cut part is still in_production on its line
+// (carton-parts.js C4), and only its 'split' card says so. A scalar subquery,
+// so a line never repeats (the cancel route cancels each id it gets once).
+export const PART_LINES_SQL = `
+  SELECT pl.id, pl.product_id, pl.qty, pl.status, pl.line_remark, pl.part_label, pl.part_per_carton,
+         COALESCE(pl.part_label, pp.label, p.name) AS label,
+         (SELECT pj.status FROM job_cards pj WHERE pj.order_line_id = pl.id ORDER BY pj.id DESC LIMIT 1) AS jc_status
+  FROM order_lines pl
+  JOIN order_lines ol ON ol.id = pl.part_of_line_id
+  JOIN products p ON p.id = pl.product_id
+  LEFT JOIN product_parts pp ON pp.outer_product_id = ol.product_id AND pp.part_product_id = pl.product_id
+  WHERE pl.part_of_line_id = $1
+  ORDER BY pp.seq NULLS LAST, pl.id`;
+export const partLinesOf = (lineId, qc = q) => qc(PART_LINES_SQL, [lineId]);
+
+// Is this line a carton made in parts? (It has part lines.) The cheap check the
+// single-line Planning/FG doors ask before touching it (carton-parts.js cartonLineBlock).
+export const hasPartLines = async (lineId, oc = one) =>
+  !!(await oc('SELECT 1 AS x FROM order_lines WHERE part_of_line_id=$1 LIMIT 1', [lineId]));
+
 // The job card a line's reverse or rollback acts on: the line's OWN card first — a plain
 // card, or a split gang CHILD (which carries the run's gang_run_id as well) —
 // and only then the run card, for a gang member whose work still sits on the
 // run's parent card (the GANG_ANCHOR_LINE shape: order_line_id NULL). Two
 // lookups, in that order; a UNION with LIMIT 1 promised no order at all.
-// Carries the parent's number for splitGangReverseBlock's message.
+// Carries the parent's number for splitGangReverseBlock's message, and the
+// card's line's part_of_line_id — set when the card makes a PART of a carton.
 export async function cardForLine(line, oc) {
-  const cols = `jc.*, pj.jc_number AS parent_jc_number
-    FROM job_cards jc LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id`;
+  const cols = `jc.*, pj.jc_number AS parent_jc_number, jol.part_of_line_id
+    FROM job_cards jc LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
+    LEFT JOIN order_lines jol ON jol.id=jc.order_line_id`;
   const own = await oc(`SELECT ${cols} WHERE jc.order_line_id=$1 ORDER BY jc.id LIMIT 1`, [line.id]);
   if (own || !line.gang_run_id) return own;
   return oc(`SELECT ${cols}
@@ -3602,8 +3628,25 @@ export async function cardForLine(line, oc) {
 // its whole gang on the parent card; deleting the child and sending its line
 // back strands it (a re-push finds the split parent, never a fresh child), and
 // widening to the run sent every member back while only one child card went —
-// the CI-JC-0317 orphan (2026-09-10). Pure.
+// the CI-JC-0317 orphan (2026-09-10). It also covers a carton made in parts
+// (carton-parts.js): a finished part card (split, its line a part) and the
+// carton's pasting card (is_assembly) cannot walk back either. Pure.
 export function splitGangReverseBlock(jc, parentJcNumber = null) {
+  // A carton made in parts (carton-parts.js). A finished part's pieces already
+  // wait for — or sit on — the carton's pasting card; the pasting card's
+  // cartons were printed and die-cut on the part cards. Neither can walk back
+  // to Planning on its own.
+  if (jc?.part_of_line_id && jc.status === 'split') {
+    return `${jc.jc_number} is a finished part — its pieces wait for, or are already on, the carton's pasting card, `
+      + 'so it cannot be reversed to Planning, rolled back or deleted. If its die-cut count is wrong, ask an admin to correct it.';
+  }
+  if (jc?.is_assembly) {
+    return `${jc.jc_number} pastes parts made on other job cards — it cannot be reversed to Planning, `
+      + 'rolled back or deleted. '
+      + (jc.status === 'closed'
+        ? 'It is finished — to correct it, use Reverse on its completed run at Sort & Paste.'
+        : 'To redo its sorting or pasting, use Send back at Sort & Paste.');
+  }
   if (isSplitChild(jc)) {
     return `${jc.jc_number} was cut, printed and die-cut with its gang on ${parentJcNumber || 'the gang card'} — `
       + 'its cartons already exist, so this job cannot be reversed to Planning, rolled back or deleted. '
@@ -3724,6 +3767,14 @@ export async function createJobCardForLine(lineId, qc, oc, user = null) {
     e.status = 409;
     throw e;
   }
+  // A carton made in parts never gets a card of its own from Planning: its
+  // parts are pushed, and its pasting card is made by itself when the last
+  // part is die-cut (carton-parts-db.js maybeCreateAssemblyCard).
+  if ((await partLinesOf(line.id, qc)).length) {
+    const e = new Error('This carton is made in parts — push its parts; the pasting card is created by itself when every part is die-cut');
+    e.status = 409;
+    throw e;
+  }
   if (!['planned', 'ready'].includes(line.status)) {
     const e = new Error('Lock planning and artwork before creating a job card');
     e.status = 409;
@@ -3767,7 +3818,8 @@ export async function createJobCardForLine(lineId, qc, oc, user = null) {
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [jc_number, line.id, line.product_id, line.machine_id, netProduceQty(line), gate.parent_needed, gate.children_per_parent]);
 
-  const stages = routingFor(product);
+  // A part of a carton ends at die cutting; sorting + pasting belong to the carton.
+  const stages = line.part_of_line_id ? partStages(routingFor(product)) : routingFor(product);
   for (let i = 0; i < stages.length; i++) {
     await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
       [jc.id, i + 1, stages[i].stage, stages[i].unit]);
@@ -4366,7 +4418,7 @@ async function stageFacts(st, isFirstStage, qc, oc) {
 }
 
 const REVERSE_STAGE_COLS = `js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id,
-       jc.order_line_id, jc.parent_job_card_id, pj.jc_number AS parent_jc_number`;
+       jc.order_line_id, jc.parent_job_card_id, jc.is_assembly, pj.jc_number AS parent_jc_number`;
 
 export async function stageReversePlan(stageId, qc = q, oc = one) {
   const st = await oc(`
@@ -4395,7 +4447,9 @@ export async function stageReversePlan(stageId, qc = q, oc = one) {
     const downstream = await qc(
       'SELECT stage, status FROM job_stages WHERE job_card_id=$1 AND seq>$2 ORDER BY seq',
       [m.job_card_id, m.seq]);
-    const child = isSplitChild(m);
+    // A carton's PASTING CARD (is_assembly, carton-parts.js) is the same shape as
+    // a split child: what it pastes was cut, printed and die-cut on the part cards.
+    const child = isSplitChild(m) || m.is_assembly;
     const verdict = stageReverseMoves({
       stage: m.stage, status: m.status, jcStatus: m.jc_status,
       downstreamStages: downstream, prevStage: prev,
@@ -4414,8 +4468,9 @@ export async function stageReversePlan(stageId, qc = q, oc = one) {
   if (!move) throw Object.assign(new Error('This stage cannot be sent back'), { status: 409 });
 
   // A child never drew board (stage start skips it — the parent drew for the
-  // gang), so its first stage has none to return.
-  const isFirstStage = !results[0].prev && !isSplitChild(st);
+  // gang), so its first stage has none to return. Nor did a pasting card: its
+  // part cards drew theirs.
+  const isFirstStage = !results[0].prev && !isSplitChild(st) && !st.is_assembly;
   const members = [];
   for (const r of results) members.push(await stageFacts(r.m, isFirstStage, qc, oc));
 
@@ -4624,10 +4679,13 @@ export async function reverseChainPreview(jcId, qc = q, oc = one) {
   const rows = await qc(
     `SELECT id, stage, status, seq FROM job_stages
      WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC`, [jcId]);
+  // Every field splitGangReverseBlock reads — the same as a cardForLine row:
+  // a finished part (part_of_line_id) and a pasting card (is_assembly) too.
   const jc = await oc(`
     SELECT jc.id, jc.jc_number, jc.status, jc.gang_run_id, jc.order_line_id, jc.parent_job_card_id,
-           pj.jc_number AS parent_jc_number
+           jc.is_assembly, pj.jc_number AS parent_jc_number, jol.part_of_line_id
     FROM job_cards jc LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
+    LEFT JOIN order_lines jol ON jol.id=jc.order_line_id
     WHERE jc.id=$1`, [jcId]);
   // Member JOBS, not cards: a gang normally runs on ONE parent card, so a card
   // count would say "all 1 cards come back together" while two jobs move. A
@@ -4833,11 +4891,49 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
 // order's own world. `scopeLineIds`, when given, is the set of line ids being
 // deleted in the same operation; a ganged line whose gang-mates fall outside
 // that set blocks, so a shared gang run is never half-destroyed.
-export async function rollbackLine({ lineId, mode = 'rollback', note = null, force = false, scopeLineIds = null }, qc = q, oc = one, user = null) {
+// A CARTON made in parts (carton-parts.js) first takes each of its part lines
+// through this same function, in the same mode — `viaCarton` marks those inner
+// calls. Called on a part directly, 'rollback' rolls back its whole carton and
+// 'delete' is refused: a part never moves alone.
+export async function rollbackLine({ lineId, mode = 'rollback', note = null, force = false, scopeLineIds = null, viaCarton = false }, qc = q, oc = one, user = null) {
+  // Peeked before any lock (carton-parts.js contract C8):
+  //   • a PART never moves alone — rolling one back rolls back its whole carton
+  //     (Planning shows only the parts, so this is how a planner undoes a
+  //     carton); deleting one alone is refused;
+  //   • a CARTON is locked FOR NO KEY UPDATE, never FOR UPDATE: every second
+  //     update of one of its parts re-checks part_of_line_id and share-locks the
+  //     carton, and FOR UPDATE would deadlock against it — the gang row's rule.
+  const peek = await oc(`SELECT ol.part_of_line_id,
+      EXISTS (SELECT 1 FROM order_lines x WHERE x.part_of_line_id = ol.id) AS has_parts
+    FROM order_lines ol WHERE ol.id=$1`, [lineId]);
+  if (peek?.part_of_line_id && !viaCarton) {
+    if (mode === 'delete') {
+      const msg = partsChangeBlock(peek);
+      const e = new Error(msg);
+      e.status = 409; e.blockers = [msg];
+      throw e;
+    }
+    // Say so — the planner clicked ONE part and the whole carton goes back.
+    const why = 'Rolling back a part rolls back its whole carton — ';
+    try {
+      const out = await rollbackLine({ lineId: peek.part_of_line_id, mode, note: note || `from its part line #${lineId}`, force, scopeLineIds }, qc, oc, user);
+      const parts = await partLinesOf(peek.part_of_line_id, qc);
+      return { ...out, carton_line_id: peek.part_of_line_id,
+        message: `${why}${parts.map(p => p.label).join(' + ')} returned to the sales order` };
+    } catch (e) {
+      if (e.blockers) {
+        e.message = why + e.message;
+        e.blockers = e.blockers.map(b => why + b);
+        if (e.body?.blockers) e.body = { ...e.body, blockers: e.blockers };
+      }
+      throw e;
+    }
+  }
+
   // Gang row first (lockLineGangFirst): leaving a gang can dissolve it — the
   // mate's UPDATE and the run's DELETE below — so the run is locked before this
   // line, the order a push on the mate takes them in.
-  const line = await lockLineGangFirst(lineId, qc, oc, { gang: 'NO KEY UPDATE', line: 'UPDATE' });
+  const line = await lockLineGangFirst(lineId, qc, oc, { gang: 'NO KEY UPDATE', line: peek?.has_parts ? 'NO KEY UPDATE' : 'UPDATE' });
   if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
 
   // A split gang child's cartons already exist: rolling its line back deleted
@@ -4879,6 +4975,30 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
         stages, prLinkedToPo: prPo.n > 0, fgProduced: fgProd.n > 0, dispatchedQty: +line.dispatched_qty || 0,
       });
   if (blockers.length) { const e = new Error(blockers[0]); e.status = 409; e.blockers = blockers; throw e; }
+
+  // A CARTON made in parts takes its parts with it — each through this same
+  // function, so every part's holds, PR and job card are undone exactly as any
+  // line's are, under each part's own blockers. First, because the carton row
+  // cannot be deleted while a part still points at it (no FK cascade, on
+  // purpose). One transaction: a blocked part rolls the whole call back.
+  // A refusal below is a plain throw: it undoes the parts already rolled back
+  // only because every caller lets it abort the transaction.
+  const parts = await partLinesOf(lineId, qc);
+  const partNote = `its carton line #${lineId} was ${mode === 'delete' ? 'deleted' : 'rolled back'}${note ? ` — ${note}` : ''}`;
+  // Ascending id, like every other multi-line lock.
+  for (const part of [...parts].sort((a, b) => a.id - b.id)) {
+    try {
+      await rollbackLine({ lineId: part.id, mode, note: partNote, force, scopeLineIds, viaCarton: true }, qc, oc, user);
+    } catch (e) {
+      // Name the part the refusal is about: "Part 2: Cutting is in progress — …".
+      if (e.blockers) {
+        e.message = `${part.label}: ${e.message}`;
+        e.blockers = e.blockers.map(b => `${part.label}: ${b}`);
+        if (e.body?.blockers) e.body = { ...e.body, blockers: e.blockers };
+      }
+      throw e;
+    }
+  }
 
   // 1. Release any planning-time FG reservation.
   await releaseFgReservation(lineId, qc, oc, user);
@@ -4977,6 +5097,12 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
               wastage_sheets=NULL, spec_override=NULL, leftover_plan=NULL,
               tooling_ok=0, artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0
             WHERE id=$1`, [lineId]);
+  // A carton made in parts carries no board of its own — its parts do. Held at
+  // zero, never NULL, or readiness would price the carton's own master board as
+  // demand once the carton reaches pasting (carton-parts.js contract C2).
+  if (mode === 'rollback' && parts.length) {
+    await qc('UPDATE order_lines SET sheets_required=0, parent_sheets_required=0, wastage_sheets=0 WHERE id=$1', [lineId]);
+  }
 
   if (mode === 'delete') {
     // Null out nullable FK references so the line row can be removed.
@@ -4992,6 +5118,14 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
   return { ok: true, mode, deleted: false, message: 'Item rolled back to the sales order' };
 }
 
+// A carton's PASTING CARD (is_assembly, carton-parts.js) has no Job Card step to
+// be pulled back to: what it pastes was cut, printed and die-cut on the part
+// cards. One sentence, for pullBackToJobCard and the pull-back route's early
+// refusal.
+export const pastingCardPullBackRefusal = jcNumber =>
+  `${jcNumber} pastes parts made on other job cards — they were cut, printed and die-cut on the part cards, `
+  + 'so there is no Job Card step to pull it back to. Use Send back.';
+
 // Pull a job OFF the floor in one act and hand it back to the Job Card station,
 // editable. Every ledger effect is compensated by sendStageBack — this only adds
 // the un-planning on top, so there is exactly one place that knows how to give
@@ -5006,7 +5140,7 @@ export async function pullBackToJobCard(stageId, reason, qc = q, oc = one, user 
   // on the gang's parent card, and pulling it back used to reopen that SPLIT
   // parent and every partner. Refused before anything is written.
   const child = await oc(`
-    SELECT jc.jc_number, jc.parent_job_card_id, pj.jc_number AS parent_jc_number
+    SELECT jc.jc_number, jc.parent_job_card_id, jc.is_assembly, pj.jc_number AS parent_jc_number
     FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
     LEFT JOIN job_cards pj ON pj.id=jc.parent_job_card_id
     WHERE js.id=$1`, [stageId]);
@@ -5014,6 +5148,9 @@ export async function pullBackToJobCard(stageId, reason, qc = q, oc = one, user 
     throw Object.assign(new Error(
       `${child.jc_number} is a gang child — its sheets were printed and die-cut on ${child.parent_jc_number}, `
       + 'so there is no Job Card step to pull it back to. Use Send back.'), { status: 409 });
+  }
+  if (child?.is_assembly) {
+    throw Object.assign(new Error(pastingCardPullBackRefusal(child.jc_number)), { status: 409 });
   }
   const out = await sendStageBack(stageId, reason, qc, oc, user);
   const jc = await oc('SELECT id, jc_number, order_line_id, gang_run_id, machine_id FROM job_cards WHERE id=(SELECT job_card_id FROM job_stages WHERE id=$1)', [stageId]);

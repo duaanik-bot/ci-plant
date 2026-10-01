@@ -67,7 +67,11 @@ const artworkSql = (() => {
   const close = artworkRoute.indexOf('`', from + 1);
   assert.ok(close > from, 'the artwork query template literal is unterminated');
   const sql = artworkRoute.slice(from + 1, close);
-  assert.ok(/WHERE ol\.status IN/.test(sql), 'the SQL slice is not the artwork query');
+  // `WHERE (` — MANDATORY, not optional: the carton-made-in-parts exclusion ANDs
+  // onto the WHOLE gate, and unwrapped it would bind to the pending clause alone
+  // (AND before OR), listing every planned carton in Artwork again.
+  assert.ok(/WHERE \(ol\.status IN/.test(sql),
+    'the SQL slice is not the artwork query, or its gate is no longer wrapped in parentheses');
   return sql;
 })();
 

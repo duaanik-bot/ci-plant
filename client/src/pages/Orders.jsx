@@ -66,6 +66,24 @@ function pendencyStage(l) {
   if (pending > 0) return { key: 'production_required', label: 'Production Required' };
   return { key: 'pending', label: 'Awaiting Planning' };
 }
+// A carton made in parts: where each part is (server: carton-parts.js) — its
+// live stage on the floor, else its line status. A part is done once its card
+// is die-cut; its pieces then wait for the carton's pasting card, which the
+// row's own stage line above follows. The chip and the CSV's Parts column.
+function partsProgress(parts) {
+  return parts
+    .map(p => `${p.label} — ${p.jc_status === 'split' ? 'die-cut ✓'
+      : p.stage ? p.stage.replace(/_/g, ' ')
+      : String(p.status || '').replace(/_/g, ' ')}`)
+    .join(' · ');
+}
+
+// The line-wise pendency CSV: one row per line, a carton's Parts beside its Status.
+const PENDENCY_CSV_HEADER = ['PO', 'Customer', 'Product', 'Code', 'Ordered', 'Dispatched', 'Pending', 'FG Cover', 'FG Total', 'Production Required', 'Status', 'Parts', 'Job Card', 'Stage', 'Delivery', 'Overdue (days)', 'Age (days)', 'Pending Value'];
+function pendencyCsvRow(l) {
+  return [l.po_number, l.customer_name, l.product_name, l.product_code, l.qty, l.dispatched_qty, l.pending_qty, l.fg_allocated_qty, l.fg_qty, l.production_required_qty,
+    pendencyStage(l).label, l.parts?.length ? partsProgress(l.parts) : '', l.jc_number || '', l.current_stage || l.next_stage || '', l.delivery_date || '', l.overdue_days, l.age_days, Math.round(l.pending_value)];
+}
 function PendencyBadge({ line }) {
   const s = pendencyStage(line);
   return (
@@ -75,6 +93,9 @@ function PendencyBadge({ line }) {
         <div className="mt-0.5 text-[11px] text-slate-400">
           {line.jc_number}{line.gang_parent_job ? ' · gang parent' : ''} · {line.done_stages}/{line.total_stages} stages
         </div>
+      )}
+      {line.parts?.length > 0 && (
+        <div className="mt-0.5 text-[11px] text-sky-700">Parts: {partsProgress(line.parts)}</div>
       )}
     </div>
   );
@@ -98,11 +119,14 @@ const ORDER_KPI_LABEL = {
   late: 'orders past their delivery date',
 };
 
-// The pendency tab lists LINES, so its cards filter lines, not orders.
+// The pendency tab lists LINES, so its cards filter lines, not orders. On the
+// floor or still to plan is the server's one answer per line (pendencyFloor in
+// routes/orders.js): an open card of its own — or, for a carton made in parts
+// before its pasting card, a card on any of its parts.
 const PENDENCY_KPI_ROWS = {
   ready_fg: l => (+l.fg_allocated_qty || 0) > 0,
-  on_floor: l => !!l.jc_status && l.jc_status !== 'closed',
-  to_plan: l => !l.jc_status || l.jc_status === 'closed',
+  on_floor: l => !!l.on_floor,
+  to_plan: l => !l.on_floor,
   overdue: l => +l.overdue_days > 0,
 };
 const PENDENCY_KPI_LABEL = {
@@ -116,7 +140,7 @@ function buildPendencyRollups(lines) {
   const byProduct = {};
   const byCustomer = {};
   for (const l of lines) {
-    const wip = l.jc_status && l.jc_status !== 'closed' ? +l.qty_planned || 0 : 0;
+    const wip = +l.wip_qty || 0;   // the server's pendencyFloor, stamped on the line
     const p = (byProduct[l.product_id] ||= {
       key: l.product_id, label: l.product_name, code: l.product_code, size: l.size,
       pending_qty: 0, pending_value: 0, fg_qty: +l.fg_qty || 0, fg_allocated_qty: 0,
@@ -227,6 +251,44 @@ function ProductsLoadNote({ status, onRetry }) {
     );
   }
   return <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Loading products…</div>;
+}
+
+// The order detail lists what the customer ordered. A carton made in parts is
+// one item: each of its part lines sits right under it, unnumbered.
+function linesWithParts(lines = []) {
+  const rows = [];
+  let no = 0;
+  for (const l of lines) {
+    if (l.part_of_line_id) continue;
+    rows.push({ line: l, no: ++no });
+    for (const p of lines) if (p.part_of_line_id === l.id) rows.push({ line: p, no: null });
+  }
+  // A part whose carton is not on this list (never expected) still shows.
+  for (const l of lines) if (l.part_of_line_id && !rows.some(r => r.line === l)) rows.push({ line: l, no: null });
+  return rows;
+}
+
+// A carton made in parts on more than one line of this order — the PO 02545
+// shape, its parts typed as lines of the carton. The server warns on save too;
+// this says it while the order is typed. Never a refusal.
+function doubledCartons(lines = [], products = []) {
+  const n = new Map();
+  for (const l of lines) {
+    if (!l.product_id || !l.qty || l.status === 'cancelled') continue;
+    const p = products.find(x => String(x.id) === String(l.product_id));
+    if (!p?.has_parts) continue;
+    n.set(String(p.id), (n.get(String(p.id)) || 0) + 1);
+  }
+  return n;
+}
+
+function DoubledCartonNote({ product: p, n }) {
+  if (!p || !(n > 1)) return null;
+  return (
+    <div className="mt-1.5 break-words rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-amber-800">
+      {p.code} is made in parts and is on {n} lines of this order — order it once unless the customer really ordered it twice
+    </div>
+  );
 }
 
 function OrderTotals({ lines }) {
@@ -368,7 +430,10 @@ export default function Orders() {
   // Only cards naming a SUBSET are wired; a total covers every row already.
   const orderKpi = useKpiFilter(tab);
   const orderRows = orderKpi.apply(ordersForTab[tab] || ordersForTab.pending, ORDER_KPI_ROWS);
-  const custProducts = products.filter(p => String(p.customer_id) === String(form.customer_id) && p.active);
+  // A part of a carton made in parts is never ordered on its own: its line is
+  // made with its carton's (carton-parts.js), so no PO picker offers one.
+  const custProducts = products.filter(p => String(p.customer_id) === String(form.customer_id) && p.active && !p.is_part);
+  const newDoubles = doubledCartons(form.lines, products);
   const setLine = (i, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const cloneLine = i => setForm(f => {
     const source = f.lines[i] || emptyLine;
@@ -378,8 +443,10 @@ export default function Orders() {
 
   const save = async () => {
     const lines = form.lines.filter(l => l.product_id && l.qty).map(l => ({ ...l, qty: +l.qty, rate: l.rate === '' ? undefined : +l.rate }));
-    await api.post('/orders', { ...form, customer_id: +form.customer_id, lines });
+    const created = await api.post('/orders', { ...form, customer_id: +form.customer_id, lines });
     toast.success('Order created');
+    // Things the planner should know about the order, not reasons it was refused.
+    for (const w of created.warnings || []) toast.info(w);
     setShowNew(false);
     setForm({ po_number: '', customer_id: '', po_date: '', delivery_date: '', notes: '', lines: [{ ...emptyLine }] });
     load();
@@ -462,7 +529,9 @@ export default function Orders() {
     po_date: toDateInput(o.po_date),
     delivery_date: toDateInput(o.delivery_date),
     notes: o.notes || '',
-    lines: o.lines.map(l => ({
+    // Part lines never enter the form: the server makes and keeps them in step
+    // with their carton, and a line missing from the save is a line removed.
+    lines: o.lines.filter(l => !l.part_of_line_id).map(l => ({
       id: l.id,
       product_id: String(l.product_id),
       qty: l.qty,
@@ -479,6 +548,7 @@ export default function Orders() {
     ensureProducts();
   };
   const editProducts = products.filter(p => String(p.customer_id) === String(editForm?.customer_id) && p.active);
+  const editDoubles = editForm ? doubledCartons(editForm.lines, products) : new Map();
   const setEditLine = (i, patch) => setEditForm(f => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const cloneEditLine = i => setEditForm(f => {
     const source = f.lines[i] || emptyLine;
@@ -899,9 +969,7 @@ export default function Orders() {
                   <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Line-wise pending detail</span>
                   <Button size="sm" variant="secondary" onClick={() => exportCsv(
                     `sales-pendency-${new Date().toISOString().slice(0, 10)}.csv`,
-                    ['PO', 'Customer', 'Product', 'Code', 'Ordered', 'Dispatched', 'Pending', 'FG Cover', 'FG Total', 'Production Required', 'Status', 'Job Card', 'Stage', 'Delivery', 'Overdue (days)', 'Age (days)', 'Pending Value'],
-                    pdLines.map(l => [l.po_number, l.customer_name, l.product_name, l.product_code, l.qty, l.dispatched_qty, l.pending_qty, l.fg_allocated_qty, l.fg_qty, l.production_required_qty,
-                      pendencyStage(l).label, l.jc_number || '', l.current_stage || l.next_stage || '', l.delivery_date || '', l.overdue_days, l.age_days, Math.round(l.pending_value)]),
+                    PENDENCY_CSV_HEADER, pdLines.map(pendencyCsvRow),
                   )}><Download size={13} /> Export CSV</Button>
                 </div>
                 <DataTable searchable
@@ -1018,6 +1086,7 @@ export default function Orders() {
                           </button>
                         </div>
                         <ProductSpec product={prod} />
+                        <DoubledCartonNote product={prod} n={newDoubles.get(String(l.product_id))} />
                         {/* The line's own note, under the product it belongs to.
                             Carried from here to dispatch — usually a batch number. */}
                         <Input className="mt-1.5 !h-8 !text-xs" maxLength={20}
@@ -1113,12 +1182,26 @@ export default function Orders() {
                 <th className="px-3 py-2 text-right">Value</th><th className="px-3 py-2">Status</th>
               </tr></thead>
               <tbody>
-                {detail.lines.map((l, i) => (
+                {linesWithParts(detail.lines).map(({ line: l, no }) => (
                   <tr key={l.id} className="border-b border-gray-50">
-                    <td className="px-3 py-2 text-xs font-black tabular-nums text-slate-300">{String(i + 1).padStart(2, '0')}</td>
+                    <td className="px-3 py-2 text-xs font-black tabular-nums text-slate-300">{no ? String(no).padStart(2, '0') : ''}</td>
                     <td className="px-3 py-2">
-                      <ProductIdentity row={l} />
-                      <ProductSpec product={l} />
+                      {l.part_of_line_id ? (
+                        // One part of the carton above — printed on its own board
+                        // and pasted into it; the customer ordered the carton.
+                        <div className="pl-5">
+                          <div className="flex items-start gap-1.5">
+                            <span className="shrink-0 whitespace-nowrap font-semibold leading-snug text-slate-500">↳ {l.part_label || 'Part'}</span>
+                            <ProductIdentity row={l} />
+                          </div>
+                          <ProductSpec product={l} />
+                        </div>
+                      ) : (
+                        <>
+                          <ProductIdentity row={l} />
+                          <ProductSpec product={l} />
+                        </>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.dispatched_qty)}</td>
@@ -1128,12 +1211,16 @@ export default function Orders() {
                     <td className="px-3 py-2">
                       {l.completed_at ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700"><CheckCircle2 size={12} /> Completed</span>
-                      ) : (l.dispatched_qty >= l.qty && l.status !== 'cancelled') ? (
+                      ) : (!l.part_of_line_id && l.dispatched_qty >= l.qty && l.status !== 'cancelled') ? (
                         <PressButton type="button" onClick={() => markLineComplete(l.id)}
                           className="inline-flex items-center gap-1 rounded-full border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-600 transition hover:bg-emerald-50" title="Item fulfilled — mark complete">
                           <CheckCircle2 size={12} /> Mark complete
                         </PressButton>
-                      ) : <StatusBadge status={l.status} />}
+                      ) : (
+                        // A part never ships: 'dispatched' on a part line means it
+                        // was handed to the carton's pasting card.
+                        <StatusBadge status={l.part_of_line_id && l.status === 'dispatched' ? 'pasted' : l.status} />
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1199,7 +1286,10 @@ export default function Orders() {
                               setEditLine(i, { product_id: e.target.value, rate: p?.rate ?? '', gst: gstOf(p) });
                             }}>
                               <option value="">{productPlaceholder(editForm.customer_id, productsState.status)}</option>
-                              {editProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
+                              {/* No part is offered (see custProducts) — but a line that
+                                  already carries one, booked before its carton was split,
+                                  keeps showing its own product. */}
+                              {editProducts.filter(p => !p.is_part || String(p.id) === String(l.product_id)).map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           </div>
                           <button type="button" disabled={!editForm.customer_id || !canQuickCreate}
@@ -1210,6 +1300,7 @@ export default function Orders() {
                           </button>
                         </div>
                         <ProductSpec product={prod} />
+                        <DoubledCartonNote product={prod} n={editDoubles.get(String(l.product_id))} />
                         {/* The line's own note, under the product it belongs to.
                             Carried from here to dispatch — usually a batch number. */}
                         <Input className="mt-1.5 !h-8 !text-xs" maxLength={20}

@@ -169,7 +169,7 @@ test('plan-save judges a parent bound for the master against the board the maste
 test('plan-save answers parent_kept_job_only: true|false beside its existing shape', () => {
   assert.match(planSave, /let parentKeptJobOnly = false;/);
   assert.match(planSave,
-    /res\.json\(\{ \.\.\.out, readiness: await readiness\(out\), board_shortfalls: boardShortfalls, parent_kept_job_only: parentKeptJobOnly,\s*master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept \}\);/);
+    /res\.json\(\{ \.\.\.out, readiness: await readiness\(out\), board_shortfalls: boardShortfalls, parent_kept_job_only: parentKeptJobOnly,\s*master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept(,\s*\w+: \w+)* \}\);/);
 });
 
 test('plan-save\'s job-only audit says why a parent meant for the master stayed on the job', () => {

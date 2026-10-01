@@ -170,11 +170,16 @@ async function productHistory(id, params) {
   // a line has not shipped yet. What it does change is how much still has to be
   // MADE, so the drawer shows it as coverage against the pending figure rather
   // than quietly shrinking it. (netProduceQty is the production-side number.)
+  //
+  // A PASTED PART (a carton made in parts, carton-parts.js) is done: its pieces
+  // went into the carton's pasting card and its line walked to 'dispatched'
+  // with nothing dispatched of its own. It owes nothing and makes nothing more.
+  const PASTED_PART = `ol.part_of_line_id IS NOT NULL AND ol.status = 'dispatched'`;
   const orders = await q(`
     SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status,
            COALESCE(ol.fg_consumed_qty,0) AS fg_consumed_qty,
-           GREATEST(0, ol.qty - ol.dispatched_qty - COALESCE(ol.fg_consumed_qty,0)) AS to_make_qty,
-           GREATEST(0, ol.qty - ol.dispatched_qty) AS pending_qty,
+           CASE WHEN ${PASTED_PART} THEN 0 ELSE GREATEST(0, ol.qty - ol.dispatched_qty - COALESCE(ol.fg_consumed_qty,0)) END AS to_make_qty,
+           CASE WHEN ${PASTED_PART} THEN 0 ELSE GREATEST(0, ol.qty - ol.dispatched_qty) END AS pending_qty,
            o.po_number, o.po_date, o.delivery_date, o.status AS order_status
     FROM order_lines ol
     JOIN orders o ON o.id=ol.order_id
@@ -186,8 +191,8 @@ async function productHistory(id, params) {
   const [ordersPos] = await q(`
     SELECT COALESCE(SUM(ol.qty),0)::bigint AS ordered_total,
            COALESCE(SUM(ol.dispatched_qty),0)::bigint AS ordered_dispatched,
-           COALESCE(SUM(GREATEST(0, ol.qty - ol.dispatched_qty)),0)::bigint AS orders_pending,
-           COUNT(*) FILTER (WHERE GREATEST(0, ol.qty - ol.dispatched_qty) > 0)::int AS open_lines
+           COALESCE(SUM(CASE WHEN ${PASTED_PART} THEN 0 ELSE GREATEST(0, ol.qty - ol.dispatched_qty) END),0)::bigint AS orders_pending,
+           COUNT(*) FILTER (WHERE GREATEST(0, ol.qty - ol.dispatched_qty) > 0 AND NOT (${PASTED_PART}))::int AS open_lines
     FROM order_lines ol
     WHERE ol.product_id=$1 AND ol.status <> 'cancelled'`, [id]);
 

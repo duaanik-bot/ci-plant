@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, PressButton, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
+import ProductPartsEditor from '../components/ProductPartsEditor.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
@@ -536,6 +537,15 @@ export default function Masters() {
         .catch(() => requestedRefs.current.delete(ref));
     }
   }, [tab]);
+
+  // "Made in parts" picks from this customer's products: the Products tab's own
+  // rows (the /products list it loaded), for the customer the form was opened
+  // with — the parts list saves on its own, against the product as saved.
+  const partsCustomerId = tab === 'products' && editing?.id
+    ? (editing._loadedCustomerId ?? editing.customer_id) : null;
+  const partsChoices = useMemo(
+    () => (partsCustomerId == null ? [] : rows.filter(p => String(p.customer_id) === String(partsCustomerId))),
+    [rows, partsCustomerId]);
 
   // Codes already issued — excludes the row being edited and every leftover
   // offcut (which inherits its parent's spec), so an edit never re-suffixes an
@@ -1218,6 +1228,12 @@ export default function Masters() {
               </Field>
             ))}
           </div>
+        )}
+        {/* Products — "Made in parts": an existing carton's parts, saved with
+            their own button (routes/product-parts.js), as in the Product 360's
+            editor (ProductMasterEditor.jsx). */}
+        {editing && tab === 'products' && editing.id && (
+          <ProductPartsEditor key={editing.id} product={editing} customerProducts={partsChoices} />
         )}
         {/* Boards — the money the fields above imply, live. Board is bought by
             weight, so the buyer's real question is "what does one sheet cost?";

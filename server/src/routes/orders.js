@@ -7,7 +7,10 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, qtyBelowDispatchedWarning, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, qtyBelowDispatchedWarning, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS, partLinesOf, hasPartLines } from '../helpers.js';
+import { syncPartLines } from '../carton-parts-db.js';
+import { CARTON_STATUS_SQL } from '../carton-status.js';
+import { partsChangeBlock, cartonLineBlock, cartonPrintState } from '../carton-parts.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { planningResponse, planningScopeOf } from '../planning-scope.js';
@@ -184,7 +187,17 @@ const LINE_VIEW = `
          -- The rule lives HERE rather than in the client so the queue's badge
          -- and its filter cannot drift apart, and so an explicit draft column,
          -- when it arrives, replaces exactly one line of SQL.
-         (ol.status = 'pending' AND ol.parent_sheets_required IS NOT NULL) AS plan_draft,
+         -- A carton made in parts is never a draft: its 0/0/0 figures are
+         -- "no board of its own" (carton-parts.js C2), not a saved plan.
+         (ol.status = 'pending' AND ol.parent_sheets_required IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM order_lines xd WHERE xd.part_of_line_id = ol.id)) AS plan_draft,
+         -- Carton made in parts (carton-parts.js): a PART line names its carton;
+         -- a CARTON line knows it has parts. The line's own remembered label and
+         -- pieces per carton win (C9); the master fills in for an older line.
+         ol.part_of_line_id, COALESCE(ol.part_label, pp.label) AS part_label,
+         COALESCE(ol.part_per_carton, pp.per_carton) AS part_per_carton,
+         po.code AS outer_code, po.name AS outer_name,
+         EXISTS (SELECT 1 FROM order_lines xl WHERE xl.part_of_line_id = ol.id) AS has_parts,
          gg.gang_number, gg.kind AS run_kind
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
@@ -198,7 +211,10 @@ const LINE_VIEW = `
   LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
   -- Must come after gang_runs: DIE_TEXT reads gg, and a LEFT JOIN's ON can only
   -- see tables already joined above it.
-  LEFT JOIN tools dc ON dc.family = 'die' AND dc.code = ${DIE_TEXT}`;
+  LEFT JOIN tools dc ON dc.family = 'die' AND dc.code = ${DIE_TEXT}
+  LEFT JOIN order_lines olo ON olo.id = ol.part_of_line_id
+  LEFT JOIN products po ON po.id = olo.product_id
+  LEFT JOIN product_parts pp ON pp.outer_product_id = olo.product_id AND pp.part_product_id = ol.product_id`;
 
 // Resolve the GST % to store on an order line: an explicit override wins,
 // else the product's own rate, else the default for its type (from the master).
@@ -210,15 +226,56 @@ const resolveGst = (explicit, prod) => {
   return null; // leave null → billing falls back to product/default at invoice time
 };
 
+// What an order's lines say about cartons made in parts (carton-parts.js), as
+// warnings — never refusals: a customer can order a carton twice. A carton on
+// two lines is how PO 02545 booked its carton twice (its parts typed as lines);
+// a part on a line of its own is a part ordered without its carton.
+async function orderPartsWarnings(orderId, qc) {
+  const twice = await qc(`
+    SELECT p.code, COUNT(*)::int AS n FROM order_lines ol JOIN products p ON p.id = ol.product_id
+     WHERE ol.order_id=$1 AND ol.part_of_line_id IS NULL AND ol.status <> 'cancelled'
+       AND EXISTS (SELECT 1 FROM product_parts pp WHERE pp.outer_product_id = ol.product_id)
+     GROUP BY p.code HAVING COUNT(*) > 1 ORDER BY p.code`, [orderId]);
+  const alone = await qc(`
+    SELECT p.code, string_agg(DISTINCT op.code, ', ' ORDER BY op.code) AS cartons
+      FROM order_lines ol JOIN products p ON p.id = ol.product_id
+      JOIN product_parts pp ON pp.part_product_id = ol.product_id
+      JOIN products op ON op.id = pp.outer_product_id
+     WHERE ol.order_id=$1 AND ol.part_of_line_id IS NULL AND ol.status <> 'cancelled'
+     GROUP BY p.code ORDER BY p.code`, [orderId]);
+  return [
+    ...twice.map(r => `${r.code} is made in parts and is on ${r.n} lines of this order — order it once unless the customer really ordered it twice`),
+    ...alone.map(r => `${r.code} is a part of ${r.cartons} — order the carton`),
+  ];
+}
+
+// Closing a whole order cancels its open lines. A carton made in parts goes
+// only if its parts can (partsChangeBlock) — so say which carton and why before
+// any line is touched, never a bare "Invalid status change" from a part.
+async function cartonCancelBlock(orderId, qc) {
+  const cartons = await qc(`
+    SELECT ol.*, p.code FROM order_lines ol JOIN products p ON p.id = ol.product_id
+     WHERE ol.order_id=$1 AND ol.part_of_line_id IS NULL AND ol.status NOT IN ('dispatched','cancelled')
+       AND EXISTS (SELECT 1 FROM order_lines x WHERE x.part_of_line_id = ol.id)
+     ORDER BY ol.id`, [orderId]);
+  for (const c of cartons) {
+    const block = partsChangeBlock(c, await partLinesOf(c.id, qc));
+    if (block) return `${c.code}: ${block}`;
+  }
+  return null;
+}
+
 // ── Orders ──────────────────────────────────────────────────────────────────
 r.get('/orders', async (_req, res, next) => {
   try {
     res.json(await q(`
       SELECT o.*, c.name AS customer_name, c.segment,
-        (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.order_id=o.id) AS line_count,
-        (SELECT COALESCE(SUM(ol.qty*ol.rate),0) FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS value,
-        (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS ordered_qty,
-        (SELECT COALESCE(SUM(ol.dispatched_qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS fulfilled_qty,
+        -- A part line is internal (carton-parts.js): the customer ordered the
+        -- carton, so an order's line count and quantities count it once.
+        (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.part_of_line_id IS NULL) AS line_count,
+        (SELECT COALESCE(SUM(ol.qty*ol.rate),0) FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS value,
+        (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS ordered_qty,
+        (SELECT COALESCE(SUM(ol.dispatched_qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS fulfilled_qty,
         -- Every line's product & artwork identifiers, folded into the row so the
         -- Sales Orders search matches by product name, code, artwork or output
         -- number — not just PO/customer. Consumed by the table's deep search.
@@ -250,7 +307,12 @@ r.post('/orders', canPlan, async (req, res, next) => {
     if (!po_number || !customer_id || !lines?.length) {
       return res.status(400).json({ error: 'PO number, customer and at least one line are required' });
     }
-    const orderId = await tx(async (qc, oc) => {
+    const saved = await tx(async (qc, oc) => {
+      // A carton's parts list saved at this same instant must not miss this line
+      // (carton-parts.js): the parts save holds this lock exclusively. Taken
+      // FIRST, before the order row — taken later it deadlocks against the
+      // save, which locks each order after this lock.
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       const [o] = await qc(
         `INSERT INTO orders (po_number, customer_id, po_date, delivery_date, notes)
          VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -265,13 +327,17 @@ r.post('/orders', canPlan, async (req, res, next) => {
           SELECT p.rate, p.gst_pct, gr.rate AS type_gst
           FROM products p LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
           WHERE p.id=$1`, [l.product_id]);
-        await qc('INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        const [made] = await qc('INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
           [o.id, l.product_id, l.qty, l.rate ?? prod?.rate ?? 0, resolveGst(l.gst, prod || {}), tol, cleanLineRemark(l.line_remark)]);
+        // A carton made in parts gets its hidden part lines now (carton-parts.js).
+        await syncPartLines(made.id, qc, oc, req.user.name);
       }
       await audit('order', o.id, 'create', po_number, qc, req.user.name);
-      return o.id;
+      return { id: o.id, warnings: await orderPartsWarnings(o.id, qc) };
     });
-    res.json(await one('SELECT * FROM orders WHERE id=$1', [orderId]));
+    const order = await one('SELECT * FROM orders WHERE id=$1', [saved.id]);
+    if (saved.warnings.length) order.warnings = saved.warnings;
+    res.json(order);
   } catch (e) { next(e); }
 });
 
@@ -285,6 +351,11 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
     const orderId = +req.params.id;
     const warnings = [];
     await tx(async (qc, oc) => {
+      // A carton's parts list saved at this same instant must not miss this line
+      // (carton-parts.js): the parts save holds this lock exclusively. Taken
+      // FIRST, before the order row — taken later it deadlocks against the
+      // save, which locks each order after this lock.
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       const order = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId]);
       if (!order) throw Object.assign(new Error('Order not found'), { status: 404 });
 
@@ -297,10 +368,26 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
          WHERE id=$6`,
         [po_number, customer_id, po_date || plantDateStr(), delivery_date || null, notes || null, orderId]);
 
-      const existing = await qc('SELECT * FROM order_lines WHERE order_id=$1 ORDER BY id', [orderId]);
+      // Part lines are never in the payload (the edit form never carries them),
+      // and the removal loop below must never see them — they follow their
+      // carton through syncPartLines, or leave with it through rollbackLine.
+      const existing = await qc('SELECT * FROM order_lines WHERE order_id=$1 AND part_of_line_id IS NULL ORDER BY id', [orderId]);
       const keepIds = [];
+      const codeOf = new Map();   // kept line → its product code, to name it in a part-line warning
+      // The lines THIS save made, or whose qty, batch or product it changed. A
+      // carton's line stays pending until its pasting card exists, so its sync
+      // would otherwise repeat the same "Part 2 is already in production…" on
+      // every edit of the order, even of another line. Every line still syncs;
+      // only these speak. (The parts save and the shortage re-raise keep every
+      // warning — there they are the point.)
+      const saidFor = new Set();
+      // A tab opened before this order had part lines can send them back: they
+      // follow their carton, so they are skipped — never a 404 for the planner.
+      const ownParts = new Set((await qc(
+        'SELECT id FROM order_lines WHERE order_id=$1 AND part_of_line_id IS NOT NULL', [orderId])).map(r => r.id));
 
       for (const l of lines) {
+        if (l.id && ownParts.has(+l.id)) continue;
         if (!l.product_id || !l.qty) throw Object.assign(new Error('Each line needs a product and quantity'), { status: 400 });
         const product = await oc(`
           SELECT p.id, p.code, p.rate, p.customer_id, p.gst_pct, gr.rate AS type_gst
@@ -331,20 +418,50 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
             await audit('order_line', current.id, 'qty_below_dispatched',
               `${current.qty} → ${qty}, ${current.dispatched_qty} dispatched`, qc, req.user.name);
           }
+          // A carton made in parts never turns into another product in an edit:
+          // its parts (and their board) belong to this product, and a blocked
+          // removal would leave the old parts under the new product. Remove the
+          // line (rollbackLine stops at each part's blockers) and add the new one.
+          if (+product.id !== +current.product_id && (await partLinesOf(current.id, qc)).length) {
+            const was = await oc('SELECT code FROM products WHERE id=$1', [current.product_id]);
+            throw Object.assign(new Error(`${was?.code ?? 'This carton'} is made in parts — it cannot change product in an edit; remove the line and add ${product.code || 'the new product'} instead`), { status: 409 });
+          }
+          const remark = cleanLineRemark(l.line_remark);
+          if (qty !== +current.qty || remark !== (current.line_remark ?? null) || +product.id !== +current.product_id) {
+            saidFor.add(current.id);
+          }
           await qc('UPDATE order_lines SET product_id=$1, qty=$2, rate=$3, gst_pct=$4, line_remark=$6 WHERE id=$5',
-            [product.id, qty, rate, gst, current.id, cleanLineRemark(l.line_remark)]);
+            [product.id, qty, rate, gst, current.id, remark]);
           keepIds.push(current.id);
+          codeOf.set(current.id, product.code || product.id);
         } else {
           const cust = await oc('SELECT tolerance_pct FROM customers WHERE id=$1', [customer_id]);
           const [created] = await qc(
             'INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
             [orderId, product.id, qty, rate, gst, cust?.tolerance_pct ?? 0, cleanLineRemark(l.line_remark)]);
           keepIds.push(created.id);
+          codeOf.set(created.id, product.code || product.id);
+          saidFor.add(created.id);
         }
       }
 
       for (const line of existing) {
         if (keepIds.includes(line.id)) continue;
+        const removed = await oc('SELECT code, name FROM products WHERE id=$1', [line.product_id]);
+        // A carton made in parts leaves through rollbackLine, which takes each of
+        // its parts with it — holds, PRs and cards undone the one audited way,
+        // under each part's own blockers (carton-parts.js contract C8). Audited
+        // like a plain line (product · qty · was status), and a refusal names
+        // the carton: an edit can remove several.
+        if ((await partLinesOf(line.id, qc)).length) {
+          try {
+            await rollbackLine({ lineId: line.id, mode: 'delete', note: removedLineDetail(line, removed) }, qc, oc, req.user.name);
+          } catch (e) {
+            if (e.blockers) e.message = `${removed?.code ?? line.product_id}: ${e.message}`;
+            throw e;
+          }
+          continue;
+        }
         const job = await oc('SELECT id FROM job_cards WHERE order_line_id=$1 LIMIT 1', [line.id]);
         if (line.dispatched_qty > 0 || job) {
           throw Object.assign(new Error('Cannot remove lines that already have dispatch or job card activity'), { status: 400 });
@@ -355,11 +472,18 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
         // one order/update row, and what left had to be reconstructed from
         // gaps in the id sequence. Same action verb as rollbackLine's delete,
         // so one timeline entry covers both ways a line can leave an order.
-        const removed = await oc('SELECT code, name FROM products WHERE id=$1', [line.product_id]);
         await audit('order_line', line.id, 'deleted_entirely',
           removedLineDetail(line, removed), qc, req.user.name);
         await qc('DELETE FROM order_lines WHERE id=$1', [line.id]);
       }
+
+      // Qty / batch / product changes follow onto each carton's part lines. A
+      // warning names its carton: two cartons on one order can each have a Part 1.
+      for (const id of keepIds) {
+        const s = await syncPartLines(id, qc, oc, req.user.name);
+        if (saidFor.has(id)) warnings.push(...s.warnings.map(w => `${codeOf.get(id)}: ${w}`));
+      }
+      warnings.push(...await orderPartsWarnings(orderId, qc));
 
       await audit('order', orderId, 'update', po_number, qc, req.user.name);
     });
@@ -387,7 +511,27 @@ r.put('/orders/:id', canPlan, async (req, res, next) => {
 // the one that did not.
 r.post('/order-lines/:id/cancel', canPlan, async (req, res, next) => {
   try {
-    res.json(await tx((qc, oc) => setLineStatus(+req.params.id, 'cancelled', qc, oc, req.user.name)));
+    res.json(await tx(async (qc, oc) => {
+      const lineId = +req.params.id;
+      // Locked before its parts are read: a parts save converting this carton
+      // holds the line while it inserts the part lines, so the list read below
+      // is the one it committed — never an empty list that leaves new part
+      // lines pending under a cancelled carton. NO KEY UPDATE, as rollbackLine
+      // takes a carton: a part's own second update share-locks it.
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR NO KEY UPDATE', [lineId]);
+      // A carton made in parts cancels with its parts; a part never alone
+      // (carton-parts.js). setLineStatus releases a planned part's holds. Its
+      // part lines are locked too, in id order, BEFORE their statuses are read:
+      // a push or plan on a part in flight is waited for and then seen — never
+      // overwritten with 'cancelled' by the loop below.
+      if (line) await qc('SELECT id FROM order_lines WHERE part_of_line_id=$1 ORDER BY id FOR NO KEY UPDATE', [line.id]);
+      const partLines = line ? await partLinesOf(line.id, qc) : [];
+      const partBlock = line && partsChangeBlock(line, partLines);
+      if (partBlock) throw Object.assign(new Error(partBlock), { status: 409 });
+      const out = await setLineStatus(lineId, 'cancelled', qc, oc, req.user.name);
+      for (const p of partLines) await setLineStatus(p.id, 'cancelled', qc, oc, req.user.name);
+      return out;
+    }));
   } catch (e) { next(e); }
 });
 
@@ -415,6 +559,8 @@ r.post('/orders/:id/cancel', canPlan, async (req, res, next) => {
       const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
       if (o.status === 'cancelled') throw Object.assign(new Error('Order is already closed'), { status: 409 });
+      const cartonBlock = await cartonCancelBlock(o.id, qc);
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
       // Cancel the lines that have not shipped; leave dispatched ones intact.
       const openLines = await qc(
         `SELECT id FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [o.id]);
@@ -444,11 +590,13 @@ async function deletePreview(orderId) {
     hard.push(`${dispatched.n} dispatch challan(s) exist — goods that already left the plant cannot be deleted`);
 
   const lines = await q(`
-    SELECT ol.id, ol.gang_run_id, ol.dispatched_qty, p.name AS product_name
+    SELECT ol.id, ol.gang_run_id, ol.dispatched_qty, ol.part_of_line_id, p.name AS product_name
     FROM order_lines ol JOIN products p ON p.id=ol.product_id
     WHERE ol.order_id=$1 ORDER BY ol.id`, [orderId]);
   const lineIds = new Set(lines.map(l => l.id));
-  deletes.push(`Sales order ${o.po_number} with ${lines.length} item(s)`);
+  // The items are what the customer ordered: a carton made in parts is one,
+  // however many part lines it carries (their cards and blockers still count below).
+  deletes.push(`Sales order ${o.po_number} with ${lines.filter(l => !l.part_of_line_id).length} item(s)`);
 
   const seenGangs = new Set();
   const seenCards = new Set();
@@ -566,12 +714,13 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
       // Locked as read (gangs, order, then lines ascending), so no line can
       // change gang after the check below. A line that joined a gang after the
       // first read would have its gang locked out of order — refuse instead.
-      const lines = await qc('SELECT id, gang_run_id FROM order_lines WHERE order_id=$1 ORDER BY id FOR UPDATE', [orderId]);
+      const lines = await qc('SELECT id, gang_run_id, part_of_line_id FROM order_lines WHERE order_id=$1 ORDER BY id FOR UPDATE', [orderId]);
       const locked = new Set(before.map(r => r.gang_run_id));
       if (lines.some(l => l.gang_run_id && !locked.has(l.gang_run_id)))
         throw Object.assign(new Error('A line of this order was just added to a gang — refresh and try again'), { status: 409 });
       const scopeLineIds = new Set(lines.map(l => l.id));
-      for (const l of lines) {
+      // A carton made in parts takes its parts with it (rollbackLine, contract C8).
+      for (const l of lines.filter(x => !x.part_of_line_id)) {
         await rollbackLine({
           lineId: l.id, mode: 'delete', force, scopeLineIds,
           note: note || `Order ${o.po_number} deleted`,
@@ -580,7 +729,7 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
       // Detach any FG ledger rows still pointing at the order, then remove it.
       await qc('UPDATE fg_movements SET order_id=NULL WHERE order_id=$1', [orderId]);
       await audit('order', orderId, force ? 'force_deleted_entirely' : 'deleted_entirely',
-        `${o.po_number} — ${lines.length} line(s) removed${force ? ' · production reversed automatically' : ''}${note ? ` · ${note}` : ''}`, qc, req.user.name);
+        `${o.po_number} — ${lines.filter(x => !x.part_of_line_id).length} line(s) removed${force ? ' · production reversed automatically' : ''}${note ? ` · ${note}` : ''}`, qc, req.user.name);
       await qc('DELETE FROM orders WHERE id=$1', [orderId]);
       return { ok: true, deleted: true, message: `Order ${o.po_number} deleted` };
     });
@@ -651,8 +800,11 @@ r.post('/orders/:id/complete-lines', canPlan, async (req, res, next) => {
         done.push(id);
       }
       // Roll up: order completes once no non-cancelled line is left uncompleted.
+      // A part line never ships and is never marked complete — pasted, it is
+      // 'dispatched' with nothing dispatched (carton-parts.js) — so its carton
+      // answers for it here.
       const pending = await oc(
-        `SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status<>'cancelled' AND completed_at IS NULL`, [o.id]);
+        `SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status<>'cancelled' AND completed_at IS NULL AND part_of_line_id IS NULL`, [o.id]);
       let rolled = false;
       if (pending.n === 0 && o.status !== 'cancelled' && o.status !== 'completed') {
         await qc(`UPDATE orders SET status='completed' WHERE id=$1`, [o.id]);
@@ -679,14 +831,18 @@ r.post('/orders/:id/status', canPlan, async (req, res, next) => {
       if (err) throw Object.assign(new Error(err), { status: 409 });
 
       // Completing an order requires every non-cancelled line fully dispatched.
+      // A part line is never dispatched by quantity — its pieces leave inside
+      // its carton (carton-parts.js) — so only the carton is asked.
       if (to === 'completed') {
         const undone = await oc(
           `SELECT COUNT(*)::int AS n FROM order_lines
-           WHERE order_id=$1 AND status<>'cancelled' AND dispatched_qty < qty`, [o.id]);
+           WHERE order_id=$1 AND status<>'cancelled' AND dispatched_qty < qty AND part_of_line_id IS NULL`, [o.id]);
         if (undone.n > 0) throw Object.assign(new Error('Every item must be fully dispatched before completing the order'), { status: 409 });
       }
       // Cancelling cascades to un-shipped lines (mirrors the old /cancel path).
       if (to === 'cancelled') {
+        const cartonBlock = await cartonCancelBlock(o.id, qc);
+        if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
         const openLines = await qc(
           `SELECT id FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [o.id]);
         for (const l of openLines) await setLineStatus(l.id, 'cancelled', qc, oc, req.user.name);
@@ -701,6 +857,23 @@ r.post('/orders/:id/status', canPlan, async (req, res, next) => {
 });
 
 // ── Pendency ────────────────────────────────────────────────────────────────
+// Where a pendency line stands on the floor. A job card still open means that
+// quantity is in flight — FG is only credited when the card closes. A carton
+// made in parts has no card of its own until its pasting card (carton-parts.js):
+// once EVERY part has a card (a die-cut, 'split' one counts) it is on the floor,
+// carrying its production-required quantity; while any part is still without
+// one, that part still needs planning, so the carton is still to plan. With its
+// pasting card, that card decides like any other. The same rule as the carton's
+// status (carton-status.js), so the badge and the buckets agree.
+export function pendencyFloor(l) {
+  if (l.jc_status) {
+    const open = l.jc_status !== 'closed';
+    return { on_floor: open, wip_qty: open ? +l.qty_planned || 0 : 0 };
+  }
+  const carded = !!l.parts?.length && l.parts.every(p => p.jc_status);
+  return { on_floor: carded, wip_qty: carded ? +l.production_required_qty || 0 : 0 };
+}
+
 // What is still owed to customers: line-wise detail (workflow position, FG
 // cover, ageing) plus product-wise and customer-wise roll-ups — the sales
 // mirror of /procurement/pendency.
@@ -715,7 +888,27 @@ r.get('/sales/pendency', async (_req, res, next) => {
                p.party_item_code, p.size,
                ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
                ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
-               ol.status, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
+               -- The sales-facing status (carton-status.js): a carton made in
+               -- parts reads its least-advanced part until its pasting card —
+               -- the badge then agrees with the floor buckets (pendencyFloor).
+               ${CARTON_STATUS_SQL} AS status, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
+               -- A carton made in parts: where each of its parts is (the Parts
+               -- line under its status), and each part's own line — the one a
+               -- shade card is raised against, since the part is what is
+               -- printed. Its stage reads like the row's own: the running
+               -- stage, else the next pending one. NULL on every other line.
+               (SELECT json_agg(json_build_object('line_id', pl.id, 'product_id', pl.product_id, 'code', pp2.code,
+                                                  'label', COALESCE(pl.part_label, pp.label, pp2.name), 'qty', pl.qty,
+                                                  'status', pl.status, 'jc_status', pj.status,
+                                                  'stage', COALESCE(
+                                                    (SELECT stage FROM job_stages WHERE job_card_id=pj.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1),
+                                                    (SELECT stage FROM job_stages WHERE job_card_id=pj.id AND status='pending' ORDER BY seq LIMIT 1)))
+                                 ORDER BY pp.seq, pl.id)
+                  FROM order_lines pl
+                  JOIN products pp2 ON pp2.id = pl.product_id
+                  LEFT JOIN product_parts pp ON pp.outer_product_id = ol.product_id AND pp.part_product_id = pl.product_id
+                  LEFT JOIN job_cards pj ON pj.order_line_id = pl.id
+                 WHERE pl.part_of_line_id = ol.id) AS parts,
                COALESCE(fg.qty, 0)::int AS fg_qty,
                GREATEST(0, (${PLANT_TODAY_SQL} - o.po_date::date))::int AS age_days,
                CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
@@ -733,6 +926,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
         LEFT JOIN fg_stock fg ON fg.product_id = ol.product_id
         WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
           AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
+          AND ol.part_of_line_id IS NULL
       )
       SELECT d.*,
              GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending))::int AS fg_allocated_qty,
@@ -755,9 +949,10 @@ r.get('/sales/pendency', async (_req, res, next) => {
       ) jc ON true
       ORDER BY d.overdue_days DESC, d.delivery_date ASC NULLS LAST, d.line_id`);
 
-    // A job card still open means that quantity is in flight on the floor —
-    // FG is only credited when the card closes.
-    const wipOf = l => (l.jc_status && l.jc_status !== 'closed' ? +l.qty_planned || 0 : 0);
+    // Floor presence rides on each line (on_floor, wip_qty), so the Orders
+    // page's bucket cards and roll-ups read the same answer as these.
+    for (const l of rows) Object.assign(l, pendencyFloor(l));
+    const wipOf = l => l.wip_qty;
 
     const byProduct = {};
     for (const l of rows) {
@@ -854,23 +1049,35 @@ r.get('/status-sheet', async (_req, res, next) => {
              -- the only thing that separates a line nobody has planned from one
              -- the planner has committed that has not reached the floor —
              -- Unplanned vs Planned on the "Where it is" rail (lib/lineStage.js).
-             ol.status,
+             -- A carton made in parts reads its least-advanced part until its
+             -- pasting card (carton-status.js) — the same status Track and
+             -- Sales Pendency show.
+             ${CARTON_STATUS_SQL} AS status,
              ${LINE_STATUS_SQL} AS line_status,
              ${overdueSql} AS overdue_days,
-             EXISTS (
+             (EXISTS (
                SELECT 1 FROM job_cards jc
                JOIN job_stages js ON js.job_card_id = jc.id
                WHERE (jc.order_line_id = ol.id
                       OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
                           AND jc.parent_job_card_id IS NULL))
                  AND js.stage = 'printing' AND js.status = 'completed'
+             )
+             -- A carton made in parts is printed once EVERY part is (carton-parts.js).
+             OR (EXISTS (SELECT 1 FROM order_lines pl WHERE pl.part_of_line_id = ol.id)
+                 AND NOT EXISTS (
+                   SELECT 1 FROM order_lines pl WHERE pl.part_of_line_id = ol.id
+                     AND NOT EXISTS (SELECT 1 FROM job_cards pj JOIN job_stages ps ON ps.job_card_id = pj.id
+                                     WHERE pj.order_line_id = pl.id AND ps.stage = 'printing' AND ps.status = 'completed')))
              ) AS printed_derived
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
       JOIN products p ON p.id = ol.product_id
       LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
-      WHERE ${STATUS_SHEET_SCOPE_SQL}
+      -- A part line is internal (carton-parts.js): the customer chases the
+      -- carton, so the sheet lists the carton once and never its parts.
+      WHERE ${STATUS_SHEET_SCOPE_SQL} AND ol.part_of_line_id IS NULL
       ORDER BY ol.is_p1 DESC,
                ${overdueSql} DESC,
                ${LINE_EDD_SQL} ASC NULLS LAST, ol.id`);
@@ -930,6 +1137,30 @@ r.get('/status-sheet', async (_req, res, next) => {
         ORDER BY ol.id, prc.id DESC`, [ids]);
       const dripByLine = new Map(dripRows.map(row => [row.line_id, { status: row.status, plate_size: row.plate_size }]));
       for (const l of rows) l.dripoff_plate = dripByLine.get(l.line_id) || null;
+      // A carton made in parts has no printing stage of its own — its only
+      // card is its pasting card — so its Print Status is read off its PARTS'
+      // printing (carton-parts.js cartonPrintState), as print_state, and the
+      // sheet's printState prefers it. Not as a synthesized entry in `stages`:
+      // the Stage chips, "Where it is" and the export read every entry there
+      // (lib/lineStage.js), and one lone printing stage would count as the
+      // carton's whole route — "done" the moment its parts are printed. Only
+      // carton lines get the field; every other line reads its stages as before.
+      const printRows = await q(`
+        SELECT pl.part_of_line_id AS line_id,
+               (SELECT ps.status FROM job_cards pj JOIN job_stages ps ON ps.job_card_id = pj.id
+                 WHERE pj.order_line_id = pl.id AND ps.stage = 'printing'
+                 ORDER BY pj.id DESC, ps.seq LIMIT 1) AS printing
+        FROM order_lines pl
+        WHERE pl.part_of_line_id = ANY($1::int[])
+        ORDER BY pl.part_of_line_id, pl.id`, [ids]);
+      const printingByCarton = new Map();
+      for (const p of printRows) {
+        if (!printingByCarton.has(p.line_id)) printingByCarton.set(p.line_id, []);
+        printingByCarton.get(p.line_id).push(p.printing);
+      }
+      for (const l of rows) {
+        if (printingByCarton.has(l.line_id)) l.print_state = cartonPrintState(printingByCarton.get(l.line_id));
+      }
     }
     res.json({ lines: rows });
   } catch (e) { next(e); }
@@ -979,10 +1210,28 @@ r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
     if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
-    const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, wip, wip_date, printed_override, is_p1, remarks, delivery_date`, vals);
+    // One transaction: a carton whose new date or star landed while its parts
+    // kept the old one is the half-state this must never leave. Every
+    // statement runs on the transaction's own client (prod's pool is max:1).
+    const out = await tx(async (qc, oc) => {
+      const row = await oc(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
+                            RETURNING id, wip, wip_date, printed_override, is_p1, remarks, delivery_date`, vals);
+      if (!row) return null;
+      // A carton made in parts: its parts are planned and printed against the
+      // carton's own date and priority (carton-parts.js). WIP / remarks / printed
+      // stay the carton's — the customer chases the carton, not its pieces.
+      const follow = [];
+      const fvals = [];
+      if ('delivery_date' in req.body) { fvals.push(req.body.delivery_date || null); follow.push(`delivery_date=$${fvals.length}`); }
+      if ('is_p1' in req.body) { fvals.push(req.body.is_p1 ? 1 : 0); follow.push(`is_p1=$${fvals.length}`); }
+      if (follow.length) {
+        fvals.push(id);
+        await qc(`UPDATE order_lines SET ${follow.join(', ')} WHERE part_of_line_id=$${fvals.length}`, fvals);
+      }
+      await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), qc, req.user?.name);
+      return row;
+    });
     if (!out) return res.status(404).json({ error: 'line not found' });
-    await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
   } catch (e) { next(e); }
 });
@@ -1208,7 +1457,9 @@ r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
       JOIN products p ON p.id = ol.product_id
-      WHERE ${STATUS_SHEET_SCOPE_SQL}`);
+      -- The sheet's own rows, so never a part line (carton-parts.js): a row of
+      -- the customer's list maps onto the carton they ordered.
+      WHERE ${STATUS_SHEET_SCOPE_SQL} AND ol.part_of_line_id IS NULL`);
     const byProduct = new Map();
     for (const l of lines) {
       if (!byProduct.has(l.product_id)) byProduct.set(l.product_id, []);
@@ -1283,6 +1534,10 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
            RETURNING id, wip, wip_date, delivery_date, order_id`,
           [it.line_id, it.wip_date || today, it.edd || null]);
         if (!row[0]) continue;
+        // A carton made in parts: its parts are planned and printed against the
+        // carton's date (carton-parts.js), exactly as the line edit keeps them —
+        // in this same transaction. The WIP mark stays the carton's alone.
+        if (it.edd) await qc('UPDATE order_lines SET delivery_date=$1 WHERE part_of_line_id=$2', [it.edd, it.line_id]);
         await audit('order_line', it.line_id, 'status-sheet-wip-import',
           `marked Customer WIP (${row[0].wip_date}) from an uploaded WIP list`
           + (it.edd ? `; EDD set to ${it.edd}` : ''), qc, req.user?.name);
@@ -1367,9 +1622,17 @@ r.get('/planning', async (req, res, next) => {
     // order within it — a PO booked this morning tops the queue instead of
     // sinking to wherever its delivery date fell. The table's default sort
     // mirrors this; any column header still re-sorts the queue by hand.
+    // A carton made in parts is never planned itself — its parts are, each on
+    // its own board (carton-parts.js) — so it is hidden while it has no job card
+    // of its own. Once its pasting card exists it shows in Completed like any
+    // pushed job (rolling it back there is still refused by the pasting-card
+    // rule). The parts sort at the carton's own place in its order, side by
+    // side, however late they were made.
     const rows = await q(`${LINE_VIEW}
       WHERE ol.status IN ('pending','planned','ready','in_production')
-      ORDER BY ol.order_id DESC, ol.id`);
+      AND (NOT EXISTS (SELECT 1 FROM order_lines xl WHERE xl.part_of_line_id = ol.id)
+           OR EXISTS (SELECT 1 FROM job_cards xj WHERE xj.order_line_id = ol.id))
+      ORDER BY ol.order_id DESC, COALESCE(ol.part_of_line_id, ol.id), ol.id`);
     // ?scope=queue | completed (planning-scope.js): the view above still reads
     // every row — the split is BY RUN, and the tab badges are counted off the
     // whole list — but everything below runs over the asked half only. That is
@@ -1457,7 +1720,10 @@ async function planningRows(rows) {
         gates, ...lightExtras.get(-l.id),
         machineId: l.machine_id, finalisedAt: released.get(l.id)?.finalised_at ?? null, toolingOk: l.tooling_ok,
       }),
-      fg_available: fgAvailableFromCtx(l, ctx),
+      // A part's pieces come from its own job card, never from FG stock
+      // (carton-parts.js cartonLineBlock isPart) — so no Use FG Stock or Complete
+      // from Stock is offered on its row.
+      fg_available: l.part_of_line_id ? 0 : fgAvailableFromCtx(l, ctx),
       job_card_id: released.get(l.id)?.job_card_id ?? null,
       shade_card_id: sc?.shade_card_id ?? null,
       shade_status: sc?.status ?? null,
@@ -1582,7 +1848,13 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
     // save pinned to it (pinParentOnMasterClear), and the parent THIS plan keeps.
     let parentPinnedLines = [];
     let jobParentKept = null;
+    // A quantity sent for a PART, kept as it was: a part's quantity is its
+    // carton's (carton-parts.js C3). Said in the save's toast, never refused.
+    let partQtyKept = false;
     await tx(async (qc, oc) => {
+      // A parts save in flight is waited for, FIRST — before any row lock, which
+      // would deadlock against it (it holds the exclusive lock, then the rows).
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       let line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       // A ganged line's plan can dissolve its gang (a board change below: the
@@ -1598,6 +1870,15 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         if (line.gang_run_id && line.gang_run_id !== gangId)
           throw Object.assign(new Error('This line moved to another gang just now — refresh and try again'), { status: 409 });
       }
+      // A carton made in parts is refused: it has no board of its own, its parts
+      // are planned instead (carton-parts.js C2), and a plan written on it would
+      // claim its own master's board. Asked while HOLDING the line (after the run,
+      // the order every lock here takes them in), in a fresh statement: an order
+      // edit converts a line under the same SHARED parts lock, holding the line
+      // FOR UPDATE — this waits for it, and then sees its parts.
+      await oc('SELECT id FROM order_lines WHERE id=$1 FOR KEY SHARE', [req.params.id]);
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(req.params.id, oc) });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
 
       // Planning is over once the job leaves for the floor. This route rewrites
       // sheets_required, parent_sheets_required, the spec override and the board
@@ -1630,7 +1911,16 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           throw Object.assign(new Error('Order quantity must be greater than zero'), { status: 400 });
         if (nq < line.dispatched_qty)
           throw Object.assign(new Error(`Quantity cannot go below the ${line.dispatched_qty} already dispatched`), { status: 400 });
-        if (nq !== line.qty) {
+        if (nq !== line.qty && line.part_of_line_id) {
+          // A part is made for its carton: syncPartLines sets its quantity from
+          // the carton's (carton-parts.js C3), and the next edit would undo a
+          // figure typed here. The engine shows a part's box read-only, so only
+          // an old tablet bundle or a direct call sends one — kept as it was, on
+          // the record, and the rest of the plan saves (warn, never refuse).
+          partQtyKept = true;
+          await audit('order_line', line.id, 'part_qty_kept',
+            `planning engine sent qty ${nq} — kept ${line.qty}: a part's quantity follows its carton`, qc, req.user.name);
+        } else if (nq !== line.qty) {
           await qc('UPDATE order_lines SET qty=$1 WHERE id=$2', [nq, line.id]);
           await audit('order_line', line.id, 'qty_edit', `${line.qty} → ${nq} (planning engine)`, qc, req.user.name);
           line.qty = nq;
@@ -2261,7 +2551,8 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     res.json({ ...out, readiness: await readiness(out), board_shortfalls: boardShortfalls, parent_kept_job_only: parentKeptJobOnly,
-      master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept });
+      master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept,
+      part_qty_kept: partQtyKept });
   } catch (e) { next(e); }
 });
 
@@ -2288,6 +2579,9 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
 r.post('/order-lines/:id/plan/discard', canPlanWork, async (req, res, next) => {
   try {
     const out = await tx(async (qc, oc) => {
+      // A parts save in flight is waited for first (before the row lock below,
+      // or the two deadlock).
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       // FOR UPDATE before the guard reads the row, not after: the guard's whole
       // claim is "this line is still an unlocked draft", and a Lock Plan landing
       // on the same line concurrently would otherwise be read here as 'pending'
@@ -2295,6 +2589,13 @@ r.post('/order-lines/:id/plan/discard', canPlanWork, async (req, res, next) => {
       // plan had just claimed.
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      // A carton made in parts has no draft to discard: its 0/0/0 figures are
+      // "no board of its own", and nulling them would price its own master's
+      // board as demand again (carton-parts.js C2, C8). Asked under the row lock
+      // just taken, in a fresh statement — an order edit converting this line
+      // right now holds it FOR UPDATE, so this waits and then sees its parts.
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(req.params.id, oc) });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
 
       // The saved-draft test is the SAME pair LINE_VIEW's `plan_draft` column
       // computes (status='pending' AND parent_sheets_required IS NOT NULL), so
@@ -2948,10 +3249,15 @@ r.get('/artwork', async (_req, res, next) => {
     // returns 0 on equal keys and Array#sort is stable, so whatever order
     // arrives here is exactly what survives inside every group of equal sort
     // keys. Pinned in artwork-row-stays-put.test.js.
+    //
+    // A carton made in parts is never listed: its PARTS carry the artwork, each
+    // on its own sheet, and the carton's 0/0/0 figures are not a saved plan
+    // (carton-parts.js C2) — the same exclusion LINE_VIEW's plan_draft makes.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('planned','ready','in_production')
+      WHERE (ol.status IN ('planned','ready','in_production')
          OR (ol.status = 'pending'
-             AND (ol.parent_sheets_required IS NOT NULL OR ol.artwork_locked = 1))
+             AND (ol.parent_sheets_required IS NOT NULL OR ol.artwork_locked = 1)))
+        AND NOT EXISTS (SELECT 1 FROM order_lines xa WHERE xa.part_of_line_id = ol.id)
       ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST, ol.id`);
     // Tooling chips: ONE query for every product on the page.
     const pids = [...new Set(rows.map(l => l.product_id))];
@@ -3315,6 +3621,11 @@ r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
   try {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
+    // A carton made in parts buys no board of its own — its parts raise for
+    // theirs. Said here in its own words: its 0/0/0 figures would otherwise
+    // answer "No shortage" below. Re-checked under the lock before the write.
+    const cartonAsked = cartonLineBlock({ hasParts: line.has_parts });
+    if (cartonAsked) return res.status(409).json({ error: cartonAsked });
     // With a ctx the gate's available_sheets is CLAIMABLE (shelf less other
     // jobs' active holds, claimableQty) instead of the gross shelf. Without
     // it, a board fully frozen for other jobs answered "No shortage for this
@@ -3356,7 +3667,18 @@ r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
     // inserts it (helpers.js lockDocNumber), and a PR row without its mirror
     // line is a PR no shortage figure can see.
     const pr = await tx(async (qc, oc) => {
+      // A parts save committing after the unlocked read above would make this
+      // line a carton: wait for it first (before the number lock and the
+      // inserts), then refuse — a PR here would buy the outer's own board.
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
+      // The number lock before any row lock — a board move takes CI-PR- and then
+      // order lines FOR UPDATE (doc-number-lock-order.test.js) — then the line
+      // itself: an order edit converting it right now holds it FOR UPDATE, so
+      // this waits for it and the fresh statement below sees its parts.
       const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number', oc);
+      await oc('SELECT id FROM order_lines WHERE id=$1 FOR KEY SHARE', [line.id]);
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(line.id, oc) });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
       const [row] = await qc(
         `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason, order_line_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
         [pr_number, gate.board_material_id, shortage, line.planned_date,

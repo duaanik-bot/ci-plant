@@ -91,8 +91,9 @@ test('the run discard guards on the SAME pair as LINE_VIEW.plan_draft', () => {
   assert.match(route, /code: 'RUN_NEVER_SAVED'/);
   // The pair is the one LINE_VIEW computes. If that view's rule ever changes,
   // this assertion is what says the route has to follow it.
+  // (The pair, plus "not a carton made in parts" — a carton never joins a run.)
   assert.match(orders,
-    /\(ol\.status = 'pending' AND ol\.parent_sheets_required IS NOT NULL\) AS plan_draft/,
+    /\(ol\.status = 'pending' AND ol\.parent_sheets_required IS NOT NULL\s*\n\s*AND NOT EXISTS \(SELECT 1 FROM order_lines xd WHERE xd\.part_of_line_id = ol\.id\)\) AS plan_draft/,
     'LINE_VIEW.plan_draft is the rule both discards are written against');
 });
 

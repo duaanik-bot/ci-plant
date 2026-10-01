@@ -192,6 +192,24 @@ test('receiptFor: a completed stage keeps the input it closed against', () => {
   assert.equal(receiptFor({ stage, prev, ups: 4, childrenPerParent: 2, extraParents: 0 }).received, 26800);
 });
 
+test('receiptFor: a first stage awaiting Start shows the input Start will stamp, where the caller knows it — and stays uncapped', () => {
+  // A split gang child's or a pasting card's sorting: its pieces were cut on
+  // another card, so nothing upstream on ITS card counts toward it.
+  const stage = { seq: 1, stage: 'sorting', unit: 'cartons', status: 'pending', qty_in: null, qty_out: null };
+  const of = (st, prev, plannedIn) => receiptFor({ stage: st, prev, ups: 4, childrenPerParent: 1, extraParents: 0, plannedIn });
+  assert.equal(of(stage, null).received, 0);            // not told: as before
+  const r = of(stage, null, 5400);
+  assert.equal(r.received, 5400);                       // what the queue row shows
+  assert.equal(r.live, 0);                              // nothing has really arrived yet
+  assert.equal(r.ceiling, null);                        // the cap stays deferred until Start
+  assert.equal(of(stage, null, 0).received, 0);         // a card planned for 0 says 0
+  // Once Start has stamped it, the stamp speaks.
+  assert.equal(of({ ...stage, status: 'in_progress', qty_in: 5000 }, null, 5400).received, 5000);
+  // And it never stands in for a real upstream.
+  const prev = { seq: 1, stage: 'die_cutting', unit: 'sheets', status: 'partially_completed', qty_out: 100 };
+  assert.equal(of({ ...stage, seq: 2 }, prev, 5400).received, 400);
+});
+
 test('previousOf: skips QC and tolerates a gap in seq', () => {
   const qc = CI_JC_0001.find(s => s.seq === 5);
   assert.equal(previousOf(CI_JC_0001, qc).stage, 'sorting');

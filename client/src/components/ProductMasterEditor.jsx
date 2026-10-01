@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Loader2, Save } from 'lucide-react';
 import { api, fmt } from '../api.js';
+import ProductPartsEditor from './ProductPartsEditor.jsx';
 import {
   PRODUCT_MASTER_FIELDS,
   PRODUCT_MASTER_SOFT_SPEC,
@@ -47,6 +48,15 @@ export default function ProductMasterEditor({ open, product, onClose, onSaved })
     });
     return () => { current = false; };
   }, [open, product?.id, retryVersion]);
+
+  // What this carton can be made in parts of: the customer's products, from
+  // the master this editor already loaded (the rows GET /products lists).
+  // The SAVED customer — the parts list saves on its own, against the product
+  // as the server has it, never a customer changed but not yet saved here.
+  const loadedCustomerId = form?._loadedCustomerId;
+  const customerProducts = useMemo(
+    () => products.filter(row => String(row.customer_id) === String(loadedCustomerId)),
+    [products, loadedCustomerId]);
 
   const set = patch => setForm(current => ({ ...current, ...patch }));
 
@@ -165,23 +175,28 @@ export default function ProductMasterEditor({ open, product, onClose, onSaved })
           <Button variant="secondary" onClick={() => setRetryVersion(version => version + 1)}>Retry</Button>
         </div>
       ) : form ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {pending.length > 0 && (
-            <div className="col-span-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] font-semibold text-amber-800">
-              <AlertTriangle size={13} className="shrink-0" />
-              <span>Still to fill - you can save now and finish these later:</span>
-              {pending.map(spec => (
-                <span key={spec.key} className="rounded-full bg-white/80 px-2 py-0.5 font-bold text-amber-700">{spec.label}</span>
-              ))}
-            </div>
-          )}
-          {PRODUCT_MASTER_FIELDS.filter(field => !field.showWhen || field.showWhen(form)).map(field => (
-            <Field key={field.key} label={field.label} required={field.required} hint={field.hint}
-              className={field.newRow ? 'sm:col-start-1' : ''}>
-              {renderField(field)}
-            </Field>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {pending.length > 0 && (
+              <div className="col-span-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                <AlertTriangle size={13} className="shrink-0" />
+                <span>Still to fill - you can save now and finish these later:</span>
+                {pending.map(spec => (
+                  <span key={spec.key} className="rounded-full bg-white/80 px-2 py-0.5 font-bold text-amber-700">{spec.label}</span>
+                ))}
+              </div>
+            )}
+            {PRODUCT_MASTER_FIELDS.filter(field => !field.showWhen || field.showWhen(form)).map(field => (
+              <Field key={field.key} label={field.label} required={field.required} hint={field.hint}
+                className={field.newRow ? 'sm:col-start-1' : ''}>
+                {renderField(field)}
+              </Field>
+            ))}
+          </div>
+          {/* An existing product only — its parts are saved against its id.
+              Keyed by it: another product never shows this one's list. */}
+          {form.id && <ProductPartsEditor key={form.id} product={form} customerProducts={customerProducts} />}
+        </>
       ) : null}
     </Modal>
   );

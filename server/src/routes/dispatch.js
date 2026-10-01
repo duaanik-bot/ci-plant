@@ -8,6 +8,7 @@ import { toleranceCeiling, ceilingForWire, toleranceRoom, exceedsTolerance, tole
 import { boxBreakdown } from '../box-math.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { isShortage, shortfallOf, productionOver } from '../shortage.js';
+import { syncPartLines } from '../carton-parts-db.js';
 
 const r = Router();
 const canDispatch = requireRole('dispatch', 'planner');
@@ -39,6 +40,11 @@ async function productQtyPerBox(productId, run) {
 
 // Open produced order lines wanting a product, priority by delivery date — the
 // cascade order for FG-list dispatch across multiple sales orders.
+//
+// A carton's part line is never picked for a challan. Its pieces leave inside
+// the carton, and it passes 'produced' only inside the transaction that makes
+// its carton's pasting card (carton-parts.js) — so this, /dispatch/ready and
+// /dispatch/shortages skip it outright rather than rely on that timing.
 const PRODUCED_LINES_SQL = `
   SELECT ol.id AS order_line_id, ol.order_id, ol.qty AS ordered, ol.dispatched_qty AS dispatched,
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
@@ -46,7 +52,7 @@ const PRODUCED_LINES_SQL = `
   FROM order_lines ol
   JOIN orders o ON o.id=ol.order_id
   JOIN customers c ON c.id=o.customer_id
-  WHERE ol.product_id=$1 AND ol.status='produced'
+  WHERE ol.product_id=$1 AND ol.status='produced' AND ol.part_of_line_id IS NULL
   ORDER BY o.delivery_date NULLS LAST, ol.id`;
 
 r.get('/dispatch/ready', async (_req, res, next) => {
@@ -104,7 +110,7 @@ r.get('/dispatch/ready', async (_req, res, next) => {
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(fl.qty),0)::int AS lotted FROM fg_lots fl
         WHERE fl.job_card_id=jc.id AND fl.status != 'rejected') lot ON true
-      WHERE ol.status='produced' AND COALESCE(f.qty,0) > 0
+      WHERE ol.status='produced' AND COALESCE(f.qty,0) > 0 AND ol.part_of_line_id IS NULL
       ORDER BY o.delivery_date NULLS LAST`);
 
     // Suggested dispatch and the leftover that follows it are DERIVED FROM THE
@@ -158,7 +164,7 @@ r.get('/dispatch/shortages', async (_req, res, next) => {
       JOIN products p ON p.id=ol.product_id
       LEFT JOIN fg_stock f ON f.product_id=p.id
       LEFT JOIN job_cards jc ON jc.order_line_id=ol.id
-      WHERE ol.status='produced'
+      WHERE ol.status='produced' AND ol.part_of_line_id IS NULL
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
 
     const perBox = new Map();
@@ -582,6 +588,11 @@ export async function resolveShortage({ lineId, action, reason, vehicle, driver 
     // 'close' ends in applyFgMove, which mints — its numbers before this row
     // lock. 'replan' mints nothing and leaves the FG numbers free.
     if (action === 'close') await lockDocNumbers(FG_MOVE_PREFIXES, oc);
+    // 'replan' raises a new line. A carton's parts list saved at this same
+    // instant must not miss it (carton-parts.js): the parts save holds this lock
+    // exclusively. Taken FIRST, before the line — taken later it deadlocks
+    // against the save, which locks each order after this lock.
+    if (action === 'replan') await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
     const ol = await oc(`
       SELECT ol.*, jc.status AS jc_status, jc.jc_number, p.name AS product_name,
              COALESCE(f.qty,0) AS fg_qty,
@@ -635,6 +646,8 @@ export async function resolveShortage({ lineId, action, reason, vehicle, driver 
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending') RETURNING id`,
         [so.id, ol.product_id, balance, ol.rate, ol.tolerance_pct, ol.delivery_date || null,
          ol.spec_override || null, wiring]);
+      // A carton made in parts re-raises its parts with it (carton-parts.js).
+      await syncPartLines(newLine.id, qc, oc, user);
 
       // Close the original at what it really shipped. The job card STAYS — those
       // cartons were genuinely made and that is production history, not a mistake.

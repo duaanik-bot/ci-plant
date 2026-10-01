@@ -73,7 +73,15 @@ export function extrasInStageUnit({ stage, extraParents, childrenPerParent }) {
 // A whole receipt from plain row values — the shape every non-DB caller wants.
 // `stage` is the job_stages row; `prev` the stage before it (already found by
 // the caller, since it comes from a list on one page and a query on another).
-export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents, extraStageQty = null }) {
+//
+// `plannedIn` is for a FIRST stage that Start has not stamped yet. It has no
+// upstream on its card to count from, so its live receipt reads 0 — "0
+// cartons" on a queue row with 5,400 in front of it. Where the caller knows the
+// input Start WILL stamp (a split gang child's or a pasting card's planned
+// cartons), `received` shows that instead. It is the shown figure only: `live`
+// stays what has really arrived and `ceiling` stays deferred (null) until
+// Start, so nothing a save is capped or closed against moves.
+export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents, extraStageQty = null, plannedIn = null }) {
   const extra_issued = extraStageQty == null
     ? extrasInStageUnit({ stage: stage.stage, extraParents, childrenPerParent })
     : n(extraStageQty);
@@ -85,13 +93,16 @@ export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents, 
     ownQtyIn: stage.qty_in, extraIssued: extra_issued,
   };
   const live = stageReceived(parts);
+  const awaitingStart = !prev && (stage.qty_in === null || stage.qty_in === undefined)
+    && plannedIn !== null && plannedIn !== undefined;
   return {
     upstream_available,
     extra_issued,
     live,
     // A completed stage keeps the input it closed against; an open one tracks
-    // upstream live.
-    received: stage.status === 'completed' && stage.qty_in != null ? stage.qty_in : live,
+    // upstream live; a first stage awaiting Start shows what Start will stamp.
+    received: stage.status === 'completed' && stage.qty_in != null ? stage.qty_in
+      : awaitingStart ? n(plannedIn) + extra_issued : live,
     ceiling: availableCeiling({ isCutting: stage.stage === 'cutting', ...parts }),
   };
 }

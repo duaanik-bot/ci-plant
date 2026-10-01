@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Link2, RotateCcw, Send, Trash2, Undo2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Info, Link2, RotateCcw, Send, Trash2, Undo2, X } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, Checkbox, Modal, useDockTailRoom, useToast } from './ui.jsx';
 
@@ -216,7 +216,12 @@ function WorkflowDecisionModal({
   );
 }
 
-function DangerModal({ open, mode, label, busy, blockers, note, setNote, onClose, onConfirm }) {
+// A PART of a carton made in parts never moves alone (server/src/carton-parts.js
+// C7/C8): rolling one back rolls back its whole carton, all parts, and the server
+// refuses to delete one on its own — the carton is what leaves the order.
+const PART_DELETE_REASON = 'Remove the carton in Orders → Edit';
+
+function DangerModal({ open, mode, label, busy, blockers, note, setNote, onClose, onConfirm, part = null }) {
   const isDelete = mode === 'delete';
   return (
     <Modal
@@ -240,7 +245,9 @@ function DangerModal({ open, mode, label, busy, blockers, note, setNote, onClose
           <div className="ci-summary-panel">
             {isDelete
               ? <><b>{label}</b> and everything derived from it — job card, stages, print-queue slot, any board requisition, tooling & artwork approvals — will be removed, and the item deleted from the sales order. This cannot be undone.</>
-              : <><b>{label}</b> returns to the sales order as a fresh Pending item. All planning, artwork, tooling, job card and print-queue work on it is cleared.</>}
+              : part
+                ? <><b>{label}</b> is one part of {part.outerCode || 'its carton'} — rolling it back rolls back the <b>whole carton</b>: every part returns to the sales order as a fresh Pending item, and all their planning, board holds, not-yet-ordered PRs and unstarted job cards are cleared.</>
+                : <><b>{label}</b> returns to the sales order as a fresh Pending item. All planning, artwork, tooling, job card and print-queue work on it is cleared.</>}
           </div>
         )}
         <textarea
@@ -267,8 +274,19 @@ export function useDangerActions({ line, jobCard, onDone }) {
   const [blockers, setBlockers] = useState([]);
   const [note, setNote] = useState('');
   const allowed = canPlan() && !!lineId;
+  // One part of a carton made in parts: its rollback takes the whole carton,
+  // and it has no Delete of its own — the reason stands where Delete would.
+  // A planning row carries its carton's code flat (LINE_VIEW outer_code); a job
+  // card carries it where production.js attachCartonParts puts it.
+  const partOf = line?.part_of_line_id || jobCard?.part_of_line_id || null;
+  const part = partOf ? { outerCode: line?.outer_code || jobCard?.carton_parts?.outer_code || null } : null;
+  const partDeleteSaid = () => toast.info(
+    `${label} is one part of ${part?.outerCode || 'its carton'} — a part is never deleted on its own. ${PART_DELETE_REASON}.`);
 
-  const open = m => { setBlockers([]); setNote(''); setMode(m); };
+  const open = m => {
+    if (m === 'delete' && partOf) { partDeleteSaid(); return; }
+    setBlockers([]); setNote(''); setMode(m);
+  };
   const run = async () => {
     setBusy(true);
     try {
@@ -284,19 +302,21 @@ export function useDangerActions({ line, jobCard, onDone }) {
 
   const items = allowed ? [
     { key: 'rollback', label: 'Roll back to Sales Order', icon: RotateCcw, tone: 'danger', onClick: () => open('rollback') },
-    { key: 'delete', label: 'Delete entirely', icon: Trash2, tone: 'danger', onClick: () => open('delete') },
+    partOf
+      ? { key: 'delete', label: PART_DELETE_REASON, icon: Info, onClick: partDeleteSaid }
+      : { key: 'delete', label: 'Delete entirely', icon: Trash2, tone: 'danger', onClick: () => open('delete') },
   ] : [];
 
   const modal = (
     <DangerModal open={!!mode} mode={mode} label={label} busy={busy} blockers={blockers}
-      note={note} setNote={setNote} onClose={() => setMode(null)} onConfirm={run} />
+      note={note} setNote={setNote} onClose={() => setMode(null)} onConfirm={run} part={part} />
   );
 
-  return { items, modal, allowed, open };
+  return { items, modal, allowed, open, partOf };
 }
 
 export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
-  const { items, modal, allowed, open } = useDangerActions({ line, jobCard, onDone });
+  const { items, modal, allowed, open, partOf } = useDangerActions({ line, jobCard, onDone });
   if (!allowed) return null;
 
   return (
@@ -308,9 +328,11 @@ export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
           <Button size="sm" variant="ghost" title="Roll back to Sales Order"
             className="min-h-0 rounded-lg border border-amber-200 bg-amber-50/60 px-1.5 py-0.5 text-[10px] text-amber-700 hover:bg-amber-100"
             onClick={() => open('rollback')}><RotateCcw size={10} /> Rollback</Button>
-          <Button size="sm" variant="ghost" title="Delete entirely from all stations"
-            className="min-h-0 rounded-lg border border-red-200 bg-red-50/60 px-1.5 py-0.5 text-[10px] text-red-700 hover:bg-red-100"
-            onClick={() => open('delete')}><Trash2 size={10} /> Delete</Button>
+          {partOf
+            ? <span className="self-center text-[10px] text-slate-500">{PART_DELETE_REASON}</span>
+            : <Button size="sm" variant="ghost" title="Delete entirely from all stations"
+                className="min-h-0 rounded-lg border border-red-200 bg-red-50/60 px-1.5 py-0.5 text-[10px] text-red-700 hover:bg-red-100"
+                onClick={() => open('delete')}><Trash2 size={10} /> Delete</Button>}
         </div>
       )}
       {modal}

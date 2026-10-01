@@ -13,6 +13,7 @@ import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, own
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
+import { CARTON_STATUS_SQL } from '../carton-status.js';
 import { avsMandatorySql, qaStampsForCards } from '../avs-gate.js';
 import { markUncacheable } from '../data-tables.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
@@ -184,12 +185,22 @@ export function countsBySection(stages, sections = SECTIONS) {
 // when the stage started. Upstream keeps counting, the snapshot does not, and
 // the station ends up shown a received figure that matches neither its upstream
 // nor the ceiling the server enforces when it saves. Derive, don't cache.
+//
+// A card whose FIRST stage is sorting is a split gang child or a carton's
+// pasting card (carton-parts.js) — every other route starts at cutting
+// (routingFor). Its pieces were cut on another card, so nothing upstream on ITS
+// card counts toward it, and until Start stamps its input the live receipt
+// reads 0. Start stamps the card's planned cartons (the `!prev` branch of
+// /job-stages/:id/start in routes/production.js) — the queue row shows that
+// same figure while it waits. stageReceipt() is deliberately not told: what a
+// save is capped or closed against still reads only the stamp.
 const rowReceipt = (s, prev) => {
   const { upstream_available, extra_issued, received } = receiptFor({
     stage: s, prev, ups: s.ups,
     childrenPerParent: s.children_per_parent,
     extraParents: s.extra_issued_parents,
     extraStageQty: s.extra_issued_units,
+    plannedIn: !prev && s.stage === 'sorting' ? (s.qty_planned ?? s.sheets_issued ?? null) : null,
   });
   return { upstream_available, extra_issued, received };
 };
@@ -459,7 +470,12 @@ r.get('/floor', async (req, res, next) => {
              -- the engine covered across several boards checks each mix row
              -- against ITS OWN board's stock — the cutting station must not
              -- flag "board short" on a job the engine already covered.
-             (NOT EXISTS (SELECT 1 FROM stock_movements smv
+             -- A carton's PASTING CARD (is_assembly, carton-parts.js) draws no board
+             -- at all: its sheets_issued counts CARTONS, pasted from pieces the part
+             -- cards cut, printed and die-cut on their own boards — so it is never
+             -- board pending (the same rule as JC_VIEW).
+             (NOT jc.is_assembly AND
+              NOT EXISTS (SELECT 1 FROM stock_movements smv
                           WHERE smv.ref_type='job_card' AND smv.ref_id=jc.id AND smv.type='consumption')
               AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
              oxs.xs_number AS open_xs, oxs.status AS open_xs_status, oxs.issued_stage_qty AS open_xs_stage_qty,
@@ -1406,10 +1422,13 @@ r.get('/floor/:section', async (req, res, next) => {
 });
 
 // ── Track ───────────────────────────────────────────────────────────────────
+// The status Track shows for a line is the sales-facing one (carton-status.js):
+// a carton made in parts reads its least-advanced part until its pasting card,
+// exactly as the Status Sheet and Sales Pendency read it.
 r.get('/track', async (_req, res, next) => {
   try {
     res.json(await q(`
-      SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status, ol.planned_date, ol.line_remark,
+      SELECT ol.id, ol.qty, ol.dispatched_qty, ${CARTON_STATUS_SQL} AS status, ol.planned_date, ol.line_remark,
              o.po_number, o.delivery_date, c.name AS customer_name,
              p.name AS product_name, p.code AS product_code, p.party_item_code,
              jc.jc_number, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
@@ -1433,19 +1452,24 @@ r.get('/track', async (_req, res, next) => {
         ORDER BY CASE WHEN jc2.order_line_id = ol.id THEN 0 ELSE 1 END, jc2.id DESC
         LIMIT 1
       ) jc ON true
-      WHERE ol.status != 'cancelled'
+      -- A part line is internal (carton-parts.js): the carton is tracked, and
+      -- its journey shows where each part is.
+      WHERE ol.status != 'cancelled' AND ol.part_of_line_id IS NULL
       ORDER BY (ol.status='dispatched'), o.delivery_date NULLS LAST, ol.id DESC`));
   } catch (e) { next(e); }
 });
 
 r.get('/track/:id', async (req, res, next) => {
   try {
+    // A part line answers for its carton (carton-parts.js): the customer
+    // ordered the carton, and the carton's Planned step shows the part.
     const line = await one(`
       SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.created_at AS order_created_at,
              o.status AS order_status, c.name AS customer_name, c.city,
              p.name AS product_name, p.code AS product_code,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
              p.party_item_code, p.size, p.colors, p.coating, p.special, p.ups, p.tool_id,
+             ${CARTON_STATUS_SQL} AS track_status,
              bm.name AS board_name, m.name AS machine_name, gg.gang_number, gg.kind AS run_kind
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
@@ -1454,7 +1478,7 @@ r.get('/track/:id', async (req, res, next) => {
       JOIN materials bm ON bm.id = p.board_material_id
       LEFT JOIN machines m ON m.id = ol.machine_id
       LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
-      WHERE ol.id = $1`, [req.params.id]);
+      WHERE ol.id = (SELECT COALESCE(x.part_of_line_id, x.id) FROM order_lines x WHERE x.id = $1)`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Order line not found' });
 
     // A ganged line rides the gang PARENT card (one shared physical run) until
@@ -1492,6 +1516,35 @@ r.get('/track/:id', async (req, res, next) => {
       WHERE dl.order_line_id = $1 ORDER BY d.id`, [line.id]);
     const trail = await q(`
       SELECT * FROM audit_log WHERE entity='order_line' AND entity_id=$1 ORDER BY id`, [line.id]);
+    // A carton made in parts has no plan of its own: its board rides on its
+    // parts and its sheets_required is 0 (carton-parts.js), which the Planned
+    // step would read as "Waiting for plan lock" even with its parts on the
+    // floor. Each part's own line and card say where it is instead — and,
+    // until the pasting card, its own gates (artwork, tooling, card).
+    const parts = await q(`
+      SELECT COALESCE(pl.part_label, pp.label, p2.name) AS label, pl.status, pj.status AS jc_status,
+             pl.product_id, p2.special, p2.tool_id, pl.tooling_ok,
+             pl.artwork_locked, pl.artwork_customer_ok, pl.artwork_qa_ok,
+             pj.jc_number, pj.created_at AS jc_created_at,
+             (SELECT stage FROM job_stages WHERE job_card_id=pj.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
+             (SELECT stage FROM job_stages WHERE job_card_id=pj.id AND status='pending' ORDER BY seq LIMIT 1) AS next_stage,
+             (SELECT MAX(a.created_at) FROM audit_log a
+               WHERE a.entity='order_line' AND a.entity_id=pl.id AND a.action='planned') AS planned_at,
+             (SELECT MAX(a.created_at) FROM audit_log a
+               WHERE a.entity='order_line' AND a.entity_id=pl.id AND a.action='artwork_locked') AS artwork_at
+        FROM order_lines pl
+        JOIN products p2 ON p2.id = pl.product_id
+        LEFT JOIN product_parts pp ON pp.outer_product_id = $2 AND pp.part_product_id = pl.product_id
+        LEFT JOIN job_cards pj ON pj.order_line_id = pl.id
+       WHERE pl.part_of_line_id = $1
+       ORDER BY pp.seq NULLS LAST, pl.id`, [line.id, line.product_id]);
+
+    // Before its pasting card a carton made in parts IS its parts: their own
+    // gates stand in for its Artwork, Tooling and Job-card steps. With its
+    // pasting card (its own card) it is its own line again.
+    const partsGate = parts.length > 0 && !ownJc;
+    const latest = ats => ats.reduce((at, x) => (x && (!at || new Date(x) > new Date(at)) ? x : at), null);
+    const stepOf = (n, of) => (n === of ? 'done' : n ? 'active' : 'todo');
 
     // Assemble the timeline. Every event: { key, title, detail, at, state }
     const events = [];
@@ -1502,44 +1555,96 @@ r.get('/track/:id', async (req, res, next) => {
     });
 
     const plannedAudit = trail.find(t => t.action === 'planned');
-    events.push({
-      key: 'planned', title: 'Planned',
-      detail: line.sheets_required
-        ? `${(line.sheets_required ?? 0).toLocaleString('en-IN')} sheets (${line.board_name})`
-          + `${line.machine_name ? ` · ${line.machine_name}` : ''}${line.planned_date ? ` · ${line.planned_date}` : ''}`
-        : 'Waiting for plan lock',
-      at: plannedAudit?.created_at ?? null, by: plannedAudit?.user_name,
-      state: line.sheets_required ? 'done' : 'todo',
-    });
+    if (parts.length) {
+      // Planned once every part's plan is locked; each part reads die-cut ✓
+      // once its card is done (its pieces then wait for the pasting card).
+      const stageName = s => s.replace(/_/g, ' ');
+      const where = p => (p.jc_status === 'split' ? 'die-cut ✓'
+        : p.current_stage ? `${stageName(p.current_stage)} in progress`
+        : p.jc_status && p.next_stage ? `waiting for ${stageName(p.next_stage)}`
+        : stageName(p.status));
+      const planned = parts.filter(p => ['planned', 'ready', 'in_production', 'produced', 'dispatched'].includes(p.status));
+      events.push({
+        key: 'planned', title: 'Planned — made in parts',
+        detail: parts.map(p => `${p.label} — ${where(p)}`).join(' · '),
+        at: planned.length === parts.length ? latest(planned.map(p => p.planned_at)) : null,
+        state: stepOf(planned.length, parts.length),
+      });
+    } else {
+      events.push({
+        key: 'planned', title: 'Planned',
+        detail: line.sheets_required
+          ? `${(line.sheets_required ?? 0).toLocaleString('en-IN')} sheets (${line.board_name})`
+            + `${line.machine_name ? ` · ${line.machine_name}` : ''}${line.planned_date ? ` · ${line.planned_date}` : ''}`
+          : 'Waiting for plan lock',
+        at: plannedAudit?.created_at ?? null, by: plannedAudit?.user_name,
+        state: line.sheets_required ? 'done' : 'todo',
+      });
+    }
 
-    const artAudit = trail.filter(t => t.action === 'artwork_locked').pop();
-    events.push({
-      key: 'artwork', title: 'Artwork approved & locked',
-      detail: line.artwork_locked ? 'Customer ✓ and QA ✓ — locked for print'
-        : `${line.artwork_customer_ok ? 'Customer ✓' : 'Customer pending'} · ${line.artwork_qa_ok ? 'QA ✓' : 'QA pending'}`,
-      at: artAudit?.created_at ?? null, by: artAudit?.user_name,
-      state: line.artwork_locked ? 'done' : 'todo',
-    });
+    // Artwork: before its pasting card, every part locked. (The pasting card
+    // locks the carton's own artwork with its parts, carton-parts-db.js.)
+    if (partsGate) {
+      const locked = parts.filter(p => p.artwork_locked);
+      events.push({
+        key: 'artwork', title: 'Artwork approved & locked',
+        detail: parts.map(p => `${p.label} ${p.artwork_locked ? '✓'
+          : `${p.artwork_customer_ok ? 'customer ✓' : 'customer pending'} · ${p.artwork_qa_ok ? 'QA ✓' : 'QA pending'}`}`).join(' · '),
+        at: locked.length === parts.length ? latest(parts.map(p => p.artwork_at)) : null,
+        state: stepOf(locked.length, parts.length),
+      });
+    } else {
+      // A carton made in parts locks its own artwork with its pasting card, under
+      // its own action (carton-parts-db.js) — the time the step shows is that one.
+      const artAudit = trail.filter(t => t.action === 'artwork_locked' || t.action === 'artwork_locked_with_parts').pop();
+      events.push({
+        key: 'artwork', title: 'Artwork approved & locked',
+        detail: line.artwork_locked ? 'Customer ✓ and QA ✓ — locked for print'
+          : `${line.artwork_customer_ok ? 'Customer ✓' : 'Customer pending'} · ${line.artwork_qa_ok ? 'QA ✓' : 'QA pending'}`,
+        at: artAudit?.created_at ?? null, by: artAudit?.user_name,
+        state: line.artwork_locked ? 'done' : 'todo',
+      });
+    }
 
     // Tooling — Artwork's sibling gate: physical tools from maker to rack.
-    const lineTools = await q(
-      'SELECT * FROM tools WHERE product_id=$1 OR id=$2',
-      [line.product_id, line.tool_id ?? -1]);
-    const tDetail = toolingDetail({ id: line.product_id, special: line.special, tool_id: line.tool_id }, lineTools);
-    const tReady = toolingGateOk(tDetail, line.tooling_ok);
-    const toolMove = await one(`
-      SELECT te.at, te.user_name FROM tool_events te JOIN tools t ON t.id = te.tool_id
-      WHERE (t.product_id=$1 OR t.id=$2) AND te.action='moved' AND te.to_zone='in_rack'
-      ORDER BY te.id DESC LIMIT 1`, [line.product_id, line.tool_id ?? -1]);
-    events.push({
-      key: 'tooling', title: 'Tooling ready',
-      detail: tReady
-        ? (tDetail.filter(d => d.status === 'ready').map(d => `${d.label} ✓`).join(' · ') || 'Manual override ✓')
-        : tDetail.filter(d => d.status !== 'ready')
-            .map(d => `${d.label} ${d.status === 'missing' ? 'missing' : 'not ready'}`).join(' · '),
-      at: tReady ? toolMove?.at ?? null : null, by: toolMove?.user_name,
-      state: tReady ? 'done' : 'todo',
-    });
+    // A carton made in parts is die-cut on its PARTS' dies — each part on its
+    // own — and its pasting card needs no die of its own, so every part's gate
+    // must be ok, before and after the pasting card alike.
+    if (parts.length) {
+      const partTools = await q('SELECT * FROM tools WHERE product_id = ANY($1::int[]) OR id = ANY($2::int[])',
+        [parts.map(p => p.product_id), parts.map(p => p.tool_id ?? -1)]);
+      const gates = parts.map(p => {
+        const d = toolingDetail({ id: p.product_id, special: p.special, tool_id: p.tool_id },
+          partTools.filter(t => t.product_id === p.product_id || t.id === p.tool_id));
+        return { p, d, ok: toolingGateOk(d, p.tooling_ok) };
+      });
+      const ok = gates.filter(g => g.ok).length;
+      events.push({
+        key: 'tooling', title: 'Tooling ready',
+        detail: gates.map(g => `${g.p.label} ${g.ok ? '✓' : g.d.filter(x => x.status !== 'ready')
+          .map(x => `${x.label} ${x.status === 'missing' ? 'missing' : 'not ready'}`).join(', ')}`).join(' · '),
+        at: null, state: stepOf(ok, parts.length),
+      });
+    } else {
+      const lineTools = await q(
+        'SELECT * FROM tools WHERE product_id=$1 OR id=$2',
+        [line.product_id, line.tool_id ?? -1]);
+      const tDetail = toolingDetail({ id: line.product_id, special: line.special, tool_id: line.tool_id }, lineTools);
+      const tReady = toolingGateOk(tDetail, line.tooling_ok);
+      const toolMove = await one(`
+        SELECT te.at, te.user_name FROM tool_events te JOIN tools t ON t.id = te.tool_id
+        WHERE (t.product_id=$1 OR t.id=$2) AND te.action='moved' AND te.to_zone='in_rack'
+        ORDER BY te.id DESC LIMIT 1`, [line.product_id, line.tool_id ?? -1]);
+      events.push({
+        key: 'tooling', title: 'Tooling ready',
+        detail: tReady
+          ? (tDetail.filter(d => d.status === 'ready').map(d => `${d.label} ✓`).join(' · ') || 'Manual override ✓')
+          : tDetail.filter(d => d.status !== 'ready')
+              .map(d => `${d.label} ${d.status === 'missing' ? 'missing' : 'not ready'}`).join(' · '),
+        at: tReady ? toolMove?.at ?? null : null, by: toolMove?.user_name,
+        state: tReady ? 'done' : 'todo',
+      });
+    }
 
     if (jc) {
       const releaseJc = gangJc || jc;
@@ -1548,8 +1653,12 @@ r.get('/track/:id', async (req, res, next) => {
         title: gangJc
           ? `Gang job card ${releaseJc.jc_number} released`
           : `Job card ${releaseJc.jc_number} released`,
-        detail: `${releaseJc.sheets_issued.toLocaleString('en-IN')} sheets issued${issues.length ? ` — batch ${issues.map(i => i.batch_no).filter(Boolean).join(', ')}` : ''}`
-          + (gangJc ? ` · ${line.gang_number} — one shared run with ${gangMates.map(m => m.product_name).join(' + ') || 'the gang'} until die cutting` : ''),
+        // A carton's pasting card issues no sheets: it pastes the pieces its
+        // parts' cards die-cut (carton-parts.js), so it reads as cartons.
+        detail: releaseJc.is_assembly
+          ? `${(+releaseJc.qty_planned || 0).toLocaleString('en-IN')} cartons to paste · joins ${parts.map(p => `${p.label} ${p.jc_number}`).join(' + ')}`
+          : `${releaseJc.sheets_issued.toLocaleString('en-IN')} sheets issued${issues.length ? ` — batch ${issues.map(i => i.batch_no).filter(Boolean).join(', ')}` : ''}`
+            + (gangJc ? ` · ${line.gang_number} — one shared run with ${gangMates.map(m => m.product_name).join(' + ') || 'the gang'} until die cutting` : ''),
         at: releaseJc.created_at, state: 'done',
       });
       for (const st of stages) {
@@ -1590,6 +1699,16 @@ r.get('/track/:id', async (req, res, next) => {
         detail: fgJc.status === 'closed' ? `${fgJc.qty_produced.toLocaleString('en-IN')} cartons in · ${fgJc.qty_scrap.toLocaleString('en-IN')} total scrap` : 'After final QC',
         at: fgJc.closed_at, state: fgJc.status === 'closed' ? 'done' : 'todo',
       });
+    } else if (partsGate) {
+      const carded = parts.filter(p => p.jc_number);
+      events.push({
+        key: 'jobcard', title: 'Job cards released — one per part',
+        detail: parts.map(p => `${p.label} ${p.jc_number || 'no card yet'}`).join(' · ')
+          + ' — the pasting card follows once every part is die-cut',
+        at: carded.length === parts.length ? latest(parts.map(p => p.jc_created_at)) : null,
+        state: stepOf(carded.length, parts.length),
+      });
+      events.push({ key: 'fg', title: 'Finished goods to warehouse', detail: 'After production', at: null, state: 'todo' });
     } else {
       events.push({ key: 'jobcard', title: 'Job card', detail: 'Released once all three gates are green', at: null, state: 'todo' });
       events.push({ key: 'fg', title: 'Finished goods to warehouse', detail: 'After production', at: null, state: 'todo' });
@@ -1610,7 +1729,8 @@ r.get('/track/:id', async (req, res, next) => {
       });
     }
 
-    res.json({ line, job_card: jc, events });
+    // The header badge reads the same status as the list's pill (CARTON_STATUS_SQL).
+    res.json({ line: { ...line, status: line.track_status }, job_card: jc, events });
   } catch (e) { next(e); }
 });
 

@@ -26,6 +26,7 @@ import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-l
 import { syncPrAllocation } from './procurement.js';
 import { commitBoardForLine, commitInputs } from './board.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
+import { partLineGangBlock } from '../carton-parts.js';
 
 const r = Router();
 const canPlan = requireRole(...PLANNING_ROLES);
@@ -33,7 +34,10 @@ const canPlan = requireRole(...PLANNING_ROLES);
 // Effective spec — job-only overrides win over the product master (same
 // expression the planning views use).
 const MEMBER_VIEW = `
-  SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id,
+  SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id, ol.part_of_line_id,
+         -- A carton made in parts (it has part lines) — partLineGangBlock
+         -- refuses it and its parts alike (carton-parts.js).
+         EXISTS (SELECT 1 FROM order_lines xl WHERE xl.part_of_line_id = ol.id) AS has_parts,
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
          ol.dispatched_qty,
          ol.wastage_sheets, ol.spec_override, ol.stock_booking, ol.avs_mandatory,
@@ -84,6 +88,26 @@ const MEMBER_VIEW = `
   LEFT JOIN materials mbm ON mbm.id = p.board_material_id
   LEFT JOIN tools dtool ON dtool.id = p.tool_id
   LEFT JOIN job_cards jc ON jc.order_line_id = ol.id`;
+
+// A part of a carton made in parts, or the carton itself, never runs in a gang
+// or a combined run (carton-parts.js partLineGangBlock refuses both) — so no
+// list that OFFERS jobs for one shows them either: the suggestions, a run's
+// "add jobs" picker and a template's candidates. Refusing a pick the screen
+// itself proposed is the dead end this closes.
+const NOT_IN_PARTS = `ol.part_of_line_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM order_lines xp WHERE xp.part_of_line_id = ol.id)`;
+
+// The member query's has_parts is read in THAT statement's snapshot, taken
+// before it waited on the members' row locks — so a line an order edit or a
+// parts save turned into a carton while this door waited still reads false
+// there. Now the members are held (nothing can add parts to a line held FOR
+// UPDATE), a fresh statement sees the committed truth (carton-parts.js C7).
+async function markCartonsNow(members, qc) {
+  const cartons = new Set((await qc(
+    'SELECT DISTINCT part_of_line_id AS id FROM order_lines WHERE part_of_line_id = ANY($1)',
+    [members.map(m => m.id)])).map(r => r.id));
+  for (const m of members) if (cartons.has(m.id)) m.has_parts = true;
+}
 
 // Parent sheets a member still needs — helpers.js owns the rule, because the
 // unlocked-plan fallbacks have to convert child sheets to parent ones and
@@ -966,6 +990,7 @@ r.get('/gang-suggestions', async (_req, res, next) => {
   try {
     const lines = await q(`${MEMBER_VIEW}
       WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
+        AND ${NOT_IN_PARTS}
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
     res.json(gangSuggestions(lines, { parentSheets: memberParentSheets }));
   } catch (e) { next(e); }
@@ -981,6 +1006,11 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
       const members = await qc(
         `${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
       if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+      // A part runs on its own card to die cutting, and a carton made in parts
+      // has no sheet of its own — neither can share a run (carton-parts.js C7).
+      await markCartonsNow(members, qc);
+      const partBlock = partLineGangBlock(members);
+      if (partBlock) throw Object.assign(new Error(partBlock), { status: 409 });
 
       const bad = members.find(m => !['pending', 'planned'].includes(m.status));
       if (bad) throw Object.assign(new Error(`${bad.product_name} is already ${bad.status.replace('_', ' ')} — only lines still in planning can be ganged`), { status: 409 });
@@ -1091,6 +1121,10 @@ r.post('/merge-runs', canPlan, async (req, res, next) => {
     const runId = await tx(async (qc, oc) => {
       const members = await qc(`${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
       if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+      // Never a part, never a carton made in parts (carton-parts.js C7).
+      await markCartonsNow(members, qc);
+      const partBlock = partLineGangBlock(members);
+      if (partBlock) throw Object.assign(new Error(partBlock), { status: 409 });
 
       const verdict = mergeCompat(members);
       if (!verdict.ok) throw Object.assign(
@@ -2552,6 +2586,7 @@ r.get('/gang-runs/:id/addable', async (req, res, next) => {
     const coating = members[0]?.coating ?? null;
     const rows = await q(`${MEMBER_VIEW}
       WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
+        AND ${NOT_IN_PARTS}
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
     res.json(rows
       // A combined run admits ONLY its own product — the whole premise is one
@@ -2583,6 +2618,10 @@ r.post('/gang-runs/:id/add-lines', canPlan, async (req, res, next) => {
       await assertPlanningOnlyGangEdit(gang.id, oc);
       const members = await qc(`${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
       if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+      // Never a part, never a carton made in parts (carton-parts.js C7).
+      await markCartonsNow(members, qc);
+      const partBlock = partLineGangBlock(members);
+      if (partBlock) throw Object.assign(new Error(partBlock), { status: 409 });
       for (const m of members) {
         if (!['pending', 'planned'].includes(m.status))
           throw Object.assign(new Error(`${m.product_name} is already ${m.status.replace('_', ' ')} — only lines still in planning can be ganged`), { status: 409 });
@@ -3384,6 +3423,7 @@ r.get('/gang-templates/:id/candidates', async (req, res, next) => {
     for (const sl of slots) {
       const lines = await q(`${MEMBER_VIEW}
         WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
+          AND ${NOT_IN_PARTS}
           AND p.id = $1
         ORDER BY o.delivery_date NULLS LAST, ol.id`, [sl.product_id]);
       out.push({
@@ -3422,6 +3462,12 @@ r.post('/gang-templates/:id/create-run', canPlan, async (req, res, next) => {
       const lineIds = slots.map(sl => byProduct[sl.product_id]);
       const members = await qc(`${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
       if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+      // Never a part, never a carton made in parts (carton-parts.js C7) — the
+      // candidates list no longer offers them, but a stale screen or a direct
+      // call still can.
+      await markCartonsNow(members, qc);
+      const partBlock = partLineGangBlock(members);
+      if (partBlock) throw Object.assign(new Error(partBlock), { status: 409 });
       for (const m of members) {
         const slot = slots.find(sl => sl.product_id === m.product_id);
         if (!slot) throw Object.assign(new Error(`${m.product_name} is not on this template`), { status: 409 });

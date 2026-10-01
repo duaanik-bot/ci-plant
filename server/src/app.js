@@ -35,6 +35,7 @@ import chat from './routes/chat.js';
 import writeons from './routes/writeons.js';
 import verification from './routes/verification.js';
 import fluence from './routes/fluence.js';
+import productParts from './routes/product-parts.js';
 import avs from './routes/avs.js';
 import avsSwitch from './routes/avs-switch.js';
 import avsIntake from './routes/avs-intake.js';
@@ -103,6 +104,9 @@ app.use('/api', writeons);
 app.use('/api', verification);
 // Fluence-only: prescription & kit master. Reads and writes fluence_* tables only.
 app.use('/api', fluence);
+// "Made in parts": an outer carton's parts on the Product Master (product_parts).
+// Saving the list re-syncs the carton's open order lines (carton-parts-db.js).
+app.use('/api', productParts);
 // AVS — carton checks run in Claude; reports live in the Supabase schema avs.
 // Reads those reports and records QA's final decision in avs.decisions only.
 app.use('/api', avs);

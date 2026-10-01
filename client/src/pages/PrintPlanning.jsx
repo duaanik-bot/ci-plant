@@ -53,6 +53,14 @@ const TRIAGE = 'triage';
 // board while the planning queue was being taught to call it a Single.
 const canPlan = () => ['admin', 'planner'].includes(auth.user?.role);
 
+// A PART of a carton made in parts rolls back its whole carton and has no Delete
+// of its own (WorkflowControls). The board's card carries the carton's code flat
+// (outer_code); the menu reads it where a job-card payload carries it, so the
+// card is handed over in that shape.
+const dangerCardOf = card => (card.part_of_line_id
+  ? { ...card, carton_parts: { role: 'part', outer_code: card.outer_code } }
+  : card);
+
 // Per-machine colour identity. Each press lane gets its own hue so the board
 // reads at a glance on the floor — matching the coloured top-rail, header icon,
 // count badge and the left edge of every card queued on that press. Hues are
@@ -294,7 +302,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
               28px menu button would otherwise set the row height while invisible. */}
           <span className="-my-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100"
             onClick={e => e.stopPropagation()}>
-            <DangerZone jobCard={card} onDone={onDone} asMenu />
+            <DangerZone jobCard={dangerCardOf(card)} onDone={onDone} asMenu />
           </span>
           <ChevronRight size={13} className="shrink-0 text-slate-300 transition-colors group-hover:text-blue-400" />
         </div>
@@ -2048,13 +2056,13 @@ export default function PrintPlanning() {
                         <CornerUpLeft size={10} /> Triage
                       </PressButton>
                     )}
-                    <DangerZone jobCard={card} onDone={load} asMenu />
+                    <DangerZone jobCard={dangerCardOf(card)} onDone={load} asMenu />
                     <ChevronRight size={13} className="text-slate-300 group-hover:text-blue-400" />
                   </span>
                 )}
                 {!isLead && (
                   <span className="flex items-center justify-end gap-1.5">
-                    <DangerZone jobCard={card} onDone={load} asMenu />
+                    <DangerZone jobCard={dangerCardOf(card)} onDone={load} asMenu />
                     <ChevronRight size={13} className="text-slate-300 group-hover:text-blue-400" />
                   </span>
                 )}

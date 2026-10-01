@@ -223,6 +223,10 @@ const NOT_A_STATION_ROW = {
   'components/Timeline.jsx': ['seq'],
   // OD columns for tables that declare a po_date column; Section declares none
   'lib/odDays.js': ['po_date'],
+  // closeAtZeroCalls orders a job card's OWN stages (GET /job-cards/:id, read by
+  // Sort & Paste), never a station row. The traveler pulls this lib in only for
+  // a pasting card's "No board" sentence and the groups it prints.
+  'lib/cartonParts.js': ['seq'],
   // the lists themselves
   'lib/sectionLean.js': [...QUEUE_LEAN_DROPS, ...COMPLETED_LEAN_DROPS],
 };

@@ -487,7 +487,8 @@ export default function StatusSheet() {
   // the sheet lying to the customer. Richer than the old boolean, too — refresh
   // keeps it current without anyone touching it.
   const printState = m => {
-    const ps = (m.stages || []).find(s => s.stage === 'printing');
+    // A carton made in parts has no printing stage of its own: the server reads its parts' (print_state).
+    const ps = 'print_state' in m ? (m.print_state && { status: m.print_state }) : (m.stages || []).find(s => s.stage === 'printing');
     if (!ps) return ['Not started', 'bg-slate-100 text-slate-500', false];
     switch (ps.status) {
       case 'completed': return ['Done', 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', false];

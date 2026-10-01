@@ -38,8 +38,10 @@ test('the artwork queue admits a job whose plan is SAVED but not locked', () => 
   assert.match(artworkRoute,
     /ol\.status = 'pending'\s*\n\s*AND \(ol\.parent_sheets_required IS NOT NULL/,
     'a pending line carrying a written parent requirement must reach the artwork queue');
+  // The pair, plus (carton made in parts) "not a carton": a carton's 0/0/0
+  // figures are not a saved plan, and the artwork gate excludes it too.
   assert.match(orders,
-    /\(ol\.status = 'pending' AND ol\.parent_sheets_required IS NOT NULL\) AS plan_draft/,
+    /\(ol\.status = 'pending' AND ol\.parent_sheets_required IS NOT NULL\s*\n\s*AND NOT EXISTS \(SELECT 1 FROM order_lines xd WHERE xd\.part_of_line_id = ol\.id\)\) AS plan_draft/,
     'LINE_VIEW.plan_draft is the rule the gate is written against');
   // The original three statuses stay — this widened the door, it did not move it.
   assert.match(artworkRoute, /ol\.status IN \('planned','ready','in_production'\)/);

@@ -52,6 +52,7 @@ import { jobCardProductIds } from '../components/fluence/JobCardFluenceRx.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
+import { closedNothingMadeText, PASTING_NO_BOARD_TEXT, PASTING_ORDER_QTY_TEXT, pastingQtyCorrectionText, sheetsIssuedTotal } from '../lib/cartonParts.js';
 import { canPlan } from '../modules.js';
 
 // Read-only inherited spec cell — label over value, used across the three
@@ -563,7 +564,12 @@ export default function Production() {
       throw e;
     }
     const isLast = st.seq === Math.max(...jc.stages.map(s => s.seq));
-    toast.success(isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.stage(st.stage)} completed`);
+    // A PART of a carton made in parts ends at die cutting: its pieces go to the
+    // carton's pasting card, never to FG (server carton-parts.js). A carton's
+    // PASTING card closed at 0 made nothing: its carton goes to the Shortage tab.
+    toast.success(isLast && jc.part_of_line_id ? "Part die-cut — pieces handed to the carton's pasting card"
+      : isLast && jc.is_assembly && +form.qty_out === 0 ? closedNothingMadeText(jc.jc_number, jc.product_code)
+      : isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.stage(st.stage)} completed`);
     setCompleting(null); load();
   };
 
@@ -715,7 +721,10 @@ export default function Production() {
           summary: [
             { label: 'Job cards', value: shown.length },
             { label: 'Ordered', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_planned || 0), 0)) },
-            { label: 'Sheets issued', value: fmt.num(shown.reduce((s, j) => s + (+j.sheets_issued || 0), 0)) },
+            // A carton's PASTING CARD counts cartons in sheets_issued, never sheets
+            // (carton-parts.js): it stays out of this total, and its own row
+            // below reads a dash.
+            { label: 'Sheets issued', value: fmt.num(sheetsIssuedTotal(shown)) },
             ...(showOutput ? [
               { label: 'Produced', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_produced || 0), 0)) },
               { label: 'Scrap', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_scrap || 0), 0)) },
@@ -737,7 +746,7 @@ export default function Production() {
               export: j => { return odExport(poAgeOf(j).days); } },
             { key: 'delivery_date', label: 'Delivery', export: j => fmt.date(j.delivery_date) },
             { key: 'qty_planned', label: 'Ordered', align: 'right', export: j => fmt.num(j.qty_planned) },
-            { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => fmt.num(j.sheets_issued) },
+            { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => (j.is_assembly ? '—' : fmt.num(j.sheets_issued)) },
             { key: 'stage', label: 'Stage Position', export: j => {
               const running = j.stages.find(s => ['in_progress', 'partially_completed'].includes(s.status));
               const done = j.stages.filter(s => s.status === 'completed').length;
@@ -968,8 +977,19 @@ export default function Production() {
                 <PoAgeLine jc={jc} />
               </div>
               <div className="flex gap-5 text-right text-xs text-gray-500">
-                <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>{jc.gang_parent ? 'print sheets' : 'ordered'}</div>
-                <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.sheets_issued)}</div>sheets issued</div>
+                {/* A carton's pasting card issues no sheets — its pieces were cut
+                    on the part cards — and its qty_planned is not what was
+                    ordered: it is the cartons its parts' pieces join, the figure
+                    its printed card calls "Cartons to Paste". So it reads what
+                    the carton's own line ordered (when the row carries it), then
+                    the cartons to paste. Every other card reads as it did. */}
+                {jc.is_assembly ? (<>
+                  {jc.line_qty != null && <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.line_qty)}</div>ordered</div>}
+                  <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>cartons to paste</div>
+                </>) : (<>
+                  <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>{jc.gang_parent ? 'print sheets' : 'ordered'}</div>
+                  <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.sheets_issued)}</div>sheets issued</div>
+                </>)}
                 {jc.status === 'closed' && <>
                   <div><div className="font-bold text-emerald-600 tabular-nums">{fmt.num(jc.qty_produced)}</div>produced</div>
                   <div><div className="font-bold text-red-500 tabular-nums">{fmt.num(jc.qty_scrap)}</div>scrap</div>
@@ -1052,7 +1072,9 @@ export default function Production() {
             <div className="ci-summary-panel text-xs">
               Input: <b>{fmt.num(receivedQty(completing.st))} {completing.st.unit}</b>
               {completing.st.seq === Math.max(...completing.jc.stages.map(s => s.seq)) &&
-                <span className="ml-2 font-semibold text-emerald-600">Final stage — closing this completes the job and adds finished goods.</span>}
+                <span className="ml-2 font-semibold text-emerald-600">{completing.jc.part_of_line_id
+                  ? "Final stage for this part — its pieces go to the carton's pasting card."
+                  : 'Final stage — closing this completes the job and adds finished goods.'}</span>}
             </div>
             {completing.st.stage === 'cutting' && (
               <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase}
@@ -1102,10 +1124,13 @@ export default function Production() {
       <Modal open={!!editing} onClose={() => { if (overIssue.dialog) return; setEditing(null); }} title={editing ? `Job Card Form — ${editing.jc_number}` : ''} wide
         footer={<>
           <Button variant="secondary" onClick={() => setEditing(null)}>Close</Button>
-          {editing && !editing.finalised_at && canEditJobCard &&
+          {/* A pasting card's form has nothing to save: its board note and its
+              cartons are shown, never typed. Its quantity is corrected through
+              Amend below — offered, as for every card, once it is finalised. */}
+          {editing && !editing.finalised_at && canEditJobCard && !editing.is_assembly &&
             <Button variant="secondary" onClick={saveJobForm} disabled={!canSaveEditing}>Save Changes</Button>}
           {editing && canEditJobCard && editing.finalised_at && editing.status !== 'closed' && editing.status !== 'split' &&
-            <Button variant="secondary" onClick={() => openAmend(editing)}>Amend Qty / Sheets</Button>}
+            <Button variant="secondary" onClick={() => openAmend(editing)}>{editing.is_assembly ? 'Amend Cartons to Paste' : 'Amend Qty / Sheets'}</Button>}
           {canReopen && <Button variant="secondary" onClick={reopen}>Reopen</Button>}
           {!editing?.finalised_at
             ? <Button onClick={finalise} disabled={!canFinalise}>Finalise Job Card</Button>
@@ -1151,26 +1176,54 @@ export default function Production() {
                   </div>
                 : null}
 
-            {/* Editable fields */}
+            {/* Editable fields. A carton's PASTING CARD (is_assembly) only sorts
+                and pastes — its pieces were cut, printed and die-cut on its
+                parts' cards — so it names no board, issues no sheets and takes
+                no press: the band says so in the printed card's own sentence,
+                the two inputs are not drawn, and its quantity is the cartons
+                its parts' die-cut pieces join, shown and never typed. Nothing
+                on its panel is editable, so the title does not say so and the
+                footer draws no Save; under the cartons it says how they ARE
+                corrected — Amend, once finalised. Every other card is as it was. */}
             <section className="ci-form-panel">
-              <div className="ci-form-panel-title"><span>Editable job fields</span><span>{fmt.title(editing.status)}</span></div>
-              <BoardBand board={boardUsed(editing)} />
+              <div className="ci-form-panel-title"><span>{editing.is_assembly ? 'Job fields' : 'Editable job fields'}</span><span>{fmt.title(editing.status)}</span></div>
+              {editing.is_assembly ? (
+                <div data-no-board="assembly" className="mb-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Board in use</div>
+                  <div className="mt-1 text-sm font-bold text-gray-900">{PASTING_NO_BOARD_TEXT}</div>
+                </div>
+              ) : (
+                <BoardBand board={boardUsed(editing)} />
+              )}
               <div className="ci-form-grid">
-                <Field label="Planned Quantity">
-                  <Input type="number" min="1" value={jobForm.qty_planned} disabled={!canSaveEditing}
-                    onChange={e => setJobForm({ ...jobForm, qty_planned: e.target.value })} />
-                </Field>
-                <Field label="Sheets Issued">
-                  <Input type="number" min="0" value={jobForm.sheets_issued} disabled={!canSaveEditing}
-                    onChange={e => setJobForm({ ...jobForm, sheets_issued: e.target.value })} />
-                </Field>
-                <Field label="Press / Machine">
-                  <Select value={jobForm.machine_id} disabled={!canSaveEditing}
-                    onChange={e => setJobForm({ ...jobForm, machine_id: e.target.value })}>
-                    <option value="">No press assigned</option>
-                    {machines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
-                  </Select>
-                </Field>
+                {editing.is_assembly ? (
+                  <Field label="Cartons to Paste" hint={<>
+                    {"from its parts' die-cut pieces — not typed here"}
+                    <span className="mt-0.5 block">{pastingQtyCorrectionText(!!editing.finalised_at)}</span>
+                  </>}>
+                    <Input value={fmt.num(jobForm.qty_planned)} disabled readOnly />
+                  </Field>
+                ) : (
+                  <Field label="Planned Quantity">
+                    <Input type="number" min="1" value={jobForm.qty_planned} disabled={!canSaveEditing}
+                      onChange={e => setJobForm({ ...jobForm, qty_planned: e.target.value })} />
+                  </Field>
+                )}
+                {!editing.is_assembly && (
+                  <Field label="Sheets Issued">
+                    <Input type="number" min="0" value={jobForm.sheets_issued} disabled={!canSaveEditing}
+                      onChange={e => setJobForm({ ...jobForm, sheets_issued: e.target.value })} />
+                  </Field>
+                )}
+                {!editing.is_assembly && (
+                  <Field label="Press / Machine">
+                    <Select value={jobForm.machine_id} disabled={!canSaveEditing}
+                      onChange={e => setJobForm({ ...jobForm, machine_id: e.target.value })}>
+                      <option value="">No press assigned</option>
+                      {machines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
+                    </Select>
+                  </Field>
+                )}
                 <Field label="Job Status">
                   <Input value={fmt.title(editing.status)} disabled readOnly />
                 </Field>
@@ -1180,8 +1233,10 @@ export default function Production() {
             {/* AVS — Planning's switch: printing is completed only after QA
                 releases the job in Artwork Verification. Planning (planner,
                 admin) switches it; everyone else sees it read-only. A card split
-                off a gang after printing has nothing left to lock. */}
-            {!editing.parent_job_card_id && (
+                off a gang after printing has nothing left to lock, and a carton's
+                pasting card has no printing stage at all — its parts were printed
+                on their own cards, each with its own switch. */}
+            {!editing.parent_job_card_id && !editing.is_assembly && (
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>AVS check before printing is completed</span><AvsChip on={editing.avs_mandatory} /></div>
                 <AvsSwitch value={editing.avs_mandatory} jobCardId={editing.id}
@@ -1189,25 +1244,33 @@ export default function Production() {
               </section>
             )}
 
-            {/* Inherited — Planning */}
+            {/* Inherited — Planning. A pasting card was planned on no sheet and
+                no press: between what was ordered and when it is due it reads
+                the cartons it will paste, as its printed card does. */}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Planning Engine</span><span className="text-gray-400">Plan {fmt.date(editing.planned_date) || '—'}</span></div>
               <div className="ci-form-grid">
                 <Spec label="Ordered Qty">{editing.gang_parent && editing.gang_members?.length
                   ? `${fmt.num(editing.gang_members.reduce((s, m) => s + (+m.qty || 0), 0))} cartons · ${editing.gang_members.length} products`
                   : `${fmt.num(editing.line_qty)} cartons`}</Spec>
-                <Spec label="Sheets Required">{editing.sheets_required != null ? fmt.num(editing.sheets_required) : '—'}</Spec>
-                <Spec label="Parent Sheets Issued">{fmt.num(editing.sheets_issued)}</Spec>
-                <Spec label="Print Sheets / Parent">{yieldTxt}</Spec>
-                <Spec label="Press">{editing.machine_name || '—'}</Spec>
+                {editing.is_assembly ? (
+                  <Spec label="Cartons to Paste">{fmt.num(editing.qty_planned)}</Spec>
+                ) : (<>
+                  <Spec label="Sheets Required">{editing.sheets_required != null ? fmt.num(editing.sheets_required) : '—'}</Spec>
+                  <Spec label="Parent Sheets Issued">{fmt.num(editing.sheets_issued)}</Spec>
+                  <Spec label="Print Sheets / Parent">{yieldTxt}</Spec>
+                  <Spec label="Press">{editing.machine_name || '—'}</Spec>
+                </>)}
                 <Spec label="Delivery">{fmt.date(editing.delivery_date)}</Spec>
               </div>
             </section>
 
             {/* Printing Specifications — what the press has to hang on the units.
                 A gang parent takes its ink from the run's anchor line; each
-                carton's own build is listed in the per-carton panel below. */}
-            {!editing.gang_parent && (
+                carton's own build is listed in the per-carton panel below. A
+                carton's pasting card prints nothing: each part's own card
+                carries its build. */}
+            {!editing.gang_parent && !editing.is_assembly && (
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title">
                   <span>Printing Specifications</span>
@@ -1396,15 +1459,20 @@ export default function Production() {
               <div className="ci-form-grid">
                 {/* The MASTER's board — the board in use is in the band at the
                     head of the card, and the two can differ. This panel states
-                    what the carton is specced on, which is its whole job. */}
-                <Spec label="Board (master)">{editing.master_board_name || editing.board_name || '—'}</Spec>
-                <Spec label="Parent Sheet">{editing.sheet_l ? `${editing.sheet_l}×${editing.sheet_w}"` : '—'}</Spec>
-                <Spec label="Coating / Lam">{editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : 'None'}</Spec>
-                {!editing.gang_parent && <Spec label="Print Sheet">{editing.child_l ? `${editing.child_l}×${editing.child_w}"` : '—'}</Spec>}
+                    what the carton is specced on, which is its whole job.
+                    A carton's pasting card runs on none of it: the master's
+                    board, parent sheet, coating, print sheet and ups belong to
+                    its parts' cards. Its panel keeps what the pasting bench
+                    reads — the carton's size, its pasting and its die — as its
+                    printed card's Product group does. */}
+                {!editing.is_assembly && <Spec label="Board (master)">{editing.master_board_name || editing.board_name || '—'}</Spec>}
+                {!editing.is_assembly && <Spec label="Parent Sheet">{editing.sheet_l ? `${editing.sheet_l}×${editing.sheet_w}"` : '—'}</Spec>}
+                {!editing.is_assembly && <Spec label="Coating / Lam">{editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : 'None'}</Spec>}
+                {!editing.gang_parent && !editing.is_assembly && <Spec label="Print Sheet">{editing.child_l ? `${editing.child_l}×${editing.child_w}"` : '—'}</Spec>}
                 {!editing.gang_parent && <Spec label="Carton Size">{editing.size || '—'}</Spec>}
                 {!editing.gang_parent && <Spec label="Pasting">{editing.pasting_type ? fmt.title(editing.pasting_type) : '—'}</Spec>}
                 {!editing.gang_parent && <Spec label="Die">{editing.die_number ? `#${editing.die_number}${editing.die_location ? ` · ${editing.die_location}` : ''}` : '—'}</Spec>}
-                {!editing.gang_parent && <Spec label="UPS">{editing.ups}</Spec>}
+                {!editing.gang_parent && !editing.is_assembly && <Spec label="UPS">{editing.ups}</Spec>}
               </div>
             </section>
 
@@ -1447,7 +1515,13 @@ export default function Production() {
 
       {/* Amend — qty/sheets change after finalise, reason mandatory. Order qty
           flows back to the sales line and re-derives the plan; the trail lands
-          in the universal timeline as order_line/qty_amended + job_card/amended. */}
+          in the universal timeline as order_line/qty_amended + job_card/amended.
+          A carton's PASTING CARD amends ONE figure, its cartons to paste: it
+          issues no sheets, and its order quantity is the carton's — the server
+          refuses one sent from here, in the words shown where that field would
+          be. The inputs it does not draw keep the values they opened with, so
+          submitAmend sends nothing for them: the request is the reason and the
+          quantity, exactly as before. */}
       <Modal open={!!amending} onClose={() => { if (overIssue.dialog) return; setAmending(null); }}
         title={amending ? `Amend — ${amending.jc_number}` : ''}
         footer={<>
@@ -1456,29 +1530,44 @@ export default function Production() {
         </>}>
         {amending && (
           <div className="space-y-3">
-            <p className="text-xs text-slate-500">
-              Changes flow everywhere live — the sales line, Planning, Pendency, board demand and the stations —
-              and every amendment is recorded with your name and reason in the history trail.
-            </p>
+            {amending.is_assembly ? (
+              <p className="text-xs text-slate-500">
+                This changes the cartons the card starts with at Sort &amp; Paste. Every amendment is
+                recorded with your name and reason in the history trail.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Changes flow everywhere live — the sales line, Planning, Pendency, board demand and the stations —
+                and every amendment is recorded with your name and reason in the history trail.
+              </p>
+            )}
             <div className="ci-form-grid">
-              {!amending.gang_parent && (
+              {amending.is_assembly ? (
+                <div data-order-qty="follows-carton">
+                  <span className="mb-1 block max-w-full break-words text-xs font-medium leading-snug text-slate-600">Order Qty (now {fmt.num(amending.line_qty)})</span>
+                  <span className="block text-xs text-gray-400">Not amended here — {PASTING_ORDER_QTY_TEXT}</span>
+                </div>
+              ) : !amending.gang_parent && (
                 <Field label={`Order Qty (now ${fmt.num(amending.line_qty)})`} hint="flows back to the sales order line — plan sheets re-derive automatically">
                   <Input type="number" min="1" value={amendForm.order_qty}
                     onChange={e => setAmendForm({ ...amendForm, order_qty: e.target.value })} />
                 </Field>
               )}
-              <Field label={`Planned Qty (now ${fmt.num(amending.qty_planned)})`}>
+              <Field label={`${amending.is_assembly ? 'Cartons to Paste' : 'Planned Qty'} (now ${fmt.num(amending.qty_planned)})`}>
                 <Input type="number" min="1" value={amendForm.qty_planned}
                   onChange={e => setAmendForm({ ...amendForm, qty_planned: e.target.value })} />
               </Field>
-              <Field label={`Sheets Issued (now ${fmt.num(amending.sheets_issued)})`}
-                hint={cuttingStarted(amending) ? 'cutting already ran — board is consumed; use Adjust on the cutting stage' : 'board to issue at cutting start'}>
-                <Input type="number" min="0" value={amendForm.sheets_issued} disabled={cuttingStarted(amending)}
-                  onChange={e => setAmendForm({ ...amendForm, sheets_issued: e.target.value })} />
-              </Field>
+              {!amending.is_assembly && (
+                <Field label={`Sheets Issued (now ${fmt.num(amending.sheets_issued)})`}
+                  hint={cuttingStarted(amending) ? 'cutting already ran — board is consumed; use Adjust on the cutting stage' : 'board to issue at cutting start'}>
+                  <Input type="number" min="0" value={amendForm.sheets_issued} disabled={cuttingStarted(amending)}
+                    onChange={e => setAmendForm({ ...amendForm, sheets_issued: e.target.value })} />
+                </Field>
+              )}
             </div>
             <Field label="Reason (required)">
-              <Input value={amendForm.reason} placeholder="e.g. customer revised PO 01732 from 5,000 to 8,000"
+              <Input value={amendForm.reason}
+                placeholder={amending.is_assembly ? 'e.g. 56 sets short — Part 2 pieces damaged before pasting' : 'e.g. customer revised PO 01732 from 5,000 to 8,000'}
                 onChange={e => setAmendForm({ ...amendForm, reason: e.target.value })} />
             </Field>
           </div>

@@ -22,9 +22,15 @@ const squash = s => s.replace(/\s+/g, ' ').trim();
 // FgStockPanel: p.id, name · code on the option, addProduct.code /
 // party_artwork_code / size, and productSearchText() on data-search, which
 // reads name, code, internal_carton_code, party_artwork_code, party_item_code,
-// output_number, size and customer_name.
+// output_number, size and customer_name. is_part: a carton's parts are never
+// ordered on their own, so the PO picker leaves them out (carton made in parts).
 const PICKER = ['id', 'name', 'code', 'customer_id', 'customer_name', 'active',
-  'internal_carton_code', 'party_item_code', 'party_artwork_code', 'output_number', 'size'];
+  'internal_carton_code', 'party_item_code', 'party_artwork_code', 'output_number', 'size', 'is_part'];
+// The one WHERE the picker may carry: is_part's own EXISTS, a flag in the
+// SELECT list, which can never add or drop a row.
+const IS_PART = 'EXISTS (SELECT 1 FROM product_parts pp WHERE pp.part_product_id = p.id) AS is_part';
+// GET /products also flags a carton made in parts, the same way.
+const HAS_PARTS = 'EXISTS (SELECT 1 FROM product_parts pp WHERE pp.outer_product_id = p.id) AS has_parts';
 
 test('the picker route exists and selects everything its pickers draw and search', () => {
   assert.ok(pickerSql.includes('FROM products p'), 'GET /products/picker must be registered');
@@ -52,8 +58,9 @@ test('the picker lists the same rows in the same order as GET /products', () => 
     assert.ok(squash(listSql).includes(join), `/products: ${join}`);
     assert.ok(squash(pickerSql).includes(join), `/products/picker: ${join}`);
   }
-  assert.equal(/\bWHERE\b/.test(listSql), false, '/products lists every product');
-  assert.equal(/\bWHERE\b/.test(pickerSql), false, 'so does the picker');
+  assert.equal(/\bWHERE\b/.test(squash(listSql).replace(IS_PART, '').replace(HAS_PARTS, '')), false, '/products lists every product');
+  assert.ok(squash(pickerSql).split(' FROM products p ')[0].includes(IS_PART), 'is_part is a flag in the SELECT list');
+  assert.equal(/\bWHERE\b/.test(squash(pickerSql).replace(IS_PART, '')), false, 'so does the picker');
   // Names repeat, so ORDER BY p.name alone is not a total order — two lists
   // built from it can disagree on which twin comes first.
   assert.match(listSql, /ORDER BY p\.name, p\.id`/);
@@ -61,8 +68,8 @@ test('the picker lists the same rows in the same order as GET /products', () => 
 });
 
 test('GET /products keeps its full row — old bundles read every column', () => {
-  assert.equal(squash(listSql.split('FROM')[0]),
-    "rows = await q(` SELECT p.*, c.name AS customer_name, m.name AS board_material_name, m.sheet_l, m.sheet_w, d.code AS linked_die_code, d.condition AS die_condition, COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst");
+  assert.equal(squash(listSql).split(' FROM products p ')[0],
+    "rows = await q(` SELECT p.*, c.name AS customer_name, m.name AS board_material_name, m.sheet_l, m.sheet_w, d.code AS linked_die_code, d.condition AS die_condition, COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst, " + IS_PART + ', ' + HAS_PARTS);
   assert.ok(squash(listSql).includes('LEFT JOIN tools d ON d.id=p.tool_id LEFT JOIN gst_rates gr ON gr.product_type = p.product_type'));
   assert.match(masters, /r\.get\(`\/\$\{table\}`, async \(_req, res, next\)/,
     'the list route reads no query parameter — its response cannot vary by one');

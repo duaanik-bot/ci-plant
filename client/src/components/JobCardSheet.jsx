@@ -27,6 +27,8 @@ import { colourDetailLines } from './PrintColour.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
 import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../lib/plateInks.js';
 import JobCardFluenceRx from './fluence/JobCardFluenceRx.jsx';
+import JobCardPartsBand from './JobCardPartsBand.jsx';
+import { PASTING_NO_BOARD_TEXT, printedSpecGroups } from '../lib/cartonParts.js';
 
 // One group inside the single spec block: a faint full-width caption, then its
 // fields on the shared 4-column grid. Captions keep the merged block scannable
@@ -67,6 +69,14 @@ export default function JobCardSheet({ jc }) {
   const scStatusText = shade ? scLabel(shade.status) : '—';
 
   const board = boardUsed(jc);
+  // A carton made in parts (the band under the number says which card this is).
+  // Its PASTING card uses no board: it pastes the pieces its parts' cards cut,
+  // printed and die-cut on their own boards, so it has no cutting plan and no
+  // parent sheets — its sheets_issued counts cartons (production.js JC_VIEW).
+  // A PART card counts pieces: its line's qty is the carton's qty × its pieces
+  // per carton. Every other card prints exactly as it did.
+  const pasting = !!jc.is_assembly;
+  const qtyUnit = jc.part_of_line_id ? 'pcs' : 'cartons';
 
   // The cut plan rows behind the Board & cutting plan block — every job with a
   // cutting stage gets them, single-board included, so the operator executes
@@ -165,12 +175,14 @@ export default function JobCardSheet({ jc }) {
     ['Print Sheets / Parent', yieldTxt],
   ];
   const planning = [
-    ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
+    ['Ordered Qty', `${fmt.num(jc.line_qty)} ${qtyUnit}`],
     ['Planned Qty', fmt.num(jc.qty_planned)],
     // What the plant actually made. Zero until the last stage closes, so it
     // reads as a dash on a card that has not run rather than a misleading 0.
-    ['Qty Produced', jc.qty_produced ? `${fmt.num(jc.qty_produced)} cartons` : '—'],
-    ['Parent Sheets Issued', fmt.num(jc.sheets_issued)],
+    ['Qty Produced', jc.qty_produced ? `${fmt.num(jc.qty_produced)} ${qtyUnit}` : '—'],
+    // A pasting card issues no parent sheets: what it starts with is the cartons
+    // its parts make together — its planned sets.
+    pasting ? ['Cartons to Paste', fmt.num(jc.qty_planned)] : ['Parent Sheets Issued', fmt.num(jc.sheets_issued)],
     ['Sheets Required', jc.sheets_required != null ? fmt.num(jc.sheets_required) : '—'],
     // The press AND who is on it. Print Planning assigns both together, so a
     // card naming the machine without the operator sends the floor asking.
@@ -212,6 +224,19 @@ export default function JobCardSheet({ jc }) {
   // colour_type, so Planning captured the spec and the traveler dropped it.
   const printing = colourDetailLines(jc);
 
+  // The groups this card prints, in the order they are read. A pasting card
+  // leaves out what belongs to its parts' cards — Sheet & Finish, Printing
+  // Specifications, and the Planned Qty / Sheets Required / Press rows of
+  // Planning (cartonParts.js printedSpecGroups holds that one rule). Every
+  // other card prints all of them, exactly as before.
+  const specGroups = printedSpecGroups(jc, [
+    { title: 'Sheet & Finish', rows: sheet },
+    { title: 'Product', rows: product },
+    ...(printing.length > 0 ? [{ title: 'Printing Specifications', rows: printing }] : []),
+    { title: 'Artwork', rows: artwork },
+    { title: 'Planning', rows: planning },
+  ]);
+
   return (
     // The jc-* classes are inert everywhere except a PHONE-width modal: they are
     // matched only under index.css's @container cimodal rules, and the print
@@ -237,6 +262,7 @@ export default function JobCardSheet({ jc }) {
               `font-semibold` is left in place deliberately: a group-hover rule
               elsewhere keys on it to tint the name. */}
           <h1 className="mt-1 text-xl font-normal tracking-tight text-ink-900">{jc.jc_number}</h1>
+          <JobCardPartsBand jc={jc} />
           <div className="mt-0.5 text-sm text-gray-600">
             {jc.gang_parent && jc.gang_members?.length
               ? jc.run_kind === 'merge'
@@ -250,7 +276,13 @@ export default function JobCardSheet({ jc }) {
               : <ProductIdentity row={jc} compact nameClassName="text-[20px] !font-bold leading-tight" codesClassName="max-w-[320px]" />}
           </div>
         </div>
-        <div className="jc-head-right text-right text-xs text-gray-600">
+        {/* A carton-in-parts card's band (JobCardPartsBand) is a long line. Beside
+            it this column is capped, and never narrower than its PO line, which
+            is kept whole: it gives way to the band down to that line, a long
+            customer name wraps inside it as on any card, and "Released <date>"
+            never drops to a line of its own. Every other card's header is
+            exactly as it was. */}
+        <div className={`jc-head-right ${jc.carton_parts ? 'min-w-min max-w-[15rem] ' : ''}text-right text-xs text-gray-600`}>
           <div className="text-sm font-extrabold text-ink-900">COLOUR IMPRESSIONS</div>
           {/* A run card serves SEVERAL sales orders — the anchor member's
               customer/PO presented as "the" value would lie to the floor.
@@ -263,7 +295,7 @@ export default function JobCardSheet({ jc }) {
           ) : (
             <>
               <div>Customer: <b>{jc.customer_name}</b></div>
-              <div>PO: <b>{jc.po_number}</b> · Released {fmt.date(jc.created_at)}</div>
+              <div className={jc.carton_parts ? 'whitespace-nowrap' : undefined}>PO: <b>{jc.po_number}</b> · Released {fmt.date(jc.created_at)}</div>
             </>
           )}
           <div className="mt-1 inline-flex gap-1.5">
@@ -288,7 +320,16 @@ export default function JobCardSheet({ jc }) {
             the identity at the top and the executable numbers at the bottom.
             Everything the guillotine needs is here: which boards, what size
             they are, what they cut to, how many cuts, and the three counts —
-            packets pulled, parents on the machine, children off it. */}
+            packets pulled, parents on the machine, children off it.
+            A pasting card has none of it: the box a storeman reads for his
+            packets says so, rather than printing the carton's master board and
+            a cut plan counted in cartons. The band above names the part cards. */}
+        {pasting ? (
+          <div data-no-board="assembly" className="mb-3 rounded border-2 border-ink-900 px-3 py-2">
+            <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board &amp; cutting plan</div>
+            <div className="mt-1 text-sm font-bold text-ink-900">{PASTING_NO_BOARD_TEXT}</div>
+          </div>
+        ) : (
         <div className="mb-3 rounded border-2 border-ink-900 px-3 py-2">
           <div className="jc-caphead flex items-baseline justify-between gap-3">
             <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board &amp; cutting plan</div>
@@ -389,13 +430,10 @@ export default function JobCardSheet({ jc }) {
             </div>
           ))}
         </div>
+        )}
 
         <div className="jc-spec grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
-          <Group title="Sheet & Finish" rows={sheet} />
-          <Group title="Product" rows={product} />
-          {printing.length > 0 && <Group title="Printing Specifications" rows={printing} />}
-          <Group title="Artwork" rows={artwork} />
-          <Group title="Planning" rows={planning} />
+          {specGroups.map(g => <Group key={g.title} title={g.title} rows={g.rows} />)}
         </div>
       </div>
 

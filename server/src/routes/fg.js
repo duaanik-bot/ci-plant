@@ -4,8 +4,9 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, lockDocNumbers, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption, consumeFgLot, forceLineStatus, unbankPlanningLeftover } from '../helpers.js';
+import { audit, nextNumber, lockDocNumbers, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan, boxLeftoverFromFg, adjustFgStock, scrapLeftoverBox, setLotRetired, releaseFgConsumption, consumeFgLot, forceLineStatus, unbankPlanningLeftover, hasPartLines } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { cartonLineBlock } from '../carton-parts.js';
 import { normalisePicks, fulfilBlock, completesOrder, undoBlock, STOCK_FULFIL_ACTION, STOCK_UNDO_ACTION } from '../stock-fulfil.js';
 
 const r = Router();
@@ -270,8 +271,18 @@ r.post('/order-lines/:id/consume-fg', canPlan, async (req, res, next) => {
     const { lot_id, qty, remarks } = req.body;
     if (!lot_id || !qty || +qty <= 0) return res.status(400).json({ error: 'Lot and a positive quantity are required' });
     await tx(async (qc, oc) => {
+      // A parts save in flight is waited for first, before the row lock below
+      // (the save holds its exclusive lock, then the rows — the other order
+      // deadlocks).
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
+      // Neither a carton made in parts nor one of its parts takes FG here: the
+      // carton is filled by its pasting card, a part's pieces come from its own
+      // card — FG booked against either would set a line produced behind the
+      // join's back, or leave the pasting card waiting forever (carton-parts.js).
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(line.id, oc), isPart: !!line.part_of_line_id });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
       if (!['pending', 'planned', 'ready'].includes(line.status))
         throw Object.assign(new Error('FG can only be consumed while the line is in planning (before production starts)'), { status: 409 });
       const jc = await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]);
@@ -300,7 +311,13 @@ r.post('/order-lines/:id/fulfil-from-stock', canPlan, async (req, res, next) => 
     const remarks = String(req.body.remarks || '').trim() || null;
     const user = req.user.name;
     const out = await tx(async (qc, oc) => {
+      // Waited for first, as consume-fg does (see there).
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
+      // A carton made in parts, or one of its parts, is never completed from FG
+      // stock: 'produced' here would go behind its parts' backs (carton-parts.js).
+      const cartonBlock = line && cartonLineBlock({ hasParts: await hasPartLines(line.id, oc), isPart: !!line.part_of_line_id });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
       const jc = line ? await oc('SELECT id FROM job_cards WHERE order_line_id=$1', [line.id]) : null;
       const balanceBefore = line ? netProduceQty(line) : 0;
       const block = fulfilBlock(line, { hasJobCard: !!jc, completing: completesOrder(balanceBefore, picks) });

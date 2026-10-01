@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, lineIdsClosedBy, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, lineIdsClosedBy, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState, splitGangReverseBlock, pastingCardPullBackRefusal } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { effectiveProduct } from '../helpers.js';
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
@@ -27,6 +27,10 @@ import { plateComponentsFromSpec } from '../plates.js';
 // same one the plan lock wrote by — see runBanksLeftover's own comment.
 import { runBanksLeftover } from './gangs.js';
 import { avsGateForCard, avsLockedError, avsMandatorySql } from '../avs-gate.js';
+// A carton made in parts: a part card ends at die cutting, and the carton's
+// pasting card is made once every part is die-cut (carton-parts.js holds the rules).
+import { closePartCard, maybeCreateAssemblyCard } from '../carton-parts-db.js';
+import { shouldJoinAtDieCut } from '../carton-parts.js';
 
 const r = Router();
 const canPlan = requireRole(...PLANNING_ROLES);
@@ -133,6 +137,9 @@ const JC_VIEW = `
          dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
          ol.line_remark,   -- the line's travelling note, carried onto the card
+         -- Set on a PART of a carton made in parts (carton-parts.js): its last
+         -- stage hands pieces to the carton's pasting card, never FG.
+         ol.part_of_line_id,
          gg.kind AS run_kind,
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
          gmm.members AS gang_members,
@@ -156,11 +163,17 @@ const JC_VIEW = `
          -- character-identical to the pre-mix expression, so a job with no mix
          -- rows (bmp.n = 0, including every gang card — see bmp's own comment)
          -- computes exactly what it always did.
-         (jc.status IN ('open','in_progress')
+         -- A carton's PASTING CARD (is_assembly, carton-parts.js) draws no board
+         -- at all: its sheets_issued counts CARTONS, pasted from pieces the part
+         -- cards cut, printed and die-cut on their own boards — so it is never
+         -- board pending and never short.
+         (NOT jc.is_assembly AND
+          jc.status IN ('open','in_progress')
           AND NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
           AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
-         CASE WHEN bmp.n > 0 THEN bmp.short::int ELSE GREATEST(0, jc.sheets_issued - stk.avail)::int END AS board_short_sheets,
+         CASE WHEN jc.is_assembly THEN 0
+              WHEN bmp.n > 0 THEN bmp.short::int ELSE GREATEST(0, jc.sheets_issued - stk.avail)::int END AS board_short_sheets,
          -- Chosen cuts per board when the job carries a mix (NULL otherwise) —
          -- the register's stage rail and completion prefill derive a mixed
          -- job's expected cutting output from this instead of the legacy
@@ -304,6 +317,36 @@ async function attachTools(jc) {
     WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
     ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
   return jc;
+}
+
+// The carton-in-parts facts a job card prints (JobCardPartsBand), read from the
+// ORDER's own part lines (carton-parts.js contract C9) — the master only lends
+// each part its label while it still lists it. A part card names its carton and
+// how many parts it has; a pasting card names the part cards it joins.
+async function attachCartonParts(jc) {
+  if (jc.is_assembly) {
+    jc.carton_parts = { role: 'assembly', parts: await q(`
+      SELECT COALESCE(pl.part_label, pp.label, p.name) AS label, pj.jc_number, pj.qty_produced
+        FROM order_lines pl
+        JOIN order_lines ol ON ol.id = pl.part_of_line_id
+        JOIN products p ON p.id = pl.product_id
+        LEFT JOIN product_parts pp ON pp.outer_product_id = ol.product_id AND pp.part_product_id = pl.product_id
+        LEFT JOIN job_cards pj ON pj.order_line_id = pl.id
+       WHERE pl.part_of_line_id = $1
+       ORDER BY pp.seq NULLS LAST, pl.id`, [jc.order_line_id]) };
+    return;
+  }
+  const me = jc.order_line_id && await one(`
+    SELECT pl.part_of_line_id, COALESCE(pl.part_label, pp.label, p.name) AS label,
+           op.code AS outer_code, op.name AS outer_name,
+           (SELECT COUNT(*)::int FROM order_lines x WHERE x.part_of_line_id = pl.part_of_line_id) AS of_parts
+      FROM order_lines pl
+      JOIN order_lines ol ON ol.id = pl.part_of_line_id
+      JOIN products p ON p.id = pl.product_id
+      JOIN products op ON op.id = ol.product_id
+      LEFT JOIN product_parts pp ON pp.outer_product_id = ol.product_id AND pp.part_product_id = pl.product_id
+     WHERE pl.id = $1`, [jc.order_line_id]);
+  if (me?.part_of_line_id) jc.carton_parts = { role: 'part', ...me };
 }
 
 // Board Mix for the printed traveler and the cutting-completion panel — both
@@ -468,19 +511,31 @@ export function jobCardCounts(rows, closedNotLoaded = 0) {
   return counts;
 }
 
+// A job card the live register and the plate picker still carry: not closed,
+// and not a FINISHED PART of a carton made in parts (carton-parts.js) — a part
+// card ends 'split' at die cutting with no gang of its own, its pieces handed
+// to the carton's pasting card, so it is history. Every gang card stays: a
+// split gang parent sits beside its live children, and plates still go out to
+// one. Spelled by the statuses a solo card is live in (the CHECK allows open,
+// in_progress, split, closed), so the picker never names a split card
+// (job-cards-open-picker.test.js). The live register counts what this leaves
+// out as closed.
+const LIVE_JOB_CARD = `jc.status <> 'closed' AND (jc.gang_run_id IS NOT NULL OR jc.status IN ('open', 'in_progress'))`;
+
 // The register, for one scope. `deps` exists for the test suite, which runs the
 // real board and plate stamping over a fixture with a fake query function.
 export async function jobCardRegister(scope, deps = {}) {
   const { q: qq = q, one: oo = one, readiness: ready = readiness, readinessBatch: readyBatch = readinessBatch } = deps;
   const scoped = JOB_CARD_SCOPES.includes(scope) ? scope : null;
-  // The live scope still loads SPLIT cards, though it does not return them: the
-  // board and plate verdicts below are computed over a SET of cards and collapse
-  // a gang run to its weakest member, and a split gang parent sits in that set
-  // beside its live children (8 runs on live prod, 2026-09-17). Leave it out
-  // and a running child's Board badge changes. Only closed cards were never in
-  // the set, so only they stay in the database.
+  // The live scope still loads SPLIT gang cards, though it does not return
+  // them: the board and plate verdicts below are computed over a SET of cards
+  // and collapse a gang run to its weakest member, and a split gang parent sits
+  // in that set beside its live children (8 runs on live prod, 2026-09-17).
+  // Leave it out and a running child's Board badge changes. Only closed cards
+  // were never in the set, so only they stay in the database — they and the
+  // finished part cards, which share no gang and so no verdict (LIVE_JOB_CARD).
   const rows = await qq(scoped === 'live'
-    ? `${JC_VIEW} WHERE jc.status <> 'closed' ORDER BY (jc.status='closed'), jc.id DESC`
+    ? `${JC_VIEW} WHERE ${LIVE_JOB_CARD} ORDER BY (jc.status='closed'), jc.id DESC`
     : `${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
   const inScope = scoped === 'live' ? rows.filter(jc => jobCardRung(jc) !== 'closed')
     : scoped === 'history' ? rows.filter(jc => jobCardRung(jc) === 'closed')
@@ -540,13 +595,14 @@ export async function jobCardRegister(scope, deps = {}) {
   // before the history has ever been opened and stay right as cards close.
   // The live scope never loaded the closed cards, so it counts them — over
   // exactly JC_VIEW's inner joins, the only joins that can drop a card from the
-  // register (job-cards-scope.test.js pins that).
+  // register (job-cards-scope.test.js pins that) — and the finished part cards
+  // with them: exactly what LIVE_JOB_CARD left out.
   const closedNotLoaded = scoped === 'live'
     ? Number((await qq(`SELECT COUNT(*)::int AS n
                         FROM job_cards jc
                         JOIN products p ON p.id = jc.product_id
                         JOIN materials bm ON bm.id = p.board_material_id
-                        WHERE jc.status = 'closed'`))[0]?.n) || 0
+                        WHERE NOT (${LIVE_JOB_CARD})`))[0]?.n) || 0
     : 0;
   return { cards, counts: jobCardCounts(rows, closedNotLoaded) };
 }
@@ -564,8 +620,10 @@ r.get('/job-cards', async (req, res, next) => {
 //
 // WHICH cards appear is decided by JC_VIEW's inner joins alone (every other join
 // there is LEFT onto a key or a one-row LATERAL), so these are those joins,
-// verbatim. Split cards stay: plates still go out to one. Newest first, the
-// register's own order once closed cards are gone. See job-cards-open-picker.test.js.
+// verbatim. Split gang cards stay: plates still go out to one. A finished part
+// card of a carton made in parts does not — its printing is done and its pieces
+// are on the carton's pasting card (LIVE_JOB_CARD). Newest first, the register's
+// own order once closed cards are gone. See job-cards-open-picker.test.js.
 //
 // Registered BEFORE /job-cards/:id — after it, 'open-picker' would be taken for
 // a card id and the picker would silently come up empty.
@@ -574,7 +632,7 @@ export const JOB_CARD_PICKER_SQL = `
   FROM job_cards jc
   JOIN products p ON p.id = jc.product_id
   JOIN materials bm ON bm.id = p.board_material_id
-  WHERE jc.status <> 'closed'
+  WHERE ${LIVE_JOB_CARD}
   ORDER BY jc.id DESC`;
 
 r.get('/job-cards/open-picker', async (_req, res, next) => {
@@ -599,6 +657,7 @@ r.get('/job-cards/:id', async (req, res, next) => {
     // own comment for the issued→plan fallback and the cut-geometry contract.
     await attachBoardMix(jc);
     await attachTools(jc);
+    await attachCartonParts(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -610,10 +669,12 @@ r.get('/job-cards/:id', async (req, res, next) => {
 // members together (their parent_sheets_required already carry any override
 // that was itself confirmed at the run's lock). A card split off a run after
 // die cutting counts cartons in that column, not parent sheets, so it is never
-// judged. Returns null inside the rule, throws the structured 409 until the
+// judged — and neither is a carton's PASTING CARD (is_assembly,
+// carton-parts.js), which counts cartons there too: its pieces were cut on the
+// part cards. Returns null inside the rule, throws the structured 409 until the
 // planner answers, and records the answer when it comes.
 async function judgeParentSheets({ jc, issuing, required = null, ack, action, qc, oc, user }) {
-  if (jc.parent_job_card_id || (!jc.order_line_id && !jc.gang_run_id)) return null;
+  if (jc.parent_job_card_id || jc.is_assembly || (!jc.order_line_id && !jc.gang_run_id)) return null;
   const plan = jc.order_line_id
     ? await oc('SELECT * FROM order_lines WHERE id=$1', [jc.order_line_id])
     : await oc(`SELECT SUM(parent_sheets_required)::int AS parent_sheets_required,
@@ -700,8 +761,10 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
       ORDER BY sm.id`, [jc.id]);
     // Same shape as the detail GET above. Without it the re-rendered card would
     // read board_mix as empty after a save and call a deliberately planned
-    // second board an unplanned substitution.
+    // second board an unplanned substitution — and, without carton_parts, drop
+    // a carton-in-parts card's parts band until the next reload.
     await attachBoardMix(jc);
+    await attachCartonParts(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -819,7 +882,8 @@ r.post('/job-cards/:id/ready-override', canOverrideReady, async (req, res, next)
 // board demand and the stations all pick the new numbers up live.
 // Rules:
 //   • order_qty: plain/child cards only (a gang parent has no single line);
-//     floor = qty already dispatched.
+//     floor = qty already dispatched. Never a carton made in parts: its
+//     pasting card and its part cards follow the carton, changed in Orders.
 //   • sheets_issued: only while the CUTTING stage is still pending — board is
 //     consumed at cutting start, so later corrections belong to the cutting
 //     Adjust flow (which trues the board ledger up).
@@ -848,6 +912,16 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
       if (order_qty !== undefined && order_qty !== null && order_qty !== '') {
         if (!jc.order_line_id) {
           throw Object.assign(new Error('A gang parent has no single order line — amend each carton from Planning'), { status: 409 });
+        }
+        // A carton made in parts (carton-parts.js): a pasting card's line IS the
+        // carton, and a part line's qty is the carton's times its pieces per
+        // carton. Re-deriving either here would put the carton back on its own
+        // board (contract C2) and board sheets in a cartons column — so the
+        // quantity changes only with the carton, in Orders.
+        const partOf = (await oc('SELECT part_of_line_id FROM order_lines WHERE id=$1', [jc.order_line_id]))?.part_of_line_id;
+        if (jc.is_assembly || partOf) {
+          throw Object.assign(new Error(`${jc.jc_number} ${jc.is_assembly ? 'pastes a carton made in parts' : 'is one part of a carton made in parts'} — `
+            + 'its quantity follows the carton: change the carton in Orders → Edit'), { status: 409 });
         }
         const nq = Math.round(+order_qty);
         if (!Number.isFinite(nq) || nq <= 0) throw Object.assign(new Error('Order quantity must be greater than zero'), { status: 400 });
@@ -899,9 +973,11 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
       const nextQtyPlanned = qty_planned !== undefined && qty_planned !== null && qty_planned !== ''
         ? Math.round(+qty_planned)
         : (derived && !jc.gang_run_id ? derived.net : undefined);
+      // A pasting card never follows: its sheets_issued counts CARTONS, and it has
+      // no cutting stage, so cuttingPending alone would always let board sheets in.
       const nextSheets = sheets_issued !== undefined && sheets_issued !== null && sheets_issued !== ''
         ? Math.round(+sheets_issued)
-        : (derived && cuttingPending && !jc.gang_run_id ? derived.parentSheets : undefined);
+        : (derived && cuttingPending && !jc.gang_run_id && !jc.is_assembly ? derived.parentSheets : undefined);
       const jcChanges = [];
       if (nextQtyPlanned !== undefined) {
         if (!Number.isFinite(nextQtyPlanned) || nextQtyPlanned <= 0) throw Object.assign(new Error('Planned quantity must be greater than zero'), { status: 400 });
@@ -1283,13 +1359,15 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       }
 
       let qtyIn;
-      if (!prev && jc.parent_job_card_id) {
+      if (!prev && (jc.parent_job_card_id || jc.is_assembly)) {
         // Split gang child (post die-cut): the board was already issued to and
         // consumed by the gang PARENT at cutting. This card's first stage
         // (sorting) receives the die-cut CARTONS — it must NOT re-consume board.
         // Input = its planned carton count; any shortfall against what actually
         // arrives is flagged at completion via the Sort & Paste waste gate, never
         // hard-blocking the start.
+        // A carton's PASTING CARD is the same shape: its pieces were cut, printed
+        // and die-cut on the part cards (carton-parts.js).
         qtyIn = jc.qty_planned ?? jc.sheets_issued;
       } else if (!prev) {
         qtyIn = jc.sheets_issued;
@@ -1491,8 +1569,13 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
 // Soft strength mix-up alarm. Scans the WHOLE active print plan (triage + every
 // press, any date — per the owner's choice) for a same-customer / same-brand /
 // different-strength sibling of the card being planned. The moving card's own
-// gang is excluded — it is one physical run, planned as a unit. Returns the
-// collision payload for a structured 409, or null when the board is clean.
+// gang is excluded — it is one physical run, planned as a unit. So are the
+// other PARTS of a carton made in parts: "… OUTER PART 1" and "… PART 2" read
+// to the name matcher as strengths 1 and 2 of one brand, but pieces of the
+// same carton (they share an outer in product_parts) are never a strength
+// mix-up — told apart by what they are, not by their names; the matcher and
+// every other pair are untouched. Returns the collision payload for a
+// structured 409, or null when the board is clean.
 async function strengthClash(qc, jc) {
   const rows = await qc(`
     SELECT jc.id, jc.jc_number, jc.machine_id,
@@ -1509,7 +1592,14 @@ async function strengthClash(qc, jc) {
   if (!target) return null;
   const gang = jc.gang_run_id || target.gang_run_id;
   const pool = rows.filter((r) => r.id !== jc.id && !(gang && r.gang_run_id === gang));
-  const hits = findClashes(target, pool);
+  let hits = findClashes(target, pool);
+  if (hits.length) {
+    const siblings = new Set((await qc(`
+      SELECT DISTINCT o.part_product_id AS id
+        FROM product_parts me JOIN product_parts o ON o.outer_product_id = me.outer_product_id
+       WHERE me.part_product_id = $1`, [target.product_id])).map((r) => r.id));
+    hits = hits.filter((h) => !siblings.has(h.product_id));
+  }
   if (!hits.length) return null;
   return {
     this: { product_name: target.name, strength: familyKey(target.name).strength, jc_number: target.jc_number },
@@ -1706,6 +1796,10 @@ r.get('/print-planning', async (req, res, next) => {
              -- no line and therefore no note of its own; its members carry
              -- theirs, so the board shows a badge only where one truly belongs.
              ol.line_remark,
+             -- A PART of a carton made in parts (carton-parts.js) and its
+             -- carton's code: the card's menu rolls back the whole carton and
+             -- offers no Delete of its own, the same as Planning.
+             ol.part_of_line_id, pco.code AS outer_code,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
@@ -1785,6 +1879,8 @@ r.get('/print-planning', async (req, res, next) => {
       -- constant JC_VIEW and the floor board use.
       ${BOARD_MIX_POSITION_LATERAL}
       ${MIX_CUTS_LATERAL}
+      LEFT JOIN order_lines pc ON pc.id = ol.part_of_line_id
+      LEFT JOIN products pco ON pco.id = pc.product_id
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
 
@@ -2983,11 +3079,24 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       const runKind = jc.gang_run_id
         ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jc.gang_run_id]))?.kind
         : null;
+      // A PART of a carton made in parts ends here (carton-parts.js). Its die-cut
+      // sheets become pieces on the part card — no FG: a part is not a saleable
+      // carton — and the carton's pasting card is made once EVERY part is
+      // die-cut (contract C4/C5). qty_out is this stage's good count, the same
+      // figure the ordinary close below credits to FG. Looked up only for a
+      // route's last stage when it is die cutting — the one completion
+      // shouldJoinAtDieCut can answer yes to.
+      const partOf = jc.order_line_id && st.seq === last.mx && st.stage === 'die_cutting'
+        ? (await oc('SELECT part_of_line_id FROM order_lines WHERE id=$1', [jc.order_line_id]))?.part_of_line_id
+        : null;
       if (shouldSplitAtDieCut({
         isLastStage: st.seq === last.mx, stage: st.stage,
         gangRunId: jc.gang_run_id, orderLineId: jc.order_line_id, runKind,
       })) {
         await splitGangParentJob(jc.id, qc, oc, req.user.name);
+      } else if (shouldJoinAtDieCut({ isLastStage: st.seq === last.mx, stage: st.stage, partOfLineId: partOf })) {
+        await closePartCard(jc, qty_out, qc, oc, req.user.name);
+        await maybeCreateAssemblyCard(partOf, qc, oc, req.user.name);
       } else if (st.seq === last.mx) {
         const tot = await oc(`SELECT COALESCE(SUM(qty_scrap),0)::int AS s FROM job_stages WHERE job_card_id=$1`, [jc.id]);
         // Only QC-accepted quantity becomes Finished Goods.
@@ -3517,11 +3626,22 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
 async function stageImpact(stageId, newOut, newScrap, oc, qc) {
   const st = await oc(`
     SELECT js.*, jc.status AS jc_status, jc.children_per_parent, jc.jc_number, jc.product_id,
-           jc.order_line_id, jc.gang_run_id
-    FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id WHERE js.id=$1`, [stageId]);
+           jc.order_line_id, jc.gang_run_id, jol.part_of_line_id
+    FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+    LEFT JOIN order_lines jol ON jol.id = jc.order_line_id
+    WHERE js.id=$1`, [stageId]);
   if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
 
   const out = { stage: st, old: { qty_out: st.qty_out, qty_scrap: st.qty_scrap }, new: { qty_out: newOut, qty_scrap: newScrap }, downstream: [], blocked: null };
+  // A FINISHED PART of a carton made in parts (carton-parts.js): its die-cut
+  // count became the part card's pieces and sized the carton's pasting card,
+  // so no count on it may change here — both would go stale. The preview and
+  // the adjust say so alike, in the words a reverse of it gets
+  // (splitGangReverseBlock): a wrong count is for an admin to correct.
+  if (st.part_of_line_id && st.jc_status === 'split') {
+    out.blocked = splitGangReverseBlock({ jc_number: st.jc_number, status: st.jc_status, part_of_line_id: st.part_of_line_id });
+    return out;
+  }
   if (st.status !== 'completed') { out.blocked = 'Only a completed stage can be adjusted'; return out; }
   // `closed` alone is not a reason. With FG and QC retired the LAST stage closes
   // the card as it completes, so every stage worth adjusting was closed the
@@ -3917,9 +4037,10 @@ r.post('/job-stages/:id/pull-back', canRun, async (req, res, next) => {
       if (!plan.move) throw Object.assign(new Error('This stage cannot be pulled back'), { status: 409 });
       // Before the approver gate, so the floor sees the real reason, not a 403.
       if (!plan.pullBack) {
-        throw Object.assign(new Error(
-          `${plan.st.jc_number} is a gang child — its sheets were printed and die-cut on ${plan.parentJcNumber || 'the gang card'}, `
-          + 'so there is no Job Card step to pull it back to. Use Send back.'), { status: 409 });
+        throw Object.assign(new Error(plan.st.is_assembly
+          ? pastingCardPullBackRefusal(plan.st.jc_number)
+          : `${plan.st.jc_number} is a gang child — its sheets were printed and die-cut on ${plan.parentJcNumber || 'the gang card'}, `
+            + 'so there is no Job Card step to pull it back to. Use Send back.'), { status: 409 });
       }
       if (reverseNeedsApprover({ target: 'job_card', items: plan.manifest.items })) {
         const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);

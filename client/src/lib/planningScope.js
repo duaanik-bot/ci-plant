@@ -11,10 +11,16 @@
 
 const PUSHED = 'in_production';
 
-// LINE_VIEW's own ORDER BY: newest sales order first, lines in id order within
-// it. The table re-sorts by order_id, but ties keep this order, so the merge has
-// to rebuild it rather than just concatenating the halves.
-const byServerOrder = (a, b) => (Number(b.order_id) - Number(a.order_id)) || (Number(a.id) - Number(b.id));
+// GET /planning's own ORDER BY: newest sales order first, lines in id order
+// within it — except a carton made in parts, whose parts sort at the CARTON's
+// place (ORDER BY ol.order_id DESC, COALESCE(ol.part_of_line_id, ol.id), ol.id),
+// side by side however late they were made. The table re-sorts by order_id, but
+// ties keep this order, so the merge has to rebuild it rather than just
+// concatenating the halves — and must rebuild the SAME order, or a carton's
+// parts split apart the moment the Completed half lands.
+const placeOf = l => Number(l.part_of_line_id ?? l.id);
+const byServerOrder = (a, b) => (Number(b.order_id) - Number(a.order_id))
+  || (placeOf(a) - placeOf(b)) || (Number(a.id) - Number(b.id));
 
 // `completed` null = not loaded yet: the queue alone. A line can turn up in
 // both halves when it moved between the two fetches (a push, a rollback); it is

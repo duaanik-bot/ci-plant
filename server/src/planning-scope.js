@@ -14,8 +14,12 @@
 // byte: plant tablets keep an old bundle open for days, and that bundle calls
 // setLines() straight on the response.
 //
-// client/src/lib/planningScope.js mirrors the RUN rule (planningScopeOfRun) —
-// change one, change both.
+// client/src/lib/planningScope.js mirrors the per-run DECISION
+// (planningScopeOfRun: a run is completed only when every member still on
+// /planning is pushed) — change one, change both. WHAT makes a run is decided
+// here alone (cartonOrRunOf: a gang or combined run, or the parts of one carton
+// made in parts); the page only ever asks planningScopeOfRun about a gang's
+// members, so the carton key has no client twin.
 
 export const PLANNING_SCOPES = Object.freeze(['queue', 'completed']);
 
@@ -81,6 +85,14 @@ export function planningCounts(rows) {
 export async function planningResponse(rawScope, rows, build) {
   const scope = planningScopeOf(rawScope);
   if (!scope) return build(rows);
-  const part = partitionPlanningLines(rows);
+  // A carton made in parts travels like a run too: its parts sit in ONE half,
+  // so a part still To Plan is served beside a part already on the floor and
+  // Planning's "Carton board: n of m" chip counts every part of the carton.
+  const part = partitionPlanningLines(rows, { gangIdOf: cartonOrRunOf });
   return { scope, lines: await build(part[scope]), counts: planningCounts(rows) };
 }
+
+// The key a line travels between the two halves under: its gang or combined
+// run, else the carton it is a part of (carton-parts.js), else none.
+export const cartonOrRunOf = l =>
+  l.gang_run_id ?? (l.part_of_line_id != null ? `carton:${l.part_of_line_id}` : null);

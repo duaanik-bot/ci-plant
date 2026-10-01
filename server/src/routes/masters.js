@@ -37,6 +37,23 @@ function productCodeClash(table, e, req, minted) {
 
 const MOVED_SINCE_OPENED = 'This product was moved to another customer since you opened it — reload it to see its current customer and code.';
 
+// A carton made in parts and its parts belong to ONE customer (carton-parts.js,
+// contract C1), so neither the carton nor a part moves on its own. Why this
+// product cannot change customer, or null. Read under the product row lock,
+// taken after the series lock like the move's own write: a parts save (it
+// share-locks the carton and its parts) is either seen here or waits for us.
+async function partsMoveBlock(productId, qc, oc) {
+  const p = await oc('SELECT code FROM products WHERE id=$1 FOR UPDATE', [productId]);
+  if (!p) return null;
+  if (await oc('SELECT 1 AS x FROM product_parts WHERE outer_product_id=$1 LIMIT 1', [productId])) {
+    return `${p.code} is made in parts — clear its parts list first`;
+  }
+  const outers = await qc(`SELECT op.code FROM product_parts pp JOIN products op ON op.id = pp.outer_product_id
+                            WHERE pp.part_product_id=$1 ORDER BY op.code`, [productId]);
+  if (!outers.length) return null;
+  return `${p.code} is a part of ${outers.map(o => o.code).join(', ')} — take it off ${outers.length > 1 ? 'those cartons' : 'that carton'} first`;
+}
+
 // Generic CRUD for the five master tables — same shape everywhere.
 const MASTERS = {
   customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'tolerance_pct', 'shade_approval_requirement', 'billing_entity_id', 'active'],
@@ -129,7 +146,8 @@ r.get('/products/picker', async (_req, res, next) => {
     const rows = await q(`
       SELECT p.id, p.name, p.code, p.customer_id, c.name AS customer_name, p.active,
              p.internal_carton_code, p.party_item_code, p.party_artwork_code,
-             p.output_number, p.size
+             p.output_number, p.size,
+             EXISTS (SELECT 1 FROM product_parts pp WHERE pp.part_product_id = p.id) AS is_part
       FROM products p JOIN customers c ON c.id=p.customer_id
       JOIN materials m ON m.id=p.board_material_id
       ORDER BY p.name, p.id`);
@@ -145,7 +163,9 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         rows = await q(`
           SELECT p.*, c.name AS customer_name, m.name AS board_material_name, m.sheet_l, m.sheet_w,
                  d.code AS linked_die_code, d.condition AS die_condition,
-                 COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst
+                 COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst,
+                 EXISTS (SELECT 1 FROM product_parts pp WHERE pp.part_product_id = p.id) AS is_part,
+                 EXISTS (SELECT 1 FROM product_parts pp WHERE pp.outer_product_id = p.id) AS has_parts
           FROM products p JOIN customers c ON c.id=p.customer_id
           JOIN materials m ON m.id=p.board_material_id
           LEFT JOIN tools d ON d.id=p.tool_id
@@ -282,6 +302,8 @@ for (const [table, cols] of Object.entries(MASTERS)) {
             req.body.code = await nextProductCode(+req.body.customer_id, qc, oc);
             minted = true;
             movedFrom = +cur.customer_id;
+            const inParts = await partsMoveBlock(req.params.id, qc, oc);
+            if (inParts) throw Object.assign(new Error(inParts), { status: 409 });
           } else if (cur && req.body.code != null
               && String(req.body.code).trim() !== String(cur.code ?? '').trim()) {
             // A retyped code queues with the minters of its series.
@@ -448,6 +470,8 @@ r.post('/products/:id/migrate-customer', canEdit, async (req, res, next) => {
       // of the same move waits on the lock, then finds it already moved and
       // takes it as it is, rather than re-coding it a second time.
       const code = await nextProductCode(target, qc, oc);
+      const inParts = await partsMoveBlock(req.params.id, qc, oc);
+      if (inParts) throw Object.assign(new Error(inParts), { status: 409 });
       const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2, internal_carton_code=$2 WHERE id=$3 AND customer_id=$4 RETURNING *', [target, code, req.params.id, p.customer_id]);
       if (!updated) {
         const now = await oc('SELECT * FROM products WHERE id=$1', [req.params.id]);

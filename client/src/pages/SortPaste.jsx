@@ -39,6 +39,7 @@ import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, 
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { isCardTier, useTier } from '../lib/tier.js';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
+import { closeAtZeroCalls, closedNothingMadeText, nothingToPasteText } from '../lib/cartonParts.js';
 
 // This screen IS the pasting station — /floor/pasting redirects here.
 const SECTION = 'sort-paste';
@@ -231,6 +232,11 @@ export default function SortPaste() {
   // Hand a job back one station — bad blanks belong at die cutting, not here.
   // Shared with Section.jsx so the manifest an operator signs is identical.
   const sb = useSendBack({ toast, onDone: () => load() });
+  // A carton's pasting card with nothing to paste (closeEmpty below): the queue
+  // row being closed, and the cards on the queue known to be such a card.
+  const [closingEmpty, setClosingEmpty] = useState(null);
+  const [emptyPasting, setEmptyPasting] = useState(() => new Set());
+  const emptyAsked = useRef(new Set());
   // Who is on the machine. Sorting and pasting share this floor device, so the
   // pick is both a view filter and the name filed against what he records.
   const [pick, setPick] = useState(null);
@@ -240,6 +246,29 @@ export default function SortPaste() {
   useFallbackRefresh(load, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250 });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
+  // Which cards planned at 0 are a carton's PASTING card — its scarcest part
+  // was die-cut at 0, and the card is still made so the shortage re-raise can
+  // bring the carton back (carton-parts-db.js). A queue row is a stage row and
+  // does not say; the card does (GET /job-cards/:id is_assembly, which the Job
+  // Cards page reads). Asked once per card and only for a card planned at 0, so
+  // an ordinary queue never asks; a failed ask is asked again on the next load.
+  const plannedAtZero = r => r.qty_planned != null && Number(r.qty_planned) === 0;
+  useEffect(() => {
+    for (const r of data?.queue || []) {
+      const id = r.job_card_id;
+      if (!plannedAtZero(r) || emptyAsked.current.has(id)) continue;
+      emptyAsked.current.add(id);
+      api.get(`/job-cards/${id}`)
+        .then(jc => { if (jc.is_assembly) setEmptyPasting(ids => new Set(ids).add(id)); })
+        .catch(() => emptyAsked.current.delete(id));
+    }
+  }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Such a card can only close, so it offers that one action instead of Start /
+  // Process — the Process form's pool is 0 and its completion rightly refuses a
+  // grid with no input. A card on hold keeps its Resume and offers the close
+  // once it runs again. Every other row is exactly as it was.
+  const closesEmpty = r => r.queue_state !== 'hold' && plannedAtZero(r) && emptyPasting.has(r.job_card_id);
+  const openCloseEmpty = r => { setClosingEmpty(r); setClearance(freshClearance()); };
 
   const machines = data?.machines || [];
   const autoMachines = machines.filter(m => !m.is_manual);
@@ -602,6 +631,26 @@ export default function SortPaste() {
     toast.info(`${reversing.jc_number} — Sort & Paste reversed, back on the floor to redo`);
     setReversing(null); setReverseReason(''); load();
   };
+  // Close a pasting card with nothing to paste, through the SAME per-stage calls
+  // the Job Cards page makes (lib/cartonParts.js closeAtZeroCalls), off the card
+  // as it stands now: sorting then pasting, each started where it is pending and
+  // completed at 0. The Sort & Paste completion is neither used nor loosened.
+  // The closer marks the carton produced with nothing made, so it lands in
+  // Dispatch → Shortage for Planning to re-raise — the road any short job takes.
+  const emptyNeedsStart = !!closingEmpty && [closingEmpty.sorting_status, closingEmpty.pasting_status].includes('pending');
+  const closeEmpty = async () => {
+    const row = closingEmpty;
+    try {
+      const jc = await api.get(`/job-cards/${row.job_card_id}`);
+      if (!jc.is_assembly || Number(jc.qty_planned) !== 0) {
+        toast.error(`${row.jc_number} has cartons to paste now — close it through Process`);
+        return;
+      }
+      for (const call of closeAtZeroCalls(jc.stages, clearancePayload(clearance))) await api.post(call.url, call.body);
+      toast.success(closedNothingMadeText(row.jc_number, row.product_code));
+      setClosingEmpty(null);
+    } finally { load(); }
+  };
 
   const submit = async () => {
     setSaving(true);
@@ -828,7 +877,9 @@ export default function SortPaste() {
               )}
               {canOperate() && (
                 <div className="mt-2.5 space-y-1.5">
-                  {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
+                  {closesEmpty(r) ? (
+                    <Button className="w-full" onClick={() => openCloseEmpty(r)}><Check size={14} /> Close — nothing to paste</Button>
+                  ) : r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                     <Button variant="success" className="w-full" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
                   ) : ['running', 'partial'].includes(r.queue_state) ? (
                     <div className="flex items-center gap-1.5">
@@ -949,7 +1000,9 @@ export default function SortPaste() {
                     {canOperate() && touchTable && (
                       <td className={`${td} whitespace-nowrap text-right`}>
                         <span className="inline-flex items-center gap-1">
-                          {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
+                          {closesEmpty(r) ? (
+                            <Button size="sm" onClick={() => openCloseEmpty(r)}><Check size={12} /> Close — nothing to paste</Button>
+                          ) : r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                             <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
                           ) : ['running', 'partial'].includes(r.queue_state) ? (
                             <>
@@ -977,8 +1030,11 @@ export default function SortPaste() {
                          share, and the gap to Status already reads as a gutter. */
                       <td className={`${td} whitespace-nowrap pl-0 text-right align-top`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
-                            Sort-phase → Start, then Process; Hold/Resume as usual. */}
-                        {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
+                            Sort-phase → Start, then Process; Hold/Resume as usual.
+                            A pasting card with nothing to paste → its one close. */}
+                        {closesEmpty(r) ? (
+                          <Button size="sm" onClick={() => openCloseEmpty(r)}><Check size={12} /> Close — nothing to paste</Button>
+                        ) : r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                           <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
                         ) : ['running', 'partial'].includes(r.queue_state) ? (
                           /* Icon-only for the three secondary actions — labelled,
@@ -1177,6 +1233,26 @@ export default function SortPaste() {
               </Field>
             </section>
             <LineClearancePanel checks={clearance} onChange={setClearance} />
+          </div>
+        )}
+      </Modal>
+
+      {/* Close — nothing to paste (closeEmpty). The line clearance is the one
+          every stage start asks for, as on the Job Cards page — shown only while
+          a stage of the card is still to be started. */}
+      <Modal open={!!closingEmpty} onClose={() => setClosingEmpty(null)}
+        title={closingEmpty ? `Close ${closingEmpty.jc_number} — nothing to paste` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setClosingEmpty(null)}>Cancel</Button>
+          <Button onClick={closeEmpty} disabled={emptyNeedsStart && !allClear(clearance)}
+            title={emptyNeedsStart && !allClear(clearance) ? 'Confirm line clearance first' : undefined}>
+            <Check size={13} /> Close — nothing to paste
+          </Button>
+        </>}>
+        {closingEmpty && (
+          <div className="space-y-3">
+            <div className="ci-summary-panel text-sm">{nothingToPasteText(closingEmpty.jc_number, closingEmpty.product_code)}</div>
+            {emptyNeedsStart && <LineClearancePanel checks={clearance} onChange={setClearance} />}
           </div>
         )}
       </Modal>

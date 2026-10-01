@@ -64,7 +64,12 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const fileRef = useRef(null);
 
   const allProducts = useMemo(() => [...products, ...localProducts], [products, localProducts]);
-  const custProducts = allProducts.filter(p => String(p.customer_id) === String(form?.customer_id) && p.active);
+  // A PO names the carton, never one of its parts: a carton made in parts gets
+  // its part lines made with it (carton-parts.js). So no picker here offers a
+  // part, and no line keeps a match that lands on one (toFormLine below).
+  const custProducts = allProducts.filter(p => String(p.customer_id) === String(form?.customer_id) && p.active && !p.is_part);
+  const partIds = useMemo(() => new Set(allProducts.filter(p => p.is_part).map(p => String(p.id))), [allProducts]);
+  const orderable = s => !!s && !partIds.has(String(s.product_id));
   const boards = materials.filter(m => m.category === 'board' && (m.active ?? 1) && !m.leftover);
 
   useEffect(() => {
@@ -85,7 +90,11 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   };
 
   const toFormLine = l => {
-    const best = l.match?.best;
+    // The server's matcher reads every active product, a part too. A match, a
+    // suggestion or a sister-customer find on a part is dropped, so the line
+    // reads unmatched (or suggested) and the planner picks the carton.
+    const best = orderable(l.match?.best) ? l.match.best : null;
+    const suggestions = (l.match?.suggestions || []).filter(orderable);
     return {
       raw_text: l.raw_text, pdf_rate: l.rate ?? null, item_code: l.item_code ?? null,
       artwork_code: l.artwork_code ?? null, name_text: l.name_text || '',
@@ -94,14 +103,22 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       die_code: l.die_code || '', sheet_size: l.sheet_size || '',
       ups: l.ups ?? '', pasting_type: l.pasting_type || '',
       product_id: best ? String(best.product_id) : '',
-      qty: l.qty ?? '', rate: l.rate ?? best?.rate ?? '', gst: best ? best.gst : '',
+      // A part row's PDF price is the PART's: its carton is booked at the
+      // carton's master rate when picked (pickProduct), never at this.
+      qty: l.qty ?? '', rate: l.match?.part_note ? '' : (l.rate ?? best?.rate ?? ''), gst: best ? best.gst : '',
       // Party item code prefills from the matched master, else the code we read
       // off the PDF line — so a No-match line arrives ready to save onto the
       // product you pick. AW code only lives on the master.
       party_item_code: best?.party_item_code || l.item_code || '',
       aw_code: best?.party_artwork_code || l.artwork_code || '',
-      status: l.match?.status || 'none', confidence: best?.confidence ?? null,
-      suggestions: l.match?.suggestions || [], foreign: l.match?.foreign || null, learned: false,
+      status: best ? (l.match?.status || 'none') : suggestions.length ? 'suggested' : 'none',
+      confidence: best?.confidence ?? null,
+      suggestions, foreign: orderable(l.match?.foreign) ? l.match.foreign : null, learned: false,
+      // The PDF row names a PART of a carton made in parts (the server's note):
+      // the row stays unmatched, suggesting its carton, and teaches no master.
+      // pdf_part_note is what the PDF row names; part_note, whether it still
+      // applies (pickProduct drops it when the pick is not one of its cartons).
+      part_note: l.match?.part_note || null, pdf_part_note: l.match?.part_note || null, part_label: null,
     };
   };
 
@@ -173,15 +190,22 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const pickProduct = (i, productId) => {
     const p = custProducts.find(x => String(x.id) === String(productId));
     const cur = form.lines[i];
+    // On a row whose PDF names a PART, picking one of its suggested cartons books
+    // the CARTON, at the carton's master rate (the PDF price is the part's), and
+    // keeps the note. Any other pick makes it an ordinary row; clearing brings
+    // the note back.
+    const carton = cur.pdf_part_note && (cur.suggestions || []).find(s => String(s.product_id) === String(productId));
     setLine(i, {
       product_id: String(productId || ''),
-      rate: cur.pdf_rate ?? p?.rate ?? '',
+      rate: carton ? (p?.rate ?? '') : (cur.pdf_rate ?? p?.rate ?? ''),
       gst: gstOf(p),
       // Prefer what the planner already typed, then the master's saved codes,
       // then the code read off the PDF line.
       party_item_code: cur.party_item_code || p?.party_item_code || cur.item_code || '',
       aw_code: cur.aw_code || p?.party_artwork_code || cur.artwork_code || '',
       learned: !!productId && !!cur.raw_text,
+      part_note: !productId || carton ? cur.pdf_part_note : null,
+      part_label: carton ? carton.part_label ?? null : null,
     });
   };
 
@@ -379,12 +403,16 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     setBusy(true);
     try {
       const kept = form.lines.filter(l => l.product_id && l.qty);
+      // A row whose PDF text names a PART teaches no master: an alias or its item
+      // code saved onto the carton would auto-match the part's row to the carton
+      // on the next PO — the silent re-match the part note exists to stop.
+      const teach = kept.filter(l => !l.part_note);
       // learn aliases for every human-confirmed mapping before creating
-      await Promise.all(kept.filter(l => l.learned && l.raw_text).map(l =>
+      await Promise.all(teach.filter(l => l.learned && l.raw_text).map(l =>
         api.post('/orders/import/alias', { customer_id: +form.customer_id, alias_text: l.raw_text, product_id: +l.product_id })));
       // write the party item code / AW code onto each mapped master (partial
       // update — empty cells are omitted so they never wipe an existing value).
-      await Promise.all(kept
+      await Promise.all(teach
         .filter(l => (l.party_item_code || '').trim() || (l.aw_code || '').trim())
         .map(l => {
           const body = {};
@@ -392,13 +420,17 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
           if ((l.aw_code || '').trim()) body.party_artwork_code = l.aw_code.trim();
           return api.put(`/products/${l.product_id}`, body);
         }));
-      await api.post('/orders', {
+      const created = await api.post('/orders', {
         po_number: form.po_number, customer_id: +form.customer_id,
         po_date: form.po_date || undefined, delivery_date: form.delivery_date || undefined,
         notes: form.notes || undefined,
         lines: kept.map(l => ({ product_id: +l.product_id, qty: +l.qty, rate: l.rate === '' ? undefined : +l.rate, gst: l.gst })),
       });
       toast.success('Order created from PDF');
+      // Things the planner should know about the order, not reasons it was
+      // refused — a carton made in parts on two lines, a part booked without its
+      // carton — said exactly as the New Order form says them (Orders.jsx save).
+      for (const w of created.warnings || []) toast.info(w);
       onCreated();
       reset();
       onClose();
@@ -412,7 +444,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     if (!form) return [];
     const seen = new Set(); const out = [];
     for (const l of form.lines) {
-      if (l.pdf_rate == null || !l.product_id) continue;
+      // A part row's PDF rate is the part's price, never the carton's.
+      if (l.pdf_rate == null || !l.product_id || l.part_note) continue;
       const prod = custProducts.find(p => String(p.id) === String(l.product_id));
       if (!prod || seen.has(prod.id)) continue;
       const masterRate = Number(rateOverrides[prod.id] ?? prod.rate);
@@ -423,6 +456,15 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     }
     return out;
   })();
+
+  // How many rows of this PO each carton made in parts is picked on. Its parts
+  // listed as rows, each mapped to the carton, is how PO 02545 booked it twice.
+  // A warning on those rows — never a refusal: a customer can order it twice.
+  const cartonRows = new Map();
+  for (const l of form?.lines || []) {
+    const p = l.product_id && l.qty && custProducts.find(x => String(x.id) === String(l.product_id));
+    if (p?.has_parts) cartonRows.set(p.id, (cartonRows.get(p.id) || 0) + 1);
+  }
 
   const totals = (form?.lines || []).reduce((t, l) => {
     if (l.qty && l.rate) { t.taxable += l.qty * l.rate; t.gst += lineTax(l); }
@@ -522,7 +564,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                     </div>
                   ) : null;
                   const masterRate = prod ? Number(rateOverrides[prod.id] ?? prod.rate) : null;
-                  const rateMismatch = l.pdf_rate != null && prod && masterRate !== Number(l.pdf_rate);
+                  const rateMismatch = l.pdf_rate != null && !l.part_note && prod && masterRate !== Number(l.pdf_rate);
+                  const dupRows = prod?.has_parts ? cartonRows.get(prod.id) || 0 : 0;
                   return (
                     <div key={i} className="ci-line-item">
                       <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -540,8 +583,25 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                             </button>
                           </span>
                         )}
+                        {/* A part row booked as its carton: said, never offered as a master update. */}
+                        {l.part_note && prod && l.pdf_rate != null && (
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                            PDF ₹{l.pdf_rate} is {l.part_label || 'the part'}'s price — {prod.code} master ₹{masterRate} used
+                          </span>
+                        )}
                         {prod?.spec_incomplete ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span> : null}
                       </div>
+                      {/* Full-width and wrapping, so both read whole at phone width. */}
+                      {l.part_note && (
+                        <div className="mb-1.5 break-words rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-amber-800">
+                          {l.part_note}
+                        </div>
+                      )}
+                      {dupRows > 1 && (
+                        <div className="mb-1.5 break-words rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-amber-800">
+                          {prod.code} is made in parts and is on {dupRows} rows of this PO — order it once unless the customer really ordered it twice
+                        </div>
+                      )}
                       <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_92px_100px_84px_118px_40px] md:items-start">
                         <div className="ci-line-key min-w-0">
                           <div className="space-y-1.5">
@@ -573,7 +633,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                                   line lifted a whole class of those from "No match" (where
                                   this button lived) into "Suggested" (where it did not).
                                   Same affordance as the sales-order line — see Orders.jsx. */}
-                              {!l.product_id && (
+                              {/* Never on a part row: a new master for it would be a second part. */}
+                              {!l.product_id && !l.pdf_part_note && (
                                 <button type="button" disabled={!form.customer_id}
                                   title={form.customer_id ? 'Create a new product master for this line' : 'Pick a customer first'}
                                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
@@ -596,7 +657,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                           <Trash2 size={15} />
                         </button>
                       </div>
-                      {l.product_id && (
+                      {/* Not on a part row: its codes are the part's, and are never saved onto the carton. */}
+                      {l.product_id && !l.part_note && (
                         <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 md:grid-cols-2">
                           <label className="flex items-center gap-2">
                             <span className="w-[104px] shrink-0 text-[11px] font-semibold text-slate-400">Item Code</span>

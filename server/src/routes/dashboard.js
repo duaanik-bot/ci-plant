@@ -22,10 +22,12 @@ r.get('/dashboard', async (_req, res, next) => {
       shortLines, xsOpen, dueSoon, awPending,
       bottleneck, machineUtil, operatorProd, recentJobs,
     ] = await Promise.all([
+      // Orders in hand counts what customers ordered: a carton made in parts
+      // once, never its part lines (carton-parts.js).
       one(`
       SELECT COUNT(*)::int AS lines, COALESCE(SUM((qty-dispatched_qty)*rate),0) AS value,
              COALESCE(SUM(qty-dispatched_qty),0)::int AS qty
-      FROM order_lines WHERE status NOT IN ('dispatched','cancelled')`),
+      FROM order_lines WHERE status NOT IN ('dispatched','cancelled') AND part_of_line_id IS NULL`),
 
       one(`SELECT COUNT(*)::int AS jobs FROM job_cards WHERE status IN ('open','in_progress')`),
 
@@ -68,9 +70,11 @@ r.get('/dashboard', async (_req, res, next) => {
                    FROM (${COMMITTED_DEMAND_SQL}) d GROUP BY 1) dm ON dm.mid=m.id
         WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`),
 
+      // Ready to dispatch: the dashboard twin of /dispatch/ready, which never
+      // offers a carton's part line (carton-parts.js) — so neither does this.
       one(`
       SELECT COUNT(*)::int AS lines, COALESCE(SUM((ol.qty-ol.dispatched_qty)*ol.rate),0) AS value
-      FROM order_lines ol WHERE ol.status='produced'`),
+      FROM order_lines ol WHERE ol.status='produced' AND ol.part_of_line_id IS NULL`),
 
       one(`
       SELECT COUNT(*)::int AS total,
@@ -262,7 +266,8 @@ r.get('/reports/sales', async (_req, res, next) => {
              SUM((ol.qty-ol.dispatched_qty)*ol.rate) AS pending_value
       FROM order_lines ol
       JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
-      WHERE ol.status != 'cancelled'
+      -- What the customer ordered: never a carton's part line (carton-parts.js).
+      WHERE ol.status != 'cancelled' AND ol.part_of_line_id IS NULL
       GROUP BY c.id, c.name, c.segment ORDER BY order_value DESC`));
   } catch (e) { next(e); }
 });

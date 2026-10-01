@@ -156,6 +156,13 @@ const CARD_VIEW = `
     LEFT JOIN machines wm ON wm.id = jc.machine_id
     WHERE wol.product_id = sc.product_id
       AND wol.status IN ('pending','planned','ready','in_production')
+      -- A finished part card is not live work (carton-parts.js): die-cut and
+      -- 'split', its pieces wait for the carton's pasting card while its line
+      -- stays in_production, so the status test above cannot tell. A gang
+      -- parent has no order line of its own and never joins here — the gang
+      -- tiers are unchanged.
+      AND NOT EXISTS (SELECT 1 FROM job_cards pj WHERE pj.order_line_id = wol.id
+                         AND pj.status = 'split' AND pj.gang_run_id IS NULL)
     ORDER BY (CASE WHEN jc.machine_id IS NOT NULL THEN 1
                    WHEN jc.id IS NOT NULL         THEN 2
                    ELSE 3 END),

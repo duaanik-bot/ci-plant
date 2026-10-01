@@ -6,7 +6,8 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, lockDocNumber, notify, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, lockDocNumber, notify, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines, hasPartLines } from '../helpers.js';
+import { cartonLineBlock } from '../carton-parts.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -576,6 +577,17 @@ r.post('/requisitions', canRaisePr, async (req, res, next) => {
     const result = await tx(async (qc, oc) => {
       await assertPurchasable(oc, lines);
       const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number', oc);
+      // A PR bought FOR a job (the planning engine's Raise PR) never buys a
+      // carton made in parts its outer's own board — its parts raise for theirs
+      // (carton-parts.js C2); a part is a job like any other. The number lock
+      // above first (doc-number-lock-order.test.js), then the line itself — an
+      // order edit converting it right now holds it FOR UPDATE, so this waits —
+      // then the question, in a fresh statement.
+      if (req.body.order_line_id) {
+        await oc('SELECT id FROM order_lines WHERE id=$1 FOR KEY SHARE', [req.body.order_line_id]);
+        const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(req.body.order_line_id, oc) });
+        if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
+      }
       const first = lines[0];
       const [pr] = await qc(
         `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason,
@@ -787,8 +799,13 @@ r.post('/requisitions/:id/reassign', canBuy, async (req, res, next) => {
 
       const line = await oc(`
         SELECT ol.id, p.name AS product_name FROM order_lines ol
-        JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [orderLineId]);
+        JOIN products p ON p.id=ol.product_id WHERE ol.id=$1 FOR KEY SHARE OF ol`, [orderLineId]);
       if (!line) throw Object.assign(new Error('That job is no longer planned'), { status: 409 });
+      // Never re-pointed at a carton made in parts: its parts buy their own
+      // board (carton-parts.js C2). Asked under the line's lock just taken, in a
+      // fresh statement, so a conversion that committed while this waited is seen.
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(orderLineId, oc) });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
 
       const before = pr.order_line_id;
       const [row] = await qc('UPDATE requisitions SET order_line_id=$1 WHERE id=$2 RETURNING *',

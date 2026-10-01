@@ -3,7 +3,8 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, lockDocNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, lockDocNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines, hasPartLines } from '../helpers.js';
+import { cartonLineBlock } from '../carton-parts.js';
 import { requireRole } from '../auth.js';
 import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard, claimsByBoard, heldFor } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
@@ -611,10 +612,16 @@ r.post('/board/commit', canMove, async (req, res, next) => {
     if (mat.category !== 'board')
       return res.status(400).json({ error: `${mat.name} is not a board — only board can be committed to a job` });
 
-    const out = await tx(async (qc) => {
+    const out = await tx(async (qc, oc) => {
       // Lock the line, then read the position fresh: a screen minutes old may
       // be quoting free stock another planner has since taken.
       await qc('SELECT id FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+      // A carton made in parts claims no board of its own — its parts do
+      // (carton-parts.js C2); a part commits like any job. Asked under the lock
+      // just taken, in a fresh statement: a conversion that committed while this
+      // waited is seen.
+      const cartonBlock = cartonLineBlock({ hasParts: await hasPartLines(lineId, oc) });
+      if (cartonBlock) throw Object.assign(new Error(cartonBlock), { status: 409 });
       const reason = String(req.body.reason || '').trim() || 'Committed from the planning engine';
       const res_ = await commitBoardForLine(
         { materialId, lineId, want, reason, origin: null, user: req.user.name }, qc);

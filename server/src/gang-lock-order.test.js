@@ -129,7 +129,7 @@ test('the member sweeps are NO KEY UPDATE, and split takes the gang before them'
 // would deadlock it (gang-lock-order-pg.test.js runs that race).
 test('a line leaving (and maybe dissolving) its gang takes the gang first, NO KEY UPDATE', () => {
   const rollback = fnBody(read('helpers.js'), 'export async function rollbackLine(');
-  assert.match(rollback, /lockLineGangFirst\(lineId, qc, oc, \{ gang: 'NO KEY UPDATE', line: 'UPDATE' \}\)/);
+  assert.match(rollback, /lockLineGangFirst\(lineId, qc, oc, \{ gang: 'NO KEY UPDATE', line: peek\?\.has_parts \? 'NO KEY UPDATE' : 'UPDATE' \}\)/);
   const plan = fnBody(read('routes/orders.js'), "r.post('/order-lines/:id/plan'");
   const gangAt = plan.indexOf("SELECT id FROM gang_runs WHERE id=$1 FOR NO KEY UPDATE");
   const firstWrite = plan.search(/UPDATE order_lines/);
@@ -143,7 +143,7 @@ test('a line leaving (and maybe dissolving) its gang takes the gang first, NO KE
 test('deleting an order locks all its gangs, before the order row and any line', () => {
   const del = read('routes/orders.js');
   const tx = del.slice(del.indexOf("const before = await qc('SELECT DISTINCT gang_run_id FROM order_lines WHERE order_id=$1"));
-  assert.match(tx, /SELECT id, gang_run_id FROM order_lines WHERE order_id=\$1 ORDER BY id FOR UPDATE/, 'the lines are locked as they are checked');
+  assert.match(tx, /SELECT id, gang_run_id, part_of_line_id FROM order_lines WHERE order_id=\$1 ORDER BY id FOR UPDATE/, 'the lines are locked as they are checked');
   const lockAt = tx.indexOf('await lockGangsFirst(before.map(r => r.gang_run_id), qc);');
   const orderAt = tx.indexOf("SELECT * FROM orders WHERE id=$1 FOR UPDATE");
   assert.ok(lockAt >= 0 && orderAt > lockAt, 'the gangs before the order row');

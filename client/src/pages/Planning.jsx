@@ -20,6 +20,8 @@ import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.js
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import PartChip from '../components/PartChip.jsx';
+import { cartonBoardSummary, cartonQtyOf, focusLineOf } from '../lib/cartonParts.js';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
@@ -881,6 +883,12 @@ export default function Planning() {
   // covered, which on the one screen that can FIX a short job would hide it.
   const boardGate = m => (m.readiness?.material ? 'covered' : 'short');
   const rowBoardState = r => rowBoardStateOf(r, boardGate);
+  // One board verdict per carton made in parts, off EVERY loaded line — not the
+  // filtered table: a carton's parts can sit in two tabs (one locked, one still
+  // To Plan), and a board filter can hide the covered one, and either way the
+  // chip must still count every part of the carton, not just those on screen.
+  // It reads the board column's own fallback, so its count and colour agree.
+  const cartonBoards = useMemo(() => cartonBoardSummary(lines, boardGate), [lines]);   // eslint-disable-line react-hooks/exhaustive-deps
   const boardShort = r => rowBoardState(r) !== 'covered';   // the KPI card's "short" = anything unresolved
   // The same red wash the Artwork queue wears, on the same two verdicts, out of
   // the same CSS — a job short of board has to look identical wherever a planner
@@ -959,7 +967,9 @@ export default function Planning() {
       gangs: new Set(rows.filter(l => l.gang_run_id).map(l => l.gang_run_id)).size,
       ganged: rows.filter(l => l.gang_run_id).length,
       onPress: rows.filter(l => l.machine_name).length,
-      qty: rows.reduce((s, l) => s + (+l.qty || 0), 0),
+      // Cartons, not pieces: a carton made in parts counts once, off its parts'
+      // rows (lib/cartonParts.js cartonQtyOf); every other line adds its qty.
+      qty: cartonQtyOf(rows),
       fgCovered: rows.reduce((s, l) => s + (+l.fg_consumed_qty || 0), 0),
       parentSheets: rows.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0),
       childSheets: rows.reduce((s, l) => s + (+l.sheets_required || 0), 0),
@@ -988,7 +998,9 @@ export default function Planning() {
   ], clearSelection);
   // ── Landing on the job the notification named ────────────────────────────
   // The line id behind the deep link, whichever door it came through.
-  const focusLineId = Number(focusAr?.order_line_id ?? lineParam) || null;
+  // A carton made in parts is not listed while its parts are made: a link that
+  // names it lands on its first part (lib/cartonParts.js focusLineOf).
+  const focusLineId = focusLineOf(lines, Number(focusAr?.order_line_id ?? lineParam) || null);
   // A gang collapses into ONE row carrying a synthetic id, so the row standing
   // for a line is not always the line itself.
   const focusRow = focusLineId
@@ -2209,9 +2221,11 @@ export default function Planning() {
     const clearedNote = updated.master_parent_cleared
       ? ` · master parent ${updated.master_parent_cleared} cleared on ${planLine.product_code} — it can't stay on the new board; the master now cuts the board's full sheet`
         + (updated.job_parent_kept ? ` · this job keeps ${updated.job_parent_kept}` : '') : '';
+    // A quantity sent for a PART was kept as it was (the server's part_qty_kept).
+    const partNote = updated.part_qty_kept ? " · a part's quantity follows its carton — change the carton in Orders → Edit" : '';
     toast.success(draft
-      ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}${keptNote}${clearedNote}`
-      : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}${keptNote}${clearedNote}`
+      ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}${keptNote}${clearedNote}${partNote}`
+      : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}${keptNote}${clearedNote}${partNote}`
         + (lo.push && lo.strip ? ` · leftover ${lo.strip.l}×${lo.strip.w}" → warehouse after cutting` : ''));
     sayBoardShortfalls(updated);
     // A gang shares one board — changing it moves this job out of the gang.
@@ -3804,6 +3818,8 @@ export default function Planning() {
             ],
             searchValue: l => [
               (l._gang || [l]).map(productSearchText).join(' '),
+              // a part is found by its carton's code too ("SW-715" finds its parts)
+              (l._gang || [l]).map(m => m.outer_code || '').join(' '),
               specSearch(l, m => m.coating),
               (l._gang || [l]).map(colourSearchText).join(' '),
             ].join(' '),
@@ -3831,6 +3847,7 @@ export default function Planning() {
             : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1"
                 meta={[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')} />
               {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div>
+              <PartChip row={l} summary={cartonBoards} />
               <FluenceButton productId={l.product_id} context="planning" className="mt-1" /></div>)}<ColourScheme line={l} /></div>) },
           // ── BOARD ─────────────────────────────────────────────────────────
           // What the job prints ON, and nothing else: grade, weight, and the
@@ -4315,7 +4332,8 @@ export default function Planning() {
                   Order Qty{hasTolerance(planLine.eff_tolerance_pct) ? ` (${toleranceLabel(planLine.eff_tolerance_pct)})` : ''}
                   {form.qty !== '' && +form.qty !== planLine.qty && <span className="ml-1 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700">edited</span>}
                 </div>
-                <input type="number" min="1" value={form.qty}
+                <input type="number" min="1" value={form.qty} readOnly={!!planLine.part_of_line_id}
+                  title={planLine.part_of_line_id ? `Follows its carton ${planLine.outer_code || ''} — change the carton in Orders → Edit` : undefined}
                   onChange={e => setForm({ ...form, qty: e.target.value })}
                   className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm font-bold tabular-nums text-slate-900 outline-none focus:ring-0" />
                 {/* The engine has ALWAYS planned the balance — calc.planQty is
@@ -5247,7 +5265,7 @@ export default function Planning() {
                           the Use FG dialog existed. It now states whether the
                           stock covers the job in FULL or in PART, and offers the
                           decision on the spot. Saying no is just not pressing it. */}
-                      {ctx.fg.verified_available > 0 && ctx.fg.balance_to_produce > 0 && (() => {
+                      {!planLine.part_of_line_id && ctx.fg.verified_available > 0 && ctx.fg.balance_to_produce > 0 && (() => {
                         const covers = Math.min(ctx.fg.verified_available, ctx.fg.balance_to_produce);
                         const full = covers >= ctx.fg.balance_to_produce;
                         return (

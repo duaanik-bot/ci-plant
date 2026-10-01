@@ -2831,4 +2831,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // MRP in a kit, and Colour Impressions' acknowledgment of a customer's change.
   // Additive and idempotent; after the files above, whose tables it references.
   await pool.query(migration('20260928160000_fluence_mrp_changes.sql'));
+
+  // Cartons made in parts — product_parts, order_lines.part_of_line_id,
+  // job_cards.is_assembly (carton-parts.js holds every rule). Idempotent.
+  await pool.query(migration('20260929120000_carton_parts.sql'));
 }

@@ -167,6 +167,6 @@ test('plan-save pins the old parent on the product\'s OTHER open plans, before i
 
 test('plan-save answers master_parent_cleared (L×W or null) and what the master actually took', () => {
   assert.match(planSave, /let masterParentCleared = null;/);
-  assert.match(planSave, /master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept \}\);/);
+  assert.match(planSave, /master_parent_cleared: masterParentCleared, master_written: masterWritten, parent_pinned_lines: parentPinnedLines, job_parent_kept: jobParentKept(,\s*\w+: \w+)* \}\);/);
   assert.match(planSave, /masterWritten = Object\.keys\(toMaster\);/);
 });
