@@ -8,6 +8,8 @@
      Ported from the stand-alone Kit Studio page (v13, 26-Sep-2026); this file is the source now.
      Data comes through erp-bridge.js from /api/kit-studio (server/src/routes/kitstudio.js). -->
 <script src="erp-bridge.js"></script>
+<!-- The carton packing engine: pure functions, shared with server/src/kit-pack.test.js. -->
+<script src="kit-pack.js"></script>
 <!-- The ERP's own typeface (client/index.html): SF on Apple machines, Inter everywhere else. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -373,6 +375,63 @@ th .thsort:hover{color:var(--ink)}
 .pmspec .no{color:var(--warn)}
 .pmhint{font-size:12px;color:var(--muted);margin-top:2px}
 .pmhint .link{font-weight:600;color:var(--accent);font-size:12px}
+/* New kit: the step bar — where the kit stands, what to do next, Undo / Redo / Start from scratch — pinned on top */
+.kitbar{position:sticky;top:0;z-index:6;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;align-items:center;margin:0 0 14px;padding:10px 12px;border-radius:20px;border:1px solid rgba(255,255,255,.8);
+  background:linear-gradient(180deg,rgba(250,252,255,.94),rgba(240,245,252,.92));-webkit-backdrop-filter:blur(20px) saturate(150%);backdrop-filter:blur(20px) saturate(150%);box-shadow:0 1px 2px rgba(29,29,31,.05),0 10px 26px -14px rgba(40,52,74,.35),inset 0 1px 0 rgba(255,255,255,.9)}
+.ksteps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.ks button{width:100%;display:flex;align-items:center;gap:8px;border:1px solid transparent;background:none;border-radius:14px;padding:5px 8px;cursor:pointer;text-align:left;color:var(--ink);transition:background-color .15s,border-color .15s}
+.ks button:hover{background:rgba(255,255,255,.75);border-color:rgba(10,132,255,.2)}
+.ks .kn{flex:none;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font:700 12px var(--f-body);background:rgba(29,29,31,.07);color:var(--muted)}
+.ks .kt{display:grid;min-width:0}
+.ks .kt b{font:600 13px/1.25 var(--f-body);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ks .kt small{font:500 11.5px/1.3 var(--f-body);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ks.done .kn{background:var(--ok-bg);color:var(--ok)}
+.ks.now .kn{background:var(--accent);color:#fff;box-shadow:0 0 0 3px rgba(10,132,255,.2)}
+.ks.now button{background:rgba(225,239,255,.7);border-color:rgba(10,132,255,.28)}
+.ks.warn .kn{background:var(--warn-bg);color:var(--warn)}
+.ks.warn small{color:var(--warn)}
+.ks.todo .kt b{color:var(--muted)}
+.kbtns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.knext{grid-column:1/-1;margin:0;font-size:13px;color:var(--label);display:flex;gap:8px;align-items:baseline}
+.knext .kh{flex:none;font:700 10.5px var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:2px 8px}
+.builder .sticky{top:var(--kbh,12px)}
+#cardProd,#cardBox,#cardArr,#cardSave{scroll-margin-top:var(--kbh,12px)}
+.stepn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;margin-right:8px;background:var(--accent);color:#fff;font:700 11px var(--f-body);letter-spacing:0;vertical-align:1px}
+h2 .stepn{width:22px;height:22px;font-size:12px;vertical-align:2px}
+@keyframes ksFlash{0%{box-shadow:0 0 0 0 rgba(10,132,255,.55),var(--glass-shadow)}100%{box-shadow:0 0 0 14px rgba(10,132,255,0),var(--glass-shadow)}}
+.card.flash{animation:ksFlash .9s var(--ease) 2}
+.btn.hb{padding:6px 11px}
+.hrow{display:inline-flex;gap:6px}
+.narrow-only{display:none}
+/* How should it sit? — the carton drawn each way, and Turn 90° */
+.poseq{font-size:13px}
+.posegrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pose{display:grid;justify-items:center;gap:1px;padding:6px 4px 7px;border-radius:14px;border:1px solid rgba(255,255,255,.85);background:rgba(255,255,255,.72);cursor:pointer;color:var(--ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 1px 2px rgba(29,29,31,.06);transition:border-color .15s,background-color .15s,box-shadow .15s,transform .15s var(--ease)}
+.pose:hover{border-color:rgba(10,132,255,.45);background:#fff;transform:translateY(-1px)}
+.pose b{font:600 12.5px/1.2 var(--f-body);text-align:center}
+.pose small{font:500 11px/1.2 var(--f-body);color:var(--muted);text-align:center}
+.pose[aria-pressed="true"]{border-color:rgba(10,132,255,.6);background:var(--accent-soft);box-shadow:inset 0 0 0 1px rgba(10,132,255,.45)}
+.pose[aria-pressed="true"] small{color:var(--accent-deep)}
+.pose.turn{color:var(--accent-deep)}
+.pose svg{display:block;width:100%;max-width:92px;height:auto}
+.lvpick{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap}
+.lvpick .lbl{font:700 11px var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.lvpick .seg button{display:inline-flex;align-items:center}
+/* Ways to pack this box */
+.ways{display:grid;gap:6px;margin:10px 0 2px;padding:10px 12px;border-radius:16px;border:1px solid rgba(255,255,255,.8);background:rgba(255,255,255,.5)}
+.waysh{font-size:13px}
+.waylist{display:flex;gap:6px;flex-wrap:wrap}
+.way{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 10px;border-radius:14px;border:1px solid rgba(29,29,31,.08);background:rgba(255,255,255,.75);cursor:pointer;color:var(--ink);text-align:left;transition:border-color .15s,background-color .15s}
+.way:hover{border-color:rgba(10,132,255,.45);background:#fff}
+.way span{display:grid}
+.way b{font:600 12.5px/1.25 var(--f-body)}
+.way small{font:500 11px/1.3 var(--f-body);color:var(--muted)}
+.way.on{border-color:rgba(10,132,255,.6);background:var(--accent-soft)}
+.way svg{flex:none;color:var(--accent-deep)}
+.howto{margin:8px 0 0;padding:10px 12px;border-radius:14px;background:rgba(225,239,255,.55);border:1px solid rgba(10,132,255,.16);font-size:12.5px;color:var(--label)}
+@media (max-width:1100px){.ksteps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:860px){.kitbar{position:static;grid-template-columns:1fr}.kbtns{justify-content:flex-start}.narrow-only{display:inline-flex}.builder .sticky{top:auto}}
+@media (max-width:520px){.posegrid{grid-template-columns:repeat(2,minmax(0,1fr))}.ks .kt small{white-space:normal}.cardtools .ct .tx{display:none}.cardtools .ct{padding:6px 8px}}
 @media (max-width:860px){.builder{grid-template-columns:1fr}.sticky{position:static}}
 @media (max-width:520px){.item{grid-template-columns:minmax(0,1fr) 56px 28px 28px}.item .sz{grid-column:1/-1;order:5;text-align:left;margin-top:-4px}.rec{grid-template-columns:1fr}.lwh{grid-template-columns:repeat(3,minmax(0,1fr))}.lwh .btn{grid-column:1/-1}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -414,6 +473,18 @@ const S = {products:new Map(), kits:new Map(), drafts:new Map(), settings:{...DE
   kf:{q:'',st:'ALL',origin:'ALL'}, pf:{q:'',st:'ALL'}, drawer:null,
   build:blankBuild()};
 try{ const v=localStorage.getItem('kst.view'); if(v) S.view=v; }catch(e){}
+/* A new kit being made survives the page reloading in this browser tab — the ERP re-opens the studio when the
+   window turns between its phone and desktop layouts, and a refresh happens: the kit comes back as it was left.
+   Kept for the login that made it, and only written once it has been brought back (buildBack). */
+const BUILD_KEY='kst.build';
+let buildBack=false;
+function keepBuild(){ if(!buildBack) return; try{ const b=S.build, any=b.name.trim()||b.notes.trim()||b.items.some(i=>i.pid||i.raw);
+  if(any) sessionStorage.setItem(BUILD_KEY,JSON.stringify({me:S.me??null,build:b})); else sessionStorage.removeItem(BUILD_KEY); }catch(_){} }
+function bringBuildBack(){
+  try{ const v=JSON.parse(sessionStorage.getItem(BUILD_KEY)||'null'), k=v&&v.build;
+    if(k&&(v.me??null)===(S.me??null)&&Array.isArray(k.items)&&k.ovr){ S.build={...blankBuild(),...k};
+      if(S.build.custom) for(const l of S.build.custom.lanes||[]) for(const x of l.items||[]){ delete x.u; for(const z of x.stack||[]) delete z.u; } } }catch(_){}
+  buildBack=true; }
 /* Embedded in the ERP's Fluence page (?embed=1): its tabs choose the view (window.kitStudio.show)
    and hear where the studio went (kitStudioErp.viewChanged) — one tab bar for the whole module. */
 const EMBED=new URLSearchParams(location.search).get('embed')==='1';
@@ -645,37 +716,18 @@ function pickMost(entries, use){
   return Object.values(g).sort((a,b)=> b.ids.length-a.ids.length || (use[key(b.k)]||0)-(use[key(a.k)]||0) || (a.k.W-b.k.W));
 }
 function unitsOf(items){ const u=[]; for(const it of items){ if(!it.pid) continue; const d=dimsOf(it.pid); if(!d) continue; const q=Math.max(1,+it.q||1); for(let i=0;i<q;i++) u.push({pid:it.pid,name:pName(it.pid),t:d[0],m:d[1],b:d[2]}); } return u; }
-/* carton orientation: t ≤ m ≤ b are the inner carton's sides. orient = edge | end | flat, rot = turned 90° on the floor */
-const dep = it => it.d ?? it.t;
-function orientDims(it){ let l,d,up;
-  if(it.orient==='end'){ up=it.b; l=it.m; d=it.t; }
-  else if(it.orient==='flat'){ up=it.t; l=it.b; d=it.m; }
-  else { it.orient='edge'; up=it.m; l=it.b; d=it.t; }
-  if(it.rot){ const x=l; l=d; d=x; }
-  it.l=l; it.d=d; it.up=up; return it; }
-const ORI={edge:'Standing',end:'Tall',flat:'Flat'};
-const ORI_LONG={edge:'Standing (long side down)',end:'Standing tall (on its end)',flat:'Lying flat'};
-const placeTxt = it => (it.orient==='end'?'standing tall':it.orient==='flat'?'lying flat':'standing')+(it.rot?', turned 90°':'');
-/* a spot on the floor can hold a stack: it.stack = cartons resting on top of it (bottom to top) */
-const hasStack = it => !!(it&&it.stack&&it.stack.length);
-const colItems = it => hasStack(it)?[it,...it.stack]:[it];
-const FL = it => hasStack(it)?Math.max(it.l,...it.stack.map(s=>s.l)):it.l;
-const FD = it => hasStack(it)?Math.max(dep(it),...it.stack.map(dep)):dep(it);
-const FH = it => hasStack(it)?it.up+it.stack.reduce((a,x)=>a+x.up,0):it.up;
+/* carton orientation: t ≤ m ≤ b are the inner carton's sides. orient = flat | edge | end, rot = turned 90° on the floor.
+   The geometry and the packing live in kit-pack.js (shared with the server's tests). A spot on the floor can hold a
+   stack: it.stack = cartons resting on top of it (bottom to top). */
+const {dep,orientDims,hasStack,colItems,FL,FD,FH,packLanes}=window.KitPack;
+/* How a carton sits, in plain words: the three ways, short and long, and as saved with a layout */
+const ORI={edge:'On its edge',end:'Standing up',flat:'Lying flat'};
+const ORI_LONG={edge:'On its long edge, like a book on a shelf',end:'Standing up on its end',flat:'Lying flat on its biggest side'};
+const POSE_ORDER=['flat','edge','end'];
+const placeTxt = it => (it.orient==='end'?'standing up':it.orient==='flat'?'lying flat':'on its edge')+(it.rot?', turned 90°':'');
 const allUnits = lanes => lanes.flatMap(l=>l.items.flatMap(colItems));
 const cloneIt = it => { const c={...it}; if(hasStack(it)) c.stack=it.stack.map(x=>({...x})); else delete c.stack; return c; };
 let UID=0; const uidOf = it => (it.u==null?(it.u=++UID):it.u);
-function packLanes(its, cap){
-  const orders=[(a,b)=>dep(b)-dep(a)||b.l-a.l,(a,b)=>b.l-a.l||dep(b)-dep(a),(a,b)=>b.l*dep(b)-a.l*dep(a)];
-  let best=null;
-  for(const o of orders){ const arr=[...its].sort(o), lanes=[];
-    for(const it of arr){ let pick=null, ps=null;
-      for(const ln of lanes){ if(ln.len+it.l>cap) continue; const s0=Math.max(ln.dep,dep(it))-ln.dep, s1=cap-ln.len-it.l; if(!pick||s0<ps[0]||(s0===ps[0]&&s1<ps[1])){ pick=ln; ps=[s0,s1]; } }
-      if(pick){ pick.len+=it.l; pick.dep=Math.max(pick.dep,dep(it)); pick.items.push(it); } else lanes.push({len:it.l,dep:dep(it),items:[it]}); }
-    const W=lanes.reduce((s,l)=>s+l.dep,0), L=Math.max(...lanes.map(l=>l.len));
-    if(!best||W<best.W||(W===best.W&&L<best.L)) best={W,L,lanes}; }
-  return best;
-}
 const layCache=new Map();
 function layouts(units){
   if(!units.length) return [];
@@ -724,37 +776,35 @@ function fitLayout(opts, size){ // kept for compatibility: tightest listed layou
   return f.sort((a,b)=>(b.L*b.W*b.H)-(a.L*a.W*a.H))[0]||null;
 }
 const fitCache=new Map();
+const unitDims = units => units.map(u=>u.pid+':'+u.t+'-'+u.m+'-'+u.b).sort().join('|');
 function fitToSize(units, size){
-  // Arrange the cartons inside a given box: length and height keep the minimum clearance, width is packed as tight as possible.
+  // Arrange the cartons inside a given box (kit-pack.js): standing in rows as the studio always has — length and height
+  // keep the minimum clearance, width packed as tight as possible. Where they don't fit that way: lying flat, turned or stacked.
   if(!units.length||!hasSize(size)) return null;
   const st=S.settings, L=+size.L, W=+size.W, H=+size.H;
-  const ck=unitKey(units)+'@'+L+'x'+W+'x'+H+'@'+st.dLmin+st.dHmin+st.dWmin; if(fitCache.has(ck)) return fitCache.get(ck);
-  const groups={}; units.forEach((u,i)=>{ (groups[u.t+'-'+u.m+'-'+u.b]=groups[u.t+'-'+u.m+'-'+u.b]||[]).push(i); }); const gk=Object.keys(groups);
-  let best=null;
-  for(const [cl,ch] of [[st.dLmin,st.dHmin],[0,0]]){
-    const cap=L-cl, hc=H-ch;
-    const gopts=gk.map(k=>{ const u=units[groups[k][0]]; const o=[]; if(u.m<=hc&&u.b<=cap) o.push({l:u.b,up:u.m,orient:'edge'}); if(u.b<=hc&&u.m<=cap) o.push({l:u.m,up:u.b,orient:'end'}); return o; });
-    if(gopts.some(o=>!o.length)) continue;
-    let combos=[[]]; for(const o of gopts){ const nx=[]; for(const c of combos) for(const x of o) nx.push([...c,x]); combos=nx; if(combos.length>1024) break; }
-    for(const c of combos.slice(0,1024)){
-      const its=[]; gk.forEach((k,gi)=>{ for(const i of groups[k]) its.push({...units[i],idx:i,l:c[gi].l,up:c[gi].up,orient:c[gi].orient}); });
-      const p=packLanes(its,cap); if(p.L>cap) continue;
-      if(!best||p.W<best.p.W||(p.W===best.p.W&&p.lanes.length<best.p.lanes.length)) best={p,its};
-    }
-    if(best) break;
-  }
-  let res=null;
-  if(best){ const lay=deriveLay(best.p.lanes.map(l=>({items:l.items}))); const spareW=W-lay.W;
-    res={lay,status: spareW>=st.dWmin?'fits':(spareW>=0?'tight':'short'),spare:{L:L-lay.L,W:spareW,H:H-lay.H}}; }
+  const ck=unitDims(units)+'@'+L+'x'+W+'x'+H+'@'+st.dLmin+st.dHmin+st.dWmin; if(fitCache.has(ck)) return fitCache.get(ck);
+  const b=KitPack.fitBox(units,{L,W,H},st); let res;
+  if(b){ const lay=deriveLay(b.lanes); const spareW=W-lay.W;
+    res={lay,status: spareW>=st.dWmin?'fits':(spareW>=0?'tight':'short'),spare:{L:L-lay.L,W:spareW,H:H-lay.H},stacked:b.stacked||0,house:!!b.house,way:KitPack.wayLabel(b)}; }
   else res={lay:null,status:'nofit'};
   fitCache.set(ck,res); return res;
 }
+/* The ways these cartons go into one box (kit-pack.js), each with its arrangement: picked from the arrangement card. */
+const wayCache=new Map();
+function waysFor(units, size){
+  if(!units.length||!hasSize(size)) return [];
+  const st=S.settings, L=+size.L, W=+size.W, H=+size.H, ck=unitDims(units)+'@'+L+'x'+W+'x'+H+'@'+st.dLmin+st.dHmin+st.dWmin;
+  if(wayCache.has(ck)) return wayCache.get(ck);
+  const ways=KitPack.packWays(units,{L,W,H},st,5).filter(w=>w.status!=='short').slice(0,4).map(w=>({...w,lay:deriveLay(w.lanes)}));
+  wayCache.set(ck,ways); return ways;
+}
 function fitNote(ft){
   if(!ft) return '';
-  if(ft.status==='fits') return `Fit checked: every carton fits with ${ft.spare.L} / ${ft.spare.W} / ${ft.spare.H} mm to spare (L / W / H).`;
-  if(ft.status==='tight') return `Fit checked: cartons fit, but with only ${ft.spare.W} mm spare on width.`;
+  const how=ft.lay&&ft.house===false&&ft.way?` Packed ${ft.way.toLowerCase()}.`:'';
+  if(ft.status==='fits') return `Fit checked: every carton fits with ${ft.spare.L} / ${ft.spare.W} / ${ft.spare.H} mm to spare (L / W / H).${how}`;
+  if(ft.status==='tight') return `Fit checked: cartons fit, but with only ${ft.spare.W} mm spare on width.${how}`;
   if(ft.status==='short') return `Fit check: at the listed inner sizes the cartons need ${-ft.spare.W} mm more width than this box.`;
-  return 'Fit check: the cartons cannot stand inside this length and height.';
+  return 'Fit check: the cartons don’t go into this length and height — standing, lying flat or stacked.';
 }
 /* every die in hand (confirmed kit sizes), plus sizes still to be confirmed */
 function dieIndex(){
@@ -874,19 +924,36 @@ function repack(ctx){
 function layEdit(ctx){ return ctx==='b'?S.build.custom:(S.drawer?S.drawer.layEdit:null); }
 function setLayEdit(ctx,v){ if(ctx==='b') S.build.custom=v; else if(S.drawer) S.drawer.layEdit=v; }
 function editLanes(ctx){ let c=layEdit(ctx); if(!c){ const base=lastLay[ctx]; if(!base) return null; c={key:base._key,lanes:cloneLanes(base)}; } return c; }
+/* The one carton picked inside a stack (S.sel.lv, 0 = the bottom one) — or null: the whole spot */
+const shownCol = (ctx,r,i) => { const c=layEdit(ctx)||lastLay[ctx]; return c&&c.lanes[r]?c.lanes[r].items[i]:null; };
+function selLevel(ctx,r,i){ const s=S.sel; if(!s||s.ctx!==ctx||s.r!==r||s.i!==i||s.lv==null||(s.list&&s.list.length>1)) return null;
+  const col=shownCol(ctx,r,i); return col&&hasStack(col)&&s.lv<colItems(col).length?s.lv:null; }
+/* what a change does, in words — named on the Undo and Redo buttons */
+const OP_WHAT={flat:n=>`laying ${n} flat`,edge:n=>`putting ${n} on its edge`,end:n=>`standing ${n} up`,turn:n=>`standing ${n} up`,lay:n=>`laying ${n} flat`,rot:n=>`turning ${n} 90°`,
+  left:n=>`moving ${n} left`,right:n=>`moving ${n} right`,back:n=>`moving ${n} back a row`,front:n=>`moving ${n} forward a row`,lift:n=>`taking ${n} off the stack`};
+function opWhat(ctx,op,r,i){
+  const multi=selCells(ctx).length>1&&isSel(ctx,r,i), col=shownCol(ctx,r,i); if(!col) return '';
+  const lv=multi?null:selLevel(ctx,r,i), cl=colItems(col), n=multi?`${selCells(ctx).length} cartons`:lv!=null?shortName(cl[lv].name):cl.length>1?'the stack':shortName(col.name);
+  return (OP_WHAT[op]||(x=>x))(n); }
 function layOp(ctx,op,r,i){
   const c=editLanes(ctx); if(!c) return;
   const lanes=c.lanes, ln=lanes[r]; if(!ln||!ln.items[i]) return; const it=ln.items[i]; let nr=r, ni=i;
   if(['turn','lay','edge','end','flat','rot'].includes(op)){
-    // turn / stand buttons act on every selected carton, and on every carton in a stack
-    const cells=selCells(ctx).length>1&&isSel(ctx,r,i)?selCells(ctx):[[r,i]];
-    for(const [a,b] of cells){ const o=lanes[a]&&lanes[a].items[b]; if(!o) continue;
-      for(const x of colItems(o)){
+    // turn / sit buttons act on every selected carton; in a stack, on the one carton picked in it — or on all of them
+    const multi=selCells(ctx).length>1&&isSel(ctx,r,i), cells=multi?selCells(ctx):[[r,i]], lv=multi?null:selLevel(ctx,r,i);
+    for(const [a,b] of cells){ const o=lanes[a]&&lanes[a].items[b]; if(!o) continue; const cl=colItems(o);
+      for(const x of lv!=null&&cl[lv]?[cl[lv]]:cl){
         if(op==='turn') x.orient=x.orient==='end'?'edge':'end';
         else if(op==='lay') x.orient=x.orient==='flat'?'edge':'flat';
         else if(op==='rot') x.rot=!x.rot; else x.orient=op;
         orientDims(x); } }
     setLayEdit(ctx,c); if(!(S.sel&&S.sel.ctx===ctx&&isSel(ctx,r,i))) S.sel={ctx,r,i}; return;
+  }
+  if(op==='lift'){ // the picked carton comes off the stack and stands beside it in the row
+    const lv=selLevel(ctx,r,i); if(lv==null||!hasStack(it)) return;
+    if(lv===0){ const nb=it.stack[0], rest=it.stack.slice(1); if(rest.length) nb.stack=rest; else delete nb.stack; delete it.stack; ln.items.splice(i,1,nb,it); }
+    else { const off=it.stack.splice(lv-1,1)[0]; if(!it.stack.length) delete it.stack; delete off.stack; ln.items.splice(i+1,0,off); }
+    setLayEdit(ctx,c); S.sel={ctx,r,i:i+1}; return;
   }
   else if(op==='left'&&i>0){ [ln.items[i-1],ln.items[i]]=[ln.items[i],ln.items[i-1]]; ni=i-1; }
   else if(op==='right'&&i<ln.items.length-1){ [ln.items[i+1],ln.items[i]]=[ln.items[i],ln.items[i+1]]; ni=i+1; }
@@ -913,11 +980,13 @@ function moveGroup(ctx, cells, to){
   c.lanes=nl; setLayEdit(ctx,c); setSelObjs(ctx,nl,objs,objs.includes(prim)?prim:objs[objs.length-1]); return true;
 }
 function moveItem(ctx, r, i, to){ return moveGroup(ctx,[[r,i]],to); }
-function afterLay(ctx){ if(ctx==='b'){ S.build.choice=null; S.build.ovr={L:'',W:'',H:''}; render(); } else renderDrawer(); }
+/* after the cartons are moved or turned by hand: the box chosen for the kit stays — the arrangement shows whether it fits */
+function afterLay(ctx){ if(ctx==='b') render(); else renderDrawer(); }
 function doLop(ctx,op,r,i){
   if(op==='del'){ if(!isSel(ctx,r,i)) S.sel={ctx,r,i}; removeSel(ctx); return; }
   if(op==='unstack'){ unstack(ctx,r,i); return; }
-  const before=capturePos(ctx); pushHist(ctx); layOp(ctx,op,r,i); S.selFocus=true; afterLay(ctx); playFlip(ctx,before); }
+  const what=opWhat(ctx,op,r,i), before=capturePos(ctx); pushHist(ctx,what); layOp(ctx,op,r,i); S.selFocus=true; afterLay(ctx); playFlip(ctx,before);
+  if(op==='lift') toast(cap(what.replace(/^taking/,'took'))+' — it now sits beside it',{undo:ctx}); }
 
 /* ---------- selection (Shift / Ctrl / Cmd + click adds or removes a carton) ---------- */
 function selCells(ctx){ if(!S.sel||S.sel.ctx!==ctx) return []; return S.sel.list&&S.sel.list.length?S.sel.list:[[S.sel.r,S.sel.i]]; }
@@ -936,25 +1005,83 @@ function toggleSel(ctx,r,i){
 }
 function selectAll(ctx){ const G=GEOM[ctx]; if(!G) return; const list=[]; G.rows.forEach(rw=>rw.cells.forEach(c=>list.push([c.ri,c.pi]))); if(!list.length) return; S.sel={ctx,r:list[0][0],i:list[0][1],list}; }
 
-/* ---------- undo (Ctrl / Cmd + Z, or the Undo button on the message) ---------- */
-const HIST={b:[],d:[]};
+/* ---------- undo and redo: the Undo / Redo buttons, Ctrl/⌘ Z, Ctrl/⌘ Shift Z or Ctrl Y, the Undo on a message ----------
+   A step keeps what a change touched — the products, the carton arrangement, the chosen box, the selection — and,
+   for Start from scratch, the kit's name and notes too (whole); in a kit on the list, a box pick keeps its size (size).
+   `what` names the change for the buttons and the message. */
+const HIST={b:[],d:[]}, REDO={b:[],d:[]}, HMAX=40, keptRedo={b:null,d:null};
+const jclone = v => v==null?v:JSON.parse(JSON.stringify(v));
 function snapLay(ctx){ const c=layEdit(ctx); return c?{key:c.key,lanes:c.lanes.map(l=>({items:l.items.map(cloneIt)}))}:null; }
-function pushHist(ctx){
-  const h=HIST[ctx]; if(!h) return;
-  const items=ctx==='b'?S.build.items:(S.drawer&&S.drawer.d&&S.drawer.d.items)||[];
-  h.push({items:JSON.parse(JSON.stringify(items)),custom:snapLay(ctx),sel:S.sel?JSON.parse(JSON.stringify(S.sel)):null,
-    choice:ctx==='b'?S.build.choice:null,ovr:ctx==='b'?{...S.build.ovr}:null,owner:ctx==='b'?S.build:(S.drawer&&S.drawer.id)});
-  if(h.length>40) h.shift();
+function histOwner(ctx){ return ctx==='b'?S.build:(S.drawer&&S.drawer.t==='kit'?S.drawer.id:null); }
+function snapOf(ctx,what,opt={}){
+  if(ctx==='b'){ const b=S.build;
+    return {what,owner:b,items:jclone(b.items),custom:snapLay('b'),sel:jclone(S.sel),choice:b.choice?{...b.choice}:null,ovr:{...b.ovr},opt:b.opt,style:b.style,
+      whole:opt.whole?{name:b.name,family:b.family,status:b.status,notes:b.notes,draftId:b.draftId,savedSig:b.savedSig}:null}; }
+  const D=S.drawer; if(!D||D.t!=='kit') return null;
+  return {what,owner:D.id,items:jclone(D.d.items||[]),custom:snapLay('d'),sel:jclone(S.sel),size:opt.size?{L:D.d.L,W:D.d.W,H:D.d.H,sizeStatus:D.d.sizeStatus}:null};
 }
+function keepStep(ctx,s){ const h=HIST[ctx]; h.push(s); if(h.length>HMAX) h.shift(); keptRedo[ctx]=REDO[ctx]; REDO[ctx]=[]; }
+function pushHist(ctx,what,opt){ if(!HIST[ctx]) return; const s=snapOf(ctx,what,opt); if(s) keepStep(ctx,s); }
+/* a step kept for a change that then didn't happen — a drag let go where it started */
+function dropHist(ctx){ HIST[ctx].pop(); if(keptRedo[ctx]){ REDO[ctx]=keptRedo[ctx]; keptRedo[ctx]=null; } }
+function resetHist(ctx){ HIST[ctx]=[]; REDO[ctx]=[]; keptRedo[ctx]=null; held=null; }
+/* typing (a product, a quantity, a box size): the step is taken when the box is entered, kept once it changes something */
+let held=null;
+function holdHist(ctx,what){ held={ctx,s:snapOf(ctx,what)}; }
+function useHeld(ctx){ const h=held; if(!h||h.ctx!==ctx||!h.s||h.s.owner!==histOwner(ctx)) return; held=null; keepStep(ctx,h.s); }
+const histLive = (ctx,list) => { const s=list[ctx]; return !!(s&&s.length&&s[s.length-1].owner===histOwner(ctx)); };
 function undoCtx(){ if(S.drawer&&S.drawer.t==='kit') return HIST.d.length?'d':null; return S.view==='build'&&HIST.b.length?'b':null; }
-function undo(ctx){
-  const h=HIST[ctx]; let s=h&&h.pop(); if(!s){ toast('Nothing to undo'); return; }
-  if(ctx==='d'){ if(!S.drawer||S.drawer.id!==s.owner){ HIST.d=[]; toast('Nothing to undo'); return; } }
-  else if(S.build!==s.owner){ HIST.b=[]; toast('Nothing to undo'); return; }
+function redoCtx(){ if(S.drawer&&S.drawer.t==='kit') return REDO.d.length?'d':null; return S.view==='build'&&REDO.b.length?'b':null; }
+function applySnap(ctx,s){
+  if(ctx==='d'){ const D=S.drawer; D.d.items=s.items; D.layEdit=s.custom; if(s.size) Object.assign(D.d,s.size); }
+  else { const b=S.build; b.items=s.items; b.custom=s.custom; b.choice=s.choice; b.ovr=s.ovr; b.opt=s.opt; b.style=s.style; if(s.whole) Object.assign(b,s.whole); }
+  S.sel=s.sel;
+}
+function stepHist(ctx,back){
+  const from=back?HIST:REDO, to=back?REDO:HIST, s=from[ctx]&&from[ctx].pop(); held=null;
+  if(!s||s.owner!==histOwner(ctx)){ if(s) resetHist(ctx); toast(back?'Nothing to undo':'Nothing to redo'); return; }
   const before=capturePos(ctx); closeAsk();
-  if(ctx==='d'){ S.drawer.d.items=s.items; S.drawer.layEdit=s.custom; }
-  else { S.build.items=s.items; S.build.custom=s.custom; S.build.choice=s.choice; S.build.ovr=s.ovr; }
-  S.sel=s.sel; S.selFocus=true; if(ctx==='b') render(); else renderDrawer(); playFlip(ctx,before); toast('Undone');
+  const now=snapOf(ctx,s.what,{whole:!!s.whole,size:!!s.size}); if(now){ to[ctx].push(now); if(to[ctx].length>HMAX) to[ctx].shift(); }
+  applySnap(ctx,s); S.selFocus=true; if(ctx==='b') render(); else renderDrawer(); playFlip(ctx,before);
+  toast((back?'Undone':'Redone')+(s.what?': '+s.what:''));
+}
+const undo = ctx => stepHist(ctx,true), redo = ctx => stepHist(ctx,false);
+/* the Undo and Redo buttons, each saying what it would take back or put back */
+function histBtns(ctx,ro){
+  const u=!ro&&histLive(ctx,HIST), r=!ro&&histLive(ctx,REDO), lu=u?HIST[ctx].at(-1).what:'', lr=r?REDO[ctx].at(-1).what:'';
+  return `<button class="btn sm hb" data-undo="${ctx}" ${u?'':'disabled'} title="${u?esc('Undo: '+(lu||'the last change')):'Nothing to undo yet'} (Ctrl/⌘ Z)" aria-label="Undo${lu?': '+esc(lu):''}">${ICON.undo}Undo</button><button class="btn sm hb" data-redo="${ctx}" ${r?'':'disabled'} title="${r?esc('Redo: '+(lr||'the change')):'Nothing to redo'} (Ctrl/⌘ Shift Z)" aria-label="Redo${lr?': '+esc(lr):''}">${ICON.redo}Redo</button>`;
+}
+
+/* ---------- New kit: choosing the box, starting again, the ways to pack ---------- */
+/* A box chosen for the new kit — a top size, a die in hand, a size in the comparison, or back to the recommendation
+   (null): the cartons are re-packed for it — standing as always; lying flat, turned or stacked where that is what fits.
+   Undo takes it back. */
+function pickBox(size,what){
+  const b=S.build, before=capturePos('b'), box=size?{L:+size.L,W:+size.W,H:+size.H}:null;
+  pushHist('b',what||`choosing the box ${dimTxt(box)}`);
+  b.choice=box; b.ovr={L:'',W:'',H:''}; b.custom=null; b.opt=null; S.sel=null; render(); playFlip('b',before);
+  const ft=box?fitToSize(unitsOf(b.items.filter(i=>i.pid)),box):null;
+  toast(!box?'Back to the recommended box — the cartons are re-packed for it'
+    :ft&&ft.lay?`Box ${dimTxt(box)} chosen — the cartons are re-packed for it${ft.house?'':', '+ft.way.toLowerCase()}`
+    :`Box ${dimTxt(box)} chosen — but the cartons don’t go into it`,{undo:'b'});
+}
+/* Start from scratch: an empty new kit — name, products, box and arrangement. A draft it was stays in Drafts; Undo brings it all back. */
+function startFromScratch(){
+  const b=S.build, had=b.name.trim()||b.family.trim()||b.notes.trim()||b.style||b.items.some(i=>i.pid||i.raw)||b.choice||b.custom||b.ovr.L!==''||b.ovr.W!==''||b.ovr.H!=='';
+  if(!had){ toast('This kit is empty already — add its products to begin'); return; }
+  const dr=b.draftId?S.drafts.get(b.draftId):null, dirty=bDirty();
+  pushHist('b','starting from scratch',{whole:true}); Object.assign(b,blankBuild()); S.sel=null; S.dDelOpen=false; render();
+  try{ window.scrollTo({top:0,behavior:reducedMotion()?'auto':'smooth'}); }catch(_){}
+  toast(`Started from scratch${dr?` — “${dr.name}” is still in Drafts${dirty?' as last saved':''}`:''}`,{undo:'b'});
+}
+/* The ways to pack the box shown (kit-pack.js), as the arrangement card offers them: one click packs the cartons that way. */
+const WAYS={};
+function pickWay(ctx,n){
+  const W=WAYS[ctx], w=W&&W.list[n]; if(!w||!canCtx(ctx)) return; const before=capturePos(ctx);
+  if(w.best){ if(!layEdit(ctx)){ toast('That is how the cartons are packed now'); return; } pushHist(ctx,'going back to our arrangement'); setLayEdit(ctx,null); }
+  else { pushHist(ctx,`packing ${w.label.toLowerCase()}`); setLayEdit(ctx,{key:W.key,lanes:cloneLanes(w.lay)}); }
+  S.sel=null; afterLay(ctx); playFlip(ctx,before); hintSave(ctx);
+  toast(w.best?'Back to our arrangement':`Packed ${w.label.toLowerCase()}`,{undo:ctx});
 }
 
 /* ---------- remove, swap, stack ---------- */
@@ -966,9 +1093,14 @@ function removeSel(ctx){
   if(contentsLocked(ctx)){ toast('What is in the kit is changed with “Edit contents & prescription” — here you arrange its cartons.'); return; }
   const c=editLanes(ctx); if(!c) return; const lanes=c.lanes;
   const cells=selCells(ctx).filter(([r,i])=>lanes[r]&&lanes[r].items[i]); if(!cells.length) return;
-  const before=capturePos(ctx); pushHist(ctx);
-  const objs=cells.map(([r,i])=>lanes[r].items[i]), units=objs.flatMap(colItems);
-  for(const o of objs) for(const ln of lanes){ const j=ln.items.indexOf(o); if(j>=0){ ln.items.splice(j,1); break; } }
+  // one carton picked inside a stack: only that one goes, the rest of the stack stays
+  const lv=cells.length===1?selLevel(ctx,cells[0][0],cells[0][1]):null;
+  const objs=cells.map(([r,i])=>lanes[r].items[i]), units=lv!=null?[colItems(objs[0])[lv]]:objs.flatMap(colItems);
+  const before=capturePos(ctx); pushHist(ctx,`removing ${units.length===1?shortName(units[0].name):units.length+' cartons'}`);
+  if(lv!=null){ const [r,i]=cells[0], col=objs[0];
+    if(lv===0){ const nb=col.stack[0], rest=col.stack.slice(1); if(rest.length) nb.stack=rest; else delete nb.stack; lanes[r].items.splice(i,1,nb); }
+    else { col.stack.splice(lv-1,1); if(!col.stack.length) delete col.stack; } }
+  else for(const o of objs) for(const ln of lanes){ const j=ln.items.indexOf(o); if(j>=0){ ln.items.splice(j,1); break; } }
   for(let k=lanes.length-1;k>=0;k--) if(!lanes[k].items.length) lanes.splice(k,1);
   const items=itemsOf(ctx);
   for(const u of units){ const j=items.findIndex(x=>x.pid===u.pid); if(j<0) continue; const q=Math.max(1,+items[j].q||1)-1; if(q<=0) items.splice(j,1); else items[j].q=q; }
@@ -978,22 +1110,22 @@ function removeSel(ctx){
 }
 function swapCols(ctx,a,b){
   const c=editLanes(ctx); if(!c) return; const L=c.lanes, A=L[a[0]]&&L[a[0]].items[a[1]], B=L[b[0]]&&L[b[0]].items[b[1]]; if(!A||!B||A===B) return;
-  const before=capturePos(ctx); pushHist(ctx);
+  const before=capturePos(ctx); pushHist(ctx,`swapping ${shortName(A.name)} and ${shortName(B.name)}`);
   L[a[0]].items[a[1]]=B; L[b[0]].items[b[1]]=A; setLayEdit(ctx,c); setSelObjs(ctx,L,[A],A); S.selFocus=true; afterLay(ctx); playFlip(ctx,before);
   toast(`Swapped ${shortName(A.name)} and ${shortName(B.name)}`,{undo:ctx});
 }
 function stackOn(ctx,a,b){
   const c=editLanes(ctx); if(!c) return; const L=c.lanes, A=L[a[0]]&&L[a[0]].items[a[1]], B=L[b[0]]&&L[b[0]].items[b[1]]; if(!A||!B||A===B) return;
-  const before=capturePos(ctx); pushHist(ctx);
+  const before=capturePos(ctx); pushHist(ctx,`stacking ${shortName(A.name)} on ${shortName(B.name)}`);
   L[a[0]].items.splice(a[1],1); B.stack=[...(B.stack||[]),...colItems(A).map(x=>{ const y={...x}; delete y.stack; return y; })];
   c.lanes=L.filter(l=>l.items.length); setLayEdit(ctx,c); setSelObjs(ctx,c.lanes,[B],B); S.selFocus=true;
   const box=GEOM[ctx]&&GEOM[ctx].box, hh=FH(B), over=box&&+box.H&&hh>+box.H;
   afterLay(ctx); playFlip(ctx,before);
-  toast(`Stacked ${shortName(A.name)} on ${shortName(B.name)} — the stack is ${hh} mm high${over?`, taller than the box (${box.H} mm)`:''}`,{undo:ctx});
+  toast(`Stacked ${shortName(A.name)} on ${shortName(B.name)} — the stack is ${hh} mm high${over?`, taller than the box (${box.H} mm)`:''}. Click it to turn one carton on its own.`,{undo:ctx});
 }
 function unstack(ctx,r,i){
   const c=editLanes(ctx); if(!c) return; const ln=c.lanes[r], B=ln&&ln.items[i]; if(!hasStack(B)) return;
-  const before=capturePos(ctx); pushHist(ctx);
+  const before=capturePos(ctx); pushHist(ctx,'unstacking');
   const ups=B.stack; delete B.stack; ln.items.splice(i+1,0,...ups); setLayEdit(ctx,c); setSelObjs(ctx,c.lanes,[B,...ups],B); S.selFocus=true;
   afterLay(ctx); playFlip(ctx,before); toast(`Unstacked — ${ups.length+1} cartons side by side`,{undo:ctx});
 }
@@ -1070,33 +1202,74 @@ function layoutSVG(lay, box, ctx){
     <text x="${pad-4}" y="${pad+Wb/2}" text-anchor="middle" font-size="4" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, system-ui, sans-serif" fill="var(--muted)" transform="rotate(-90 ${pad-4} ${pad+Wb/2})">width ${Wb} mm</text>
   </svg>`;
 }
-/* simple pictogram buttons for turning and standing a carton */
+/* simple pictogram buttons for turning, laying down and standing a carton */
 const ICON={
   rot:'<svg width="18" height="16" viewBox="0 0 18 16" aria-hidden="true"><path d="M14.6 8.4A5.7 5.7 0 1 1 12.4 3.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M13.6 .9l-.9 3.4-3.4-.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   edge:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="3" y="5" width="16" height="9" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.4"/><path d="M1 15.2h20" stroke="currentColor" stroke-width="1.2"/></svg>',
   end:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="7.5" y="1" width="7" height="13" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.4"/><path d="M1 15.2h20" stroke="currentColor" stroke-width="1.2"/></svg>',
   flat:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="2" y="9.5" width="18" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.4"/><path d="M1 15.2h20" stroke="currentColor" stroke-width="1.2"/></svg>',
+  stack:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="3" y="9.6" width="16" height="4.4" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="4.5" y="4.8" width="13" height="4.4" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="6" y="0.8" width="10" height="3.6" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><path d="M1 15.2h20" stroke="currentColor" stroke-width="1.2"/></svg>',
   del:'<svg width="15" height="16" viewBox="0 0 15 16" aria-hidden="true"><path d="M2 4h11M5.5 4V2.4h4V4M3.6 4l.8 10h6.2l.8-10M6.2 6.8v4.6M8.8 6.8v4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  unstack:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="12" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><path d="M11 2v4.5M8.8 4.4 11 6.6l2.2-2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'};
+  unstack:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="12" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><path d="M11 2v4.5M8.8 4.4 11 6.6l2.2-2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  lift:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="9.5" width="9" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="12.5" y="9.5" width="8" height="4.5" rx="1" fill="currentColor" fill-opacity=".45" stroke="currentColor" stroke-width="1.3"/><path d="M6 7.5V3.5a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v3.4M14.4 5.2l2.1 2.1 2.1-2.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  undo:'<svg width="15" height="14" viewBox="0 0 15 14" aria-hidden="true"><path d="M5.2 1.5 1.5 5.2l3.7 3.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.8 5.2h7a4.4 4.4 0 0 1 0 8.8H6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  redo:'<svg width="15" height="14" viewBox="0 0 15 14" aria-hidden="true"><path d="M9.8 1.5l3.7 3.7-3.7 3.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.2 5.2h-7a4.4 4.4 0 0 0 0 8.8H9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  scratch:'<svg width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M8.5 1H3a1.6 1.6 0 0 0-1.6 1.6v10.8A1.6 1.6 0 0 0 3 15h8a1.6 1.6 0 0 0 1.6-1.6V5.1L8.5 1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.3 1.2v4.1h4.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>'};
+/* "How should it sit?": each way drawn from this carton's own sides, at one scale, from the front — the length runs
+   across, the height goes up, the depth goes back — so lying flat looks low and standing up looks tall. */
+const poseDims = (u,o) => orientDims({t:u.t,m:u.m,b:u.b,orient:o,rot:false});
+function poseScale(u){ let s=Infinity; for(const o of POSE_ORDER){ const x=poseDims(u,o), dd=x.d*0.42; s=Math.min(s,56/(x.l+dd),36/(x.up+dd)); } return s; }
+function poseSVG(u,o,col,sc){
+  const x=poseDims(u,o), l=x.l*sc, h=x.up*sc, dd=x.d*sc*0.42, X=(64-(l+dd))/2, Y=44, P=(a,b)=>`${(X+a).toFixed(1)},${(Y-b).toFixed(1)}`;
+  const ln=`stroke="${shadeHex(col,.45)}" stroke-width=".7" stroke-linejoin="round"`;
+  return `<svg viewBox="0 0 64 48" width="64" height="48" aria-hidden="true"><path d="M3 ${Y+.6}H61" stroke="var(--line-strong)" stroke-width="1.2" stroke-linecap="round"/>`
+    +`<polygon points="${P(l,0)} ${P(l+dd,dd)} ${P(l+dd,h+dd)} ${P(l,h)}" fill="${shadeHex(col,.68)}" ${ln}/>`
+    +`<polygon points="${P(0,0)} ${P(l,0)} ${P(l,h)} ${P(0,h)}" fill="${shadeHex(col,.86)}" ${ln}/>`
+    +`<polygon points="${P(0,h)} ${P(l,h)} ${P(l+dd,h+dd)} ${P(dd,h+dd)}" fill="${col}" ${ln}/></svg>`;
+}
+/* Turn 90°: the carton seen from above, now (filled) and once turned (dashed) */
+function turnSVG(u,col){
+  const l=u.l, d=dep(u), s=32/Math.max(l,d,1), w=l*s, h=d*s, cx=30, cy=25;
+  return `<svg viewBox="0 0 64 48" width="64" height="48" aria-hidden="true"><rect x="${(cx-h/2).toFixed(1)}" y="${(cy-w/2).toFixed(1)}" width="${h.toFixed(1)}" height="${w.toFixed(1)}" rx=".8" fill="none" stroke="${shadeHex(col,.5)}" stroke-width=".9" stroke-dasharray="2.2 1.6"/>`
+    +`<rect x="${(cx-w/2).toFixed(1)}" y="${(cy-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx=".8" fill="${col}" fill-opacity=".88" stroke="${shadeHex(col,.45)}" stroke-width=".8"/>`
+    +`<path d="M49.5 9.5a18 18 0 0 1 5.2 12.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M51.9 19.6l2.8 3.1 2.8-3.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+/* the carton a turn would change: the one picked in a stack, else the top of the spot */
+function turnTarget(ctx,ri,pi,it){ const multi=selCells(ctx).length>1, lv=multi?null:selLevel(ctx,ri,pi), cl=colItems(it); return {multi,lv,cl,tg:lv!=null?cl[lv]:cl[cl.length-1]}; }
+function poseTiles(ctx,ri,pi,it){
+  const {multi,lv,cl,tg}=turnTarget(ctx,ri,pi,it), col=colorFor(tg.pid), sc=poseScale(tg);
+  const same=cl.every(x=>(x.orient||'edge')===(cl[0].orient||'edge')), cur=multi?null:lv!=null||cl.length===1||same?(tg.orient||'edge'):null;
+  const key={flat:'F',edge:'E',end:'S'};
+  const tile=o=>{ const h={flat:tg.t,edge:tg.m,end:tg.b}[o];
+    return `<button class="pose" data-lop="${o}" data-ctx="${ctx}" data-r="${ri}" data-i="${pi}" aria-pressed="${cur===o}" title="${esc(ORI_LONG[o])} — ${h} mm high (key ${key[o]})">${poseSVG(tg,o,col,sc)}<b>${ORI[o]}</b><small>${cur===o?'✓ now · ':''}${h} mm high</small></button>`; };
+  return `<div class="posegrid" role="group" aria-label="How the carton sits">${POSE_ORDER.map(tile).join('')}<button class="pose turn" data-lop="rot" data-ctx="${ctx}" data-r="${ri}" data-i="${pi}" title="Turn it a quarter turn on the spot, so its long side runs the other way (key R)">${turnSVG(tg,col)}<b>Turn 90°</b><small>on the spot</small></button></div>`;
+}
+/* in a stack: change one carton of it, or the whole stack */
+function levelPick(ctx,it,lv){
+  const cl=colItems(it); if(cl.length<2) return '';
+  const nm=k=>k===cl.length-1?'Top':k===0?'Bottom':`Level ${k+1}`;
+  return `<div class="lvpick"><span class="lbl">Change</span><div class="seg" role="group" aria-label="Which carton of the stack the buttons change"><button data-lvpick="" data-ctx="${ctx}" aria-pressed="${lv==null}">The whole stack</button>${cl.map((z,k)=>k).reverse().map(k=>`<button data-lvpick="${k}" data-ctx="${ctx}" aria-pressed="${lv===k}" title="Change only ${esc(cl[k].name)}"><span class="sw" style="background:${colorFor(cl[k].pid)}"></span>${nm(k)}: ${esc(shortName(cl[k].name))}</button>`).join('')}</div></div>`;
+}
 function lopBtns(ctx,ri,pi,nLanes,nIn,it){
-  const o=it.orient||'edge', multi=selCells(ctx).length>1;
+  const {multi,lv,cl,tg}=turnTarget(ctx,ri,pi,it), stk=!multi&&cl.length>1;
   const b=(op,html,title,pressed,dis,cls='')=>`<button class="obtn ${cls}" data-lop="${op}" data-ctx="${ctx}" data-r="${ri}" data-i="${pi}" title="${title}" ${pressed!==undefined?`aria-pressed="${!!pressed}"`:''} ${dis?'disabled':''}>${html}</button>`;
-  const all=multi?' (all selected)':'';
-  return `<div class="grp"><span class="lbl">Turn</span>${b('rot',ICON.rot+'Turn 90°','Turn a quarter turn on the spot'+all+' (key R)')}</div>
-    <div class="grp"><span class="lbl">Stand</span>${b('edge',ICON.edge+'Standing','Standing on its long side, like a book on a shelf'+all+' (key S)',!multi&&o==='edge')}${b('end',ICON.end+'Tall','Standing tall on its end'+all+' (key T)',!multi&&o==='end')}${b('flat',ICON.flat+'Flat','Lying flat on its biggest face'+all+' (key F)',!multi&&o==='flat')}</div>
+  const who=multi?`all ${selCells(ctx).length} selected cartons`:lv!=null?`only ${shortName(tg.name)}`:stk?`all ${cl.length} cartons in the stack`:'';
+  return `${stk?levelPick(ctx,it,lv):''}<div class="poseq"><b>How should it sit?</b>${who?` <span class="note">Changes ${esc(who)}.</span>`:''}</div>
+    ${poseTiles(ctx,ri,pi,it)}
     ${multi?'':`<div class="grp"><span class="lbl">Move</span>${b('left','◀ Left','Move left in its row',undefined,pi===0)}${b('back','▲ Back','Move one row towards the back')}${b('front','▼ Front','Move one row towards the front')}${b('right','Right ▶','Move right in its row',undefined,pi===nIn-1)}</div>`}
-    ${!multi&&hasStack(it)||!contentsLocked(ctx)?`<div class="grp"><span class="lbl">Kit</span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Put the stacked cartons side by side again'):''}${contentsLocked(ctx)?'':b('del',ICON.del+'Remove','Remove '+(multi?'the selected cartons':'this carton')+' from the kit (Delete key) — you can undo','','','danger')}</div>`:''}`;
+    ${stk||!contentsLocked(ctx)?`<div class="grp"><span class="lbl">Kit</span>${stk&&lv!=null?b('lift',ICON.lift+'Take it off the stack',`Take ${esc(shortName(tg.name))} off the stack — it stands beside it`):''}${stk?b('unstack',ICON.unstack+(lv!=null?'Unstack all':'Unstack'),'Put every carton of the stack side by side again'):''}${contentsLocked(ctx)?'':b('del',ICON.del+'Remove','Remove '+(multi?'the selected cartons':lv!=null?'this carton':stk?'the whole stack':'this carton')+' from the kit (Delete key) — you can undo','','','danger')}</div>`:''}`;
 }
 function cardTools(ctx,sel,it){
-  const o=it.orient||'edge';
+  const {multi,lv,cl,tg}=turnTarget(ctx,sel.r,sel.i,it), one=!multi&&(lv!=null||cl.length===1), o=tg.orient||'edge';
   const b=(op,html,title,pressed)=>`<button class="ct" data-lop="${op}" data-ctx="${ctx}" data-r="${sel.r}" data-i="${sel.i}" title="${title}" aria-label="${title}" ${pressed!==undefined?`aria-pressed="${!!pressed}"`:''}>${html}</button>`;
-  const multi=selCells(ctx).length>1;
-  return `<div class="cardtools" data-tools="${ctx}" hidden>${multi?`<span class="ctn">${selCells(ctx).length} selected</span><span class="ctsep"></span>`:''}${b('rot',ICON.rot+'Turn','Turn 90°')}<span class="ctsep"></span>${b('edge',ICON.edge+'Standing','Standing',!multi&&o==='edge')}${b('end',ICON.end+'Tall','Tall',!multi&&o==='end')}${b('flat',ICON.flat+'Flat','Flat',!multi&&o==='flat')}<span class="ctsep"></span>${!multi&&hasStack(it)?b('unstack',ICON.unstack+'Unstack','Unstack'):''}${contentsLocked(ctx)?'':b('del',ICON.del,'Remove from the kit (Delete)')}</div>`;
+  return `<div class="cardtools" data-tools="${ctx}" hidden>${multi?`<span class="ctn">${selCells(ctx).length} selected</span><span class="ctsep"></span>`:lv!=null?`<span class="ctn">${esc(shortName(tg.name))}</span><span class="ctsep"></span>`:cl.length>1?`<span class="ctn">Stack of ${cl.length}</span><span class="ctsep"></span>`:''}${b('rot',ICON.rot+'<span class="tx">Turn</span>','Turn 90° on the spot')}<span class="ctsep"></span>${b('flat',ICON.flat+'<span class="tx">Flat</span>','Lying flat',one&&o==='flat')}${b('edge',ICON.edge+'<span class="tx">On edge</span>','On its long edge',one&&o==='edge')}${b('end',ICON.end+'<span class="tx">Standing</span>','Standing up',one&&o==='end')}<span class="ctsep"></span>${!multi&&lv!=null?b('lift',ICON.lift,'Take it off the stack'):''}${!multi&&cl.length>1&&lv==null?b('unstack',ICON.unstack+'<span class="tx">Unstack</span>','Unstack'):''}${contentsLocked(ctx)?'':b('del',ICON.del,'Remove from the kit (Delete)')}</div>`;
 }
 function orientTable(lay, ctx){
-  const rows=[]; lay.lanes.forEach((ln,ri)=>ln.items.forEach((col,pi)=>colItems(col).forEach((it,lv)=>rows.push({ri,pi,it,lv,n:ln.items.length}))));
+  const rows=[]; lay.lanes.forEach((ln,ri)=>ln.items.forEach((col,pi)=>colItems(col).forEach((it,lv,all)=>rows.push({ri,pi,it,lv,n:ln.items.length,stk:all.length>1}))));
+  // a carton in a stack is a row of its own: clicking it picks just that carton, to turn it on its own
+  const on=r=>ctx&&isSel(ctx,r.ri,r.pi)&&(()=>{ const l=selLevel(ctx,r.ri,r.pi); return l==null||l===r.lv; })();
   return `<div class="tablewrap"><table class="otab"><thead><tr><th>Row</th><th>Carton</th><th>How it sits</th><th class="num">Long ↔</th><th class="num">Deep ↕</th><th class="num">High ↑</th></tr></thead><tbody>
-  ${rows.map(r=>`<tr class="${ctx?'pick':''} ${ctx&&isSel(ctx,r.ri,r.pi)?'selrow':''}" ${ctx?`data-lrow="${ctx}" data-r="${r.ri}" data-i="${r.pi}" title="Click to select this carton · Shift+click to add it to the selection"`:''}><td class="mono">${r.ri+1}.${r.pi+1}${r.lv?`<span class="note"> ↑${r.lv+1}</span>`:''}</td><td><span class="sw" style="background:${colorFor(r.it.pid)}"></span>${esc(r.it.name)}</td><td><b>${ORI[r.it.orient||'edge']}</b>${r.it.rot?' <span class="note">· turned</span>':''}${r.lv?` <span class="note">· stacked on top</span>`:''}</td><td class="num mono">${r.it.l}</td><td class="num mono">${dep(r.it)}</td><td class="num mono">${r.it.up}</td></tr>`).join('')}
+  ${rows.map(r=>`<tr class="${ctx?'pick':''} ${on(r)?'selrow':''}" ${ctx?`data-lrow="${ctx}" data-r="${r.ri}" data-i="${r.pi}" ${r.stk?`data-lv="${r.lv}"`:''} title="Click to select this carton${r.stk?' on its own':''} · Shift+click to add it to the selection"`:''}><td class="mono">${r.ri+1}.${r.pi+1}${r.lv?`<span class="note"> ↑${r.lv+1}</span>`:''}</td><td><span class="sw" style="background:${colorFor(r.it.pid)}"></span>${esc(r.it.name)}</td><td><b>${ORI[r.it.orient||'edge']}</b>${r.it.rot?' <span class="note">· turned</span>':''}${r.lv?` <span class="note">· stacked on top</span>`:''}</td><td class="num mono">${r.it.l}</td><td class="num mono">${dep(r.it)}</td><td class="num mono">${r.it.up}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -1141,13 +1314,14 @@ function scene3D(G,box,key,opt={}){
     if(t.type!=='row') o+=txt([b[0],b[1]-2.5],'new row here',5,'var(--accent)'); }
   const cells=[]; for(const row of G.rows) for(const c of row.cells){ let x0=c.x-pd, y0=c.y-pd; const dr=opt.drag&&opt.drag.r===c.ri&&opt.drag.i===c.pi; if(dr){ x0+=opt.drag.dx; y0+=opt.drag.dy; } cells.push({c,x0,x1:x0+c.w,y0,y1:y0+c.h,h:FH(c.it),dr}); }
   const ordered=order3(cells.filter(k=>!k.dr),vx,vy).concat(cells.filter(k=>k.dr)), labels=[], avg=a=>[(a[0][0]+a[1][0]+a[2][0]+a[3][0])/4,(a[0][1]+a[1][1]+a[2][1]+a[3][1])/4];
-  for(const k of ordered){ const lv=colItems(k.c.it), on=opt.edit&&isSel(key,k.c.ri,k.c.pi); let z=0;
-    o+=`<g ${opt.edit?`class="c3" data-c3="${key}" data-r="${k.c.ri}" data-i="${k.c.pi}"`:''} ${k.dr?'opacity=".85"':''}><title>${esc(lv.map(it=>`${it.name} · ${ORI_LONG[it.orient||'edge']}${it.rot?', turned 90°':''} · ${it.l} long × ${dep(it)} deep × ${it.up} high`).join(' | '))} (mm)</title>`;
-    lv.forEach((it,li)=>{ const col=colorFor(it.pid), x0=k.x0, y0=k.y0, x1=x0+it.l, y1=y0+dep(it), z1=z+it.up;
-      const xf=vx>0?x1:x0, yf=vy>0?y1:y0, st=`stroke="${on?'var(--accent)':shadeHex(col,.45)}" stroke-width="${on?1.2:.35}" stroke-linejoin="round"`;
+  for(const k of ordered){ const lv=colItems(k.c.it), on=opt.edit&&isSel(key,k.c.ri,k.c.pi), stk=lv.length>1, pick=on&&stk?selLevel(key,k.c.ri,k.c.pi):null; let z=0;
+    o+=`<g ${opt.edit?`class="c3" data-c3="${key}" data-r="${k.c.ri}" data-i="${k.c.pi}"`:''} ${k.dr?'opacity=".85"':''}><title>${esc(lv.map(it=>`${it.name} · ${ORI_LONG[it.orient||'edge']}${it.rot?', turned 90°':''} · ${it.l} long × ${dep(it)} deep × ${it.up} high`).join(' | '))} (mm)${opt.edit&&stk?' — click one carton of the stack to turn it on its own':''}</title>`;
+    lv.forEach((it,li)=>{ const col=colorFor(it.pid), x0=k.x0, y0=k.y0, x1=x0+it.l, y1=y0+dep(it), z1=z+it.up, onL=on&&(pick==null||pick===li);
+      const xf=vx>0?x1:x0, yf=vy>0?y1:y0, st=`stroke="${onL?'var(--accent)':shadeHex(col,.45)}" stroke-width="${onL?1.2:.35}" stroke-linejoin="round"`;
       const front=[P(x0,yf,z),P(x1,yf,z),P(x1,yf,z1),P(x0,yf,z1)], top=[P(x0,y0,z1),P(x1,y0,z1),P(x1,y1,z1),P(x0,y1,z1)];
-      o+=poly(front,shadeHex(col,.84),st)+poly([P(xf,y0,z),P(xf,y1,z),P(xf,y1,z1),P(xf,y0,z1)],shadeHex(col,.68),st)+poly(top,col,st);
-      labels.push({c:k.c,it,on,col,anchor:li===lv.length-1?avg(top):avg(front)}); z=z1; });
+      // each carton of a stack answers a click on its own (data-lv), so one of them can be turned alone
+      o+=(opt.edit&&stk?`<g data-lv="${li}">`:'')+poly(front,shadeHex(col,.84),st)+poly([P(xf,y0,z),P(xf,y1,z),P(xf,y1,z1),P(xf,y0,z1)],shadeHex(col,.68),st)+poly(top,col,st)+(opt.edit&&stk?'</g>':'');
+      labels.push({c:k.c,it,on:onL,col,li:stk?li:null,anchor:li===lv.length-1?avg(top):avg(front)}); z=z1; });
     o+='</g>'; }
   const xn=vx>0?Lb:0, yn=vy>0?Wb:0, pe='pointer-events="none"';   // the two walls nearest you, see-through
   o+=poly([P(xn,0,0),P(xn,Wb,0),P(xn,Wb,Hb),P(xn,0,Hb)],'var(--accent)',`fill-opacity=".05" stroke="var(--ink)" stroke-width=".4" ${pe}`);
@@ -1179,7 +1353,7 @@ function callouts(cells,C,key,opt){
     const it=k.it||k.c.it, nm=shortName(it.name), name=nm.length<=maxCh?nm:nm.slice(0,maxCh-1)+'…', y=+k.ly.toFixed(2);
     const ex=left?SIDE-1.5:VW-SIDE+1.5, sw=left?SIDE-6.2:VW-SIDE+2.6, tx=left?SIDE-7.6:VW-SIDE+8;
     const lc=k.on?'var(--accent)':'var(--muted)';
-    o+=`<g ${opt.edit?`class="c3" data-c3="${key}" data-r="${k.c.ri}" data-i="${k.c.pi}"`:''}>`
+    o+=`<g ${opt.edit?`class="c3" data-c3="${key}" data-r="${k.c.ri}" data-i="${k.c.pi}" ${k.li!=null?`data-lv="${k.li}"`:''}`:''}>`
       +`<path d="M${ex} ${y}L${(left?ex+4:ex-4)} ${y}L${k.anchor[0].toFixed(2)} ${k.anchor[1].toFixed(2)}" fill="none" stroke="${lc}" stroke-width="${k.on?.7:.35}" stroke-opacity="${k.on?1:.8}" pointer-events="none"/>`
       +`<circle cx="${k.anchor[0].toFixed(2)}" cy="${k.anchor[1].toFixed(2)}" r="${k.on?1.5:1.1}" fill="${k.on?'var(--accent)':'var(--ink)'}" stroke="var(--surface)" stroke-width=".5" pointer-events="none"/>`
       +`<rect x="${left?1:VW-SIDE+1}" y="${(y-gap/2).toFixed(2)}" width="${SIDE-2}" height="${gap}" fill="transparent"/>`
@@ -1206,14 +1380,14 @@ function renderV3Big(){
   <div class="v3modal" role="dialog" aria-modal="true" aria-labelledby="v3T">
     <div class="v3mhead"><h2 id="v3T">3D view</h2><span class="row" style="gap:4px">${v3btns(key)}<button class="btn" data-v3close>Close</button></span></div>
     <div class="v3mbody"><svg class="v3svg" data-v3="${key}" viewBox="0 0 ${V3W} ${V3H}" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" role="img" aria-label="3D view of the cartons in the kit">${scene3D(g.G,g.box,key,{edit:g.edit})}</svg></div>
-    <div class="v3mfoot">${it?`<div class="laytools"><div><span class="sw" style="background:${colorFor(it.pid)}"></span><b>${esc(it.name)}</b> <span class="note">· row ${sel.r+1} · ${ORI_LONG[it.orient||'edge'].toLowerCase()}${it.rot?', turned 90°':''} · ${it.l} long × ${dep(it)} deep × ${it.up} high (mm)</span></div>${lopBtns(key,sel.r,sel.i,g.G.rows.length,row.cells.length,it)}</div>`:`<p class="note" style="margin:0">${g.edit?'Click a carton or its name to get the turn and stand buttons. Drag a carton to move it. ':''}Drag an empty spot to spin the kit. Esc closes.</p>`}</div>
+    <div class="v3mfoot">${it?`<div class="laytools"><div><span class="sw" style="background:${colorFor(it.pid)}"></span><b>${esc(it.name)}</b> <span class="note">· row ${sel.r+1} · ${ORI_LONG[it.orient||'edge'].toLowerCase()}${it.rot?', turned 90°':''} · ${it.l} long × ${dep(it)} deep × ${it.up} high (mm)</span></div>${lopBtns(key,sel.r,sel.i,g.G.rows.length,row.cells.length,it)}</div>`:`<p class="note" style="margin:0">${g.edit?'Click a carton or its name for the buttons that turn it or lay it down — in a stack, click the one carton to change. Drag a carton to move it. ':''}Drag an empty spot to spin the kit. Esc closes.</p>`}</div>
   </div>`;
 }
 function view3D(G,box,key,edit){
   G3[key]={G,box,edit};
   return `<div class="viewhead"><h4>3D view</h4><span class="row">${v3btns(key)}<button class="btn sm primary" data-v3op="big" data-v3key="${key}" title="Open the 3D view full screen">⤢ Bigger view</button></span></div>
     <div class="v3stage"><svg class="v3svg" data-v3="${key}" viewBox="0 0 ${V3W} ${V3H}" width="100%" style="max-height:620px" role="img" aria-label="3D view of the cartons in the kit">${scene3D(G,box,key,{edit})}</svg></div>
-    <p class="note" style="margin:6px 0 0">Drag an empty spot to spin the kit.${edit?' Drag a carton to move it. Click a carton to select it; double-click to turn it 90°.':''}</p>`;
+    <p class="note" style="margin:6px 0 0">Drag an empty spot to spin the kit.${edit?' Drag a carton to move it. Click a carton to select it — in a stack, the one you click; double-click turns it 90°.':''}</p>`;
 }
 
 /* ---------- data ---------- */
@@ -1285,7 +1459,9 @@ async function saveDoc(coll, id, before, after, isKit, msg){
 
 /* ---------- views ---------- */
 let busy=false, drag=null, d3=null, pendingR=false, noClickUntil=0, lastCard={k:'',t:0};
-function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ holdView(); renderInner(); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); tellHost(); }
+function render(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(render,0); return; } busy=true; try{ holdView(); renderInner(); } finally{ busy=false; } keepBuild(); requestAnimationFrame(()=>{ placeCardTools(); fitKitbar(); }); if(S.v3big) renderV3Big(); tellHost(); }
+/* New kit's step bar is pinned on top: the cards pinned beside it, and the steps it scrolls to, stop below it */
+function fitKitbar(){ const kb=document.querySelector('.kitbar'), h=kb&&getComputedStyle(kb).position==='sticky'?kb.offsetHeight+12:12; document.documentElement.style.setProperty('--kbh',h+'px'); }
 let toldView=null, toldDrafts=null;
 function tellHost(){ const X=window.kitStudioErp; if(!X||!X.viewChanged) return;
   const n=[...S.drafts.values()].filter(d=>!d.pushed).length; if(S.view===toldView&&n===toldDrafts) return;
@@ -1299,7 +1475,7 @@ function placeCardTools(){
     tb.style.left=left+'px'; tb.style.top=top+'px'; });
   if(S.selFocus){ S.selFocus=false; const g=S.sel&&document.querySelector(`[data-stage="${S.sel.ctx}"] g[data-on="1"]`); if(g) try{ g.focus({preventScroll:true}); }catch(e){} }
 }
-addEventListener('resize',()=>requestAnimationFrame(placeCardTools));
+addEventListener('resize',()=>requestAnimationFrame(()=>{ placeCardTools(); fitKitbar(); }));
 function renderInner(){
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected', b.dataset.v===S.view));
   const who=$('#who'); who.innerHTML = S.db ? (S.canEdit?'<span class="chip CONFIRMED">Can edit</span>':'<span class="chip">View only</span>') : '';
@@ -1475,20 +1651,21 @@ function kitLinks(ids,n=4){
 /* Top sizes and dies in hand as one-click buttons: a click locks that size in (size to save / this kit's size) */
 function sizePicks(r,opts){
   const rk=r.rank, dis=!canCtx(opts.ctx||'b'), cur=opts.cur&&hasSize(opts.cur)?key(opts.cur):null, recK=r.rec?key(r.rec.size):null, ctx=opts.ctx||'b';
-  const lockTxt=ctx==='d'?'kit size':'size to save';
+  const lockTxt=ctx==='d'?'kit size':'box for this kit', onTxt=ctx==='d'?'✓ locked':opts.picked?'✓ chosen':'✓ in use';
   const pick=(x,label)=>{ const k=key(x.size), on=k===cur;
-    return `<button class="btn sm pick ${on?'on':''}" data-use-size="${x.size.L},${x.size.W},${x.size.H}" ${dis?'disabled':''} aria-pressed="${on}" title="${on?`This is the ${lockTxt}`:`Lock in ${dimTxt(x.size)} as the ${lockTxt}`}">${label}<span class="mono">${dimTxt(x.size)}</span>${on?'<span class="lk">✓ locked</span>':''}</button>`; };
+    return `<button class="btn sm pick ${on?'on':''}" data-use-size="${x.size.L},${x.size.W},${x.size.H}" ${dis?'disabled':''} aria-pressed="${on}" title="${on?`This is the ${lockTxt}`:ctx==='b'?`Use ${dimTxt(x.size)} — the cartons re-pack for it`:`Lock in ${dimTxt(x.size)} as the ${lockTxt}`}">${label}<span class="mono">${dimTxt(x.size)}</span>${on?`<span class="lk">${onTxt}</span>`:''}</button>`; };
+  const how=x=>x.fit&&x.fit.house===false?`<span class="pp mid" title="${esc(x.fit.way)}">${x.fit.stacked?'stacked':'laid differently'}</span>`:'';
   const pct=x=>`<span class="pp ${x.empty<25?'lo':x.empty<=40?'mid':'hi'}">${Math.round(x.empty)}% empty</span>`;
   const top=rk.rows.filter(x=>x.rank).slice(0,5);
   const dies=rk.rows.filter(x=>x.rank&&x.die.length).slice(0,5);
   const near=(rk.near||[]).slice(0,4);
   const curRow=cur&&rk.rows.find(x=>key(x.size)===cur);
-  return `<h3 style="margin-top:14px">Top sizes <span class="note" style="font-weight:400">· click one to lock it in</span></h3>
-    <div class="alt sizepick">${top.map(x=>`<span class="pk">${pick(x,`<span class="rk">#${x.rank}</span>${key(x.size)===recK?'<span class="star">★</span>':''}`)}<span class="pkm">${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${x.tight?'<span class="note">tight</span>':''}</span></span>`).join('')}</div>
-    ${cur&&!top.some(x=>key(x.size)===cur)?`<p class="note" style="margin:6px 0 0">Locked: <b class="mono">${dimTxt(opts.cur)}</b>${curRow?(curRow.rank?` (rank #${curRow.rank} of ${rk.okCount}, ${Math.round(curRow.empty)}% empty)`:curRow.ok?` (${Math.round(curRow.empty)}% empty)`:' (the cartons don’t fit at their listed sizes)'):(()=>{ const nr=(rk.near||[]).find(x=>key(x.size)===cur); return nr?` — a die in hand, but it needs ${nr.need} mm more width at the listed inner sizes. Check it with a sample first`:''; })()}.</p>`:''}
+  return `<h3 style="margin-top:14px">Top sizes <span class="note" style="font-weight:400">· ${ctx==='b'?'click one to use it — the cartons re-pack for it':'click one to lock it in'}</span></h3>
+    <div class="alt sizepick">${top.map(x=>`<span class="pk">${pick(x,`<span class="rk">#${x.rank}</span>${key(x.size)===recK?'<span class="star">★</span>':''}`)}<span class="pkm">${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${how(x)}${x.tight?'<span class="note">tight</span>':''}</span></span>`).join('')}</div>
+    ${cur&&!top.some(x=>key(x.size)===cur)?`<p class="note" style="margin:6px 0 0">${ctx==='d'?'Locked':opts.picked?'Chosen':'In use'}: <b class="mono">${dimTxt(opts.cur)}</b>${curRow?(curRow.rank?` (rank #${curRow.rank} of ${rk.okCount}, ${Math.round(curRow.empty)}% empty)`:curRow.ok?` (${Math.round(curRow.empty)}% empty)`:' (the cartons don’t fit at their listed sizes)'):(()=>{ const nr=(rk.near||[]).find(x=>key(x.size)===cur); return nr?` — a die in hand, but it needs ${nr.need} mm more width at the listed inner sizes. Check it with a sample first`:''; })()}.</p>`:''}
     <h3 style="margin-top:14px">Dies in hand to check</h3>
     ${dies.length?`<p class="note" style="margin:0 0 6px">Dies we already have that fit these cartons, best first. Open a kit below to see its sample, or click the size to lock it in.</p>
-    <div class="dielist">${dies.map(x=>`<div class="dr">${pick(x,`<span class="rk">#${x.rank}</span>`)}<span class="pkm">${pct(x)}<span class="note mono">spare ${x.fit.spare.L}/${x.fit.spare.W}/${x.fit.spare.H}${x.tight?' · tight':''}</span></span>
+    <div class="dielist">${dies.map(x=>`<div class="dr">${pick(x,`<span class="rk">#${x.rank}</span>`)}<span class="pkm">${pct(x)}${how(x)}<span class="note mono">spare ${x.fit.spare.L}/${x.fit.spare.W}/${x.fit.spare.H}${x.tight?' · tight':''}</span></span>
       <div class="dk"><b>${x.die.length} kit${x.die.length>1?'s':''}:</b> ${kitLinks(x.die)}</div></div>`).join('')}</div>`:'<p class="note" style="margin:0">No die we have fits these cartons. A new die and one dummy are needed.</p>'}
     ${near.length?`<h3 style="margin-top:12px">Close dies · worth a physical check</h3>
     <p class="note" style="margin:0 0 6px">At the listed inner sizes these are a few mm short on width. Cartons often squeeze in, so try a sample before ordering a new die.</p>
@@ -1497,11 +1674,11 @@ function sizePicks(r,opts){
     <div class="row" style="margin-top:8px"><button class="btn sm" data-goto-cmp="${ctx}">Compare all ${rk.okCount} sizes ↓</button></div>`;
 }
 function recCard(r, opts={}){
-  if(!r.f.n) return `<div class="card pad"><h3>Recommended panel size</h3><p class="muted">Add products to see the size.</p></div>`;
+  if(!r.f.n) return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><h3>${opts.step?`<span class="stepn">${opts.step}</span>`:''}Recommended panel size</h3><p class="muted">Add products to see the size.</p></div>`;
   const w=r.win, rec=r.rec; const inc=!r.f.allSized;
   const title=r.isRec||!rec?'Recommended panel size':(r.mode==='custom'?'Size for your arrangement':'Size for the selected layout');
   const optSizes=r.opts.map((o,i)=>winFor(o,null,'').size);
-  return `<div class="card pad"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${title}</h3>${w&&r.isRec?'<span class="chip CONFIRMED">★ Recommended</span>':''}</div>
+  return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><div class="row" style="justify-content:space-between"><h3 style="margin:0">${opts.step?`<span class="stepn">${opts.step}</span>`:''}${title}</h3>${w&&r.isRec?'<span class="chip CONFIRMED">★ Recommended</span>':''}</div>
     ${w?`<div class="rec" style="margin-top:8px">${carton(w.size,110)}<div><div class="big">${dimTxt(w.size)}</div><div class="unit">L × W × H mm · ${esc(w.basis)}</div><div class="row" style="margin-top:8px">${confChip(inc?'INCOMPLETE':w.conf)}</div><p class="note" style="margin:6px 0 0">${esc(w.note)}</p>
     ${w.fit?`<p class="note" style="margin:4px 0 0;color:${w.fit.status==='fits'?'var(--ok)':'var(--warn)'}">${w.fit.status==='fits'?'✓ ':''}${esc(fitNote(w.fit))}</p>`:''}
     ${dieProof(w.size, r.excl)}
@@ -1530,11 +1707,11 @@ function sizeTable(r,ctx,cur){
     ${rows.map(x=>{ const k=key(x.size), isRec=k===recK, isCur=k===curK;
       return `<tr class="${isRec?'top':''} ${isCur?'cur':''} ${x.ok?'':'nofit'}">
         <td class="rk">${x.rank?'#'+x.rank:'—'}</td>
-        <td><span class="dims">${dimTxt(x.size)}</span><div>${isRec?'<span class="tag rec">★ recommended</span>':''}${isCur?`<span class="tag cur">${ctx==='d'?'this kit now':'size to save'}</span>`:''}</div>${c?`<div class="srcn mono">${x.ok?`spare ${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' · tight':''}`:'doesn’t fit'}</div>`:''}${c&&x.src.some(t=>t!=='Die in hand')?`<div class="srcn">${esc(x.src.filter(t=>t!=='Die in hand').join(' · '))}</div>`:''}</td>
+        <td><span class="dims">${dimTxt(x.size)}</span><div>${isRec?'<span class="tag rec">★ recommended</span>':''}${isCur?`<span class="tag cur">${ctx==='d'?'this kit now':'size to save'}</span>`:''}</div>${c?`<div class="srcn mono">${x.ok?`spare ${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' · tight':''}`:'doesn’t fit'}</div>${x.ok&&x.fit.house===false?`<div class="srcn">${esc(x.fit.way)}</div>`:''}`:''}${c&&x.src.some(t=>t!=='Die in hand')?`<div class="srcn">${esc(x.src.filter(t=>t!=='Die in hand').join(' · '))}</div>`:''}</td>
         <td class="diec">${x.die.length?`<span class="dieb yes">✓ Die in hand</span><div class="note" title="${esc(x.die.map(id=>S.kits.get(id)?.name||id).join(', '))}">${x.die.length} kit${x.die.length>1?'s':''}: ${names(x.die)}</div>`:`<span class="dieb no">✗ No die available</span><div class="note">new die + one dummy${x.other.length?` · ${x.other.length} unconfirmed kit${x.other.length>1?'s':''} use it`:''}</div>`}</td>
         ${c?'':`<td class="num mono">${cm3(x.box)} cm³</td>`}
         <td>${x.ok?`${wasteChip({pct:x.empty,vol:rk.cv,box:x.box})}<span class="ebar"><span style="width:${(100-x.empty).toFixed(1)}%;background:${colr(x.empty)}"></span></span><div class="note">${cm3(x.box-rk.cv)} cm³ empty${c?` of ${cm3(x.box)} cm³`:''}</div>`:`<span class="note">—${c?` · box ${cm3(x.box)} cm³`:''}</span>`}</td>
-        ${c?'':`<td class="mono">${x.ok?`${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' <span class="note">· tight</span>':''}`:`<span class="note">doesn’t fit</span>`}</td>`}
+        ${c?'':`<td class="mono">${x.ok?`${x.fit.spare.L} / ${x.fit.spare.W} / ${x.fit.spare.H}${x.tight?' <span class="note">· tight</span>':''}${x.fit.house===false?`<div class="srcn">${esc(x.fit.way)}</div>`:''}`:`<span class="note">doesn’t fit</span>`}</td>`}
         ${c?'':`<td class="src">${esc(x.src.join(' · '))}</td>`}
         <td>${x.ok&&!isCur?`<button class="btn sm" data-use-size="${x.size.L},${x.size.W},${x.size.H}" ${ro?'disabled':''} title="Use this box size">Use</button>`:''}</td></tr>`; }).join('')}
     </tbody></table></div>
@@ -1551,42 +1728,71 @@ function layView(r, size){
 }
 function selHead(ctx,lay,sel,selIt){
   const ms=selCells(ctx).filter(([a,b])=>lay.lanes[a]&&lay.lanes[a].items[b]);
-  if(ms.length>1) return `<b>${ms.length} cartons selected</b> <span class="note">· ${ms.map(([a,b])=>esc(shortName(colItems(lay.lanes[a].items[b]).at(-1).name))).join(', ')} · turn, stand and remove act on all of them; drag any one to move them together</span>`;
+  if(ms.length>1) return `<b>${ms.length} cartons selected</b> <span class="note">· ${ms.map(([a,b])=>esc(shortName(colItems(lay.lanes[a].items[b]).at(-1).name))).join(', ')} · the buttons below change all of them; drag any one to move them together</span>`;
   const lv=colItems(selIt), tp=lv[lv.length-1];
   if(lv.length>1) return `<span class="sw" style="background:${colorFor(tp.pid)}"></span><b>Stack of ${lv.length}</b> <span class="note">· ${lv.map((z,k)=>esc(shortName(z.name))+(k?'':' (bottom)')).join(' ▸ ')} · row ${sel.r+1} · ${FL(selIt)} long × ${FD(selIt)} deep × ${FH(selIt)} high (mm)</span>`;
   return `<span class="sw" style="background:${colorFor(selIt.pid)}"></span><b>${esc(selIt.name)}</b> <span class="note">· row ${sel.r+1} · ${ORI_LONG[selIt.orient||'edge'].toLowerCase()}${selIt.rot?', turned 90°':''} · ${selIt.l} long × ${dep(selIt)} deep × ${selIt.up} high (mm)</span>`;
 }
+/* the ways these cartons go into the box shown: one click packs them that way (or back to ours, ★) */
+const WAY_ICON = w => w.kind==='stack'?ICON.stack:ICON[w.kind]||ICON.edge;
+function waysBlock(r,lay,box,ctx){
+  const ways=r.units&&r.units.length&&!r.f.missing.length?waysFor(r.units,box):[]; WAYS[ctx]={key:r.ukey,list:ways};
+  const cur=KitPack.sigOf(lay.lanes); if(ways.length<2&&!(ways.length===1&&ways[0].sig!==cur)) return '';
+  return `<div class="ways"><div class="waysh"><b>Ways to pack this box</b> <span class="note">— click one and the cartons are packed that way</span></div><div class="waylist">${ways.map((w,n)=>{ const on=w.sig===cur, spare=(+box.W)-w.lay.W;
+    return `<button class="way ${on?'on':''}" data-way="${n}" data-ctx="${ctx}" aria-pressed="${on}" title="${esc(w.label)}${w.best?' — our pick for this box':''}">${WAY_ICON(w)}<span><b>${esc(w.label)}</b><small>${w.best?'★ our pick · ':''}${w.status==='fits'?`${spare} mm spare in width`:'fits, tight on width'}${on?' · in use':''}</small></span></button>`; }).join('')}</div></div>`;
+}
 function layoutCard(r, size, title, ctx, ro){
-  const V=layView(r,size); if(!V) return '';
+  const V=layView(r,size); if(!V) return ctx==='b'?`<section class="card pad" id="cardArr"><h3>${title||'Carton orientation'}</h3><p class="muted" style="margin:0">Add the products first — their cartons show here, packed in the box, ready to turn and move.</p></section>`:'';
   const {lay,ft,box}=V;
   const isRec = r.rec && !r.custom && key(box)===key(r.rec.size) && (r.mode==='rec' || r.isRec);
-  const edit=!ro;
-  if(!lay){ return `<div class="card pad"><h3>${title||'Carton orientation'}</h3><p class="banner" style="margin:0">These cartons can’t stand inside ${dimTxt(size)}.</p>${edit&&r.rec?`<div class="row" style="margin-top:8px"><button class="btn primary sm" data-use-rec="${ctx}">Use recommended size ${dimTxt(r.rec.size)}</button></div>`:''}</div>`; }
+  const edit=!ro, idA=ctx==='b'?'id="cardArr"':'';
+  if(!lay){ return `<div class="card pad" ${idA}><h3>${title||'Carton orientation'}</h3><p class="banner" style="margin:0">These cartons don’t go into ${dimTxt(size)} — not standing, lying flat or stacked.</p>${edit&&r.rec?`<div class="row" style="margin-top:8px"><button class="btn primary sm" data-use-rec="${ctx}">Use recommended size ${dimTxt(r.rec.size)}</button>${histBtns(ctx)}</div>`:''}</div>`; }
   lastLay[ctx]={...lay,_key:r.ukey};
   const fits=lay.L<=box.L&&lay.W<=box.W&&lay.H<=box.H;
   const sel=S.sel&&S.sel.ctx===ctx&&lay.lanes[S.sel.r]&&lay.lanes[S.sel.r].items[S.sel.i]?S.sel:null;
   const selIt=sel?lay.lanes[sel.r].items[sel.i]:null;
   const badge = r.custom ? `<span class="chip PROPOSED">${r.isRec?'Your arrangement · fits recommended size':(r.match>=0?'Matches option '+(r.match+1):'Your arrangement')}</span>`
-              : isRec ? `<span class="chip CONFIRMED">★ Recommended</span>` : `<span class="chip">${r.mode==='opt'?'Layout option':'Fitted to '+dimTxt(box)}</span>`;
+              : isRec ? `<span class="chip CONFIRMED">★ Recommended</span>` : `<span class="chip">${r.mode==='opt'?'Layout option':'Packed for '+dimTxt(box)}</span>`;
   const actions = edit ? [
-      !isRec&&r.rec?`<button class="btn sm primary" data-use-rec="${ctx}" title="Arrange the cartons inside the recommended box">Use recommended size ${dimTxt(r.rec.size)}</button>`:'',
-      r.custom?`<button class="btn sm" data-lay-repack="${ctx}" title="Keep each carton's turn, re-arrange the rows for the smallest box">Re-pack rows</button>`:'',
-      r.custom?`<button class="btn sm ghost" data-lay-reset="${ctx}">Back to recommendation</button>`:'',
+      `<span class="hrow ${ctx==='b'?'narrow-only':''}">${histBtns(ctx)}</span>`,
+      !isRec&&r.rec?`<button class="btn sm primary" data-use-rec="${ctx}" title="Pack the cartons in the recommended box">Use recommended size ${dimTxt(r.rec.size)}</button>`:'',
+      r.custom?`<button class="btn sm" data-lay-repack="${ctx}" title="Keep how each carton sits, re-arrange the rows for the smallest box">Re-pack rows</button>`:'',
+      r.custom?`<button class="btn sm ghost" data-lay-reset="${ctx}" title="Forget the changes made by hand and pack the cartons our way">Back to our arrangement</button>`:'',
       ctx==='b'&&can('build')?`<button class="btn sm" data-save-draft>Save draft</button>`:''
     ].join('') : '';
   const k3=edit?ctx:'v'+ctx;
-  return `<div class="card pad"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${title||'Carton orientation'}</h3>${badge}</div>
+  return `<div class="card pad" ${idA}><div class="row" style="justify-content:space-between"><h3 style="margin:0">${title||'Carton orientation'}</h3>${badge}</div>
     ${actions?`<div class="row" style="margin:8px 0 2px;gap:6px">${actions}</div>`:''}
+    ${edit?waysBlock(r,lay,box,ctx):''}
     <div class="viewhead"><h4>Top view</h4><span class="note">looking down into the open kit</span></div>
     <div class="laystage" data-stage="${edit?ctx:''}">${layoutSVG(lay,box,edit?ctx:null)}${edit&&selIt?cardTools(ctx,sel,selIt):''}</div>
-    <div class="dimkey"><span><b>↔</b> length, left to right</span><span><b>↕</b> depth, back to front</span><span><b>H↑</b> height standing up</span><span>dashed outline = lying flat</span><span>all in mm</span></div>
-    ${edit?(selIt?`<div class="laytools"><div>${selHead(ctx,lay,sel,selIt)}</div>${lopBtns(ctx,sel.r,sel.i,lay.lanes.length,lay.lanes[sel.r].items.length,selIt)}<div class="note">Keys: <span class="kbd">R</span> turn · <span class="kbd">S</span> standing · <span class="kbd">T</span> tall · <span class="kbd">F</span> flat · arrows move · <span class="kbd">Delete</span> removes · <span class="kbd">Ctrl/⌘ Z</span> undo · <span class="kbd">Shift</span>+click selects more.</div></div>`:`<p class="note" style="margin:8px 0 0"><b>Drag a carton</b> — the others slide aside to show where it will land. Drop it <b>on</b> another carton to swap places or stack it; drop between rows to start a new row. <b>Shift+click</b> to pick several and move them together. <b>Click</b> a carton for turn, stand and remove buttons. <b>Delete</b> removes a carton and <b>Ctrl/⌘ Z</b> undoes.</p>`):''}
+    <div class="dimkey"><span><b>↔</b> length, left to right</span><span><b>↕</b> depth, back to front</span><span><b>H↑</b> height</span><span>dashed outline = lying flat</span><span>all in mm</span></div>
+    ${edit?(selIt?`<div class="laytools"><div>${selHead(ctx,lay,sel,selIt)}</div>${lopBtns(ctx,sel.r,sel.i,lay.lanes.length,lay.lanes[sel.r].items.length,selIt)}<div class="note">Keys: <span class="kbd">F</span> lying flat · <span class="kbd">E</span> on its edge · <span class="kbd">S</span> standing up · <span class="kbd">R</span> turn 90° · arrows move · <span class="kbd">Delete</span> removes · <span class="kbd">Ctrl/⌘ Z</span> undo · <span class="kbd">Shift</span>+click selects more.</div></div>`
+      :`<div class="howto"><b>To change how a carton sits, click it</b> — buttons with pictures show each way it can sit. <b>Drag</b> a carton to move it; drop it <b>on</b> another carton to swap them or stack it on top. Click a carton in a stack (here or in the 3D view) to turn just that one. <b>Undo</b> takes back any step.</div>`):''}
     ${view3D(layGeom(lay,box),box,k3,edit)}
-    ${fits||ft?'':`<p class="banner" style="margin:8px 0 0">This arrangement needs contents space of ${lay.L} × ${lay.W} × ${lay.H} mm — it doesn’t fit ${dimTxt(box)}.${r.win?` Size for it: ${dimTxt(r.win.size)}.`:''}</p>`}
+    ${fits||ft?'':`<p class="banner" style="margin:8px 0 0">This arrangement needs contents space of ${lay.L} × ${lay.W} × ${lay.H} mm — it doesn’t fit ${dimTxt(box)}.${r.win?` Size for it: ${dimTxt(r.win.size)}.`:''}${edit&&r.win&&key(r.win.size)!==key(box)?` <button class="btn sm" data-use-size="${r.win.size.L},${r.win.size.W},${r.win.size.H}">Use ${dimTxt(r.win.size)}</button>`:''}</p>`}
     ${ft&&ft.status!=='fits'?`<p class="banner" style="margin:8px 0 0">${esc(fitNote(ft))}</p>`:''}
     <p class="note">Contents ${lay.L} × ${lay.W} × ${lay.H} mm inside ${dimTxt(box)}${fits?` (spare ${box.L-lay.L} / ${box.W-lay.W} / ${box.H-lay.H} mm)`:''}.${(()=>{ const uv=(r.units||[]).reduce((s2,u)=>s2+u.t*u.m*u.b,0), bv=(+box.L)*(+box.W)*(+box.H); return uv&&bv&&!r.f.missing.length?` <b>${Math.round(Math.max(0,1-uv/bv)*100)}% of this box is empty space.</b>`:''; })()}</p>
     ${orientTable(lay, edit?ctx:null)}
   </div>`;
+}
+/* New kit's step bar: where the kit stands, what to do next, and Undo, Redo and Start from scratch always at hand */
+function kitBar(b,r,typed,ro,dirty){
+  const n=r.f.n, miss=r.f.missing.length, size=typed||b.choice||(r.win&&r.win.size)||null, picked=!!(typed||b.choice), saved=!!(b.draftId&&!dirty), named=!!b.name.trim(), ready=n>0&&!miss;
+  const steps=[
+    {k:'prod',t:'Add the products',s:!n?'now':miss?'warn':'done',d:!n?'Nothing in the kit yet':`${n} carton${n>1?'s':''}${miss?` · ${miss} without a size`:''}`},
+    {k:'size',t:'Choose the box',s:ready?'done':'todo',d:!ready?'After the products':size?`${dimTxt(size)}${picked?' · chosen':' · suggested'}`:'—'},
+    {k:'arr',t:'Arrange the cartons',s:ready?'done':'todo',d:!ready?'After the box':b.custom?'Arranged by you':'Arranged for you'},
+    {k:'save',t:'Save',s:saved?'done':ready?'now':'todo',d:saved?'Saved in Drafts':ready&&!named?'Name it, then save':b.draftId&&dirty?'Changes not saved yet':'Not saved yet'}];
+  const die=r.win&&r.win.kind==='die';
+  const next=!n?'Type the first product under <b>1 · Products in the kit</b>, or copy every product of an existing kit with <b>Start from an existing kit</b>.'
+    :miss?`<b>${esc(shortName(pName(r.f.missing[0])))}</b>${miss>1?` and ${miss-1} more have`:' has'} no inner size yet. Add it under <b>Inner products</b> — then the box can be worked out.`
+    :saved?'Saved in Drafts. Push it to Kits once the dummy is approved — or keep working and save again.'
+    :`${picked?`Box <b>${dimTxt(size)}</b> chosen.`:`We suggest the box <b>${dimTxt(size)}</b>${die?' — a die we already have':''}.`} To try another, click a size under <b>Top sizes</b> — the cartons re-pack for it. Click a carton to turn it or lay it flat. ${named?'When it looks right, <b>Save as draft</b>.':'Then name the kit and <b>Save as draft</b>.'}`;
+  return `<div class="kitbar" role="region" aria-label="New kit steps">
+    <ol class="ksteps">${steps.map((x,i)=>`<li class="ks ${x.s}"><button data-step="${x.k}" title="Go to ${esc(x.t.toLowerCase())}"><span class="kn" aria-hidden="true">${x.s==='done'?'✓':x.s==='warn'?'!':i+1}</span><span class="kt"><b>${esc(x.t)}</b><small>${esc(x.d)}</small></span></button></li>`).join('')}</ol>
+    <div class="kbtns">${histBtns('b',ro)}<button class="btn sm danger-soft" data-scratch ${ro?'disabled':''} title="Clear the name, products, box and arrangement and begin again — Undo brings it all back">${ICON.scratch}Start from scratch</button></div>
+    <p class="knext"><span class="kh">Next</span><span>${next}</span></p></div>`;
 }
 function vBuild(){
   const b=S.build, typed=(b.ovr.L!==''&&b.ovr.W!==''&&b.ovr.H!=='')?{L:+b.ovr.L,W:+b.ovr.W,H:+b.ovr.H}:null;
@@ -1595,8 +1801,9 @@ function vBuild(){
   const sim=similarKits(b.items, null);
   const chosen=b.choice || (r.win&&r.win.size) || null;
   const ro=!can('build'), dr=b.draftId?S.drafts.get(b.draftId):null, dirty=bDirty();
-  const head=b.draftId?`<div class="drafthead" style="margin-bottom:14px"><span>Draft <b>${esc(dr?dr.name:b.name)}</b>${dr?` · last saved ${fmtDate(dr.updatedAt)} by ${esc(who(dr.updatedBy))}`:''}${dirty?' · <b>unsaved changes</b>':' · all changes saved'}${dr&&dr.pushed?' · already added to Kits':''}</span><span class="row" style="gap:6px"><button class="btn sm" data-goto="drafts">All drafts</button><button class="btn sm ghost" data-clear-build>Start a new kit</button>${ro?'':`<button class="btn sm danger-soft" data-del-open-draft>${TRASH}Delete draft</button>`}</span>${S.dDelOpen&&!ro?`<div class="confirmbox"><span>Delete the draft <b>${esc(dr?dr.name:b.name)}</b> for everyone? This can’t be undone.${dr&&dr.pushed?' The kit already in Kits stays.':''}</span> <button class="btn danger sm" data-del-open-draft-yes>Delete draft</button><button class="btn sm" data-del-open-draft-no>Keep</button></div>`:''}</div>`:'';
-  return `${head}<div class="builder">
+  const cur={L:b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''),W:b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''),H:b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:'')};
+  const head=b.draftId?`<div class="drafthead" style="margin-bottom:14px"><span>Draft <b>${esc(dr?dr.name:b.name)}</b>${dr?` · last saved ${fmtDate(dr.updatedAt)} by ${esc(who(dr.updatedBy))}`:''}${dirty?' · <b>unsaved changes</b>':' · all changes saved'}${dr&&dr.pushed?' · already added to Kits':''}</span><span class="row" style="gap:6px"><button class="btn sm" data-goto="drafts">All drafts</button>${ro?'':`<button class="btn sm danger-soft" data-del-open-draft>${TRASH}Delete draft</button>`}</span>${S.dDelOpen&&!ro?`<div class="confirmbox"><span>Delete the draft <b>${esc(dr?dr.name:b.name)}</b> for everyone? This can’t be undone.${dr&&dr.pushed?' The kit already in Kits stays.':''}</span> <button class="btn danger sm" data-del-open-draft-yes>Delete draft</button><button class="btn sm" data-del-open-draft-no>Keep</button></div>`:''}</div>`:'';
+  return `${head}${kitBar(b,r,typed,ro,dirty)}<div class="builder">
     <div class="grid">
       <section class="card pad grid">
         <h2>New kit development</h2>
@@ -1611,28 +1818,28 @@ function vBuild(){
         </div>
         <label class="f">Notes (kept with the draft; become the kit’s remarks when added to Kits)<textarea id="bNotes" rows="2" placeholder="e.g. dummy sent 25-Sep, waiting for Fluence approval" ${ro?'disabled':''}>${esc(b.notes)}</textarea></label>
       </section>
-      <section class="card pad"><h2>Products in the kit</h2>${itemsEditor(b.items,'b',ro)}
+      <section class="card pad" id="cardProd"><h2><span class="stepn">1</span>Products in the kit</h2>${itemsEditor(b.items,'b',ro)}
         <p class="note">${r.f.n} item${r.f.n===1?'':'s'} · total inner thickness ${r.f.T} mm${r.f.missing.length?` · <span style="color:var(--bad)">${r.f.missing.length} without inner size</span>`:''}</p></section>
-      ${layoutCard(r, (b.ovr.L!==''&&b.ovr.W!==''&&b.ovr.H!=='')?{L:+b.ovr.L,W:+b.ovr.W,H:+b.ovr.H}:(b.choice||null), null, 'b', ro)}
+      ${layoutCard(r, typed||b.choice||null, '<span class="stepn">3</span>Arrange the cartons', 'b', ro)}
       <section class="card pad"><h2>Closest existing kits by products</h2>
         ${sim.length?`<ul class="list">${sim.map(s=>`<li><span><button class="link" data-open-kit="${s.id}">${esc(s.k.name)}</button> <span class="note">${s.inter} of ${s.bs} products shared</span></span><span class="row"><span class="dims ${hasSize(s.k)?'':'none'}">${dimTxt(s.k)}</span>${chip(s.k.sizeStatus)}</span></li>`).join('')}</ul>`:'<p class="muted">Add products to compare with existing kits.</p>'}
       </section>
     </div>
     <div class="grid sticky">
-      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur:{L:b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''),W:b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''),H:b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:'')}})}
-      <section class="card pad grid"><h3>Size to save</h3>
+      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur,picked:!!(typed||b.choice),step:2,id:'cardBox'})}
+      <section class="card pad grid" id="cardSave"><h3><span class="stepn">4</span>Save the kit · size to save</h3>
         <div class="lwh">
-          <label class="f">L<input type="number" id="bL" value="${esc(b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''))}" ${ro?'disabled':''}></label>
-          <label class="f">W<input type="number" id="bW" value="${esc(b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''))}" ${ro?'disabled':''}></label>
-          <label class="f">H<input type="number" id="bH" value="${esc(b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:''))}" ${ro?'disabled':''}></label>
-          <button class="btn ghost" data-reset-size>Reset</button>
+          <label class="f">L<input type="number" id="bL" value="${esc(cur.L)}" ${ro?'disabled':''}></label>
+          <label class="f">W<input type="number" id="bW" value="${esc(cur.W)}" ${ro?'disabled':''}></label>
+          <label class="f">H<input type="number" id="bH" value="${esc(cur.H)}" ${ro?'disabled':''}></label>
+          <button class="btn ghost" data-reset-size title="Back to the recommended box">Reset</button>
         </div>
-        ${spaceBlock(b.items.filter(i=>i.pid),{L:b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''),W:b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''),H:b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:'')},r)}
-        <div class="row"><button class="btn primary" data-save-draft ${ro?'disabled':''}>${b.draftId?'Save draft':'Save as draft'}</button><button class="btn" data-push="b" ${ro?'disabled':''} title="Add it to the main Kits list">Push to Kits</button><button class="btn" data-rep="b" ${r.f.n?'':'disabled'} title="PDF with size, 3D and top views, and each carton’s orientation">Customer report (PDF)</button><button class="btn ghost" data-clear-build>Clear</button></div>
+        ${spaceBlock(b.items.filter(i=>i.pid),cur,r)}
+        <div class="row"><button class="btn primary" data-save-draft ${ro?'disabled':''}>${b.draftId?'Save draft':'Save as draft'}</button><button class="btn" data-push="b" ${ro?'disabled':''} title="Add it to the main Kits list">Push to Kits</button><button class="btn" data-rep="b" ${r.f.n?'':'disabled'} title="PDF with size, 3D and top views, and each carton’s orientation">Customer report (PDF)</button></div>
         <p class="note"><b>Save draft</b> keeps the kit, its size and carton layout in Drafts while it’s in development. It stays out of the Kits list and the size history. <b>Push to Kits</b> adds it to the main Kits list once the dummy is approved. You can also push from the Drafts tab.</p>
       </section>
     </div></div>
-    <div style="margin-top:16px">${sizeTable(r,'b',{L:b.ovr.L!==''?b.ovr.L:(chosen?chosen.L:''),W:b.ovr.W!==''?b.ovr.W:(chosen?chosen.W:''),H:b.ovr.H!==''?b.ovr.H:(chosen?chosen.H:'')})}</div>`;
+    <div style="margin-top:16px">${sizeTable(r,'b',cur)}</div>`;
 }
 function vExport(){
   const st=S.settings, ro=!can('settings');
@@ -1656,7 +1863,7 @@ function vExport(){
 }
 
 /* ---------- drawer ---------- */
-function openKit(id){ const k=S.kits.get(id); if(!k) return; S.sel=null; HIST.d=[]; S.drawer={t:'kit',id,d:JSON.parse(JSON.stringify({...k,history:undefined})),confirmDel:false,layEdit:loadLayout(k.layout,k.items||[])}; renderDrawer(); }
+function openKit(id){ const k=S.kits.get(id); if(!k) return; S.sel=null; resetHist('d'); S.drawer={t:'kit',id,d:JSON.parse(JSON.stringify({...k,history:undefined})),confirmDel:false,layEdit:loadLayout(k.layout,k.items||[])}; renderDrawer(); }
 function openProd(id,isNew){ const p=isNew?{name:'',mrp:'',status:'Active',L:'',W:'',H:'',sizeStatus:'MISSING',remarks:''}:S.products.get(id); if(!p) return; S.drawer={t:'prod',id,isNew,d:JSON.parse(JSON.stringify({...p,history:undefined}))}; renderDrawer(); }
 /* The open kit's contents changed in the Fluence master (its editor, or a
    colleague): take the new list, keep every other unsaved edit on screen. */
@@ -1664,10 +1871,10 @@ function syncDrawerContents(){
   const D=S.drawer; if(!D||D.t!=='kit'||!D.d.erp||!D.d.erp.kitId) return; const k=S.kits.get(D.id); if(!k) return;
   const sig=x=>JSON.stringify((x||[]).map(i=>[i.pid,+i.q||1,i.mrp??null]));
   if(sig(k.items)===sig(D.d.items)) return;
-  D.d.items=JSON.parse(JSON.stringify(k.items||[])); D.d.erp=JSON.parse(JSON.stringify(k.erp||null)); D.layEdit=null; HIST.d=[]; if(S.sel&&S.sel.ctx==='d') S.sel=null;
+  D.d.items=JSON.parse(JSON.stringify(k.items||[])); D.d.erp=JSON.parse(JSON.stringify(k.erp||null)); D.layEdit=null; resetHist('d'); if(S.sel&&S.sel.ctx==='d') S.sel=null;
   renderDrawer(); toast('The kit’s contents changed in the Fluence master — shown here now.');
 }
-function closeDrawer(){ S.drawer=null; HIST.d=[]; closeAsk(); if(S.sel&&S.sel.ctx==='d') S.sel=null; if(S.v3big&&S.v3big!=='b'){ S.v3big=null; renderV3Big(); } renderDrawer(); }
+function closeDrawer(){ S.drawer=null; resetHist('d'); closeAsk(); if(S.sel&&S.sel.ctx==='d') S.sel=null; if(S.v3big&&S.v3big!=='b'){ S.v3big=null; renderV3Big(); } renderDrawer(); }
 function renderDrawer(){ if((drag&&drag.moved)||(d3&&d3.moved)){ pendingR=true; return; } if(busy){ setTimeout(renderDrawer,0); return; } busy=true; try{ keepFocus(renderDrawerRaw); } finally{ busy=false; } requestAnimationFrame(placeCardTools); if(S.v3big) renderV3Big(); }
 function renderDrawerRaw(){
   const root=$('#drawerRoot'); const D=S.drawer; if(!D){ root.innerHTML=''; return; }
@@ -1735,8 +1942,9 @@ function setItemName(prefix,i,val){ const it=itemsOf(prefix)[i]; const pid=pidBy
 document.addEventListener('click', async e => {
   const ak=e.target.closest('[data-ask]'); if(ak){ answerAsk(ak.dataset.ask); return; }
   const ub=e.target.closest('[data-undo]'); if(ub){ const tt=$('#toast'); if(tt) tt.hidden=true; undo(ub.dataset.undo); return; }
+  const rb=e.target.closest('[data-redo]'); if(rb){ redo(rb.dataset.redo); return; }
   const g=e.target.closest('[data-lsel]'); if(g){ if(Date.now()<noClickUntil) return; cardClick(g.dataset.lsel,+g.dataset.r,+g.dataset.i,e.shiftKey||e.ctrlKey||e.metaKey); return; }
-  const lr=e.target.closest('tr[data-lrow]'); if(lr){ const c=lr.dataset.lrow, r=+lr.dataset.r, i=+lr.dataset.i; if((e.shiftKey||e.ctrlKey||e.metaKey)&&S.sel&&S.sel.ctx===c) toggleSel(c,r,i); else S.sel={ctx:c,r,i}; S.selFocus=true; if(c==='b') render(); else renderDrawer(); return; }
+  const lr=e.target.closest('tr[data-lrow]'); if(lr){ const c=lr.dataset.lrow, r=+lr.dataset.r, i=+lr.dataset.i; if((e.shiftKey||e.ctrlKey||e.metaKey)&&S.sel&&S.sel.ctx===c) toggleSel(c,r,i); else { S.sel={ctx:c,r,i}; if(lr.dataset.lv!=null) S.sel.lv=+lr.dataset.lv; } S.selFocus=true; if(c==='b') render(); else renderDrawer(); return; }
   if(e.target.closest('[data-v3close]')){ S.v3big=null; renderV3Big(); return; }
   const v3b=e.target.closest('[data-v3op]'); if(v3b){ const k=v3b.dataset.v3key, st=v3st(k), op=v3b.dataset.v3op;
     if(op==='big'){ S.v3big=k; renderV3Big(); setTimeout(()=>$('.v3modal [data-v3close].btn')?.focus(),0); return; }
@@ -1756,7 +1964,8 @@ document.addEventListener('click', async e => {
   if(ds.ksort!==undefined){ S.kf.sort=S.kf.sort==='desc'?'asc':S.kf.sort==='asc'?'':'desc'; render(); return; }
   if(ds.seg){ const v=ds.val; if(ds.seg==='kst') S.kf.st=v; if(ds.seg==='kor') S.kf.origin=v; if(ds.seg==='pst') S.pf.st=v; if(ds.seg==='dst') S.df=v; if(ds.seg==='rank'){ S.rankMode=v; try{ localStorage.setItem('kst.rank',v); }catch(_){} } render(); return; }
   if(ds.addItem){ itemsOf(ds.addItem).push({pid:null,q:1,raw:''}); if(ds.addItem==='b') render(); else renderDrawer(); const n=itemsOf(ds.addItem).length-1; document.getElementById(ds.addItem+'p'+n)?.focus(); return; }
-  if(ds.delItem){ itemsOf(ds.delItem).splice(+ds.i,1); if(ds.delItem==='b'){S.build.choice=null; render();} else renderDrawer(); return; }
+  if(ds.delItem){ const row=itemsOf(ds.delItem)[+ds.i]; if(row&&(row.pid||row.raw)) pushHist(ds.delItem,`removing ${row.pid?shortName(pName(row.pid)):'a product'}`);
+    itemsOf(ds.delItem).splice(+ds.i,1); if(ds.delItem==='b'){S.build.choice=null; render();} else renderDrawer(); return; }
   if(ds.insItem){ insertItem(ds.insItem,+ds.i); return; }
   if(ds.saveDraft!==undefined){ saveDraft(); return; }
   if(ds.push){ openPush(ds.push); return; }
@@ -1771,24 +1980,27 @@ document.addEventListener('click', async e => {
   if(ds.delOpenDraft!==undefined){ S.dDelOpen=true; render(); return; }
   if(ds.delOpenDraftNo!==undefined){ S.dDelOpen=false; render(); return; }
   if(ds.delOpenDraftYes!==undefined){ const id=S.build.draftId; S.dDelOpen=false; if(id) delDraft(id,{clear:true}); else render(); return; }
-  if(ds.newDraft!==undefined){ if(S.build.draftId&&!bDirty()) S.build=blankBuild(); S.view='build'; render(); return; }
+  if(ds.newDraft!==undefined){ if(S.build.draftId&&!bDirty()){ S.build=blankBuild(); resetHist('b'); } S.view='build'; render(); return; }
   if(ds.useSize){ const [L,W,H]=ds.useSize.split(',').map(Number);
-    if(S.drawer&&S.drawer.t==='kit'&&t.closest('.drawer')){ const D=S.drawer, o=S.kits.get(D.id)||{}; Object.assign(D.d,{L,W,H}); D.layEdit=null; S.sel=null;
+    if(S.drawer&&S.drawer.t==='kit'&&t.closest('.drawer')){ const D=S.drawer, o=S.kits.get(D.id)||{}; pushHist('d',`choosing the box ${dimTxt({L,W,H})}`,{size:true}); Object.assign(D.d,{L,W,H}); D.layEdit=null; S.sel=null;
       if(hasSize(o)&&key(o)===key(D.d)) D.d.sizeStatus=o.sizeStatus||D.d.sizeStatus; else if(D.d.sizeStatus!=='PROPOSED'&&D.d.sizeStatus!=='VERIFY') D.d.sizeStatus='PROPOSED';
-      renderDrawer(); toast(hasSize(o)&&key(o)===key(D.d)?`Back to the saved size ${dimTxt({L,W,H})}`:`${dimTxt({L,W,H})} locked in — press Save changes to keep it`); }
-    else { S.build.choice={L,W,H}; S.build.ovr={L:'',W:'',H:''}; S.sel=null; render(); toast(`${dimTxt({L,W,H})} locked in as the size to save`); } return; }
+      renderDrawer(); toast(hasSize(o)&&key(o)===key(D.d)?`Back to the saved size ${dimTxt({L,W,H})} — the cartons are re-packed for it`:`${dimTxt({L,W,H})} chosen, the cartons re-packed for it — press Save changes to keep it`,{undo:'d'}); }
+    else pickBox({L,W,H}); return; }
   if(ds.lop){ doLop(ds.ctx,ds.lop,+ds.r,+ds.i); return; }
   if(ds.rep){ let p={mrp:true,rem:false}; try{ p={...p,...JSON.parse(localStorage.getItem('kst.rep')||'{}')}; }catch(_){}
     S.rep={ctx:ds.rep,mrp:!!p.mrp,rem:!!p.rem,busy:false,msg:''}; renderModal(); setTimeout(()=>$('[data-rep-go]')?.focus(),0); return; }
   if(ds.repClose!==undefined){ if(S.rep&&!S.rep.busy){ S.rep=null; renderModal(); } return; }
   if(ds.repGo!==undefined){ runReport(); return; }
-  if(ds.useRec){ if(ds.useRec==='b'){ S.build.custom=null; S.build.opt=null; S.build.choice=null; S.build.ovr={L:'',W:'',H:''}; S.sel=null; render(); }
-    else if(S.drawer){ const D=S.drawer; const r=recommend((D.d.items||[]).filter(i=>i.pid),null,D.id); if(r.rec){ const o=S.kits.get(D.id)||{}; Object.assign(D.d,{L:r.rec.size.L,W:r.rec.size.W,H:r.rec.size.H}); if(key(o)!==key(D.d)) D.d.sizeStatus='PROPOSED'; D.layEdit=null; S.sel=null; renderDrawer(); toast('Recommended size applied — press Save changes to keep it'); } } return; }
-  if(ds.layRepack){ const c=ds.layRepack, before=capturePos(c); pushHist(c); repack(c); afterLay(c); playFlip(c,before); toast('Rows re-packed',{undo:c}); return; }
-  if(ds.layReset){ const c=ds.layReset, before=capturePos(c); pushHist(c); setLayEdit(c,null); S.sel=null; if(c==='b') render(); else renderDrawer(); playFlip(c,before); return; }
-  if(ds.opt!==undefined){ S.build.custom=null; S.sel=null; S.build.opt=ds.opt==='rec'?null:+ds.opt; S.build.choice=null; S.build.ovr={L:'',W:'',H:''}; render(); return; }
-  if(ds.resetSize!==undefined){ S.build.custom=null; S.sel=null; S.build.opt=null; S.build.choice=null; S.build.ovr={L:'',W:'',H:''}; render(); return; }
-  if(ds.clearBuild!==undefined){ S.build=blankBuild(); S.sel=null; S.dDelOpen=false; render(); return; }
+  if(ds.useRec){ if(ds.useRec==='b') pickBox(null,'going back to the recommended box');
+    else if(S.drawer){ const D=S.drawer; const r=recommend((D.d.items||[]).filter(i=>i.pid),null,D.id); if(r.rec){ const o=S.kits.get(D.id)||{}; pushHist('d','the recommended size',{size:true}); Object.assign(D.d,{L:r.rec.size.L,W:r.rec.size.W,H:r.rec.size.H}); if(key(o)!==key(D.d)) D.d.sizeStatus='PROPOSED'; D.layEdit=null; S.sel=null; renderDrawer(); toast('Recommended size applied — press Save changes to keep it',{undo:'d'}); } } return; }
+  if(ds.layRepack){ const c=ds.layRepack, before=capturePos(c); pushHist(c,'re-packing the rows'); repack(c); afterLay(c); playFlip(c,before); toast('Rows re-packed',{undo:c}); return; }
+  if(ds.layReset){ const c=ds.layReset, before=capturePos(c); pushHist(c,'going back to our arrangement'); setLayEdit(c,null); S.sel=null; if(c==='b') render(); else renderDrawer(); playFlip(c,before); toast('Back to our arrangement',{undo:c}); return; }
+  if(ds.opt!==undefined){ pushHist('b','a layout option'); S.build.custom=null; S.sel=null; S.build.opt=ds.opt==='rec'?null:+ds.opt; S.build.choice=null; S.build.ovr={L:'',W:'',H:''}; render(); return; }
+  if(ds.resetSize!==undefined){ pickBox(null,'going back to the recommended box'); return; }
+  if(ds.clearBuild!==undefined||ds.scratch!==undefined){ startFromScratch(); return; }
+  if(ds.way!==undefined){ pickWay(ds.ctx,+ds.way); return; }
+  if(ds.lvpick!==undefined){ const c=ds.ctx; if(S.sel&&S.sel.ctx===c){ if(ds.lvpick==='') delete S.sel.lv; else S.sel.lv=+ds.lvpick; S.selFocus=true; if(c==='b') render(); else renderDrawer(); } return; }
+  if(ds.step){ const el=document.getElementById({prod:'cardProd',size:'cardBox',arr:'cardArr',save:'cardSave'}[ds.step]); if(el){ el.scrollIntoView({behavior:reducedMotion()?'auto':'smooth',block:'start'}); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); } return; }
   if(ds.newProd!==undefined){ openProd('n'+Date.now().toString(36), true); return; }
   if(ds.erpSize!==undefined){ const id=S.drawer&&S.drawer.id; if(!id||!window.kitStudioErp) return; t.disabled=true;
     try{ const res=await window.kitStudioErp.useErpSize(id); toast(res.erp==='same'?'The ERP product already has this size':'ERP product size is now '+(res.erpSize||''));
@@ -1836,16 +2048,18 @@ document.addEventListener('input', e => {
   if(S.pm&&/^pm(Name|Code|Mrp)$/.test(t.id)){ S.pm[{pmName:'name',pmCode:'code',pmMrp:'mrp'}[t.id]]=t.value; return; }
   if(t.id==='kq'){ S.kf.q=t.value; render(); return; }
   if(t.id==='pq'){ S.pf.q=t.value; render(); return; }
-  if(ds.item){ if(ds.f==='q'){ itemsOf(ds.item)[+ds.i].q=Math.max(1,+t.value||1); if(ds.item==='b'){ S.build.choice=null; render(); } else renderDrawer(); }
+  if(ds.item){ if(ds.f==='q'){ const row=itemsOf(ds.item)[+ds.i], q=Math.max(1,+t.value||1); if(row.q!==q&&held&&held.s) held.s.what=`changing the quantity of ${row.pid?shortName(pName(row.pid)):'a product'}`; if(row.q!==q) useHeld(ds.item); row.q=q; if(ds.item==='b'){ S.build.choice=null; render(); } else renderDrawer(); }
     else setItemName(ds.item,+ds.i,t.value); // the product is committed on Enter, Tab, a click in the list, or leaving the box
     return; }
   if(ds.d!==undefined && S.drawer){ S.drawer.d[ds.d]=t.value; return; }
-  if(t.id==='bName') S.build.name=t.value; if(t.id==='bFam') S.build.family=t.value; if(t.id==='bNotes') S.build.notes=t.value;
+  if(t.id==='bName'||t.id==='bFam'||t.id==='bNotes'){ S.build[{bName:'name',bFam:'family',bNotes:'notes'}[t.id]]=t.value; keepBuild(); }
   if(t.id==='bL'||t.id==='bW'||t.id==='bH') S.build.ovr[t.id.slice(1)]=t.value;
 });
 document.addEventListener('change', e => {
   const t=e.target;
-  if(t.id==='bL'||t.id==='bW'||t.id==='bH'){ softRender('b'); }
+  if(t.id==='bL'||t.id==='bW'||t.id==='bH'){ const o=S.build.ovr, whole=o.L!==''&&o.W!==''&&o.H!=='';
+    if(held&&held.ctx==='b'&&held.s&&JSON.stringify(held.s.ovr)!==JSON.stringify(o)){ held.s.what=whole?`typing the box ${o.L} × ${o.W} × ${o.H}`:'typing a box size'; useHeld('b'); if(whole){ S.build.custom=null; S.sel=null; } }
+    softRender('b'); }
   if(t.id==='bStat') S.build.status=t.value;
   if(t.dataset.dstatus) setDraftStatus(t.dataset.dstatus,t.value);
   if(S.push&&(t.id==='pSS'||t.id==='pKS')) S.push[t.id==='pSS'?'sstatus':'kstatus']=t.value;
@@ -1862,6 +2076,7 @@ document.addEventListener('keydown', e => {
   if(acKey(e)) return;
   const typing=e.target.closest&&e.target.closest('input,textarea,select,[contenteditable="true"]');
   if(!typing&&(e.ctrlKey||e.metaKey)&&!e.altKey&&!e.shiftKey&&(e.key==='z'||e.key==='Z')){ const c=undoCtx(); if(c){ e.preventDefault(); undo(c); } return; }
+  if(!typing&&(e.ctrlKey||e.metaKey)&&!e.altKey&&((e.shiftKey&&(e.key==='z'||e.key==='Z'))||(!e.shiftKey&&(e.key==='y'||e.key==='Y')))){ const c=redoCtx(); if(c){ e.preventDefault(); redo(c); } return; }
   const ae=document.activeElement, nearLay=!ae||ae===document.body||(ae.closest&&ae.closest('.laystage,.laytools,.v3stage,.v3modal,.otab'));
   if(!typing&&nearLay&&(e.key==='Delete'||e.key==='Backspace')&&S.sel&&selVisible(S.sel.ctx)&&!drag){ e.preventDefault(); removeSel(S.sel.ctx); return; }
   if(!typing&&(e.ctrlKey||e.metaKey)&&(e.key==='a'||e.key==='A')){ const st=document.activeElement&&document.activeElement.closest&&document.activeElement.closest('.laystage'); const c=st&&st.dataset.stage; if(c){ e.preventDefault(); selectAll(c); S.selFocus=true; if(c==='b') render(); else renderDrawer(); return; } }
@@ -1875,7 +2090,7 @@ document.addEventListener('keydown', e => {
   const stCtx=inStage?(inStage.dataset.stage||((inStage.querySelector('[data-ctx]')||{}).dataset||{}).ctx):null;
   if(inStage && S.sel && S.sel.ctx===stCtx && !e.metaKey && !e.ctrlKey && !e.altKey){
     if(e.target.matches&&e.target.matches('g[data-lsel]')&&(e.key==='Enter'||e.key===' ')&&e.target.dataset.on!=='1'){ e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click',{bubbles:true})); return; }
-    const op={r:'rot',R:'rot',s:'edge',S:'edge',t:'end',T:'end',f:'flat',F:'flat',ArrowLeft:'left',ArrowRight:'right',ArrowUp:'back',ArrowDown:'front'}[e.key];
+    const op={r:'rot',R:'rot',f:'flat',F:'flat',e:'edge',E:'edge',s:'end',S:'end',t:'end',T:'end',ArrowLeft:'left',ArrowRight:'right',ArrowUp:'back',ArrowDown:'front'}[e.key];
     if(op){ e.preventDefault(); doLop(S.sel.ctx,op,S.sel.r,S.sel.i); return; }
     if(e.key==='Escape'){ const c=S.sel.ctx; S.sel=null; if(c==='b') render(); else renderDrawer(); return; }
   } else if(inStage && (e.key==='Enter'||e.key===' ') && e.target.matches && e.target.matches('g[data-lsel]')){ e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click',{bubbles:true})); return; }
@@ -1984,9 +2199,9 @@ function endDrag(e,cancel){
   if(d.raf){ cancelAnimationFrame(d.raf); d.raf=0; } if(e&&!cancel){ d.p=svgPt(d.svg,e); paintDrag(d); }
   const t=cancel?null:d.target;
   if(t&&t.type==='onto'&&!d.multi){ openAsk(d,e); return; }
-  if(t&&!d.same){ const before=capturePos(d.ctx); pushHist(d.ctx);
+  if(t&&!d.same){ const before=capturePos(d.ctx); pushHist(d.ctx,d.multi?`moving ${d.cells.length} cartons`:`moving ${shortName(colItems(d.objs[0]).at(-1).name)}`);
     if(moveGroup(d.ctx,d.cells,t)){ S.selFocus=true; d.svg.classList.remove('dnd'); afterLay(d.ctx); playFlip(d.ctx,before); hintSave(d.ctx); pendingR=false; return; }
-    HIST[d.ctx].pop(); }
+    dropHist(d.ctx); }
   settleDrag(d);
   if(pendingR){ pendingR=false; render(); }
 }
@@ -2015,17 +2230,18 @@ function answerAsk(v){
   if(pendingR){ pendingR=false; render(); }
 }
 /* one click selects a carton; a second click on the same carton within ~0.45 s turns it 90° */
-function cardClick(ctx,r,i,add){
+function cardClick(ctx,r,i,add,lv){
   if(add){ lastCard={k:'',t:0}; if(!S.sel||S.sel.ctx!==ctx) S.sel={ctx,r,i}; else toggleSel(ctx,r,i); S.selFocus=true; if(ctx==='b') render(); else renderDrawer(); return; }
-  const k=ctx+':'+r+':'+i, now=Date.now();
+  const k=ctx+':'+r+':'+i+':'+(lv??''), now=Date.now();
   if(lastCard.k===k&&now-lastCard.t<450){ lastCard={k:'',t:0}; doLop(ctx,'rot',r,i); return; }
-  lastCard={k,t:now}; S.sel={ctx,r,i}; S.selFocus=true; if(ctx==='b') render(); else renderDrawer();
+  lastCard={k,t:now}; S.sel={ctx,r,i}; if(lv!=null) S.sel.lv=lv; S.selFocus=true; if(ctx==='b') render(); else renderDrawer();
 }
 /* 3D view pointer handling */
 document.addEventListener('pointerdown', e => {
   if(e.button!==0) return; const svg=e.target.closest&&e.target.closest('svg[data-v3]'); if(!svg) return;
   if(S.ask) return; const key=svg.dataset.v3, g=G3[key]; if(!g) return; const c=e.target.closest('[data-c3]'), st=v3st(key);
-  d3={svg,key,sx:e.clientX,sy:e.clientY,moved:false,id:e.pointerId,mode:c&&g.edit&&S.canEdit?'move':'orbit',r:c?+c.dataset.r:null,i:c?+c.dataset.i:null,yaw0:st.yaw,pitch0:st.pitch,hit:!!c,add:e.shiftKey||e.ctrlKey||e.metaKey};
+  const lvEl=c&&e.target.closest('[data-lv]'), lv=lvEl&&c.contains(lvEl)?+lvEl.dataset.lv:(c&&c.dataset.lv!=null?+c.dataset.lv:null);
+  d3={svg,key,sx:e.clientX,sy:e.clientY,moved:false,id:e.pointerId,mode:c&&g.edit&&S.canEdit?'move':'orbit',r:c?+c.dataset.r:null,i:c?+c.dataset.i:null,lv,yaw0:st.yaw,pitch0:st.pitch,hit:!!c,add:e.shiftKey||e.ctrlKey||e.metaKey};
   if(d3.mode==='move'){ const q=svgPt(svg,e); d3.f0=cam3(g.G,g.box,key).floor(q.x,q.y); }
   e.preventDefault();
 });
@@ -2041,9 +2257,9 @@ document.addEventListener('pointermove', e => {
 });
 function end3(e,cancel){
   if(!d3||(e&&e.pointerId!==d3.id)) return; const d=d3; d3=null; document.body.classList.remove('is-dragging');
-  if(!d.moved){ if(d.hit&&G3[d.key]&&G3[d.key].edit) cardClick(d.key,d.r,d.i,d.add); return; }
+  if(!d.moved){ if(d.hit&&G3[d.key]&&G3[d.key].edit) cardClick(d.key,d.r,d.i,d.add,d.lv); return; }
   noClickUntil=Date.now()+400;
-  if(d.mode==='move'){ if(!cancel&&d.target&&!d.target.same){ const before=capturePos(d.key); pushHist(d.key); if(moveItem(d.key,d.r,d.i,d.target)){ S.selFocus=true; afterLay(d.key); playFlip(d.key,before); hintSave(d.key); } else { HIST[d.key].pop(); draw3(d.key); } } else draw3(d.key); }
+  if(d.mode==='move'){ if(!cancel&&d.target&&!d.target.same){ const before=capturePos(d.key), mv=shownCol(d.key,d.r,d.i); pushHist(d.key,mv?`moving ${shortName(colItems(mv).at(-1).name)}`:'moving a carton'); if(moveItem(d.key,d.r,d.i,d.target)){ S.selFocus=true; afterLay(d.key); playFlip(d.key,before); hintSave(d.key); } else { dropHist(d.key); draw3(d.key); } } else draw3(d.key); }
   if(pendingR){ pendingR=false; render(); }
 }
 document.addEventListener('pointerup', e=>end3(e,false));
@@ -2167,15 +2383,16 @@ function acDraw(){
 function acOpen(t){ if(!t||t.disabled) return; AC.input=t; AC.items=acMatches(t.dataset.ac,t.value); AC.idx=0; AC.moved=false; acDraw(); }
 function acClose(){ const p=document.getElementById('acPop'); if(p){ p.hidden=true; p.innerHTML=''; } if(AC.input){ AC.input.setAttribute('aria-expanded','false'); AC.input.removeAttribute('aria-activedescendant'); } AC.items=[]; }
 function acExact(t){ const n=nrm(t.value); return n?((LISTS[t.dataset.ac]||[]).find(v=>nrm(v)===n)||null):null; }
-function copyFrom(val){ const id=kidByName(val); if(!id) return; HIST.b=[]; S.build.items=(S.kits.get(id).items||[]).map(i=>({pid:i.pid,q:i.q,mrp:i.mrp})); S.build.choice=null; S.build.custom=null; S.sel=null; toast('Copied '+S.build.items.length+' products from '+S.kits.get(id).name); render(); }
+function copyFrom(val){ const id=kidByName(val); if(!id) return; pushHist('b',`copying the products of ${S.kits.get(id).name}`); S.build.items=(S.kits.get(id).items||[]).map(i=>({pid:i.pid,q:i.q,mrp:i.mrp})); S.build.choice=null; S.build.custom=null; S.sel=null; toast('Copied '+S.build.items.length+' products from '+S.kits.get(id).name,{undo:'b'}); render(); }
 function acCommit(t,val){
   const ds=t.dataset;
   if(ds.item){ const pid=pidByName(val); setItemName(ds.item,+ds.i,val); if(pid&&pid===AC.startPid) return false;
+    if(held&&held.s) held.s.what=pid?`adding ${shortName(pName(pid))}`:'changing a product'; useHeld(ds.item);
     AC.startPid=pid; if(ds.item==='b'){ S.build.choice=null; render(); } else renderDrawer(); return true; }
   if(t.id==='bFam'){ S.build.family=val; return true; }
   if(t.id==='dFam'){ if(S.drawer) S.drawer.d.family=val; return true; }
   if(t.id==='bFrom'){ copyFrom(val); return true; }
-  if(t.id==='bStyle'){ if(S.build.style===val) return false; S.build.style=val; S.build.choice=null; render(); return true; }
+  if(t.id==='bStyle'){ if(S.build.style===val) return false; useHeld('b'); S.build.style=val; S.build.choice=null; S.build.custom=null; S.sel=null; render(); return true; }
   return false;
 }
 function focusStep(id,dir){
@@ -2195,9 +2412,9 @@ function acAccept(t,val,how){
 function acBlur(t){
   const val=t.value.trim(), ex=acExact(t);
   if(t.dataset.item){ const it=rowItems(t.dataset.item)[+t.dataset.i]; if(!it) return; setItemName(t.dataset.item,+t.dataset.i,ex||val); if(ex&&t.value!==ex) t.value=ex;
-    if(it.pid!==AC.startPid){ AC.startPid=it.pid; if(t.dataset.item==='b') S.build.choice=null; softRender(t.dataset.item); } return; }
+    if(it.pid!==AC.startPid){ if(held&&held.s) held.s.what=it.pid?`adding ${shortName(pName(it.pid))}`:'changing a product'; useHeld(t.dataset.item); AC.startPid=it.pid; if(t.dataset.item==='b') S.build.choice=null; softRender(t.dataset.item); } return; }
   if(t.id==='bFam'||t.id==='dFam'){ const v=ex||val; if(t.value!==v) t.value=v; if(t.id==='bFam') S.build.family=v; else if(S.drawer) S.drawer.d.family=v; return; }
-  if(t.id==='bStyle'){ const v=ex||(val?null:''); if(v!==null&&v!==S.build.style){ S.build.style=v; S.build.choice=null; softRender('b'); } return; }
+  if(t.id==='bStyle'){ const v=ex||(val?null:''); if(v!==null&&v!==S.build.style){ useHeld('b'); S.build.style=v; S.build.choice=null; S.build.custom=null; S.sel=null; softRender('b'); } return; }
   if(t.id==='bFrom'&&ex){ const run=()=>copyFrom(ex); if(ptrDown) softQ=run; else setTimeout(run,0); }
 }
 function acKey(e){
@@ -2214,6 +2431,11 @@ document.addEventListener('focusin', e => { const t=e.target; if(!t.dataset||!t.
   AC.startPid=t.dataset.item?(rowItems(t.dataset.item)[+t.dataset.i]||{}).pid:undefined;
   if(AC.skip){ AC.input=t; return; } acOpen(t); });
 document.addEventListener('focusout', e => { const t=e.target; if(!t.dataset||!t.dataset.ac) return; if(AC.input===t) acClose(); if(t.isConnected) acBlur(t); });
+/* entering a product, a quantity or a box size takes an undo step, kept once the typing changes something */
+document.addEventListener('focusin', e => { const t=e.target; if(!t||!t.dataset||t.disabled) return;
+  if(t.dataset.item&&(t.dataset.item==='b'||(S.drawer&&S.drawer.t==='kit'))) holdHist(t.dataset.item,t.dataset.f==='q'?'changing a quantity':'changing a product');
+  else if(/^b[LWH]$/.test(t.id)) holdHist('b','typing a box size');
+  else if(t.id==='bStyle') holdHist('b','changing the box style'); });
 addEventListener('scroll', () => { const p=document.getElementById('acPop'); if(p&&!p.hidden&&AC.input) acDraw(); }, true);
 addEventListener('resize', () => { const p=document.getElementById('acPop'); if(p&&!p.hidden&&AC.input) acDraw(); });
 function insertItem(prefix,i,fromQty){
@@ -2255,12 +2477,12 @@ function openDraft(id,force){
   const items=(d.items||[]).map(i=>({pid:i.pid,q:i.q||1,mrp:i.mrp}));
   const custom=d.custom&&d.layout?loadLayout(d.layout,items):null;
   S.build={...blankBuild(),name:d.name||'',family:d.family||'',style:d.style||'',status:d.status||'In development',notes:d.notes||'',items,custom,choice:hasSize(d)?{L:+d.L,W:+d.W,H:+d.H}:null,draftId:id};
-  S.build.savedSig=sigB(); S.dOpenAsk=null; S.dDelOpen=false; S.sel=null; S.view='build'; try{ localStorage.setItem('kst.view','build'); }catch(_){}
+  S.build.savedSig=sigB(); resetHist('b'); S.dOpenAsk=null; S.dDelOpen=false; S.sel=null; S.view='build'; try{ localStorage.setItem('kst.view','build'); }catch(_){}
   render(); window.scrollTo({top:0});
 }
 async function delDraft(id,opt){
   try{ await S.db.collection('drafts').doc(id).delete();
-    if(S.build.draftId===id){ if(opt&&opt.clear){ S.build=blankBuild(); S.sel=null; HIST.b=[]; } else { S.build.draftId=null; S.build.savedSig=null; } }
+    if(S.build.draftId===id){ if(opt&&opt.clear){ S.build=blankBuild(); S.sel=null; resetHist('b'); } else { S.build.draftId=null; S.build.savedSig=null; } }
     S.dDel=null; S.dDelOpen=false; toast('Draft deleted'); render(); }
   catch(err){ toast('Could not delete: '+(err?.message||'try again')); }
 }
@@ -2306,7 +2528,7 @@ async function runPush(){
   const kid='n'+Date.now().toString(36);
   if(!await saveDoc('kits',kid,null,kit,true,'Added to Kits')){ P.busy=false; P.msg='Could not add the kit. Try again.'; if(S.push===P) renderModal(); return; }
   if(B.draftId){ const d=S.drafts.get(B.draftId); if(d){ const after={...d,pushed:{kitId:kid,at:now,by:S.me||null,name}}; delete after.history; delete after.updatedAt; delete after.updatedBy; await saveDoc('drafts',B.draftId,d,after,true,`${name} added to Kits`); } }
-  if(P.src==='b') { S.build=blankBuild(); S.sel=null; }
+  if(P.src==='b') { S.build=blankBuild(); S.sel=null; resetHist('b'); }
   S.push=null; renderModal(); toast(`${name} added to Kits`);
   S.view='kits'; S.kf={q:name,st:'ALL',origin:'ALL'}; render(); setTimeout(()=>openKit(kid),400);
   if(P.thenErp) setTimeout(()=>{ if(S.kits.get(kid)&&!S.pm) pmOpen(kid); },550);
@@ -2467,7 +2689,7 @@ async function buildPdf(R,opt,wm){
   for(const [k,v] of facts){ if(!v) continue; F('bold',6.8,C.muted); doc.text(k.toUpperCase(),M,fy); F('normal',8.8,C.ink); const vl=doc.splitTextToSize(pt(v),LW-29); doc.text(vl,M+29,fy); fy+=vl.length*3.9+2.4; }
   const IX=M+LW+4, IW=CW-LW-4, IH=Math.max(62,fy-y0-4);
   if(lay){ iso(R.G,R.box,IX,y0-3,IW,IH); F('normal',7,C.faint); doc.text('3D view from the front-right corner. Numbers match the table.',IX+IW/2,y0-3+IH+3,{align:'center'}); }
-  else { doc.setFillColor(...C.sunk); doc.roundedRect(IX,y0-3,IW,IH,2,2,'F'); F('normal',8.5,C.muted); doc.text(doc.splitTextToSize(pt(R.missing.length?`Arrangement not drawn: no inner size on record for ${R.missing.join(', ')}.`:'Arrangement not drawn: these cartons do not fit inside this panel size standing in one layer.'),IW-10),IX+5,y0+6); }
+  else { doc.setFillColor(...C.sunk); doc.roundedRect(IX,y0-3,IW,IH,2,2,'F'); F('normal',8.5,C.muted); doc.text(doc.splitTextToSize(pt(R.missing.length?`Arrangement not drawn: no inner size on record for ${R.missing.join(', ')}.`:'Arrangement not drawn: these cartons do not go into this panel size, standing, lying flat or stacked.'),IW-10),IX+5,y0+6); }
   y=Math.max(fy,y0-3+IH+6)+6;
 
   /* top view */
@@ -2603,10 +2825,11 @@ render();
   S.db=db; S.user=user; S.dl=dl;
   if(!db){ $('#banner').innerHTML='<div class="banner">The kit database isn’t available. Reload the page, or sign in to the ERP again.</div>'; $('#view').innerHTML=''; return; }
   try{ S.canEdit = user ? !!(await user.canEdit()) : false; S.me = user ? await user.id() : null; }catch(e){}
+  bringBuildBack();
   db.collection('products').limit(1000).onSnapshot(snap=>{ S.products=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedP=true; dataVer++; render(); resolveNames(); }, err=>toast('Products stopped updating — reload the page.'));
   db.collection('kits').limit(1000).onSnapshot(snap=>{ S.kits=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedK=true; dataVer++; render(); resolveNames(); syncDrawerContents(); }, err=>toast('Kits stopped updating — reload the page.'));
   db.collection('drafts').limit(500).onSnapshot(snap=>{ S.drafts=new Map(snap.docs.map(d=>[d.id,d.data()])); S.loadedD=true; render(); resolveNames(); }, err=>toast('Drafts stopped updating — reload the page.'));
-  db.doc('settings/main').onSnapshot(s=>{ if(s.exists){ const d=s.data(); S.settings={...DEF}; for(const k in DEF) if(typeof d[k]==='number') S.settings[k]=d[k]; layCache.clear(); fitCache.clear(); dataVer++; render(); } }, ()=>{});
+  db.doc('settings/main').onSnapshot(s=>{ if(s.exists){ const d=s.data(); S.settings={...DEF}; for(const k in DEF) if(typeof d[k]==='number') S.settings[k]=d[k]; layCache.clear(); fitCache.clear(); wayCache.clear(); dataVer++; render(); } }, ()=>{});
   render();
 })();
 })();
