@@ -695,7 +695,9 @@ async function pmGo(){
   }catch(err){ if(S.pm===P){ P.busy=false; P.msg=(err&&err.message)||'The ERP did not save that. Try again.'; renderModal(); } }
 }
 window.addEventListener('kitstudio:notice', ev => setTimeout(()=>toast(ev.detail), 900));
-let toastT; function toast(m,opt){ clearTimeout(toastT); let t=$('#toast'); if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');document.body.appendChild(t);} t.textContent=m; if(opt&&opt.undo){ const b=document.createElement('button'); b.className='tbtn'; b.dataset.undo=opt.undo; b.textContent='Undo'; t.appendChild(b); } t.hidden=false; toastT=setTimeout(()=>t.hidden=true,opt&&opt.undo?7000:3200); }
+let toastT; function toast(m,opt){ clearTimeout(toastT); let t=$('#toast'); if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');document.body.appendChild(t);} t.textContent=m;
+  if(opt&&opt.act){ const a=opt.act, b=document.createElement('button'); b.className='tbtn'; Object.assign(b.dataset,{lop:a.op,ctx:a.ctx,r:a.r,i:a.i}); b.textContent=a.label; t.appendChild(b); }   // a next step, one click away
+  if(opt&&opt.undo){ const b=document.createElement('button'); b.className='tbtn'; b.dataset.undo=opt.undo; b.textContent='Undo'; t.appendChild(b); } t.hidden=false; toastT=setTimeout(()=>t.hidden=true,opt&&opt.act?10000:opt&&opt.undo?7000:3200); }
 const pName = pid => S.products.get(pid)?.name || pid;
 const pidByName = name => { const n=String(name).trim().toUpperCase(); for(const [id,p] of S.products) if(String(p.name).trim().toUpperCase()===n) return id; return null; };
 const kidByName = name => { const n=String(name).trim().toUpperCase(); for(const [id,k] of S.kits) if(String(k.name).trim().toUpperCase()===n) return id; return null; };
@@ -807,7 +809,7 @@ function fitToSize(units, size){
   const ck=unitDims(units)+'@'+L+'x'+W+'x'+H+'@'+st.dLmin+st.dHmin+st.dWmin; if(fitCache.has(ck)) return fitCache.get(ck);
   const b=KitPack.fitBox(units,{L,W,H},st); let res;
   if(b){ const lay=deriveLay(b.lanes); const spareW=W-lay.W;
-    res={lay,status: spareW>=st.dWmin?'fits':(spareW>=0?'tight':'short'),spare:{L:L-lay.L,W:spareW,H:H-lay.H},stacked:b.stacked||0,house:!!b.house,way:KitPack.wayLabel(b)}; }
+    res={lay,status: spareW>=st.dWmin?'fits':(spareW>=0?'tight':'short'),spare:{L:L-lay.L,W:spareW,H:H-lay.H},stacked:b.stacked||0,side:b.side||0,house:!!b.house,way:KitPack.wayLabel(b)}; }
   else res={lay:null,status:'nofit'};
   fitCache.set(ck,res); return res;
 }
@@ -817,7 +819,7 @@ function waysFor(units, size){
   if(!units.length||!hasSize(size)) return [];
   const st=S.settings, L=+size.L, W=+size.W, H=+size.H, ck=unitDims(units)+'@'+L+'x'+W+'x'+H+'@'+st.dLmin+st.dHmin+st.dWmin;
   if(wayCache.has(ck)) return wayCache.get(ck);
-  const ways=KitPack.packWays(units,{L,W,H},st,5).filter(w=>w.status!=='short').slice(0,4).map(w=>({...w,lay:deriveLay(w.lanes)}));
+  const ways=KitPack.packWays(units,{L,W,H},st,6).filter(w=>w.status!=='short').slice(0,5).map(w=>({...w,lay:deriveLay(w.lanes)}));
   wayCache.set(ck,ways); return ways;
 }
 function fitNote(ft){
@@ -914,42 +916,59 @@ function winFor(o, excludeId, label){
   if(die) return {size:{L:die.L,W:die.W,H:die.H},basis:`${label}, fits existing die of ${S.kits.get(die.from).name}`,conf:'HIGH',note:`All cartons fit with room to spare (${die.L-o.L} / ${die.W-o.W} / ${die.H-o.H} mm). Reuses a die already used by ${die.uses} kit${die.uses>1?'s':''}.`,kind:'die'};
   return {size:{L:o.L+st.cL,W:o.W+st.cW,H:o.H+st.cH},basis:`${label} from actual inner carton sizes`,conf:'HIGH',note:`Contents measure ${o.L} × ${o.W} × ${o.H} mm; clearance +${st.cL} / +${st.cW} / +${st.cH} mm added. New die — approve one dummy.`,kind:'new'};
 }
+/* the arrangement's size: rows one behind the other in blocks, blocks side by side (a carton beside the rows is a block of its own) */
 function deriveLay(lanes){
-  const ls=lanes.filter(l=>l.items.length).map(l=>({items:l.items,len:l.items.reduce((s,x)=>s+FL(x),0),dep:Math.max(...l.items.map(FD))}));
+  const ls=lanes.filter(l=>l.items.length).map(l=>({items:l.items,...(l.col?{col:l.col}:{}),len:l.items.reduce((s,x)=>s+FL(x),0),dep:Math.max(...l.items.map(FD))}));
   const st=S.settings; if(!ls.length) return {L:0,W:0,H:0,lanes:[],style:'custom',box:{L:st.cL,W:st.cW,H:st.cH}};   // the box emptied: nothing in it yet
-  const L=Math.max(...ls.map(l=>l.len)), W=ls.reduce((s,l)=>s+l.dep,0), H=Math.max(...ls.flatMap(l=>l.items.map(FH)));
+  const {L,W}=KitPack.extentOf(ls), H=Math.max(...ls.flatMap(l=>l.items.map(FH)));
   return {L,W,H,lanes:ls,style:'custom',box:{L:L+st.cL,W:W+st.cW,H:H+st.cH}};
 }
-const cloneLanes = lay => lay.lanes.map(ln=>({items:ln.items.map(cloneIt)}));
+/* rows kept in order: none empty, the blocks numbered 0, 1, 2 … from the left, each block's rows together, back to front */
+function normLanes(lanes){
+  const ls=lanes.filter(l=>l&&l.items&&l.items.length), cols=[...new Set(ls.map(l=>l.col||0))].sort((a,b)=>a-b), re=new Map(cols.map((c,i)=>[c,i]));
+  return ls.map((l,i)=>[l,i]).sort((a,b)=>re.get(a[0].col||0)-re.get(b[0].col||0)||a[1]-b[1]).map(([l])=>{ const c=re.get(l.col||0); if(c) l.col=c; else delete l.col; return l; });
+}
+const laneCopy = (l,items) => l.col?{items,col:l.col}:{items};
+const cloneLanes = lay => lay.lanes.map(ln=>laneCopy(ln,ln.items.map(cloneIt)));
 const unitKey = units => units.map(u=>u.pid).sort().join('|');
 const storeIt = it => ({pid:it.pid,name:it.name,along:it.l,depth:dep(it),upright:it.up,placement:placeTxt(it),o:it.orient||'edge',rot:!!it.rot});
 function storeLayout(lay,tray){ if(!lay) return null;
   const out={contents:{L:lay.L,W:lay.W,H:lay.H},rows:lay.lanes.map(ln=>ln.items.map(it=>hasStack(it)?{...storeIt(it),stack:it.stack.map(storeIt),...(it.group?{group:true}:{})}:storeIt(it)))};
+  if(lay.lanes.some(l=>l.col)) out.cols=lay.lanes.map(l=>l.col||0);   // the block each row is in: 0 = the rows, 1 … = beside them
   if(tray&&tray.length) out.tray=tray.map(storeIt);   // cartons taken out of the box, not placed yet
   return out; }
 function loadLayout(stored, items){
   if(!stored||!stored.rows) return null; const lanes=[];
   const mk=x=>{ const d=dimsOf(x.pid); if(!d) return null; const o=ORI[x.o]?x.o:(x.placement==='on end'?'end':'edge');
     return orientDims({pid:x.pid,name:pName(x.pid),t:d[0],m:d[1],b:d[2],orient:o,rot:!!x.rot}); };
-  for(const row of stored.rows){ const its=[]; for(const x of row){ const it=mk(x); if(!it) return null;
-      if(Array.isArray(x.stack)&&x.stack.length){ const st=x.stack.map(mk); if(st.some(v=>!v)) return null; it.stack=st; if(x.group) it.group=true; }
+  stored.rows.forEach((row,ri)=>{ const its=[]; for(const x of row){ const it=mk(x); if(!it){ its.bad=true; break; }
+      if(Array.isArray(x.stack)&&x.stack.length){ const st=x.stack.map(mk); if(st.some(v=>!v)){ its.bad=true; break; } it.stack=st; if(x.group) it.group=true; }
       its.push(it); }
-    lanes.push({items:its}); }
+    const c=Array.isArray(stored.cols)?+stored.cols[ri]||0:0; lanes.push(c?{items:its,col:c,bad:its.bad}:{items:its,bad:its.bad}); });
+  if(lanes.some(l=>l.bad)) return null; lanes.forEach(l=>delete l.bad);
   const tray=Array.isArray(stored.tray)?stored.tray.map(mk):[]; if(tray.some(v=>!v)) return null;
   const key=unitKey(unitsOf(items)); if(unitKey([...allUnits(lanes),...tray])!==key) return null;
-  return tray.length?{key,lanes,tray}:{key,lanes};
+  const nl=normLanes(lanes); return tray.length?{key,lanes:nl,tray}:{key,lanes:nl};
 }
 const lastLay={};
+/* Tidy the rows: every carton keeps how it sits; the rows of each block are packed again for the smallest box
+   (cartons beside the rows stay beside them) */
 function repack(ctx){
-  const c=editLanes(ctx); if(!c) return; const its=c.lanes.flatMap(l=>l.items).map(x=>({ref:x,l:FL(x),d:FD(x),t:FD(x),up:FH(x)})); const st=S.settings;
-  const ls=its.map(x=>x.l), lmin=Math.max(...ls), caps=new Set([lmin]);
-  for(let a=0;a<ls.length;a++) for(let b=a+1;b<ls.length;b++){ const s2=ls[a]+ls[b]; if(s2>=lmin&&s2<=200) caps.add(s2); for(let c3=b+1;c3<ls.length;c3++){ const s3=s2+ls[c3]; if(s3>=lmin&&s3<=200) caps.add(s3); } }
-  const H=Math.max(...its.map(x=>x.up)); let best=null;
-  for(const cap of caps){ const p=packLanes(its,cap); const v=(p.L+st.cL)*(p.W+st.cW)*(H+st.cH); if(!best||v<best.v) best={v,p}; }
-  c.lanes=best.p.lanes.map(l=>({items:l.items.map(x=>x.ref)})); setLayEdit(ctx,c); S.sel=null;
+  const c=editLanes(ctx); if(!c||!c.lanes.length) return; const st=S.settings, box=boxOf(ctx); let lanes=c.lanes;
+  const inBox=e=>!box||(e.L<=+box.L-st.dLmin&&e.W<=+box.W-st.dWmin);   // inside the box shown (with its clearance) comes first
+  for(const b of KitPack.blocksOf(lanes)){
+    const its=b.lanes.flatMap(l=>l.items).map(x=>({ref:x,l:FL(x),d:FD(x),t:FD(x),up:FH(x)}));
+    const ls=its.map(x=>x.l), lmin=Math.max(...ls), caps=new Set([lmin]);
+    for(let a=0;a<ls.length;a++) for(let b2=a+1;b2<ls.length;b2++){ const s2=ls[a]+ls[b2]; if(s2>=lmin&&s2<=200) caps.add(s2); for(let c3=b2+1;c3<ls.length;c3++){ const s3=s2+ls[c3]; if(s3>=lmin&&s3<=200) caps.add(s3); } }
+    const others=lanes.filter(l=>(l.col||0)!==b.col), e0=KitPack.extentOf(lanes); let best={v:(e0.L+st.cL)*(e0.W+st.cW),ok:inBox(e0),trial:lanes};   // never worse than it is
+    for(const cap of caps){ const p=packLanes(its,cap), trial=[...others,...p.lanes.map(l=>b.col?{items:l.items.map(x=>x.ref),col:b.col}:{items:l.items.map(x=>x.ref)})];
+      const e=KitPack.extentOf(trial), v=(e.L+st.cL)*(e.W+st.cW), ok=inBox(e); if(!best||(ok&&!best.ok)||(ok===best.ok&&v<best.v)) best={v,ok,trial}; }
+    lanes=normLanes(best.trial);
+  }
+  c.lanes=lanes; setLayEdit(ctx,c); S.sel=null;
 }
 function layEdit(ctx){ return ctx==='b'?S.build.custom:(S.drawer?S.drawer.layEdit:null); }
-function setLayEdit(ctx,v){ if(ctx==='b') S.build.custom=v; else if(S.drawer) S.drawer.layEdit=v; }
+function setLayEdit(ctx,v){ if(v&&v.lanes) v.lanes=normLanes(v.lanes); if(ctx==='b') S.build.custom=v; else if(S.drawer) S.drawer.layEdit=v; }
 function editLanes(ctx){ let c=layEdit(ctx); if(!c){ const base=lastLay[ctx]; if(!base) return null; c={key:base._key,lanes:cloneLanes(base)}; } return c; }
 /* A stack's cartons are separate — each is picked, turned, moved and removed on its own — unless the stack is
    grouped (it.group): then they move and turn as one. The carton picked in a separate stack is S.sel.lv (0 = the
@@ -970,7 +989,8 @@ function detachLevel(lanes,r,i,lv){
 function placeAt(lanes,x,t){
   if(t.type==='onto'){ const B=lanes[t.r]&&lanes[t.r].items[t.i]; if(!B||B===x) return false; B.stack=[...(B.stack||[]),x]; return true; }
   if(t.type==='row'&&lanes[t.r]){ lanes[t.r].items.splice(Math.max(0,Math.min(t.idx,lanes[t.r].items.length)),0,x); return true; }
-  lanes.splice(Math.max(0,Math.min(t.at??lanes.length,lanes.length)),0,{items:[x]}); return true;
+  // a new row — in a block (t.col), or beside the rows: a block of its own (col -1 = at the left, one past the last = at the right)
+  lanes.splice(Math.max(0,Math.min(t.at??lanes.length,lanes.length)),0,t.col?{items:[x],col:t.col}:{items:[x]}); return true;
 }
 function findCarton(lanes,x){ for(let r=0;r<lanes.length;r++) for(let i=0;i<lanes[r].items.length;i++){ const k=colItems(lanes[r].items[i]).indexOf(x); if(k>=0) return [r,i,k]; } return null; }
 function selectCarton(ctx,lanes,x){ const p=findCarton(lanes,x); if(!p){ S.sel=null; return; } S.sel={ctx,r:p[0],i:p[1]}; if(isLoose(lanes[p[0]].items[p[1]])) S.sel.lv=p[2]; }
@@ -978,19 +998,21 @@ function selectCarton(ctx,lanes,x){ const p=findCarton(lanes,x); if(!p){ S.sel=n
 function moveLevel(ctx,r,i,lv,t){
   if(t.type==='onto'&&t.r===r&&t.i===i) return false;          // back onto its own stack
   const c=editLanes(ctx); if(!c) return false; const x=detachLevel(c.lanes,r,i,lv); if(!x) return false;
-  placeAt(c.lanes,x,t); c.lanes=c.lanes.filter(l=>l.items.length); setLayEdit(ctx,c); selectCarton(ctx,c.lanes,x); return true;
+  placeAt(c.lanes,x,t); setLayEdit(ctx,c); selectCarton(ctx,c.lanes,x); return true;
 }
 /* what a change does, in words — named on the Undo and Redo buttons */
 const OP_WHAT={flat:n=>`laying ${n} flat`,edge:n=>`putting ${n} on its edge`,end:n=>`standing ${n} up`,turn:n=>`standing ${n} up`,lay:n=>`laying ${n} flat`,rot:n=>`turning ${n} 90°`,
-  left:n=>`moving ${n} left`,right:n=>`moving ${n} right`,back:n=>`moving ${n} back a row`,front:n=>`moving ${n} forward a row`,lift:n=>`taking ${n} off the stack`,out:n=>`taking ${n} out of the box`};
+  left:n=>`moving ${n} left`,right:n=>`moving ${n} right`,back:n=>`moving ${n} back a row`,front:n=>`moving ${n} forward a row`,lift:n=>`taking ${n} off the stack`,out:n=>`taking ${n} out of the box`,
+  sideL:n=>`standing ${n} beside the rows, on the left`,sideR:n=>`standing ${n} beside the rows, on the right`};
 function opWhat(ctx,op,r,i){
   const multi=selCells(ctx).length>1&&isSel(ctx,r,i), col=shownCol(ctx,r,i); if(!col) return '';
   if(op==='group'||op==='ungroup') return op==='group'?'grouping the stack':'separating the stacked cartons';
   const lv=multi?null:selLevel(ctx,r,i), cl=colItems(col), n=multi?`${selCells(ctx).length} cartons`:lv!=null?shortName(cl[lv].name):cl.length>1?'the stack':shortName(col.name);
+  if((op==='left'||op==='right')&&goesBeside(ctx,op,r,i)) op=op==='left'?'sideL':'sideR';
   return (OP_WHAT[op]||(x=>x))(n); }
 function layOp(ctx,op,r,i){
   const c=editLanes(ctx); if(!c) return;
-  const lanes=c.lanes, ln=lanes[r]; if(!ln||!ln.items[i]) return; const it=ln.items[i]; let nr=r, ni=i;
+  const lanes=c.lanes, ln=lanes[r]; if(!ln||!ln.items[i]) return; const it=ln.items[i];
   const multi=selCells(ctx).length>1&&isSel(ctx,r,i), lv=multi?null:selLevel(ctx,r,i);
   if(['turn','lay','edge','end','flat','rot'].includes(op)){
     // turn / sit buttons act on every selected spot; on one carton of a separate stack; on every carton of a grouped one
@@ -1016,28 +1038,63 @@ function layOp(ctx,op,r,i){
       for(const z of colItems(o).slice()){ delete z.stack; delete z.group; out.push(z); } }
     c.tray=[...(c.tray||[]),...out]; c.lanes=lanes.filter(l=>l.items.length); setLayEdit(ctx,c); S.sel=null; return;
   }
-  if(lv!=null&&['left','right','back','front'].includes(op)){ // one carton of a separate stack steps off it, that way
-    const x=detachLevel(lanes,r,i,lv); if(!x) return;
-    placeAt(lanes,x,op==='left'?{type:'row',r,idx:i}:op==='right'?{type:'row',r,idx:i+1}
-      :op==='back'?(r>0?{type:'row',r:r-1,idx:lanes[r-1].items.length}:{type:'new',at:0}):(r<lanes.length-1?{type:'row',r:r+1,idx:lanes[r+1].items.length}:{type:'new',at:lanes.length}));
-    c.lanes=lanes.filter(l=>l.items.length); setLayEdit(ctx,c); selectCarton(ctx,c.lanes,x); return;
+  if(['left','right','back','front','sideL','sideR'].includes(op)){
+    // Back and front stay among the rows of the carton's block. Left of a row's first carton, or right of its last, it
+    // goes beside the rows: into the next block that way, at its front — or a block of its own at the box's side.
+    // One carton of a separate stack steps off it: left or right of the stack in its row, or to the next row.
+    const t=moveTarget(lanes,r,i,op,lv!=null), x=lv!=null?detachLevel(lanes,r,i,lv):it; if(!t||!x) return;
+    if(lv==null&&t.type==='row'&&t.r===r){ // left / right inside the row: swap places with the neighbour
+      const j=op==='left'?i-1:i+1; [ln.items[j],ln.items[i]]=[ln.items[i],ln.items[j]]; setLayEdit(ctx,c); S.sel={ctx,r,i:j}; return; }
+    if(lv==null) ln.items.splice(i,1);
+    turnForBeside(lanes,x,t); placeAt(lanes,x,t); setLayEdit(ctx,c); selectCarton(ctx,c.lanes,x); return;
   }
-  else if(op==='left'&&i>0){ [ln.items[i-1],ln.items[i]]=[ln.items[i],ln.items[i-1]]; ni=i-1; }
-  else if(op==='right'&&i<ln.items.length-1){ [ln.items[i+1],ln.items[i]]=[ln.items[i],ln.items[i+1]]; ni=i+1; }
-  else if(op==='back'){ ln.items.splice(i,1); if(r===0){ lanes.unshift({items:[it]}); nr=0; ni=0; } else { lanes[r-1].items.push(it); nr=r-1; ni=lanes[r-1].items.length-1; } }
-  else if(op==='front'){ ln.items.splice(i,1); if(r===lanes.length-1){ lanes.push({items:[it]}); nr=lanes.length-1; ni=0; } else { lanes[r+1].items.push(it); nr=r+1; ni=lanes[r+1].items.length-1; } }
-  for(let k=lanes.length-1;k>=0;k--) if(!lanes[k].items.length){ lanes.splice(k,1); if(k<nr) nr--; }
-  setLayEdit(ctx,c); S.sel={ctx,r:nr,i:ni};
+}
+/* A carton sent beside the rows by a button turns, if that way it takes less room there — so it runs front to back,
+   along the rows (a stack keeps how it is). */
+let besideTurned=false;
+function turnForBeside(lanes,x,t){
+  besideTurned=false; if(!x||hasStack(x)) return; const into=t.type==='side'||(t.type==='new'&&(t.col||0)!==mainCol(lanes)); if(!into) return;
+  const area=y=>{ const trial=lanes.map(l=>laneCopy(l,l.items.filter(z=>z!==x))); placeAt(trial,y,t); const e=KitPack.extentOf(trial); return e.L*e.W; };
+  const turned=orientDims({...x,rot:!x.rot}); if(area(turned)<area(x)){ x.rot=!x.rot; orientDims(x); besideTurned=true; }
+}
+/* after a carton is dragged beside the rows: if turned it would take less room there, say so — one click turns it */
+function besideHint(ctx){
+  const s=S.sel; if(!s||s.ctx!==ctx||(s.list&&s.list.length>1)) return; const c=layEdit(ctx), x=c&&c.lanes[s.r]&&c.lanes[s.r].items[s.i]; if(!x||hasStack(x)) return;
+  const y=orientDims({...x,rot:!x.rot}), cur=KitPack.extentOf(c.lanes), e=KitPack.extentOf(c.lanes.map(l=>laneCopy(l,l.items.map(z=>z===x?y:z))));
+  if(e.L*e.W<cur.L*cur.W) toast(`${shortName(x.name)} stands beside the rows. Turned, it would run front to back and take less room.`,{undo:ctx,act:{label:'Turn it 90°',ctx,op:'rot',r:s.r,i:s.i}});
+}
+/* Where a move button sends a carton (whole spot, or one carton of a separate stack: level). */
+function moveTarget(lanes,r,i,op,level){
+  const ln=lanes[r], col=ln.col||0, n=ln.items.length, cols=[...new Set(lanes.map(l=>l.col||0))].sort((a,b)=>a-b);
+  const ks=c2=>lanes.map((l,k)=>k).filter(k=>(lanes[k].col||0)===c2), mine=ks(col), bFirst=mine[0], bLast=mine[mine.length-1];
+  const beside=dir=>{ const nb=dir>0?cols.find(c2=>c2>col):[...cols].reverse().find(c2=>c2<col);
+    if(nb==null) return {type:'side',where:dir>0?'right':'left',col:dir>0?cols[cols.length-1]+1:-1,at:dir>0?lanes.length:0};
+    const kk=ks(nb); return {type:'new',col:nb,at:kk[kk.length-1]+1}; };
+  const step=dir=>{ const k=r+dir; return k>=bFirst&&k<=bLast?{type:'row',r:k,idx:lanes[k].items.length}:{type:'new',col,at:dir<0?bFirst:bLast+1}; };
+  if(op==='sideL') return beside(-1);
+  if(op==='sideR') return beside(1);
+  if(op==='back') return step(-1);
+  if(op==='front') return step(1);
+  if(level) return {type:'row',r,idx:op==='left'?i:i+1};
+  if(op==='left') return i>0?{type:'row',r,idx:i-1}:beside(-1);
+  return i<n-1?{type:'row',r,idx:i+1}:beside(1);
+}
+/* a left / right press that takes the carton beside the rows (it is at the end of its row) */
+function goesBeside(ctx,op,r,i){
+  if(op==='sideL'||op==='sideR') return true; if(op!=='left'&&op!=='right') return false;
+  const c=layEdit(ctx)||lastLay[ctx], ln=c&&c.lanes[r]; if(!ln) return false;
+  if(selCells(ctx).length>1&&isSel(ctx,r,i)) return false; if(selLevel(ctx,r,i)!=null) return false;
+  return op==='left'?i===0:i===ln.items.length-1;
 }
 /* drop a dragged carton into a row (at an index) or into a new row */
 /* move a group of cartons (objects) to a target: into a row at an index (among the cartons not moving), or into a new row */
 function applyMove(lanes, objs, t){
-  const L=lanes.map(l=>({items:l.items.filter(x=>!objs.includes(x))}));
+  const L=lanes.map(l=>laneCopy(l,l.items.filter(x=>!objs.includes(x))));
   if(t.type==='row'&&L[t.r]) L[t.r].items.splice(Math.max(0,Math.min(t.idx,L[t.r].items.length)),0,...objs);
-  else L.splice(Math.max(0,Math.min(t.at,L.length)),0,{items:[...objs]});
-  return L.filter(l=>l.items.length);
+  else L.splice(Math.max(0,Math.min(t.at??L.length,L.length)),0,t.col?{items:[...objs],col:t.col}:{items:[...objs]});
+  return normLanes(L);
 }
-const laneSig = lanes => lanes.map(l=>l.items.map(uidOf).join(',')).join('|');
+const laneSig = lanes => lanes.map(l=>(l.col||0)+':'+l.items.map(uidOf).join(',')).join('|');
 function orderCells(cells){ return [...cells].sort((a,b)=>a[0]-b[0]||a[1]-b[1]); }
 function moveGroup(ctx, cells, to){
   const c=editLanes(ctx); if(!c) return false; const lanes=c.lanes;
@@ -1053,11 +1110,25 @@ function doLop(ctx,op,r,i){
   if(op==='del'){ if(!isSel(ctx,r,i)) S.sel={ctx,r,i}; removeSel(ctx); return; }
   if(op==='unstack'){ unstack(ctx,r,i); return; }
   if(op==='group'||op==='ungroup'){ const col=shownCol(ctx,r,i); if(!col||!hasStack(col)||(op==='group')===!!col.group) return; }
+  const side=goesBeside(ctx,op,r,i), deep0=rowDepthOf(ctx,r);
   const what=opWhat(ctx,op,r,i), before=capturePos(ctx); pushHist(ctx,what); layOp(ctx,op,r,i); S.selFocus=true; afterLay(ctx); playFlip(ctx,before);
-  if(op==='lift') toast(cap(what.replace(/^taking/,'took'))+' — it now sits beside it'+saveNote(ctx),{undo:ctx});
+  if(side){ const x=S.sel&&S.sel.ctx===ctx?shownCol(ctx,S.sel.r,S.sel.i):null, nm=x?shortName(colItems(x)[S.sel.lv??0].name):'It';
+    toast(`${nm} now stands beside the rows, on the ${/sideL|left/.test(op)?'left':'right'}${besideTurned?', turned to run front to back':''} — the rows stay together`+saveNote(ctx),{undo:ctx}); }
+  else if(['rot','edge','end','flat'].includes(op)) turnHint(ctx,r,i,deep0);
+  else if(op==='lift') toast(cap(what.replace(/^taking/,'took'))+' — it now sits beside it'+saveNote(ctx),{undo:ctx});
   else if(op==='out') toast(cap(what.replace(/^taking/,'took'))+' — it waits in Cartons to place, above the box',{undo:ctx});
   else if(op==='group'||op==='ungroup') toast((op==='group'?'Grouped — the stack now moves and turns as one':'Separate cartons — each one of the stack moves and turns on its own')+saveNote(ctx),{undo:ctx}); }
 
+/* how deep a row is — and the hint when turning a carton made its row deeper than the cartons beside it */
+function rowDepthOf(ctx,r){ const c=layEdit(ctx)||lastLay[ctx], ln=c&&c.lanes[r]; return ln&&ln.items.length?Math.max(...ln.items.map(FD)):0; }
+function turnHint(ctx,r,i,deep0){
+  if(selCells(ctx).length>1) return; const c=layEdit(ctx)||lastLay[ctx], lanes=c&&c.lanes, ln=lanes&&lanes[r]; if(!ln||!ln.items[i]||lanes.length<2) return;
+  const x=ln.items[i], me=FD(x); if(me<=deep0+2||(ln.col||0)!==mainCol(lanes)) return;   // the row didn't grow because of it — or it stands beside the rows already
+  const cols=lanes.map(l=>l.col||0), side=lanes.map(l=>laneCopy(l,l.items.filter(z=>z!==x))); side.push({items:[x],col:Math.max(...cols)+1});
+  const now=KitPack.extentOf(lanes), there=KitPack.extentOf(side); if(there.L*there.W>=now.L*now.W) return;   // beside the rows it wouldn't take less room
+  const nm=shortName(colItems(x).at(-1).name);
+  toast(`Row ${r+1} is now ${me} mm deep because of ${nm}. Beside the rows it would take less room, and the rows stay together.`,{undo:ctx,act:{label:'Beside the rows ▶',ctx,op:'sideR',r,i}});
+}
 /* ---------- selection (Shift / Ctrl / Cmd + click adds or removes a carton) ---------- */
 function selCells(ctx){ if(!S.sel||S.sel.ctx!==ctx) return []; return S.sel.list&&S.sel.list.length?S.sel.list:[[S.sel.r,S.sel.i]]; }
 function isSel(ctx,r,i){ return selCells(ctx).some(([a,b])=>a===r&&b===i); }
@@ -1081,7 +1152,7 @@ function selectAll(ctx){ const G=GEOM[ctx]; if(!G) return; const list=[]; G.rows
    `what` names the change for the buttons and the message. */
 const HIST={b:[],d:[]}, REDO={b:[],d:[]}, HMAX=40, keptRedo={b:null,d:null};
 const jclone = v => v==null?v:JSON.parse(JSON.stringify(v));
-function snapLay(ctx){ const c=layEdit(ctx); return c?{key:c.key,lanes:c.lanes.map(l=>({items:l.items.map(cloneIt)})),...(c.tray?{tray:c.tray.map(cloneIt)}:{})}:null; }
+function snapLay(ctx){ const c=layEdit(ctx); return c?{key:c.key,lanes:c.lanes.map(l=>laneCopy(l,l.items.map(cloneIt))),...(c.tray?{tray:c.tray.map(cloneIt)}:{})}:null; }
 function histOwner(ctx){ return ctx==='b'?S.build:(S.drawer&&S.drawer.t==='kit'?S.drawer.id:null); }
 function snapOf(ctx,what,opt={}){
   if(ctx==='b'){ const b=S.build;
@@ -1135,6 +1206,13 @@ function pickBox(size,what){
     :ft&&ft.lay?`Box ${dimTxt(box)} chosen — the cartons are re-packed for it${ft.house?'':', '+ft.way.toLowerCase()}`
     :`Box ${dimTxt(box)} chosen — but the cartons don’t go into it`,{undo:'b'});
 }
+/* A size made the new kit's own (an amended one picked on the Your size card): as if typed — the cartons re-pack for it */
+function typeBox(size){
+  const b=S.build, before=capturePos('b'); pushHist('b',`typing the box ${dimTxt(size)}`);
+  b.ovr={L:String(size.L),W:String(size.W),H:String(size.H)}; b.choice=null; b.custom=null; b.opt=null; S.sel=null; render(); playFlip('b',before);
+  const ft=fitToSize(unitsOf(b.items.filter(i=>i.pid)),size), ok=ft&&ft.lay&&ft.status!=='nofit'&&ft.status!=='short';
+  toast(ok?`Your size is now ${dimTxt(size)} — the cartons are re-packed for it${ft.house?'':', '+ft.way.toLowerCase()}`:`Your size is now ${dimTxt(size)} — but the cartons don’t go into it`,{undo:'b'});
+}
 /* Clear the whole kit: an empty new kit — name, products, box and arrangement. A draft it was stays in Drafts; Undo brings it all back.
    (Packing the box from scratch, keeping the products, is Re-pack fresh / Empty the box on the arrangement card.) */
 function startFromScratch(){
@@ -1174,17 +1252,23 @@ function emptyBox(ctx){
   requestAnimationFrame(()=>{ const z=document.querySelector(`[data-tray-zone="${ctx}"]`); if(z) z.scrollIntoView({behavior:reducedMotion()?'auto':'smooth',block:'start'}); });
   toast(`The box is empty — ${all.length+(c.tray||[]).length} cartons wait above it, in Cartons to place. Drag each one in, or press Put in.`,{undo:ctx});
 }
-/* the best free spot on the floor for one carton: the row it widens least, or a new row at the front — sitting the way
-   it is if that fits, else the first way that does (standing before lying flat) */
+/* the best free spot on the floor for one carton: sitting the way it is if that fits, else the first way that does
+   (standing before lying flat) — at the end of a row, in a new row at the front of a block, or beside the rows;
+   the spot that keeps the box narrowest, then shortest. With no spot inside the box, the narrowest one. */
 function bestSpot(lanes,x,box){
-  const st=S.settings, cap=+box.L-st.dLmin, hc=+box.H-st.dHmin, Wb=+box.W, ls=deriveLay(lanes).lanes, W0=ls.reduce((s,l)=>s+l.dep,0);
+  const st=S.settings, cap=+box.L-st.dLmin, hc=+box.H-st.dHmin, Wb=+box.W, bl=KitPack.blocksOf(lanes);
+  const spots=lanes.map((ln,j)=>({type:'row',r:j,idx:ln.items.length}));
+  for(const b of bl){ const k=lanes.indexOf(b.lanes[b.lanes.length-1]); spots.push(b.col?{type:'new',at:k+1,col:b.col}:{type:'new',at:k+1}); }
+  if(!bl.length) spots.push({type:'new',at:0}); else spots.push({type:'side',where:'right',col:bl[bl.length-1].col+1,at:lanes.length});
   let fall=null;
   for(const [o,rot] of [[x.orient||'edge',!!x.rot],['edge',false],['end',false],['edge',true],['end',true],['flat',false],['flat',true]]){
-    const y=orientDims({t:x.t,m:x.m,b:x.b,orient:o,rot}); if(y.l>cap||y.up>hc) continue;
-    let pick={W:W0+y.d,t:{type:'new',at:ls.length}};
-    ls.forEach((l,j)=>{ if(l.len+y.l>cap) return; const W=W0-l.dep+Math.max(l.dep,y.d); if(W<=pick.W) pick={W,t:{type:'row',r:j,idx:l.items.length}}; });
-    if(pick.W<=Wb) return {...pick,o,rot};
-    if(!fall||pick.W<fall.W) fall={...pick,o,rot};
+    const y=orientDims({t:x.t,m:x.m,b:x.b,orient:o,rot}); if(y.up>hc) continue;
+    let pick=null;
+    for(const t of spots){ const trial=lanes.map(l=>laneCopy(l,[...l.items])); placeAt(trial,y,t); const e=KitPack.extentOf(trial); if(e.L>cap) continue;
+      if(!pick||e.W<pick.W||(e.W===pick.W&&e.L<pick.L)) pick={W:e.W,L:e.L,t}; }
+    if(!pick) continue;
+    if(pick.W<=Wb) return {W:pick.W,t:pick.t,o,rot};
+    if(!fall||pick.W<fall.W) fall={W:pick.W,t:pick.t,o,rot};
   }
   return fall;
 }
@@ -1200,7 +1284,7 @@ function trayAuto(ctx){
   const c=layEdit(ctx), box=boxOf(ctx); if(!c||!c.tray||!c.tray.length||!box||!canCtx(ctx)) return;
   if(!c.lanes.length){ const before=capturePos(ctx); pushHist(ctx,'packing every carton'); setLayEdit(ctx,null); S.sel=null; afterLay(ctx); playFlip(ctx,before); toast('Every carton is in the box — packed our way'+saveNote(ctx),{undo:ctx}); return; }
   const before=capturePos(ctx); pushHist(ctx,`packing the ${c.tray.length} carton${c.tray.length>1?'s':''} left`);
-  const stuck=[]; for(const x of [...c.tray].sort((a,b)=>b.l*dep(b)-a.l*dep(a))){ const sp=bestSpot(c.lanes,x,box); if(!sp){ stuck.push(x); continue; } x.orient=sp.o; x.rot=sp.rot; orientDims(x); placeAt(c.lanes,x,sp.t); }
+  const stuck=[]; for(const x of [...c.tray].sort((a,b)=>b.l*dep(b)-a.l*dep(a))){ const sp=bestSpot(c.lanes,x,box); if(!sp){ stuck.push(x); continue; } x.orient=sp.o; x.rot=sp.rot; orientDims(x); placeAt(c.lanes,x,sp.t); c.lanes=normLanes(c.lanes); }
   if(stuck.length) c.tray=stuck; else delete c.tray; setLayEdit(ctx,c); S.sel=null; afterLay(ctx); playFlip(ctx,before);
   toast(stuck.length?`${stuck.length} carton${stuck.length>1?'s don’t':' doesn’t'} go into this box any way`:'Every carton is in the box'+saveNote(ctx),{undo:ctx});
 }
@@ -1284,12 +1368,18 @@ function colorFor(pid){ let h=0; for(const c of String(pid)) h=(h*31+c.charCodeA
 const GEOM={};
 function layGeom(lay, box){
   const Lb=Math.max(+box.L||0,lay.L), Wb=Math.max(+box.W||0,lay.W), pad=14;
-  const ox=pad+(Lb-lay.L)/2, oy=pad+(Wb-lay.W)/2, rows=[]; let y=oy, n=0;
-  lay.lanes.forEach((ln,ri)=>{ let x=ox; const d=ln.dep ?? Math.max(...ln.items.map(FD));
+  const ox=pad+(Lb-lay.L)/2, oy=pad+(Wb-lay.W)/2, rows=[], at={}; let n=0, bx=ox;
+  // the blocks of rows side by side from the left, each starting at the back
+  const bl=KitPack.blocksOf(lay.lanes); for(const b of bl){ at[b.col]={x0:bx,x1:bx+b.len,y:oy}; bx+=b.len; }
+  lay.lanes.forEach((ln,ri)=>{ const B=at[ln.col||0]; if(!B) return; let x=B.x0; const y=B.y, d=ln.dep ?? Math.max(...ln.items.map(FD));
     const cells=ln.items.map((it,pi)=>{ uidOf(it); const w=FL(it), c={ri,pi,it,x,y,w,h:FD(it),n:++n,sn:hasStack(it)?it.stack.map(()=>++n):null}; x+=w; return c; });
-    rows.push({ri,y,dep:d,x0:ox,cells}); y+=d; });
-  return {Lb,Wb,pad,ox,oy,rows,lay,box,vw:Lb+pad*2,vh:Wb+pad*2+10};
+    rows.push({ri,y,dep:d,x0:B.x0,x1:B.x1,col:ln.col||0,cells}); B.y+=d; });
+  const blocks=bl.map(b=>({col:b.col,x0:at[b.col].x0,x1:at[b.col].x1,y0:oy,y1:oy+b.dep,rows:rows.filter(r=>r.col===b.col)}));
+  return {Lb,Wb,pad,ox,oy,rows,blocks,lay,box,vw:Lb+pad*2,vh:Wb+pad*2+10};
 }
+/* which block is "the rows" (the one with the most cartons): the others stand beside them, on its left or right */
+function mainCol(lanes){ let best=null; for(const b of KitPack.blocksOf(lanes)){ const n=b.lanes.reduce((s,l)=>s+l.items.length,0); if(!best||n>best.n) best={col:b.col,n}; } return best?best.col:0; }
+function laneSide(lanes,r){ const c=lanes[r]&&(lanes[r].col||0); if(c==null) return ''; const m=mainCol(lanes); return c===m?'':c>m?'right':'left'; }
 const shortName = s => String(s).replace(/^F-\s*/,'').replace(/ TABLETS$/,'');
 /* dimension arrows drawn inside each carton (top view) */
 function arrH(x1,x2,y,label,halo){ const a=Math.min(1.1,(x2-x1)/4);
@@ -1339,6 +1429,7 @@ const ICON={
   del:'<svg width="15" height="16" viewBox="0 0 15 16" aria-hidden="true"><path d="M2 4h11M5.5 4V2.4h4V4M3.6 4l.8 10h6.2l.8-10M6.2 6.8v4.6M8.8 6.8v4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   unstack:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="12" y="9.5" width="8.5" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><path d="M11 2v4.5M8.8 4.4 11 6.6l2.2-2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   lift:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="9.5" width="9" height="4.5" rx="1" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.3"/><rect x="12.5" y="9.5" width="8" height="4.5" rx="1" fill="currentColor" fill-opacity=".45" stroke="currentColor" stroke-width="1.3"/><path d="M6 7.5V3.5a1.5 1.5 0 0 1 1.5-1.5h7.5a1.5 1.5 0 0 1 1.5 1.5v3.4M14.4 5.2l2.1 2.1 2.1-2.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  side:'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="3.6" rx=".8" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.2"/><rect x="1.5" y="6.2" width="13" height="3.6" rx=".8" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.2"/><rect x="1.5" y="10.9" width="13" height="3.6" rx=".8" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.2"/><rect x="16" y="1.5" width="4.5" height="13" rx=".8" fill="currentColor" fill-opacity=".45" stroke="currentColor" stroke-width="1.2"/></svg>',
   link:'<svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true"><path d="M6.6 8.4a3 3 0 0 0 4.2 0l2.4-2.4a3 3 0 0 0-4.2-4.2L8 2.8M9.4 5.6a3 3 0 0 0-4.2 0L2.8 8a3 3 0 0 0 4.2 4.2L8 11.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   out:'<svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><path d="M2 6.5v7.5h16V6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 6.5h4.5M13.5 6.5H18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="7" y="4.5" width="6" height="4" rx=".8" fill="currentColor" fill-opacity=".25" stroke="currentColor" stroke-width="1.2"/><path d="M10 3.6V.9M8.5 2.3 10 .8l1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   undo:'<svg width="15" height="14" viewBox="0 0 15 14" aria-hidden="true"><path d="M5.2 1.5 1.5 5.2l3.7 3.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.8 5.2h7a4.4 4.4 0 0 1 0 8.8H6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
@@ -1391,7 +1482,8 @@ function lopBtns(ctx,ri,pi,nLanes,nIn,it){
   const off=one?' — it comes off the stack':'';
   return `${stk?stackBar(ctx,ri,pi,it,lv):''}<div class="poseq"><b>How should it sit?</b>${who?` <span class="note">Changes ${esc(who)}.</span>`:''}</div>
     ${poseTiles(ctx,ri,pi,it)}
-    ${multi?'':`<div class="grp"><span class="lbl">Move</span>${b('left','◀ Left','Move left in its row'+off,undefined,!one&&pi===0)}${b('back','▲ Back','Move one row towards the back'+off)}${b('front','▼ Front','Move one row towards the front'+off)}${b('right','Right ▶','Move right in its row'+off,undefined,!one&&pi===nIn-1)}</div>`}
+    ${multi?'':`<div class="grp"><span class="lbl">Move</span>${b('left','◀ Left',!one&&pi===0?'It is first in its row — ◀ stands it beside the rows, on the left':'Move left in its row'+off)}${b('back','▲ Back','Move one row towards the back'+off)}${b('front','▼ Front','Move one row towards the front'+off)}${b('right','Right ▶',!one&&pi===nIn-1?'It is last in its row — ▶ stands it beside the rows, on the right':'Move right in its row'+off)}</div>
+    <div class="grp"><span class="lbl">Beside the rows</span>${b('sideL','◀ Left side','Stand it beside all the rows, on the left — it runs front to back along them, and the rows stay together'+off)}${b('sideR','Right side ▶','Stand it beside all the rows, on the right — it runs front to back along them, and the rows stay together'+off)}</div>`}
     <div class="grp"><span class="lbl">Kit</span>${one?b('lift',ICON.lift+'Take it off the stack',`Take ${esc(shortName(tg.name))} off the stack — it stands beside it`):''}${stk?b('unstack',ICON.unstack+'Unstack all','Put every carton of the stack side by side'):''}${b('out',ICON.out+'Take out of the box',(one?'This carton':multi?'The selected cartons':stk?'The stack':'This carton')+' goes to Cartons to place, above the box — put it back in where you like')}${contentsLocked(ctx)?'':b('del',ICON.del+'Remove','Remove '+(multi?'the selected cartons':one?'only this carton':stk?'the whole stack':'this carton')+' from the kit (Delete key) — you can undo','','','danger')}</div>`;
 }
 function cardTools(ctx,sel,it){
@@ -1400,11 +1492,11 @@ function cardTools(ctx,sel,it){
   return `<div class="cardtools" data-tools="${ctx}" hidden>${multi?`<span class="ctn">${selCells(ctx).length} selected</span><span class="ctsep"></span>`:lv!=null?`<span class="ctn">${esc(shortName(tg.name))}</span>${b('group',ICON.link+'<span class="tx">Group</span>','Group the stack — its cartons move and turn as one')}<span class="ctsep"></span>`:cl.length>1?`<span class="ctn">Stack of ${cl.length}</span>${b('ungroup',ICON.link+'<span class="tx">Separate</span>','Separate the stack — each carton moves and turns on its own')}<span class="ctsep"></span>`:''}${b('rot',ICON.rot+'<span class="tx">Turn</span>','Turn 90° on the spot')}<span class="ctsep"></span>${b('flat',ICON.flat+'<span class="tx">Flat</span>','Lying flat',one&&o==='flat')}${b('edge',ICON.edge+'<span class="tx">On edge</span>','On its long edge',one&&o==='edge')}${b('end',ICON.end+'<span class="tx">Standing</span>','Standing up',one&&o==='end')}<span class="ctsep"></span>${!multi&&lv!=null?b('lift',ICON.lift,'Take it off the stack'):''}${!multi&&cl.length>1&&lv==null?b('unstack',ICON.unstack+'<span class="tx">Unstack</span>','Unstack'):''}${contentsLocked(ctx)?'':b('del',ICON.del,'Remove from the kit (Delete)')}</div>`;
 }
 function orientTable(lay, ctx){
-  const rows=[]; lay.lanes.forEach((ln,ri)=>ln.items.forEach((col,pi)=>colItems(col).forEach((it,lv,all)=>rows.push({ri,pi,it,lv,n:ln.items.length,stk:all.length>1,grp:!!col.group}))));
+  const rows=[]; lay.lanes.forEach((ln,ri)=>{ const sd=laneSide(lay.lanes,ri); ln.items.forEach((col,pi)=>colItems(col).forEach((it,lv,all)=>rows.push({ri,pi,it,lv,sd,n:ln.items.length,stk:all.length>1,grp:!!col.group}))); });
   // a carton in a stack is a row of its own: clicking it picks just that carton, to turn it on its own
   const on=r=>ctx&&isSel(ctx,r.ri,r.pi)&&(()=>{ const l=selLevel(ctx,r.ri,r.pi); return l==null||l===r.lv; })();
   return `<div class="tablewrap"><table class="otab"><thead><tr><th>Row</th><th>Carton</th><th>How it sits</th><th class="num">Long ↔</th><th class="num">Deep ↕</th><th class="num">High ↑</th></tr></thead><tbody>
-  ${rows.map(r=>`<tr class="${ctx?'pick':''} ${on(r)?'selrow':''}" ${ctx?`data-lrow="${ctx}" data-r="${r.ri}" data-i="${r.pi}" ${r.stk?`data-lv="${r.lv}"`:''} title="Click to select this carton${r.stk?' on its own':''} · Shift+click to add it to the selection"`:''}><td class="mono">${r.ri+1}.${r.pi+1}${r.lv?`<span class="note"> ↑${r.lv+1}</span>`:''}</td><td><span class="sw" style="background:${colorFor(r.it.pid)}"></span>${esc(r.it.name)}</td><td><b>${ORI[r.it.orient||'edge']}</b>${r.it.rot?' <span class="note">· turned</span>':''}${r.lv?` <span class="note">· stacked on top</span>`:''}${r.stk&&r.grp&&!r.lv?` <span class="note">· grouped stack</span>`:''}</td><td class="num mono">${r.it.l}</td><td class="num mono">${dep(r.it)}</td><td class="num mono">${r.it.up}</td></tr>`).join('')}
+  ${rows.map(r=>`<tr class="${ctx?'pick':''} ${on(r)?'selrow':''}" ${ctx?`data-lrow="${ctx}" data-r="${r.ri}" data-i="${r.pi}" ${r.stk?`data-lv="${r.lv}"`:''} title="Click to select this carton${r.stk?' on its own':''} · Shift+click to add it to the selection"`:''}><td class="mono">${r.ri+1}.${r.pi+1}${r.lv?`<span class="note"> ↑${r.lv+1}</span>`:''}</td><td><span class="sw" style="background:${colorFor(r.it.pid)}"></span>${esc(r.it.name)}</td><td><b>${ORI[r.it.orient||'edge']}</b>${r.it.rot?' <span class="note">· turned</span>':''}${r.lv?` <span class="note">· stacked on top</span>`:''}${r.stk&&r.grp&&!r.lv?` <span class="note">· grouped stack</span>`:''}${r.sd&&!r.lv?` <span class="note">· beside the rows, ${r.sd}</span>`:''}</td><td class="num mono">${r.it.l}</td><td class="num mono">${dep(r.it)}</td><td class="num mono">${r.it.up}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -1444,9 +1536,9 @@ function scene3D(G,box,key,opt={}){
   o+=poly([P(0,yw,0),P(Lb,yw,0),P(Lb,yw,Hb),P(0,yw,Hb)],'var(--surface)','fill-opacity=".6" stroke="var(--line-strong)" stroke-width=".5"');
   o+=txt(P(Lb/2,vy>0?-9:Wb+9,0),vy>0?'BACK':'FRONT',5.2,'var(--muted)');   // the far side's name; the near side is named with the length below
   const t=opt.target, pd=G.pad;
-  if(t&&!t.same){ const a=t.type==='row'?P(t.ix-pd,t.y0-pd,.3):P(t.x0-pd-3,t.y-pd,.3), b=t.type==='row'?P(t.ix-pd,t.y1-pd,.3):P(t.x1-pd+3,t.y-pd,.3);
+  if(t&&!t.same){ const side=t.type==='side', a=t.type==='row'?P(t.ix-pd,t.y0-pd,.3):side?P(t.x-pd,t.y0-pd,.3):P(t.x0-pd-3,t.y-pd,.3), b=t.type==='row'?P(t.ix-pd,t.y1-pd,.3):side?P(t.x-pd,t.y1-pd,.3):P(t.x1-pd+3,t.y-pd,.3);
     o+=`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" class="dropind ${t.type==='row'?'':'nr'}" style="stroke-width:1.4"/>`;
-    if(t.type!=='row') o+=txt([b[0],b[1]-2.5],'new row here',5,'var(--accent)'); }
+    if(t.type!=='row') o+=txt([b[0],b[1]-2.5],side?'beside the rows':'new row here',5,'var(--accent)'); }
   const cells=[]; for(const row of G.rows) for(const c of row.cells){ let x0=c.x-pd, y0=c.y-pd; const dr=opt.drag&&opt.drag.r===c.ri&&opt.drag.i===c.pi;
     if(dr&&opt.drag.lv!=null&&hasStack(c.it)){ const cl=colItems(c.it), mo=cl[opt.drag.lv], rest=cl.filter((_,k)=>k!==opt.drag.lv), rc={...rest[0],stack:rest.slice(1)}; if(!rc.stack.length) delete rc.stack;
       cells.push({c:{...c,it:rc},x0,x1:x0+FL(rc),y0,y1:y0+FD(rc),h:FH(rc),dr:false});
@@ -1793,7 +1885,7 @@ function sizePicks(r,opts){
   const lockTxt=ctx==='d'?'kit size':'box for this kit', onTxt=ctx==='d'?'✓ locked':opts.picked?'✓ chosen':'✓ in use';
   const pick=(x,label)=>{ const k=key(x.size), on=k===cur;
     return `<button class="btn sm pick ${on?'on':''}" data-use-size="${x.size.L},${x.size.W},${x.size.H}" ${dis?'disabled':''} aria-pressed="${on}" title="${on?`This is the ${lockTxt}`:ctx==='b'?`Use ${dimTxt(x.size)} — the cartons re-pack for it`:`Lock in ${dimTxt(x.size)} as the ${lockTxt}`}">${label}<span class="mono">${dimTxt(x.size)}</span>${on?`<span class="lk">${onTxt}</span>`:''}</button>`; };
-  const how=x=>x.fit&&x.fit.house===false?`<span class="pp mid" title="${esc(x.fit.way)}">${x.fit.stacked?'stacked':'laid differently'}</span>`:'';
+  const how=x=>x.fit&&x.fit.house===false?`<span class="pp mid" title="${esc(x.fit.way)}">${x.fit.stacked?'stacked':x.fit.side?`${x.fit.side} beside the rows`:'laid differently'}</span>`:'';
   const pct=x=>`<span class="pp ${x.empty<25?'lo':x.empty<=40?'mid':'hi'}">${Math.round(x.empty)}% empty</span>`;
   const top=rk.rows.filter(x=>x.rank).slice(0,5);
   const dies=rk.rows.filter(x=>x.rank&&x.die.length).slice(0,5);
@@ -1801,7 +1893,7 @@ function sizePicks(r,opts){
   const curRow=cur&&rk.rows.find(x=>key(x.size)===cur);
   return `<h3 style="margin-top:14px">Top sizes <span class="note" style="font-weight:400">· ${ctx==='b'?'click one to use it — the cartons re-pack for it':'click one to lock it in'}</span></h3>
     <div class="alt sizepick">${top.map(x=>`<span class="pk">${pick(x,`<span class="rk">#${x.rank}</span>${key(x.size)===recK?'<span class="star">★</span>':''}`)}<span class="pkm">${pct(x)}${x.die.length?'<span class="dieb yes">✓ die</span>':'<span class="dieb no">new die</span>'}${how(x)}${x.tight?'<span class="note">tight</span>':''}</span></span>`).join('')}</div>
-    ${cur&&!top.some(x=>key(x.size)===cur)?`<p class="note" style="margin:6px 0 0">${ctx==='d'?'Locked':opts.picked?'Chosen':'In use'}: <b class="mono">${dimTxt(opts.cur)}</b>${curRow?(curRow.rank?` (rank #${curRow.rank} of ${rk.okCount}, ${Math.round(curRow.empty)}% empty)`:curRow.ok?` (${Math.round(curRow.empty)}% empty)`:' (the cartons don’t fit at their listed sizes)'):(()=>{ const nr=(rk.near||[]).find(x=>key(x.size)===cur); return nr?` — a die in hand, but it needs ${nr.need} mm more width at the listed inner sizes. Check it with a sample first`:''; })()}.</p>`:''}
+    ${cur&&!opts.typed&&!top.some(x=>key(x.size)===cur)?`<p class="note" style="margin:6px 0 0">${ctx==='d'?'Locked':opts.picked?'Chosen':'In use'}: <b class="mono">${dimTxt(opts.cur)}</b>${curRow?(curRow.rank?` (rank #${curRow.rank} of ${rk.okCount}, ${Math.round(curRow.empty)}% empty)`:curRow.ok?` (${Math.round(curRow.empty)}% empty)`:' (the cartons don’t fit at their listed sizes)'):(()=>{ const nr=(rk.near||[]).find(x=>key(x.size)===cur); return nr?` — a die in hand, but it needs ${nr.need} mm more width at the listed inner sizes. Check it with a sample first`:''; })()}.</p>`:''}
     <h3 style="margin-top:14px">Dies in hand to check</h3>
     ${dies.length?`<p class="note" style="margin:0 0 6px">Dies we already have that fit these cartons, best first. Open a kit below to see its sample, or click the size to lock it in.</p>
     <div class="dielist">${dies.map(x=>`<div class="dr">${pick(x,`<span class="rk">#${x.rank}</span>`)}<span class="pkm">${pct(x)}${how(x)}<span class="note mono">spare ${x.fit.spare.L}/${x.fit.spare.W}/${x.fit.spare.H}${x.tight?' · tight':''}</span></span>
@@ -1812,13 +1904,53 @@ function sizePicks(r,opts){
       <div class="dk"><b>${x.die.length} kit${x.die.length>1?'s':''}:</b> ${kitLinks(x.die)}</div></div>`).join('')}</div>`:''}
     <div class="row" style="margin-top:8px"><button class="btn sm" data-goto-cmp="${ctx}">Compare all ${rk.okCount} sizes ↓</button></div>`;
 }
+/* New kit, a size typed by hand: the card works for that size — do the cartons go in, how, how much of the box is
+   empty — and amends it: trimmed to the cartons, or what it takes for them to go in; the dies in hand nearest to it;
+   and our own pick, one click away. The arrangement card packs the cartons for the typed size. */
+function amendSizes(r,T,ft){
+  const st=S.settings, units=r.units, own=[], dies=[], seen=new Set([key(T)]);
+  const add=(list,max,size,label,why)=>{ const sz={L:Math.round(size.L),W:Math.round(size.W),H:Math.round(size.H)}, k=key(sz); if(seen.has(k)||list.length>=max) return;
+    const f=fitToSize(units,sz); if(!f||!f.lay||f.status==='nofit'||f.status==='short') return; seen.add(k); list.push({size:sz,label,why,fit:f}); };
+  const grew=sz=>esc(['L','W','H'].map(k=>sz[k]>T[k]?`${sz[k]-T[k]} mm ${{L:'longer',W:'wider',H:'higher'}[k]}`:'').filter(Boolean).join(', '));
+  const ok=!!(ft&&ft.lay&&ft.status!=='nofit'&&ft.status!=='short');
+  if(ok){ const l=ft.lay, tr={L:Math.min(T.L,l.L+st.cL),W:Math.min(T.W,l.W+st.cW),H:Math.min(T.H,l.H+st.cH)}, dl=T.L-tr.L, dw=T.W-tr.W, dh=T.H-tr.H;
+    if(dl+dw+dh>=3) add(own,2,tr,'Your size, trimmed to the cartons',esc([dl&&`${dl} mm shorter`,dw&&`${dw} mm narrower`,dh&&`${dh} mm lower`].filter(Boolean).join(', ')+' — the same clearance as a new size')); }
+  else {
+    const wider=ft&&ft.lay&&ft.status==='short';
+    if(wider){ const need=ft.lay.W+st.cW; add(own,2,{L:T.L,W:need,H:T.H},'Your length and height, wider',esc(`${need-T.W} mm wider — the cartons need ${ft.lay.W} mm across`)); }
+    // one side at a time, the least it takes (wider is said above already)
+    for(const [k,lab] of [['W','wider'],['L','longer'],['H','higher']]) if(!(wider&&k==='W')) for(const d of [2,5,10,15,20,30,40]){ const sz={...T,[k]:T[k]+d}, f=fitToSize(units,sz);
+      if(f&&f.lay&&f.status!=='nofit'&&f.status!=='short'){ add(own,2,sz,`Your size, ${d} mm ${lab}`,''); break; } }
+    // or each side as big as one of the sizes the cartons go into — the smallest such box first
+    const env=[...((r.rank&&r.rank.rows)||[]).filter(x=>x.ok).map(x=>x.size),...(r.opts||[]).map(o=>o.box)].map(z=>({L:Math.max(T.L,+z.L),W:Math.max(T.W,+z.W),H:Math.max(T.H,+z.H)}))
+      .sort((a,b2)=>a.L*a.W*a.H-b2.L*b2.W*b2.H);
+    for(const sz of env){ if(own.length>=2) break; add(own,2,sz,'Your size, made big enough',grew(sz)); }
+  }
+  // the dies in hand nearest to it
+  const near=((r.rank&&r.rank.rows)||[]).filter(x=>x.ok&&x.die.length&&!seen.has(key(x.size))).map(x=>({x,d:Math.abs(x.size.L-T.L)+Math.abs(x.size.W-T.W)+Math.abs(x.size.H-T.H)})).sort((a,b2)=>a.d-b2.d);
+  for(const {x} of near){ if(dies.length>=2) break; add(dies,2,x.size,`Die in hand · ${x.die.length} kit${x.die.length>1?'s':''}`,kitLinks(x.die,2)); }
+  return [...own,...dies];
+}
+function yourSize(r,T,opts){
+  const units=r.units, ft=fitToSize(units,T), ok=!!(ft&&ft.lay&&ft.status!=='nofit'&&ft.status!=='short'), rk=r.rank, rec=r.rec, dis=!canCtx('b');
+  const cv=units.reduce((a,u)=>a+u.t*u.m*u.b,0), bv=T.L*T.W*T.H, empty=Math.max(0,(bv-cv)/bv*100), row=rk&&rk.rows.find(x=>key(x.size)===key(T)), isRec=!!rec&&key(rec.size)===key(T);
+  const how=ok?(ft.house?'standing in rows, the usual way':ft.way.charAt(0).toLowerCase()+ft.way.slice(1)):'';
+  const am=amendSizes(r,T,ft), pct=e=>`<span class="pp ${e<25?'lo':e<=40?'mid':'hi'}">${Math.round(e)}% empty</span>`;
+  const tag=f=>f&&f.house===false?`<span class="pp mid" title="${esc(f.way)}">${f.stacked?'stacked':f.side?`${f.side} beside the rows`:'laid differently'}</span>`:'';
+  return `<div class="rec" style="margin-top:8px">${carton(T,110)}<div><div class="big">${dimTxt(T)}</div><div class="unit">L × W × H mm · the size you typed${isRec?' — our recommendation too':''}</div>
+    <p class="note" style="margin:8px 0 0;color:${ok?(ft.status==='fits'?'var(--ok)':'var(--warn)'):'var(--bad)'}">${ok?`✓ All ${r.f.n} carton${r.f.n>1?'s':''} go in — ${esc(how)}. Spare ${ft.spare.L} / ${ft.spare.W} / ${ft.spare.H} mm (L / W / H)${ft.status==='tight'?', tight on width':''}.`:`✗ ${esc(fitNote(ft))}`}</p>
+    <p class="note" style="margin:4px 0 0">${Math.round(empty)}% of this box is empty space (${cm3(bv-cv)} of ${cm3(bv)} cm³)${row&&row.rank?` · #${row.rank} of the ${rk.okCount} sizes that fit`:''}.${ok?' The cartons below are packed for it.':''}</p>
+    ${dieProof(T,r.excl)}</div></div>
+    ${am.length?`<h3 style="margin-top:12px">${ok?'Your size, amended':'Nearest sizes that take the cartons'}</h3><p class="note" style="margin:0 0 6px">${ok?'Sizes close to yours that the cartons also go into.':'Your size, made just big enough — or a die we already have.'} Click one to make it your size.</p>
+    <div class="dielist">${am.map(a=>`<div class="dr"><button class="btn sm pick" data-use-typed="${a.size.L},${a.size.W},${a.size.H}" ${dis?'disabled':''} title="Make ${dimTxt(a.size)} your size — the cartons re-pack for it"><span class="mono">${dimTxt(a.size)}</span></button><span class="pkm"><b>${esc(a.label)}</b>${pct(Math.max(0,(a.size.L*a.size.W*a.size.H-cv)/(a.size.L*a.size.W*a.size.H)*100))}${tag(a.fit)}${rec&&key(rec.size)===key(a.size)?'<span class="dieb yes">★ our recommendation too</span>':''}</span>${a.why?`<div class="dk">${a.why}</div>`:''}</div>`).join('')}</div>`:''}
+    ${rec&&!isRec&&!am.some(a=>key(a.size)===key(rec.size))?`<p class="note" style="margin:10px 0 0">Our recommendation is <b class="mono">${dimTxt(rec.size)}</b> — ${esc(rec.basis)}. <button class="btn sm" data-use-size="${rec.size.L},${rec.size.W},${rec.size.H}" ${dis?'disabled':''} title="Use our recommended size instead of yours">Use it</button></p>`:''}`;
+}
 function recCard(r, opts={}){
   if(!r.f.n) return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><h3>${opts.step?`<span class="stepn">${opts.step}</span>`:''}Recommended panel size</h3><p class="muted">Add products to see the size.</p></div>`;
-  const w=r.win, rec=r.rec; const inc=!r.f.allSized;
-  const title=r.isRec||!rec?'Recommended panel size':(r.mode==='custom'?'Size for your arrangement':'Size for the selected layout');
-  const optSizes=r.opts.map((o,i)=>winFor(o,null,'').size);
-  return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><div class="row" style="justify-content:space-between"><h3 style="margin:0">${opts.step?`<span class="stepn">${opts.step}</span>`:''}${title}</h3>${w&&r.isRec?'<span class="chip CONFIRMED">★ Recommended</span>':''}</div>
-    ${w?`<div class="rec" style="margin-top:8px">${carton(w.size,110)}<div><div class="big">${dimTxt(w.size)}</div><div class="unit">L × W × H mm · ${esc(w.basis)}</div><div class="row" style="margin-top:8px">${confChip(inc?'INCOMPLETE':w.conf)}</div><p class="note" style="margin:6px 0 0">${esc(w.note)}</p>
+  const w=r.win, rec=r.rec; const inc=!r.f.allSized, T=opts.typed&&r.f.allSized&&r.units&&r.units.length?opts.typed:null;
+  const title=T?'Your size':r.isRec||!rec?'Recommended panel size':(r.mode==='custom'?'Size for your arrangement':'Size for the selected layout');
+  return `<div class="card pad" ${opts.id?`id="${opts.id}"`:''}><div class="row" style="justify-content:space-between"><h3 style="margin:0">${opts.step?`<span class="stepn">${opts.step}</span>`:''}${title}</h3>${T?'<span class="chip PROPOSED">Typed by you</span>':w&&r.isRec?'<span class="chip CONFIRMED">★ Recommended</span>':''}</div>
+    ${T?yourSize(r,T,opts):w?`<div class="rec" style="margin-top:8px">${carton(w.size,110)}<div><div class="big">${dimTxt(w.size)}</div><div class="unit">L × W × H mm · ${esc(w.basis)}</div><div class="row" style="margin-top:8px">${confChip(inc?'INCOMPLETE':w.conf)}</div><p class="note" style="margin:6px 0 0">${esc(w.note)}</p>
     ${w.fit?`<p class="note" style="margin:4px 0 0;color:${w.fit.status==='fits'?'var(--ok)':'var(--warn)'}">${w.fit.status==='fits'?'✓ ':''}${esc(fitNote(w.fit))}</p>`:''}
     ${dieProof(w.size, r.excl)}
     ${!r.isRec&&rec?`<p class="note" style="margin:6px 0 0">Recommended is <b class="mono">${dimTxt(rec.size)}</b> (${esc(rec.basis)}).</p>`:''}
@@ -1866,13 +1998,13 @@ function layView(r, size){
   return {lay,ft,box};
 }
 function selHead(ctx,lay,sel,selIt){
-  const ms=selCells(ctx).filter(([a,b])=>lay.lanes[a]&&lay.lanes[a].items[b]);
+  const ms=selCells(ctx).filter(([a,b])=>lay.lanes[a]&&lay.lanes[a].items[b]), sd=laneSide(lay.lanes,sel.r), where=sd?`beside the rows, on the ${sd}`:`row ${sel.r+1}`;
   if(ms.length>1) return `<b>${ms.length} cartons selected</b> <span class="note">· ${ms.map(([a,b])=>esc(shortName(colItems(lay.lanes[a].items[b]).at(-1).name))).join(', ')} · the buttons below change all of them; drag any one to move them together</span>`;
   const lv=colItems(selIt), tp=lv[lv.length-1], k=selLevel(ctx,sel.r,sel.i);
   if(lv.length>1&&k!=null){ const z=lv[k], where=k===lv.length-1?'on top of':k===0?'at the bottom of':`level ${k+1} of`;
-    return `<span class="sw" style="background:${colorFor(z.pid)}"></span><b>${esc(z.name)}</b> <span class="note">· ${where} a stack of ${lv.length} · row ${sel.r+1} · ${ORI_LONG[z.orient||'edge'].toLowerCase()}${z.rot?', turned 90°':''} · ${z.l} long × ${dep(z)} deep × ${z.up} high (mm)</span>`; }
-  if(lv.length>1) return `<span class="sw" style="background:${colorFor(tp.pid)}"></span><b>Grouped stack of ${lv.length}</b> <span class="note">· ${lv.map((z,k)=>esc(shortName(z.name))+(k?'':' (bottom)')).join(' ▸ ')} · row ${sel.r+1} · ${FL(selIt)} long × ${FD(selIt)} deep × ${FH(selIt)} high (mm)</span>`;
-  return `<span class="sw" style="background:${colorFor(selIt.pid)}"></span><b>${esc(selIt.name)}</b> <span class="note">· row ${sel.r+1} · ${ORI_LONG[selIt.orient||'edge'].toLowerCase()}${selIt.rot?', turned 90°':''} · ${selIt.l} long × ${dep(selIt)} deep × ${selIt.up} high (mm)</span>`;
+    return `<span class="sw" style="background:${colorFor(z.pid)}"></span><b>${esc(z.name)}</b> <span class="note">· ${where} a stack of ${lv.length} · ${where} · ${ORI_LONG[z.orient||'edge'].toLowerCase()}${z.rot?', turned 90°':''} · ${z.l} long × ${dep(z)} deep × ${z.up} high (mm)</span>`; }
+  if(lv.length>1) return `<span class="sw" style="background:${colorFor(tp.pid)}"></span><b>Grouped stack of ${lv.length}</b> <span class="note">· ${lv.map((z,k)=>esc(shortName(z.name))+(k?'':' (bottom)')).join(' ▸ ')} · ${where} · ${FL(selIt)} long × ${FD(selIt)} deep × ${FH(selIt)} high (mm)</span>`;
+  return `<span class="sw" style="background:${colorFor(selIt.pid)}"></span><b>${esc(selIt.name)}</b> <span class="note">· ${where} · ${ORI_LONG[selIt.orient||'edge'].toLowerCase()}${selIt.rot?', turned 90°':''} · ${selIt.l} long × ${dep(selIt)} deep × ${selIt.up} high (mm)</span>`;
 }
 /* the ways these cartons go into the box shown: one click packs them that way (or back to ours, ★) */
 const WAY_ICON = w => w.kind==='stack'?ICON.stack:ICON[w.kind]||ICON.edge;
@@ -1919,7 +2051,7 @@ function layoutCard(r, size, title, ctx, ro){
     <div class="dimkey"><span><b>↔</b> length, left to right</span><span><b>↕</b> depth, back to front</span><span><b>H↑</b> height</span><span>dashed outline = lying flat</span><span>all in mm</span></div>
     ${edit?(selIt?`<div class="laytools"><div>${selHead(ctx,lay,sel,selIt)}</div>${lopBtns(ctx,sel.r,sel.i,lay.lanes.length,lay.lanes[sel.r].items.length,selIt)}<div class="note">Keys: <span class="kbd">F</span> lying flat · <span class="kbd">E</span> on its edge · <span class="kbd">S</span> standing up · <span class="kbd">R</span> turn 90° · arrows move · <span class="kbd">Delete</span> removes · <span class="kbd">Ctrl/⌘ Z</span> undo · <span class="kbd">Shift</span>+click selects more.</div></div>`
       :tray?`<div class="howto"><b>Packing by hand.</b> Drag each carton from <b>Cartons to place</b> into the box, where you want it — drop it <b>on</b> a carton to stack it on top. Click a carton in the box to turn it or lay it flat. <b>Auto-pack the rest</b> puts in what is left; <b>Undo</b> takes back any step.</div>`
-      :`<div class="howto"><b>To change how a carton sits, click it</b> — buttons with pictures show each way it can sit. <b>Drag</b> a carton to move it; drop it <b>on</b> another carton to swap them or stack it on top. Stacked cartons are separate: click one (here, in the table or in the 3D view) to turn or move just that one — or <b>Group</b> the stack to move it whole. <b>Undo</b> takes back any step.</div>`):''}
+      :`<div class="howto"><b>To change how a carton sits, click it</b> — buttons with pictures show each way it can sit. <b>Drag</b> a carton to move it; drop it <b>on</b> another carton to swap them or stack it on top. Stacked cartons are separate: click one (here, in the table or in the 3D view) to turn or move just that one — or <b>Group</b> the stack to move it whole. To stand a carton <b>beside all the rows</b> (turned, running front to back), drag it past the end of the rows or press <b>Right side ▶</b>: the rows stay together. <b>Undo</b> takes back any step.</div>`):''}
     ${view3D(layGeom(lay,box),box,k3,edit)}
     ${fits||ft?'':`<p class="banner" style="margin:8px 0 0">This arrangement needs contents space of ${lay.L} × ${lay.W} × ${lay.H} mm — it doesn’t fit ${dimTxt(box)}.${r.win?` Size for it: ${dimTxt(r.win.size)}.`:''}${edit&&r.win&&key(r.win.size)!==key(box)?` <button class="btn sm" data-use-size="${r.win.size.L},${r.win.size.W},${r.win.size.H}">Use ${dimTxt(r.win.size)}</button>`:''}</p>`}
     ${ft&&ft.status!=='fits'?`<p class="banner" style="margin:8px 0 0">${esc(fitNote(ft))}</p>`:''}
@@ -1977,7 +2109,7 @@ function vBuild(){
       </section>
     </div>
     <div class="grid sticky">
-      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur,picked:!!(typed||b.choice),step:2,id:'cardBox'})}
+      ${recCard(r,{pick:true,sel:b.opt,ctx:'b',cur,picked:!!(typed||b.choice),typed,step:2,id:'cardBox'})}
       <section class="card pad grid" id="cardSave"><h3><span class="stepn">4</span>Save the kit · size to save</h3>
         <div class="lwh">
           <label class="f">L<input type="number" id="bL" value="${esc(cur.L)}" ${ro?'disabled':''}></label>
@@ -2132,6 +2264,7 @@ document.addEventListener('click', async e => {
   if(ds.delOpenDraftNo!==undefined){ S.dDelOpen=false; render(); return; }
   if(ds.delOpenDraftYes!==undefined){ const id=S.build.draftId; S.dDelOpen=false; if(id) delDraft(id,{clear:true}); else render(); return; }
   if(ds.newDraft!==undefined){ if(S.build.draftId&&!bDirty()){ S.build=blankBuild(); resetHist('b'); } S.view='build'; render(); return; }
+  if(ds.useTyped){ const [L,W,H]=ds.useTyped.split(',').map(Number); typeBox({L,W,H}); return; }
   if(ds.useSize){ const [L,W,H]=ds.useSize.split(',').map(Number);
     if(S.drawer&&S.drawer.t==='kit'&&t.closest('.drawer')){ const D=S.drawer, o=S.kits.get(D.id)||{}; pushHist('d',`choosing the box ${dimTxt({L,W,H})}`,{size:true}); Object.assign(D.d,{L,W,H}); D.layEdit=null; S.sel=null;
       if(hasSize(o)&&key(o)===key(D.d)) D.d.sizeStatus=o.sizeStatus||D.d.sizeStatus; else if(D.d.sizeStatus!=='PROPOSED'&&D.d.sizeStatus!=='VERIFY') D.d.sizeStatus='PROPOSED';
@@ -2217,7 +2350,10 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t=e.target;
-  if(t.id==='bL'||t.id==='bW'||t.id==='bH'){ const o=S.build.ovr, whole=o.L!==''&&o.W!==''&&o.H!=='';
+  if(t.id==='bL'||t.id==='bW'||t.id==='bH'){ const o=S.build.ovr;
+    // one side typed: the other two are the ones on screen, so the size typed is whole
+    if(o[t.id.slice(1)]!=='') for(const k of ['L','W','H']) if(o[k]===''){ const v=($('#b'+k)||{}).value; if(v) o[k]=v; }
+    const whole=o.L!==''&&o.W!==''&&o.H!=='';
     if(held&&held.ctx==='b'&&held.s&&JSON.stringify(held.s.ovr)!==JSON.stringify(o)){ held.s.what=whole?`typing the box ${o.L} × ${o.W} × ${o.H}`:'typing a box size'; useHeld('b'); if(whole){ S.build.custom=null; S.sel=null; } }
     softRender('b'); }
   if(t.id==='bStat') S.build.status=t.value;
@@ -2259,21 +2395,45 @@ document.addEventListener('keydown', e => {
 
 /* ---------- drag and drop in the top view ---------- */
 function svgPt(svg,e){ const m=svg.getScreenCTM(); if(!m) return {x:0,y:0}; const p=new DOMPoint(e.clientX,e.clientY).matrixTransform(m.inverse()); return {x:p.x,y:p.y}; }
-function dropTarget(G,d,p){
-  const rows=G.rows, n=rows.length; if(!n) return null;
-  const alone=!d.keep&&rows[d.r]&&rows[d.r].cells.length===1, top=rows[0].y, bot=rows[n-1].y+rows[n-1].dep;   // keep: one carton leaves a stack that stays
-  const newRow=at=>({type:'new',at,same:alone&&(at===d.r||at===d.r+1),y:at<n?rows[at].y:bot,x0:G.ox,x1:G.ox+G.lay.L});
-  if(p.y<top) return newRow(0);
-  if(p.y>bot) return newRow(n);
-  for(const row of rows){ const y0=row.y, y1=row.y+row.dep; if(p.y<y0||p.y>y1) continue;
-    const e=Math.min(row.dep*0.28,5);
+/* Where a point on the floor falls. Past the rows' left or right end: beside them (a block of its own). In a block:
+   above, between or below its rows a new row in that block; in a row, at an index — or, in the middle half of a
+   carton, onto it (opt.onto). opt.skip leaves out the cartons on the move; opt.edge is how near a row's back or front
+   edge starts a new row. */
+function spotAt(G,p,opt){
+  const rows=G.rows, n=rows.length; if(!n||!G.blocks||!G.blocks.length) return {type:'new',at:0,col:0,y:G.oy,x0:G.ox,x1:G.ox+(G.lay.L||0)};
+  const bl=G.blocks, last=bl[bl.length-1], ly0=G.oy, ly1=G.oy+G.lay.W;
+  if(p.x>last.x1+.01) return {type:'side',where:'right',col:last.col+1,at:n,x:last.x1,y0:ly0,y1:ly1};
+  if(p.x<bl[0].x0-.01) return {type:'side',where:'left',col:-1,at:0,x:bl[0].x0,y0:ly0,y1:ly1};
+  const B=bl.find(b=>p.x>=b.x0-.01&&p.x<=b.x1+.01)||last, br=B.rows, first=br[0].ri, lastR=br[br.length-1].ri;
+  const newRow=at=>({type:'new',at,col:B.col,y:at<=lastR?rows[at].y:B.y1,x0:B.x0,x1:B.x1});
+  if(p.y<B.y0) return newRow(first);
+  if(p.y>B.y1) return newRow(lastR+1);
+  for(const row of br){ const y0=row.y, y1=row.y+row.dep; if(p.y<y0||p.y>y1) continue;
+    const e=opt.edge(row.dep);
     if(p.y<y0+e) return newRow(row.ri);
     if(p.y>y1-e) return newRow(row.ri+1);
-    const cells=row.cells.filter(c=>d.keep||!(row.ri===d.r&&c.pi===d.i));
+    const cells=row.cells.filter(c=>!opt.skip(row,c));
+    if(opt.onto){ const hit=cells.find(c=>p.x>=c.x&&p.x<=c.x+c.w&&p.y<=c.y+c.h); if(hit){ const f=(p.x-hit.x)/hit.w; if(f>0.25&&f<0.75) return {type:'onto',r:hit.ri,i:hit.pi}; } }
     const idx=cells.filter(c=>c.x+c.w/2<p.x).length;
     const ix=idx<cells.length?cells[idx].x:(cells.length?cells[cells.length-1].x+cells[cells.length-1].w:row.x0);
-    return {type:'row',r:row.ri,idx,same:!d.keep&&row.ri===d.r&&idx===d.i,ix,y0,y1}; }
-  return null;
+    return {type:'row',r:row.ri,idx,ix,y0,y1}; }
+  return newRow(lastR+1);
+}
+/* a carton (or stack) on its own in its row — and in its block — goes nowhere when let go beside itself */
+function sameSpot(G,t,r,i,keep){
+  const row=G.rows[r]; if(!row||!t) return false;
+  if(t.type==='row') return !keep&&t.r===r&&t.idx===i;
+  if(keep||row.cells.length!==1) return false;
+  if(t.type==='new') return t.col===row.col&&(t.at===r||t.at===r+1);
+  if(t.type==='side'){ const b=G.blocks.find(x=>x.col===row.col); return !!b&&b.rows.length===1&&(t.where==='right'?b===G.blocks[G.blocks.length-1]:b===G.blocks[0]); }
+  return false;
+}
+/* the 3D view's drop: the same spots, no dropping onto a carton */
+function dropTarget(G,d,p){
+  if(!G.rows.length) return null;
+  const t=spotAt(G,p,{skip:(row,c)=>!d.keep&&row.ri===d.r&&c.pi===d.i,edge:dep=>Math.min(dep*0.28,5)});
+  if(t) t.same=sameSpot(G,t,d.r,d.i,d.keep);
+  return t;
 }
 function showDrop(svg,t){
   const NS='http://www.w3.org/2000/svg';
@@ -2287,20 +2447,8 @@ function showDrop(svg,t){
 }
 /* where would the dragged carton(s) land? hit-tested on the layout as it was when the drag began, so the answer never flickers */
 function hitTarget(G,d,p){
-  const rows=G.rows, n=rows.length;
   if(p.x<G.pad-14||p.x>G.vw-G.pad+14||p.y<G.pad-16||p.y>G.vh-G.pad+10) return null;          // let go outside the kit to cancel
-  if(!n) return {type:'new',at:0};                                                             // the box is empty: the first carton in
-  const top=rows[0].y, bot=rows[n-1].y+rows[n-1].dep;
-  if(p.y<top) return {type:'new',at:0};
-  if(p.y>bot) return {type:'new',at:n};
-  for(const row of rows){ const y0=row.y, y1=row.y+row.dep; if(p.y<y0||p.y>y1) continue;
-    const e=Math.min(row.dep*0.25,4);
-    if(p.y<y0+e) return {type:'new',at:row.ri};
-    if(p.y>y1-e) return {type:'new',at:row.ri+1};
-    const cells=row.cells.filter(c=>!d.gset.has(c.ri+':'+c.pi));
-    if(!d.multi){ const hit=cells.find(c=>p.x>=c.x&&p.x<=c.x+c.w&&p.y<=c.y+c.h); if(hit){ const f=(p.x-hit.x)/hit.w; if(f>0.25&&f<0.75) return {type:'onto',r:hit.ri,i:hit.pi}; } }
-    return {type:'row',r:row.ri,idx:cells.filter(c=>c.x+c.w/2<p.x).length}; }
-  return null;
+  return spotAt(G,p,{onto:!d.multi,skip:(row,c)=>d.gset.has(c.ri+':'+c.pi),edge:dep=>Math.min(dep*0.25,4)});
 }
 /* the carton a drag carries on its own — the top one off a separate stack, or one from Cartons to place —
    drawn following the pointer while the rest stays where it is */
@@ -2317,10 +2465,10 @@ function startDrag(d,e){
   if(d.tray||(!grp&&col&&isLoose(col))){
     // one carton on its own: from the tray, or the top one of a separate stack (the rest of the stack stays put)
     d.cells=d.tray?[]:[[d.r,d.i]]; d.multi=false; d.gset=new Set();
-    if(d.tray){ const x=(layEdit(d.ctx)||{}).tray[d.k]; d.lvObj=x; d.baseLanes=G.lay.lanes.map(l=>({items:l.items})); d.p0={x:x.l/2,y:dep(x)/2};
+    if(d.tray){ const x=(layEdit(d.ctx)||{}).tray[d.k]; d.lvObj=x; d.baseLanes=G.lay.lanes.map(l=>laneCopy(l,l.items)); d.p0={x:x.l/2,y:dep(x)/2};
       d.float=floatCarton(d,x,{x:0,y:0}); d.chip&&d.chip.classList.add('dragging'); }
     else { const cl=colItems(col); d.lv=cl.length-1; d.lvObj=cl[d.lv]; const rest={...col,stack:col.stack.slice(0,-1)}; if(!rest.stack.length) delete rest.stack;
-      d.baseLanes=G.lay.lanes.map((l,ri)=>({items:l.items.map((x,pi)=>ri===d.r&&pi===d.i?rest:x)}));
+      d.baseLanes=G.lay.lanes.map((l,ri)=>laneCopy(l,l.items.map((x,pi)=>ri===d.r&&pi===d.i?rest:x)));
       const c0=G.rows[d.r].cells[d.i]; d.float=floatCarton(d,d.lvObj,{x:c0.x,y:c0.y}); d.g.classList.add('lifting'); }
     uidOf(d.lvObj); d.objs=[d.lvObj]; d.gs=[d.float];
     d.svg.querySelectorAll('g[data-u]').forEach(g=>d.others.set(g.dataset.u,g));
@@ -2338,14 +2486,14 @@ function startDrag(d,e){
 function previewDrag(d){
   const G=d.G, t=d.target; let pos=null; d.same=true;
   d.svg.querySelectorAll('.droptgt').forEach(g=>g.classList.remove('droptgt'));
-  if(t&&(t.type==='row'||t.type==='new')){
-    const lanes=d.baseLanes||G.lay.lanes.map(l=>({items:l.items})), nl=applyMove(lanes,d.objs,t);
+  if(t&&(t.type==='row'||t.type==='new'||t.type==='side')){
+    const lanes=d.baseLanes||G.lay.lanes.map(l=>laneCopy(l,l.items)), nl=applyMove(lanes,d.objs,t);
     if(laneSig(nl)!==laneSig(lanes)){ d.same=false; const G2=layGeom(deriveLay(nl),G.box); pos=new Map(); G2.rows.forEach(rw=>rw.cells.forEach(c=>pos.set(String(uidOf(c.it)),c))); }
   } else if(t&&t.type==='onto') d.same=!!(d.lvObj&&!d.tray&&t.r===d.r&&t.i===d.i);
   for(const [u,g] of d.others){ const c0=d.base.get(u), c1=pos&&pos.get(u), dx=c1&&c0?c1.x-c0.x:0, dy=c1&&c0?c1.y-c0.y:0;
     g.style.transform=(Math.abs(dx)>.01||Math.abs(dy)>.01)?`translate(${dx.toFixed(2)}px,${dy.toFixed(2)}px)`:''; }
   let gh=pos?d.objs.map(o=>{ const c=pos.get(String(uidOf(o))); return c?`<rect class="ghost" x="${c.x.toFixed(2)}" y="${c.y.toFixed(2)}" width="${c.w}" height="${c.h}" rx="0.8"/>`:''; }).join(''):'';
-  if(pos&&t.type==='new'){ const c=pos.get(String(uidOf(d.objs[0]))); if(c) gh+=`<text class="droplbl" x="${c.x.toFixed(2)}" y="${(c.y-1.2).toFixed(2)}">new row</text>`; }
+  if(pos&&(t.type==='new'||t.type==='side')){ const c=pos.get(String(uidOf(d.objs[0]))); if(c) gh+=`<text class="droplbl" x="${c.x.toFixed(2)}" y="${(c.y-1.2).toFixed(2)}">${t.type==='side'?'beside the rows':'new row'}</text>`; }
   if(t&&t.type==='onto'&&!d.same){ const tg=d.svg.querySelector(`g[data-u][data-r="${t.r}"][data-i="${t.i}"]`), c=G.rows[t.r].cells[t.i]; if(tg) tg.classList.add('droptgt');
     gh+=`<rect class="ghost onto" x="${(c.x-.8).toFixed(2)}" y="${(c.y-.8).toFixed(2)}" width="${c.w+1.6}" height="${c.h+1.6}" rx="1.2"/><text class="droplbl" x="${c.x.toFixed(2)}" y="${(c.y-1.4).toFixed(2)}">${d.lvObj?'let go to stack it on top':'let go to swap or stack'}</text>`; }
   d.ghost.innerHTML=gh;
@@ -2396,12 +2544,12 @@ function endDrag(e,cancel){
     settleDrag(d); if(pendingR){ pendingR=false; render(); } return; }
   if(d.lvObj){ // the top carton of a separate stack, on its own
     if(t&&!d.same){ const before=capturePos(ctx); pushHist(ctx,`moving ${shortName(d.lvObj.name)} off the stack`);
-      if(moveLevel(ctx,d.r,d.i,d.lv,t)){ S.selFocus=true; d.svg.classList.remove('dnd'); if(d.float) d.float.remove(); afterLay(ctx); playFlip(ctx,before); hintSave(ctx); pendingR=false; return; }
+      if(moveLevel(ctx,d.r,d.i,d.lv,t)){ S.selFocus=true; d.svg.classList.remove('dnd'); if(d.float) d.float.remove(); afterLay(ctx); playFlip(ctx,before); hintSave(ctx); if(t.type==='side') besideHint(ctx); pendingR=false; return; }
       dropHist(ctx); }
     settleDrag(d); if(pendingR){ pendingR=false; render(); } return; }
   if(t&&t.type==='onto'&&!d.multi){ openAsk(d,e); return; }
   if(t&&!d.same){ const before=capturePos(ctx); pushHist(ctx,d.multi?`moving ${d.cells.length} cartons`:`moving ${shortName(colItems(d.objs[0]).at(-1).name)}`);
-    if(moveGroup(ctx,d.cells,t)){ S.selFocus=true; d.svg.classList.remove('dnd'); afterLay(ctx); playFlip(ctx,before); hintSave(ctx); pendingR=false; return; }
+    if(moveGroup(ctx,d.cells,t)){ S.selFocus=true; d.svg.classList.remove('dnd'); afterLay(ctx); playFlip(ctx,before); hintSave(ctx); if(t.type==='side') besideHint(ctx); pendingR=false; return; }
     dropHist(ctx); }
   settleDrag(d);
   if(pendingR){ pendingR=false; render(); }
@@ -2464,7 +2612,7 @@ function end3(e,cancel){
   noClickUntil=Date.now()+400;
   if(d.mode==='move'){ if(!cancel&&d.target&&!d.target.same){ const before=capturePos(d.key), col=shownCol(d.key,d.r,d.i), mo=col?(d.keep?colItems(col)[d.mv]:colItems(col).at(-1)):null;
       pushHist(d.key,mo?`moving ${shortName(mo.name)}${d.keep?' off the stack':''}`:'moving a carton');
-      if(d.keep?moveLevel(d.key,d.r,d.i,d.mv,d.target):moveItem(d.key,d.r,d.i,d.target)){ S.selFocus=true; afterLay(d.key); playFlip(d.key,before); hintSave(d.key); } else { dropHist(d.key); draw3(d.key); } } else draw3(d.key); }
+      if(d.keep?moveLevel(d.key,d.r,d.i,d.mv,d.target):moveItem(d.key,d.r,d.i,d.target)){ S.selFocus=true; afterLay(d.key); playFlip(d.key,before); hintSave(d.key); if(d.target.type==='side') besideHint(d.key); } else { dropHist(d.key); draw3(d.key); } } else draw3(d.key); }
   if(pendingR){ pendingR=false; render(); }
 }
 document.addEventListener('pointerup', e=>end3(e,false));
@@ -2472,6 +2620,13 @@ document.addEventListener('pointercancel', e=>end3(e,true));
 document.addEventListener('pointercancel', e=>endDrag(e,true));
 
 /* ---------- export ---------- */
+/* a saved arrangement in words, row by row — cartons stacked on one, and cartons beside the rows, said so */
+function layoutText(L){
+  if(!L||!Array.isArray(L.rows)) return ''; const one=x=>x.name+' ('+x.placement+', '+x.along+'x'+x.depth+', '+x.upright+' up)';
+  const cols=Array.isArray(L.cols)?L.cols:[], cnt={}; L.rows.forEach((r,i)=>{ const c=+cols[i]||0; cnt[c]=(cnt[c]||0)+r.length; });
+  const main=+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]||a-b)[0]||0;
+  return L.rows.map((r,i)=>{ const c=+cols[i]||0; return (c===main?'Row '+(i+1):'Beside the rows ('+(c>main?'right':'left')+')')+': '+r.map(x=>one(x)+(Array.isArray(x.stack)&&x.stack.length?' with '+x.stack.map(one).join(', ')+' on top':'')).join(' + '); }).join(' | ');
+}
 /* One table per export: columns (key, label, align) and rows as objects. The ERP
    turns it into its branded PDF or Excel; without the ERP it goes out as CSV. */
 function exportTable(kind, scope){
@@ -2489,7 +2644,7 @@ function exportTable(kind, scope){
     const rows=list.map(([,k])=>{ const w=spaceUse(k.items,k); return {name:k.name,code:k.code||'',fp:k.erp&&k.erp.productCode||'',family:k.family||'',status:k.status||'',L:k.L,W:k.W,H:k.H,size:hasSize(k)?dimTxt(k):'',
       sizeStatus:k.sizeStatus||'MISSING',sizeSource:k.sizeSource||'',items:items(k),mrp:mrpOf(k),products:(k.items||[]).map(i=>pName(i.pid)+(i.q>1?' ×'+i.q:'')).join('; '),
       origin:k.origin==='new'?'New development':'Customer master',updated:k.updatedAt||'',remarks:k.remarks||'',
-      layout:k.layout?k.layout.rows.map((r,i)=>'Row '+(i+1)+': '+r.map(x=>x.name+' ('+x.placement+', '+x.along+'x'+x.depth+', '+x.upright+' up)').join(' + ')).join(' | '):'',
+      layout:layoutText(k.layout),
       boxcm3:w?Math.round(w.box/1000):'',cartcm3:w&&w.pct!=null?Math.round(w.vol/1000):'',empty:pct(w)}; });
     return {title:'Fluence Kits',what:scope==='view'?'Kit Studio — Kits list':'Kit Studio — all kits',file:`Fluence Kits ${stamp}`,columns,pdfColumns,rows,orientation:'landscape'};
   }
@@ -2542,7 +2697,7 @@ async function doExport(kind){
   /* Inside the ERP: "kits:pdf", "lines:xlsx"… — the ERP's branded file, on record. */
   if(kind.includes(':')){ const [k,f]=kind.split(':'); return listExport(k,f,'all',null); }
   if(kind==='kits'){ name=`Fluence Kits ${stamp}.csv`; rows=[['Kit','Fluence code','Family','Kit status','L mm','W mm','H mm','Size status','Size source','Items','MRP total','Products','Origin','Last updated','Remarks','Carton layout','Box volume cm3','Cartons volume cm3','Empty space %']];
-    for(const k of [...S.kits.values()].sort(sortName)) rows.push([k.name,k.code,k.family,k.status,k.L,k.W,k.H,k.sizeStatus,k.sizeSource,(k.items||[]).reduce((s,i)=>s+(+i.q||1),0),Math.round(kitMrp(k)),(k.items||[]).map(i=>pName(i.pid)+(i.q>1?' ×'+i.q:'')).join('; '),k.origin==='new'?'New development':'Customer master',k.updatedAt||'',k.remarks,k.layout?k.layout.rows.map((r,i)=>'Row '+(i+1)+': '+r.map(x=>x.name+' ('+x.placement+', '+x.along+'x'+x.depth+', '+x.upright+' up)').join(' + ')).join(' | '):'',...(w=>w?[Math.round(w.box/1000),w.pct==null?'':Math.round(w.vol/1000),w.pct==null?'':Math.round(w.pct)]:['','',''])(spaceUse(k.items,k))]); }
+    for(const k of [...S.kits.values()].sort(sortName)) rows.push([k.name,k.code,k.family,k.status,k.L,k.W,k.H,k.sizeStatus,k.sizeSource,(k.items||[]).reduce((s,i)=>s+(+i.q||1),0),Math.round(kitMrp(k)),(k.items||[]).map(i=>pName(i.pid)+(i.q>1?' ×'+i.q:'')).join('; '),k.origin==='new'?'New development':'Customer master',k.updatedAt||'',k.remarks,layoutText(k.layout),...(w=>w?[Math.round(w.box/1000),w.pct==null?'':Math.round(w.vol/1000),w.pct==null?'':Math.round(w.pct)]:['','',''])(spaceUse(k.items,k))]); }
   else if(kind==='lines'){ name=`Fluence Kit Contents ${stamp}.csv`; rows=[['Kit','Fluence code','Product','Qty','MRP','Inner L','Inner W','Inner H']];
     for(const k of [...S.kits.values()].sort(sortName)) for(const i of k.items||[]){ const p=S.products.get(i.pid)||{}; rows.push([k.name,k.code,p.name,i.q,i.mrp,p.L,p.W,p.H]); } }
   else { name=`Fluence Inner Products ${stamp}.csv`; rows=[['Product','Standard MRP','Status','L mm','W mm','H mm','Size status','Name in Fluence size file','Used in kits','Remarks']]; const u=usage();
@@ -2651,7 +2806,7 @@ function insertItem(prefix,i,fromQty){
 }
 
 /* ---------- drafts: kits in development, kept out of Kits until pushed ---------- */
-function sigB(b=S.build){ return JSON.stringify([b.name.trim(),b.family.trim(),b.style,b.status,b.notes,b.items.map(i=>[i.pid,i.pid?'':(i.raw||''),+i.q||1]),b.choice,b.ovr,b.opt,b.custom?b.custom.lanes.map(l=>l.items.map(x=>[(x.stack||[]).map(z=>[z.pid,z.orient||'edge',!!z.rot]),x.pid,x.orient||'edge',!!x.rot,!!x.group])):null,b.custom&&b.custom.tray?b.custom.tray.map(z=>[z.pid,z.orient||'edge',!!z.rot]):null]); }
+function sigB(b=S.build){ return JSON.stringify([b.name.trim(),b.family.trim(),b.style,b.status,b.notes,b.items.map(i=>[i.pid,i.pid?'':(i.raw||''),+i.q||1]),b.choice,b.ovr,b.opt,b.custom?b.custom.lanes.map(l=>[l.col||0,...l.items.map(x=>[(x.stack||[]).map(z=>[z.pid,z.orient||'edge',!!z.rot]),x.pid,x.orient||'edge',!!x.rot,!!x.group])]):null,b.custom&&b.custom.tray?b.custom.tray.map(z=>[z.pid,z.orient||'edge',!!z.rot]):null]); }
 function bDirty(){ const b=S.build; return b.savedSig!==null ? sigB()!==b.savedSig : (b.name.trim()!==''||b.items.some(i=>i.pid||i.raw)); }
 function buildSnapshot(){
   const b=S.build, items=b.items.filter(i=>i.pid);
@@ -2659,7 +2814,15 @@ function buildSnapshot(){
   const r=recommend(items,kidByName(b.style)||null,null,b.opt,b.custom);
   const lay=r.custom?r.layout:((L&&W&&H)?((fitToSize(r.units||[],{L,W,H})||{}).lay||r.layout):r.layout);
   return {items:items.map(i=>({pid:i.pid,q:Math.max(1,+i.q||1),mrp:i.mrp??S.products.get(i.pid)?.mrp??null})),L,W,H,layout:storeLayout(lay,r.custom&&b.custom&&b.custom.tray),custom:!!r.custom,
-    sizeBasis:r.win?`${r.win.basis}${r.isRec?' (recommended)':''}`:''};
+    sizeBasis:buildBasis(r,false)};
+}
+/* where the new kit's size comes from, in words — typed by hand, chosen from the comparison, or ours */
+function buildBasis(r,long){
+  const b=S.build, typed=b.ovr.L!==''&&b.ovr.W!==''&&b.ovr.H!==''?{L:+b.ovr.L,W:+b.ovr.W,H:+b.ovr.H}:null, size=typed||b.choice, rk=r.rank;
+  if(size&&!(r.rec&&key(r.rec.size)===key(size))){ const row=rk&&rk.rows.find(x=>key(x.size)===key(size)), ft=r.units&&r.units.length?fitToSize(r.units,size):null;
+    const how=ft&&ft.lay&&ft.status!=='nofit'&&ft.status!=='short'?(ft.house?'the cartons standing in rows, the usual way':`the cartons ${ft.way.charAt(0).toLowerCase()+ft.way.slice(1)}`):'';
+    return `${typed?'Size typed by hand':'Chosen from the size comparison'}${row&&row.rank?` (rank #${row.rank} of ${rk.okCount}, ${Math.round(row.empty)}% empty)`:''}${long&&how?`. Packed with ${how}`:''}`; }
+  return r.win?(long?`${r.win.basis}. ${r.win.note}`:`${r.win.basis}${r.isRec?' (recommended)':''}`):'';
 }
 function buildReady(){ const b=S.build;
   if(!b.name.trim()){ toast('Give the kit a name first'); $('#bName')?.focus(); return false; }
@@ -2783,7 +2946,7 @@ function repData(ctx){
   const V=noRec?null:layView(r,sizeArg), box=V?V.box:(hasSize(sizeArg)?sizeArg:(!noRec&&r.win?r.win.size:null));
   if(!box) K.sizeStatus='MISSING'; else if(ctx==='d'&&!sizeArg){ K.sizeStatus='PROPOSED'; K.recommended=true; }
   let basis='';
-  if(ctx==='b') basis=r.win?`${r.win.basis}. ${r.win.note}`:'';
+  if(ctx==='b') basis=buildBasis(r,true);
   else if(ctx.startsWith('dr:')) basis=K.basis||(r.win?`${r.win.basis}. ${r.win.note}`:'');
   else if(sizeArg) basis=K.sizeStatus==='CONFIRMED'?'Panel size on record, in production.':'Panel size on record.';
   else if(r.win&&!noRec) basis=`Recommended by Kit Studio: ${r.win.basis}. ${r.win.note}`;
@@ -2889,7 +3052,8 @@ async function buildPdf(R,opt,wm){
     ['Spare room',lay&&R.box?`${R.box.L-lay.L} / ${R.box.W-lay.W} / ${R.box.H-lay.H} mm  (L / W / H)`:''],
     ['Empty space',R.waste&&R.waste.pct!=null?`${Math.round(R.waste.pct)}% of the box is not filled by the inner cartons (${cm3(R.waste.box-R.waste.vol)} of ${cm3(R.waste.box)} cu. cm)`:''],
     ['Die',R.die],
-    ['Cartons',nU?`${nU} carton${nU>1?'s':''} in ${R.G.rows.length} row${R.G.rows.length>1?'s':''}, ${nStk?`${nStk} stack${nStk>1?'s':''} of cartons on top of each other`:'one layer'}`:''],
+    ['Cartons',nU?(()=>{ const mc=mainCol(R.G.lay.lanes), inRows=R.G.rows.filter(rw=>rw.col===mc), bes=R.G.rows.filter(rw=>rw.col!==mc).reduce((s2,rw)=>s2+rw.cells.length,0);
+      return `${nU} carton${nU>1?'s':''} in ${inRows.length} row${inRows.length>1?'s':''}${bes?`, ${bes} standing beside the rows`:''}, ${nStk?`${nStk} stack${nStk>1?'s':''} of cartons on top of each other`:'one layer'}`; })():''],
     ['Size basis',R.basis]];
   for(const [k,v] of facts){ if(!v) continue; F('bold',6.8,C.muted); doc.text(k.toUpperCase(),M,fy); F('normal',8.8,C.ink); const vl=doc.splitTextToSize(pt(v),LW-29); doc.text(vl,M+29,fy); fy+=vl.length*3.9+2.4; }
   const IX=M+LW+4, IW=CW-LW-4, IH=Math.max(62,fy-y0-4);
@@ -2905,9 +3069,10 @@ async function buildPdf(R,opt,wm){
   const nRows=R.G?R.G.rows.length:0;
   if(R.G){ section('CARTON ORIENTATION','How each carton sits in the kit, in mm as placed.');
     const body=[], pids=[];
-    for(const row of R.G.rows) for(const c of row.cells) colItems(c.it).forEach((it,lv)=>{ const p=S.products.get(it.pid)||{}, o=it.orient||'edge';
+    for(const row of R.G.rows){ const sd=laneSide(R.G.lay.lanes,row.ri); for(const c of row.cells) colItems(c.it).forEach((it,lv)=>{ const p=S.products.get(it.pid)||{}, o=it.orient||'edge';
       pids.push(it.pid);
-      body.push([lv?c.sn[lv-1]:c.n,pt(it.name),hasSize(p)?pt(dimTxt(p)):'-',`Row ${row.ri+1}${nRows>1?(row.ri===0?' (back)':row.ri===nRows-1?' (front)':''):''}, ${ordn(c.pi+1)} from left${lv?`, on top of #${lv>1?c.sn[lv-2]:c.n}`:''}`,ORI_LONG[o]+(it.rot?', turned 90°':''),it.l,dep(it),it.up]); });
+      const pos=sd?`Beside the rows, on the ${sd}${c.pi?`, ${ordn(c.pi+1)} from left`:''}`:`Row ${row.ri+1}${nRows>1?(row.ri===0?' (back)':row.ri===nRows-1?' (front)':''):''}, ${ordn(c.pi+1)} from left`;
+      body.push([lv?c.sn[lv-1]:c.n,pt(it.name),hasSize(p)?pt(dimTxt(p)):'-',`${pos}${lv?`, on top of #${lv>1?c.sn[lv-2]:c.n}`:''}`,ORI_LONG[o]+(it.rot?', turned 90°':''),it.l,dep(it),it.up]); }); }
     at(doc,{startY:y,head:[['#','Product','Inner carton','Position','How it sits','Long (L-R)','Deep (B-F)','High']],body,theme:'grid',
       margin:{left:M,right:M,top:18,bottom:18},styles:{font:'helvetica',fontSize:8,cellPadding:1.7,lineColor:C.line,lineWidth:0.2,textColor:C.ink,valign:'middle'},
       headStyles:{fillColor:C.sunk,textColor:C.muted,fontStyle:'bold',fontSize:7},
@@ -2979,7 +3144,8 @@ async function buildPdf(R,opt,wm){
           doc.setLineWidth(0.45); doc.setLineDashPattern([1,0.6],0); doc.rect(X,Y,w,h,'S'); doc.setLineDashPattern([],0); }
         else { const tp=lvs[0]; doc.setFillColor(...rgb(colorFor(tp.pid))); doc.setDrawColor(...C.ink); doc.setLineWidth(0.2); if(tp.orient==='flat') doc.setLineDashPattern([0.8,0.5],0); doc.rect(X,Y,w,h,'FD'); doc.setLineDashPattern([],0); }
         label(c,X,Y,w,h); }
-      F('bold',7,C.muted); doc.text(`R${row.ri+1}`,bx-2,by+(row.y-G.pad+row.dep/2)*s+1.2,{align:'right'}); }
+      // row numbers down the left, for the first block (cartons beside the rows are named in the table)
+      F('bold',7,C.muted); if(row.x0<=G.ox+.01) doc.text(`R${row.ri+1}`,bx-2,by+(row.y-G.pad+row.dep/2)*s+1.2,{align:'right'}); }
     F('bold',6.5,C.muted); doc.text('BACK',bx+Lb*s/2,by-1.6,{align:'center'}); doc.text('FRONT',bx+Lb*s/2,by+Wb*s+3.8,{align:'center'});
     F('normal',6.5,C.muted); doc.text(`length ${Lb} mm`,bx+Lb*s,by-1.6,{align:'right'});
     const wt=`width ${Wb} mm`, tw=doc.getTextWidth(wt); doc.text(wt,bx+Lb*s+3.4,by+Wb*s/2+tw/2,{angle:90});

@@ -132,7 +132,8 @@ test('the ways to pack one box: each once, the box’s own arrangement first', (
   assert.equal(new Set(ways.map(w => w.sig)).size, ways.length, 'no way twice');
   assert.ok(labels.includes('Lying flat, stacked 4 high'), labels.join(' | '));
   assert.ok(labels.includes('Standing up'), labels.join(' | '));
-  assert.ok(ways.length <= 4);
+  assert.ok(labels.includes('On the long edge in rows, 1 beside them'), labels.join(' | '));
+  assert.ok(ways.length <= 5);
 });
 
 test('the studio packs with this engine, and choosing a box re-packs the new kit for it', () => {

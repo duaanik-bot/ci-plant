@@ -14,7 +14,10 @@
      up  height
    A spot on the floor may hold a stack: it.stack = the cartons resting on it,
    bottom to top. Cartons stand in rows (lanes) that run the box's length; the
-   rows sit one behind the other across its width. */
+   rows sit one behind the other across its width. Rows make blocks (lane.col,
+   0 = the left-most; absent = 0) that stand side by side along the length: a
+   carton beside the rows is a block of its own, so it can run front to back
+   alongside all of them instead of making one row deep. */
 (function (root) {
 'use strict';
 
@@ -25,6 +28,24 @@ const colItems = it => hasStack(it) ? [it, ...it.stack] : [it];
 const FL = it => hasStack(it) ? Math.max(it.l, ...it.stack.map(s => s.l)) : it.l;
 const FD = it => hasStack(it) ? Math.max(dep(it), ...it.stack.map(dep)) : dep(it);
 const FH = it => hasStack(it) ? it.up + it.stack.reduce((a, x) => a + x.up, 0) : it.up;
+
+/* The blocks of rows, left to right: each as long as its longest row, as deep as its rows together. The kit is the
+   blocks side by side — their lengths added up, as deep as the deepest block. */
+const colOf = ln => ln.col || 0;
+function blocksOf(lanes) {
+  const m = new Map();
+  for (const ln of lanes) {
+    if (!ln.items || !ln.items.length) continue;
+    const c = colOf(ln); let b = m.get(c);
+    if (!b) { b = { col: c, len: 0, dep: 0, lanes: [] }; m.set(c, b); }
+    b.len = Math.max(b.len, ln.items.reduce((s, x) => s + FL(x), 0)); b.dep += Math.max(...ln.items.map(FD)); b.lanes.push(ln);
+  }
+  return [...m.values()].sort((a, b) => a.col - b.col);
+}
+function extentOf(lanes) {
+  const bs = blocksOf(lanes);
+  return { L: bs.reduce((s, b) => s + b.len, 0), W: bs.length ? Math.max(...bs.map(b => b.dep)) : 0, blocks: bs.length };
+}
 
 function orientDims(it) {
   let l, d, up;
@@ -133,11 +154,49 @@ function poseSearch(units, cap, hc, Wb) {
   return out;
 }
 
+/* Beside the rows: one kind of carton — one, two or three of it — taken out of
+   the rows and stood at the box's side (a block of its own, lane.col 1), turned
+   or not, one behind the other; the rest stand in rows the house way, in the
+   length left. Standing only, nothing stacked. Tried thinnest along the length
+   first. Where one carton made its row as deep as itself, it now runs front to
+   back beside every row. */
+function sideSearch(units, cap, hc, Wb) {
+  const kinds = {};
+  units.forEach((u, i) => { const k = u.t + '-' + u.m + '-' + u.b; (kinds[k] = kinds[k] || []).push(i); });
+  const out = [];
+  // the floor a carton takes standing in a row (the house way), or Infinity where it can't stand in that length
+  const foot = (r, room) => Math.min(r.m <= hc && r.b <= room ? r.t * r.b : Infinity, r.b <= hc && r.m <= room ? r.t * r.m : Infinity);
+  for (const k of Object.keys(kinds)) {
+    const idx = kinds[k], u = units[idx[0]], poses = [], seen = new Set();
+    for (const o of ['end', 'edge']) for (const rot of [true, false]) {
+      const x = orientDims({ ...u, orient: o, rot });
+      const pk = x.l + 'x' + dep(x) + 'x' + x.up;
+      if (x.up <= hc && x.l < cap && dep(x) <= Wb && !seen.has(pk)) { seen.add(pk); poses.push(x); }
+    }
+    poses.sort((a, b) => a.l - b.l || dep(a) - dep(b));
+    for (let n = 1; n <= Math.min(3, idx.length) && n < units.length; n++) {
+      const take = new Set(idx.slice(0, n)), rest = units.filter((_, i) => !take.has(i));
+      for (const x of poses) {
+        if (dep(x) * n > Wb) continue;
+        const room = cap - x.l;
+        const area = rest.reduce((s, r) => s + foot(r, room), 0);
+        if (!(area / room <= Wb)) continue;                         // the rows can't be that shallow in the length left
+        const main = standingSearch(rest, room, hc); if (!main || main.L > room) continue;
+        const side = [...take].map(i => ({ items: [orientDims({ ...units[i], idx: i, orient: x.orient, rot: x.rot })], col: 1 }));
+        const lanes = [...main.lanes, ...side];
+        out.push({ lanes, W: Math.max(main.W, dep(x) * n), L: main.L + x.l, rows: lanes.length, stacked: 0, side: n, house: false, pol: 'side' });
+      }
+    }
+  }
+  return out;
+}
+
 /* Rank among arrangements that fit: the house style first; no stack before a
-   stack; a proper fit before a tight one; the fewest cartons stacked; the
-   narrowest; the fewest rows. */
+   stack; a proper fit before a tight one; cartons beside the rows before
+   cartons laid down or turned; the fewest cartons stacked; the narrowest; the
+   fewest rows. */
 const okOf = c => c.status !== 'short';
-const keyOf = c => [okOf(c) ? 0 : 1, c.house ? 0 : 1, c.stacked ? 1 : 0, RANK[c.status], c.stacked, c.W, c.rows];
+const keyOf = c => [okOf(c) ? 0 : 1, c.house ? 0 : 1, c.stacked ? 1 : 0, RANK[c.status], c.side ? 0 : 1, c.stacked, c.W, c.rows];
 function better(a, b) { const x = keyOf(a), y = keyOf(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i]; return false; }
 
 /* The house style in a box, exactly as the studio has always worked it out:
@@ -159,7 +218,7 @@ function candidates(units, size, st, all) {
   if (!units.length || !(L > 0 && W > 0 && H > 0)) return out;
   const a = houseFit(units, L, W, H, st); if (a) out.push(a);
   if (!all && a && okOf(a)) return out;
-  for (const c of poseSearch(units, L - st.dLmin, H - st.dHmin, W)) { c.pass = 0; c.status = statusOf(W - c.W, st); out.push(c); }
+  for (const c of [...sideSearch(units, L - st.dLmin, H - st.dHmin, W), ...poseSearch(units, L - st.dLmin, H - st.dHmin, W)]) { c.pass = 0; c.status = statusOf(W - c.W, st); out.push(c); }
   return out;
 }
 
@@ -177,20 +236,25 @@ function fitBox(units, size, st) {
 function kindOf(c) {
   const all = c.lanes.flatMap(l => l.items.flatMap(colItems));
   const os = new Set(all.map(x => x.orient || 'edge')), turned = all.filter(x => x.rot).length * 2 > all.length;
-  const k = c.stacked ? 'stack' : os.size === 1 ? [...os][0] : os.has('flat') ? 'mixed' : 'standing';
+  const k = c.stacked ? 'stack' : c.side ? 'side' : os.size === 1 ? [...os][0] : os.has('flat') ? 'mixed' : 'standing';
   return { kind: k + (turned ? '-turned' : ''), turned, base: k };
 }
 const WAY_LABEL = { flat: 'Lying flat', edge: 'On the long edge', end: 'Standing up', standing: 'Standing up and on edge', mixed: 'Some flat, some standing' };
 function wayLabel(c) {
   const k = kindOf(c), t = k.turned ? ', turned 90°' : '';
   if (k.base === 'stack') return `Lying flat, stacked ${c.high} high${t}`;
+  if (k.base === 'side') {
+    const os = new Set(c.lanes.filter(l => !colOf(l)).flatMap(l => l.items.flatMap(colItems)).map(x => x.orient || 'edge'));
+    return `${os.size === 1 ? WAY_LABEL[[...os][0]] : WAY_LABEL.standing} in rows, ${c.side} beside them`;
+  }
   return WAY_LABEL[k.base] + t;
 }
-const sigOf = lanes => lanes.map(l => l.items.map(c => colItems(c).map(x => x.pid + ':' + (x.orient || 'edge') + (x.rot ? 'r' : '')).join('/')).join(',')).join('|');
+/* an arrangement in a few characters: the same arrangement, the same string (a block beside the rows marked c>) */
+const sigOf = lanes => lanes.map(l => (colOf(l) ? colOf(l) + '>' : '') + l.items.map(c => colItems(c).map(x => x.pid + ':' + (x.orient || 'edge') + (x.rot ? 'r' : '')).join('/')).join(',')).join('|');
 
 /* The different ways these cartons go into one box — one per way of sitting,
    best first, the box's own arrangement (fitBox) among them. */
-function packWays(units, size, st, max = 4) {
+function packWays(units, size, st, max = 5) {
   const cs = candidates(units, size, st, true), by = new Map();
   for (const c of cs) { const k = kindOf(c).kind, o = by.get(k); if (!o || better(c, o)) by.set(k, c); }
   const best = fitBox(units, size, st), list = [...by.values()].sort((a, b) => better(a, b) ? -1 : better(b, a) ? 1 : 0);
@@ -203,5 +267,5 @@ function packWays(units, size, st, max = 4) {
   return out;
 }
 
-root.KitPack = { dep, hasStack, colItems, FL, FD, FH, orientDims, packLanes, statusOf, standingSearch, poseSearch, makeColumns, fitBox, packWays, wayLabel, sigOf };
+root.KitPack = { dep, hasStack, colItems, FL, FD, FH, colOf, blocksOf, extentOf, orientDims, packLanes, statusOf, standingSearch, poseSearch, sideSearch, makeColumns, fitBox, packWays, wayLabel, sigOf };
 })(typeof window !== 'undefined' ? window : globalThis);
