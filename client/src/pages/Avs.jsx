@@ -506,10 +506,16 @@ const pdfDownloadUrl = r => (r.drive_file_id ? `https://drive.google.com/uc?expo
 async function openPdf(r, { download = false } = {}) {
   const win = download ? null : window.open('', '_blank');
   try {
-    const res = await fetch(`/api/avs/reports/${encodeURIComponent(r.report_no)}/pdf${download ? '?download=1' : ''}`, {
-      headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
-    });
-    if (!res.ok) throw new Error(String(res.status));
+    // Google's Drive link answers in 5 to 25 s and now and then not in time:
+    // a second try usually comes back at once.
+    let res = null;
+    for (let attempt = 0; attempt < 2 && !res?.ok; attempt++) {
+      res = await fetch(`/api/avs/reports/${encodeURIComponent(r.report_no)}/pdf${download ? '?download=1' : ''}`, {
+        headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+      });
+      if (!res.ok && ![502, 504].includes(res.status)) break;
+    }
+    if (!res?.ok) throw new Error(String(res?.status));
     const url = URL.createObjectURL(await res.blob());
     if (download) {
       const a = document.createElement('a');

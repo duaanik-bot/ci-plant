@@ -252,7 +252,7 @@ r.get('/avs/reports/:no/pdf', async (req, res, next) => {
     const state = caseState({ ...report, closed: !!closed }, last || null);
     const sameIssue = last && +last.report_rev === +report.report_rev && +(last.check_no ?? 1) === +(report.check_no ?? 1);
     const stamp = pdfStamp(state, sameIssue ? last : null);
-    const got = await callDrive(await avsSettings(), { op: 'get', id: report.drive_file_id }, { timeoutMs: 24000, tries: 2 });
+    const got = await callDrive(await avsSettings(), { op: 'get', id: report.drive_file_id }, { timeoutMs: 26000, tries: 2 });
     const bytes = Buffer.from(got.base64 || '', 'base64');
     if (!bytes.length) throw fail(502, 'Google Drive sent an empty file');
     const out = Buffer.from(await stampPdf(bytes, stamp));
