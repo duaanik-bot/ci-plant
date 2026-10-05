@@ -165,6 +165,24 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     assert.equal(n.body.invoice_number, 'CI-TRD-0002');
   });
 
+  test('a trading item needs only a name: create it, stock it, bill it', async () => {
+    const made = await call('POST', '/materials', { name: 'Ripple 200 ml jacket', category: 'trading', unit: 'pcs', gst_rate: 18, std_rate: 4.5 });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    const id = made.body.id;
+    assert.equal((await call('POST', '/inventory/adjust', { material_id: id, qty: 5000, note: 'Trading opening stock' })).status, 200);
+    const master = await call('GET', '/direct-invoices/trading-items');
+    assert.deepEqual(master.body.map(m => [m.name, m.in_stock]), [['Ripple 200 ml jacket', 5000]]);
+    const picker = await call('GET', '/direct-invoices/items');
+    assert.equal(picker.body.boards.find(b => b.material_id === id)?.category, 'trading');
+    const inv = await call('POST', '/direct-invoices', {
+      customer_id: 1, lines: [{ item_type: 'board', material_id: id, qty: 1200, rate: 4.5, gst_pct: 18 }] });
+    assert.equal(inv.status, 200, JSON.stringify(inv.body));
+    assert.equal(inv.body.subtotal, 5400);
+    assert.equal((await call('GET', '/direct-invoices/trading-items')).body[0].in_stock, 3800);
+    assert.equal((await call('DELETE', `/invoices/${inv.body.id}`)).status, 200);
+    assert.equal((await call('GET', '/direct-invoices/trading-items')).body[0].in_stock, 5000);
+  });
+
   test('deleting it returns every sheet to its own pile and every carton to FG', async () => {
     const r = await call('DELETE', `/invoices/${invoice.id}`);
     assert.equal(r.status, 200, JSON.stringify(r.body));

@@ -8,7 +8,7 @@ import { Button, Field, Input, Modal, searchText, Select, useToast } from './ui.
 import { Plus, Trash2, UserPlus } from 'lucide-react';
 
 const today = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local
-const blankLine = () => ({ key: Math.random().toString(36).slice(2), item_type: 'board', item_id: '', hsn: '', qty: '', rate: '', gst_pct: '' });
+const blankLine = () => ({ key: Math.random().toString(36).slice(2), item_type: 'trading', item_id: '', hsn: '', qty: '', rate: '', gst_pct: '' });
 const blankParty = () => ({ name: '', gstin: '', state: 'Punjab', city: '' });
 const qtyText = n => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 
@@ -34,14 +34,19 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
     api.get('/direct-invoices/next-number').then(r => setInvoiceNumber(r.invoice_number || '')).catch(() => {});
   }, [open]);
 
-  const find = l => (l.item_type === 'board'
+  // 'trading' and 'board' are both warehouse materials — two lists of one kind,
+  // split only so a trading item is not buried among the boards.
+  const isMaterial = t => t !== 'carton';
+  const find = l => (isMaterial(l.item_type)
     ? items.boards.find(b => b.material_id === +l.item_id)
     : items.cartons.find(c => c.product_id === +l.item_id));
+  const trading = items.boards.filter(b => b.category === 'trading');
+  const warehouse = items.boards.filter(b => b.category !== 'trading');
 
   const setLine = (key, patch) => setLines(ls => ls.map(l => (l.key === key ? { ...l, ...patch } : l)));
   // Picking an item pre-fills its rate and GST — both stay editable.
   const pickItem = (l, id) => {
-    const it = (l.item_type === 'board' ? items.boards.find(b => b.material_id === +id) : items.cartons.find(c => c.product_id === +id));
+    const it = find({ ...l, item_id: id });
     setLine(l.key, {
       item_id: id,
       hsn: it?.hsn || '',
@@ -56,7 +61,7 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
     const used = {};
     return lines.map(l => {
       const it = find(l);
-      const k = `${l.item_type}:${l.item_id}`;
+      const k = `${isMaterial(l.item_type) ? 'm' : 'c'}:${l.item_id}`;
       const qty = +l.qty || 0;
       used[k] = (used[k] || 0) + qty;
       const amount = +(qty * (+l.rate || 0)).toFixed(2);
@@ -91,8 +96,8 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
         invoice_date: invoiceDate || undefined,
         notes: notes.trim() || undefined,
         lines: rows.map(l => ({
-          item_type: l.item_type,
-          [l.item_type === 'board' ? 'material_id' : 'product_id']: +l.item_id,
+          item_type: isMaterial(l.item_type) ? 'board' : 'carton',
+          [isMaterial(l.item_type) ? 'material_id' : 'product_id']: +l.item_id,
           hsn: l.hsn.trim() || undefined,
           qty: +l.qty, rate: +l.rate, gst_pct: +l.gst_pct || 0,
         })),
@@ -165,7 +170,7 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
         <section className="ci-data-panel">
           <div className="ci-form-panel-title m-0 border-b border-slate-100 px-4 py-3">
             <span>Items from stock</span>
-            <span>{items.boards.length} materials · {items.cartons.length} cartons in stock</span>
+            <span>{trading.length} trading · {warehouse.length} board / RM · {items.cartons.length} cartons in stock</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -181,15 +186,16 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                   <tr key={l.key} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-2">
                       <Select value={l.item_type} onChange={e => setLine(l.key, { item_type: e.target.value, item_id: '', hsn: '', rate: '', gst_pct: '' })}>
+                        <option value="trading">Trading</option>
                         <option value="board">Board / RM</option>
                         <option value="carton">Carton (FG)</option>
                       </Select>
                     </td>
                     <td className="px-3 py-2">
                       <Select value={l.item_id} onChange={e => pickItem(l, e.target.value)}>
-                        <option value="">{l.item_type === 'board' ? 'Select board / material…' : 'Select carton…'}</option>
-                        {l.item_type === 'board'
-                          ? items.boards.map(b => (
+                        <option value="">{l.item_type === 'trading' ? 'Select trading item…' : l.item_type === 'board' ? 'Select board / material…' : 'Select carton…'}</option>
+                        {isMaterial(l.item_type)
+                          ? (l.item_type === 'trading' ? trading : warehouse).map(b => (
                             <option key={b.material_id} value={b.material_id} data-search={searchText(b)}>
                               {b.name} — {qtyText(b.available)} {b.unit}
                             </option>))
@@ -198,10 +204,13 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                               {c.name} · {c.code} — {qtyText(c.available)} pcs
                             </option>))}
                       </Select>
+                      {l.item_type === 'trading' && !trading.length && (
+                        <div className="mt-1 text-xs text-amber-600">No trading item has stock — add items and stock in Masters → Trading Items.</div>
+                      )}
                       {l.it && (
                         <div className={`mt-1 text-xs ${l.over ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
                           {l.over ? 'More than stock — ' : 'In stock: '}
-                          {qtyText(l.it.available)} {l.item_type === 'board' ? l.it.unit : 'pcs'}
+                          {qtyText(l.it.available)} {isMaterial(l.item_type) ? l.it.unit : 'pcs'}
                           {l.item_type === 'carton' && l.it.customer_name ? ` · ${l.it.customer_name}` : ''}
                         </div>
                       )}

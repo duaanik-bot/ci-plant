@@ -51,6 +51,17 @@ r.get('/direct-invoices/items', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The Trading Items master (Masters → Trading Items): every trading item with
+// what is on the shelf, in stock or not.
+r.get('/direct-invoices/trading-items', async (_req, res, next) => {
+  try {
+    res.json(await q(`
+      SELECT m.*, COALESCE((SELECT SUM(b.qty) FROM stock_batches b
+                            WHERE b.material_id = m.id AND b.status='available'), 0) AS in_stock
+      FROM materials m WHERE m.category = 'trading' ORDER BY m.name, m.id`));
+  } catch (e) { next(e); }
+});
+
 // A preview for the dialog — the save mints its own inside its transaction.
 r.get('/direct-invoices/next-number', async (_req, res, next) => {
   try { res.json({ invoice_number: await nextNumber(DIRECT_PREFIX, 'invoices', 'invoice_number', one) }); }

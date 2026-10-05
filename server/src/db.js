@@ -2839,4 +2839,7 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Direct (trading) invoices — invoices.kind and direct_invoice_lines
   // (routes/direct-invoice.js). Additive and idempotent.
   await pool.query(migration('20261005120000_direct_invoices.sql'));
+
+  // Trading items — materials.category gains 'trading' (Masters → Trading Items).
+  await pool.query(migration('20261005150000_trading_items.sql'));
 }

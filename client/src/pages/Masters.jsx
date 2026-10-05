@@ -263,6 +263,30 @@ const CONFIGS = {
     columns: ['name', 'category', 'spec', 'unit', 'std_rate', 'last_rate', 'reorder_level', 'min_stock', 'max_stock', 'active'],
     columnLabels: { category: 'Class', std_rate: 'Standard Rate', last_rate: 'Last PO Rate' },
   },
+  // Goods bought and sold as they are — no board, no spec, no job card. Stored
+  // as materials in their own category, so stock and the Direct Invoice work on
+  // them like any warehouse item.
+  trading: {
+    label: 'Trading Items', endpoint: '/materials', loadEndpoint: '/direct-invoices/trading-items', activeToggle: true,
+    defaults: { category: 'trading', unit: 'pcs', gst_rate: 18, reorder_level: 0, min_stock: 0, max_stock: 0, active: 1 },
+    fields: [
+      { key: 'name', label: 'Item Name', required: true },
+      { key: 'unit', label: 'Unit', required: true },
+      { key: 'hsn_code', label: 'HSN Code', newRow: true },
+      { key: 'gst_rate', label: 'GST %', type: 'number' },
+      { key: 'std_rate', label: 'Selling Rate', type: 'number', newRow: true },
+      // Not a column: typed here, it is posted as a stock adjustment after the save.
+      { key: 'add_stock', label: 'Add Stock (qty)', type: 'number', virtual: true,
+        hint: 'Adds this quantity to stock in hand. Leave blank for no change.' },
+    ],
+    columns: ['name', 'unit', 'hsn_code', 'gst_rate', 'std_rate', 'in_stock', 'active'],
+    columnLabels: { in_stock: 'In Stock' },
+    validate: (body, { rows, editing }) => {
+      const clash = rows.find(r => String(r.id) !== String(editing.id ?? '')
+        && String(r.name || '').trim().toLowerCase() === String(body.name || '').trim().toLowerCase());
+      return clash ? `“${clash.name}” is already a trading item` : null;
+    },
+  },
   blocks: {
     label: 'Blocks', endpoint: '/tooling/procurement/block/inventory',
     loadEndpoint: '/tooling/procurement/block/inventory?all=1',
@@ -357,7 +381,7 @@ const PRODUCT_CELL_CLASS = {
 // lookup on the Boards master, so it has to be named here to line up on both.
 const DERIVED_NUMERIC_COLS = new Set([
   'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'board_count',
-  'stock_free', 'stock_ordered', 'last_purchase_rate', 'stock_available', 'stock_reserved', 'rate_per_plate',
+  'stock_free', 'stock_ordered', 'last_purchase_rate', 'stock_available', 'stock_reserved', 'rate_per_plate', 'in_stock',
 ]);
 
 // Short header labels for the Products table — keep column widths tight so the
@@ -382,7 +406,7 @@ const BOARD_COL_LABELS = { last_rate: 'Last PO Rate' };
 const singular = label => (/ies$/.test(label) ? label.replace(/ies$/, 'y') : label.replace(/s$/, ''));
 
 const MASTER_GROUPS = [
-  { label: 'Products / Items We Supply', items: ['customers', 'products'] },
+  { label: 'Products / Items We Supply', items: ['customers', 'products', 'trading'] },
   { label: 'Procurement / Consumables', items: ['vendors', 'boards', 'plates', 'chemicals', 'blocks'] },
   { label: 'Organisation & System', items: ['machines', 'sections', 'employees', 'gst_rates', 'billing_entities', 'users', 'company'] },
 ];
@@ -873,6 +897,7 @@ export default function Masters() {
       for (const [k, v] of Object.entries(cfg.defaults)) if (!cfg.fields.some(f => f.key === k)) body[k] = v;
     for (const f of cfg.fields) {
       if (editing.id && f.createOnly) continue;               // e.g. email
+      if (f.virtual) continue;                                // not a column — handled after the save
       // A derived field is read-only on the form and never typed, but it IS a
       // real column. A field with an `onSave` (the board name and code) saves
       // exactly what the form showed: kept byte-for-byte on an ordinary edit, so
@@ -934,6 +959,14 @@ export default function Masters() {
     if (cfg.operatorMapping && (saved?.id || editing.id)) {
       await api.put(`/machines/${saved?.id ?? editing.id}/operators`, {
         employee_ids: (editing.operators || []).map(o => o.id),
+      });
+    }
+    // Trading Items: stock typed on the form goes in as a stock adjustment.
+    const addStock = cfg.fields.some(f => f.key === 'add_stock') ? +editing.add_stock || 0 : 0;
+    if (addStock > 0 && (saved?.id || editing.id)) {
+      await api.post('/inventory/adjust', {
+        material_id: saved?.id ?? editing.id, qty: addStock,
+        note: editing.id ? 'Trading stock added' : 'Trading opening stock',
       });
     }
     toast.success(editing.id ? 'Updated' : 'Created');
