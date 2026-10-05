@@ -23,6 +23,9 @@ export default function Invoice() {
   if (!inv) return null;
   const co = inv.company;
   const intra = inv.igst === 0;
+  // A direct (trading) invoice was billed straight from stock: no challan, no
+  // COA, and its lines are plain descriptions rather than order lines.
+  const direct = inv.kind === 'direct';
 
   const createCoa = async line => {
     const c = await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id });
@@ -59,7 +62,9 @@ export default function Invoice() {
         invoice_number: inv.invoice_number,
         invoice_date: inv.invoice_date,
         notes: inv.notes || null,
-        lines: inv.lines.map(l => ({ id: l.id, qty: +l.qty, rate: +l.rate, gst_pct: +(l.gst_pct ?? 12) })),
+        // A direct invoice's lines moved stock when it was raised, so they are
+        // not edited here — delete it and raise it again to change them.
+        lines: direct ? undefined : inv.lines.map(l => ({ id: l.id, qty: +l.qty, rate: +l.rate, gst_pct: +(l.gst_pct ?? 12) })),
       });
       toast.success(`${saved.invoice_number} updated`);
       setEditing(false);
@@ -108,10 +113,10 @@ export default function Invoice() {
       <div className="no-print mb-4 flex justify-between">
         <Link to="/dispatch-invoice?tab=invoices"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
         <div className="flex flex-wrap gap-2">
-          <FluenceButton productIds={inv.lines.map(l => l.product_id)} context="invoice" label="Fluence verification" className="self-center" />
-          <Button variant="secondary" onClick={createAllCoas}><FileCheck2 size={14} /> Create COAs</Button>
+          {!direct && <FluenceButton productIds={inv.lines.map(l => l.product_id)} context="invoice" label="Fluence verification" className="self-center" />}
+          {!direct && <Button variant="secondary" onClick={createAllCoas}><FileCheck2 size={14} /> Create COAs</Button>}
           <Button variant="secondary" onClick={() => setEditing(true)}><Save size={14} /> Edit Invoice</Button>
-          <Button onClick={() => setPrintPrompt(true)}><Printer size={14} /> Export Invoice PDF</Button>
+          <Button onClick={() => (direct ? exportInvoice('invoice') : setPrintPrompt(true))}><Printer size={14} /> Export Invoice PDF</Button>
         </div>
       </div>
 
@@ -143,7 +148,7 @@ export default function Invoice() {
           <div className="text-right text-xs text-gray-600">
             <div className="font-bold uppercase tracking-wide text-gray-400">Place of Supply</div>
             <div className="mt-1">{inv.state || '—'} · {intra ? 'Intra-state (CGST + SGST)' : 'Inter-state (IGST)'}</div>
-            <div className="mt-1">HSN: <b>{co.hsn}</b> · GST as per line items</div>
+            <div className="mt-1">{direct ? 'HSN and GST as per line items' : <>HSN: <b>{co.hsn}</b> · GST as per line items</>}</div>
           </div>
         </div>
 
@@ -161,14 +166,26 @@ export default function Invoice() {
           <thead>
             <tr className="bg-ink-900 text-left text-[10px] font-bold uppercase tracking-wide text-white">
               <th className="px-2 py-2">#</th><th className="w-full px-2 py-2">Description</th>
-              <th className="px-2 py-2">Challan</th><th className="px-2 py-2">HSN</th>
+              <th className="px-2 py-2">{direct ? 'Unit' : 'Challan'}</th><th className="px-2 py-2">HSN</th>
               <th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Rate</th>
               <th className="px-2 py-2 text-right">GST</th>
               <th className="px-2 py-2 text-right">Amount</th>
             </tr>
           </thead>
           <tbody>
-            {inv.lines.map((l, i) => (
+            {direct && inv.lines.map((l, i) => (
+              <tr key={l.id} className="border-b border-gray-100">
+                <td className="px-2 py-2 align-top text-gray-500">{i + 1}</td>
+                <td className="w-full min-w-[180px] px-2 py-2 align-top font-semibold text-gray-900">{l.description}</td>
+                <td className="whitespace-nowrap px-2 py-2 align-top text-[11px] text-gray-500">{l.unit}</td>
+                <td className="whitespace-nowrap px-2 py-2 align-top text-[11px] text-gray-500">{l.hsn || '—'}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums">{Number(l.qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 })}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums">₹{Number(l.rate || 0).toFixed(2)}</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top tabular-nums text-gray-500">{l.gst_pct}%</td>
+                <td className="whitespace-nowrap px-2 py-2 text-right align-top font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
+              </tr>
+            ))}
+            {!direct && inv.lines.map((l, i) => (
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-2 py-2 align-top text-gray-500">{i + 1}</td>
                 <td className="w-full min-w-[180px] px-2 py-2 align-top">
@@ -265,7 +282,8 @@ export default function Invoice() {
             <Field label="Invoice Date"><Input type="date" value={String(inv.invoice_date || '').slice(0, 10)} onChange={e => setInv({ ...inv, invoice_date: e.target.value })} /></Field>
             <Field label="Notes"><Textarea value={inv.notes || ''} onChange={e => setInv({ ...inv, notes: e.target.value })} /></Field>
           </div>
-          <table className="w-full text-sm">
+          {direct && <p className="text-xs text-slate-400">Items on a direct invoice took stock when it was raised. To change them, delete this invoice (the goods return to stock) and raise it again.</p>}
+          {!direct && <><table className="w-full text-sm">
             <thead><tr className="ci-table-head"><th className="px-3 py-2">Item</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">GST %</th><th className="px-3 py-2 text-right">Line action</th></tr></thead>
             <tbody>
               {inv.lines.map(l => (
@@ -288,7 +306,7 @@ export default function Invoice() {
               ))}
             </tbody>
           </table>
-          <p className="mt-2 text-xs text-slate-400">Remove = un-bill only. → FG returns the goods to Finished Goods stock and drops the challan line. → Leftover also boxes them (auto CI-BOX-####). Blocked once a payment is recorded.</p>
+          <p className="mt-2 text-xs text-slate-400">Remove = un-bill only. → FG returns the goods to Finished Goods stock and drops the challan line. → Leftover also boxes them (auto CI-BOX-####). Blocked once a payment is recorded.</p></>}
         </div>
       </Modal>
     </div>

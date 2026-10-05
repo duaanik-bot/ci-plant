@@ -8,6 +8,7 @@ import { audit, nextNumber, lockDocNumbers, shadeCardsFor, fgReceipt, fgMove, se
 import { clashes, familyKey } from '../product-family.js';
 import { billingEntity, isIntraState, HOUSE_FALLBACK } from '../billing-entity.js';
 import { requireRole } from '../auth.js';
+import { directInvoiceLines, reverseDirectInvoice } from './direct-invoice.js';
 
 const r = Router();
 const canBill = requireRole('planner'); // admin implied
@@ -93,7 +94,8 @@ r.get('/invoices', async (_req, res, next) => {
   try {
     res.json(await q(`
       SELECT i.*, c.name AS customer_name, c.state, c.gstin,
-        (SELECT COUNT(*)::int FROM invoice_lines il WHERE il.invoice_id=i.id) AS line_count,
+        (SELECT COUNT(*)::int FROM invoice_lines il WHERE il.invoice_id=i.id)
+          + (SELECT COUNT(*)::int FROM direct_invoice_lines dil WHERE dil.invoice_id=i.id) AS line_count,
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=i.id),0) AS paid
       FROM invoices i JOIN customers c ON c.id=i.customer_id
       ORDER BY i.id DESC`));
@@ -107,6 +109,13 @@ r.get('/invoices/:id', async (req, res, next) => {
         COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=i.id),0) AS paid
       FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.id=$1`, [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    // A direct (trading) invoice has no challan behind it — its lines are its own.
+    if (inv.kind === 'direct') {
+      inv.lines = await directInvoiceLines(inv.id);
+      inv.payments = await q('SELECT * FROM payments WHERE invoice_id=$1 ORDER BY id', [inv.id]);
+      inv.company = await companyFor(inv);
+      return res.json(inv);
+    }
     inv.lines = await q(`
       SELECT il.*, p.name AS product_name, p.code AS product_code, p.size,
              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
@@ -448,6 +457,15 @@ r.delete('/invoices/:id', canBill, async (req, res, next) => {
       const issued = await oc(`SELECT coa_number FROM coas WHERE invoice_id=$1 AND status='issued' LIMIT 1`, [inv.id]);
       if (issued)
         throw Object.assign(new Error(`${issued.coa_number} is issued on this invoice — reopen the COA before deleting`), { status: 409 });
+      // A direct invoice took its goods off the shelf itself, so deleting it
+      // puts them back. It has no challan, COA or invoice_lines to unwind.
+      if (inv.kind === 'direct') {
+        await reverseDirectInvoice(inv, qc, oc, req.user.name);
+        await qc('DELETE FROM invoices WHERE id=$1', [inv.id]);
+        await audit('invoice', inv.id, 'delete',
+          `${inv.invoice_number} ₹${inv.total} deleted — direct invoice, goods returned to stock`, qc, req.user.name);
+        return;
+      }
       // Detach draft COAs (FK) → they revert to unlinked drafts on their dispatch line.
       await qc('UPDATE coas SET invoice_id=NULL WHERE invoice_id=$1', [inv.id]);
       // Dropping the lines frees the dispatch lines back to un-invoiced.

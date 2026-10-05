@@ -51,6 +51,7 @@ export const MINTING_POSTS = Object.freeze([
   '/grns/direct',
   '/grns/substitute',
   '/invoices',
+  '/direct-invoices',
   '/invoices/:id/lines/:lineId/remove',
   '/job-cards/:id/tooling-requirements',
   '/job-stages/:id/complete',

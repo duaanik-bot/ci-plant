@@ -10,7 +10,8 @@ import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilter
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
-import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
+import DirectInvoiceDialog from '../components/DirectInvoiceDialog.jsx';
+import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock, PackageOpen } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -56,6 +57,8 @@ export default function Invoices({ embedded = false }) {
   // series and editable — a number you can see before saving is a number you
   // can correct, which is the whole point of showing it here.
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  // Direct (trading) invoice — billed straight from stock, no challan behind it.
+  const [direct, setDirect] = useState(false);
 
   const [threads, setThreads] = useState({});
 
@@ -167,7 +170,9 @@ export default function Invoices({ embedded = false }) {
     if (inv.paid > 0) { toast.error('Reverse the payment before deleting this invoice'); return; }
     if (!window.confirm(
       `Delete invoice ${inv.invoice_number} (${fmt.inr(inv.total)})?\n\n` +
-      `This voids the bill and returns its dispatched line(s) to un-invoiced so they can be re-billed. This cannot be undone.`)) return;
+      (inv.kind === 'direct'
+        ? `This voids the bill and puts its goods back into stock. This cannot be undone.`
+        : `This voids the bill and returns its dispatched line(s) to un-invoiced so they can be re-billed. This cannot be undone.`))) return;
     try {
       await api.del(`/invoices/${inv.id}`);
       toast.success(`${inv.invoice_number} deleted`);
@@ -228,6 +233,9 @@ export default function Invoices({ embedded = false }) {
     <>
       <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
         disabled={!invoices.length}><Wallet size={15} /> Record Payment</Button>
+      <Button variant="secondary" onClick={() => setDirect(true)}
+        title="Trading sale — bill board or cartons straight from stock, no order or challan">
+        <PackageOpen size={15} /> Direct Invoice</Button>
       <Button onClick={openCreate} disabled={uninvoiced.length === 0}>
         <Plus size={15} /> New Invoice{uninvoiced.length > 0 && <span className="ml-1 rounded-full bg-white/25 px-1.5 text-xs">{uninvoiced.length} lines waiting</span>}
       </Button>
@@ -292,7 +300,12 @@ export default function Invoices({ embedded = false }) {
         empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}
         columns={[
           { key: 'invoice_number', label: 'Invoice', render: i => (
-            <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>) },
+            <span className="inline-flex items-center gap-1.5">
+              <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>
+              {i.kind === 'direct' && (
+                <span title="Direct invoice — billed straight from stock, no challan"
+                  className="rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-violet-700">Direct</span>)}
+            </span>) },
           { key: 'invoice_date', label: 'Date', render: i => fmt.date(i.invoice_date) },
           { key: 'customer_name', label: 'Customer', render: i => (<div><div className="font-semibold">{i.customer_name}</div><div className="text-xs text-gray-400">{i.state}</div></div>) },
           { key: 'subtotal', label: 'Taxable', align: 'right', render: i => fmt.inr(i.subtotal) },
@@ -303,7 +316,7 @@ export default function Invoices({ embedded = false }) {
           threadColumn({ entity: 'invoice', threads, idOf: i => i.id }),
           { key: '_view', label: '', render: i => (
             <div className="flex items-center justify-end gap-3">
-              <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="invoice" />
+              {i.kind !== 'direct' && <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="invoice" />}
               <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-brand-600"><FileText size={13} /> View</Link>
               <PressButton type="button" disabled={i.paid > 0}
@@ -422,6 +435,8 @@ export default function Invoices({ embedded = false }) {
           )}
         </div>
       </Modal>
+
+      <DirectInvoiceDialog open={direct} onClose={() => setDirect(false)} onCreated={load} />
 
       <Modal open={!!rec} onClose={() => setRec(null)} title="Record Payment"
         footer={<>

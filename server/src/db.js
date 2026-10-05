@@ -2835,4 +2835,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Cartons made in parts — product_parts, order_lines.part_of_line_id,
   // job_cards.is_assembly (carton-parts.js holds every rule). Idempotent.
   await pool.query(migration('20260929120000_carton_parts.sql'));
+
+  // Direct (trading) invoices — invoices.kind and direct_invoice_lines
+  // (routes/direct-invoice.js). Additive and idempotent.
+  await pool.query(migration('20261005120000_direct_invoices.sql'));
 }

@@ -96,12 +96,15 @@ test('a taken product code names the code the write tried, and a minted one is n
 // hands in its own transaction's `oc`. This scans the server source for every
 // call to a minter and refuses one that omits the client or passes the pool.
 //
-// The single exception is GET /billing/next-invoice-number: it PREVIEWS the
-// next invoice number for the form and inserts nothing, so there is no write
-// to protect.
+// The exceptions are GET /billing/next-invoice-number and its direct-invoice
+// twin, GET /direct-invoices/next-number: each PREVIEWS the next number for
+// the form and inserts nothing, so there is no write to protect.
 const MINTERS = { nextNumber: 4, nextRunNumber: 2, nextToolCode: 2, nextScNumber: 1, nextProductCode: 3, lockProductCodeSeries: 2 };
 // file → the one route in it allowed to preview on the pool.
-const POOL_PREVIEW_ALLOWED = { 'routes/billing.js': "GET /billing/next-invoice-number" };
+const POOL_PREVIEW_ALLOWED = {
+  'routes/billing.js': "GET /billing/next-invoice-number",
+  'routes/direct-invoice.js': "GET /direct-invoices/next-number",
+};
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 function sourceFiles(dir) {
