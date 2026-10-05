@@ -177,7 +177,7 @@ test('the check fetches a kept photo with its key; it writes only the runner hea
   // The office runner's heartbeat (GET /avs/robot/queue) and, since 5 Oct 2026,
   // the check's report in one post (POST /avs/robot/file-report, avs-file-report.js).
   assert.deepEqual(writesIn('./routes/avs-robot.js'), ['avs.settings']);
-  assert.deepEqual(writesIn('./avs-file-report.js'), ['avs.check_photos', 'avs.check_requests', 'avs.problems', 'avs.reports']);
+  assert.deepEqual(writesIn('./avs-file-report.js'), ['avs.check_docs', 'avs.check_photos', 'avs.check_requests', 'avs.problems', 'avs.reports']);
   assert.doesNotMatch(src + readFileSync(new URL('./avs-file-report.js', import.meta.url), 'utf8'), /\bDELETE\s+FROM\b/i,
     'the check never deletes a row');
   assert.doesNotMatch(readFileSync(new URL('./avs-file-report.js', import.meta.url), 'utf8'), /avs\.decisions/,

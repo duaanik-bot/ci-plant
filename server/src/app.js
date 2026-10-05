@@ -42,6 +42,7 @@ import avs from './routes/avs.js';
 import avsSwitch from './routes/avs-switch.js';
 import avsIntake from './routes/avs-intake.js';
 import avsRobot from './routes/avs-robot.js';
+import avsDocs from './routes/avs-docs.js';
 import kitStudio from './routes/kitstudio.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
@@ -123,6 +124,8 @@ app.use('/api', avs);
 // sets people upload for Claude to check (to Google Drive, then the AVS routine).
 app.use('/api', avsSwitch);
 app.use('/api', avsIntake);
+// Remove a photo before Verify, documents with a set, re-check with them (5 Oct 2026).
+app.use('/api', avsDocs);
 // Kit Studio: carton sizing, layouts and draft kits on top of the Fluence master.
 // Owns kit_studio_*; writes the Fluence master through, with its revisions.
 app.use('/api', kitStudio);

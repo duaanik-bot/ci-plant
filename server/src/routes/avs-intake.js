@@ -26,7 +26,8 @@
 //      step is written to the audit trail, avs.audit_log (avs-audit.js).
 //
 // This router writes avs.check_requests, avs.check_photos, avs.check_photo_bytes,
-// avs.settings and avs.audit_log only, and deletes no row: a deleted set keeps
+// avs.settings and avs.audit_log only, and deletes no row (removing a photo or a
+// document for good, owner's choice 5 Oct 2026, is routes/avs-docs.js): a deleted set keeps
 // every row and photo, marked deleted with who, when and why.
 // The two links live in avs.settings (admin only; the token is never sent back).
 import { Router } from 'express';
@@ -95,7 +96,7 @@ async function ensureRobotKey(cfg) {
     [crypto.randomBytes(24).toString('hex'), 'made by CI Plant: the AVS check fetches photos kept in CI Plant with it']);
 }
 
-const linked = cfg => ({
+export const linked = cfg => ({
   drive: !!(cfg.drive_bridge_url && cfg.drive_bridge_secret),
   claude: !!(cfg.routine_fire_url && cfg.routine_token),
 });
@@ -201,7 +202,7 @@ export async function cloudFallback() {
 // (runbook 2C.6 step 1). The cloud run reaches the AVS folder only through the
 // Drive link: without it no run is spent, and the set waits for a check started
 // in Cowork (runbook 2C.7).
-async function fireUnlessRunning(cfg, set, { cloud = false } = {}) {
+export async function fireUnlessRunning(cfg, set, { cloud = false } = {}) {
   const links = linked(cfg);
   if (links.claude && !links.drive) {
     const error = 'The Drive link is not set up, so Claude cannot reach the AVS folder from the cloud';
@@ -232,7 +233,7 @@ const SET_COLS = `s.id, s.status, s.job_card_id, s.jc_number, s.product_hint, s.
   s.fire_error, s.session_url, s.claimed_at, s.progress, s.finished_at, s.report_no, s.report_rev, s.check_no,
   s.result, s.robot_note, s.cancelled_at, s.cancelled_by, s.updated_at, s.redo_report_no, s.redo_of_set_id, s.redo_reason,
   s.job_cards, s.progress_log, s.cancel_reason, s.cancelled_status, s.deleted_at, s.deleted_by, s.delete_reason,
-  s.replaces_set_id, s.replaces_report_no`;
+  s.replaces_set_id, s.replaces_report_no, s.photos_from_set_id`;
 
 // One set, or the list: every set still in progress, and the newest
 // `perStatus` of each finished status (the page shows them by status, with
@@ -253,7 +254,15 @@ export async function readSets({ id = null, perStatus = 25, deleted = false } = 
   const photos = await q(`SELECT id, request_id, seq, file_name, mime, size_bytes, captured_at, drive_url, uploaded_at,
             stored, filed_at, filed_path
      FROM avs.check_photos WHERE request_id = ANY($1) ORDER BY request_id, seq`, [sets.map(s => s.id)]);
-  return sets.map(s => ({ ...s, label: setLabel(s.id), photos: photos.filter(p => +p.request_id === +s.id) }));
+  // Documents (5 Oct 2026, routes/avs-docs.js). A database before that migration has none.
+  const docs = await q(`SELECT id, request_id, kind, title, url, file_name, mime, size_bytes, drive_url, stored, note,
+            added_by, added_at, added_after_report, used_in_report, used_in_check
+     FROM avs.check_docs WHERE request_id = ANY($1) ORDER BY request_id, id`, [sets.map(s => s.id)])
+    .catch(e => { if (MISSING.has(e?.code) || e?.code === '42703') return []; throw e; });
+  return sets.map(s => ({
+    ...s, label: setLabel(s.id), photos: photos.filter(p => +p.request_id === +s.id),
+    docs: docs.filter(d => +d.request_id === +s.id),
+  }));
 }
 
 // Cancel and delete: anyone who may upload (owner's choice, 1 Oct 2026); the
@@ -419,7 +428,7 @@ r.post('/avs/redo', canUpload, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-const istDay = d => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' })
+export const istDay = d => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' })
   .format(new Date(d)).replace(/\//g, '-');
 // Some browsers send a HEIC photo with no type; its name still says what it is.
 const BY_EXT = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif' };
@@ -476,6 +485,7 @@ async function addPhoto(set, { buffer, originalname, mime, capturedAt = null, us
         + 'its limit. Ask the admin to run the AVS check (it files them) or to set up the Drive link, then add this photo again.');
     }
   }
+  let photoId = null;
   try {
     await tx(async (qc, oc) => {
       const photo = await oc(`INSERT INTO avs.check_photos (request_id, seq, file_name, original_name, mime, size_bytes, sha256,
@@ -484,6 +494,7 @@ async function addPhoto(set, { buffer, originalname, mime, capturedAt = null, us
         [set.id, seq, name, String(originalname || '').slice(0, 200), mime, size, sha256,
           capturedAt, put?.id || null, put?.url || null, user?.name ?? null, put ? 'drive' : 'ci_plant']);
       if (!put) await qc('INSERT INTO avs.check_photo_bytes (photo_id, bytes) VALUES ($1, $2)', [photo.id, buffer]);
+      photoId = +photo.id;
     });
   } catch (e) { await giveBack(); throw e; }
   await q(`UPDATE avs.check_requests SET drive_folder_path = $2,
@@ -491,7 +502,7 @@ async function addPhoto(set, { buffer, originalname, mime, capturedAt = null, us
                   updated_at = now() WHERE id = $1`,
     [set.id, folder, put?.parent?.id || null, put?.parent?.url || null]);
   if (!put) await ensureRobotKey(cfg);
-  return { seq, stored: put ? 'drive' : 'ci_plant', drive_error: driveError };
+  return { seq, id: photoId, stored: put ? 'drive' : 'ci_plant', drive_error: driveError };
 }
 
 r.post('/avs/uploads/:id/photos', canUpload, uploadOne, async (req, res, next) => {

@@ -89,8 +89,8 @@ function doPost(e) {
   }
 }
 
-var OPS_ = { ping: 1, list: 1, get: 1, put: 1, move: 1, mkdir: 1 };
-var WRITE_OPS_ = { put: 1, move: 1, mkdir: 1 };
+var OPS_ = { ping: 1, list: 1, get: 1, put: 1, move: 1, mkdir: 1, trash: 1 };
+var WRITE_OPS_ = { put: 1, move: 1, mkdir: 1, trash: 1 };
 // One op, as an answer object. ping says which ops this version knows.
 function one_(req) {
   if (req.op === 'ping') return { ok: true, root: folderInfo_(root_()), version: 2, batch: true };
@@ -99,6 +99,7 @@ function one_(req) {
   if (req.op === 'put') return put_(req);
   if (req.op === 'move') return move_(req);
   if (req.op === 'mkdir') return { ok: true, folder: folderInfo_(folderAt_(req.path, true)) };
+  if (req.op === 'trash') return trash_(req);
   return { ok: false, error: 'Unknown op: ' + req.op };
 }
 
@@ -316,6 +317,15 @@ function put_(req) {
   res.parent = folderInfo_(folder);
   res.ok = true;
   return res;
+}
+
+// trash: { id } — a photo or document removed from a set in CI Plant (owner's
+// choice 5 Oct 2026: removed for good). Only a file inside the AVS folder, and
+// only one not filed under a report yet (CI Plant checks that before asking).
+function trash_(req) {
+  var f = byId_(req.id);
+  f.setTrashed(true);
+  return { ok: true, id: f.getId(), name: f.getName(), trashed: true };
 }
 
 function move_(req) {

@@ -25,17 +25,23 @@
 // deleted with its report. Deleted sets are under the Deleted chip, with who,
 // when and why (owner's request, 1 Oct 2026; components/avs/AvsStop.jsx).
 //
+// Documents (owner's request, 5 Oct 2026): every set shows its documents (PO,
+// approval, artwork, e-mail) and takes more, before or after the report
+// (AvsDocs.jsx). Documents added after the report wait for "Re-check with new
+// documents": the report's next check from the same photos, started at once.
+//
 // The finished groups show one time window (Today, 7 days, 30 days, All; by
 // when the set ended) and the first few rows, with "Show all" for the rest, so
 // the list never pushes the register off the page.
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, ExternalLink, FolderOpen, History, Loader2, RefreshCw, RotateCcw, Settings2, Square, Timer, Trash2, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock, ExternalLink, FilePlus2, FolderOpen, History, Loader2, Paperclip, RefreshCw, RotateCcw, Settings2, Square, Timer, Trash2, XCircle } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
 import {
   AVS_CANCELLABLE, AVS_PERIOD_DEFAULT, AVS_PERIODS, AVS_SET_GROUPS, AVS_SET_STATUS_LABEL, AVS_SETS_SHOWN, foldEarlierChecks, inPeriod, setDeletable,
-  elapsedText, istStamp, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepChecklist, totalTime,
+  elapsedText, istStamp, newDocsSinceReport, reportLabel, setClock, setEndedAt, setGroupOf, setLabel, setProgress, stepChecklist, totalTime,
 } from '../../lib/avs.js';
+import AvsDocs from './AvsDocs.jsx';
 import { fireText } from './AvsUpload.jsx';
 
 const TONE = {
@@ -166,6 +172,8 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
   const [period, setPeriod] = useState(AVS_PERIOD_DEFAULT);
   const [showAll, setShowAll] = useState(false);
   const [openSteps, setOpenSteps] = useState(() => new Set());
+  const [openDocs, setOpenDocs] = useState(() => new Set());
+  const toggleDocs = id => setOpenDocs(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleSteps = id => setOpenSteps(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   useEffect(() => { setShowAll(false); }, [group, period]);
   const now = useNow((data?.sets || []).some(s => s.status === 'queued' || s.status === 'checking'));
@@ -183,6 +191,16 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
   const openRedo = no => sets.find(x => x.redo_report_no === no && ['uploading', 'queued', 'checking'].includes(x.status));
   const bothLinked = !!(data.linked?.drive && data.linked?.claude);
   const note = linkNote(data.linked);
+
+  const recheck = async set => {
+    setBusy(`${set.id}:recheck`);
+    try {
+      const out = await api.post(`/avs/uploads/${set.id}/recheck`, {});
+      toast.info(`${out.set?.label || 'A new check'} started for ${set.report_no} with the new documents. ${fireText(out.fire)}`);
+      setGroup('active');
+      onChanged?.();
+    } catch { /* api.js said why */ } finally { setBusy(null); }
+  };
 
   const act = async (set, verb) => {
     setBusy(`${set.id}:${verb}`);
@@ -274,7 +292,8 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   <span className="truncate text-sm text-slate-800">{s.product_hint || ''}</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-500">
-                  {s.photos?.length || 0} photo{s.photos?.length === 1 ? '' : 's'}
+                  {s.photos_from_set_id && !s.photos?.length ? `same photos as ${setLabel(s.photos_from_set_id)}`
+                    : `${s.photos?.length || 0} photo${s.photos?.length === 1 ? '' : 's'}`}
                   {kept ? ` (${kept === s.photos.length ? 'all' : kept} kept in CI Plant until filed in Drive)` : ''}
                   {' '}· {s.created_by || '—'} · uploaded {istStamp(s.created_at) || fmt.date(s.created_at)}
                   {s.finished_at && ['done', 'failed'].includes(s.status) ? ` · finished ${istStamp(s.finished_at)}` : ''}
@@ -301,6 +320,23 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   </div>
                 )}
                 {openSteps.has(s.id) && <StepList set={s} now={now} />}
+                {!s.deleted_at && s.status !== 'cancelled' && (s.docs?.length > 0 || data.can_upload) && (
+                  <button type="button" onClick={() => toggleDocs(s.id)} aria-expanded={openDocs.has(s.id)}
+                    className="mt-1 inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-100">
+                    {openDocs.has(s.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    <Paperclip size={12} /> Documents{s.docs?.length ? ` (${s.docs.length})` : ''}
+                    {newDocsSinceReport(s).length > 0 && s.status === 'done'
+                      ? <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800">{newDocsSinceReport(s).length} new since the report</span> : null}
+                  </button>
+                )}
+                {openDocs.has(s.id) && !s.deleted_at && (
+                  <div className="mt-1 max-w-2xl">
+                    <AvsDocs set={s} editable={!!data.can_upload && s.status !== 'cancelled'} onChange={() => onChanged?.()} />
+                    {s.status === 'done' && (
+                      <p className="mt-1 text-[11px] text-slate-500">Documents added now are read when you press <b>Re-check with new documents</b>.</p>
+                    )}
+                  </div>
+                )}
                 {s.robot_note && ['done', 'failed'].includes(s.status) && (
                   <div className={`mt-0.5 text-xs ${s.status === 'failed' ? 'text-red-700' : 'text-slate-700'}`}>{s.robot_note}</div>
                 )}
@@ -343,6 +379,13 @@ export default function AvsSets({ data, onChanged, onOpenReport, onContinue, onS
                   <Button size="sm" variant="secondary" repeatable onClick={() => onRedo(s)}
                     title="Upload new photos and check this product again. The current report stays on record.">
                     <span className="inline-flex items-center gap-1"><RotateCcw size={12} /> Redo verification</span>
+                  </Button>
+                )}
+                {data.can_upload && s.status === 'done' && s.report_no && !s.deleted_at && !openRedo(s.report_no)
+                  && newDocsSinceReport(s).length > 0 && (
+                  <Button size="sm" disabled={busy === `${s.id}:recheck`} onClick={() => recheck(s)}
+                    title="Check this report again with the same photos and the documents added since. The current report stays on record.">
+                    <span className="inline-flex items-center gap-1"><FilePlus2 size={12} /> Re-check with new documents</span>
                   </Button>
                 )}
                 {data.can_retry && !s.deleted_at && (s.status === 'failed' || (s.status === 'queued' && bothLinked)) && (

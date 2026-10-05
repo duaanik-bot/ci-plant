@@ -7,6 +7,10 @@
 //    set up; until then CI Plant keeps it, and Claude files it in the AVS folder
 //    when it checks the set. A photo over 4 MB is shrunk first (Vercel's limit);
 //    one under it goes as it is, with its camera data.
+//    Before Verify a photo can be removed (the cross on it) and taken or chosen
+//    again; photos can also be dragged onto the box (5 Oct 2026).
+// 2b. Documents (optional): the PO, the approval, the artwork, an e-mail file
+//    or link (AvsDocs.jsx). Claude reads them first and still cross-checks them.
 // 3. Verify: the set joins the queue and Claude is started. The report then
 //    appears in Artwork Verification, where QA decides.
 //
@@ -14,10 +18,11 @@
 // then new photos for the same job card. The check issues them as the next
 // check of the same report number; the earlier check stays on record.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, History, ImagePlus, Loader2, RotateCcw, ScanSearch, Search, Send, XCircle } from 'lucide-react';
+import { Camera, CheckCircle2, History, ImagePlus, Loader2, RotateCcw, ScanSearch, Search, Send, Trash2, X, XCircle } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Modal, useToast } from '../ui.jsx';
 import { AVS_PHOTO_MAX_BYTES, AVS_REMARK_MAX, AVS_SET_MAX_PHOTOS, redoProblem, setLabel } from '../../lib/avs.js';
+import AvsDocs from './AvsDocs.jsx';
 
 const LIMIT = AVS_PHOTO_MAX_BYTES - 64 * 1024;
 
@@ -79,6 +84,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
   const [result, setResult] = useState(null);
   const [reason, setReason] = useState('');
   const [starting, setStarting] = useState(false);
+  const [dropOver, setDropOver] = useState(false);
+  const [removing, setRemoving] = useState(null);
 
   // The upload queue is worked through outside React's render cycle.
   const form = useRef({});
@@ -168,7 +175,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
           const out = await api.upload(`/avs/uploads/${s.id}/photos`, file,
             { captured_at: new Date(original.lastModified || Date.now()).toISOString() });
           setRef.current = out; setSet(out);
-          mark(key, { status: 'done', stored: out.last_photo?.stored, driveError: out.last_photo?.drive_error });
+          const photoId = out.last_photo?.id ?? null;
+          mark(key, { status: 'done', stored: out.last_photo?.stored, driveError: out.last_photo?.drive_error, photoId });
         } catch (e) {
           mark(key, { status: 'failed', error: e?.message || 'Upload failed' });
         }
@@ -192,6 +200,34 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
     });
     setItems(cur => [...cur, ...fresh]);
     pump();
+  };
+
+  // Remove a photo before Verify (for good), to take or choose it again.
+  const removeItem = async x => {
+    if (x.status === 'uploading') return;
+    if (x.status === 'waiting') {
+      queue.current = queue.current.filter(k => k !== x.key);
+      setItems(list => list.filter(i => i.key !== x.key));
+      return;
+    }
+    if (x.status === 'failed' || !x.photoId) { setItems(list => list.filter(i => i.key !== x.key)); return; }
+    await removePhoto(x.photoId, x.key);
+  };
+  const removePhoto = async (photoId, key = null) => {
+    if (!setRef.current) return;
+    setRemoving(photoId);
+    try {
+      const out = await api.post(`/avs/uploads/${setRef.current.id}/photos/${photoId}/delete`, {});
+      setRef.current = out; setSet(out);
+      if (key) setItems(list => list.filter(i => i.key !== key));
+    } catch { /* api.js said why */ } finally { setRemoving(null); }
+  };
+  const onDropPhotos = e => {
+    e.preventDefault(); setDropOver(false);
+    const list = [...(e.dataTransfer?.files || [])];
+    const photos = list.filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+    if (list.length > photos.length) toast.info('Only photos go here. Add a PO, approval or e-mail in the Documents box below.');
+    if (photos.length) add(photos);
   };
 
   const saved = set?.photos?.length || 0;
@@ -360,7 +396,8 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
             <li>Good light, no glare, the whole panel in the frame; 2 to 6 photos that together show every panel and flap with text.</li>
             <li>Include the flap with the artwork code, and a close-up of the small print (batch, MRP, barcode).</li>
           </ul>
-          <div className="flex flex-wrap gap-2">
+          <div onDragOver={e => { e.preventDefault(); setDropOver(true); }} onDragLeave={() => setDropOver(false)} onDrop={onDropPhotos}
+            className={`flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2 ${dropOver ? 'border-violet-400 bg-violet-50' : 'border-slate-300'}`}>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={e => { add(e.target.files); e.target.value = ''; }} />
             <input ref={galleryRef} type="file" accept="image/*,.heic,.heif" multiple className="hidden"
@@ -371,8 +408,24 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
             <Button variant="secondary" repeatable onClick={() => galleryRef.current?.click()}>
               <span className="inline-flex items-center gap-1.5"><ImagePlus size={15} /> Choose photos</span>
             </Button>
+            <span className="text-[11px] text-slate-400">or drag photos here</span>
           </div>
-          {earlier > 0 && <p className="text-xs text-slate-500">{earlier} photo{earlier === 1 ? '' : 's'} added earlier.</p>}
+          {earlier > 0 && (
+            <div className="text-xs text-slate-500">
+              {earlier} photo{earlier === 1 ? '' : 's'} added earlier:
+              <ul className="mt-1 flex flex-wrap gap-1">
+                {(set?.photos || []).filter(p => !items.some(i => +i.photoId === +p.id)).map(p => (
+                  <li key={p.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+                    {p.file_name}
+                    {set?.status === 'uploading' && (
+                      <button type="button" title="Remove this photo" disabled={removing === p.id} onClick={() => removePhoto(p.id)}
+                        className="text-red-600 hover:text-red-800 disabled:opacity-40"><Trash2 size={11} /></button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {items.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {items.map(x => (
@@ -381,6 +434,13 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
                     ? `Saved in CI Plant. Claude files it in the AVS folder in Google Drive when it checks the set.${x.driveError ? ` (${x.driveError})` : ''}`
                     : undefined}>
                   <img src={x.preview} alt={x.name} className="h-full w-full object-cover" />
+                  {x.status !== 'uploading' && (
+                    <button type="button" onClick={() => removeItem(x)} disabled={!!x.photoId && removing === x.photoId} title="Remove this photo"
+                      aria-label={`Remove ${x.name}`}
+                      className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white hover:bg-red-600 disabled:opacity-40">
+                      {x.photoId && removing === x.photoId ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                    </button>
+                  )}
                   <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/55 py-0.5 text-[10px] font-semibold text-white">
                     {x.status === 'waiting' && 'Waiting'}
                     {x.status === 'uploading' && <><Loader2 size={11} className="animate-spin" /> Saving…</>}
@@ -410,6 +470,7 @@ export default function AvsUploadDialog({ open, onClose, jobCard = null, resume 
           {items.filter(x => x.status === 'failed').map(x => (
             <p key={`e${x.key}`} className="text-xs text-red-600">{x.name}: {x.error}</p>
           ))}
+          <AvsDocs set={set} ensureSet={ensureSet} onChange={out => { setRef.current = out; setSet(out); }} />
           {!set && (
             <div>
               <label htmlFor="avs-set-note" className="block text-xs font-medium text-slate-600">Note for the check (optional)</label>

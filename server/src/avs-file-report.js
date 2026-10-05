@@ -73,6 +73,9 @@ export function filingProblems(p) {
     if (!x || !Number.isInteger(x.id) || x.id <= 0) out.push(`photos[${i}] needs the check_photos id.`);
     else if (blank(x.drive_file_id)) out.push(`photo ${x.id} needs its drive_file_id.`);
   });
+  if (p.docs_used !== undefined && !(Array.isArray(p.docs_used) && p.docs_used.every(x => Number.isInteger(x) && x > 0))) {
+    out.push('docs_used must be a list of avs.check_docs ids.');
+  }
   const s = p.set ?? {};
   if (typeof s !== 'object') out.push('set must be an object.');
   else if (s.result !== undefined && s.result !== r.status) out.push('set.result must equal report.status.');
@@ -132,5 +135,15 @@ export function setDone(setId, report, set = {}) {
     params: [setId, report.report_no, report.report_rev, report.check_no, report.status,
       set.robot_note ?? null, set.drive_folder_path ?? null, set.drive_folder_id ?? null,
       set.drive_folder_url ?? (set.drive_folder_id ? `https://drive.google.com/drive/folders/${set.drive_folder_id}` : null)],
+  };
+}
+
+// The documents this check read (5 Oct 2026): marked used, so they stay on
+// record with the report and can no longer be removed.
+export function docsUsed(ids, report) {
+  return {
+    text: `UPDATE avs.check_docs SET used_in_report = $2, used_in_check = $3, used_at = now()
+      WHERE id = ANY($1::bigint[]) AND used_in_report IS NULL RETURNING id`,
+    params: [ids, report.report_no, report.check_no],
   };
 }

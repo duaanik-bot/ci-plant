@@ -11,6 +11,7 @@
 //                                      every few seconds: it says it is alive and
 //                                      gets the sets Verify left to it.
 //
+//   GET  /api/avs/robot/docs/:id       a document kept in CI Plant (avs-docs.js)
 //   POST /api/avs/robot/file-report the check saves its report in one call
 //                                      (avs-file-report.js; runbook 2C.5).
 //
@@ -20,7 +21,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { one, q, tx } from '../db.js';
-import { filingProblems, reportUpsert, problemUpsert, photoFiled, setDone } from '../avs-file-report.js';
+import { filingProblems, reportUpsert, problemUpsert, photoFiled, setDone, docsUsed } from '../avs-file-report.js';
 import { cloudFallback } from './avs-intake.js';
 import { markUncacheable } from '../data-tables.js';
 
@@ -57,6 +58,30 @@ r.get('/avs/robot/queue', async (req, res, next) => {
     const checking = await one(`SELECT count(*)::int AS n FROM avs.check_requests
        WHERE status = 'checking' AND claimed_at > now() - interval '3 hours'`);
     res.json({ ok: true, queued: sets, checking: checking.n, now: new Date().toISOString() });
+  } catch (e) {
+    if (MISSING.has(e?.code)) return res.status(404).json({ error: 'AVS is not set up on this database.' });
+    next(e);
+  }
+});
+
+// A document CI Plant kept because Google Drive could not take it (avs-docs.js).
+r.get('/avs/robot/docs/:id', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    const id = Number(req.params.id);
+    const doc = Number.isInteger(id) && id > 0 && await one(`
+      SELECT d.id, d.file_name, d.mime, d.sha256, d.stored, d.drive_url, d.url, b.bytes
+        FROM avs.check_docs d LEFT JOIN avs.check_doc_bytes b ON b.doc_id = d.id WHERE d.id = $1`, [id]);
+    if (!doc) return res.status(404).json({ error: 'No such document.' });
+    if (!doc.bytes) return res.status(410).json({ error: 'This document is not kept in CI Plant.', stored: doc.stored, drive_url: doc.drive_url, url: doc.url });
+    res.set({
+      'Content-Type': doc.mime || 'application/octet-stream',
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(doc.file_name || 'document')}`,
+      'X-Doc-Sha256': doc.sha256 || '',
+    });
+    res.end(doc.bytes);
   } catch (e) {
     if (MISSING.has(e?.code)) return res.status(404).json({ error: 'AVS is not set up on this database.' });
     next(e);
@@ -133,9 +158,10 @@ r.post('/avs/robot/file-report', async (req, res, next) => {
           ? `Set ${p.set_id} is ${now.deleted_at ? 'deleted' : now.status}${now.report_no ? ` (report ${now.report_no})` : ''}: nothing was saved.`
           : `There is no set ${p.set_id}: nothing was saved.`), { status: 409 });
       }
+      const docs = p.docs_used?.length ? await qc(docsUsed(p.docs_used, p.report).text, docsUsed(p.docs_used, p.report).params) : [];
       const latest = await oc(`SELECT report_no, report_rev, check_no, status FROM avs.latest_reports
         WHERE report_no = $1`, [rep.report_no]);
-      return { report: rep, problems: (p.problems ?? []).length, photos, set, latest };
+      return { report: rep, problems: (p.problems ?? []).length, photos, set, latest, docs_used: docs.map(d => +d.id) };
     });
     // QA decisions since the last run (2.8b step 3), read here so the check needs no other query.
     const since = typeof p.decisions_since === 'string' && !Number.isNaN(Date.parse(p.decisions_since)) ? p.decisions_since : null;

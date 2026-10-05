@@ -653,3 +653,55 @@ export function setupProblem({ drive_bridge_url, routine_fire_url, routine_token
   }
   return null;
 }
+
+// ── Documents with a photo set (owner's request, 5 Oct 2026) ─────────────────
+// The PO, the customer's approval, the artwork, an e-mail (file or link) or
+// anything else that helps the check. Claude reads them first and still
+// cross-checks them (runbook 2.4c). Added after the report, they wait for
+// "Re-check with new documents" (the report's next check, same photos).
+export const AVS_DOC_KINDS = [
+  { key: 'po', label: 'Purchase order' },
+  { key: 'approval', label: 'Customer approval' },
+  { key: 'artwork', label: 'Artwork / master' },
+  { key: 'email', label: 'E-mail' },
+  { key: 'other', label: 'Other' },
+];
+export const docKindLabel = key => AVS_DOC_KINDS.find(k => k.key === key)?.label ?? 'Document';
+export const AVS_DOC_MAX_BYTES = AVS_PHOTO_MAX_BYTES;
+export const AVS_SET_MAX_DOCS = 20;
+export const AVS_DOC_TYPES = [
+  'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword',
+  'message/rfc822', 'application/vnd.ms-outlook', 'text/plain', 'text/csv',
+];
+export const AVS_DOC_ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.xlsx,.xls,.docx,.doc,.eml,.msg,.txt,.csv';
+const DOC_BY_EXT = {
+  pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic',
+  heif: 'image/heif', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword',
+  eml: 'message/rfc822', msg: 'application/vnd.ms-outlook', txt: 'text/plain', csv: 'text/csv',
+};
+// The type the server trusts: the browser's, else the file name's.
+export function docMime(name, type) {
+  const t = String(type || '').toLowerCase();
+  if (t && t !== 'application/octet-stream' && AVS_DOC_TYPES.includes(t)) return t;
+  return DOC_BY_EXT[String(name || '').split('.').pop().toLowerCase()] || t;
+}
+export function docProblem({ kind, url, size, type, title }) {
+  if (!AVS_DOC_KINDS.some(k => k.key === kind)) return 'Pick what the document is (PO, approval, artwork, e-mail or other).';
+  if (title && String(title).length > 200) return 'Keep the title under 200 characters.';
+  if (url != null && url !== '') {
+    if (!/^https?:\/\/\S+$/i.test(String(url).trim())) return 'Paste a full link starting with https://';
+    if (String(url).length > 2000) return 'That link is too long.';
+    return null;
+  }
+  if (!AVS_DOC_TYPES.includes(String(type || '').toLowerCase())) return 'Add a PDF, photo, Excel, Word, e-mail (.eml/.msg) or text file.';
+  if (!(size > 0)) return 'The file is empty.';
+  if (size > AVS_DOC_MAX_BYTES) return 'The file is over 4 MB. Save a smaller copy (or paste its Drive link) and try again.';
+  return null;
+}
+// A document may be removed until a finished check has used it.
+export const docRemovable = d => !!d && !d.used_in_report;
+// Documents added after the report that no check has read yet.
+export const newDocsSinceReport = set => (set?.docs || []).filter(d => d.added_after_report && !d.used_in_report);
