@@ -7,6 +7,7 @@ import { api, fmt } from '../api.js';
 import { Button, DataTable, Input, KpiCard, PageHeader, StatusBadge, Tabs } from '../components/ui.jsx';
 import { ReceiptText, Package, ShoppingCart, Factory } from 'lucide-react';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import AccountsBooks, { BOOK_TABS, isBookTab } from '../components/AccountsBooks.jsx';
 
 // Local-date ISO (no UTC shift) — period boundaries must match plant time.
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -124,7 +125,7 @@ export default function Accounts() {
 
   return (
     <div>
-      <PageHeader title="Accounts" subtitle="Sales & purchase registers — customer and vendor volumes for the period" />
+      <PageHeader title="Accounts" subtitle="Sales & purchase registers, payables, party ledgers and the cash & bank book" />
 
       {/* Period controls */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -192,7 +193,11 @@ export default function Accounts() {
         { key: 'products', label: 'Product Volumes', count: data.sale_products.length },
         { key: 'sales', label: 'Sales Register', count: data.sales.length },
         { key: 'purchases', label: 'Purchase Register', count: data.purchases.length },
+        ...BOOK_TABS,
       ]} />
+
+      {/* Payables, purchase bills, cash & bank book, party ledger. */}
+      {isBookTab(tab) && <AccountsBooks view={tab} from={from} to={to} periodLabel={periodLabel} />}
 
       {tab === 'customers' && (
         <DataTable searchable rows={byCustomer} empty="No sales in this period"

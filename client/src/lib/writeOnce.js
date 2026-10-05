@@ -69,6 +69,7 @@ export const MINTING_POSTS = Object.freeze([
   '/plates/warehouse/assets',
   '/products',
   '/products/:id/migrate-customer',
+  '/purchase-bills',
   '/purchase-orders',
   '/purchase-orders/from-requisitions',
   '/requisitions',
@@ -81,6 +82,7 @@ export const MINTING_POSTS = Object.freeze([
   '/tooling/requirements/:id/actions',
   '/tools',
   '/tools/push',
+  '/vendor-payments',
   '/workflow/order-lines/:id',
 ]);
 

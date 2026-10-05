@@ -2842,4 +2842,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
 
   // Trading items — materials.category gains 'trading' (Masters → Trading Items).
   await pool.query(migration('20261005150000_trading_items.sql'));
+
+  // Accounts books — purchase_bills, purchase_bill_lines, vendor_payments
+  // (routes/accounts.js). New tables only; idempotent.
+  await pool.query(migration('20261005180000_accounts_books.sql'));
 }

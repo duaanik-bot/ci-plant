@@ -183,6 +183,57 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     assert.equal((await call('GET', '/direct-invoices/trading-items')).body[0].in_stock, 5000);
   });
 
+  test('accounts: a purchase bill lands trading stock and a payable; payment, ledger and cash book follow', async () => {
+    const item = (await call('GET', '/direct-invoices/trading-items')).body[0];
+    const stock0 = item.in_stock;
+    const refused = await call('POST', '/purchase-bills', { vendor_id: 1, lines: [{ material_id: BOARD, qty: 10, rate: 1 }] });
+    assert.equal(refused.status, 409, 'board is received through a GRN, never off a bill');
+    const bill = await call('POST', '/purchase-bills', {
+      vendor_id: 1, vendor_bill_no: 'V-77', bill_date: '2026-10-01',
+      lines: [{ material_id: item.id, qty: 1000, rate: 90, gst_pct: 0 }, { description: 'Freight', qty: 1, rate: 5000, gst_pct: 18 }] });
+    assert.equal(bill.status, 200, JSON.stringify(bill.body));
+    assert.match(bill.body.bill_number, /^CI-PB-\d{4}$/);
+    assert.equal(bill.body.total, 90000 + 5000 + 900);
+    const stock = async () => (await call('GET', '/direct-invoices/trading-items')).body[0].in_stock;
+    assert.equal(await stock(), stock0 + 1000, 'only the item line lands stock');
+
+    const over = await call('POST', '/vendor-payments', { vendor_id: 1, purchase_bill_id: bill.body.id, amount: 95901 });
+    assert.equal(over.status, 409);
+    const pay = await call('POST', '/vendor-payments', { vendor_id: 1, purchase_bill_id: bill.body.id, amount: 40000, mode: 'rtgs', paid_on: '2026-10-03' });
+    assert.equal(pay.status, 200, JSON.stringify(pay.body));
+    assert.match(pay.body.payment_number, /^CI-PAY-\d{4}$/);
+
+    const payables = (await call('GET', '/accounts/payables')).body;
+    assert.deepEqual(payables.map(v => [v.vendor_id, v.billed, v.paid, v.outstanding, v.open_bills]), [[1, 95900, 40000, 55900, 1]]);
+    const ledger = (await call('GET', '/accounts/ledger?party=vendor&id=1')).body;
+    assert.deepEqual(ledger.entries.map(e => [e.kind, e.debit, e.credit, e.balance]),
+      [['Purchase bill', 0, 95900, 95900], ['Payment', 40000, 0, 55900]]);
+
+    const inv = await call('POST', '/direct-invoices', { customer_id: 1, invoice_date: '2026-10-02',
+      lines: [{ item_type: 'board', material_id: item.id, qty: 100, rate: 105, gst_pct: 0 }] });
+    assert.equal(inv.status, 200, JSON.stringify(inv.body));
+    const rcpt = await call('POST', '/payments', { customer_id: 1, invoice_id: inv.body.id, amount: 10500 });
+    assert.equal(rcpt.status, 200, JSON.stringify(rcpt.body));
+    const cust = (await call('GET', '/accounts/ledger?party=customer&id=1')).body;
+    assert.deepEqual(cust.entries.filter(e => e.number === inv.body.invoice_number || e.kind === 'Receipt')
+      .map(e => [e.kind, e.debit, e.credit]), [['Invoice', 10500, 0], ['Receipt', 0, 10500]]);
+    assert.equal(cust.balance, cust.entries.reduce((s, e) => s + e.debit - e.credit, 0));
+
+    const book = (await call('GET', '/accounts/cashbook')).body;
+    assert.deepEqual(book.entries.map(e => [e.direction, e.money_in, e.money_out]), [['out', 0, 40000], ['in', 10500, 0]]);
+    assert.equal(book.closing, -29500);
+    const later = (await call('GET', '/accounts/cashbook?from=2026-10-04&to=2026-10-04')).body;
+    assert.equal(later.opening, -40000, 'money moved before the period is the opening balance');
+
+    assert.equal((await call('DELETE', `/purchase-bills/${bill.body.id}`)).status, 409, 'a paid bill is not deleted');
+    assert.equal((await call('DELETE', `/vendor-payments/${pay.body.id}`)).status, 200);
+    assert.equal((await call('DELETE', `/payments/${rcpt.body.id}`)).status, 200);
+    assert.equal((await db.one('SELECT status FROM invoices WHERE id=$1', [inv.body.id])).status, 'open', 'the receipt is gone, so the invoice is owed again');
+    assert.equal((await call('DELETE', `/invoices/${inv.body.id}`)).status, 200);
+    assert.equal((await call('DELETE', `/purchase-bills/${bill.body.id}`)).status, 200);
+    assert.equal(await stock(), stock0, 'the bill is gone and so are its goods');
+  });
+
   test('deleting it returns every sheet to its own pile and every carton to FG', async () => {
     const r = await call('DELETE', `/invoices/${invoice.id}`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
