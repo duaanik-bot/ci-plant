@@ -61,7 +61,12 @@ app.use('/api', dataTablesMiddleware);
 const standardJson = express.json();
 const ocrJson = express.json({ limit: '12mb' });
 const OCR_PATH = '/api/orders/import/parse-ocr';
-app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson : standardJson)(req, res, next));
+// The AVS check's report (findings, problem points, photos) in one post: up to
+// a few hundred KB, so it gets its own ceiling too (routes/avs-robot.js).
+const AVS_FILE_PATH = '/api/avs/robot/file-report';
+const avsFileJson = express.json({ limit: '4mb' });
+app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson
+  : req.path === AVS_FILE_PATH ? avsFileJson : standardJson)(req, res, next));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public

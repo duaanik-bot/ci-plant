@@ -172,10 +172,16 @@ test('an upload never needs the Drive link: without it the photo is kept in CI P
   assert.match(route, /keptMaxBytes\(\)/, 'with a ceiling, so a check that never runs cannot fill the database');
 });
 
-test('the check fetches a kept photo with its key and changes nothing', () => {
+test('the check fetches a kept photo with its key; it writes only the runner heartbeat and its own report', () => {
   const src = readFileSync(new URL('./routes/avs-robot.js', import.meta.url), 'utf8');
-  // Its one write: the office runner's heartbeat (GET /avs/robot/queue).
+  // The office runner's heartbeat (GET /avs/robot/queue) and, since 5 Oct 2026,
+  // the check's report in one post (POST /avs/robot/file-report, avs-file-report.js).
   assert.deepEqual(writesIn('./routes/avs-robot.js'), ['avs.settings']);
+  assert.deepEqual(writesIn('./avs-file-report.js'), ['avs.check_photos', 'avs.check_requests', 'avs.problems', 'avs.reports']);
+  assert.doesNotMatch(src + readFileSync(new URL('./avs-file-report.js', import.meta.url), 'utf8'), /\bDELETE\s+FROM\b/i,
+    'the check never deletes a row');
+  assert.doesNotMatch(readFileSync(new URL('./avs-file-report.js', import.meta.url), 'utf8'), /avs\.decisions/,
+    'QA decides in CI Plant: the check never writes a decision');
   assert.match(src, /VALUES \('local_runner_seen_at'/);
   assert.match(src, /timingSafeEqual/);
   assert.match(src, /'Cache-Control', 'no-store'/);
