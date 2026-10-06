@@ -611,6 +611,30 @@ function ToolingNav() {
   );
 }
 
+// Artwork Verification's live badge (owner's request, 6 Oct 2026): how many photo
+// sets are waiting for Claude or being checked now, so the side pane shows that
+// something is going on. Asked every 20 s while a check runs, every minute when idle.
+function useAvsActive(enabled) {
+  const [a, setA] = useState({ active: 0, checking: 0, queued: 0, uploading: 0 });
+  const load = () => api.get('/avs/active').then(setA).catch(() => {});
+  useFallbackRefresh(load, { enabled, intervalMs: a.active > 0 ? 20000 : 60000 });
+  return a;
+}
+
+function AvsBadge({ isActive, corner = false }) {
+  const a = useAvsActive(true);
+  if (!a.active) return null;
+  const tip = [a.checking && `${a.checking} being checked by Claude`, a.queued && `${a.queued} waiting for Claude`,
+    a.uploading && `${a.uploading} still uploading`].filter(Boolean).join(' · ');
+  return (
+    <span title={tip} aria-label={tip}
+      className={`${corner ? 'absolute right-0.5 top-0.5 h-4 min-w-[16px] justify-center px-1 text-[9px]' : 'ml-auto px-1.5 text-[10px]'} flex items-center gap-1 rounded-full font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-[#FFF4E0] text-[#C26A00]'}`}>
+      {a.checking > 0 && <span className={`h-1.5 w-1.5 animate-pulse rounded-full ${isActive ? 'bg-white' : 'bg-[#FF9500]'}`} />}
+      {a.active > 99 ? '99+' : a.active}
+    </span>
+  );
+}
+
 function NavItem({ item }) {
   return (
     <NavLink to={item.to} end={item.end}
@@ -620,6 +644,7 @@ function NavItem({ item }) {
         <>
           <item.icon size={15} className={`shrink-0 ${isActive ? 'text-white' : 'text-[#8E8E93]'}`} />
           <span className="truncate">{item.label}</span>
+          {item.module === 'avs' && <AvsBadge isActive={isActive} />}
         </>
       )}
     </NavLink>
@@ -800,6 +825,7 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
                       <>
                         <i.icon size={18} className={isActive ? 'text-white' : 'text-[#8E8E93]'} />
                         <span className="flex-1">{i.label}</span>
+                        {i.module === 'avs' && <AvsBadge isActive={isActive} />}
                       </>
                     )}
                   </NavLink>
@@ -834,6 +860,7 @@ function TabletRail({ groups, floorTotal }) {
                 <>
                   <Icon size={19} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
                   <span className="max-w-full truncate leading-tight">{label}</span>
+                  {i.module === 'avs' && <AvsBadge isActive={isActive} corner />}
                   {isFloor && floorTotal > 0 && (
                     <span className={`absolute right-0.5 top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
                       {floorTotal > 99 ? '99+' : floorTotal}

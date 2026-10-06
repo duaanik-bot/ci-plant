@@ -301,6 +301,25 @@ r.get('/avs/uploads', async (req, res, next) => {
   }
 });
 
+// The side pane's badge on Artwork Verification (owner's request, 6 Oct 2026:
+// "whenever something is in progress, show the number"). Read only and tiny, so
+// every open page can ask it often: sets waiting for Claude (queued) and sets
+// Claude is checking now; photo sets still being uploaded are counted apart.
+r.get('/avs/active', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    const row = await one(`SELECT
+        count(*) FILTER (WHERE status = 'queued')::int AS queued,
+        count(*) FILTER (WHERE status = 'checking')::int AS checking,
+        count(*) FILTER (WHERE status = 'uploading' AND updated_at > now() - interval '12 hours')::int AS uploading
+      FROM avs.check_requests WHERE deleted_at IS NULL AND status IN ('queued', 'checking', 'uploading')`);
+    res.json({ ...row, active: row.queued + row.checking });
+  } catch (e) {
+    offWhenMissing(res, next, { queued: 0, checking: 0, uploading: 0, active: 0 })(e);
+  }
+});
+
 // Open job cards to pick from — printing ones first, the rest newest first.
 r.get('/avs/job-cards', async (req, res, next) => {
   try {
