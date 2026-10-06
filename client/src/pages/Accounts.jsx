@@ -56,8 +56,8 @@ export default function Accounts() {
         className="text-left font-semibold text-slate-900 hover:text-brand-600 hover:underline">{name}</button>
       {sub ? <div className="text-xs text-gray-400">{sub}</div> : null}
     </div>);
-  const [preset, setPreset] = useState('this');
-  const [range, setRange] = useState(() => presetRange('this')); // [from, to]
+  const [preset, setPreset] = useState('all');
+  const [range, setRange] = useState(() => presetRange('all')); // [from, to]
   const [data, setData] = useState({ sales: [], purchases: [], sale_products: [], timeline: { sales: [], purchases: [] } });
 
   const [from, to] = range;
@@ -183,7 +183,7 @@ export default function Accounts() {
           {timeline.map(m => {
             const active = preset === `month:${m.month}`;
             return (
-              <button key={m.month} onClick={() => active ? pickPreset('this') : pickMonth(m.month)}
+              <button key={m.month} onClick={() => active ? pickPreset('all') : pickMonth(m.month)}
                 title={`${monthLabel(m.month)} — Sales ${fmt.inr(m.sales)} (${fmt.num(m.salesQty)} ctn) · Purchases ${fmt.inr(m.purchases)}`}
                 className={`group rounded-lg border px-1 pb-1.5 pt-2 transition ${active ? 'border-brand-300 bg-brand-50' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
                 <div className="flex h-16 items-end justify-center gap-1">
