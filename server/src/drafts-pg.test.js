@@ -247,4 +247,60 @@ describe('draft sales orders from the AVS intake — through the real app', {
     const l = await db.one('SELECT status FROM order_lines WHERE order_id=$1', [id]);
     assert.equal(l.status, 'pending');
   });
+  test("the intake's held draft is copied into Sales Orders once, orange, and confirm writes back", async () => {
+    // The office routine's own holding tables (production has them in schema avs).
+    await db.q(`CREATE SCHEMA IF NOT EXISTS avs`);
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.draft_orders (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, customer_id int, po_number text, po_number_full text,
+      po_date date, delivery_date date, status text DEFAULT 'draft', customer_note text, mail_subject text,
+      mail_from text, check_notes text, created_at timestamptz DEFAULT now(), updated_at timestamptz,
+      confirmed_at timestamptz, confirmed_by text, confirmed_order_id int,
+      rejected_at timestamptz, rejected_by text, reject_reason text)`);
+    await db.q(`CREATE TABLE IF NOT EXISTS avs.draft_order_lines (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, draft_order_id bigint, line_no int, po_item_code text,
+      po_description text, qty int, rate numeric, gst_pct int, line_remark text, include boolean DEFAULT true,
+      match_status text, product_id int)`);
+    const held = (await db.one(`INSERT INTO avs.draft_orders (customer_id, po_number, po_number_full, po_date, delivery_date, mail_subject, check_notes)
+      VALUES ($1, '02715', 'SGB/2627/POS/PMP/02715', '2026-10-05', '2026-10-25', 'OH D3 CARTON', 'All lines matched') RETURNING id`, [customerId])).id;
+    await db.q(`INSERT INTO avs.draft_order_lines (draft_order_id, line_no, qty, rate, gst_pct, match_status, product_id)
+      VALUES ($1, 1, 64000, 3.74, 5, 'matched', $2), ($1, 2, 10, 1, 5, 'not_ours', NULL)`, [held, productId]);
+    // A PO already typed in by hand is never copied.
+    const typed = (await db.one(`INSERT INTO avs.draft_orders (customer_id, po_number) VALUES ($1, '9001') RETURNING id`, [customerId])).id;
+    await db.q(`INSERT INTO avs.draft_order_lines (draft_order_id, line_no, qty, rate, match_status, product_id) VALUES ($1, 1, 5, 1, 'matched', $2)`, [typed, productId]);
+
+    await call('GET', '/drafts/summary');
+    await call('GET', '/drafts/summary'); // twice: still one copy
+    const copies = await db.q(`SELECT id, status, po_number, delivery_date FROM orders WHERE draft_source = $1`, [`avs_intake#${held}`]);
+    assert.equal(copies.length, 1);
+    assert.equal(copies[0].status, 'draft');
+    assert.equal(copies[0].delivery_date, '2026-10-25');
+    const lines = await db.q(`SELECT status, qty FROM order_lines WHERE order_id = $1`, [copies[0].id]);
+    assert.deepEqual(lines.map(l => [l.status, l.qty]), [['draft', 64000]], 'the not-ours line is left out');
+    assert.equal((await db.q(`SELECT 1 FROM orders WHERE draft_source = $1`, [`avs_intake#${typed}`])).length, 0);
+    const bell = await db.q(`SELECT title FROM notifications WHERE kind='new_po' AND title LIKE '%02715%'`);
+    assert.ok(bell.length > 0, 'the team is told about the copied draft');
+
+    const ok = await call('POST', `/orders/${copies[0].id}/confirm`, {});
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const back = await db.one(`SELECT status, confirmed_order_id, confirmed_by FROM avs.draft_orders WHERE id = $1`, [held]);
+    assert.equal(back.status, 'confirmed');
+    assert.equal(back.confirmed_order_id, copies[0].id);
+    await call('GET', '/drafts/summary');
+    assert.equal((await db.q(`SELECT 1 FROM orders WHERE draft_source = $1`, [`avs_intake#${held}`])).length, 1, 'never copied again');
+  });
+
+  test('a held line still waiting for a product master blocks confirm', async () => {
+    const held = (await db.one(`INSERT INTO avs.draft_orders (customer_id, po_number) VALUES ($1, '02799') RETURNING id`, [customerId])).id;
+    await db.q(`INSERT INTO avs.draft_order_lines (draft_order_id, line_no, qty, rate, match_status, product_id, po_item_code)
+      VALUES ($1, 1, 100, 1, 'matched', $2, 'A-1'), ($1, 2, 50, 1, 'new_product', NULL, 'NEW-9')`, [held, productId]);
+    await call('GET', '/drafts/summary');
+    const o = await db.one(`SELECT id, draft_note FROM orders WHERE draft_source = $1`, [`avs_intake#${held}`]);
+    assert.match(o.draft_note, /1 PO item still need a product master: NEW-9/);
+    const r = await call('POST', `/orders/${o.id}/confirm`, {});
+    assert.equal(r.status, 409);
+    const c = await call('POST', `/orders/${o.id}/status`, { status: 'cancelled', note: 'Wrong PO' });
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    const back = await db.one(`SELECT status, reject_reason FROM avs.draft_orders WHERE id = $1`, [held]);
+    assert.deepEqual([back.status, back.reject_reason], ['rejected', 'Wrong PO']);
+  });
 });

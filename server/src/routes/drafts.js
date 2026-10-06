@@ -34,6 +34,7 @@ import { q, one, tx } from '../db.js';
 import { audit, notify, setLineStatus } from '../helpers.js';
 import { customerInitials } from '../../../client/src/lib/customerCode.js';
 import { requireRole } from '../auth.js';
+import { syncPartLines } from '../carton-parts-db.js';
 import { markUncacheable } from '../data-tables.js';
 
 const r = Router();
@@ -153,9 +154,114 @@ export async function notifyNewDraftOrders() {
   });
 }
 
+// ── The intake's holding table → Sales Orders ──────────────────────────────
+// The office intake routine keys each new PO into its own holding table
+// (avs.draft_orders / avs.draft_order_lines, written by the routine through
+// Supabase). Sales Orders reads public.orders, so a held draft is copied once
+// into a real DRAFT sales order (orange, never with Planning until confirmed),
+// tagged draft_source 'avs_intake#<held id>' so it is copied only once and its
+// confirm or cancel can be written back to the holding row.
+//   • a PO someone already typed in by hand (same customer + PO number) is not
+//     copied — the typed order stands;
+//   • only PO lines the intake matched to a product master are copied; any line
+//     still waiting for a new master is named in the draft's note, and Confirm
+//     refuses until it is dealt with (heldLinesWithoutMaster).
+export const INTAKE_TAG = 'avs_intake#';
+const heldId = draftSource => {
+  const m = String(draftSource || '').match(/^avs_intake#(\d+)$/);
+  return m ? Number(m[1]) : null;
+};
+
+export async function syncIntakeDrafts() {
+  let held;
+  try {
+    held = await q(`
+      -- Dates as text: a DATE read into JS is local midnight, and an ISO string of
+      -- it would be the day before in India.
+      SELECT d.*, to_char(d.po_date, 'YYYY-MM-DD') AS po_d, to_char(d.delivery_date, 'YYYY-MM-DD') AS del_d,
+             to_char(d.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS made_d
+        FROM avs.draft_orders d
+       WHERE d.status = 'draft' AND d.confirmed_order_id IS NULL AND d.rejected_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.draft_source = $1 || d.id::text)
+       ORDER BY d.id`, [INTAKE_TAG]);
+  } catch (e) {
+    if (MISSING.has(e.code)) return { copied: 0 };
+    throw e;
+  }
+  let copied = 0;
+  for (const d of held) {
+    const made = await tx(async (qc, oc) => {
+      // One copier at a time, and the carton-parts lock POST /orders takes.
+      await qc(`SELECT pg_advisory_xact_lock(hashtext('avs_intake_draft_copy'))`);
+      await qc(`SELECT pg_advisory_xact_lock_shared(hashtext('product_parts'))`);
+      if (await oc(`SELECT 1 AS y FROM orders WHERE draft_source = $1`, [INTAKE_TAG + d.id])) return null;
+      // Typed in by hand already: leave it to the typed order.
+      if (await oc(`SELECT 1 AS y FROM orders WHERE customer_id = $1 AND po_number = $2 AND status <> 'cancelled'`,
+        [d.customer_id, d.po_number])) return null;
+      const lines = await qc(`SELECT * FROM avs.draft_order_lines WHERE draft_order_id = $1 AND include IS NOT FALSE
+                                AND match_status IS DISTINCT FROM 'not_ours' ORDER BY line_no, id`, [d.id]);
+      const ready = lines.filter(l => l.product_id);
+      const waiting = lines.filter(l => !l.product_id);
+      if (!ready.length) return null; // nothing a sales order can carry yet
+      const noteBits = [];
+      if (waiting.length) noteBits.push(`${waiting.length} PO item${waiting.length === 1 ? '' : 's'} still need a product master: ${waiting.map(l => [l.po_item_code, l.po_description].filter(Boolean).join(' ')).join('; ')}. Add ${waiting.length === 1 ? 'it' : 'them'} before confirming.`);
+      if (d.check_notes) noteBits.push(String(d.check_notes));
+      const notes = [d.po_number_full && `PO ${d.po_number_full}`, d.mail_subject && `mail "${d.mail_subject}"`, d.mail_from && `from ${d.mail_from}`, d.customer_note && `customer: ${d.customer_note}`]
+        .filter(Boolean).join(' · ') || null;
+      const [o] = await qc(
+        `INSERT INTO orders (po_number, customer_id, po_date, delivery_date, notes, status, draft_source, draft_note)
+         VALUES ($1,$2,$3,$4,$5,'draft',$6,$7) RETURNING id`,
+        [d.po_number, d.customer_id, d.po_d || d.made_d, d.del_d || null, notes,
+          INTAKE_TAG + d.id, noteBits.join('\n').slice(0, 3000) || null]);
+      const cust = await oc('SELECT tolerance_pct FROM customers WHERE id=$1', [d.customer_id]);
+      for (const l of ready) {
+        const [made] = await qc(
+          `INSERT INTO order_lines (order_id, product_id, qty, rate, gst_pct, tolerance_pct, line_remark)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [o.id, l.product_id, l.qty, l.rate ?? 0, l.gst_pct ?? null, cust?.tolerance_pct ?? 0, l.line_remark || null]);
+        await syncPartLines(made.id, qc, oc, 'AVS intake');
+      }
+      await audit('order', o.id, 'create', `Draft from the AVS intake (held draft ${d.id}, PO ${d.po_number})`, qc, 'AVS intake');
+      return o.id;
+    });
+    if (made) copied += 1;
+  }
+  return { copied };
+}
+
+// Lines of the held PO that have no product master yet — a draft is not
+// confirmed while the PO still has items nobody has set up.
+async function heldLinesWithoutMaster(order, oc) {
+  const id = heldId(order.draft_source);
+  if (!id) return 0;
+  try {
+    const r = await oc(`SELECT COUNT(*)::int AS n FROM avs.draft_order_lines
+                          WHERE draft_order_id = $1 AND include IS NOT FALSE
+                           AND match_status IS DISTINCT FROM 'not_ours' AND product_id IS NULL`, [id]);
+    return r?.n || 0;
+  } catch (e) {
+    if (MISSING.has(e.code)) return 0;
+    throw e;
+  }
+}
+
+// The decision goes back to the holding row, so the intake never offers it again.
+export async function settleHeldDraft(order, outcome, qc, user, reason = null) {
+  const id = heldId(order.draft_source);
+  if (!id) return;
+  if (outcome === 'confirmed') {
+    await qc(`UPDATE avs.draft_orders SET status='confirmed', confirmed_at=now(), confirmed_by=$2,
+                     confirmed_order_id=$3, updated_at=now() WHERE id=$1`, [id, user, order.id]);
+  } else {
+    await qc(`UPDATE avs.draft_orders SET status='rejected', rejected_at=now(), rejected_by=$2,
+                     reject_reason=$3, updated_at=now() WHERE id=$1`, [id, user, reason || 'Cancelled in Sales Orders']);
+  }
+}
+
 // Never lets an alert problem fail the read that triggered it.
 export async function notifyNewDraftOrdersSoft() {
   try {
+    await syncIntakeDrafts();
     const any = await one(`SELECT 1 AS y FROM orders WHERE status = 'draft' AND draft_notified_at IS NULL LIMIT 1`);
     if (any) return await notifyNewDraftOrders();
   } catch (e) {
@@ -230,12 +336,15 @@ export async function confirmDraftOrder(orderId, qc, oc, user, why = null) {
   const lines = await qc(`SELECT id FROM order_lines WHERE order_id=$1 AND status='draft' ORDER BY id`, [orderId]);
   const live = await oc(`SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status <> 'cancelled'`, [orderId]);
   if (!live?.n) throw fail(409, 'This draft has no lines — add at least one line before confirming it');
+  const waiting = await heldLinesWithoutMaster(o, oc);
+  if (waiting) throw fail(409, `${waiting} item${waiting === 1 ? '' : 's'} on this PO still need${waiting === 1 ? 's' : ''} a product master — add ${waiting === 1 ? 'it' : 'them'} to the order (or tell the intake to leave ${waiting === 1 ? 'it' : 'them'} out) before confirming`);
   for (const l of lines) await setLineStatus(l.id, 'pending', qc, oc, user);
   const products = await qc(`
     UPDATE products SET is_draft = 0, confirmed_at = now(), confirmed_by = $2
      WHERE is_draft = 1 AND id IN (SELECT product_id FROM order_lines WHERE order_id = $1)
     RETURNING id, code, name`, [orderId, user]);
   await qc(`UPDATE orders SET status='pending', confirmed_at=now(), confirmed_by=$2 WHERE id=$1`, [orderId, user]);
+  await settleHeldDraft(o, 'confirmed', qc, user);
   await audit('order', orderId, 'status:draft→pending', why ? `Draft confirmed: ${why}` : 'Draft confirmed', qc, user);
   for (const p of products) await audit('product', p.id, 'draft_confirmed', `With order ${o.po_number}`, qc, user);
   return { order_id: orderId, po_number: o.po_number, lines: lines.length, products };

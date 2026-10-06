@@ -27,7 +27,7 @@ import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
-import { confirmDraftOrder } from './drafts.js';
+import { confirmDraftOrder, settleHeldDraft } from './drafts.js';
 import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, LINE_EDD_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
 import { eddPlan, eddForRow } from '../wip-edd.js';
 
@@ -855,6 +855,8 @@ r.post('/orders/:id/status', canPlan, async (req, res, next) => {
         for (const l of openLines) await setLineStatus(l.id, 'cancelled', qc, oc, req.user.name);
       }
       await qc('UPDATE orders SET status=$1 WHERE id=$2', [to, o.id]);
+      // A draft the intake made: its holding row learns it was dropped.
+      if (o.status === 'draft' && to === 'cancelled') await settleHeldDraft(o, 'rejected', qc, req.user.name, note || null);
       await audit('order', o.id, `status:${o.status}→${to}`, note || null, qc, req.user.name);
       return { from: o.status, to };
     });

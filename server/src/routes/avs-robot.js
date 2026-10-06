@@ -28,7 +28,7 @@ import { filingProblems, reportUpsert, problemUpsert, photoFiled, setDone, docsU
 import { cloudFallback } from './avs-intake.js';
 import { markUncacheable } from '../data-tables.js';
 import { jobSnapshot } from '../avs-snapshot.js';
-import { notifyNewDraftOrders } from './drafts.js';
+import { notifyNewDraftOrders, syncIntakeDrafts } from './drafts.js';
 
 const r = Router();
 const MISSING = new Set(['42P01', '3F000']); // the avs schema exists only on production
@@ -54,7 +54,8 @@ r.post('/avs/robot/drafts-notify', async (req, res, next) => {
     markUncacheable();
     res.set('Cache-Control', 'no-store');
     if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
-    res.json(await notifyNewDraftOrders());
+    const sync = await syncIntakeDrafts();
+    res.json({ ...sync, ...(await notifyNewDraftOrders()) });
   } catch (e) { next(e); }
 });
 
