@@ -24,6 +24,7 @@ import { one, q, tx } from '../db.js';
 import { filingProblems, reportUpsert, problemUpsert, photoFiled, setDone, docsUsed } from '../avs-file-report.js';
 import { cloudFallback } from './avs-intake.js';
 import { markUncacheable } from '../data-tables.js';
+import { jobSnapshot } from '../avs-snapshot.js';
 
 const r = Router();
 const MISSING = new Set(['42P01', '3F000']); // the avs schema exists only on production
@@ -113,6 +114,28 @@ r.get('/avs/robot/photos/:id', async (req, res, next) => {
       'X-Photo-Sha256': photo.sha256 || '',
     });
     res.end(photo.bytes);
+  } catch (e) {
+    if (MISSING.has(e?.code)) return res.status(404).json({ error: 'AVS is not set up on this database.' });
+    next(e);
+  }
+});
+
+// Everything the check reads about a set's job, in ONE answer (6 Oct 2026;
+// runbook 2C.3a). avs_prefetch.py saves it as snapshot.json while Claude reads
+// the photos, so the 6 to 10 connector SELECTs of 2.5b / 2.5c are not needed.
+//   GET /api/avs/robot/job-snapshot/:setId   header x-avs-robot-key
+// Read only: avs-snapshot.js only SELECTs.
+r.get('/avs/robot/job-snapshot/:setId', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    const id = Number(req.params.setId);
+    const set = Number.isInteger(id) && id > 0 && await one(`SELECT * FROM avs.check_requests WHERE id = $1`, [id]);
+    if (!set) return res.status(404).json({ error: 'No such set.' });
+    const started = Date.now();
+    const snap = await jobSnapshot((text, params) => q(text, params), set);
+    res.json({ ok: true, ms: Date.now() - started, ...snap });
   } catch (e) {
     if (MISSING.has(e?.code)) return res.status(404).json({ error: 'AVS is not set up on this database.' });
     next(e);
