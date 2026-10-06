@@ -219,6 +219,20 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
       .map(e => [e.kind, e.debit, e.credit]), [['Invoice', 10500, 0], ['Receipt', 0, 10500]]);
     assert.equal(cust.balance, cust.entries.reduce((s, e) => s + e.debit - e.credit, 0));
 
+    // A statement for a period opens with what was owed before it, and every
+    // entry names the invoice or voucher behind it.
+    const stmt = (await call('GET', '/accounts/ledger?party=vendor&id=1&from=2026-10-02')).body;
+    assert.equal(stmt.opening, 95900);
+    assert.deepEqual(stmt.entries.map(e => [e.ref_type, e.ref_id, e.balance]), [['payment', pay.body.id, 55900]]);
+    assert.deepEqual(stmt.monthly, [{ month: '2026-10', debit: 40000, credit: 95900 }]);
+    assert.equal(cust.entries.find(e => e.number === inv.body.invoice_number).ref_type, 'invoice');
+    const vBill = (await call('GET', `/accounts/voucher?type=bill&id=${bill.body.id}`)).body;
+    assert.deepEqual([vBill.number, vBill.amount, vBill.paid, vBill.lines.length, vBill.payments.length], [bill.body.bill_number, 95900, 40000, 2, 1]);
+    const vPay = (await call('GET', `/accounts/voucher?type=payment&id=${pay.body.id}`)).body;
+    assert.deepEqual([vPay.against, vPay.mode, vPay.party_type], [bill.body.bill_number, 'rtgs', 'vendor']);
+    const vRcpt = (await call('GET', `/accounts/voucher?type=receipt&id=${rcpt.body.id}`)).body;
+    assert.deepEqual([vRcpt.against, vRcpt.against_invoice_id, vRcpt.amount], [inv.body.invoice_number, inv.body.id, 10500]);
+
     const book = (await call('GET', '/accounts/cashbook')).body;
     assert.deepEqual(book.entries.map(e => [e.direction, e.money_in, e.money_out]), [['out', 0, 40000], ['in', 10500, 0]]);
     assert.equal(book.closing, -29500);

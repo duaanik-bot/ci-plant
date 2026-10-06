@@ -256,37 +256,88 @@ r.get('/accounts/ledger', async (req, res, next) => {
   try {
     const id = +req.query.id;
     const isVendor = req.query.party === 'vendor';
+    const from = req.query.from || null, to = req.query.to || null;
     if (!id) throw fail(400, 'Choose a party');
     const party = isVendor
       ? await one('SELECT id, name, city, state, gstin FROM vendors WHERE id=$1', [id])
       : await one('SELECT id, name, city, state, gstin FROM customers WHERE id=$1', [id]);
     if (!party) throw fail(404, 'Party not found');
+    // ref_type + ref_id say what an entry IS, so the screen can open the
+    // invoice or the voucher behind it.
     const rows = isVendor
       ? await q(`
           SELECT b.bill_date AS date, 'Purchase bill' AS kind, b.bill_number AS number,
-                 COALESCE(b.vendor_bill_no, '') AS reference, 0::float AS debit, b.total AS credit, b.id AS sort_id, 1 AS ord
+                 COALESCE(b.vendor_bill_no, '') AS reference, 0::float AS debit, b.total AS credit,
+                 b.id AS ref_id, 'bill' AS ref_type, 1 AS ord
           FROM purchase_bills b WHERE b.vendor_id=$1
           UNION ALL
           SELECT vp.paid_on, 'Payment', vp.payment_number,
-                 CONCAT_WS(' · ', UPPER(vp.mode), vp.reference), vp.amount, 0, vp.id, 2
+                 CONCAT_WS(' · ', UPPER(vp.mode), vp.reference), vp.amount, 0, vp.id, 'payment', 2
           FROM vendor_payments vp WHERE vp.vendor_id=$1
-          ORDER BY date, ord, sort_id`, [id])
+          ORDER BY date, ord, ref_id`, [id])
       : await q(`
           SELECT i.invoice_date AS date, 'Invoice' AS kind, i.invoice_number AS number,
-                 '' AS reference, i.total AS debit, 0::float AS credit, i.id AS sort_id, 1 AS ord
+                 '' AS reference, i.total AS debit, 0::float AS credit,
+                 i.id AS ref_id, 'invoice' AS ref_type, 1 AS ord
           FROM invoices i WHERE i.customer_id=$1 AND i.status <> 'cancelled'
           UNION ALL
           SELECT ${RECEIPT_DAY}::text, 'Receipt', p.payment_number,
-                 CONCAT_WS(' · ', UPPER(p.mode), p.reference), 0, p.amount, p.id, 2
+                 CONCAT_WS(' · ', UPPER(p.mode), p.reference), 0, p.amount, p.id, 'receipt', 2
           FROM payments p WHERE p.customer_id=$1
-          ORDER BY date, ord, sort_id`, [id]);
-    let balance = 0;
-    const entries = rows.map(e => {
-      balance = r2(balance + (isVendor ? e.credit - e.debit : e.debit - e.credit));
-      return { date: e.date, kind: e.kind, number: e.number, reference: e.reference,
-               debit: +e.debit, credit: +e.credit, balance };
-    });
-    res.json({ party: { ...party, type: isVendor ? 'vendor' : 'customer' }, entries, balance });
+          ORDER BY date, ord, ref_id`, [id]);
+    // The statement covers [from, to]; everything before it is the opening
+    // balance, and the month strip is always the party's whole history.
+    let opening = 0, balance = 0;
+    const entries = [], months = {};
+    for (const e of rows) {
+      const day = String(e.date).slice(0, 10);
+      const m = (months[day.slice(0, 7)] ||= { month: day.slice(0, 7), debit: 0, credit: 0 });
+      m.debit = r2(m.debit + +e.debit); m.credit = r2(m.credit + +e.credit);
+      const signed = isVendor ? e.credit - e.debit : e.debit - e.credit;
+      if (from && day < from) { opening = r2(opening + signed); balance = opening; continue; }
+      if (to && day > to) continue;
+      balance = r2(balance + signed);
+      entries.push({ date: day, kind: e.kind, number: e.number, reference: e.reference,
+                     debit: +e.debit, credit: +e.credit, balance, ref_type: e.ref_type, ref_id: e.ref_id });
+    }
+    res.json({ party: { ...party, type: isVendor ? 'vendor' : 'customer' }, opening, entries, balance,
+               monthly: Object.values(months).sort((a, b) => a.month.localeCompare(b.month)) });
+  } catch (e) { next(e); }
+});
+
+// ── Voucher — one receipt, payment or purchase bill, in full ────────────────
+r.get('/accounts/voucher', async (req, res, next) => {
+  try {
+    const id = +req.query.id, type = req.query.type;
+    let v = null;
+    if (type === 'receipt') {
+      v = await one(`
+        SELECT 'Receipt' AS title, p.payment_number AS number, ${RECEIPT_DAY}::text AS date, p.amount, p.mode,
+               p.reference, p.notes, c.name AS party, c.city, c.gstin, 'customer' AS party_type, c.id AS party_id,
+               i.invoice_number AS against, i.id AS against_invoice_id
+        FROM payments p JOIN customers c ON c.id=p.customer_id LEFT JOIN invoices i ON i.id=p.invoice_id
+        WHERE p.id=$1`, [id]);
+    } else if (type === 'payment') {
+      v = await one(`
+        SELECT 'Payment' AS title, vp.payment_number AS number, vp.paid_on AS date, vp.amount, vp.mode,
+               vp.reference, vp.notes, vp.created_by, v.name AS party, v.city, v.gstin, 'vendor' AS party_type, v.id AS party_id,
+               b.bill_number AS against, b.id AS against_bill_id
+        FROM vendor_payments vp JOIN vendors v ON v.id=vp.vendor_id LEFT JOIN purchase_bills b ON b.id=vp.purchase_bill_id
+        WHERE vp.id=$1`, [id]);
+    } else if (type === 'bill') {
+      v = await one(`
+        SELECT 'Purchase bill' AS title, b.bill_number AS number, b.bill_date AS date, b.total AS amount,
+               b.vendor_bill_no AS reference, b.notes, b.created_by, b.subtotal, b.tax, b.round_off,
+               v.name AS party, v.city, v.gstin, 'vendor' AS party_type, v.id AS party_id,
+               COALESCE((SELECT SUM(vp.amount) FROM vendor_payments vp WHERE vp.purchase_bill_id=b.id),0) AS paid
+        FROM purchase_bills b JOIN vendors v ON v.id=b.vendor_id WHERE b.id=$1`, [id]);
+      if (v) {
+        v.lines = await q('SELECT description, unit, qty, rate, amount, gst_pct, material_id FROM purchase_bill_lines WHERE bill_id=$1 ORDER BY id', [id]);
+        v.payments = await q('SELECT id, payment_number, paid_on, amount, mode FROM vendor_payments WHERE purchase_bill_id=$1 ORDER BY id', [id]);
+      }
+    } else throw fail(400, 'Unknown voucher type');
+    if (!v) throw fail(404, 'Voucher not found');
+    res.json({ ...v, type, id });
   } catch (e) { next(e); }
 });
 
@@ -296,10 +347,10 @@ r.get('/accounts/cashbook', async (req, res, next) => {
     const from = req.query.from || null, to = req.query.to || null;
     const all = await q(`
       SELECT ${RECEIPT_DAY}::text AS date, 'in' AS direction, p.payment_number AS number, c.name AS party,
-             p.mode, p.reference, i.invoice_number AS against, p.amount, p.id AS sort_id, 'payments' AS source
+             p.mode, p.reference, i.invoice_number AS against, p.amount, p.id AS sort_id, 'payments' AS source, c.id AS party_id
       FROM payments p JOIN customers c ON c.id=p.customer_id LEFT JOIN invoices i ON i.id=p.invoice_id
       UNION ALL
-      SELECT vp.paid_on, 'out', vp.payment_number, v.name, vp.mode, vp.reference, b.bill_number, vp.amount, vp.id, 'vendor_payments'
+      SELECT vp.paid_on, 'out', vp.payment_number, v.name, vp.mode, vp.reference, b.bill_number, vp.amount, vp.id, 'vendor_payments', v.id
       FROM vendor_payments vp JOIN vendors v ON v.id=vp.vendor_id LEFT JOIN purchase_bills b ON b.id=vp.purchase_bill_id
       ORDER BY date, sort_id`);
     let opening = 0, balance = 0;
@@ -310,6 +361,8 @@ r.get('/accounts/cashbook', async (req, res, next) => {
       if (to && e.date > to) continue;
       balance = r2(balance + signed);
       entries.push({ ...e, id: `${e.source}-${e.sort_id}`, source_id: e.sort_id,
+        ref_type: e.direction === 'in' ? 'receipt' : 'payment', ref_id: e.sort_id,
+        party_key: `${e.direction === 'in' ? 'customer' : 'vendor'}:${e.party_id}`,
         money_in: e.direction === 'in' ? +e.amount : 0, money_out: e.direction === 'out' ? +e.amount : 0, balance });
     }
     res.json({ opening, entries, closing: balance });

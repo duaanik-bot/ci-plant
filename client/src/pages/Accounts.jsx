@@ -46,6 +46,16 @@ function last12Months() {
 
 export default function Accounts() {
   const [tab, setTab] = useState('customers');
+  // The party whose statement is open ('customer:2' | 'vendor:5'). Clicking a
+  // customer or vendor name anywhere on this page sets it and opens the ledger.
+  const [party, setParty] = useState('');
+  const openLedger = key => { setParty(key || ''); if (key) setTab('ledger'); };
+  const nameLink = (name, key, sub) => (
+    <div>
+      <button type="button" onClick={e => { e.stopPropagation(); openLedger(key); }} title="Open statement of account"
+        className="text-left font-semibold text-slate-900 hover:text-brand-600 hover:underline">{name}</button>
+      {sub ? <div className="text-xs text-gray-400">{sub}</div> : null}
+    </div>);
   const [preset, setPreset] = useState('this');
   const [range, setRange] = useState(() => presetRange('this')); // [from, to]
   const [data, setData] = useState({ sales: [], purchases: [], sale_products: [], timeline: { sales: [], purchases: [] } });
@@ -89,7 +99,7 @@ export default function Accounts() {
   const byCustomer = useMemo(() => {
     const map = {};
     for (const i of data.sales) {
-      const c = (map[i.customer_id] ||= { customer_name: i.customer_name, city: i.city, segment: i.segment, invoices: 0, qty: 0, taxable: 0, tax: 0, value: 0 });
+      const c = (map[i.customer_id] ||= { customer_id: i.customer_id, customer_name: i.customer_name, city: i.city, segment: i.segment, invoices: 0, qty: 0, taxable: 0, tax: 0, value: 0 });
       c.invoices += 1; c.qty += i.qty; c.taxable += i.subtotal; c.tax += i.tax; c.value += i.total;
     }
     return Object.values(map).sort((a, b) => b.value - a.value);
@@ -98,7 +108,7 @@ export default function Accounts() {
   const byVendor = useMemo(() => {
     const map = {};
     for (const p of data.purchases) {
-      const v = (map[p.vendor_id] ||= { vendor_name: p.vendor_name, city: p.city, pos: 0, ordered_qty: 0, received_qty: 0, value: 0, categories: new Set() });
+      const v = (map[p.vendor_id] ||= { vendor_id: p.vendor_id, vendor_name: p.vendor_name, city: p.city, pos: 0, ordered_qty: 0, received_qty: 0, value: 0, categories: new Set() });
       v.pos += 1; v.ordered_qty += p.ordered_qty; v.received_qty += p.received_qty; v.value += p.value;
       for (const c of (p.categories || '').split(', ').filter(Boolean)) v.categories.add(c);
     }
@@ -197,12 +207,14 @@ export default function Accounts() {
       ]} />
 
       {/* Payables, purchase bills, cash & bank book, party ledger. */}
-      {isBookTab(tab) && <AccountsBooks view={tab} from={from} to={to} periodLabel={periodLabel} />}
+      {isBookTab(tab) && <AccountsBooks view={tab} from={from} to={to} periodLabel={periodLabel}
+        party={party} onOpenLedger={openLedger} onPickMonth={pickMonth}
+        activeMonth={preset.startsWith('month:') ? preset.slice(6) : null} />}
 
       {tab === 'customers' && (
         <DataTable searchable rows={byCustomer} empty="No sales in this period"
           columns={[
-            { key: 'customer_name', label: 'Customer', render: c => (<div><div className="font-semibold">{c.customer_name}</div><div className="text-xs text-gray-400">{c.city}{c.segment ? ` · ${c.segment}` : ''}</div></div>) },
+            { key: 'customer_name', label: 'Customer', render: c => nameLink(c.customer_name, `customer:${c.customer_id}`, `${c.city || ''}${c.segment ? ` · ${c.segment}` : ''}`) },
             { key: 'invoices', label: 'Invoices', align: 'right', render: c => <span className="tabular-nums">{c.invoices}</span> },
             { key: 'qty', label: 'Cartons', align: 'right', render: c => <span className="font-semibold tabular-nums">{fmt.num(c.qty)}</span> },
             { key: 'taxable', label: 'Taxable', align: 'right', render: c => money(c.taxable) },
@@ -220,7 +232,7 @@ export default function Accounts() {
       {tab === 'vendors' && (
         <DataTable searchable rows={byVendor} empty="No purchases in this period"
           columns={[
-            { key: 'vendor_name', label: 'Vendor', render: v => (<div><div className="font-semibold">{v.vendor_name}</div><div className="text-xs text-gray-400">{v.city}</div></div>) },
+            { key: 'vendor_name', label: 'Vendor', render: v => nameLink(v.vendor_name, `vendor:${v.vendor_id}`, v.city) },
             { key: 'categories', label: 'Supplies', render: v => <span className="text-xs text-gray-500">{v.categories || '—'}</span> },
             { key: 'pos', label: 'POs', align: 'right', render: v => <span className="tabular-nums">{v.pos}</span> },
             { key: 'ordered_qty', label: 'Ordered', align: 'right', render: v => <span className="font-semibold tabular-nums">{fmt.num(v.ordered_qty)}</span> },
@@ -260,7 +272,7 @@ export default function Accounts() {
               <><Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>
                 <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="accounts" className="ml-2" /></>) },
             { key: 'invoice_date', label: 'Date', render: i => fmt.date(i.invoice_date) },
-            { key: 'customer_name', label: 'Customer', render: i => (<div><div className="font-semibold">{i.customer_name}</div><div className="text-xs text-gray-400">{i.state}</div></div>) },
+            { key: 'customer_name', label: 'Customer', render: i => nameLink(i.customer_name, `customer:${i.customer_id}`, i.state) },
             { key: 'qty', label: 'Cartons', align: 'right', render: i => <span className="tabular-nums">{fmt.num(i.qty)}</span> },
             { key: 'subtotal', label: 'Taxable', align: 'right', render: i => money(i.subtotal) },
             { key: 'tax', label: 'GST', align: 'right', render: i => <span className="tabular-nums text-xs text-gray-500">{fmt.inr(i.tax)}</span> },
@@ -282,7 +294,7 @@ export default function Accounts() {
             { key: 'po_number', label: 'PO', render: p => (
               <Link to={`/procurement/po/${p.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{p.po_number}</Link>) },
             { key: 'created_at', label: 'Date', render: p => fmt.date(p.created_at) },
-            { key: 'vendor_name', label: 'Vendor', render: p => (<div><div className="font-semibold">{p.vendor_name}</div><div className="text-xs text-gray-400">{p.city}</div></div>) },
+            { key: 'vendor_name', label: 'Vendor', render: p => nameLink(p.vendor_name, `vendor:${p.vendor_id}`, p.city) },
             { key: 'categories', label: 'Materials', render: p => <span className="text-xs text-gray-500">{p.categories || '—'}{p.line_count > 0 ? ` · ${p.line_count} line${p.line_count === 1 ? '' : 's'}` : ''}</span> },
             { key: 'ordered_qty', label: 'Ordered', align: 'right', render: p => <span className="tabular-nums">{fmt.num(p.ordered_qty)}</span> },
             { key: 'received_qty', label: 'Received', align: 'right', render: p => (

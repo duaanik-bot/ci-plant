@@ -1,7 +1,8 @@
 // Accounts books — purchase bills, vendor payments, payables, the party ledger
 // and the cash & bank book. The buying-side mirror of Invoices + Record Payment,
 // and the two books that read both sides together. Rendered inside Accounts.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PressButton, searchText, Select, useToast } from './ui.jsx';
 import { Plus, Trash2, ShoppingBag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
@@ -22,8 +23,18 @@ export const BOOK_TABS = [
 ];
 export const isBookTab = k => BOOK_TABS.some(t => t.key === k);
 
-export default function AccountsBooks({ view, from, to, periodLabel }) {
+// A name that opens that party's statement.
+const partyLink = (label, onClick, sub) => (
+  <div>
+    <button type="button" onClick={e => { e.stopPropagation(); onClick(); }}
+      className="text-left font-semibold text-slate-900 hover:text-brand-600 hover:underline">{label}</button>
+    {sub && <div className="text-xs text-gray-400">{sub}</div>}
+  </div>);
+const monthLabel = ym => new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+
+export default function AccountsBooks({ view, from, to, periodLabel, party, onOpenLedger, onPickMonth, activeMonth }) {
   const toast = useToast();
+  const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
@@ -31,7 +42,10 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
   const [payables, setPayables] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [book, setBook] = useState({ opening: 0, entries: [], closing: 0 });
-  const [party, setParty] = useState(''); // 'customer:2' | 'vendor:5'
+  // `party` ('customer:2' | 'vendor:5') is owned by Accounts, so a name clicked
+  // in any register can open its statement here.
+  const setParty = onOpenLedger;
+  const [voucher, setVoucher] = useState(null); // the receipt / payment / bill being viewed
   const [ledger, setLedger] = useState(null);
   const [bill, setBill] = useState(null);   // purchase entry form
   const [pay, setPay] = useState(null);     // vendor payment form
@@ -44,7 +58,8 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
   const loadLedger = () => {
     if (!party) { setLedger(null); return; }
     const [type, id] = party.split(':');
-    api.get(`/accounts/ledger?party=${type}&id=${id}`).then(setLedger).catch(() => setLedger(null));
+    const qs = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).map(x => `&${x}`).join('');
+    api.get(`/accounts/ledger?party=${type}&id=${id}${qs}`).then(setLedger).catch(() => setLedger(null));
   };
   const load = () => {
     api.get('/purchase-bills').then(setBills).catch(() => {});
@@ -58,7 +73,23 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
     load();
   }, []);
   useEffect(loadBook, [from, to]);
-  useEffect(loadLedger, [party]);
+  useEffect(loadLedger, [party, from, to]);
+  // A name clicked in a register far up the page opens the statement down
+  // here — bring it into view so the click visibly lands somewhere.
+  const ledgerRef = useRef(null);
+  useEffect(() => {
+    if (view === 'ledger' && party) ledgerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [view, party]);
+
+  const openVoucher = (type, id) => {
+    api.get(`/accounts/voucher?type=${type}&id=${id}`).then(setVoucher)
+      .catch(e => netError(toast, e, 'Could not open the voucher'));
+  };
+  // The number on any entry opens what it is: an invoice goes to the invoice
+  // page, everything else opens its voucher here.
+  const entryLink = (e, cls = 'font-bold text-brand-600 hover:underline') => (e.ref_type === 'invoice'
+    ? <Link to={`/invoices/${e.ref_id}`} onClick={ev => ev.stopPropagation()} className={cls}>{e.number}</Link>
+    : <button type="button" className={cls} onClick={ev => { ev.stopPropagation(); openVoucher(e.ref_type, e.ref_id); }}>{e.number}</button>);
 
   // ── Purchase entry ────────────────────────────────────────────────────────
   const openBill = () => {
@@ -157,7 +188,7 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
       {view === 'payables' && (
         <DataTable searchable rows={payables} getRowId={v => v.vendor_id} defaultSort={{ key: 'outstanding', dir: 'desc' }} empty="Nothing owed — no purchase bills booked yet"
           columns={[
-            { key: 'vendor_name', label: 'Vendor', render: v => (<div><div className="font-semibold">{v.vendor_name}</div><div className="text-xs text-gray-400">{v.city}</div></div>) },
+            { key: 'vendor_name', label: 'Vendor', render: v => partyLink(v.vendor_name, () => setParty(`vendor:${v.vendor_id}`), v.city) },
             { key: 'billed', label: 'Billed', align: 'right', render: v => money(v.billed) },
             { key: 'paid', label: 'Paid', align: 'right', render: v => money(v.paid + v.on_account) },
             { key: 'b0_30', label: '0–30 d', align: 'right', render: v => (v.b0_30 ? money(v.b0_30) : dash) },
@@ -167,7 +198,7 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
             { key: 'outstanding', label: 'We Owe', align: 'right', render: v => <span className={`font-bold tabular-nums ${v.outstanding > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{fmt.inr(v.outstanding)}</span> },
             { key: '_act', label: '', render: v => (
               <div className="flex justify-end gap-3 text-xs font-semibold">
-                <button type="button" className="text-gray-400 hover:text-brand-600" onClick={() => setParty(`vendor:${v.vendor_id}`)}>Ledger ↓</button>
+                <button type="button" className="text-gray-400 hover:text-brand-600" onClick={() => setParty(`vendor:${v.vendor_id}`)}>Ledger</button>
                 <button type="button" className="text-brand-600 hover:underline" onClick={() => openPay(v.vendor_id)}>Pay</button>
               </div>) },
           ]}
@@ -181,9 +212,9 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
       {view === 'bills' && (
         <DataTable searchable rows={bills} getRowId={b => b.id} defaultSort={{ key: 'id', dir: 'desc' }} empty="No purchase bills yet — use Purchase Entry"
           columns={[
-            { key: 'bill_number', label: 'Bill', render: b => (<div><div className="font-bold text-slate-800">{b.bill_number}</div>{b.vendor_bill_no && <div className="text-xs text-gray-400">Vendor bill {b.vendor_bill_no}</div>}</div>) },
+            { key: 'bill_number', label: 'Bill', render: b => (<div>{entryLink({ ref_type: 'bill', ref_id: b.id, number: b.bill_number })}{b.vendor_bill_no && <div className="text-xs text-gray-400">Vendor bill {b.vendor_bill_no}</div>}</div>) },
             { key: 'bill_date', label: 'Date', render: b => fmt.date(b.bill_date) },
-            { key: 'vendor_name', label: 'Vendor', render: b => (<div><div className="font-semibold">{b.vendor_name}</div><div className="text-xs text-gray-400">{b.city}</div></div>) },
+            { key: 'vendor_name', label: 'Vendor', render: b => partyLink(b.vendor_name, () => setParty(`vendor:${b.vendor_id}`), b.city) },
             { key: 'items', label: 'Items', render: b => <span className="text-xs text-gray-500">{b.items || '—'}</span> },
             { key: 'subtotal', label: 'Taxable', align: 'right', render: b => money(b.subtotal) },
             { key: 'tax', label: 'GST', align: 'right', render: b => <span className="tabular-nums text-xs text-gray-500">{fmt.inr(b.tax)}</span> },
@@ -218,8 +249,9 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
           <DataTable searchable rows={book.entries} getRowId={e => e.id} empty={`No money in or out · ${periodLabel}`}
             columns={[
               { key: 'date', sortable: false, label: 'Date', render: e => fmt.date(e.date) },
-              { key: 'number', sortable: false, label: 'Voucher', render: e => <span className="font-bold text-slate-800">{e.number}</span> },
-              { key: 'party', sortable: false, label: 'Party', render: e => (<div><div className="font-semibold">{e.party}</div><div className="text-xs text-gray-400">{e.direction === 'in' ? 'Receipt from customer' : 'Payment to vendor'}{e.against ? ` · ${e.against}` : ' · on account'}</div></div>) },
+              { key: 'number', sortable: false, label: 'Voucher', render: e => entryLink(e) },
+              { key: 'party', sortable: false, label: 'Party', render: e => partyLink(e.party, () => setParty(e.party_key),
+                `${e.direction === 'in' ? 'Receipt from customer' : 'Payment to vendor'}${e.against ? ` · ${e.against}` : ' · on account'}`) },
               { key: 'mode', sortable: false, label: 'Mode', render: e => <span className="text-xs font-semibold uppercase text-slate-500">{e.mode}{e.reference ? ` · ${e.reference}` : ''}</span> },
               { key: 'money_in', sortable: false, label: 'In', align: 'right', render: e => (e.money_in ? <span className="font-semibold tabular-nums text-emerald-700">{fmt.inr(e.money_in)}</span> : dash) },
               { key: 'money_out', sortable: false, label: 'Out', align: 'right', render: e => (e.money_out ? <span className="font-semibold tabular-nums text-red-700">{fmt.inr(e.money_out)}</span> : dash) },
@@ -238,8 +270,8 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
         </>
       )}
 
-      {(view === 'ledger' || (view === 'payables' && party.startsWith('vendor:'))) && (
-        <div className={view === 'payables' ? 'mt-5' : ''}>
+      {view === 'ledger' && (
+        <div ref={ledgerRef} className="scroll-mt-4">
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <Field label="Party" className="w-80 max-w-full">
               <Select value={party} onChange={e => setParty(e.target.value)}>
@@ -248,37 +280,133 @@ export default function AccountsBooks({ view, from, to, periodLabel }) {
                 {vendors.map(v => <option key={`v${v.id}`} value={`vendor:${v.id}`} data-search={searchText(v)}>{v.name} — vendor</option>)}
               </Select>
             </Field>
-            {ledger && (
-              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-2 shadow-sm">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                  {ledger.party.type === 'vendor' ? 'We owe' : 'They owe us'}</div>
-                <div className={`text-lg font-extrabold tabular-nums ${ledger.balance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{fmt.inr(ledger.balance)}</div>
+            {ledger && [
+              ['Opening balance', ledger.opening, false],
+              [ledger.party.type === 'vendor' ? 'Billed to us' : 'Invoiced', ledger.entries.reduce((s, e) => s + (ledger.party.type === 'vendor' ? e.credit : e.debit), 0), false],
+              [ledger.party.type === 'vendor' ? 'Paid' : 'Received', ledger.entries.reduce((s, e) => s + (ledger.party.type === 'vendor' ? e.debit : e.credit), 0), false],
+              [ledger.party.type === 'vendor' ? 'We owe' : 'They owe us', ledger.balance, true],
+            ].map(([label, v, closing]) => (
+              <div key={label} className="rounded-2xl border border-slate-100 bg-white px-4 py-2 shadow-sm">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</div>
+                <div className={`text-lg font-extrabold tabular-nums ${closing ? (v > 0 ? 'text-red-700' : 'text-emerald-700') : 'text-slate-900'}`}>{fmt.inr(v)}</div>
               </div>
-            )}
+            ))}
           </div>
+
+          {/* The party's own month-by-month timeline — click a month to see just it. */}
+          {ledger && ledger.monthly.length > 0 && (() => {
+            const months = ledger.monthly.slice(-12);
+            const max = Math.max(1, ...months.map(m => Math.max(m.debit, m.credit)));
+            const vendor = ledger.party.type === 'vendor';
+            return (
+              <div className="mb-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-700">{ledger.party.name} — statement of account · {periodLabel}</h3>
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-indigo-400" /> {vendor ? 'Paid' : 'Invoiced'}</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-400" /> {vendor ? 'Billed to us' : 'Received'}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 overflow-x-auto">
+                  {months.map(m => (
+                    <button key={m.month} type="button" onClick={() => onPickMonth(m.month)}
+                      title={`${monthLabel(m.month)} — debit ${fmt.inr(m.debit)} · credit ${fmt.inr(m.credit)}`}
+                      className={`w-16 shrink-0 rounded-lg border px-1 pb-1.5 pt-2 transition ${activeMonth === m.month ? 'border-brand-300 bg-brand-50' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
+                      <div className="flex h-12 items-end justify-center gap-1">
+                        <div className="w-2.5 rounded-t bg-indigo-400" style={{ height: `${Math.max(m.debit > 0 ? 8 : 2, 100 * m.debit / max)}%` }} />
+                        <div className="w-2.5 rounded-t bg-emerald-400" style={{ height: `${Math.max(m.credit > 0 ? 8 : 2, 100 * m.credit / max)}%` }} />
+                      </div>
+                      <div className="mt-1 text-center text-[10px] font-semibold text-gray-400">{monthLabel(m.month)}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {ledger ? (
-            <DataTable rows={ledger.entries} getRowId={e => `${e.kind}-${e.number}`}
-              empty={`No transactions with ${ledger.party.name} yet`}
+            <DataTable rows={ledger.entries} getRowId={e => `${e.ref_type}-${e.ref_id}`}
+              onRowClick={e => (e.ref_type === 'invoice' ? navigate(`/invoices/${e.ref_id}`) : openVoucher(e.ref_type, e.ref_id))}
+              empty={`No transactions with ${ledger.party.name} · ${periodLabel}`}
               columns={[
                 { key: 'date', sortable: false, label: 'Date', render: e => fmt.date(e.date) },
-                { key: 'kind', sortable: false, label: 'Particulars', render: e => (<div><span className="font-semibold">{e.kind}</span> <span className="font-bold text-slate-800">{e.number}</span>{e.reference && <div className="text-xs text-gray-400">{e.reference}</div>}</div>) },
+                { key: 'kind', sortable: false, label: 'Particulars', render: e => (<div><span className="font-semibold">{e.kind}</span> {entryLink(e)}{e.reference && <div className="text-xs text-gray-400">{e.reference}</div>}</div>) },
                 { key: 'debit', sortable: false, label: 'Debit', align: 'right', render: e => (e.debit ? money(e.debit) : dash) },
                 { key: 'credit', sortable: false, label: 'Credit', align: 'right', render: e => (e.credit ? money(e.credit) : dash) },
                 { key: 'balance', sortable: false, label: 'Balance', align: 'right', render: e => <span className="font-bold tabular-nums">{fmt.inr(e.balance)}</span> },
               ]}
-              exportName={`Ledger — ${ledger.party.name}`}
-              exportSubtitle={[ledger.party.city, ledger.party.state, ledger.party.gstin && `GSTIN ${ledger.party.gstin}`].filter(Boolean).join(' · ')}
+              exportName={`Statement of Account — ${ledger.party.name}`}
+              exportSubtitle={[periodLabel, ledger.party.city, ledger.party.state, ledger.party.gstin && `GSTIN ${ledger.party.gstin}`].filter(Boolean).join(' · ')}
               exportSummary={rows => [
+                { label: 'Opening', value: fmt.inr(ledger.opening) },
                 { label: 'Debit', value: fmt.inr(rows.reduce((s, e) => s + e.debit, 0)) },
                 { label: 'Credit', value: fmt.inr(rows.reduce((s, e) => s + e.credit, 0)) },
                 { label: ledger.party.type === 'vendor' ? 'We owe' : 'They owe us', value: fmt.inr(ledger.balance) },
               ]} />
-          ) : view === 'ledger' && (
+          ) : (
             <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
-              Pick a party to see every invoice, bill, receipt and payment with a running balance.</p>
+              Pick a party — or click any customer or vendor name in Accounts — to see every invoice, bill, receipt and payment with a running balance.</p>
           )}
         </div>
       )}
+
+      {/* ── Voucher — one receipt, payment or purchase bill ── */}
+      <Modal open={!!voucher} onClose={() => setVoucher(null)} title={voucher ? `${voucher.title} ${voucher.number}` : ''}
+        footer={<>
+          {voucher && <Button variant="secondary" onClick={() => { const k = `${voucher.party_type}:${voucher.party_id}`; setVoucher(null); setParty(k); }}>Open {voucher.party}'s ledger</Button>}
+          <Button onClick={() => setVoucher(null)}>Close</Button>
+        </>}>
+        {voucher && (
+          <div className="space-y-3 text-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-gray-400">{voucher.party_type === 'vendor' ? 'Vendor' : 'Customer'}</div>
+                <div className="font-bold text-gray-900">{voucher.party}</div>
+                <div className="text-xs text-gray-500">{[voucher.city, voucher.gstin && `GSTIN ${voucher.gstin}`].filter(Boolean).join(' · ')}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">{fmt.date(voucher.date)}</div>
+                <div className="text-xl font-extrabold tabular-nums text-slate-900">{fmt.inr(voucher.amount)}</div>
+              </div>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl bg-slate-50 px-4 py-3 text-xs">
+              {voucher.mode && <><dt className="text-gray-500">Mode</dt><dd className="text-right font-semibold uppercase">{voucher.mode}</dd></>}
+              {voucher.type !== 'bill' && <><dt className="text-gray-500">Against</dt><dd className="text-right font-semibold">
+                {voucher.against_invoice_id ? <Link className="text-brand-600 hover:underline" to={`/invoices/${voucher.against_invoice_id}`}>{voucher.against}</Link>
+                  : voucher.against_bill_id ? <button type="button" className="text-brand-600 hover:underline" onClick={() => openVoucher('bill', voucher.against_bill_id)}>{voucher.against}</button>
+                  : 'On account'}</dd></>}
+              {voucher.reference && <><dt className="text-gray-500">{voucher.type === 'bill' ? 'Vendor bill no' : 'Reference'}</dt><dd className="text-right font-semibold">{voucher.reference}</dd></>}
+              {voucher.created_by && <><dt className="text-gray-500">Entered by</dt><dd className="text-right font-semibold">{voucher.created_by}</dd></>}
+              {voucher.notes && <><dt className="text-gray-500">Notes</dt><dd className="text-right">{voucher.notes}</dd></>}
+            </dl>
+            {voucher.type === 'bill' && (<>
+              <table className="w-full text-xs">
+                <thead><tr className="ci-table-head"><th className="px-2 py-1.5">Item</th><th className="px-2 py-1.5 text-right">Qty</th><th className="px-2 py-1.5 text-right">Rate</th><th className="px-2 py-1.5 text-right">GST</th><th className="px-2 py-1.5 text-right">Amount</th></tr></thead>
+                <tbody>{voucher.lines.map((l, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="px-2 py-1.5 font-semibold">{l.description}{l.material_id ? <span className="ml-1 font-normal text-gray-400">· into stock</span> : null}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{(+l.qty).toLocaleString('en-IN')} {l.unit || ''}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">₹{(+l.rate).toFixed(2)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{l.gst_pct}%</td>
+                    <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
+                  </tr>))}</tbody>
+              </table>
+              <div className="ml-auto w-56 space-y-0.5 text-xs">
+                <div className="flex justify-between text-gray-600"><span>Taxable</span><span className="tabular-nums">{fmt.inr(voucher.subtotal)}</span></div>
+                <div className="flex justify-between text-gray-600"><span>GST</span><span className="tabular-nums">{fmt.inr(voucher.tax)}</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1 font-bold"><span>Total</span><span className="tabular-nums">{fmt.inr(voucher.amount)}</span></div>
+                <div className="flex justify-between text-gray-600"><span>Paid</span><span className="tabular-nums">{fmt.inr(voucher.paid)}</span></div>
+                <div className="flex justify-between font-bold text-red-700"><span>Balance</span><span className="tabular-nums">{fmt.inr(voucher.amount - voucher.paid)}</span></div>
+              </div>
+              {voucher.payments.length > 0 && (
+                <div className="text-xs text-gray-500">Payments: {voucher.payments.map(p => (
+                  <button key={p.id} type="button" className="mr-2 font-semibold text-brand-600 hover:underline" onClick={() => openVoucher('payment', p.id)}>
+                    {p.payment_number} ({fmt.inr(p.amount)})</button>))}</div>
+              )}
+            </>)}
+          </div>
+        )}
+      </Modal>
 
       {/* ── Purchase entry ── */}
       <Modal wide open={!!bill} onClose={() => setBill(null)} title="Purchase Entry — vendor bill"
