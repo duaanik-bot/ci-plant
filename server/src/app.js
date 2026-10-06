@@ -41,6 +41,7 @@ import productParts from './routes/product-parts.js';
 import avs from './routes/avs.js';
 import avsSwitch from './routes/avs-switch.js';
 import avsIntake from './routes/avs-intake.js';
+import drafts from './routes/drafts.js';
 import avsRobot from './routes/avs-robot.js';
 import avsDocs from './routes/avs-docs.js';
 import kitStudio from './routes/kitstudio.js';
@@ -124,6 +125,9 @@ app.use('/api', avs);
 // sets people upload for Claude to check (to Google Drive, then the AVS routine).
 app.use('/api', avsSwitch);
 app.use('/api', avsIntake);
+// Draft sales orders and draft masters keyed in by the AVS order intake: the
+// Drafts chip, and Confirm (draft → pending, so Planning sees it).
+app.use('/api', drafts);
 // Remove a photo before Verify, documents with a set, re-check with them (5 Oct 2026).
 app.use('/api', avsDocs);
 // Kit Studio: carton sizing, layouts and draft kits on top of the Fluence master.

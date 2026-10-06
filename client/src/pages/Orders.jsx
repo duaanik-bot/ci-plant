@@ -12,6 +12,7 @@ import { nextCodeForRows } from '../lib/productCode.js';
 import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
+import { canConfirmDrafts, ConfirmDraftDialog, DRAFT_ROW, DraftBadge, DraftsChip, DraftsPanel, isDraftOrder, useDraftSummary } from '../components/Drafts.jsx';
 import { createOnDemandList, scheduleIdle } from '../lib/onDemandList.js';
 
 const emptyLine = { product_id: '', qty: '', rate: '', gst: '' };
@@ -46,8 +47,11 @@ const PENDENCY_TONES = {
   ready: 'bg-violet-50 text-violet-700',
   planned: 'bg-blue-50 text-blue-700',
   pending: 'bg-gray-100 text-gray-600',
+  draft: 'bg-orange-500 text-white',
 };
 function pendencyStage(l) {
+  // Keyed in by the AVS intake, not confirmed: Planning cannot see it yet.
+  if (l.order_status === 'draft') return { key: 'draft', label: 'Draft · to confirm' };
   const fgCover = +(l.fg_allocated_qty ?? l.fg_qty ?? 0);
   const pending = +l.pending_qty || 0;
   if (+l.overdue_days > 0 && fgCover < pending) return { key: 'delayed', label: 'Delayed' };
@@ -334,7 +338,10 @@ export default function Orders() {
   const [editForm, setEditForm] = useState(null);
   const [form, setForm] = useState({ po_number: '', customer_id: '', po_date: '', delivery_date: '', notes: '', lines: [{ ...emptyLine }] });
   const [gstRates, setGstRates] = useState([]);
-  const [tab, setTab] = useState('pending');
+  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get('tab') === 'draft' ? 'draft' : 'pending'));
+  const [draftSummary, reloadDrafts] = useDraftSummary();
+  const [showDrafts, setShowDrafts] = useState(false);
+  const [confirmDraft, setConfirmDraft] = useState(null);
   const [quickProduct, setQuickProduct] = useState(null); // { line, mode: 'new' | 'edit' }
   const [pendency, setPendency] = useState(null);
   const [pendencyFilter, setPendencyFilter] = useState({ search: '', customer: '', product: '', status: '' });
@@ -389,8 +396,12 @@ export default function Orders() {
   };
 
   const byStatus = s => orders.filter(o => o.status === s);
+  // Drafts keyed in by the AVS intake sit in Pending too (orange, on top) —
+  // they are what customers have ordered — and have a tab of their own.
+  const drafts = byStatus('draft');
   const ordersForTab = {
-    pending: byStatus('pending'),
+    draft: drafts,
+    pending: [...drafts, ...byStatus('pending')],
     hold: byStatus('hold'),
     completed: byStatus('completed'),
     closed: byStatus('closed'),
@@ -465,6 +476,11 @@ export default function Orders() {
   const quickCustomerId = quickProduct?.mode === 'edit' ? editForm?.customer_id : form.customer_id;
 
   const openDetail = o => api.get(`/orders/${o.id}`).then(setDetail);
+  // /orders?order=123 (the Drafts list on another screen) opens that order.
+  useEffect(() => {
+    const want = Number(new URLSearchParams(window.location.search).get('order'));
+    if (Number.isInteger(want) && want > 0) openDetail({ id: want });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const closeDetail = () => {
     setDetail(null);
     setEditing(false);
@@ -623,12 +639,14 @@ export default function Orders() {
   return (
     <div>
       <PageHeader title="Sales Orders" subtitle="Customer POs in — every line tracked to dispatch"
-        actions={<div className="flex gap-2">
+        actions={<div className="flex flex-wrap items-center gap-2">
+          <DraftsChip summary={draftSummary} onOpen={() => setShowDrafts(true)} />
           <Button variant="secondary" onClick={() => { setShowImport(true); ensureProducts(); }}><FileUp size={15} /> Import PO</Button>
           <Button onClick={() => { setShowNew(true); ensureProducts(); }}><Plus size={15} /> New Order</Button>
         </div>} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'pending', label: 'Pending', count: ordersForTab.pending.length },
+        { key: 'draft', label: 'Drafts · to confirm', count: ordersForTab.draft.length, tone: 'draft' },
         { key: 'hold', label: 'Hold', count: ordersForTab.hold.length },
         { key: 'completed', label: 'Completed', count: ordersForTab.completed.length },
         { key: 'closed', label: 'Closed', count: ordersForTab.closed.length },
@@ -697,10 +715,10 @@ export default function Orders() {
               export: o => `${(o.ordered_qty > 0 ? Math.min(100, (o.fulfilled_qty / o.ordered_qty) * 100) : 0).toFixed(1)}%`,
               render: o => <FulfillmentBar pct={o.ordered_qty > 0 ? (o.fulfilled_qty / o.ordered_qty) * 100 : 0}
                 done={o.fulfilled_qty} total={o.ordered_qty} unit="pcs" /> },
-            { key: 'status', label: 'Status', render: o => <StatusBadge status={o.status} /> },
+            { key: 'status', label: 'Status', render: o => (isDraftOrder(o) ? <DraftBadge /> : <StatusBadge status={o.status} />) },
             threadColumn({ entity: 'order', threads: orderThreads, idOf: o => o.id }),
             { key: '_actions', label: '', sortable: false, render: o => (
-              canDelete && ['pending', 'hold', 'cancelled'].includes(tab) ? (
+              canDelete && ['pending', 'draft', 'hold', 'cancelled'].includes(tab) ? (
                 <div className="flex justify-end" onClick={e => e.stopPropagation()}>
                   <button type="button" title="Delete order"
                     className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
@@ -712,10 +730,11 @@ export default function Orders() {
             ) },
           ]}
           rows={orderRows} onRowClick={openDetail}
-          rowClass={unreadRowClass(orderThreads, o => o.id)}
+          rowClass={o => `${unreadRowClass(orderThreads, x => x.id)(o)} ${isDraftOrder(o) ? DRAFT_ROW : ''}`}
           getRowId={o => o.id}
           empty={{
             pending: 'No pending orders — create your first one',
+            draft: 'No drafts — every order the AVS intake keyed in has been confirmed',
             hold: 'No orders on hold',
             completed: 'No completed orders yet',
             closed: 'No closed orders',
@@ -1011,7 +1030,7 @@ export default function Orders() {
                     threadColumn({ entity: 'order_line', threads: lineThreads, idOf: l => l.line_id }),
                   ]}
                   rows={pdLines} getRowId={l => l.line_id}
-                  rowClass={unreadRowClass(lineThreads, l => l.line_id)}
+                  rowClass={l => `${unreadRowClass(lineThreads, x => x.line_id)(l)} ${isDraftOrder(l) ? DRAFT_ROW : ''}`}
                   onRowClick={l => openDetail({ id: l.order_id })}
                   empty="Nothing pending"
                   exportName="Line-wise Pendency"
@@ -1127,6 +1146,19 @@ export default function Orders() {
         </div>
       </Modal>
 
+      {/* Drafts from the AVS intake: the chip's list, and the confirm step. */}
+      <DraftsPanel open={showDrafts} onClose={() => setShowDrafts(false)}
+        canConfirm={canConfirmDrafts(auth.user)} onOpenOrder={openDetail}
+        onChanged={() => { load(); reloadDrafts(); }} />
+      {confirmDraft && (
+        <ConfirmDraftDialog order={confirmDraft} onClose={() => setConfirmDraft(null)}
+          onDone={() => {
+            setConfirmDraft(null);
+            load(); reloadDrafts();
+            api.get(`/orders/${detail.id}`).then(setDetail).catch(() => {});
+          }} />
+      )}
+
       {/* Order detail */}
       <Modal open={!!detail} onClose={() => { if (!quickProduct) closeDetail(); }} title={detail ? `${detail.po_number} — ${detail.customer_name}` : ''} wide
         footer={detail && (editing ? <>
@@ -1152,8 +1184,16 @@ export default function Orders() {
                   Dispatch tolerance {toleranceLabel(detail.lines[0].eff_tolerance_pct)}
                 </span>
               )}
-              <StatusBadge status={detail.status} />
+              {isDraftOrder(detail) ? <DraftBadge /> : <StatusBadge status={detail.status} />}
             </div>
+            {isDraftOrder(detail) && (
+              <div className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-sm text-orange-900 ring-1 ring-inset ring-orange-300 shadow-[inset_4px_0_0_#F97316]">
+                <b>Draft — keyed in by the AVS intake{detail.draft_source && detail.draft_source !== 'avs_intake' ? ` (${detail.draft_source})` : ''} from the customer's PO.</b>{' '}
+                Planning does not see it yet. Check every line against the PO, edit anything that is wrong, then press <b>Confirm order</b>.
+                {detail.lines?.some(l => l.product_is_draft) && <span className="mt-1 block text-xs">Lines marked <b>NEW MASTER</b> use product masters the intake created; they are confirmed with the order.</span>}
+                {detail.draft_note && <span className="mt-1 block text-xs">{detail.draft_note}</span>}
+              </div>
+            )}
             {detail && (() => {
               const isAdmin = auth.user?.role === 'admin';
               const s = detail.status;
@@ -1165,6 +1205,10 @@ export default function Orders() {
               );
               return (
                 <div className="mb-3 flex flex-wrap gap-1.5">
+                  {s === 'draft' && canConfirmDrafts(auth.user) && (
+                    <Button size="sm" onClick={() => setConfirmDraft(detail)}><CheckCircle2 size={13} /> Confirm order → Planning</Button>
+                  )}
+                  {s === 'draft' && b('cancelled', 'Cancel draft', 'danger')}
                   {s === 'hold' && b('pending', 'Resume (Pending)', 'primary')}
                   {s === 'pending' && b('hold', 'Hold')}
                   {s === 'pending' && b('completed', 'Complete', 'primary')}
@@ -1199,6 +1243,7 @@ export default function Orders() {
                       ) : (
                         <>
                           <ProductIdentity row={l} />
+                          {l.product_is_draft ? <span className="mt-0.5 inline-block rounded-full bg-orange-500 px-1.5 py-px text-[9px] font-bold text-white" title="A product master the AVS intake created for this PO — confirmed with the order">NEW MASTER</span> : null}
                           <ProductSpec product={l} />
                         </>
                       )}

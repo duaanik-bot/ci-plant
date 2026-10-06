@@ -27,6 +27,7 @@ import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
+import { confirmDraftOrder } from './drafts.js';
 import { STATUS_SHEET_SCOPE_SQL, LINE_STATUS_SQL, LINE_EDD_SQL, overdueDaysSql, isWipState, wipDateFor } from '../wip-scope.js';
 import { eddPlan, eddForRow } from '../wip-edd.js';
 
@@ -74,7 +75,7 @@ const LINE_VIEW = `
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance_pct,
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
          p.internal_carton_code,
-         p.party_item_code,
+         p.party_item_code, p.is_draft AS product_is_draft, o.status AS order_status,
          COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          -- The output number, from helpers.js outputNumberSql — the same rule
          -- the job cards and the station queues resolve, so the Planning
@@ -829,6 +830,12 @@ r.post('/orders/:id/status', canPlan, async (req, res, next) => {
       if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
       const err = orderTransitionError(o.status, to, isAdmin);
       if (err) throw Object.assign(new Error(err), { status: 409 });
+      // A draft becomes an order only through Confirm: its lines turn into
+      // demand and its draft masters are confirmed with it (routes/drafts.js).
+      if (o.status === 'draft' && to === 'pending') {
+        const done = await confirmDraftOrder(o.id, qc, oc, req.user.name, note || null);
+        return { from: 'draft', to, confirmed: done };
+      }
 
       // Completing an order requires every non-cancelled line fully dispatched.
       // A part line is never dispatched by quantity — its pieces leave inside
@@ -882,6 +889,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
     const rows = await q(`
       WITH demand AS (
         SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
+               o.status AS order_status,
                c.id AS customer_id, c.name AS customer_name,
                p.id AS product_id, p.name AS product_name, p.code AS product_code,
                COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
@@ -913,7 +921,9 @@ r.get('/sales/pendency', async (_req, res, next) => {
                GREATEST(0, (${PLANT_TODAY_SQL} - o.po_date::date))::int AS age_days,
                CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < ${PLANT_TODAY_SQL}
                     THEN (${PLANT_TODAY_SQL} - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
-               COALESCE(SUM(ol.qty - ol.dispatched_qty) OVER (
+               -- A draft is not demand yet: it never takes FG cover from a
+               -- confirmed line ahead of it in the queue.
+               COALESCE(SUM(CASE WHEN o.status = 'draft' THEN 0 ELSE ol.qty - ol.dispatched_qty END) OVER (
                  PARTITION BY ol.product_id
                  ORDER BY o.delivery_date NULLS LAST, o.po_date, ol.id
                  ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
@@ -924,13 +934,17 @@ r.get('/sales/pendency', async (_req, res, next) => {
         JOIN products p ON p.id = ol.product_id
         LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
         LEFT JOIN fg_stock fg ON fg.product_id = ol.product_id
-        WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
+        -- A draft the AVS intake keyed in shows too (orange, "to confirm"): it is
+        -- what the customer has ordered, though Planning cannot see it yet.
+        WHERE o.status IN ('draft','pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
           AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
           AND ol.part_of_line_id IS NULL
       )
       SELECT d.*,
-             GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending))::int AS fg_allocated_qty,
-             GREATEST(0, d.pending_qty - GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending)))::int AS production_required_qty,
+             CASE WHEN d.order_status = 'draft' THEN 0
+                  ELSE GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending)) END::int AS fg_allocated_qty,
+             CASE WHEN d.order_status = 'draft' THEN d.pending_qty
+                  ELSE GREATEST(0, d.pending_qty - GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending))) END::int AS production_required_qty,
              jc.id AS job_card_id, jc.jc_number, jc.status AS jc_status, jc.qty_planned, jc.qty_produced,
              jc.order_line_id IS NULL AS gang_parent_job,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
@@ -1026,6 +1040,7 @@ r.get('/status-sheet', async (_req, res, next) => {
     const overdueSql = overdueDaysSql(PLANT_TODAY_SQL);
     const rows = await q(`
       SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date,
+             o.status AS order_status,
              -- The EDD this line answers for: its own when it has one,
              -- otherwise the PO's. Both halves ride along so the cell can
              -- show whether the date is the line's or inherited.

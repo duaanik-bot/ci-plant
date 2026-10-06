@@ -1923,6 +1923,7 @@ export function Tabs({ tabs, active, onChange }) {
                as three invoices. Absent tone keeps the original neutral chip. */
             <span className={`ml-1.5 rounded-full px-1.5 text-xs ${t.tone === 'danger'
               ? 'bg-red-100 font-bold text-red-700'
+              : t.tone === 'draft' && t.count ? 'bg-orange-500 font-bold text-white'
               : active === t.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{t.count}</span>
           )}
         </button>

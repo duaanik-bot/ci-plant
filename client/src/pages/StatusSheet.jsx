@@ -21,7 +21,7 @@
 //
 // Edits post to /status-sheet/* and update optimistically; realtime/fallback refresh reconciles.
 import { useMemo, useRef, useState } from 'react';
-import { api, fmt } from '../api.js';
+import { api, auth, fmt } from '../api.js';
 import { createThreadSummary } from '../lib/threadSummary.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
@@ -35,6 +35,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays, CalendarCheck } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import { canConfirmDrafts, DRAFT_ROW, DraftBadge, DraftsChip, DraftsPanel, isDraftOrder, useDraftSummary } from '../components/Drafts.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
 import { DRIP_OFF_PLATE_SIZE, dripPlateStateLabel, hasDripOffCoating } from '../lib/plateInks.js';
@@ -173,6 +174,8 @@ export default function StatusSheet() {
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
   const [threads, setThreads] = useState({});
+  const [draftSummary, reloadDrafts] = useDraftSummary();
+  const [showDrafts, setShowDrafts] = useState(false);
 
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no pending orders". A network reject fires no central toast
@@ -694,7 +697,7 @@ export default function StatusSheet() {
   const columns = [
     { key: 'po_number', label: 'Order #', render: r => r._gang
       ? (<div>{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}<div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className={`text-[10px] font-bold uppercase tracking-wide ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>{r.run_kind === 'merge' ? `${r._gang.length} orders · one pile` : `${r._gang.length} cartons · one run`}</div></div>)
-      : <span className="font-semibold text-slate-800">{r.po_number}</span> },
+      : <span className="block leading-tight"><span className="font-semibold text-slate-800">{r.po_number}</span>{isDraftOrder(r) && <span className="mt-0.5 block"><DraftBadge compact /></span>}</span> },
     // Was labelled just "Date" and sorted on the rendered string, which orders
     // by the day name. Named for what it is now, sorted on the raw date, and a
     // gang shows its span — the same pair every other planning screen carries.
@@ -829,9 +832,12 @@ export default function StatusSheet() {
 
   return (
     <div>
+      <DraftsPanel open={showDrafts} onClose={() => setShowDrafts(false)}
+        canConfirm={canConfirmDrafts(auth.user)} onChanged={() => { reloadDrafts(); load(); }} />
       <PageHeader title="Status Sheet"
         subtitle="Live pending-order status — supply progress, delivery dates, customer WIP and priority in one editable sheet"
         actions={<>
+          <DraftsChip summary={draftSummary} onOpen={() => setShowDrafts(true)} />
           {/* Only offered when there is something to clear — a dead button on a
               header is one more thing to read past, and its absence says the
               list is already empty for whoever is in view. */}
@@ -965,6 +971,8 @@ export default function StatusSheet() {
           // (it asks for a click; the WIP tint only asks for attention).
           const unread = unreadRowClass(threads, threadLineId)(r);
           if (unread) return unread;
+          // A draft keyed in by the AVS intake is orange until it is confirmed.
+          if (isDraftOrder(r)) return DRAFT_ROW;
           const isWip = r._gang ? r._gang.some(m => m.wip) : r.wip;
           return isWip ? 'bg-blue-50/60' : '';
         }}

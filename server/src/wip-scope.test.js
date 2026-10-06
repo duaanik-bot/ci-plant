@@ -35,7 +35,8 @@ test('a cancelled line is out under every reading', () => {
 test('pending still means owed — the original predicate is unchanged', () => {
   assert.match(PENDING_SQL, /ol\.qty > ol\.dispatched_qty/);
   assert.match(PENDING_SQL, /ol\.completed_at IS NULL/);
-  assert.match(PENDING_SQL, /o\.status IN \('pending','hold'\)/);
+  // A draft from the AVS intake is on the sheet too (orange), not yet demand.
+  assert.match(PENDING_SQL, /o\.status IN \('draft','pending','hold'\)/);
 });
 
 // ── The status cascade ───────────────────────────────────────────────────────

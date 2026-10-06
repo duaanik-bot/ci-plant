@@ -19,6 +19,7 @@ import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { notificationLink } from '../lib/notificationLink.js';
 import { currentSubscription, readEnvironment, registerWorker, subscribe } from '../lib/webPush.js';
 import { PressButton, useToast } from './ui.jsx';
+import { useDraftSummary } from './Drafts.jsx';
 // A lazy chunk behind a boundary and an open-request queue — see ChatDockLoader.jsx.
 import ChatDock from './ChatDockLoader.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -635,6 +636,20 @@ function AvsBadge({ isActive, corner = false }) {
   );
 }
 
+// Sales Orders' badge: draft orders the AVS intake keyed in from customer POs,
+// waiting for someone to check and confirm them (owner's request, 6 Oct 2026).
+function DraftOrdersBadge({ isActive, corner = false }) {
+  const [d] = useDraftSummary(true);
+  if (!d.orders) return null;
+  const tip = `${d.orders} draft order${d.orders === 1 ? '' : 's'} from the AVS intake to confirm${d.products ? ` · ${d.products} new master${d.products === 1 ? '' : 's'}` : ''}`;
+  return (
+    <span title={tip} aria-label={tip}
+      className={`${corner ? 'absolute right-0.5 top-0.5 h-4 min-w-[16px] justify-center px-1 text-[9px]' : 'ml-auto px-1.5 text-[10px]'} flex items-center rounded-full font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-orange-500 text-white'}`}>
+      {d.orders > 99 ? '99+' : d.orders}
+    </span>
+  );
+}
+
 function NavItem({ item }) {
   return (
     <NavLink to={item.to} end={item.end}
@@ -645,6 +660,7 @@ function NavItem({ item }) {
           <item.icon size={15} className={`shrink-0 ${isActive ? 'text-white' : 'text-[#8E8E93]'}`} />
           <span className="truncate">{item.label}</span>
           {item.module === 'avs' && <AvsBadge isActive={isActive} />}
+          {item.to === '/orders' && <DraftOrdersBadge isActive={isActive} />}
         </>
       )}
     </NavLink>
@@ -826,6 +842,7 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
                         <i.icon size={18} className={isActive ? 'text-white' : 'text-[#8E8E93]'} />
                         <span className="flex-1">{i.label}</span>
                         {i.module === 'avs' && <AvsBadge isActive={isActive} />}
+                        {i.to === '/orders' && <DraftOrdersBadge isActive={isActive} />}
                       </>
                     )}
                   </NavLink>
@@ -861,6 +878,7 @@ function TabletRail({ groups, floorTotal }) {
                   <Icon size={19} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
                   <span className="max-w-full truncate leading-tight">{label}</span>
                   {i.module === 'avs' && <AvsBadge isActive={isActive} corner />}
+                  {i.to === '/orders' && <DraftOrdersBadge isActive={isActive} corner />}
                   {isFloor && floorTotal > 0 && (
                     <span className={`absolute right-0.5 top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
                       {floorTotal > 99 ? '99+' : floorTotal}

@@ -107,7 +107,7 @@ export const pastingCantStart = ({ code, po, status }) =>
   `${code} on PO ${po} is ${lineSays(status)}, so its pasting card can't start — ask Planning`;
 
 // A part line the planner can still change: nothing of it is on the floor.
-export const EDITABLE_PART = ['pending', 'planned'];
+export const EDITABLE_PART = ['draft', 'pending', 'planned'];
 
 // Once ANY part is past planning, the carton is physically being made as the
 // parts on this order — the parts LIST is frozen for it. (The carton line
@@ -129,7 +129,7 @@ export const partsFrozen = partLines => partLines.some(p => !EDITABLE_PART.inclu
 // is frozen, or once the master drops the part, the line's own figures stand.
 // The LIST follows the master (adds, removes) only while no part is under way;
 // after that a changed list is one warning.
-export const SYNCABLE_OUTER = ['pending', 'planned'];
+export const SYNCABLE_OUTER = ['draft', 'pending', 'planned'];
 export function partLineSyncPlan({ outer, parts = [], existing = [] }) {
   const plan = { insert: [], update: [], remove: [], warnings: [] };
   if (!SYNCABLE_OUTER.includes(outer.status)) return plan;
@@ -190,7 +190,7 @@ export const partStillReferenced = (label, table) => (table === 'shade_cards'
 // rollback is refused, naming the station, while a part's card has a stage
 // started, and is never possible once a part is die-cut. So the part FURTHEST
 // along speaks: one die-cut part and there is no way back, whatever the others are.
-export const CANCELLABLE_PART = ['pending', 'planned'];
+export const CANCELLABLE_PART = ['draft', 'pending', 'planned'];
 const farAlong = p => (pasted(p) ? 3 : p.jc_status === 'split' ? 2 : p.status === 'in_production' ? 1 : 0);
 export function partsChangeBlock(line, partLines = []) {
   if (line?.part_of_line_id)

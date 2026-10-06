@@ -5,6 +5,7 @@ import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, 
 import MasterHistory from '../components/MasterHistory.jsx';
 import ProductPartsEditor from '../components/ProductPartsEditor.jsx';
 import FluenceButton from '../components/fluence/FluenceButton.jsx';
+import { canConfirmDrafts, DRAFT_ROW, DraftsChip, DraftsPanel, useDraftSummary } from '../components/Drafts.jsx';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS, FLUENCE_TABS, FLUENCE_TAB_KEYS, isFluenceOnly } from '../modules.js';
@@ -430,6 +431,16 @@ const PLATE_VIEWS = [
 
 export default function Masters() {
   const toast = useToast();
+  const [draftSummary, reloadDrafts] = useDraftSummary();
+  const [showDrafts, setShowDrafts] = useState(false);
+  // A draft master (made by the AVS intake for a new item) confirmed on its own.
+  const confirmDraftProduct = async r => {
+    try {
+      await api.post(`/products/${r.id}/confirm-draft`, {});
+      toast.success(`${r.code || r.name} confirmed`);
+      load(); reloadDrafts();
+    } catch (e) { toast.error(e.message || 'Could not confirm the master'); }
+  };
   const isAdmin = auth.user?.role === 'admin';
   // ?tab= makes every master — including the Board Rates sub-module — linkable,
   // so "go set this grade's rate" can be handed over as a URL and survives a
@@ -796,6 +807,11 @@ export default function Masters() {
             return <span className="block leading-tight">
               <span className="block">{v}</span>
               <span className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
+                {r.is_draft ? <span className="rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold text-white" title={r.draft_note || 'Made by the AVS intake for a new item on a customer PO. Check the spec, then confirm.'}>Draft master</span> : null}
+                {r.is_draft && canConfirmDrafts(auth.user) ? (
+                  <button type="button" onClick={e => { e.stopPropagation(); confirmDraftProduct(r); }}
+                    className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-orange-700 ring-1 ring-inset ring-orange-300 hover:bg-orange-100">Confirm</button>
+                ) : null}
                 {r.spec_incomplete && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span>}
                 <FluenceButton productId={r.id} context="masters" compact title="Fluence — the kit and prescription this carton is printed with" />
               </span></span>;
@@ -992,7 +1008,12 @@ export default function Masters() {
   return (
     <div>
       <PageHeader title="Masters" subtitle="Products we supply · materials we procure · organisation and system setup"
-        actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {singular(cfg.label)}</Button>} />
+        actions={!isCompany && <div className="flex flex-wrap items-center gap-2">
+          {tab === 'products' && <DraftsChip summary={draftSummary} onOpen={() => setShowDrafts(true)} />}
+          <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {singular(cfg.label)}</Button>
+        </div>} />
+      <DraftsPanel open={showDrafts} onClose={() => setShowDrafts(false)}
+        canConfirm={canConfirmDrafts(auth.user)} onChanged={() => { load(); reloadDrafts(); }} />
       <GroupedTabs active={navKey} onChange={selectTab}
         groups={MASTER_GROUPS.map(g => ({
           label: g.label,
@@ -1062,6 +1083,7 @@ export default function Masters() {
       ) : (
       <DataTable key={tab} searchable columns={columns} rows={cfg.rowFilter ? rows.filter(cfg.rowFilter) : rows} empty={`No ${cfg.label.toLowerCase()} yet`}
         dense={tab === 'products'}
+        rowClass={tab === 'products' ? (r => (r.is_draft ? DRAFT_ROW : '')) : undefined}
         onRowClick={cfg.history ? r => setViewing({ kind: cfg.history, record: r }) : undefined}
         defaultSort={tab === 'employees' ? { key: 'section', dir: 'asc' }
           : tab === 'sections' ? { key: 'sort_order', dir: 'asc' } : undefined}

@@ -27,7 +27,7 @@ r.get('/dashboard', async (_req, res, next) => {
       one(`
       SELECT COUNT(*)::int AS lines, COALESCE(SUM((qty-dispatched_qty)*rate),0) AS value,
              COALESCE(SUM(qty-dispatched_qty),0)::int AS qty
-      FROM order_lines WHERE status NOT IN ('dispatched','cancelled') AND part_of_line_id IS NULL`),
+      FROM order_lines WHERE status NOT IN ('draft','dispatched','cancelled') AND part_of_line_id IS NULL`),
 
       one(`SELECT COUNT(*)::int AS jobs FROM job_cards WHERE status IN ('open','in_progress')`),
 
@@ -266,8 +266,9 @@ r.get('/reports/sales', async (_req, res, next) => {
              SUM((ol.qty-ol.dispatched_qty)*ol.rate) AS pending_value
       FROM order_lines ol
       JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
-      -- What the customer ordered: never a carton's part line (carton-parts.js).
-      WHERE ol.status != 'cancelled' AND ol.part_of_line_id IS NULL
+      -- What the customer ordered: never a carton's part line (carton-parts.js),
+      -- and never a draft the intake keyed in that nobody has confirmed yet.
+      WHERE ol.status NOT IN ('cancelled','draft') AND ol.part_of_line_id IS NULL
       GROUP BY c.id, c.name, c.segment ORDER BY order_value DESC`));
   } catch (e) { next(e); }
 });

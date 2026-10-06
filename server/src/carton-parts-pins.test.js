@@ -614,11 +614,12 @@ test('Task 9: every orders-list total, the dispatch picks, the sales KPIs, track
   assert.ok((dispatch.match(/part_of_line_id IS NULL/g) || []).length >= 3, 'the three lists above');
   // dashboard: orders in hand and the sales report
   const dash = src('./routes/dashboard.js');
-  assert.match(dash, /FROM order_lines WHERE status NOT IN \('dispatched','cancelled'\) AND part_of_line_id IS NULL`\),/);
-  assert.match(route(dash, "r.get('/reports/sales',"), /WHERE ol\.status != 'cancelled' AND ol\.part_of_line_id IS NULL/);
+  assert.match(dash, /FROM order_lines WHERE status NOT IN \('draft','dispatched','cancelled'\) AND part_of_line_id IS NULL`\),/);
+  // (a draft from the AVS intake is not sales yet — routes/drafts.js)
+  assert.match(route(dash, "r.get('/reports/sales',"), /WHERE ol\.status NOT IN \('cancelled','draft'\) AND ol\.part_of_line_id IS NULL/);
   // tracking: the list shows no part; a part answers for its carton; a carton shows its parts
   const floor = src('./routes/floor.js');
-  assert.match(route(floor, "r.get('/track',"), /WHERE ol\.status != 'cancelled' AND ol\.part_of_line_id IS NULL/);
+  assert.match(route(floor, "r.get('/track',"), /WHERE ol\.status NOT IN \('cancelled','draft'\) AND ol\.part_of_line_id IS NULL/);
   const one = route(floor, "r.get('/track/:id',");
   assert.match(one, /WHERE ol\.id = \(SELECT COALESCE\(x\.part_of_line_id, x\.id\) FROM order_lines x WHERE x\.id = \$1\)/);
   assert.match(one, /WHERE pl\.part_of_line_id = \$1/);
@@ -745,7 +746,8 @@ test('(s1) ONE carton-aware status, read by Track, the Status Sheet and Sales Pe
   const pend = routeOf(orders, "r.get('/sales/pendency',");
   assert.match(pend, /\$\{CARTON_STATUS_SQL\} AS status, ol\.gang_run_id, gg\.gang_number, gg\.kind AS run_kind,/);
   // the demand filter still reads the line's OWN status
-  assert.match(pend, /WHERE o\.status IN \('pending','hold'\) AND ol\.status NOT IN \('cancelled','dispatched'\)/);
+  // (a draft order shows too, orange — it is ordered, though not yet demand)
+  assert.match(pend, /WHERE o\.status IN \('draft','pending','hold'\) AND ol\.status NOT IN \('cancelled','dispatched'\)/);
 });
 
 test('(s2) Track with the pasting card: tooling still from the parts, the card as cartons to paste, artwork locked with the parts', () => {

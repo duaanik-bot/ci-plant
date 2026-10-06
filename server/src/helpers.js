@@ -94,6 +94,9 @@ export function productCodeTaken(e, code, minted = false) {
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
+  // A draft line (an order the AVS intake keyed in, not yet confirmed) becomes
+  // demand only when its order is confirmed, or leaves with it.
+  draft:         ['pending', 'cancelled'],
   pending:       ['planned', 'cancelled'],
   planned:       ['ready', 'pending', 'cancelled'],
   ready:         ['in_production', 'planned'],
@@ -4144,6 +4147,8 @@ export function reopenBlock({ status, finalised_at, started }) {
 // Close ≠ Cancel. Both are terminal; only an admin may reopen a terminal
 // order back to pending. Returns an error message, or null when allowed.
 const ORDER_NEXT = {
+  // A draft is confirmed (→ pending, Confirm order) or dropped (→ cancelled).
+  draft:     ['pending', 'cancelled'],
   pending:   ['hold', 'completed', 'closed', 'cancelled'],
   hold:      ['pending', 'closed', 'cancelled'],
   completed: ['closed', 'pending'],   // pending = reopen (admin only, see below)

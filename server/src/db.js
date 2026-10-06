@@ -2849,4 +2849,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
 
   // A trading item may belong to one customer — materials.customer_id.
   await pool.query(migration('20261006120000_trading_item_customer.sql'));
+
+  // Draft sales orders and draft product masters — keyed in by the AVS order
+  // intake, confirmed by a person before Planning sees them. Idempotent.
+  await pool.query(migration('20261006180000_sales_order_drafts.sql'));
 }

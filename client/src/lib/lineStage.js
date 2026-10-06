@@ -58,7 +58,8 @@ export function lineStageOf(line) {
   // Unplanned would tell the planner to go and plan a job that is already running.
   if (!st.length) {
     if (PLANNED_STATUSES.has(status)) return state('planned', 0, 0);
-    return state(status === 'pending' || status == null ? 'unplanned' : 'queued', 0, 0);
+    // A draft line (AVS intake, not yet confirmed) has not even reached Planning.
+    return state(status === 'pending' || status === 'draft' || status == null ? 'unplanned' : 'queued', 0, 0);
   }
 
   const total = st.length;

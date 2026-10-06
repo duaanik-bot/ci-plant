@@ -18,8 +18,12 @@
 // Owed: the order is live, the line is neither cancelled nor dispatched, some
 // quantity is still outstanding and production has not signed it off. This is
 // the predicate the sheet has always used, unchanged.
+//
+// A draft order (keyed in by the AVS intake, not yet confirmed) is on the sheet
+// too — orange, "to confirm" — because the customer has ordered it; Planning
+// still cannot see it (its lines are 'draft', routes/drafts.js).
 export const PENDING_SQL = `(
-  o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
+  o.status IN ('draft','pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
   AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
 )`;
 

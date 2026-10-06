@@ -1454,7 +1454,7 @@ r.get('/track', async (_req, res, next) => {
       ) jc ON true
       -- A part line is internal (carton-parts.js): the carton is tracked, and
       -- its journey shows where each part is.
-      WHERE ol.status != 'cancelled' AND ol.part_of_line_id IS NULL
+      WHERE ol.status NOT IN ('cancelled','draft') AND ol.part_of_line_id IS NULL
       ORDER BY (ol.status='dispatched'), o.delivery_date NULLS LAST, ol.id DESC`));
   } catch (e) { next(e); }
 });
