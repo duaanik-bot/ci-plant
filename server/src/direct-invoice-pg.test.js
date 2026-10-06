@@ -183,6 +183,20 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     assert.equal((await call('GET', '/direct-invoices/trading-items')).body[0].in_stock, 5000);
   });
 
+  test('a trading item kept for one customer is billed to that customer only', async () => {
+    const item = (await call('GET', '/direct-invoices/trading-items')).body[0];
+    assert.equal((await call('PUT', `/materials/${item.id}`, { customer_id: 2 })).status, 200);
+    assert.equal((await call('GET', '/direct-invoices/items')).body.boards.find(b => b.material_id === item.id).customer_id, 2);
+    const line = { item_type: 'board', material_id: item.id, qty: 10, rate: 1, gst_pct: 0 };
+    const wrong = await call('POST', '/direct-invoices', { customer_id: 1, lines: [line] });
+    assert.equal(wrong.status, 409);
+    assert.match(wrong.body.error, /belongs to .+ — it cannot be billed to/);
+    const right = await call('POST', '/direct-invoices', { customer_id: 2, lines: [line] });
+    assert.equal(right.status, 200, JSON.stringify(right.body));
+    assert.equal((await call('DELETE', `/invoices/${right.body.id}`)).status, 200);
+    assert.equal((await call('PUT', `/materials/${item.id}`, { customer_id: null })).status, 200, 'blank again = any customer');
+  });
+
   test('accounts: a purchase bill lands trading stock and a payable; payment, ledger and cash book follow', async () => {
     const item = (await call('GET', '/direct-invoices/trading-items')).body[0];
     const stock0 = item.in_stock;

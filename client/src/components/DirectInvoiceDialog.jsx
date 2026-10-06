@@ -40,7 +40,10 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
   const find = l => (isMaterial(l.item_type)
     ? items.boards.find(b => b.material_id === +l.item_id)
     : items.cartons.find(c => c.product_id === +l.item_id));
-  const trading = items.boards.filter(b => b.category === 'trading');
+  // A trading item kept for one customer shows only when that customer is the
+  // party; an item with no customer shows for everyone.
+  const trading = items.boards.filter(b => b.category === 'trading'
+    && (b.customer_id == null || !customerId || b.customer_id === +customerId));
   const warehouse = items.boards.filter(b => b.category !== 'trading');
 
   const setLine = (key, patch) => setLines(ls => ls.map(l => (l.key === key ? { ...l, ...patch } : l)));
@@ -132,7 +135,16 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
             <Field label="Bill to" required className="sm:col-span-2">
               <div className="flex gap-2">
                 <div className="min-w-0 flex-1">
-                  <Select value={customerId} onChange={e => setCustomerId(e.target.value)}>
+                  <Select value={customerId} onChange={e => {
+                    const next = e.target.value;
+                    setCustomerId(next);
+                    // Drop rows holding an item that belongs to a different customer.
+                    setLines(ls => ls.map(l => {
+                      const it = l.item_type === 'trading' ? items.boards.find(b => b.material_id === +l.item_id) : null;
+                      return it && it.customer_id != null && next && it.customer_id !== +next
+                        ? { ...l, item_id: '', hsn: '', rate: '', gst_pct: '' } : l;
+                    }));
+                  }}>
                     <option value="">Select party…</option>
                     {customers.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
                   </Select>

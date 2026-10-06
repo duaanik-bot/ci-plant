@@ -64,7 +64,7 @@ const MASTERS = {
   // form set it would throw a raw 23505 at the user.
   billing_entities: ['name', 'tagline', 'address', 'city', 'state', 'state_code', 'gstin', 'hsn', 'gst_rate', 'jurisdiction', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'gstin', 'address', 'state', 'state_code', 'email', 'active'],
-  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet'],
+  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet', 'customer_id'],
   machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active', 'is_default'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
   sections: ['code', 'name', 'sort_order', 'active'],

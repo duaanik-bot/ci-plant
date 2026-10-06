@@ -272,15 +272,17 @@ const CONFIGS = {
     fields: [
       { key: 'name', label: 'Item Name', required: true },
       { key: 'unit', label: 'Unit', required: true },
-      { key: 'hsn_code', label: 'HSN Code', newRow: true },
+      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', newRow: true,
+        hint: 'Set = this item can be billed to this customer only. Blank = any customer.' },
+      { key: 'hsn_code', label: 'HSN Code' },
       { key: 'gst_rate', label: 'GST %', type: 'number' },
       { key: 'std_rate', label: 'Selling Rate', type: 'number', newRow: true },
       // Not a column: typed here, it is posted as a stock adjustment after the save.
       { key: 'add_stock', label: 'Add Stock (qty)', type: 'number', virtual: true,
         hint: 'Adds this quantity to stock in hand. Leave blank for no change.' },
     ],
-    columns: ['name', 'unit', 'hsn_code', 'gst_rate', 'std_rate', 'in_stock', 'active'],
-    columnLabels: { in_stock: 'In Stock' },
+    columns: ['name', 'customer_name', 'unit', 'hsn_code', 'gst_rate', 'std_rate', 'in_stock', 'active'],
+    columnLabels: { in_stock: 'In Stock', customer_name: 'Customer' },
     validate: (body, { rows, editing }) => {
       const clash = rows.find(r => String(r.id) !== String(editing.id ?? '')
         && String(r.name || '').trim().toLowerCase() === String(body.name || '').trim().toLowerCase());

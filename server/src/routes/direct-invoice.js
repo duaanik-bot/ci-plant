@@ -32,7 +32,7 @@ r.get('/direct-invoices/items', async (_req, res, next) => {
   try {
     const boards = await q(`
       SELECT m.id AS material_id, m.name, m.code, m.category, m.unit,
-             av.q AS available, m.hsn_code AS hsn,
+             av.q AS available, m.hsn_code AS hsn, m.customer_id,
              m.gst_rate AS gst_pct, COALESCE(m.std_rate, m.last_rate) AS rate
       FROM materials m
       JOIN (SELECT material_id, SUM(qty) q FROM stock_batches
@@ -56,9 +56,11 @@ r.get('/direct-invoices/items', async (_req, res, next) => {
 r.get('/direct-invoices/trading-items', async (_req, res, next) => {
   try {
     res.json(await q(`
-      SELECT m.*, COALESCE((SELECT SUM(b.qty) FROM stock_batches b
-                            WHERE b.material_id = m.id AND b.status='available'), 0) AS in_stock
-      FROM materials m WHERE m.category = 'trading' ORDER BY m.name, m.id`));
+      SELECT m.*, c.name AS customer_name,
+             COALESCE((SELECT SUM(b.qty) FROM stock_batches b
+                       WHERE b.material_id = m.id AND b.status='available'), 0) AS in_stock
+      FROM materials m LEFT JOIN customers c ON c.id = m.customer_id
+      WHERE m.category = 'trading' ORDER BY m.name, m.id`));
   } catch (e) { next(e); }
 });
 
@@ -114,8 +116,14 @@ r.post('/direct-invoices', canBill, async (req, res, next) => {
         if (!(qty > 0)) throw fail(400, `${at}: enter a quantity`);
         if (!(rate >= 0)) throw fail(400, `${at}: enter a rate`);
         if (l.item_type === 'board') {
-          const m = await oc('SELECT id, name, unit, hsn_code, gst_rate FROM materials WHERE id=$1', [l.material_id]);
+          const m = await oc('SELECT id, name, unit, hsn_code, gst_rate, customer_id FROM materials WHERE id=$1', [l.material_id]);
           if (!m) throw fail(404, `${at}: material not found`);
+          // An item kept for one customer is billed to that customer only —
+          // two parties' accounts must never share a line by a slip of the picker.
+          if (m.customer_id != null && m.customer_id !== customer.id) {
+            const owner = await oc('SELECT name FROM customers WHERE id=$1', [m.customer_id]);
+            throw fail(409, `${at}: ${m.name} belongs to ${owner?.name || 'another customer'} — it cannot be billed to ${customer.name}`);
+          }
           const gst = l.gst_pct == null || l.gst_pct === '' ? num(m.gst_rate) : num(l.gst_pct);
           if (!(gst >= 0)) throw fail(400, `${at}: GST % cannot be negative`);
           lines.push({ item_type: 'board', master: m, material_id: m.id, product_id: null,

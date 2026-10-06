@@ -2846,4 +2846,7 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Accounts books — purchase_bills, purchase_bill_lines, vendor_payments
   // (routes/accounts.js). New tables only; idempotent.
   await pool.query(migration('20261005180000_accounts_books.sql'));
+
+  // A trading item may belong to one customer — materials.customer_id.
+  await pool.query(migration('20261006120000_trading_item_customer.sql'));
 }
