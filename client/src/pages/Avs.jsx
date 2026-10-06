@@ -89,6 +89,23 @@ export default function Avs() {
     .catch(() => setLoadError(true)), []);
   useFallbackRefresh(load, { intervalMs: 60000 });
 
+  // In the background, have CI Plant keep a copy of every report PDF it does not
+  // hold yet (one per call), so the PDF button opens at once.
+  const warming = useRef(false);
+  useEffect(() => {
+    if (!data || warming.current) return undefined;
+    warming.current = true;
+    let stop = false;
+    (async () => {
+      for (let i = 0; i < 30 && !stop; i++) {
+        const out = await api.post('/avs/reports/pdf-cache/warm', {}).catch(() => null);
+        if (!out?.kept || !out.left) break;
+      }
+      warming.current = false;
+    })();
+    return () => { stop = true; };
+  }, [data]);
+
   // Photo sets: every 10 s while Claude has one waiting or in hand, else every
   // minute. A set that just finished brings its report into the register and
   // says where it went (its chip in the photo-set list).
@@ -537,16 +554,13 @@ const pdfDownloadUrl = r => (r.drive_file_id ? `https://drive.google.com/uc?expo
 async function openPdf(r, { download = false } = {}) {
   const win = download ? null : window.open('', '_blank');
   try {
-    // Google's Drive link answers in 5 to 25 s and now and then not in time:
-    // a second try usually comes back at once.
-    let res = null;
-    for (let attempt = 0; attempt < 2 && !res?.ok; attempt++) {
-      res = await fetch(`/api/avs/reports/${encodeURIComponent(r.report_no)}/pdf${download ? '?download=1' : ''}`, {
-        headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
-      });
-      if (!res.ok && ![502, 504].includes(res.status)) break;
-    }
-    if (!res?.ok) throw new Error(String(res?.status));
+    // CI Plant keeps a copy of each report PDF (6 Oct 2026), so this answers at
+    // once. A report whose copy is not kept yet is read from Google's Drive link
+    // (4 to 35 s); if that does not come back in time the Drive copy opens.
+    const res = await fetch(`/api/avs/reports/${encodeURIComponent(r.report_no)}/pdf${download ? '?download=1' : ''}`, {
+      headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+    });
+    if (!res.ok) throw new Error(String(res.status));
     const url = URL.createObjectURL(await res.blob());
     if (download) {
       const a = document.createElement('a');

@@ -72,7 +72,7 @@ test('report labels read the way the plant says them', () => {
 test('the AVS router writes only QA decisions and report deletions, never a plant table', () => {
   const src = readFileSync(new URL('./routes/avs.js', import.meta.url), 'utf8');
   const writes = [...src.matchAll(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_.]+)/gi)].map(m => m[2].toLowerCase());
-  assert.deepEqual([...new Set(writes)].sort(), ['avs.check_requests', 'avs.decisions', 'avs.deleted_reports']);
+  assert.deepEqual([...new Set(writes)].sort(), ['avs.check_requests', 'avs.decisions', 'avs.deleted_reports', 'avs.report_pdfs']);
   assert.doesNotMatch(src, /\bDELETE\s+FROM\b/i, 'a deleted report is marked, never erased');
   assert.deepEqual(writesIn('./avs-audit.js'), ['avs.audit_log']);
 });
@@ -539,4 +539,18 @@ test('the routine stops on AVS_CANCELLED and never reuses a deleted number', () 
   assert.match(prompt, /AVS_CANCELLED/);
   assert.match(prompt, /avs\.deleted_reports/);
   assert.match(prompt, /replaces_report_no/);
+});
+
+// ── Report PDFs kept in CI Plant (owner's OK, 6 Oct 2026) ───────────────────
+test('the PDF button reads the kept copy first and still stamps every open', () => {
+  const src = readFileSync(new URL('./routes/avs.js', import.meta.url), 'utf8');
+  const helper = src.slice(src.indexOf('async function reportPdfBytes('), src.indexOf("r.post('/avs/reports/pdf-cache/warm'"));
+  assert.ok(helper.indexOf('FROM avs.report_pdfs') < helper.indexOf('callDrive('), 'the kept copy before Google');
+  assert.match(helper, /ON CONFLICT \(drive_file_id\) DO NOTHING/, 'kept once, as filed');
+  assert.match(helper, /%PDF-/, 'only a real PDF is kept');
+  const route = src.slice(src.indexOf("r.get('/avs/reports/:no/pdf'"));
+  assert.match(route, /const bytes = await reportPdfBytes\(report\);\s*const out = Buffer\.from\(await stampPdf\(bytes, stamp\)\);/,
+    'the stamp is drawn on each open from the decision in force, never stored');
+  const sql = readFileSync(new URL('../../supabase/migrations/20261006150000_avs_report_pdfs.sql', import.meta.url), 'utf8');
+  assert.match(sql, /REVOKE ALL ON avs\.report_pdfs FROM anon, authenticated/);
 });

@@ -14,6 +14,7 @@
 // The avs schema is created on the production database by migration, not by
 // init(): a local database without it answers every read with an empty,
 // switched-off module instead of a 500.
+import crypto from 'crypto';
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { optionalText } from '../helpers.js';
@@ -340,6 +341,47 @@ async function mayDecide(user) {
 // filed. A PDF too big for one answer is not served here: the page then opens
 // the Drive copy.
 const PDF_MAX = 4 * 1024 * 1024;
+
+// The PDF as filed (no stamp), from the copy CI Plant keeps (avs.report_pdfs,
+// owner's OK 6 Oct 2026). The Drive link answers in 4 to 35 s and a request
+// stops at 30 s, so the copy is fetched from Drive once and every open after
+// that is instant. The stamp is still drawn on each open, from QA's decision
+// at that moment. Without the table (a local database) it reads Drive as before.
+const PDF_DRIVE_MS = 20000;
+async function reportPdfBytes(report) {
+  const kept = await one('SELECT bytes FROM avs.report_pdfs WHERE drive_file_id = $1', [report.drive_file_id])
+    .catch(e => { if (MISSING.has(e?.code)) return null; throw e; });
+  if (kept?.bytes?.length) return Buffer.from(kept.bytes);
+  const got = await callDrive(await avsSettings(), { op: 'get', id: report.drive_file_id }, { timeoutMs: PDF_DRIVE_MS, tries: 2 });
+  const bytes = Buffer.from(got.base64 || '', 'base64');
+  if (!bytes.length) throw fail(502, 'Google Drive sent an empty file');
+  if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw fail(502, 'Google Drive did not send a PDF');
+  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  await q(`INSERT INTO avs.report_pdfs (drive_file_id, report_no, bytes, size_bytes, sha256) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (drive_file_id) DO NOTHING`, [report.drive_file_id, report.report_no, bytes, bytes.length, sha256])
+    .catch(e => { if (!MISSING.has(e?.code)) console.error('[avs] keeping the report PDF failed:', e.message); });
+  return bytes;
+}
+
+// Keep the PDF of the newest report that has no copy yet: one per call, so a
+// call stays inside the 30 s a request may take. The register page calls it in
+// the background until nothing is left, so the PDF button finds the copy ready.
+r.post('/avs/reports/pdf-cache/warm', async (req, res, next) => {
+  try {
+    const waiting = await q(`
+      SELECT l.report_no, l.drive_file_id FROM avs.latest_reports l
+       WHERE l.drive_file_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM avs.report_pdfs k WHERE k.drive_file_id = l.drive_file_id)
+       ORDER BY l.issued_at DESC NULLS LAST LIMIT 30`);
+    if (!waiting.length) return res.json({ kept: null, left: 0 });
+    const next1 = waiting[0];
+    await reportPdfBytes(next1);
+    res.json({ kept: next1.report_no, left: waiting.length - 1 });
+  } catch (e) {
+    offWhenMissing(res, next, { kept: null, left: 0 })(e);
+  }
+});
+
 r.get('/avs/reports/:no/pdf', async (req, res, next) => {
   try {
     const no = req.params.no;
@@ -355,9 +397,7 @@ r.get('/avs/reports/:no/pdf', async (req, res, next) => {
     const state = caseState({ ...report, closed: !!closed }, last || null);
     const sameIssue = last && +last.report_rev === +report.report_rev && +(last.check_no ?? 1) === +(report.check_no ?? 1);
     const stamp = pdfStamp(state, sameIssue ? last : null);
-    const got = await callDrive(await avsSettings(), { op: 'get', id: report.drive_file_id }, { timeoutMs: 26000, tries: 2 });
-    const bytes = Buffer.from(got.base64 || '', 'base64');
-    if (!bytes.length) throw fail(502, 'Google Drive sent an empty file');
+    const bytes = await reportPdfBytes(report);
     const out = Buffer.from(await stampPdf(bytes, stamp));
     if (out.length > PDF_MAX) throw fail(413, 'The PDF is too big to send from CI Plant; open it in Drive');
     const name = String(report.report_file || `${no}.pdf`).replace(/[^\w .()+-]/g, '_');
