@@ -20,6 +20,16 @@ export default function Invoice() {
   const [printMode, setPrintMode] = useState('invoice');
   const load = () => api.get(`/invoices/${id}`).then(setInv);
   useEffect(() => { load(); }, [id]);
+  // Chrome/Safari seed the print-to-PDF filename from document.title, so the
+  // title IS the filename: the invoice number and the party it is billed to.
+  // Restored on unmount — leaving it set would rename every other page's print.
+  const fileName = inv ? `${inv.invoice_number} ${inv.customer_name || ''}`.trim() : null;
+  useEffect(() => {
+    if (!fileName) return;
+    const prev = document.title;
+    document.title = fileName;
+    return () => { document.title = prev; };
+  }, [fileName]);
   if (!inv) return null;
   const co = inv.company;
   const intra = inv.igst === 0;

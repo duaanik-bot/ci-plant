@@ -87,6 +87,11 @@ export default function Accounts() {
   const kpi = useMemo(() => ({
     salesValue: data.sales.reduce((s, i) => s + i.total, 0),
     salesQty: data.sales.reduce((s, i) => s + i.qty, 0),
+    // Sold on direct invoices, per unit — kg, sheets, pcs.
+    otherQty: Object.entries(data.sales.reduce((m, i) => {
+      for (const o of i.other_qty || []) m[o.unit] = (m[o.unit] || 0) + +o.qty;
+      return m;
+    }, {})).map(([unit, qty]) => ({ unit, qty })),
     invoices: data.sales.length,
     customers: new Set(data.sales.map(i => i.customer_id)).size,
     purchaseValue: data.purchases.reduce((s, p) => s + p.value, 0),
@@ -99,10 +104,13 @@ export default function Accounts() {
   const byCustomer = useMemo(() => {
     const map = {};
     for (const i of data.sales) {
-      const c = (map[i.customer_id] ||= { customer_id: i.customer_id, customer_name: i.customer_name, city: i.city, segment: i.segment, invoices: 0, qty: 0, taxable: 0, tax: 0, value: 0 });
+      const c = (map[i.customer_id] ||= { customer_id: i.customer_id, customer_name: i.customer_name, city: i.city, segment: i.segment, invoices: 0, qty: 0, other: {}, taxable: 0, tax: 0, value: 0 });
+      for (const o of i.other_qty || []) c.other[o.unit] = (c.other[o.unit] || 0) + +o.qty;
       c.invoices += 1; c.qty += i.qty; c.taxable += i.subtotal; c.tax += i.tax; c.value += i.total;
     }
-    return Object.values(map).sort((a, b) => b.value - a.value);
+    return Object.values(map)
+      .map(c => ({ ...c, other_qty: Object.entries(c.other).map(([unit, qty]) => ({ unit, qty })) }))
+      .sort((a, b) => b.value - a.value);
   }, [data.sales]);
 
   const byVendor = useMemo(() => {
@@ -131,6 +139,14 @@ export default function Accounts() {
   const maxMonth = Math.max(1, ...timeline.map(m => Math.max(m.sales, m.purchases)));
 
   const money = v => <span className="tabular-nums">{fmt.inr(v)}</span>;
+  // Quantity as it was sold: cartons as a plain number, anything billed on a
+  // direct invoice in its own unit — "8,009 kg" — never a bare 0.
+  const qtyText = (cartons, other) => {
+    const parts = (other || []).filter(o => +o.qty > 0)
+      .map(o => `${(+o.qty).toLocaleString('en-IN', { maximumFractionDigits: 3 })} ${o.unit}`);
+    if (+cartons > 0 || !parts.length) parts.unshift(fmt.num(cartons));
+    return parts.join(' + ');
+  };
   const exportPeriod = `Accounts · ${periodLabel}`;
 
   return (
@@ -160,7 +176,7 @@ export default function Accounts() {
           chip="bg-emerald-50 text-emerald-600" accent="text-emerald-700"
           onClick={() => setTab('customers')} active={tab === 'customers'} />
         <KpiCard label="Cartons Sold" value={fmt.num(kpi.salesQty)} icon={Package}
-          sub="volume invoiced in period"
+          sub={kpi.otherQty.length ? `+ ${qtyText(0, kpi.otherQty)} on direct invoices` : 'volume invoiced in period'}
           onClick={() => setTab('products')} active={tab === 'products'} />
         <KpiCard label={`Purchases · ${periodLabel}`} value={fmt.inr(kpi.purchaseValue)} icon={ShoppingCart}
           sub={`${kpi.pos} PO${kpi.pos === 1 ? '' : 's'} · ${kpi.vendors} vendor${kpi.vendors === 1 ? '' : 's'}`}
@@ -216,7 +232,7 @@ export default function Accounts() {
           columns={[
             { key: 'customer_name', label: 'Customer', render: c => nameLink(c.customer_name, `customer:${c.customer_id}`, `${c.city || ''}${c.segment ? ` · ${c.segment}` : ''}`) },
             { key: 'invoices', label: 'Invoices', align: 'right', render: c => <span className="tabular-nums">{c.invoices}</span> },
-            { key: 'qty', label: 'Cartons', align: 'right', render: c => <span className="font-semibold tabular-nums">{fmt.num(c.qty)}</span> },
+            { key: 'qty', label: 'Quantity', align: 'right', render: c => <span className="font-semibold tabular-nums">{qtyText(c.qty, c.other_qty)}</span> },
             { key: 'taxable', label: 'Taxable', align: 'right', render: c => money(c.taxable) },
             { key: 'tax', label: 'GST', align: 'right', render: c => <span className="tabular-nums text-xs text-gray-500">{fmt.inr(c.tax)}</span> },
             { key: 'value', label: 'Sales Value', align: 'right', render: c => <span className="font-bold tabular-nums text-emerald-700">{fmt.inr(c.value)}</span> },
@@ -251,8 +267,8 @@ export default function Accounts() {
       {tab === 'products' && (
         <DataTable searchable rows={data.sale_products} empty="No products sold in this period"
           columns={[
-            { key: 'name', label: 'Product', render: p => (<div><div className="font-semibold">{p.name}</div><div className="text-xs text-gray-400">{p.code}{p.size ? ` · ${p.size}` : ''}</div><FluenceButton productId={p.id} context="accounts" className="mt-1" /></div>) },
-            { key: 'qty', label: 'Cartons Sold', align: 'right', render: p => <span className="font-bold tabular-nums">{fmt.num(p.qty)}</span> },
+            { key: 'name', label: 'Product', render: p => (<div><div className="font-semibold">{p.name}</div><div className="text-xs text-gray-400">{p.direct ? 'Direct invoice' : p.code}{p.size ? ` · ${p.size}` : ''}</div>{!p.direct && <FluenceButton productId={p.id} context="accounts" className="mt-1" />}</div>) },
+            { key: 'qty', label: 'Quantity Sold', align: 'right', render: p => <span className="font-bold tabular-nums">{p.direct ? qtyText(0, [p]) : fmt.num(p.qty)}</span> },
             { key: 'invoices', label: 'Invoices', align: 'right', render: p => <span className="tabular-nums">{p.invoices}</span> },
             { key: 'customers', label: 'Customers', align: 'right', render: p => <span className="tabular-nums">{p.customers}</span> },
             { key: 'value', label: 'Value', align: 'right', render: p => <span className="font-bold tabular-nums text-emerald-700">{fmt.inr(p.value)}</span> },
@@ -260,7 +276,7 @@ export default function Accounts() {
           exportName="Product Volumes" exportSubtitle={exportPeriod}
           exportSummary={rows => [
             { label: 'Products', value: rows.length },
-            { label: 'Cartons', value: fmt.num(rows.reduce((s, p) => s + p.qty, 0)) },
+            { label: 'Cartons', value: fmt.num(rows.reduce((s, p) => s + (p.direct ? 0 : p.qty), 0)) },
             { label: 'Value', value: fmt.inr(rows.reduce((s, p) => s + p.value, 0)) },
           ]} />
       )}
@@ -273,7 +289,7 @@ export default function Accounts() {
                 <FluenceButton customerId={i.customer_id} resolve={{ invoice_id: i.id }} context="accounts" className="ml-2" /></>) },
             { key: 'invoice_date', label: 'Date', render: i => fmt.date(i.invoice_date) },
             { key: 'customer_name', label: 'Customer', render: i => nameLink(i.customer_name, `customer:${i.customer_id}`, i.state) },
-            { key: 'qty', label: 'Cartons', align: 'right', render: i => <span className="tabular-nums">{fmt.num(i.qty)}</span> },
+            { key: 'qty', label: 'Quantity', align: 'right', render: i => <span className="tabular-nums">{qtyText(i.qty, i.other_qty)}</span> },
             { key: 'subtotal', label: 'Taxable', align: 'right', render: i => money(i.subtotal) },
             { key: 'tax', label: 'GST', align: 'right', render: i => <span className="tabular-nums text-xs text-gray-500">{fmt.inr(i.tax)}</span> },
             { key: 'total', label: 'Total', align: 'right', render: i => <span className="font-bold tabular-nums">{fmt.inr(i.total)}</span> },

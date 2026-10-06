@@ -576,7 +576,12 @@ r.get('/accounts/registers', async (req, res, next) => {
       SELECT i.id, i.invoice_number, i.invoice_date, i.subtotal,
              (i.cgst + i.sgst + i.igst) AS tax, i.total, i.status,
              c.id AS customer_id, c.name AS customer_name, c.city, c.state, c.segment,
-             COALESCE((SELECT SUM(il.qty) FROM invoice_lines il WHERE il.invoice_id=i.id),0)::int AS qty
+             COALESCE((SELECT SUM(il.qty) FROM invoice_lines il WHERE il.invoice_id=i.id),0)::int AS qty,
+             -- A direct invoice sells by kg, sheets or pieces, not cartons: its
+             -- quantity is reported per unit so the register can say "8,009 kg".
+             (SELECT json_agg(json_build_object('unit', u.unit, 'qty', u.q) ORDER BY u.unit)
+                FROM (SELECT dil.unit, SUM(dil.qty) AS q FROM direct_invoice_lines dil
+                      WHERE dil.invoice_id=i.id GROUP BY dil.unit) u) AS other_qty
       FROM invoices i JOIN customers c ON c.id=i.customer_id
       WHERE i.status != 'cancelled'
         AND ($1::date IS NULL OR i.invoice_date::date >= $1::date)
@@ -593,6 +598,21 @@ r.get('/accounts/registers', async (req, res, next) => {
       WHERE ($1::date IS NULL OR i.invoice_date::date >= $1::date)
         AND ($2::date IS NULL OR i.invoice_date::date <= $2::date)
       GROUP BY p.id ORDER BY value DESC`, [from, to]);
+    // What was sold on direct invoices — trading items, board, cartons from
+    // stock — in the unit it was sold in.
+    const directProducts = await q(`
+      SELECT -MIN(dil.id) AS id, dil.description AS name, COALESCE(p.code, m.code) AS code, NULL AS size,
+             SUM(dil.qty) AS qty, dil.unit, SUM(dil.amount) AS value, true AS direct,
+             COUNT(DISTINCT i.id)::int AS invoices, COUNT(DISTINCT i.customer_id)::int AS customers
+      FROM direct_invoice_lines dil
+      JOIN invoices i ON i.id = dil.invoice_id AND i.status != 'cancelled'
+      LEFT JOIN products p ON p.id = dil.product_id
+      LEFT JOIN materials m ON m.id = dil.material_id
+      WHERE ($1::date IS NULL OR i.invoice_date::date >= $1::date)
+        AND ($2::date IS NULL OR i.invoice_date::date <= $2::date)
+      GROUP BY dil.description, dil.unit, p.code, m.code`, [from, to]);
+    saleProducts.push(...directProducts);
+    saleProducts.sort((a, b) => b.value - a.value);
     const purchases = await q(`
       SELECT po.id, po.po_number, po.created_at, po.status,
              v.id AS vendor_id, v.name AS vendor_name, v.city,

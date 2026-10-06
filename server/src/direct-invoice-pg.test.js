@@ -247,6 +247,13 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     const vRcpt = (await call('GET', `/accounts/voucher?type=receipt&id=${rcpt.body.id}`)).body;
     assert.deepEqual([vRcpt.against, vRcpt.against_invoice_id, vRcpt.amount], [inv.body.invoice_number, inv.body.id, 10500]);
 
+    // The registers report a direct sale in the unit it was sold in.
+    const reg = (await call('GET', '/accounts/registers')).body;
+    const sale = reg.sales.find(s => s.id === inv.body.id);
+    assert.deepEqual([sale.qty, sale.other_qty], [0, [{ unit: 'pcs', qty: 100 }]]);
+    const vol = reg.sale_products.find(p => p.direct && p.name === item.name);
+    assert.deepEqual([vol.qty, vol.unit, vol.value, vol.invoices], [100, 'pcs', 10500, 1]);
+
     const book = (await call('GET', '/accounts/cashbook')).body;
     assert.deepEqual(book.entries.map(e => [e.direction, e.money_in, e.money_out]), [['out', 0, 40000], ['in', 10500, 0]]);
     assert.equal(book.closing, -29500);
