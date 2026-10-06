@@ -40,6 +40,9 @@ const OF_KIND = Object.freeze({
   // rows have a live thing behind them that can still be acted on.
   xs_request: 'approvals',
   mgt_request: 'approvals',
+  // A new customer PO the order intake keyed in as a draft: somebody has to
+  // check it against the PO and confirm it before Planning can see it.
+  new_po: 'approvals',
   // Addressed at a person by name. Loud enough to pierce mute (see chat.js),
   // so loud enough to deserve its own tab rather than sitting under Messages.
   mention: 'mentions',

@@ -182,7 +182,7 @@ test('kindsFor returns exactly the kinds that map to it', () => {
   for (const id of CATEGORY_IDS) {
     for (const kind of kindsFor(id)) assert.equal(categoryOf(kind), id);
   }
-  assert.deepEqual(kindsFor('approvals'), ['mgt_request', 'xs_request']);
+  assert.deepEqual(kindsFor('approvals'), ['mgt_request', 'new_po', 'xs_request']);
   assert.deepEqual(kindsFor('messages'), ['chat']);
   assert.deepEqual(kindsFor('alerts'), ['fluence_change', 'fluence_download', 'fluence_mrp', 'plate_replacement', 'stock_writeon', 'xs_cutting', 'xs_received']);
 });

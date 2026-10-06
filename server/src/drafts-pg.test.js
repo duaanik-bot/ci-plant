@@ -134,6 +134,37 @@ describe('draft sales orders from the AVS intake — through the real app', {
     assert.equal(d.body.products[0].id, newProductId);
   });
 
+  test('the team is told once: a bell row per active login, stamped, never repeated', async () => {
+    // The summary read above ran the sweep (notifyNewDraftOrdersSoft).
+    const o = await db.one('SELECT draft_notified_at FROM orders WHERE id=$1', [orderId]);
+    assert.ok(o.draft_notified_at, 'stamped when announced');
+    const users = await db.one(`SELECT COUNT(*)::int AS n FROM users WHERE active = 1`);
+    const bells = await db.q(`SELECT user_id, title, body, link FROM notifications WHERE kind = 'new_po'`);
+    assert.ok(users.n > 0);
+    assert.equal(bells.length, users.n, 'every active login hears it once');
+    assert.match(bells[0].title, /New PO received: PO 9001/);
+    assert.match(bells[0].body, /2 items/);
+    assert.equal(bells[0].link, `/orders?tab=draft&order=${orderId}`);
+    // Asked again (another open app, a repeated database call): nothing new.
+    const { notifyNewDraftOrders } = await import('./routes/drafts.js');
+    assert.equal((await notifyNewDraftOrders()).announced, 0);
+    await call('GET', '/drafts/summary');
+    const again = await db.one(`SELECT COUNT(*)::int AS n FROM notifications WHERE kind = 'new_po'`);
+    assert.equal(again.n, users.n);
+  });
+
+  test('several new POs at once are one alert naming them', async () => {
+    const { newPoAlert } = await import('./routes/drafts.js');
+    const a = newPoAlert([
+      { id: 5, po_number: '02679', customer_name: 'Swiss Garnier Life Sciences', lines: 3 },
+      { id: 6, po_number: '14', customer_name: 'Fluence Pharma', lines: 1 },
+    ]);
+    assert.equal(a.title, '2 new purchase orders received');
+    assert.match(a.body, /PO 02679 \(SGLS\), PO 14/);
+    assert.equal(a.link, '/orders?tab=draft');
+    assert.deepEqual([a.refTable, a.refId], ['draft_pos', 6]);
+  });
+
   test('shown on Sales Orders, Pendency and the Status Sheet; never in Planning; no FG cover', async () => {
     const orders = await call('GET', '/orders');
     assert.equal(orders.body.find(o => o.id === orderId)?.status, 'draft');

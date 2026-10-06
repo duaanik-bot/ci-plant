@@ -12,6 +12,7 @@ import { nextCodeForRows } from '../lib/productCode.js';
 import { isNoLimit, toleranceLabel, hasTolerance } from '../lib/tolerance.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
+import PhoneAlertsPrompt from '../components/PhoneAlerts.jsx';
 import { canConfirmDrafts, ConfirmDraftDialog, DRAFT_ROW, DraftBadge, DraftsChip, DraftsPanel, isDraftOrder, useDraftSummary } from '../components/Drafts.jsx';
 import { createOnDemandList, scheduleIdle } from '../lib/onDemandList.js';
 
@@ -644,6 +645,7 @@ export default function Orders() {
           <Button variant="secondary" onClick={() => { setShowImport(true); ensureProducts(); }}><FileUp size={15} /> Import PO</Button>
           <Button onClick={() => { setShowNew(true); ensureProducts(); }}><Plus size={15} /> New Order</Button>
         </div>} />
+      <PhoneAlertsPrompt />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'pending', label: 'Pending', count: ordersForTab.pending.length },
         { key: 'draft', label: 'Drafts · to confirm', count: ordersForTab.draft.length, tone: 'draft' },

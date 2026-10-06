@@ -30,7 +30,8 @@ self.addEventListener('push', event => {
     data: { link: d.link || '/', kind: d.kind || 'note' },
     // An approval is somebody standing still waiting for an answer; it stays on
     // screen until it is dealt with. Everything else can time out on its own.
-    requireInteraction: d.kind === 'mgt_request' || d.kind === 'xs_request',
+    // A new PO likewise: it waits, as a draft, until someone confirms it.
+    requireInteraction: d.kind === 'mgt_request' || d.kind === 'xs_request' || d.kind === 'new_po',
   }));
 });
 

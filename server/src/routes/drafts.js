@@ -16,9 +16,23 @@
 //   POST /api/orders/:id/confirm      draft → pending: lines to Planning, the
 //                                     order's draft masters confirmed with it
 //   POST /api/products/:id/confirm-draft   one draft master confirmed alone
+//
+// NEW PO ALERT (owner's request, 6 Oct 2026): every new draft order is announced
+// once to the whole team — a bell row for every active login and a push to every
+// phone that has notifications on (helpers.js notify → push.js) — so someone
+// opens it, checks it against the PO and confirms it. notifyNewDraftOrders()
+// claims the drafts nobody has been told about yet (orders.draft_notified_at),
+// so however many callers race, each draft is announced exactly once. Callers:
+//   • the database itself, the moment the intake keys a draft's first line
+//     (pg_net → POST /api/avs/robot/drafts-notify, routes/avs-robot.js;
+//     supabase/migrations/20261006190000_draft_po_alert.sql) — no app needs to
+//     be open and the routine needs no extra step;
+//   • GET /api/drafts/summary, which every open CI Plant asks every two minutes
+//     and the moment orders change — the fallback if that call was lost.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus } from '../helpers.js';
+import { audit, notify, setLineStatus } from '../helpers.js';
+import { customerInitials } from '../../../client/src/lib/customerCode.js';
 import { requireRole } from '../auth.js';
 import { markUncacheable } from '../data-tables.js';
 
@@ -90,9 +104,70 @@ export async function draftSummary() {
   return { ...c, artworks, total: c.orders + c.products };
 }
 
+// A draft whose lines are still being keyed is held back for a few minutes, so
+// the alert can say how many items it carries; after that it goes regardless.
+const LINELESS_GRACE = "interval '5 minutes'";
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// The alert's words, from the drafts being announced. Pure, so it is tested.
+export function newPoAlert(rows) {
+  const label = o => `PO ${o.po_number} (${customerInitials(o.customer_name) || o.customer_name})`;
+  if (rows.length === 1) {
+    const o = rows[0];
+    return {
+      title: `New PO received: ${label(o)}`,
+      body: `${o.lines ? `${plural(o.lines, 'item')} · ` : ''}saved as a draft. Check it against the PO and confirm it in Sales Orders.`,
+      link: `/orders?tab=draft&order=${o.id}`,
+      refTable: 'orders', refId: o.id,
+    };
+  }
+  const shown = rows.slice(0, 4).map(label).join(', ');
+  return {
+    title: `${rows.length} new purchase orders received`,
+    body: `${shown}${rows.length > 4 ? ` and ${rows.length - 4} more` : ''} — saved as drafts. Check and confirm them in Sales Orders.`,
+    link: '/orders?tab=draft',
+    // A distinct key per batch, so a later batch never replaces this one on a lock screen.
+    refTable: 'draft_pos', refId: Math.max(...rows.map(o => o.id)),
+  };
+}
+
+// Who hears it: every active login (helpers.js notify leaves out a customer's
+// own Fluence login). The owner's words: all the team members operating the system.
+export async function notifyNewDraftOrders() {
+  return tx(async (qc) => {
+    const rows = await qc(`
+      SELECT o.id, o.po_number, c.name AS customer_name,
+             (SELECT COUNT(*)::int FROM order_lines ol
+               WHERE ol.order_id = o.id AND ol.part_of_line_id IS NULL AND ol.status <> 'cancelled') AS lines
+        FROM orders o JOIN customers c ON c.id = o.customer_id
+       WHERE o.status = 'draft' AND o.draft_notified_at IS NULL
+         AND (EXISTS (SELECT 1 FROM order_lines x WHERE x.order_id = o.id)
+              OR o.created_at < now() - ${LINELESS_GRACE})
+       ORDER BY o.id
+       FOR UPDATE OF o SKIP LOCKED`);
+    if (!rows.length) return { announced: 0 };
+    await qc('UPDATE orders SET draft_notified_at = now() WHERE id = ANY($1::int[])', [rows.map(o => o.id)]);
+    const users = await qc(`SELECT id FROM users WHERE active = 1`);
+    await notify(users.map(u => u.id), { kind: 'new_po', ...newPoAlert(rows) }, qc);
+    return { announced: rows.length, orders: rows.map(o => o.po_number), users: users.length };
+  });
+}
+
+// Never lets an alert problem fail the read that triggered it.
+export async function notifyNewDraftOrdersSoft() {
+  try {
+    const any = await one(`SELECT 1 AS y FROM orders WHERE status = 'draft' AND draft_notified_at IS NULL LIMIT 1`);
+    if (any) return await notifyNewDraftOrders();
+  } catch (e) {
+    console.warn(`[drafts] new PO alert: ${e.message}`);
+  }
+  return { announced: 0 };
+}
+
 r.get('/drafts/summary', async (_req, res, next) => {
   try {
     markUncacheable();
+    await notifyNewDraftOrdersSoft();
     res.json(await draftSummary());
   } catch (e) { next(e); }
 });

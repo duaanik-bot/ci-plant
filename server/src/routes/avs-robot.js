@@ -14,6 +14,9 @@
 //   GET  /api/avs/robot/docs/:id       a document kept in CI Plant (avs-docs.js)
 //   POST /api/avs/robot/file-report the check saves its report in one call
 //                                      (avs-file-report.js; runbook 2C.5).
+//   POST /api/avs/robot/drafts-notify  the database calls it (pg_net) when the
+//                                      order intake keys a new draft PO: the team
+//                                      gets the bell and the phone push (drafts.js).
 //
 // The key is made by CI Plant with the first kept photo and lives
 // only in avs.settings, which the check reads through the Supabase connector;
@@ -25,6 +28,7 @@ import { filingProblems, reportUpsert, problemUpsert, photoFiled, setDone, docsU
 import { cloudFallback } from './avs-intake.js';
 import { markUncacheable } from '../data-tables.js';
 import { jobSnapshot } from '../avs-snapshot.js';
+import { notifyNewDraftOrders } from './drafts.js';
 
 const r = Router();
 const MISSING = new Set(['42P01', '3F000']); // the avs schema exists only on production
@@ -40,6 +44,19 @@ const keyOk = async req => {
   const key = await one(`SELECT value FROM avs.settings WHERE key = 'robot_key'`);
   return sameKey(req.get('x-avs-robot-key'), key?.value);
 };
+
+// New draft POs from the order intake → tell the team now (bell + phone).
+// Called by the database (pg_net, migration 20261006190000_draft_po_alert.sql)
+// the moment a draft's first line is keyed; safe to call any number of times —
+// each draft is announced once (orders.draft_notified_at).
+r.post('/avs/robot/drafts-notify', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    res.json(await notifyNewDraftOrders());
+  } catch (e) { next(e); }
+});
 
 // The office runner: records that it is alive (avs.settings local_runner_seen_at,
 // which Verify reads), and gets the sets waiting for it. A set it did not

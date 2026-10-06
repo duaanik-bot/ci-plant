@@ -19,6 +19,7 @@ import { api, fmt } from '../api.js';
 import { Button, Modal, Textarea, useToast } from './ui.jsx';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import PhoneAlertsPrompt from './PhoneAlerts.jsx';
 
 // `!` so the orange beats the table's zebra stripe, and a solid orange rail on
 // the left edge so a draft reads by shape as well as colour.
@@ -161,6 +162,7 @@ export function DraftsPanel({ open, onClose, onOpenOrder, canConfirm, onChanged 
         <p className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-900 ring-1 ring-inset ring-orange-200">
           Keyed in automatically from customer POs in the company mailbox. <b>Planning sees none of these</b> until someone checks each one against its PO and confirms it.
         </p>
+        <PhoneAlertsPrompt compact />
         {!data ? <p className="py-10 text-center text-sm text-slate-400">Loading drafts…</p> : (
           <div className="space-y-5">
             <section>

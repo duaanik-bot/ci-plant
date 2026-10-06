@@ -35,6 +35,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS draft_source TEXT;        -- e.g. 'a
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS draft_note TEXT;          -- what the intake wants a person to check
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_by TEXT;
+-- When the team was told about this draft (bell + phone push, routes/drafts.js).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS draft_notified_at TIMESTAMPTZ;
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS is_draft INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS draft_source TEXT;
@@ -44,6 +46,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS confirmed_by TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_orders_draft ON orders (id) WHERE status = 'draft';
+CREATE INDEX IF NOT EXISTS idx_orders_draft_unnotified ON orders (id) WHERE status = 'draft' AND draft_notified_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_products_draft ON products (id) WHERE is_draft = 1;
 
 -- A line booked under a draft order is a draft line.
