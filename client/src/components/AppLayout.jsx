@@ -641,11 +641,12 @@ function AvsBadge({ isActive, corner = false }) {
 function DraftOrdersBadge({ isActive, corner = false }) {
   const [d] = useDraftSummary(true);
   if (!d.orders) return null;
-  const tip = `${d.orders} draft order${d.orders === 1 ? '' : 's'} from the AVS intake to confirm${d.products ? ` · ${d.products} new master${d.products === 1 ? '' : 's'}` : ''}`;
+  const n = d.orders > 99 ? '99+' : d.orders;
+  const tip = `${d.orders} new PO${d.orders === 1 ? '' : 's'} from the AVS intake waiting to be confirmed${d.products ? ` · ${d.products} new product master${d.products === 1 ? '' : 's'} saved with them` : ''}`;
   return (
     <span title={tip} aria-label={tip}
-      className={`${corner ? 'absolute right-0.5 top-0.5 h-4 min-w-[16px] justify-center px-1 text-[9px]' : 'ml-auto px-1.5 text-[10px]'} flex items-center rounded-full font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-orange-500 text-white'}`}>
-      {d.orders > 99 ? '99+' : d.orders}
+      className={`${corner ? 'absolute right-0.5 top-0.5 h-4 min-w-[16px] justify-center px-1 text-[9px]' : 'ml-auto gap-1 whitespace-nowrap px-1.5 text-[10px]'} flex items-center rounded-full font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-orange-500 text-white'}`}>
+      {corner ? n : <>{n} to confirm{d.products > 0 && <span aria-hidden title="Includes new product masters">★</span>}</>}
     </span>
   );
 }

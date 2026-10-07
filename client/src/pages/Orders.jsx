@@ -62,6 +62,19 @@ function ConfirmedBadge() {
     </span>
   );
 }
+// A quiet marker on a PO that brought new product masters with it — they are
+// already saved in Masters › Products (flagged "draft master") and are
+// confirmed together with the order.
+function NewMasterTag({ count }) {
+  if (!(count > 0)) return null;
+  const tip = `${count} new product master${count === 1 ? '' : 's'} created from this PO — saved in Masters › Products and confirmed with the order`;
+  return (
+    <span title={tip} aria-label={tip}
+      className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-bold text-orange-700 ring-1 ring-inset ring-orange-300">
+      ★ {count > 1 ? `${count} new masters` : 'New master'}
+    </span>
+  );
+}
 function OrderStatusBadge({ status }) {
   if (status === 'draft') return <DraftBadge />;
   if (status === 'pending') return <ConfirmedBadge />;
@@ -735,7 +748,12 @@ export default function Orders() {
           defaultSort={{ key: 'id', dir: 'desc' }}
           pinTop={isDraftOrder}
           columns={[
-            { key: 'po_number', label: 'PO Number', render: o => <span className="font-semibold text-gray-900">{o.po_number}</span> },
+            { key: 'po_number', label: 'PO Number', render: o => (
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-gray-900">{o.po_number}</span>
+                <NewMasterTag count={o.new_master_count} />
+              </span>
+            ) },
             { key: 'customer_name', label: 'Customer' },
             { key: 'po_date', label: 'PO Date', render: o => fmt.date(o.po_date) },
             { key: 'delivery_date', label: 'Delivery', render: o => fmt.date(o.delivery_date) },
@@ -1221,7 +1239,7 @@ export default function Orders() {
               <div className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-sm text-orange-900 ring-1 ring-inset ring-orange-300 shadow-[inset_4px_0_0_#F97316]">
                 <b>Pending — downloaded by the AVS intake{detail.draft_source && detail.draft_source !== 'avs_intake' ? ` (${detail.draft_source})` : ''} from the customer's PO.</b>{' '}
                 Planning does not see it yet. Check every line against the PO, edit anything that is wrong, then press <b>Confirm order</b>.
-                {detail.lines?.some(l => l.product_is_draft) && <span className="mt-1 block text-xs">Lines marked <b>NEW MASTER</b> use product masters the intake created; they are confirmed with the order.</span>}
+                {detail.lines?.some(l => l.product_is_draft) && <span className="mt-1 block text-xs">Lines marked <b>NEW MASTER</b> are new product masters the intake created from this PO — already saved in Masters › Products and confirmed together with the order.</span>}
                 {detail.draft_note && <span className="mt-1 block text-xs">{detail.draft_note}</span>}
               </div>
             )}

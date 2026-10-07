@@ -277,6 +277,10 @@ r.get('/orders', async (_req, res, next) => {
         (SELECT COALESCE(SUM(ol.qty*ol.rate),0) FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS value,
         (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS ordered_qty,
         (SELECT COALESCE(SUM(ol.dispatched_qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled' AND ol.part_of_line_id IS NULL) AS fulfilled_qty,
+        -- Products on this order still flagged as new masters (is_draft): the
+        -- intake created them with the PO, and they are confirmed with it.
+        (SELECT COUNT(DISTINCT ol.product_id)::int FROM order_lines ol JOIN products p ON p.id=ol.product_id
+          WHERE ol.order_id=o.id AND ol.part_of_line_id IS NULL AND ol.status!='cancelled' AND p.is_draft=1) AS new_master_count,
         -- Every line's product & artwork identifiers, folded into the row so the
         -- Sales Orders search matches by product name, code, artwork or output
         -- number — not just PO/customer. Consumed by the table's deep search.
