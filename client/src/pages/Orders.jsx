@@ -53,7 +53,7 @@ const PENDENCY_TONES = {
 // Sales-order wording (owner, 7 Oct 2026): status 'draft' = "Pending" (the
 // intake's download, orange until someone confirms it); status 'pending' =
 // "Confirmed" (checked, with Planning). Stored values are unchanged.
-const TAB_TITLE = { draft: 'Pending', pending: 'Confirmed' };
+const TAB_TITLE = { all: 'All Open', draft: 'Pending', pending: 'Confirmed' };
 function ConfirmedBadge() {
   return (
     <span title="Confirmed — with Planning"
@@ -359,7 +359,12 @@ export default function Orders() {
   // Owner, 7 Oct 2026: what the intake downloads is "Pending" (status 'draft',
   // orange) and opens first; orders already in the queue (status 'pending')
   // read "Confirmed".
-  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get('tab') === 'pending' ? 'pending' : 'draft'));
+  // "All" (opens first) = Pending on top, orange, then Confirmed; Hold,
+  // Completed, Closed and Cancelled keep their own tabs.
+  const [tab, setTab] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return t === 'draft' || t === 'pending' ? t : 'all';
+  });
   const [draftSummary, reloadDrafts] = useDraftSummary();
   const [showDrafts, setShowDrafts] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
@@ -421,6 +426,7 @@ export default function Orders() {
   // they are what customers have ordered — and have a tab of their own.
   const drafts = byStatus('draft');
   const ordersForTab = {
+    all: [...drafts, ...byStatus('pending')],
     draft: drafts,
     pending: byStatus('pending'),
     hold: byStatus('hold'),
@@ -667,6 +673,7 @@ export default function Orders() {
         </div>} />
       <PhoneAlertsPrompt />
       <Tabs active={tab} onChange={setTab} tabs={[
+        { key: 'all', label: 'All', count: ordersForTab.all.length },
         { key: 'draft', label: 'Pending · to confirm', count: ordersForTab.draft.length, tone: 'draft' },
         { key: 'pending', label: 'Confirmed', count: ordersForTab.pending.length },
         { key: 'hold', label: 'Hold', count: ordersForTab.hold.length },
@@ -726,6 +733,7 @@ export default function Orders() {
           // it rises with entry, so this only sets the OPENING order; every
           // header still sorts on click.
           defaultSort={{ key: 'id', dir: 'desc' }}
+          pinTop={isDraftOrder}
           columns={[
             { key: 'po_number', label: 'PO Number', render: o => <span className="font-semibold text-gray-900">{o.po_number}</span> },
             { key: 'customer_name', label: 'Customer' },
@@ -740,7 +748,7 @@ export default function Orders() {
             { key: 'status', label: 'Status', render: o => (<OrderStatusBadge status={o.status} />) },
             threadColumn({ entity: 'order', threads: orderThreads, idOf: o => o.id }),
             { key: '_actions', label: '', sortable: false, render: o => (
-              canDelete && ['pending', 'draft', 'hold', 'cancelled'].includes(tab) ? (
+              canDelete && ['all', 'pending', 'draft', 'hold', 'cancelled'].includes(tab) ? (
                 <div className="flex justify-end" onClick={e => e.stopPropagation()}>
                   <button type="button" title="Delete order"
                     className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
@@ -755,6 +763,7 @@ export default function Orders() {
           rowClass={o => `${unreadRowClass(orderThreads, x => x.id)(o)} ${isDraftOrder(o) ? DRAFT_ROW : ''}`}
           getRowId={o => o.id}
           empty={{
+            all: 'No open orders — nothing pending or confirmed',
             pending: 'No confirmed orders yet',
             draft: 'Nothing pending — every PO the intake downloaded has been confirmed',
             hold: 'No orders on hold',

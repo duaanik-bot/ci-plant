@@ -1383,6 +1383,10 @@ export function DataTable({
   exportSpec,
   dense = false,
   defaultSort,
+  // Rows for which pinTop(row) is true stay above the rest under every sort
+  // (each block still sorted) — Sales Orders keeps orange Pending above
+  // Confirmed. Omitted → plain sort, every existing caller unchanged.
+  pinTop,
   // Group rail tone. A grouped run is violet when it is a GANG (different
   // products, splits after die cutting) and teal when it is a COMBINED RUN
   // (one carton, one pile, never splits) — the same two languages the chips
@@ -1445,7 +1449,7 @@ export function DataTable({
     };
     return rows.filter(r => rowMatches(r, deferredQ, rowExtra(r)));
   }, [rows, columns, deferredQ]);
-  const sorted = useMemo(() => {
+  const sortedByColumn = useMemo(() => {
     if (!sort) return filtered;
     // A merged column carries several facts, and each of them still has to be
     // sortable — combining cells must not cost the planner a sort. `sortKeys`
@@ -1461,6 +1465,9 @@ export function DataTable({
       return 0;
     });
   }, [filtered, columns, sort]);
+  const sorted = useMemo(() => (pinTop
+    ? [...sortedByColumn.filter(r => pinTop(r)), ...sortedByColumn.filter(r => !pinTop(r))]
+    : sortedByColumn), [sortedByColumn, pinTop]);
   // Cluster grouped rows: each group appears once, at its first row's sorted
   // position, with every member directly beneath it — the group never scatters.
   // Bucketing by key keeps this linear; a filter-per-group was quadratic.
