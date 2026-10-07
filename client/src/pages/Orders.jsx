@@ -50,9 +50,26 @@ const PENDENCY_TONES = {
   pending: 'bg-gray-100 text-gray-600',
   draft: 'bg-orange-500 text-white',
 };
+// Sales-order wording (owner, 7 Oct 2026): status 'draft' = "Pending" (the
+// intake's download, orange until someone confirms it); status 'pending' =
+// "Confirmed" (checked, with Planning). Stored values are unchanged.
+const TAB_TITLE = { draft: 'Pending', pending: 'Confirmed' };
+function ConfirmedBadge() {
+  return (
+    <span title="Confirmed — with Planning"
+      className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+      Confirmed
+    </span>
+  );
+}
+function OrderStatusBadge({ status }) {
+  if (status === 'draft') return <DraftBadge />;
+  if (status === 'pending') return <ConfirmedBadge />;
+  return <StatusBadge status={status} />;
+}
 function pendencyStage(l) {
   // Keyed in by the AVS intake, not confirmed: Planning cannot see it yet.
-  if (l.order_status === 'draft') return { key: 'draft', label: 'Draft · to confirm' };
+  if (l.order_status === 'draft') return { key: 'draft', label: 'Pending · to confirm' };
   const fgCover = +(l.fg_allocated_qty ?? l.fg_qty ?? 0);
   const pending = +l.pending_qty || 0;
   if (+l.overdue_days > 0 && fgCover < pending) return { key: 'delayed', label: 'Delayed' };
@@ -339,7 +356,10 @@ export default function Orders() {
   const [editForm, setEditForm] = useState(null);
   const [form, setForm] = useState({ po_number: '', customer_id: '', po_date: '', delivery_date: '', notes: '', lines: [{ ...emptyLine }] });
   const [gstRates, setGstRates] = useState([]);
-  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get('tab') === 'draft' ? 'draft' : 'pending'));
+  // Owner, 7 Oct 2026: what the intake downloads is "Pending" (status 'draft',
+  // orange) and opens first; orders already in the queue (status 'pending')
+  // read "Confirmed".
+  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get('tab') === 'pending' ? 'pending' : 'draft'));
   const [draftSummary, reloadDrafts] = useDraftSummary();
   const [showDrafts, setShowDrafts] = useState(false);
   const [confirmDraft, setConfirmDraft] = useState(null);
@@ -402,7 +422,7 @@ export default function Orders() {
   const drafts = byStatus('draft');
   const ordersForTab = {
     draft: drafts,
-    pending: [...drafts, ...byStatus('pending')],
+    pending: byStatus('pending'),
     hold: byStatus('hold'),
     completed: byStatus('completed'),
     closed: byStatus('closed'),
@@ -647,8 +667,8 @@ export default function Orders() {
         </div>} />
       <PhoneAlertsPrompt />
       <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'pending', label: 'Pending', count: ordersForTab.pending.length },
-        { key: 'draft', label: 'Drafts · to confirm', count: ordersForTab.draft.length, tone: 'draft' },
+        { key: 'draft', label: 'Pending · to confirm', count: ordersForTab.draft.length, tone: 'draft' },
+        { key: 'pending', label: 'Confirmed', count: ordersForTab.pending.length },
         { key: 'hold', label: 'Hold', count: ordersForTab.hold.length },
         { key: 'completed', label: 'Completed', count: ordersForTab.completed.length },
         { key: 'closed', label: 'Closed', count: ordersForTab.closed.length },
@@ -660,7 +680,7 @@ export default function Orders() {
         <KpiRow cols={6}>
           {/* The first three describe the whole tab, so they stay plain tiles —
               clicking one could only ever re-show the list already on screen. */}
-          <KpiCard compact icon={ClipboardList} tone="info" label={`${fmt.title(tab)} Orders`}
+          <KpiCard compact icon={ClipboardList} tone="info" label={`${TAB_TITLE[tab] || fmt.title(tab)} Orders`}
             value={fmt.num(kpiOrders.orders)}
             sub={`${fmt.count(kpiOrders.lines, 'line')} · ${fmt.count(kpiOrders.customers, 'customer')}`} />
           <KpiCard compact icon={Banknote} tone="neutral" label="Order Value"
@@ -717,7 +737,7 @@ export default function Orders() {
               export: o => `${(o.ordered_qty > 0 ? Math.min(100, (o.fulfilled_qty / o.ordered_qty) * 100) : 0).toFixed(1)}%`,
               render: o => <FulfillmentBar pct={o.ordered_qty > 0 ? (o.fulfilled_qty / o.ordered_qty) * 100 : 0}
                 done={o.fulfilled_qty} total={o.ordered_qty} unit="pcs" /> },
-            { key: 'status', label: 'Status', render: o => (isDraftOrder(o) ? <DraftBadge /> : <StatusBadge status={o.status} />) },
+            { key: 'status', label: 'Status', render: o => (<OrderStatusBadge status={o.status} />) },
             threadColumn({ entity: 'order', threads: orderThreads, idOf: o => o.id }),
             { key: '_actions', label: '', sortable: false, render: o => (
               canDelete && ['pending', 'draft', 'hold', 'cancelled'].includes(tab) ? (
@@ -735,8 +755,8 @@ export default function Orders() {
           rowClass={o => `${unreadRowClass(orderThreads, x => x.id)(o)} ${isDraftOrder(o) ? DRAFT_ROW : ''}`}
           getRowId={o => o.id}
           empty={{
-            pending: 'No pending orders — create your first one',
-            draft: 'No drafts — every order the AVS intake keyed in has been confirmed',
+            pending: 'No confirmed orders yet',
+            draft: 'Nothing pending — every PO the intake downloaded has been confirmed',
             hold: 'No orders on hold',
             completed: 'No completed orders yet',
             closed: 'No closed orders',
@@ -744,7 +764,7 @@ export default function Orders() {
           }[tab]}
           exportName="Sales Orders"
           exportSubtitle="Customer POs, line counts and values"
-          exportMeta={() => [`Tab: ${fmt.title(tab)}`]}
+          exportMeta={() => [`Tab: ${TAB_TITLE[tab] || fmt.title(tab)}`]}
           exportSummary={rows => [
             { label: 'Orders', value: rows.length },
             { label: 'Lines', value: rows.reduce((s, o) => s + (+o.line_count || 0), 0) },
@@ -1186,11 +1206,11 @@ export default function Orders() {
                   Dispatch tolerance {toleranceLabel(detail.lines[0].eff_tolerance_pct)}
                 </span>
               )}
-              {isDraftOrder(detail) ? <DraftBadge /> : <StatusBadge status={detail.status} />}
+              {<OrderStatusBadge status={detail.status} />}
             </div>
             {isDraftOrder(detail) && (
               <div className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-sm text-orange-900 ring-1 ring-inset ring-orange-300 shadow-[inset_4px_0_0_#F97316]">
-                <b>Draft — keyed in by the AVS intake{detail.draft_source && detail.draft_source !== 'avs_intake' ? ` (${detail.draft_source})` : ''} from the customer's PO.</b>{' '}
+                <b>Pending — downloaded by the AVS intake{detail.draft_source && detail.draft_source !== 'avs_intake' ? ` (${detail.draft_source})` : ''} from the customer's PO.</b>{' '}
                 Planning does not see it yet. Check every line against the PO, edit anything that is wrong, then press <b>Confirm order</b>.
                 {detail.lines?.some(l => l.product_is_draft) && <span className="mt-1 block text-xs">Lines marked <b>NEW MASTER</b> use product masters the intake created; they are confirmed with the order.</span>}
                 {detail.draft_note && <span className="mt-1 block text-xs">{detail.draft_note}</span>}
@@ -1210,7 +1230,7 @@ export default function Orders() {
                   {s === 'draft' && canConfirmDrafts(auth.user) && (
                     <Button size="sm" onClick={() => setConfirmDraft(detail)}><CheckCircle2 size={13} /> Confirm order → Planning</Button>
                   )}
-                  {s === 'draft' && b('cancelled', 'Cancel draft', 'danger')}
+                  {s === 'draft' && b('cancelled', 'Cancel order', 'danger')}
                   {s === 'hold' && b('pending', 'Resume (Pending)', 'primary')}
                   {s === 'pending' && b('hold', 'Hold')}
                   {s === 'pending' && b('completed', 'Complete', 'primary')}
@@ -1266,7 +1286,7 @@ export default function Orders() {
                       ) : (
                         // A part never ships: 'dispatched' on a part line means it
                         // was handed to the carton's pasting card.
-                        <StatusBadge status={l.part_of_line_id && l.status === 'dispatched' ? 'pasted' : l.status} />
+                        l.status === 'pending' ? <ConfirmedBadge /> : l.status === 'draft' ? <DraftBadge compact /> : <StatusBadge status={l.part_of_line_id && l.status === 'dispatched' ? 'pasted' : l.status} />
                       )}
                     </td>
                   </tr>

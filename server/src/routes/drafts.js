@@ -117,7 +117,7 @@ export function newPoAlert(rows) {
     const o = rows[0];
     return {
       title: `New PO received: ${label(o)}`,
-      body: `${o.lines ? `${plural(o.lines, 'item')} · ` : ''}saved as a draft. Check it against the PO and confirm it in Sales Orders.`,
+      body: `${o.lines ? `${plural(o.lines, 'item')} · ` : ''}saved as Pending (orange). Check it against the PO and confirm it in Sales Orders.`,
       link: `/orders?tab=draft&order=${o.id}`,
       refTable: 'orders', refId: o.id,
     };
@@ -125,7 +125,7 @@ export function newPoAlert(rows) {
   const shown = rows.slice(0, 4).map(label).join(', ');
   return {
     title: `${rows.length} new purchase orders received`,
-    body: `${shown}${rows.length > 4 ? ` and ${rows.length - 4} more` : ''} — saved as drafts. Check and confirm them in Sales Orders.`,
+    body: `${shown}${rows.length > 4 ? ` and ${rows.length - 4} more` : ''} — saved as Pending (orange). Check and confirm them in Sales Orders.`,
     link: '/orders?tab=draft',
     // A distinct key per batch, so a later batch never replaces this one on a lock screen.
     refTable: 'draft_pos', refId: Math.max(...rows.map(o => o.id)),

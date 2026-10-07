@@ -9,7 +9,8 @@
 //   DraftsChip     the orange chip on Sales Orders / Status Sheet / Masters
 //   DraftsPanel    every draft order (lines, new masters, artwork mapping,
 //                  intake flags) and every draft master, with Open / Confirm
-//   DraftBadge     "Draft · to confirm" beside a status
+//   DraftBadge     "Pending · to confirm" beside a status (owner, 7 Oct: the
+//                  intake download reads Pending; confirmed orders read Confirmed)
 //   DRAFT_ROW      the orange row highlight, for DataTable's rowClass
 //   useDraftSummary  the counts, refreshed when orders or products change
 import { useEffect, useState } from 'react';
@@ -42,10 +43,10 @@ export function useDraftSummary(enabled = true) {
 
 export function DraftBadge({ title, compact = false }) {
   return (
-    <span title={title || 'Keyed in by the AVS intake from the customer\'s PO. Not with Planning until someone checks it and presses Confirm order.'}
+    <span title={title || 'Downloaded by the AVS intake from the customer\'s PO. Not with Planning until someone checks it and presses Confirm order.'}
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-orange-500 font-bold text-white ring-1 ring-inset ring-orange-600/30 ${compact ? 'px-2 py-px text-[10px]' : 'px-2.5 py-0.5 text-xs'}`}>
       <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/80" />
-      Draft{compact ? '' : ' · to confirm'}
+      Pending{compact ? '' : ' · to confirm'}
     </span>
   );
 }
@@ -58,15 +59,15 @@ export function DraftsChip({ summary, onOpen }) {
     s.artworks && fmt.count(s.artworks, 'artwork'),
   ].filter(Boolean);
   const tip = s.total
-    ? `Drafts from the AVS intake, waiting for a check: ${parts.join(' · ')}. Planning sees none of them until they are confirmed.`
-    : 'No drafts waiting — every order the AVS intake keyed in has been confirmed.';
+    ? `Pending from the AVS intake, waiting for a check: ${parts.join(' · ')}. Planning sees none of them until they are confirmed.`
+    : 'Nothing pending — every PO the AVS intake downloaded has been confirmed.';
   return (
     <button type="button" onClick={onOpen} title={tip}
       className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${s.total
         ? 'bg-orange-500 text-white shadow-sm hover:bg-orange-600'
         : 'bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200 hover:bg-orange-100'}`}>
       <FileText size={13} />
-      <span>Drafts</span>
+      <span>Pending</span>
       <span className={`rounded-full px-1.5 tabular-nums ${s.total ? 'bg-white/25' : 'bg-orange-100'}`}>{s.total || 0}</span>
       {s.total > 0 && <span className="hidden font-semibold opacity-90 sm:inline">{parts.join(' · ')}</span>}
     </button>
@@ -117,7 +118,7 @@ export function ConfirmDraftDialog({ order, onClose, onDone }) {
         <Button onClick={confirm} disabled={busy}><CheckCircle2 size={14} /> {busy ? 'Confirming…' : 'Confirm order'}</Button>
       </>}>
       <div className="space-y-3 text-sm text-slate-700">
-        <p>Check every line against the customer's PO first — product, quantity, rate and delivery date. Once confirmed, the order is a normal pending order and its lines go to <b>Planning</b>.</p>
+        <p>Check every line against the customer's PO first — product, quantity, rate and delivery date. Once confirmed, the orange goes, it moves to <b>Confirmed</b> and its lines go to <b>Planning</b>.</p>
         {newMasters.length > 0 && (
           <div className="rounded-xl bg-orange-50 p-3 ring-1 ring-inset ring-orange-200">
             <p className="flex items-center gap-1.5 font-semibold text-orange-800"><PackagePlus size={14} /> {fmt.count(newMasters.length, 'new product master')} will be confirmed with it:</p>
@@ -157,7 +158,7 @@ export function DraftsPanel({ open, onClose, onOpenOrder, canConfirm, onChanged 
   const products = data?.products || [];
   return (
     <>
-      <Modal open={open} onClose={onClose} wide title="Drafts from the AVS intake"
+      <Modal open={open} onClose={onClose} wide title="Pending from the AVS intake — to confirm"
         footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
         <p className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-900 ring-1 ring-inset ring-orange-200">
           Keyed in automatically from customer POs in the company mailbox. <b>Planning sees none of these</b> until someone checks each one against its PO and confirms it.
@@ -166,8 +167,8 @@ export function DraftsPanel({ open, onClose, onOpenOrder, canConfirm, onChanged 
         {!data ? <p className="py-10 text-center text-sm text-slate-400">Loading drafts…</p> : (
           <div className="space-y-5">
             <section>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Draft sales orders ({orders.length})</h3>
-              {orders.length === 0 ? <p className="rounded-xl border border-dashed py-6 text-center text-sm text-slate-400">No draft orders.</p> : (
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Pending sales orders ({orders.length})</h3>
+              {orders.length === 0 ? <p className="rounded-xl border border-dashed py-6 text-center text-sm text-slate-400">Nothing pending.</p> : (
                 <div className="space-y-3">
                   {orders.map(o => (
                     <div key={o.id} className="rounded-2xl border border-orange-200 bg-orange-50/60 p-3 shadow-[inset_4px_0_0_#F97316]">
