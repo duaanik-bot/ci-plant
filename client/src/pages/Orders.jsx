@@ -463,7 +463,11 @@ export default function Orders() {
       lines: rows.reduce((s, o) => s + (+o.line_count || 0), 0),
       customers: new Set(rows.map(o => o.customer_id ?? o.customer_name)).size,
       value: rows.reduce((s, o) => s + (+o.value || 0), 0),
+      // Both values are ex-GST (qty × basic rate) and summed over every order on
+      // the tab. Open value is line by line from the server; the order-level
+      // estimate is only a fallback for a response without it.
       openValue: rows.reduce((s, o) => {
+        if (o.open_value != null) return s + (+o.open_value || 0);
         const q = +o.ordered_qty || 0;
         return s + (q > 0 ? (+o.value || 0) * (Math.max(0, q - (+o.fulfilled_qty || 0)) / q) : 0);
       }, 0),
@@ -703,8 +707,8 @@ export default function Orders() {
           <KpiCard compact icon={ClipboardList} tone="info" label={`${TAB_TITLE[tab] || fmt.title(tab)} Orders`}
             value={fmt.num(kpiOrders.orders)}
             sub={`${fmt.count(kpiOrders.lines, 'line')} · ${fmt.count(kpiOrders.customers, 'customer')}`} />
-          <KpiCard compact icon={Banknote} tone="neutral" label="Order Value"
-            value={fmt.inrShort(kpiOrders.value)} title={fmt.inr(kpiOrders.value)}
+          <KpiCard compact icon={Banknote} tone="neutral" label="Order Value · ex-GST"
+            value={fmt.inrShort(kpiOrders.value)} title={`${fmt.inr(kpiOrders.value)} — total of every order on this tab, qty × basic rate, GST not included`}
             sub={kpiOrders.orders ? `avg ${fmt.inrShort(kpiOrders.value / kpiOrders.orders)} per order` : 'nothing booked'} />
           <KpiCard compact icon={Boxes} tone="neutral" label="Cartons Ordered"
             value={fmt.num(kpiOrders.ordered)}
@@ -714,8 +718,8 @@ export default function Orders() {
             value={`${kpiOrders.pct}%`}
             sub={`${fmt.num(Math.max(0, kpiOrders.ordered - kpiOrders.done))} pcs still to go`}
             onClick={() => orderKpi.toggle('part')} active={orderKpi.is('part')} />
-          <KpiCard compact icon={Factory} tone="violet" label="Open Value"
-            value={fmt.inrShort(kpiOrders.openValue)} title={`${fmt.inr(kpiOrders.openValue)} — value of the pieces not yet dispatched`}
+          <KpiCard compact icon={Factory} tone="violet" label="Open Value · ex-GST"
+            value={fmt.inrShort(kpiOrders.openValue)} title={`${fmt.inr(kpiOrders.openValue)} — pieces not yet dispatched × basic rate, every order on this tab, GST not included`}
             sub="still to dispatch & bill"
             onClick={() => orderKpi.toggle('open')} active={orderKpi.is('open')} />
           <KpiCard compact icon={AlertTriangle} label="Past Delivery Date"
