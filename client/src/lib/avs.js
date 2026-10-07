@@ -132,6 +132,12 @@ export function caseState({ status, report_rev = 0, check_no = 1, closed = false
   return status === 'PASS' ? 'waiting' : 'open';
 }
 
+// A report waiting for QA (owner's request, 7 Oct 2026): its whole row is orange in
+// the register until QA decides it (Release or Reject), so the person checking sees
+// at a glance what is left. Same orange as the draft rows (components/Drafts.jsx).
+export const avsNeedsQa = r => r?.case_state === 'open' || r?.case_state === 'waiting';
+export const AVS_QA_ROW = '!bg-orange-50 hover:!bg-orange-100/70 shadow-[inset_4px_0_0_#F97316]';
+
 export const CASE_STATE_LABEL = {
   open: 'Open', waiting: 'Waiting for QA', released: 'Released', rejected: 'Rejected by QA', closed: 'Closed',
 };

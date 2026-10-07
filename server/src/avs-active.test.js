@@ -22,3 +22,18 @@ test('Artwork Verification carries the live badge on desktop, phone and tablet',
   assert.match(src, /api\.get\('\/avs\/active'\)/);
   assert.equal((src.match(/i(?:tem)?\.module === 'avs' && <AvsBadge/g) || []).length, 3);
 });
+
+test('a report waiting for QA is orange in the register; a QA decision takes the colour off', async () => {
+  const { avsNeedsQa, AVS_QA_ROW, caseState } = await import('../../client/src/lib/avs.js');
+  const r = { status: 'HOLD', report_rev: 0, check_no: 1 };
+  assert.equal(avsNeedsQa({ case_state: caseState(r, null) }), true);
+  assert.equal(avsNeedsQa({ case_state: caseState({ ...r, status: 'PASS' }, null) }), true);
+  assert.equal(avsNeedsQa({ case_state: caseState(r, { decision: 'RELEASE', report_rev: 0, check_no: 1 }) }), false);
+  assert.equal(avsNeedsQa({ case_state: caseState(r, { decision: 'REJECT', report_rev: 0, check_no: 1 }) }), false);
+  assert.equal(avsNeedsQa({ case_state: 'closed' }), false);
+  // A decision on an earlier check does not count for the new check: it turns orange again.
+  assert.equal(avsNeedsQa({ case_state: caseState({ ...r, check_no: 2 }, { decision: 'RELEASE', report_rev: 0, check_no: 1 }) }), true);
+  assert.match(AVS_QA_ROW, /!bg-orange-50/);
+  const page = readFileSync(new URL('../../client/src/pages/Avs.jsx', import.meta.url), 'utf8');
+  assert.match(page, /rowClass=\{r => \(avsNeedsQa\(r\) \? AVS_QA_ROW : ''\)\}/);
+});

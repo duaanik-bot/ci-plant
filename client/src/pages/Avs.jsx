@@ -30,7 +30,7 @@ import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, useKpiFilter, useToast } from '../components/ui.jsx';
 import {
-  AVS_DECISIONS, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_REMARK_PRESETS, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
+  AVS_DECISIONS, AVS_QA_ROW, avsNeedsQa, AVS_REGISTER_FILTERS, AVS_REMARK_MAX, AVS_REMARK_PRESETS, AVS_SET_ACTIVE, AVS_WHO_DECIDES, rowMatches, undoProblem, AVS_SET_STATUS_LABEL, CASE_STATE_LABEL, decisionLabel, decisionProblem,
   istStamp, reportLabel, setLabel, AVS_SEVERITIES, AVS_SEVERITY_LABEL, elapsedText, problemSeverity, reportTime,
 } from '../lib/avs.js';
 import AvsUploadDialog from '../components/avs/AvsUpload.jsx';
@@ -226,6 +226,7 @@ export default function Avs() {
           // old report comes up too. It is the one QA has to act on.
           defaultSort={{ key: 'issued_at', dir: 'desc' }}
           onRowClick={r => open(r.report_no)}
+          rowClass={r => (avsNeedsQa(r) ? AVS_QA_ROW : '')}
           empty={loadError ? 'Server unreachable — nothing to show until it reconnects.'
             : data === null ? 'Loading AVS reports…'
             : 'No AVS reports yet. They appear here after the next check in Claude.'}
