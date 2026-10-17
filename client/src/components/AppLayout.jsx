@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Users,
 } from 'lucide-react';
 import { api, auth, currentUser, fmt } from '../api.js';
 import { recordDownload } from '../lib/fluenceDownloads.js';
@@ -26,6 +26,7 @@ import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection, isFluenceOnly } from '../modules.js';
 import { useTier } from '../lib/tier.js';
 import { storage } from '../lib/safeStorage.js';
+import { hrApi, levelAtLeast } from '../lib/hr.js';
 
 // Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin,
 // where Supply carries the chain to its end — Procurement, Warehouse, Dispatch, Accounts.
@@ -95,6 +96,9 @@ const NAV = [
       // buttons in every module are the everyday door; this page is where kits
       // are sized, designed, linked and kept.
       { label: 'Fluence', to: '/fluence', icon: Pill, roles: ['admin', 'planner', 'production'], module: 'fluence' },
+      // HR & Payroll is private and has no module key (a tick cannot hide anything from an
+      // admin). `hr: true` ties the item to the HR access probe below: no level, no item.
+      { label: 'HR & Payroll', to: '/hr', icon: Users, roles: 'all', hr: true },
       { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
       { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],
@@ -694,7 +698,7 @@ const SHORT_LABEL = {
   '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
   '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
   '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
-  '/shade-cards': 'Shades',
+  '/shade-cards': 'Shades', '/hr': 'HR',
 };
 
 // Phone bottom tab bar — the app's primary navigation on a handset. 64px of
@@ -946,9 +950,27 @@ export default function AppLayout() {
     currentUser().then(setUser).catch(() => {});
   }, []);
 
+  // HR & Payroll's nav item shows only to a login the server says holds an HR level.
+  // Asked once, right after the signed-in user is known (currentUser() is shared, so this
+  // adds no request of its own), and never in the way of the rest of the nav: everything
+  // else paints from `user` alone, and the item simply appears when the answer is in.
+  // A 403 — the usual answer — or any failure means none, and the item stays hidden. A
+  // customer's own login is never asked: it reaches nothing of the plant (access.js).
+  const [hrLevel, setHrLevel] = useState(null);
+  useEffect(() => {
+    let live = true;
+    currentUser().then(u => {
+      if (!live || isFluenceOnly(u)) return null;
+      return hrApi.me().then(me => { if (live && levelAtLeast(me?.level, 'viewer')) setHrLevel(me.level); });
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
   const groups = NAV.map(g => ({
     ...g,
     items: g.items.filter(i => {
+      // No module key, so no module tick can show or hide this one: the HR level decides.
+      if (i.hr) return Boolean(hrLevel);
       // An explicit per-user module grant is authoritative: if an admin hand-
       // picked this module in Masters → Users, show it regardless of the item's
       // default role list. (The `roles` gate is only the fallback for logins

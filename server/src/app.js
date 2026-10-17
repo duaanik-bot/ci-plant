@@ -45,6 +45,9 @@ import drafts from './routes/drafts.js';
 import avsRobot from './routes/avs-robot.js';
 import avsDocs from './routes/avs-docs.js';
 import kitStudio from './routes/kitstudio.js';
+import hr from './routes/hr.js';
+import hrPayroll from './routes/hr-payroll.js';
+import hrLedgers from './routes/hr-ledgers.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
 
@@ -133,6 +136,16 @@ app.use('/api', avsDocs);
 // Kit Studio: carton sizing, layouts and draft kits on top of the Fluence master.
 // Owns kit_studio_*; writes the Fluence master through, with its revisions.
 app.use('/api', kitStudio);
+// HR & Payroll: private. Every /api/hr route is behind the HR access guard (hr.access, read fresh on each
+// request, never the JWT) and states its own minimum level. People, pay setups, aliases, settings, pay
+// channels, access, audit and the dashboard (routes/hr.js); writes go to hr.audit_log, never audit_log.
+app.use('/api', hr);
+// HR & Payroll runs, behind the same guard: the monthly Excel import, the run's lifecycle, payments, payslips and
+// variance (routes/hr-payroll.js).
+app.use('/api', hrPayroll);
+// HR & Payroll ledgers, behind the same guard: employee loans, advances, one-time and recurring adjustments, and
+// the one-time load from the salary workbook (routes/hr-ledgers.js).
+app.use('/api', hrLedgers);
 
 // Central error handler — business errors carry .status; structured errors
 // (e.g. tolerance decisions) carry .body so the UI can offer choices.

@@ -104,6 +104,13 @@ const OF_KIND = Object.freeze({
   // is a plant alert, not an approval (nobody approves it) and not `quality`,
   // which is the colour-the-customer-signed feed.
   stock_writeon: 'alerts',
+  // HR & Payroll (routes/hr-payroll.js). A month's run sent for approval, and the approver's send-back coming
+  // home to whoever prepared it. Both file under decisions: the sent-back one is the answer arriving, exactly
+  // like stage_sent_back; the submitted one is strictly an ask, but the approvals list is pinned to the plant's
+  // three planning/XS kinds (notify-categories.test.js), so it sits beside its answer. The words never carry an
+  // amount (push shows the title on a locked phone), and both link to /hr?tab=payroll&month=YYYY-MM.
+  hr_run_submitted: 'decisions',
+  hr_run_sent_back: 'decisions',
 });
 
 // hasOwnProperty, not a bare lookup: `categoryOf('constructor')` must be `other`

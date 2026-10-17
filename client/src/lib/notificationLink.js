@@ -20,6 +20,10 @@
 const OF_REF = {
   approval_requests: id => `/planning?ar=${id}`,
   extra_sheet_requests: id => `/extra-sheets?xs=${id}`,
+  // HR & Payroll runs (kinds hr_run_submitted / hr_run_sent_back). Their rows always carry their own
+  // `/hr?tab=payroll&month=YYYY-MM` link, which rule 1 keeps; a run id alone cannot name its month, so a row
+  // whose link was lost still lands on the Payroll tab rather than the HR overview.
+  'hr.runs': () => '/hr?tab=payroll',
 };
 
 export function notificationLink(n) {

@@ -2853,4 +2853,7 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Draft sales orders and draft product masters — keyed in by the AVS order
   // intake, confirmed by a person before Planning sees them. Idempotent.
   await pool.query(migration('20261006180000_sales_order_drafts.sql'));
+
+  // HR & Payroll (schema hr) — 2026-10-16
+  await pool.query(migration('20261016120000_hr_payroll.sql'));
 }

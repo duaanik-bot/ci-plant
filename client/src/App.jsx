@@ -43,6 +43,10 @@ const POPrint = lazy(() => import('./pages/POPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
 // Fluence — kits, prescriptions and Kit Studio, one module (Fluence Pharmaceuticals only).
 const Fluence = lazy(() => import('./pages/Fluence.jsx'));
+// HR & Payroll — private. No module key: a module tick cannot hide anything from an
+// admin, so the gate is the HR access list, asked of /api/hr/me (pages/HR.jsx).
+const HR = lazy(() => import('./pages/HR.jsx'));
+const HRPayslips = lazy(() => import('./pages/HRPayslips.jsx'));
 
 // Quiet placeholder while a route chunk downloads — matches the app's muted grey.
 function PageLoading() {
@@ -181,6 +185,9 @@ export default function App() {
                 <Route path="/fluence" element={<Fluence />} />
                 {/* Kit Studio was a page of its own before it joined the Fluence module. */}
                 <Route path="/kit-studio" element={<Navigate to="/fluence?tab=kits" replace />} />
+                <Route path="/hr" element={<HR />} />
+                {/* A print page like /invoices/:id — inside the layout, whose rail and bar are no-print. */}
+                <Route path="/hr/payslips/:month" element={<HRPayslips />} />
               </Route>
             </Route>
           </Routes>
