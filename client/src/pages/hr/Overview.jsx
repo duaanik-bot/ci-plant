@@ -126,13 +126,17 @@ export default function Overview() {
                 </div>
               )}
               <div className="mt-3">
-                <h4 className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#6E6E73]">Paid against pending</h4>
+                <h4 className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#6E6E73]">Paid · unpaid · on hold</h4>
                 {pay ? (
-                  <Link to={to('payroll', month)} className="grid grid-cols-2 gap-2 text-xs">
-                    <span className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-800"><b className="block tabular-nums">{inr2(pay.paid_amount)}</b>paid · {plural(pay.paid_lines, 'person', 'people')}</span>
-                    <span className="rounded-xl bg-amber-50 px-3 py-2 text-amber-800"><b className="block tabular-nums">{inr2(pay.pending_amount)}</b>pending · {plural(pay.pending_lines, 'person', 'people')}</span>
-                  </Link>
-                ) : <p className="text-xs text-[#86868B]">Payments open once the month is finalised.</p>}
+                  <>
+                    <Link to={to('payroll', month)} className="grid grid-cols-3 gap-2 text-xs">
+                      <span className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-800"><b className="block tabular-nums">{inr2(pay.paid_amount)}</b>paid · {plural(pay.paid_lines ?? 0, 'person', 'people')}</span>
+                      <span className="rounded-xl bg-gray-100 px-3 py-2 text-gray-700"><b className="block tabular-nums">{inr2(pay.pending_amount)}</b>unpaid · {plural(pay.pending_lines ?? 0, 'person', 'people')}</span>
+                      <span className="rounded-xl bg-amber-50 px-3 py-2 text-amber-800"><b className="block tabular-nums">{inr2(pay.on_hold_amount ?? '0')}</b>on hold · {plural(pay.on_hold_lines ?? 0, 'person', 'people')}</span>
+                    </Link>
+                    {pay.final === false && <p className="mt-1 text-[11px] text-[#86868B]">Lines are marked paid once the month is finalised.</p>}
+                  </>
+                ) : <p className="text-xs text-[#86868B]">No run for this month yet.</p>}
               </div>
             </section>
 

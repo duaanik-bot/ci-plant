@@ -12,6 +12,13 @@
 //   register       one row per person, with a totals row, grouping by department or pay channel, and
 //                  PDF / Excel through the exporter. A row opens its line drawer (RunLineDrawer.jsx).
 //   payments       a finalised run, per pay channel: Mark paid with reference and date, line by line.
+//   paid / unpaid / on hold
+//                  every line has a payment status (Unpaid, Paid, On hold — plus failed / reversed). The register
+//                  has a tick column (operator): the header tick and the quick picks (All · None · Unpaid · On hold
+//                  · Paid · by channel) act on the rows shown; the selection bar says "N selected · ₹total" and offers
+//                  Mark paid (finalised runs only), Put on hold (reason), Mark unpaid (a paid line: approver, with a
+//                  reason) and Clear selection — POST /hr/runs/:month/lines/status. Status chips filter the register
+//                  (several at once), and the strip under the KPIs is the server's payment_totals.
 //
 // Refusals. Inside a dialog (submit, approve, send back, finalise, mark paid) the server's message is
 // said inline and the dialog stays open with what was typed; codes that carry people (RUN_BLOCKED,
@@ -63,6 +70,9 @@ const toId = id => (/^\d+$/.test(String(id)) ? Number(id) : id);
 const sortNum = v => { const p = paiseOf(v); return p === null ? null : Number(p); };
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
 const payStatus = l => (PAYMENT_STATUS[l?.payment_status] ? l.payment_status : 'pending');
+// Every line is in exactly one bucket: paid, on hold, or unpaid (pending, failed, reversed) — as the server's totals.
+const payBucket = l => { const s = payStatus(l); return s === 'paid' ? 'paid' : s === 'on_hold' ? 'on_hold' : 'unpaid'; };
+const PAY_FILTERS = ['pending', 'paid', 'on_hold', 'failed', 'reversed'];
 
 // ── The upload this browser left unapplied, per month ───────────────────────
 // A fallback only. GET /hr/runs/:month carries pending_import (the month's latest parsed upload, made
@@ -203,7 +213,9 @@ function PeopleLine({ label, tone, people, onOpen, hint }) {
 // ── Payments (a finalised run) ──────────────────────────────────────────────
 
 function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
-  const unpaid = group.due.filter(l => payStatus(l) !== 'paid');
+  // A line on hold is not payable: it is not offered here (the server would skip it too).
+  const unpaid = group.due.filter(l => payStatus(l) !== 'paid' && payStatus(l) !== 'on_hold');
+  const heldHere = group.lines.filter(l => payStatus(l) === 'on_hold');
   const today = plantToday();
   const [ref, setRef] = useState('');
   const [date, setDate] = useState(today);
@@ -240,6 +252,12 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
         <p className="text-xs text-[#515154]">
           Record the payment once the money has actually gone. Finalising a month is not proof of payment.
         </p>
+        {heldHere.length > 0 && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            On hold, so not offered ({heldHere.length}): {heldHere.slice(0, 8).map(l => `${nameOf(l.person_id)}${l.hold_reason ? ` — ${l.hold_reason}` : ''}`).join('; ')}
+            {heldHere.length > 8 ? `; and ${heldHere.length - 8} more` : ''}.
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label={kind === 'bank' ? 'Bank reference (UTR)' : 'Reference'} required={kind === 'bank'}
             hint={kind === 'bank' ? 'The transfer’s UTR or cheque number.' : 'Optional — e.g. the cash register page.'}>
@@ -303,7 +321,10 @@ function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen 
       .map(([code, ls]) => {
         const due = ls.filter(owes);
         const n = s => due.filter(l => payStatus(l) === s).length;
-        return { code, lines: ls, due, payable: sumPaise(ls.map(l => l.payable)), paid: n('paid'), pending: n('pending'), failed: n('failed'), reversed: n('reversed') };
+        return {
+          code, lines: ls, due, payable: sumPaise(ls.map(l => l.payable)), paid: n('paid'), pending: n('pending'), failed: n('failed'),
+          reversed: n('reversed'), held: ls.filter(l => payStatus(l) === 'on_hold').length,
+        };
       });
   }, [lines, channelLabel]);
   const due = groups.reduce((t, g) => t + g.due.length, 0);
@@ -326,7 +347,8 @@ function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen 
               <th className="px-2.5 py-2 text-right">People</th>
               <th className="px-2.5 py-2 text-right">Payable</th>
               <th className="px-2.5 py-2 text-right">Paid</th>
-              <th className="px-2.5 py-2 text-right">Not paid</th>
+              <th className="px-2.5 py-2 text-right">Unpaid</th>
+              <th className="px-2.5 py-2 text-right">On hold</th>
               <th className="px-2.5 py-2 text-right">Failed / reversed</th>
               <th className="px-2.5 py-2" />
             </tr>
@@ -347,16 +369,18 @@ function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen 
                   <td className="px-2.5 py-2 text-right font-semibold tabular-nums">{inr2(g.payable)}</td>
                   <td className="px-2.5 py-2 text-right tabular-nums text-emerald-700">{g.paid}</td>
                   <td className="px-2.5 py-2 text-right tabular-nums">{g.pending}</td>
+                  <td className={`px-2.5 py-2 text-right tabular-nums ${g.held ? 'font-bold text-amber-800' : ''}`}>{g.held}</td>
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.failed + g.reversed ? 'font-bold text-red-700' : ''}`}>{g.failed + g.reversed}</td>
                   <td className="px-2.5 py-2 text-right">
                     {canOperate && g.code && waiting > 0 && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
                     {!g.code && waiting > 0 && <span className="text-[11px] text-amber-700">Mark each person from their line</span>}
-                    {waiting === 0 && g.due.length > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700"><Check size={12} /> All paid</span>}
+                    {waiting === 0 && g.held === 0 && g.due.length > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700"><Check size={12} /> All paid</span>}
+                    {waiting === 0 && g.held > 0 && <span className="text-[11px] font-bold text-amber-800">{g.held} on hold</span>}
                   </td>
                 </tr>,
                 isOpen && (
                   <tr key={`l-${g.code}`}>
-                    <td colSpan={7} className="bg-white/40 px-2.5 py-2">
+                    <td colSpan={8} className="bg-white/40 px-2.5 py-2">
                       <ul className="divide-y divide-[#1D1D1F]/[0.05]">
                         {g.lines.map(l => (
                           <li key={l.person_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
@@ -364,7 +388,9 @@ function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen 
                               {nameOf(l.person_id)}
                             </button>
                             <span className="tabular-nums">{inr2(l.payable)}</span>
-                            {owes(l) ? <PaymentPill status={payStatus(l)} /> : <span className="text-[11px] text-[#86868B]">Nothing to pay</span>}
+                            {owes(l) || payStatus(l) !== 'pending'
+                              ? <PaymentPill status={payStatus(l)} reason={payStatus(l) === 'on_hold' ? l.hold_reason || 'No reason recorded' : null} />
+                              : <span className="text-[11px] text-[#86868B]">Nothing to pay</span>}
                             {l.paid_on && <span className="text-[11px] text-[#6E6E73]">{whenText(l.paid_on)}</span>}
                             {l.paid_ref && <span className="font-mono text-[11px] text-[#6E6E73]">{l.paid_ref}</span>}
                           </li>
@@ -444,6 +470,7 @@ export default function Payroll({ level }) {
         run: d?.run && typeof d.run === 'object' ? d.run : null,
         lines: list(d?.lines),
         inputs: list(d?.inputs),
+        paymentTotals: d?.payment_totals && typeof d.payment_totals === 'object' ? d.payment_totals : null,
         hasServerPending,
         missing: Array.isArray(d?.missing) ? d.missing : null,
         serverPending: d?.pending_import && typeof d.pending_import === 'object' ? d.pending_import : null,
@@ -600,18 +627,20 @@ export default function Payroll({ level }) {
   const [view, setView] = useState('all');
   const [focus, setFocus] = useState(null); // Set of person ids named by a refusal
   const [groupBy, setGroupBy] = useState('none');
-  useEffect(() => { setView('all'); setFocus(null); setQ(''); }, [month]);
+  const [payFilter, setPayFilter] = useState(() => new Set()); // payment statuses shown; empty = every status
+  useEffect(() => { setView('all'); setFocus(null); setQ(''); setPayFilter(new Set()); }, [month]);
+  const togglePayFilter = s => setPayFilter(cur => { const n = new Set(cur); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   const filtered = useMemo(() => rows.filter(r => {
     if (focus && !focus.has(r.id)) return false;
     if (view === 'blocked' && !r.blocked) return false;
     if (view === 'warn' && !(r.warned && !r.blocked)) return false;
     if (view === 'clean' && (r.blocked || r.warned)) return false;
     if (view.startsWith('flag:') && !r.flags.some(f => (f.code || 'FLAG') === view.slice(5))) return false;
-    if (view.startsWith('pay:') && !(owes(r.line) && r.payment === view.slice(4))) return false;
+    if (payFilter.size && !payFilter.has(r.payment)) return false;
     if (!q.trim()) return true;
     return rowMatches({ name: r.name, code: r.code, department: r.department, channel: r.channelLabel },
-      q, r.flags.map(f => flagLabel(f.code)).join(' '));
-  }), [rows, view, focus, q]);
+      q, [...r.flags.map(f => flagLabel(f.code)), PAYMENT_STATUS[r.payment]?.label || ''].join(' '));
+  }), [rows, view, focus, q, payFilter]);
 
   const totalRow = useMemo(() => {
     const sum = pick => sumPaise(filtered.map(pick));
@@ -626,11 +655,43 @@ export default function Payroll({ level }) {
       otHours: sumQty(filtered.map(r => r.input?.ot_hours)),
       blockedN: filtered.filter(r => r.blocked).length,
       warnN: filtered.filter(r => !r.blocked && r.warned).length,
-      paidN: filtered.filter(r => owes(r.line) && r.payment === 'paid').length,
+      paidN: filtered.filter(r => r.payment === 'paid').length,
+      heldN: filtered.filter(r => r.payment === 'on_hold').length,
       dueN: filtered.filter(r => owes(r.line)).length,
     };
   }, [filtered]);
   const showPaidSep = rows.some(r => (paiseOf(r.line.paid_separately) ?? 0n) !== 0n);
+
+  // ── Selection (operator): person ids ticked in the register, for Mark paid / Put on hold / Mark unpaid ──
+  // The header tick and the quick picks act on the rows SHOWN (filters, chips and search applied). After an action
+  // the run is read again; whenever what is shown changes (filters, chips, search, a reload) the selection drops the
+  // rows no longer shown, so a hidden row is never ticked and never sent.
+  const [selected, setSelected] = useState(() => new Set());
+  useEffect(() => { setSelected(new Set()); }, [month]);
+  // Only rows on screen are ever acted on: picked is the selection ∩ the rows shown, and the selection itself is
+  // pruned to the rows shown whenever the filters, chips, search or the run change (below).
+  const shownIds = useMemo(() => new Set(filtered.map(r => r.id)), [filtered]);
+  const picked = useMemo(() => filtered.filter(r => selected.has(r.id)), [filtered, selected]);
+  const allShownPicked = filtered.length > 0 && filtered.every(r => selected.has(r.id));
+  const pickShown = (test = () => true) => setSelected(new Set(filtered.filter(test).map(r => r.id)));
+  const toggleRow = (r, on) => {
+    if (r._total) { setSelected(on ? new Set([...selected, ...filtered.map(x => x.id)]) : new Set([...selected].filter(id => !shownIds.has(id)))); return; }
+    setSelected(cur => { const n = new Set(cur); if (on) n.add(r.id); else n.delete(r.id); return n; });
+  };
+  const toggleAllShown = (_sorted, on) => toggleRow({ _total: true }, on);
+  useEffect(() => {
+    setSelected(cur => {
+      const kept = [...cur].filter(id => shownIds.has(id));
+      return kept.length === cur.size ? cur : new Set(kept);
+    });
+  }, [shownIds]);
+  const channelsShown = useMemo(() => {
+    const m = new Map();
+    for (const r of filtered) { const k = r.channel ?? ''; if (!m.has(k)) m.set(k, r.channelLabel || 'No pay channel'); }
+    return [...m.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  }, [filtered]);
+  const pickedSum = sumPaise(picked.map(r => r.line.payable));
+  const pickedBy = b => picked.filter(r => payBucket(r.line) === b);
 
   // ── The drawer ──
   const [drawer, setDrawer] = useState(null);
@@ -702,11 +763,13 @@ export default function Payroll({ level }) {
       money('net', 'Net', r => r.line.net, { card: 'metric' }),
       ...(showPaidSep ? [money('paid_sep', 'Paid sep.', r => r.line.paid_separately)] : []),
       money('payable', 'Payable', r => r.line.payable, { card: 'metric', strong: true }),
-      ...(final ? [{ key: 'payment', label: 'Payment', card: 'detail', sortValue: r => r.payment,
-        export: r => (r._total ? `${r.paidN} of ${r.dueN} paid` : owes(r.line) ? PAYMENT_STATUS[r.payment].label : 'Nothing to pay'),
+      { key: 'payment', label: 'Payment', card: 'detail', sortValue: r => r.payment,
+        export: r => (r._total ? `${r.paidN} paid · ${r.heldN} on hold` : owes(r.line) || r.payment !== 'pending' ? PAYMENT_STATUS[r.payment].label : 'Nothing to pay'),
         render: r => (r._total
-          ? <span className="whitespace-nowrap text-[11px] font-bold text-[#515154]">{r.paidN} of {r.dueN} paid</span>
-          : owes(r.line) ? <PaymentPill status={r.payment} /> : <span className="text-[11px] text-[#86868B]">Nothing to pay</span>) }] : []),
+          ? <span className="whitespace-nowrap text-[11px] font-bold text-[#515154]">{r.paidN} paid{r.heldN ? ` · ${r.heldN} on hold` : ''}</span>
+          : owes(r.line) || r.payment !== 'pending'
+            ? <PaymentPill status={r.payment} reason={r.payment === 'on_hold' ? r.line.hold_reason || 'No reason recorded' : null} />
+            : <span className="text-[11px] text-[#86868B]">Nothing to pay</span>) },
       { key: 'flags', label: 'Flags', card: 'status', sortValue: r => (r._total ? null : (r.blocked ? 1000 : 0) + r.flags.length),
         export: r => (r._total ? '' : r.flags.map(f => flagLabel(f.code)).join(', ')),
         render: r => (r._total ? (
@@ -718,7 +781,7 @@ export default function Payroll({ level }) {
           </span>
         ) : <FlagDots flags={r.flags} />) },
     ];
-  }, [openDrawer, showPaidSep, final]);
+  }, [openDrawer, showPaidSep]);
 
   // ── Export: every component in its own column; grouped views export one section per group ──
   const exportSpec = useCallback(sorted => {
@@ -737,10 +800,13 @@ export default function Payroll({ level }) {
       m('adj_deductions', 'Adjustments (deduction)'), m('total_deductions', 'Total deductions'), m('net', 'Net'),
       m('paid_separately', 'Paid separately'), m('rounding', 'Rounding'), m('payable', 'Payable'),
       m('carried_advance', 'Advance carried forward'),
-      ...(final ? [{ key: 'x_payment', label: 'Payment', export: r => (owes(r.line) ? PAYMENT_STATUS[r.payment].label : 'Nothing to pay') }] : []),
+      { key: 'x_payment', label: 'Payment', export: r => (owes(r.line) || r.payment !== 'pending' ? PAYMENT_STATUS[r.payment].label : 'Nothing to pay') },
+      { key: 'x_paid_on', label: 'Paid on', export: r => r.line.paid_on || '' },
+      { key: 'x_paid_ref', label: 'Reference', export: r => r.line.paid_ref || '' },
+      { key: 'x_hold', label: 'Hold reason', export: r => (r.payment === 'on_hold' ? r.line.hold_reason || '' : '') },
       { key: 'x_flags', label: 'Flags', export: r => r.flags.map(f => `${LEVEL_META[levelOf(f)].label}: ${flagLabel(f.code)}`).join('; ') },
     ];
-    const pdfCols = columns.filter(c => c.key !== 'payment' || final);
+    const pdfCols = columns;
     const totals = rs => [
       { label: 'People', value: rs.length },
       { label: 'Gross', value: inr2(sumPaise(rs.map(r => r.line.gross))) },
@@ -763,7 +829,8 @@ export default function Payroll({ level }) {
       title: `Payroll register — ${monthLabel(month)}`,
       subtitle: `HR & Payroll · ${RUN_STATUS[status]?.label || status}`,
       meta: [
-        view !== 'all' && `Showing: ${view.startsWith('flag:') ? flagLabel(view.slice(5)) : view.startsWith('pay:') ? PAYMENT_STATUS[view.slice(4)]?.label : view}`,
+        view !== 'all' && `Showing: ${view.startsWith('flag:') ? flagLabel(view.slice(5)) : view}`,
+        payFilter.size > 0 && `Payment: ${[...payFilter].map(s => PAYMENT_STATUS[s]?.label || s).join(', ')}`,
         focus && `${focus.size} people named by a refusal`,
         groupBy !== 'none' && `Grouped by ${groupBy}`,
         q.trim() && `Search: "${q.trim()}"`,
@@ -772,7 +839,7 @@ export default function Payroll({ level }) {
       summary: totals(shown),
       sections,
     };
-  }, [columns, final, groupBy, month, status, view, focus, q, rows.length]);
+  }, [columns, final, groupBy, month, status, view, focus, q, rows.length, payFilter]);
 
   const groupFn = groupBy === 'department' ? (r => (r._total ? null : `d:${r.department || ''}`))
     : groupBy === 'channel' ? (r => (r._total ? null : `c:${r.channel ?? ''}`)) : undefined;
@@ -827,6 +894,20 @@ export default function Payroll({ level }) {
     }
     await load();
   }, [run, status, canOperate, month, load]);
+
+  // After Mark paid / Put on hold / Mark unpaid: say what happened, read the run again, and keep ticked only the rows
+  // that still match what is shown.
+  const afterStatus = useCallback(async (res, target) => {
+    const verb = { paid: 'marked paid', on_hold: 'put on hold', pending: 'marked unpaid' }[target];
+    const changed = list(res?.changed).length;
+    const same = list(res?.unchanged).length;
+    const skipped = list(res?.skipped);
+    toast.success([`${plural(changed, 'line')} ${verb}`, same && `${same} already so`, skipped.length && `${skipped.length} left as they were`].filter(Boolean).join(' · '));
+    if (skipped.length) {
+      toast.info(skipped.slice(0, 5).map(x => `${nameOf(x.person_id)}: ${x.reason}`).join(' · ') + (skipped.length > 5 ? ` · and ${skipped.length - 5} more` : ''));
+    }
+    await load();
+  }, [toast, nameOf, load]);
 
   const recalc = async () => {
     try {
@@ -922,7 +1003,8 @@ export default function Payroll({ level }) {
   if (final) {
     const due = lines.filter(owes);
     const paidN = due.filter(l => payStatus(l) === 'paid').length;
-    reasons.push({ tone: paidN === due.length ? 'green' : 'info', key: 'f', text: `Finalised ${by('finalised_by', 'finalised_at')} — locked. ${paidN} of ${plural(due.length, 'person', 'people')} marked paid.` });
+    const heldN = lines.filter(l => payStatus(l) === 'on_hold').length;
+    reasons.push({ tone: paidN === due.length ? 'green' : 'info', key: 'f', text: `Finalised ${by('finalised_by', 'finalised_at')} — locked. ${paidN} of ${plural(due.length, 'person', 'people')} marked paid${heldN ? `; ${heldN} on hold` : ''}.` });
   }
   const submitBlocked = status !== 'draft' || reasons.some(r => r.tone === 'red') || reasons.some(r => r.ack && !ackUploads);
 
@@ -1057,6 +1139,19 @@ export default function Payroll({ level }) {
               sub={(paiseOf(kpi('paid_separately')) ?? 0n) !== 0n ? `after ${inr2(kpi('paid_separately'))} paid separately` : 'to pay this month'} />
             <KpiCard compact label="Advance carried forward" value={inr2(kpi('carried_advance'))} sub="balance after this month" />
           </KpiRow>
+          {here.paymentTotals && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Payment</span>
+              {[['paid', 'Paid', 'bg-emerald-50 text-emerald-800'], ['unpaid', 'Unpaid', 'bg-gray-100 text-gray-700'], ['on_hold', 'On hold', 'bg-amber-50 text-amber-800']].map(([k, label, tone]) => (
+                <button key={k} type="button" className={`rounded-xl px-3 py-1.5 font-semibold ${tone}`}
+                  title={`Show the ${label.toLowerCase()} lines`}
+                  onClick={() => setPayFilter(new Set(k === 'unpaid' ? ['pending', 'failed', 'reversed'] : [k]))}>
+                  {label} · {plural(here.paymentTotals[k]?.count ?? 0, 'person', 'people')} · <span className="tabular-nums">{inr2(here.paymentTotals[k]?.amount)}</span>
+                </button>
+              ))}
+              {!final && <span className="text-[11px] text-[#86868B]">Lines are marked paid once the month is finalised; a hold can be set now.</span>}
+            </div>
+          )}
           {mismatch.length > 0 && (
             <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
               The run’s stored {mismatch.join(' and ')} differ{mismatch.length === 1 ? 's' : ''} from its lines added up
@@ -1115,14 +1210,18 @@ export default function Payroll({ level }) {
               <FilterChip label="Clean" count={rows.length - blockedCount - warnCount} on={view === 'clean'}
                 tone="border-emerald-300 bg-emerald-100 text-emerald-800" onClick={() => setView(v => (v === 'clean' ? 'all' : 'clean'))} />
             </FilterGroup>
-            {final && (
-              <FilterGroup label="Payment">
-                {['pending', 'paid', 'failed', 'reversed'].map(s => (
-                  <FilterChip key={s} label={PAYMENT_STATUS[s].label} count={rows.filter(r => owes(r.line) && r.payment === s).length}
-                    on={view === `pay:${s}`} onClick={() => setView(v => (v === `pay:${s}` ? 'all' : `pay:${s}`))} />
-                ))}
-              </FilterGroup>
-            )}
+            <FilterGroup label="Payment">
+              {PAY_FILTERS.map(s => {
+                const n = rows.filter(r => r.payment === s).length;
+                if (!n && !payFilter.has(s) && (s === 'failed' || s === 'reversed')) return null;
+                return (
+                  <FilterChip key={s} label={PAYMENT_STATUS[s].label} count={n} on={payFilter.has(s)}
+                    dot={s === 'paid' ? 'bg-emerald-500' : s === 'on_hold' ? 'bg-amber-500' : s === 'pending' ? 'bg-gray-400' : 'bg-red-500'}
+                    onClick={() => togglePayFilter(s)} />
+                );
+              })}
+              {payFilter.size > 0 && <FilterChip label="Any ×" on={false} onClick={() => setPayFilter(new Set())} />}
+            </FilterGroup>
             {activeFlag && (
               <FilterGroup label="Flag">
                 <FilterChip label={`${flagLabel(activeFlag)} ×`} on onClick={() => setView('all')} />
@@ -1139,10 +1238,51 @@ export default function Payroll({ level }) {
                 views={[{ key: 'none', label: 'None' }, { key: 'department', label: 'Department' }, { key: 'channel', label: 'Channel' }]} />
             </div>
           </FilterRail>
+          {canOperate && filtered.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Select</span>
+              <FilterChip label="All" count={filtered.length} on={allShownPicked} onClick={() => pickShown()} />
+              <FilterChip label="None" on={false} onClick={() => setSelected(new Set())} />
+              <FilterChip label="Unpaid" count={filtered.filter(r => payBucket(r.line) === 'unpaid').length} on={false}
+                onClick={() => pickShown(r => payBucket(r.line) === 'unpaid')} />
+              <FilterChip label="On hold" count={filtered.filter(r => r.payment === 'on_hold').length} on={false}
+                onClick={() => pickShown(r => r.payment === 'on_hold')} />
+              <FilterChip label="Paid" count={filtered.filter(r => r.payment === 'paid').length} on={false}
+                onClick={() => pickShown(r => r.payment === 'paid')} />
+              {channelsShown.length > 1 && (
+                <select aria-label="Select a pay channel" value=""
+                  className="h-8 rounded-full border border-white/70 bg-white/70 px-3 text-xs font-semibold text-[#515154]"
+                  onChange={e => { const k = e.target.value; if (k !== '') pickShown(r => (r.channel ?? '_') === k); }}>
+                  <option value="">By channel…</option>
+                  {channelsShown.map(([k, label]) => <option key={k || '_'} value={k || '_'}>{label}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+          {canOperate && picked.length > 0 && (
+            <div className="sticky top-2 z-10 mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-[#0A84FF]/25 bg-[#E1EFFF]/90 px-3 py-2 text-xs shadow-card backdrop-blur">
+              <span className="font-bold text-[#0064D2]">{picked.length} selected · <span className="tabular-nums">{inr2(pickedSum)}</span></span>
+              <span className="text-[11px] text-[#515154]">
+                {[['unpaid', 'unpaid'], ['on_hold', 'on hold'], ['paid', 'paid']].map(([b, w]) => pickedBy(b).length > 0 && `${pickedBy(b).length} ${w}`).filter(Boolean).join(' · ')}
+              </span>
+              <span className="ml-auto flex flex-wrap gap-1.5">
+                <Button size="sm" onClick={() => setDialog({ kind: 'status', status: 'paid' })} disabled={!final}
+                  title={final ? undefined : 'A line can be marked paid once the month is finalised'}>Mark paid</Button>
+                <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'on_hold' })}>Put on hold</Button>
+                <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'pending' })}>Mark unpaid</Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
+              </span>
+              {!final && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is finalised; a hold can be set now.</span>}
+            </div>
+          )}
           <DataTable
             columns={columns}
             rows={filtered.length ? [totalRow, ...filtered] : []}
             getRowId={r => r.id}
+            selectable={canOperate}
+            selectedIds={allShownPicked ? [...selected, '__total'] : [...selected]}
+            onToggleRow={toggleRow}
+            onToggleAll={toggleAllShown}
             pinTop={r => r._total === true}
             serialNumber={false}
             dense
@@ -1249,6 +1389,10 @@ export default function Payroll({ level }) {
           )}
         </ActionDialog>
       )}
+      {dialog?.kind === 'status' && (
+        <StatusDialog month={month} status={dialog.status} picked={picked} canApprove={canApprove}
+          refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
+      )}
       {dialog?.kind === 'pay' && (
         <PayDialog month={month} group={dialog.group} label={channelLabel(dialog.group.code)} kind={channelBy.get(dialog.group.code)?.kind}
           nameOf={nameOf} onClose={() => setDialog(null)}
@@ -1305,3 +1449,106 @@ function SendBackDialog({ month, refusal, onClose, onDone }) {
     </ActionDialog>
   );
 }
+
+// ── Paid / On hold / Unpaid for the ticked lines (POST /hr/runs/:month/lines/status) ──
+// Says beforehand what each ticked line will do (change, stay as it is, or be skipped and why). A paid line is moved
+// back to unpaid only by an approver, with a reason; for anyone else those lines are left out of the request and
+// the dialog says so. The server's refusal is shown inside the dialog, which stays open with what was typed.
+const STATUS_TITLE = { paid: 'Mark paid', on_hold: 'Put on hold', pending: 'Mark unpaid' };
+
+function StatusDialog({ month, status, picked, canApprove, refusal, onClose, onDone }) {
+  const today = plantToday();
+  const [ref, setRef] = useState('');
+  const [date, setDate] = useState(today);
+  const [reason, setReason] = useState('');
+  const by = test => picked.filter(test);
+  const st = r => r.payment;
+  let change = [];
+  let same = [];
+  let skip = []; // [{ r, why }]
+  if (status === 'paid') {
+    same = by(r => st(r) === 'paid');
+    skip = by(r => st(r) === 'on_hold').map(r => ({ r, why: 'on hold — release it first' }))
+      .concat(by(r => st(r) !== 'paid' && st(r) !== 'on_hold' && (paiseOf(r.line.payable) ?? -1n) < 0n).map(r => ({ r, why: 'nothing to pay' })));
+    const skipIds = new Set(skip.map(x => x.r.id));
+    change = by(r => st(r) !== 'paid' && !skipIds.has(r.id));
+  } else if (status === 'on_hold') {
+    // A line already on hold takes the new reason if it differs; with the same reason it stays as it is.
+    const sameReason = r => st(r) === 'on_hold' && (r.line.hold_reason || '') === reason.trim();
+    same = by(sameReason);
+    skip = by(r => st(r) === 'paid').map(r => ({ r, why: 'already paid — mark it unpaid first' }));
+    change = by(r => st(r) !== 'paid' && !sameReason(r));
+  } else {
+    same = by(r => st(r) === 'pending');
+    const paidOnes = by(r => st(r) === 'paid');
+    if (!canApprove) skip = paidOnes.map(r => ({ r, why: 'paid — only an approver can mark a paid line unpaid' }));
+    change = by(r => st(r) !== 'pending' && (canApprove || st(r) !== 'paid'));
+  }
+  const undoPaid = status === 'pending' && change.some(r => st(r) === 'paid');
+  const needReason = status === 'on_hold' || undoPaid;
+  const problems = [
+    !change.length && 'None of the ticked lines would change.',
+    needReason && !reason.trim() && (status === 'on_hold' ? 'Say why the payment is on hold.' : 'Say why a paid line is being marked unpaid.'),
+    status === 'paid' && !/^\d{4}-\d{2}-\d{2}$/.test(date) && 'Enter the date it was paid.',
+    status === 'paid' && date > today && 'The payment date is after today.',
+  ].filter(Boolean);
+  const names = rs => `${rs.slice(0, 6).map(r => r.name).join(', ')}${rs.length > 6 ? ` and ${rs.length - 6} more` : ''}`;
+  const verb = { paid: 'marked paid', on_hold: 'put on hold', pending: 'marked unpaid' }[status];
+  const state = { paid: 'paid', on_hold: 'on hold', pending: 'unpaid' }[status];
+  const sent = [...change, ...same];
+  return (
+    <ActionDialog title={`${STATUS_TITLE[status]} — ${plural(picked.length, 'person', 'people')}`} confirmLabel={`${STATUS_TITLE[status]} (${change.length})`}
+      variant={undoPaid ? 'danger' : 'primary'} disabled={problems.length > 0} refusal={refusal} onClose={onClose}
+      onConfirm={async () => {
+        const res = await hrApi.setLineStatuses(month, {
+          person_ids: sent.map(r => toId(r.id)), status,
+          ...(status === 'paid' ? { reference: ref.trim() || null, paid_on: date } : {}),
+          ...(reason.trim() ? { reason: reason.trim() } : {}),
+        });
+        await onDone(res, status);
+      }}>
+      <ul className="space-y-1 text-xs">
+        <li><b>{plural(change.length, 'line')}</b> will be {verb}{change.length ? ` (${inr2(sumPaise(change.map(r => r.line.payable)))})` : ''}{change.length ? `: ${names(change)}` : ''}.</li>
+        {same.length > 0 && <li className="text-[#6E6E73]">{plural(same.length, 'line')} {same.length === 1 ? 'is' : 'are'} already {state} and stay{same.length === 1 ? 's' : ''} as {same.length === 1 ? 'it is' : 'they are'}.</li>}
+        {skip.length > 0 && (
+          <li className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            Left as {skip.length === 1 ? 'it is' : 'they are'} ({skip.length}):{' '}
+            {skip.slice(0, 8).map(x => `${x.r.name} — ${x.why}`).join('; ')}{skip.length > 8 ? `; and ${skip.length - 8} more` : ''}.
+          </li>
+        )}
+      </ul>
+      {status === 'paid' && (
+        <>
+          <p className="text-xs text-[#515154]">Record the payment once the money has actually gone. Each pay channel gets its own payment batch with this reference and date.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Reference" hint="Optional — the UTR, cheque number or cash register page.">
+              <Input value={ref} autoComplete="off" onChange={e => setRef(e.target.value)} />
+            </Field>
+            <Field label="Paid on" required>
+              <Input type="date" value={date} max={today} onChange={e => setDate(e.target.value)} />
+            </Field>
+          </div>
+        </>
+      )}
+      {status === 'on_hold' && <p className="text-xs text-[#515154]">A line on hold is not paid — the channel’s Mark paid and the bank list leave it out — until it is marked unpaid again.</p>}
+      {undoPaid && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+          {plural(change.filter(r => st(r) === 'paid').length, 'paid line')} will lose {change.filter(r => st(r) === 'paid').length === 1 ? 'its' : 'their'} amount paid, date and reference (kept in the audit log).
+        </p>
+      )}
+      {needReason && (
+        <Field label={status === 'on_hold' ? 'Why it is on hold' : 'Why it is being marked unpaid'} required>
+          <Textarea value={reason} onChange={e => setReason(e.target.value)} />
+        </Field>
+      )}
+      {status === 'pending' && !needReason && (
+        <Field label="Note" hint="Optional.">
+          <Input value={reason} autoComplete="off" onChange={e => setReason(e.target.value)} />
+        </Field>
+      )}
+      {problems.length > 0 && change.length > 0 && <p className="text-[11px] text-[#86868B]">{problems[0]}</p>}
+      {!change.length && <p className="text-xs font-semibold text-[#86868B]">{problems[0]}</p>}
+    </ActionDialog>
+  );
+}
+

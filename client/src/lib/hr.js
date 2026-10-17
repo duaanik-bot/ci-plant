@@ -204,6 +204,11 @@ export const hrApi = {
   recordPayments: (month, batch) => api.post(`/hr/runs/${seg(month)}/payments`, batch),
   // PUT /hr/runs/:month/lines/:personId/payment — operator (approver for 'reversed'). { status, reference }.
   setLinePayment: (month, personId, payment) => api.put(`/hr/runs/${seg(month)}/lines/${seg(personId)}/payment`, payment),
+  // POST /hr/runs/:month/lines/status — operator (approver to move a PAID line back to unpaid). Many lines at once:
+  // { person_ids, status:'paid'|'pending'|'on_hold', reference?, paid_on?, reason? } ('pending' is Unpaid; on_hold
+  // needs a reason; paid needs a finalised run, 409 RUN_NOT_FINAL). Answers { changed, unchanged, skipped:[{ person_id,
+  // reason }], batches }.
+  setLineStatuses: (month, change) => api.post(`/hr/runs/${seg(month)}/lines/status`, change),
   // GET /hr/runs/:month/payslips?person_ids=&channel= — viewer. person_ids is an array (sent as a comma list).
   payslips: (month, { person_ids, channel } = {}) => api.get(`/hr/runs/${seg(month)}/payslips${qs({ person_ids, channel })}`),
   // GET /hr/runs/:month/variance — viewer.

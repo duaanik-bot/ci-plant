@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const ENABLED = process.env.HR_PG === '1';
 const MIGRATION = fileURLToPath(new URL('../../supabase/migrations/20261016120000_hr_payroll.sql', import.meta.url));
+const HOLD = fileURLToPath(new URL('../../supabase/migrations/20261018120000_hr_payment_hold.sql', import.meta.url));
 
 // Every hr table, in catalogue (C collation) order.
 const TABLES = ['access', 'adjustments', 'advance_txns', 'audit_log', 'column_maps', 'import_batches', 'import_rows',
@@ -130,6 +131,37 @@ describe('the hr schema on a real Postgres', {
     await replay();
     assert.deepEqual(await snapshot(), first);
     // PG_POOL_MAX=1: the same connection that ran the replay. A plain SET would still be here.
+    assert.equal((await db.one('SHOW lock_timeout')).lock_timeout, '0');
+  });
+
+  test('the payment-hold migration: on_hold under the same CHECK name, four columns, and a replay alters nothing', async () => {
+    const def = await db.one(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+        WHERE conrelid = 'hr.run_lines'::regclass AND conname = 'run_lines_payment_status_check'`);
+    for (const s of ['pending', 'paid', 'on_hold', 'failed', 'reversed']) assert.ok(def.def.includes(`'${s}'`), def.def);
+    assert.equal((await db.one(
+      `SELECT count(*)::int AS n FROM pg_constraint WHERE conrelid = 'hr.run_lines'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%payment_status%'`)).n, 1, 'one CHECK on payment_status, not two');
+    const cols = await db.q(
+      `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+        WHERE table_schema = 'hr' AND table_name = 'run_lines'
+          AND column_name IN ('hold_reason', 'held_by', 'held_at', 'status_note') ORDER BY column_name`);
+    assert.deepEqual(cols, [
+      { column_name: 'held_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'held_by', data_type: 'integer', is_nullable: 'YES' },
+      { column_name: 'hold_reason', data_type: 'text', is_nullable: 'YES' },
+      { column_name: 'status_note', data_type: 'text', is_nullable: 'YES' },
+    ]);
+    const hold = fs.readFileSync(HOLD, 'utf8');
+    const conOid = async () => (await db.one(
+      `SELECT oid::text AS oid FROM pg_constraint WHERE conrelid = 'hr.run_lines'::regclass AND conname = 'run_lines_payment_status_check'`)).oid;
+    const first = await snapshot();
+    const oid = await conOid();
+    await pool.query(hold);
+    await pool.query(sql);
+    await pool.query(hold);
+    assert.deepEqual(await snapshot(), first);
+    assert.equal(await conOid(), oid, 'the CHECK was not dropped and re-made on a replay');
     assert.equal((await db.one('SHOW lock_timeout')).lock_timeout, '0');
   });
 
@@ -301,7 +333,7 @@ describe('the hr schema on a real Postgres', {
     assert.deepEqual(await db.one(
       'INSERT INTO hr.run_lines (run_id, person_id, payable, net_before_cap) VALUES ($1, $2, 1000, -250.5) RETURNING payment_status, payable, net_before_cap',
       [july.id, person]), { payment_status: 'pending', payable: 1000, net_before_cap: -250.5 });
-    for (const s of ['paid', 'failed', 'reversed', 'pending']) {
+    for (const s of ['paid', 'on_hold', 'failed', 'reversed', 'pending']) {
       assert.equal(await codeOf('UPDATE hr.run_lines SET payment_status = $2 WHERE run_id = $1', [july.id, s]), 'ok', s);
     }
     assert.equal(await codeOf(`UPDATE hr.run_lines SET payment_status = 'refunded' WHERE run_id = $1`, [july.id]), '23514');

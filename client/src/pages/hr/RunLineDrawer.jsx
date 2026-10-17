@@ -256,19 +256,40 @@ function Dot({ tone, count }) {
 
 // ── Payment words ───────────────────────────────────────────────────────────
 
+// pending is what the owner calls Unpaid; on_hold is not to be paid until released (it carries a reason).
 export const PAYMENT_STATUS = {
-  pending: { label: 'Not paid yet', tone: 'bg-gray-100 text-gray-600' },
+  pending: { label: 'Unpaid', tone: 'bg-gray-100 text-gray-600' },
   paid: { label: 'Paid', tone: 'bg-emerald-50 text-emerald-700' },
+  on_hold: { label: 'On hold', tone: 'bg-amber-50 text-amber-800' },
   failed: { label: 'Payment failed', tone: 'bg-red-50 text-red-700' },
   reversed: { label: 'Reversed', tone: 'bg-red-50 text-red-700' },
 };
 
-export function PaymentPill({ status }) {
+// `reason` (an on-hold line's hold_reason) shows on hover, and on a tap: the pill is then a button that opens it.
+export function PaymentPill({ status, reason }) {
   const meta = PAYMENT_STATUS[status] || PAYMENT_STATUS.pending;
-  return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${meta.tone}`}>
+  const [open, setOpen] = useState(false);
+  const cls = `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${meta.tone}`;
+  const body = (
+    <>
       <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
       {meta.label}
+    </>
+  );
+  if (!reason) return <span className={cls}>{body}</span>;
+  return (
+    <span className="relative inline-flex">
+      <button type="button" className={cls} title={reason} aria-expanded={open}
+        aria-label={`${meta.label}: ${reason}`}
+        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+        onBlur={() => setOpen(false)}>
+        {body}
+      </button>
+      {open && (
+        <span role="tooltip" className="absolute left-0 top-full z-20 mt-1 w-56 whitespace-normal rounded-xl border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#3A3A3C] shadow-card">
+          {reason}
+        </span>
+      )}
     </span>
   );
 }
@@ -543,7 +564,8 @@ function PaymentBox({ month, personId, line, level, onChanged }) {
   const [act, setAct] = useState(null); // 'paid' | 'failed' | 'reversed'
   const [ref, setRef] = useState('');
   const [error, setError] = useState('');
-  const offers = [
+  const held = status === 'on_hold';
+  const offers = held ? [] : [
     status !== 'paid' && { key: 'paid', label: 'Mark paid' },
     (status === 'pending' || status === 'paid') && { key: 'failed', label: 'Mark failed' },
     status === 'paid' && canReverse && { key: 'reversed', label: 'Reverse payment' },
@@ -569,6 +591,15 @@ function PaymentBox({ month, personId, line, level, onChanged }) {
         {line?.paid_ref && <span>· ref <span className="font-mono">{line.paid_ref}</span></span>}
         {line?.paid_amount != null && status === 'paid' && <span>· {inr2(line.paid_amount)}</span>}
       </div>
+      {held && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          On hold{line?.hold_reason ? `: “${line.hold_reason}”` : ''}
+          {(line?.held_by_name || line?.held_at) && <span className="block text-[11px] opacity-80">
+            {[line.held_by_name && `by ${line.held_by_name}`, line.held_at && fmt.dt(line.held_at)].filter(Boolean).join(' · ')}
+          </span>}
+          <span className="mt-1 block text-[11px]">A line on hold is not paid. To release it, tick it in the register and choose Mark unpaid.</span>
+        </p>
+      )}
       {canMark && !act && offers.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {offers.map(o => (
@@ -751,7 +782,7 @@ export default function RunLineDrawer({
                 {person?.status && person.status !== 'active' && <StatusPill status={person.status} />}
                 {leftOut && <span className="rounded-full bg-[#1D1D1F]/[0.07] px-2 py-0.5 text-[11px] font-bold text-[#515154]">Left out this month</span>}
                 {notInRun && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Not in this run</span>}
-                {final && shown && <PaymentPill status={shown.payment_status || 'pending'} />}
+                {(final || shown?.payment_status === 'on_hold') && shown && <PaymentPill status={shown.payment_status || 'pending'} reason={shown.hold_reason} />}
               </div>
               <p className="truncate text-[11px] text-[#6E6E73]">{monthLabel(month)}{sub ? ` · ${sub}` : ''}</p>
             </div>
@@ -860,7 +891,7 @@ export default function RunLineDrawer({
                 line={shown} input={input} variance={variance} />
             </Section>
 
-            {final && shown && (
+            {(final || shown?.payment_status === 'on_hold') && shown && (
               <Section title="Payment" icon={CheckCircle2}>
                 <PaymentBox month={month} personId={personId} line={shown} level={level} onChanged={onChanged} />
               </Section>

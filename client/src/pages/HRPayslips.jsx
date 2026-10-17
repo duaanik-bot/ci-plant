@@ -7,12 +7,13 @@
 // The payload is GET /hr/runs/:month/payslips: { company:{name,gstin,address}, run, slips:[…] }.
 // Every figure on a slip is printed as the server worked it out (exact 2-dp strings, formatted with
 // inr2, never added up here). The only conversion is the payable into words, which is wording, not
-// arithmetic. Nothing is logged and no amount goes near document.title: the browser seeds the
+// arithmetic. Each slip says its payment status (Paid with date and reference, Unpaid, On hold). Nothing is logged and no amount goes near document.title: the browser seeds the
 // print-to-PDF file name from it, so it reads "Payslips July 2026 Cash".
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { Button } from '../components/ui.jsx';
+import { fmt } from '../api.js';
 import { hrApi, inr2, monthLabel } from '../lib/hr.js';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { MONTH_RE, list, paiseOf, qtyText } from './hr/RunLineDrawer.jsx';
@@ -25,6 +26,22 @@ function Row({ label, value, strong = false }) {
       <span>{label}</span>
       <span className="whitespace-nowrap tabular-nums">{value}</span>
     </div>
+  );
+}
+
+// The slip's payment status, as recorded: Paid (date, reference), On hold, or Unpaid. The reason for a hold is
+// not printed — the slip goes to the employee; it is on the screen and in the On hold report.
+const PAY_WORDS = { pending: 'Unpaid', paid: 'Paid', on_hold: 'On hold', failed: 'Payment failed', reversed: 'Payment reversed' };
+function PaymentLine({ payment }) {
+  const st = payment?.status;
+  if (!st) return null;
+  const ref = payment.reference ?? payment.paid_ref;
+  return (
+    <p className="mt-1 text-xs text-gray-700">
+      Payment: <b>{PAY_WORDS[st] || st}</b>
+      {st === 'paid' && payment.paid_on && <> on <b>{fmt.date(payment.paid_on)}</b></>}
+      {st === 'paid' && ref && <> · ref <span className="font-mono">{ref}</span></>}
+    </p>
   );
 }
 
@@ -101,6 +118,7 @@ function Slip({ slip, company, monthName }) {
         <div className="mt-1 border-t-2 border-gray-900 pt-1"><Row label="Net payable" value={inr2(t.payable)} strong /></div>
       </div>
       <p className="mt-1 text-xs italic text-gray-700">{rupeesInWords(Number(t.payable))}</p>
+      <PaymentLine payment={slip.payment} />
 
       {(loans.length > 0 || adv.balance_after != null) && (
         <div className="mt-4 grid grid-cols-2 gap-4 text-xs">

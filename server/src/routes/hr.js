@@ -47,6 +47,7 @@ import { loanOutstanding } from '../hr/loans.js';
 import { normCode, normName } from '../hr/match.js';
 import { assertAliasFree, assertNameFree, lockNames } from '../hr/names.js';
 import { add, cmp, fmtPaise, rat, toPaise } from '../hr/money.js';
+import { paymentTotals } from '../hr/payment-status.js';
 
 const r = Router();
 
@@ -875,7 +876,8 @@ async function owedAdvances() {
 
 // Headcount is as people stand now (status), except joined / exited this month, which count dates inside the
 // month asked for. The run is the month's own, with its stored totals (exact strings, a split by channel).
-// Payments are read only for a finalised run: before that nothing is waiting to be paid. Exceptions count
+// Payments split the run's lines into paid / unpaid (pending_*) / on hold, at any run status (a hold can come before
+// finalising); `final` says whether the run is finalised, before which nothing can be marked paid. Exceptions count
 // people by the flags on the run's lines, plus those with no pay setup in force and the import rows still
 // waiting for a decision. Read only; nothing here writes.
 r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
@@ -915,14 +917,17 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
         by_code: byCode.sort((a, b) => (LEVEL_ORDER[a.level] ?? 3) - (LEVEL_ORDER[b.level] ?? 3)
           || b.people - a.people || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)),
       });
-      if (run.status === 'finalised') {
-        payments = await one(
-          `SELECT count(*) FILTER (WHERE payment_status = 'paid')::int AS paid_lines,
-                  COALESCE(sum(payable) FILTER (WHERE payment_status = 'paid'), 0)::text AS paid_amount,
-                  count(*) FILTER (WHERE payment_status <> 'paid' AND payable > 0)::int AS pending_lines,
-                  COALESCE(sum(payable) FILTER (WHERE payment_status <> 'paid' AND payable > 0), 0)::text AS pending_amount
-             FROM hr.run_lines WHERE run_id = $1`, [run.id]);
-      }
+      // Paid / unpaid / on hold for the month (hr/payment-status.js): every line in exactly one, so the three add up to
+      // the run. A line can be put on hold before the run is finalised, so this is reported at any run status.
+      const t = paymentTotals(await q(
+        `SELECT payment_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
+           FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [run.id]));
+      payments = {
+        paid_lines: t.paid.count, paid_amount: t.paid.amount,
+        pending_lines: t.unpaid.count, pending_amount: t.unpaid.amount,
+        on_hold_lines: t.on_hold.count, on_hold_amount: t.on_hold.amount,
+        final: run.status === 'finalised',
+      };
     }
     exceptions.people_without_setup = (await one(
       `SELECT count(*)::int AS n FROM hr.people p

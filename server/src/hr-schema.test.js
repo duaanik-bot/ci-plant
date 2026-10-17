@@ -303,3 +303,41 @@ test('init() replays the migration after the last one, with its comment', () => 
   assert.match(src, /\/\/ HR & Payroll \(schema hr\) — 2026-10-16\n\s*await pool\.query\(migration\('20261016120000_hr_payroll\.sql'\)\);/);
   assert.equal(src.split("migration('20261016120000_hr_payroll.sql')").length, 2, 'replayed once');
 });
+
+// ── The payment hold (supabase/migrations/20261018120000_hr_payment_hold.sql) ──
+
+const holdPath = fileURLToPath(new URL('../../supabase/migrations/20261018120000_hr_payment_hold.sql', import.meta.url));
+const holdCode = () => fs.readFileSync(holdPath, 'utf8').replace(/--[^\n]*/g, '');
+
+test('the hold migration opens with a transaction-local lock timeout and destroys nothing', () => {
+  const code = holdCode();
+  assert.match(code.trimStart(), /^set local lock_timeout = '1s';/, 'the first statement');
+  assert.doesNotMatch(code, /(^|\n)\s*set\s+lock_timeout/i);
+  assert.doesNotMatch(code, /\bdrop\s+(table|column|trigger|schema|index)\b/i);
+  assert.doesNotMatch(code, /\btruncate\b/i);
+  assert.doesNotMatch(code, /\b(update|delete\s+from)\s+hr\.\w+\s+(set|where)\b/i, 'no data is rewritten');
+  assert.doesNotMatch(code, /\bgrant\b/i);
+  assert.doesNotMatch(code, /references\s+(public\.|users\b|employees\b)/i);
+  // The only DROP is the CHECK it re-adds, under the same name, in the same block.
+  const drops = [...code.matchAll(/\bdrop\b[^;]*;/gi)].map((m) => m[0].replace(/\s+/g, ' '));
+  assert.deepEqual(drops, ['drop constraint if exists run_lines_payment_status_check;']);
+});
+
+test('the hold migration adds on_hold under the first CHECK\'s name, and the four hold columns', () => {
+  const flat = holdCode().replace(/\s+/g, ' ');
+  assert.match(flat, /alter table hr\.run_lines add constraint run_lines_payment_status_check check \(payment_status in \('pending', 'paid', 'on_hold', 'failed', 'reversed'\)\);/);
+  for (const [c, type] of [['hold_reason', 'text'], ['held_by', 'integer'], ['held_at', 'timestamptz'], ['status_note', 'text']]) {
+    assert.match(flat, new RegExp(`alter table hr\\.run_lines add column if not exists ${c} ${type};`), c);
+    assert.match(flat, new RegExp(`table_schema = 'hr' and table_name = 'run_lines' and column_name = '${c}'`), `${c} is added only when missing`);
+  }
+  // A replay alters nothing: the CHECK is swapped only while it does not allow on_hold.
+  assert.match(flat, /pg_get_constraintdef\(c\.oid\) like '%on_hold%'/);
+  // The first migration's inline CHECK is what Postgres names run_lines_payment_status_check.
+  assert.match(col('run_lines', 'payment_status').rest, /check \(payment_status in \(/);
+});
+
+test('init() replays the hold migration right after the HR one, once', () => {
+  const src = fs.readFileSync(dbJs, 'utf8');
+  assert.match(src, /await pool\.query\(migration\('20261016120000_hr_payroll\.sql'\)\);\n\s*\/\/ HR payment hold[^\n]*\n\s*await pool\.query\(migration\('20261018120000_hr_payment_hold\.sql'\)\);/);
+  assert.equal(src.split("migration('20261018120000_hr_payment_hold.sql')").length, 2, 'replayed once');
+});

@@ -67,6 +67,10 @@
 //     (paid_amount = payable, so 0.00 for a line with nothing to pay, which lets a channel be closed in full) with
 //     the reference and date; a single line can be paid, failed or reversed (reversal needs approver). Finalised is
 //     never treated as paid.
+//   * A line can be put ON HOLD at any run status (with a reason) and released again; a held line is not payable:
+//     the channel batch skips it and lists it in `held`, the per-line route refuses it. POST /hr/runs/:month/lines/
+//     status sets paid / unpaid (pending) / on hold for many lines at once; GET /hr/runs/:month carries
+//     payment_totals (paid / unpaid / on_hold, each {count, amount}, and the same per channel; hr/payment-status.js).
 //
 // What a response carries
 //   * Lines and inputs (GET /hr/runs/:month) are the numbers pg gives for NUMERIC, as in routes/hr.js; runs.totals
@@ -95,6 +99,7 @@ import { loanOutstanding, nextMonth } from '../hr/loans.js';
 import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
 import { cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
 import { assertAliasFree, lockNames } from './../hr/names.js';
+import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
 import { ensureRun, finaliseRun, recalcRun } from '../hr/runs.js';
 
 const r = Router();
@@ -1122,7 +1127,7 @@ function flagsSummary(lines) {
 }
 
 const LINE_SELECT = `
-  SELECT l.*, p.code, p.name, p.display_name, p.department, p.designation, p.status AS person_status,
+  SELECT l.*, l.paid_on::text AS paid_on, p.code, p.name, p.display_name, p.department, p.designation, p.status AS person_status,
          c.label AS pay_channel_label
     FROM hr.run_lines l
     JOIN hr.people p ON p.id = l.person_id
@@ -1175,16 +1180,21 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
     const pendingImport = await pendingImportOf(q, importViews);
     if (!run) {
       return res.json({
-        run: null, lines: [], inputs: [], flags_summary: flagsSummary([]),
+        run: null, lines: [], inputs: [], payment_totals: paymentTotals([]), flags_summary: flagsSummary([]),
         missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: pendingImport,
       });
     }
-    const lines = await q(`${LINE_SELECT} WHERE l.run_id = $1 ORDER BY l.person_id`, [run.id]);
+    const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 ORDER BY l.person_id`, [run.id]);
+    const heldBy = await userNames(q, found.map((l) => l.held_by));
+    const lines = found.map((l) => ({ ...l, held_by_name: given(l.held_by) ? heldBy.get(l.held_by) ?? null : null }));
     const inputs = await q(`${INPUT_SELECT} WHERE i.run_id = $1 ORDER BY i.person_id`, [run.id]);
     res.json({
       run: await runView(q, run),
       lines,
       inputs,
+      payment_totals: paymentTotals(await q(
+        `SELECT payment_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
+           FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [run.id])),
       flags_summary: flagsSummary(lines),
       missing: await peopleWithoutInputs(q, run.id, month),
       imports: importViews,
@@ -1425,22 +1435,30 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
     const batch = await tx(async (qc) => {
       const run = await lockRunOf(qc, month);
       if (run.status !== 'finalised') throw runState(run, 'a finalised', 'paid');
-      const lines = await qc(
-        `SELECT id, person_id FROM hr.run_lines
+      const unpaid = await qc(
+        `SELECT id, person_id, payment_status, hold_reason FROM hr.run_lines
           WHERE run_id = $1 AND pay_channel = $2 AND payment_status <> 'paid' AND payable IS NOT NULL AND payable >= 0
             ${only ? 'AND person_id = ANY($3::int[])' : ''}
           ORDER BY person_id
             FOR UPDATE`, only ? [run.id, channel, only] : [run.id, channel]);
       if (only) {
-        const found = new Set(lines.map((l) => l.person_id));
+        const found = new Set(unpaid.map((l) => l.person_id));
         const absent = only.filter((id) => !found.has(id));
         if (absent.length) {
           throw bad(`No unpaid line in ${channel} for person ${listText(firstFew(absent.map(String)))}`);
         }
       }
+      // A line on hold is not payable: the batch leaves it as it is and says so.
+      const held = unpaid.filter((l) => l.payment_status === 'on_hold')
+        .map((l) => ({ person_id: l.person_id, reason: l.hold_reason ?? null }));
+      const lines = unpaid.filter((l) => l.payment_status !== 'on_hold');
       if (!lines.length) {
         const [any] = await qc(`SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND pay_channel = $2 LIMIT 1`, [run.id, channel]);
         if (!any) throw bad(`No line of ${monthLabel(month)} is paid through ${channel}`);
+        if (held.length) {
+          throw fail(409, `Nothing to pay through ${channel}: ${held.length === 1 ? 'the one unpaid line is' : `all ${held.length} unpaid lines are`} `
+            + 'on hold. Release a hold (mark the line unpaid) to pay it', 'NOTHING_TO_PAY', { held });
+        }
         throw fail(409, `Every line of ${monthLabel(month)} paid through ${channel} is already paid`, 'NOTHING_TO_PAY');
       }
       const ids = lines.map((l) => l.id);
@@ -1457,9 +1475,9 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
           WHERE id = ANY($1::int[])`, [ids, made.id, paidOn, reference]);
       await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
         month, run_id: run.id, pay_channel: channel, count: made.count, total: money(made.total), reference, paid_on: paidOn,
-        person_ids: lines.map((l) => l.person_id),
+        person_ids: lines.map((l) => l.person_id), held: held.map((h) => h.person_id),
       });
-      return { ...made, paid_on: paidOn, person_ids: lines.map((l) => l.person_id) };
+      return { ...made, paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held };
     });
     res.json(batch);
   } catch (e) { next(e); }
@@ -1487,8 +1505,11 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
       if (!line) throw notFound('Line');
       const from = line.payment_status;
       const allowed = { paid: ['pending', 'failed', 'reversed'], failed: ['pending', 'paid'], reversed: ['paid'] }[status];
+      if (from === 'on_hold') {
+        throw fail(409, 'This line is on hold, so it is not payable: release the hold (mark it unpaid) first', 'PAYMENT_STATE');
+      }
       if (!allowed.includes(from)) {
-        throw fail(409, `This line is ${from}, so it cannot be marked ${status}`, 'PAYMENT_STATE');
+        throw fail(409, `This line is ${STATUS_WORD[from] ?? from}, so it cannot be marked ${STATUS_WORD[status] ?? status}`, 'PAYMENT_STATE');
       }
       if (status === 'paid') {
         // A zero-payable line can be marked paid (paid_amount 0.00), as the batch does; only a line whose pay is
@@ -1513,6 +1534,152 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
     const [line] = await q(`${LINE_SELECT} WHERE l.run_id = (SELECT id FROM hr.runs WHERE month = $1) AND l.person_id = $2`,
       [month, personId]);
     res.json(line ?? null);
+  } catch (e) { next(e); }
+});
+
+// ── POST /hr/runs/:month/lines/status — paid / unpaid / on hold, many lines at once ──
+//
+// { person_ids:[…], status:'paid'|'pending'|'on_hold', reference?, paid_on?, reason? }, one transaction, one audit row
+// per line that changes. 'pending' is what the screen calls Unpaid.
+//   paid      a finalised run only (the payable is fixed only then): 409 RUN_NOT_FINAL otherwise. paid_amount =
+//             payable, paid_on defaults to today at the plant, the reference is optional. The lines are grouped into
+//             one payment_batches row per pay channel (a line with no channel is paid without a batch, as the per-line
+//             route does). A line on hold, or with nothing to pay (payable below zero or not worked out), is skipped.
+//   on_hold   any run status; the reason is required (400). Records held_by / held_at. A paid line is skipped: it must
+//             be marked unpaid first. A line already on hold with a different reason takes the new reason (and held_by /
+//             held_at), audited with the old one; with the same reason it is unchanged.
+//   pending   releases a hold (and moves a failed or reversed line back to unpaid). Moving a PAID line back is for an
+//             approver, with a reason: it clears paid_amount, paid_on, paid_ref and the batch link, and the audit row
+//             keeps the old values. An operator asking for that gets 403 HR_LEVEL (and nothing changes).
+// A line already in the target status is `unchanged`, not an error; a person with no line, or a line that cannot take
+// the status, is in `skipped` with the reason. Nothing else refuses: warn, don't block.
+const STATUS_TARGETS = ['paid', 'pending', 'on_hold'];
+
+r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const body = bodyOf(req);
+    const target = choiceOf(body.status, STATUS_TARGETS, 'status');
+    const personIds = idListOf(body.person_ids, 'person_ids');
+    if (!personIds || !personIds.length) throw bad('Choose at least one person');
+    const reference = textOf(body.reference, 'The reference', 120);
+    const reason = textOf(body.reason, 'The reason', 500);
+    let paidOn = null;
+    if (target === 'paid') {
+      paidOn = dateOf(body.paid_on, 'The payment date') ?? plantDateStr();
+      if (paidOn > plantDateStr()) throw bad('The payment date cannot be in the future');
+    }
+    if (target === 'on_hold' && !reason) throw bad('Say why the payment is on hold');
+    const approver = levelAtLeast(req.hr?.level, 'approver');
+    const userId = userIdOf(req);
+
+    const out = await tx(async (qc) => {
+      const run = await lockRunOf(qc, month);
+      if (target === 'paid' && run.status !== 'finalised') {
+        throw fail(409, `${monthLabel(month)} is ${run.status}: a line can be marked paid only once the month is finalised, `
+          + 'because the amount payable is fixed only then. A line can be put on hold at any time', 'RUN_NOT_FINAL');
+      }
+      const lines = await qc(
+        `SELECT id, person_id, pay_channel, payment_status, payable::text AS payable, paid_amount::text AS paid_amount,
+                paid_on::text AS paid_on, paid_ref, payment_batch_id, hold_reason
+           FROM hr.run_lines WHERE run_id = $1 AND person_id = ANY($2::int[])
+          ORDER BY person_id
+            FOR UPDATE`, [run.id, personIds]);
+      const byPerson = new Map(lines.map((l) => [l.person_id, l]));
+      const unchanged = [];
+      const skipped = [];
+      const moving = [];
+      for (const id of personIds) {
+        const line = byPerson.get(id);
+        if (!line) { skipped.push({ person_id: id, reason: `No line for this person in ${monthLabel(month)}` }); continue; }
+        // Holding a held line again with a different reason re-holds it (new reason, held_by, held_at; the old
+        // reason is in the audit row); the same reason leaves it unchanged.
+        if (line.payment_status === target && !(target === 'on_hold' && line.hold_reason !== reason)) {
+          unchanged.push(id);
+          continue;
+        }
+        if (target === 'paid') {
+          if (line.payment_status === 'on_hold') {
+            skipped.push({ person_id: id, reason: 'On hold: release the hold (mark it unpaid) before marking it paid' });
+            continue;
+          }
+          const due = line.payable === null ? null : paiseOf(line.payable);
+          if (due === null || due < 0n) { skipped.push({ person_id: id, reason: 'Nothing to pay on this line' }); continue; }
+        }
+        if (target === 'on_hold' && line.payment_status === 'paid') {
+          skipped.push({ person_id: id, reason: 'Already paid: mark it unpaid first to put it on hold' });
+          continue;
+        }
+        moving.push(line);
+      }
+      const undoPaid = target === 'pending' ? moving.filter((l) => l.payment_status === 'paid') : [];
+      if (undoPaid.length && !approver) {
+        throw fail(403, `Needs HR approver access to mark a paid line unpaid (${undoPaid.length === 1 ? '1 selected line is' : `${undoPaid.length} selected lines are`} `
+          + 'already paid)', 'HR_LEVEL', { person_ids: undoPaid.map((l) => l.person_id) });
+      }
+      if (undoPaid.length && !reason) throw bad('Say why a paid line is being marked unpaid');
+
+      const batches = [];
+      if (target === 'paid' && moving.length) {
+        const groups = new Map();
+        for (const l of moving) {
+          const k = l.pay_channel ?? null;
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k).push(l);
+        }
+        const keys = [...groups.keys()].sort((a, b) => (a === null) - (b === null) || (a < b ? -1 : a > b ? 1 : 0));
+        for (const channel of keys) {
+          const ids = groups.get(channel).map((l) => l.id);
+          let batchId = null;
+          if (channel !== null) {
+            const [made] = await qc(
+              `INSERT INTO hr.payment_batches (run_id, pay_channel, count, total, status, reference, paid_on,
+                                               confirmed_by, confirmed_at, created_by)
+               SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5
+                 FROM hr.run_lines WHERE id = ANY($6::int[])
+               RETURNING id, pay_channel, count, total::text AS total`, [run.id, channel, reference, paidOn, userId, ids]);
+            batchId = made.id;
+            const people = groups.get(channel).map((l) => l.person_id);
+            batches.push({ id: made.id, pay_channel: channel, count: made.count, total: money(made.total), person_ids: people });
+            await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
+              month, run_id: run.id, pay_channel: channel, count: made.count, total: money(made.total), reference, paid_on: paidOn,
+              person_ids: people, via: 'lines/status',
+            });
+          }
+          await qc(
+            `UPDATE hr.run_lines
+                SET payment_status = 'paid', payment_batch_id = $2, paid_amount = payable, paid_on = $3::date,
+                    paid_at = now(), paid_ref = $4, status_note = $5
+              WHERE id = ANY($1::int[])`, [ids, batchId, paidOn, reference, reason]);
+        }
+      } else if (target === 'on_hold' && moving.length) {
+        await qc(
+          `UPDATE hr.run_lines
+              SET payment_status = 'on_hold', hold_reason = $2, held_by = $3, held_at = now(), status_note = $2
+            WHERE id = ANY($1::int[])`, [moving.map((l) => l.id), reason, userId]);
+      } else if (target === 'pending' && moving.length) {
+        await qc(
+          `UPDATE hr.run_lines
+              SET payment_status = 'pending', paid_amount = NULL, paid_on = NULL, paid_at = NULL, paid_ref = NULL,
+                  payment_batch_id = NULL, hold_reason = NULL, held_by = NULL, held_at = NULL, status_note = $2
+            WHERE id = ANY($1::int[])`, [moving.map((l) => l.id), reason]);
+      }
+
+      for (const l of moving) {
+        const detail = { month, run_id: run.id, person_id: l.person_id, from: l.payment_status, to: target, reason };
+        if (target === 'paid') Object.assign(detail, { reference, paid_on: paidOn, paid_amount: money(l.payable) });
+        if (l.payment_status === 'paid') {
+          detail.was = {
+            paid_amount: given(l.paid_amount) ? money(l.paid_amount) : null, paid_on: l.paid_on, paid_ref: l.paid_ref,
+            payment_batch_id: l.payment_batch_id,
+          };
+        }
+        if (l.payment_status === 'on_hold') detail.was_hold_reason = l.hold_reason;
+        await hrAudit(qc, req, 'run_line', l.id, 'payment_status', detail);
+      }
+      return { changed: moving.map((l) => l.person_id), unchanged, skipped, batches };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 
@@ -1623,7 +1790,9 @@ r.get('/hr/runs/:month/payslips', requireHr('viewer'), async (req, res, next) =>
           advance: money(unrecovered.advance), loans: fmtPaise(loansShort), other: money(unrecovered.other), total: fmtPaise(short),
         } : null,
         flags: Array.isArray(l.flags) ? l.flags : [],
-        payment: { status: l.payment_status, paid_on: l.paid_on, paid_ref: l.paid_ref, paid_amount: m(l.paid_amount) },
+        payment: {
+          status: l.payment_status, paid_on: l.paid_on, paid_ref: l.paid_ref, reference: l.paid_ref, paid_amount: m(l.paid_amount),
+        },
       };
     });
     res.json({ company, run: await runView(q, run), slips });

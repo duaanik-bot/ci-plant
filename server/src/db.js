@@ -2856,4 +2856,6 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
 
   // HR & Payroll (schema hr) — 2026-10-16
   await pool.query(migration('20261016120000_hr_payroll.sql'));
+  // HR payment hold (hr.run_lines on_hold + hold columns) — 2026-10-18
+  await pool.query(migration('20261018120000_hr_payment_hold.sql'));
 }

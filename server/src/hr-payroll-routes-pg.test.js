@@ -458,10 +458,217 @@ describe('HR payroll routes through the real app', {
     assert.deepEqual(await septLine(B), { payable: '0.00', payment_status: 'paid', paid_amount: '0.00' });
   });
 
+  // ── October: paid / unpaid / on hold (POST /hr/runs/:month/lines/status) ──
+
+  const OCT = '2026-10';
+  let H;
+  const octLine = (personId) => db.one(
+    `SELECT l.id, l.payable::text AS payable, l.payment_status, l.paid_amount::text AS paid_amount, l.paid_on::text AS paid_on,
+            l.paid_ref, l.payment_batch_id, l.hold_reason, l.held_by, l.held_at, l.status_note
+       FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [OCT, personId]);
+  const setStatus = (who, body) => call(who, 'POST', `/hr/runs/${OCT}/lines/status`, body);
+  const cents = (v) => Math.round(Number(v) * 100);
+  const addsUp = (t, lines, payable) => {
+    assert.equal(t.paid.count + t.unpaid.count + t.on_hold.count, lines, 'every line in one bucket');
+    assert.equal(cents(t.paid.amount) + cents(t.unpaid.amount) + cents(t.on_hold.amount), cents(payable), 'the buckets add up to the run');
+    for (const [code, ch] of Object.entries(t.by_channel)) {
+      for (const b of ['paid', 'unpaid', 'on_hold']) assert.match(ch[b].amount, /^\d+\.\d{2}$/, `${code}.${b}`);
+    }
+    for (const b of ['paid', 'unpaid', 'on_hold']) {
+      assert.equal(Object.values(t.by_channel).reduce((n, ch) => n + ch[b].count, 0), t[b].count, `by_channel ${b} counts`);
+      assert.equal(Object.values(t.by_channel).reduce((n, ch) => n + cents(ch[b].amount), 0), cents(t[b].amount), `by_channel ${b} amounts`);
+    }
+  };
+
+  test('October starts as a draft with a bank-paid person too', T, async () => {
+    await db.q(`INSERT INTO hr.pay_channels (code, label, kind) VALUES ('TBANK', 'Test bank', 'bank')`);
+    H = (await db.one(`INSERT INTO hr.people (code, name, pay_channel) VALUES ('T-205', 'Test Person Eta', 'TBANK') RETURNING id`)).id;
+    await db.q(`INSERT INTO hr.pay_setups (person_id, effective_from, pay_basis, base) VALUES ($1, '2026-04-01', 'monthly', 31000)`, [H]);
+    const up = await uploadAs('operator', await sheet([
+      ['Test Person Alpha', 'T-201', 0, 0], ['Test Person Beta', 'T-202', null, 0], ['Test Person Eta', 'T-205', null, 0],
+    ]), OCT);
+    assert.equal(up.status, 200, up.text);
+    const applied = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, {});
+    assert.equal(applied.status, 200, applied.text);
+    assert.equal(applied.body.run.status, 'draft');
+    assert.equal((await octLine(H)).payable, '31000.00');
+  });
+
+  test('a hold needs a reason; a viewer cannot set a status; bad bodies are 400', T, async () => {
+    refused(await setStatus('operator', { person_ids: [A], status: 'on_hold' }), 400, undefined);
+    refused(await setStatus('operator', { person_ids: [A], status: 'on_hold', reason: '   ' }), 400, undefined);
+    refused(await setStatus('viewer', { person_ids: [A], status: 'on_hold', reason: 'x' }), 403, 'HR_LEVEL');
+    refused(await setStatus('operator', { person_ids: [], status: 'on_hold', reason: 'x' }), 400, undefined);
+    refused(await setStatus('operator', { person_ids: [A], status: 'refunded' }), 400, undefined);
+    assert.equal((await octLine(A)).payment_status, 'pending');
+  });
+
+  test('a hold is allowed on a draft run, survives a recalculation; the same reason again is unchanged, a new reason re-holds', T, async () => {
+    const res = await setStatus('operator', { person_ids: [A], status: 'on_hold', reason: 'Test: bank details being checked' });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.changed, [A]);
+    assert.deepEqual(res.body.unchanged, []);
+    assert.deepEqual(res.body.skipped, []);
+    const a = await octLine(A);
+    assert.deepEqual([a.payment_status, a.hold_reason, a.held_by], ['on_hold', 'Test: bank details being checked', ids.operator]);
+    assert.ok(a.held_at);
+    const audit = await db.one(`SELECT detail FROM hr.audit_log WHERE entity = 'run_line' AND entity_id = $1 AND action = 'payment_status'`, [String(a.id)]);
+    assert.deepEqual([audit.detail.from, audit.detail.to, audit.detail.reason], ['pending', 'on_hold', 'Test: bank details being checked']);
+
+    assert.equal((await call('operator', 'POST', `/hr/runs/${OCT}/recalc`, {})).status, 200);
+    assert.equal((await octLine(A)).payment_status, 'on_hold', 'a recalculation never touches the payment columns');
+
+    const audits = async () => (await db.one(
+      `SELECT count(*)::int AS n FROM hr.audit_log WHERE entity = 'run_line' AND action = 'payment_status'`)).n;
+    const before = await audits();
+    const again = await setStatus('operator', { person_ids: [A], status: 'on_hold', reason: 'Test: bank details being checked' });
+    assert.equal(again.status, 200, again.text);
+    assert.deepEqual([again.body.changed, again.body.unchanged], [[], [A]], 'the same reason: unchanged');
+    assert.equal(await audits(), before, 'and nothing audited');
+    assert.equal((await octLine(A)).held_at.getTime(), a.held_at.getTime(), 'unchanged means untouched');
+
+    // A different reason re-holds the line: new reason, who and when; the old reason is in the audit row.
+    const rehold = await setStatus('approver', { person_ids: [A], status: 'on_hold', reason: 'Test: waiting for a signed form' });
+    assert.equal(rehold.status, 200, rehold.text);
+    assert.deepEqual([rehold.body.changed, rehold.body.unchanged], [[A], []]);
+    const a2 = await octLine(A);
+    assert.deepEqual([a2.payment_status, a2.hold_reason, a2.held_by], ['on_hold', 'Test: waiting for a signed form', ids.approver]);
+    assert.ok(a2.held_at.getTime() >= a.held_at.getTime());
+    const last = await db.one(
+      `SELECT detail FROM hr.audit_log WHERE entity = 'run_line' AND entity_id = $1 AND action = 'payment_status' ORDER BY id DESC LIMIT 1`,
+      [String(a.id)]);
+    assert.deepEqual([last.detail.from, last.detail.to, last.detail.reason, last.detail.was_hold_reason],
+      ['on_hold', 'on_hold', 'Test: waiting for a signed form', 'Test: bank details being checked']);
+    // Back to the first reason, so the rest of the story reads the same.
+    const back = await setStatus('operator', { person_ids: [A], status: 'on_hold', reason: 'Test: bank details being checked' });
+    assert.deepEqual(back.body.changed, [A]);
+
+    const run = await call('viewer', 'GET', `/hr/runs/${OCT}`);
+    assert.equal(run.status, 200, run.text);
+    const line = run.body.lines.find((l) => l.person_id === A);
+    assert.deepEqual([line.payment_status, line.hold_reason, line.held_by_name], ['on_hold', 'Test: bank details being checked', 'Test Operator']);
+    assert.equal(run.body.payment_totals.on_hold.count, 1);
+    assert.equal(run.body.payment_totals.paid.count, 0);
+    addsUp(run.body.payment_totals, run.body.lines.length, run.body.run.totals.payable);
+  });
+
+  test('paid is refused before the run is finalised (409 RUN_NOT_FINAL), and nothing changes', T, async () => {
+    const res = await setStatus('operator', { person_ids: [B, H], status: 'paid', reference: 'TOO-SOON' });
+    refused(res, 409, 'RUN_NOT_FINAL');
+    assert.match(res.body.error, /finalised/);
+    assert.equal((await octLine(H)).payment_status, 'pending');
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.payment_batches WHERE reference = 'TOO-SOON'`)).n, 0);
+  });
+
+  test('a channel batch skips a held line and reports it', T, async () => {
+    assert.equal((await call('operator', 'POST', `/hr/runs/${OCT}/submit`, {})).status, 200);
+    assert.equal((await call('approver', 'POST', `/hr/runs/${OCT}/approve`, {})).status, 200);
+    const fin = await call('approver', 'POST', `/hr/runs/${OCT}/finalise`, {});
+    assert.equal(fin.status, 200, fin.text);
+    assert.equal((await octLine(A)).payment_status, 'on_hold', 'finalising keeps the hold');
+
+    const paid = await call('operator', 'POST', `/hr/runs/${OCT}/payments`, { pay_channel: 'TCASH', reference: 'CASH-OCT' });
+    assert.equal(paid.status, 200, paid.text);
+    assert.deepEqual(paid.body.person_ids, [B]);
+    assert.equal(paid.body.count, 1);
+    assert.deepEqual(paid.body.held, [{ person_id: A, reason: 'Test: bank details being checked' }]);
+    assert.equal((await octLine(A)).payment_status, 'on_hold');
+    const again = await call('operator', 'POST', `/hr/runs/${OCT}/payments`, { pay_channel: 'TCASH' });
+    refused(again, 409, 'NOTHING_TO_PAY');
+    assert.deepEqual(again.body.held.map((h) => h.person_id), [A]);
+    // The single-line route treats a held line as not payable too.
+    refused(await call('operator', 'PUT', `/hr/runs/${OCT}/lines/${A}/payment`, { status: 'paid' }), 409, 'PAYMENT_STATE');
+  });
+
+  test('bulk paid after finalise: paid_amount = payable, one batch per channel; unchanged and skipped are reported', T, async () => {
+    // Paying a held line is skipped, not refused.
+    const held = await setStatus('operator', { person_ids: [A], status: 'paid' });
+    assert.equal(held.status, 200, held.text);
+    assert.deepEqual(held.body.changed, []);
+    assert.deepEqual(held.body.skipped.map((x) => x.person_id), [A]);
+    assert.match(held.body.skipped[0].reason, /hold/i);
+
+    const release = await setStatus('operator', { person_ids: [A], status: 'pending' });
+    assert.equal(release.status, 200, release.text);
+    assert.deepEqual(release.body.changed, [A]);
+    const a0 = await octLine(A);
+    assert.deepEqual([a0.payment_status, a0.hold_reason, a0.held_by, a0.held_at], ['pending', null, null, null]);
+
+    const res = await setStatus('operator', { person_ids: [A, B, H, G], status: 'paid', reference: 'BULK-OCT', paid_on: '2026-10-16' });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.changed, [A, H].sort((x, y) => x - y));
+    assert.deepEqual(res.body.unchanged, [B]);
+    assert.deepEqual(res.body.skipped.map((x) => x.person_id), [G], 'G has no October line');
+    assert.deepEqual(res.body.batches.map((b) => [b.pay_channel, b.count]), [['TBANK', 1], ['TCASH', 1]]);
+    for (const id of [A, H]) {
+      const l = await octLine(id);
+      assert.deepEqual([l.payment_status, l.paid_amount, l.paid_on, l.paid_ref], ['paid', l.payable, '2026-10-16', 'BULK-OCT']);
+      assert.ok(l.payment_batch_id);
+    }
+    const batches = await db.q(
+      `SELECT b.pay_channel, b.count, b.total::text AS total, b.reference, b.paid_on::text AS paid_on FROM hr.payment_batches b
+         JOIN hr.runs r ON r.id = b.run_id WHERE r.month = $1 AND b.reference = 'BULK-OCT' ORDER BY b.pay_channel`, [OCT]);
+    assert.deepEqual(batches, [
+      { pay_channel: 'TBANK', count: 1, total: '31000.00', reference: 'BULK-OCT', paid_on: '2026-10-16' },
+      { pay_channel: 'TCASH', count: 1, total: (await octLine(A)).payable, reference: 'BULK-OCT', paid_on: '2026-10-16' },
+    ]);
+    refused(await setStatus('operator', { person_ids: [A], status: 'paid', paid_on: '2999-01-01' }), 400, undefined);
+    // A paid line cannot be put on hold without being marked unpaid first: skipped, with the reason.
+    const hold = await setStatus('operator', { person_ids: [H], status: 'on_hold', reason: 'Test: late query' });
+    assert.equal(hold.status, 200, hold.text);
+    assert.deepEqual(hold.body.skipped.map((x) => x.person_id), [H]);
+    assert.equal((await octLine(H)).payment_status, 'paid');
+  });
+
+  test('unpaid of a paid line: an operator gets 403, an approver needs a reason and clears the payment (audited)', T, async () => {
+    const before = await octLine(H);
+    refused(await setStatus('operator', { person_ids: [H], status: 'pending', reason: 'Test: bounced' }), 403, 'HR_LEVEL');
+    assert.deepEqual(await octLine(H), before, 'nothing changed');
+    refused(await setStatus('approver', { person_ids: [H], status: 'pending' }), 400, undefined);
+    assert.equal((await octLine(H)).payment_status, 'paid');
+
+    const res = await setStatus('approver', { person_ids: [H], status: 'pending', reason: 'Test: transfer bounced' });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.changed, [H]);
+    const h = await octLine(H);
+    assert.deepEqual([h.payment_status, h.paid_amount, h.paid_on, h.paid_ref, h.payment_batch_id, h.status_note],
+      ['pending', null, null, null, null, 'Test: transfer bounced']);
+    const audit = await db.one(
+      `SELECT detail FROM hr.audit_log WHERE entity = 'run_line' AND entity_id = $1 AND action = 'payment_status'
+        ORDER BY id DESC LIMIT 1`, [String(h.id)]);
+    assert.deepEqual([audit.detail.from, audit.detail.to, audit.detail.reason], ['paid', 'pending', 'Test: transfer bounced']);
+    assert.deepEqual(audit.detail.was, {
+      paid_amount: before.paid_amount, paid_on: before.paid_on, paid_ref: before.paid_ref, payment_batch_id: before.payment_batch_id,
+    });
+  });
+
+  test('payment_totals add up after paying, and payslips carry each slip\'s payment status', T, async () => {
+    const hold = await setStatus('operator', { person_ids: [H], status: 'on_hold', reason: 'Test: waiting for new account' });
+    assert.deepEqual(hold.body.changed, [H]);
+    const run = await call('viewer', 'GET', `/hr/runs/${OCT}`);
+    assert.equal(run.status, 200, run.text);
+    const t = run.body.payment_totals;
+    assert.deepEqual([t.paid.count, t.unpaid.count, t.on_hold.count], [2, 0, 1]);
+    assert.equal(t.on_hold.amount, '31000.00');
+    assert.deepEqual(t.by_channel.TBANK.on_hold, { count: 1, amount: '31000.00' });
+    assert.equal(t.by_channel.TCASH.paid.count, 2);
+    addsUp(t, run.body.lines.length, run.body.run.totals.payable);
+
+    const slips = await call('viewer', 'GET', `/hr/runs/${OCT}/payslips?person_ids=${A},${H}`);
+    assert.equal(slips.status, 200, slips.text);
+    const byId = new Map(slips.body.slips.map((x) => [x.person.id, x.payment]));
+    assert.deepEqual([byId.get(A).status, byId.get(A).paid_on, byId.get(A).reference], ['paid', '2026-10-16', 'BULK-OCT']);
+    assert.equal(byId.get(H).status, 'on_hold');
+    const dash = await call('viewer', 'GET', `/hr/dashboard?month=${OCT}`);
+    assert.equal(dash.status, 200, dash.text);
+    assert.deepEqual([dash.body.payments.paid_lines, dash.body.payments.on_hold_lines, dash.body.payments.on_hold_amount],
+      [2, 1, '31000.00']);
+  });
+
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
     const actions = new Set((await db.q(`SELECT entity || ':' || action AS a FROM hr.audit_log`)).map((x) => x.a));
     for (const a of ['import:upload', 'import:map', 'import_row:decide', 'import:apply', 'import:discard', 'run_input:edit', 'run:submit',
-      'run:send_back', 'run:approve', 'run:finalise', 'payment_batch:create', 'run_line:payment']) {
+      'run:send_back', 'run:approve', 'run:finalise', 'payment_batch:create', 'run_line:payment', 'run_line:payment_status']) {
       assert.ok(actions.has(a), `no audit row for ${a}`);
     }
     const plant = await db.one(`SELECT count(*)::int AS n FROM audit_log WHERE entity ILIKE 'hr%' OR entity IN ('run', 'import')`)

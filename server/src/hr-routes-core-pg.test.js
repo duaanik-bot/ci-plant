@@ -730,7 +730,10 @@ describe('HR core routes through the real app', {
     assert.equal(d.run.days_in_month, 31);
     assert.equal(d.run.totals.gross, '8000.00', 'the run\'s stored totals pass through as they are');
     assert.equal(d.run.totals.by_channel[0].pay_channel, 'BANK1');
-    assert.deepEqual(d.payments, { paid_lines: 1, paid_amount: '5000.00', pending_lines: 1, pending_amount: '3000.00' });
+    assert.deepEqual(d.payments, {
+      paid_lines: 1, paid_amount: '5000.00', pending_lines: 1, pending_amount: '3000.00', on_hold_lines: 0, on_hold_amount: '0.00',
+      final: true,
+    });
     assert.deepEqual(d.loans, { count: 1, outstanding: '12000.00' });
     assert.deepEqual(d.advances, { count: 1, outstanding: '2000.00' });
     assert.deepEqual(d.exceptions, {

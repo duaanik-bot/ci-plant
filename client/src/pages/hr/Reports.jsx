@@ -1,5 +1,8 @@
-// HR → Reports (spec §13): the month's payment sheet, the bank transfer lists, the payroll register, the
-// variance report, and the loan and advance registers. Each shows on screen and exports through the
+// HR → Reports (spec §13): the month's payment sheet, the paid register, the on-hold report, the bank transfer
+// lists, the payroll register, the variance report, and the loan and advance registers. The payment sheet is split
+// into Paid / Unpaid / On hold (per-channel subtotals, grand totals); the payment sheet, paid register and on-hold
+// report share multi-select filters (status, channel, department) that drive the screen and the PDF / Excel alike.
+// The bank list carries only lines still to pay (unpaid, not on hold) unless on-hold lines are asked for. Each shows on screen and exports through the
 // ERP's exporter (lib/exporter.js sections: specs → branded PDF + Excel), except the bank transfer list,
 // which is an Excel file of its own (bankFile.js — an account number must stay text).
 //
@@ -16,13 +19,16 @@ import { Button, DataTable, Input, SubTabs, useToast } from '../../components/ui
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import {
-  MONTH_RE, PAYMENT_STATUS, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
+  MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
 } from './RunLineDrawer.jsx';
+import { fmt } from '../../api.js';
 import { refusalText } from './PersonDrawer.jsx';
 import { downloadBankList } from './bankFile.js';
 
 const REPORTS = [
   { key: 'payment', label: 'Payment sheet' },
+  { key: 'paid', label: 'Paid register' },
+  { key: 'hold', label: 'On hold' },
   { key: 'bank', label: 'Bank transfer lists' },
   { key: 'register', label: 'Payroll register' },
   { key: 'variance', label: 'Variance' },
@@ -60,61 +66,144 @@ async function pool(items, n, fn) {
   return out;
 }
 
-// ── Payment sheet ───────────────────────────────────────────────────────────
+// ── Payment status: paid / unpaid / on hold ─────────────────────────────────
+// Every line is in exactly one bucket, as the server's payment_totals: paid, on hold, or unpaid (pending, failed,
+// reversed). A paid line counts what was paid (paid_amount); the others what is payable.
 
-function paymentSpec({ month, run, rows, channelLabel }) {
-  const channels = new Map();
+const payStatus = l => (PAYMENT_STATUS[l?.payment_status] ? l.payment_status : 'pending');
+const bucketOf = l => { const st = payStatus(l); return st === 'paid' ? 'paid' : st === 'on_hold' ? 'on_hold' : 'unpaid'; };
+const BUCKETS = [['paid', 'Paid'], ['unpaid', 'Unpaid'], ['on_hold', 'On hold']];
+const amountOf = l => (bucketOf(l) === 'paid' ? (l.paid_amount ?? l.payable) : l.payable);
+const statusLabel = l => (owes(l) || payStatus(l) !== 'pending' ? PAYMENT_STATUS[payStatus(l)].label : 'Nothing to pay');
+const byChannel = (rows, channelLabel) => {
+  const m = new Map();
   for (const r of rows) {
     const k = r.channel ?? '';
-    if (!channels.has(k)) channels.set(k, []);
-    channels.get(k).push(r);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
   }
-  const ordered = [...channels.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || byText(channelLabel(a[0]), channelLabel(b[0])));
-  const name = k => (k ? channelLabel(k) : 'No pay channel');
-  const statusText = r => (owes(r.line) ? PAYMENT_STATUS[r.line.payment_status]?.label || 'Not paid yet' : 'Nothing to pay');
+  return [...m.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || byText(channelLabel(a[0]), channelLabel(b[0])));
+};
 
-  const summaryRows = ordered.map(([k, rs]) => ({
-    channel: name(k), people: String(rs.length), payable: inr2(sumPaise(rs.map(r => r.line.payable))),
+// The multi-select filters (status, channel, department) the payment reports share: the same rows drive the screen
+// and the PDF / Excel. An empty set is "every".
+function filterMeta(f, channelLabel) {
+  return [
+    f.status.size > 0 && `Status: ${BUCKETS.filter(([k]) => f.status.has(k)).map(([, l]) => l).join(', ')}`,
+    f.channel.size > 0 && `Channel: ${[...f.channel].map(c => (c ? channelLabel(c) : 'No pay channel')).join(', ')}`,
+    f.dept.size > 0 && `Department: ${[...f.dept].map(d => d || 'No department').join(', ')}`,
+  ];
+}
+
+function PayFilters({ rows, filters, setFilters, channelLabel, showStatus = true }) {
+  const toggle = (axis, v) => setFilters(f => { const n = new Set(f[axis]); if (n.has(v)) n.delete(v); else n.add(v); return { ...f, [axis]: n }; });
+  const channels = [...new Set(rows.map(r => r.channel ?? ''))].sort((a, b) => (a === '') - (b === '') || byText(channelLabel(a), channelLabel(b)));
+  const depts = [...new Set(rows.map(r => r.department || ''))].sort((a, b) => (a === '') - (b === '') || byText(a, b));
+  const any = filters.status.size + filters.channel.size + filters.dept.size > 0;
+  return (
+    <FilterRail className="mb-2">
+      {showStatus && (
+        <FilterGroup label="Status" divider={false}>
+          {BUCKETS.map(([k, label]) => (
+            <FilterChip key={k} label={label} count={rows.filter(r => bucketOf(r.line) === k).length} on={filters.status.has(k)}
+              dot={k === 'paid' ? 'bg-emerald-500' : k === 'on_hold' ? 'bg-amber-500' : 'bg-gray-400'} onClick={() => toggle('status', k)} />
+          ))}
+        </FilterGroup>
+      )}
+      {channels.length > 1 && (
+        <FilterGroup label="Channel" divider={showStatus}>
+          {channels.map(c => (
+            <FilterChip key={c || '_'} label={c ? channelLabel(c) : 'No pay channel'} count={rows.filter(r => (r.channel ?? '') === c).length}
+              on={filters.channel.has(c)} onClick={() => toggle('channel', c)} />
+          ))}
+        </FilterGroup>
+      )}
+      {depts.length > 1 && (
+        <FilterGroup label="Department">
+          {depts.map(d => (
+            <FilterChip key={d || '_'} label={d || 'No department'} count={rows.filter(r => (r.department || '') === d).length}
+              on={filters.dept.has(d)} onClick={() => toggle('dept', d)} />
+          ))}
+        </FilterGroup>
+      )}
+      {any && <FilterChip label="Clear filters" on={false} onClick={() => setFilters({ status: new Set(), channel: new Set(), dept: new Set() })} />}
+    </FilterRail>
+  );
+}
+
+const applyFilters = (rows, f) => rows.filter(r => (!f.status.size || f.status.has(bucketOf(r.line)))
+  && (!f.channel.size || f.channel.has(r.channel ?? '')) && (!f.dept.size || f.dept.has(r.department || '')));
+
+// ── Payment sheet ───────────────────────────────────────────────────────────
+
+function paymentSpec({ month, run, rows, channelLabel, meta = [] }) {
+  const name = k => (k ? channelLabel(k) : 'No pay channel');
+  const inBucket = (rs, b) => rs.filter(r => bucketOf(r.line) === b);
+  const sumOf = rs => inr2(sumPaise(rs.map(r => amountOf(r.line))));
+  const countAndSum = rs => (rs.length ? `${rs.length} · ${sumOf(rs)}` : '—');
+
+  // Summary: per channel, each bucket's people and amount, then the grand total.
+  const summaryRows = byChannel(rows, channelLabel).map(([k, rs]) => ({
+    channel: name(k), people: String(rs.length), paid: countAndSum(inBucket(rs, 'paid')), unpaid: countAndSum(inBucket(rs, 'unpaid')),
+    on_hold: countAndSum(inBucket(rs, 'on_hold')), payable: inr2(sumPaise(rs.map(r => r.line.payable))),
     carried: inr2(sumPaise(rs.map(r => r.line.carried_advance))),
   }));
   summaryRows.push({
-    channel: 'Total', people: String(rows.length), payable: inr2(sumPaise(rows.map(r => r.line.payable))),
+    channel: 'Total', people: String(rows.length), paid: countAndSum(inBucket(rows, 'paid')), unpaid: countAndSum(inBucket(rows, 'unpaid')),
+    on_hold: countAndSum(inBucket(rows, 'on_hold')), payable: inr2(sumPaise(rows.map(r => r.line.payable))),
     carried: inr2(sumPaise(rows.map(r => r.line.carried_advance))), total: true,
   });
   const summaryCols = [
     { key: 'channel', label: 'Channel' }, { key: 'people', label: 'People', align: 'right' },
-    { key: 'payable', label: 'Payable', align: 'right' }, { key: 'carried', label: 'Carried as advance', align: 'right' },
-  ];
-
-  const detailCols = [
-    { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' },
-    { key: 'payable', label: 'Payable', align: 'right' }, { key: 'carried', label: 'Carried as advance', align: 'right' },
-    { key: 'status', label: 'Payment' },
+    { key: 'paid', label: 'Paid', align: 'right' }, { key: 'unpaid', label: 'Unpaid', align: 'right' },
+    { key: 'on_hold', label: 'On hold', align: 'right' }, { key: 'payable', label: 'Payable', align: 'right' },
+    { key: 'carried', label: 'Carried as advance', align: 'right' },
   ];
   const sections = [
     { heading: 'Summary by channel', columns: summaryCols, rows: summaryRows, pdfRowTone: r => (r.total ? 'info' : null) },
   ];
-  for (const [k, rs] of ordered) {
-    const paid = rs.filter(r => owes(r.line));
-    if (!paid.length) continue;
-    const body = paid.map(r => ({
-      code: r.code, name: r.name, department: r.department, payable: inr2(r.line.payable), carried: inr2(r.line.carried_advance), status: statusText(r),
-    }));
-    body.push({
-      code: '', name: `Subtotal — ${plural(paid.length, 'person', 'people')}`, department: '',
-      payable: inr2(sumPaise(paid.map(r => r.line.payable))), carried: inr2(sumPaise(paid.map(r => r.line.carried_advance))), status: '', subtotal: true,
-    });
-    sections.push({ heading: `Detail — ${name(k)}`, columns: detailCols, rows: body, pdfRowTone: r => (r.subtotal ? 'info' : null) });
+
+  // One section per bucket: its lines by channel, a subtotal per channel and the bucket's total.
+  const detail = {
+    paid: [
+      { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' },
+      { key: 'amount', label: 'Amount paid', align: 'right' }, { key: 'paid_on', label: 'Paid on' }, { key: 'ref', label: 'Reference' },
+    ],
+    unpaid: [
+      { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' },
+      { key: 'amount', label: 'Payable', align: 'right' }, { key: 'status', label: 'Status' },
+    ],
+    on_hold: [
+      { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' },
+      { key: 'amount', label: 'Payable', align: 'right' }, { key: 'reason', label: 'Why on hold' },
+    ],
+  };
+  for (const [b, title] of BUCKETS) {
+    const rs = inBucket(rows, b);
+    if (!rs.length) continue;
+    const body = [];
+    for (const [k, list2] of byChannel(rs, channelLabel)) {
+      for (const r of list2) {
+        body.push({
+          code: r.code, name: r.name, department: r.department, amount: inr2(amountOf(r.line)),
+          paid_on: r.line.paid_on || '', ref: r.line.paid_ref || '', status: statusLabel(r.line), reason: r.line.hold_reason || '',
+        });
+      }
+      body.push({ code: '', name: `Subtotal — ${name(k)} · ${plural(list2.length, 'person', 'people')}`, department: '', amount: sumOf(list2), subtotal: true });
+    }
+    body.push({ code: '', name: `Total ${title.toLowerCase()} — ${plural(rs.length, 'person', 'people')}`, department: '', amount: sumOf(rs), total: true });
+    sections.push({ heading: title, columns: detail[b], rows: body, pdfRowTone: r => (r.total ? 'info' : r.subtotal ? 'info' : null) });
   }
-  const unpaid = rows.filter(r => !owes(r.line));
-  if (unpaid.length) {
+
+  const carried = rows.filter(r => !owes(r.line) && (paiseOf(r.line.carried_advance) ?? 0n) > 0n);
+  if (carried.length) {
     sections.push({
-      heading: 'Not paid this month — carried as advance',
+      heading: 'Nothing payable this month — carried as advance',
       columns: [
         { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'channel', label: 'Channel' },
         { key: 'carried', label: 'Advance carried', align: 'right' }, { key: 'why', label: 'Why' },
       ],
-      rows: unpaid.map(r => ({
+      rows: carried.map(r => ({
         code: r.code, name: r.name, channel: name(r.channel), carried: inr2(r.line.carried_advance),
         why: flagsOf(r.line).some(f => f.code === 'INSUFFICIENT_PAY') ? flagLabel('INSUFFICIENT_PAY') : 'Nothing payable',
       })),
@@ -125,11 +214,11 @@ function paymentSpec({ month, run, rows, channelLabel }) {
     title: `Payment sheet — ${monthLabel(month)}`,
     subtitle: `HR & Payroll · ${run?.status === 'finalised' ? 'Finalised' : `Run is ${run?.status || 'not started'} — not final`}`,
     orientation: 'portrait',
-    meta: [`${plural(rows.length, 'person', 'people')}`],
+    meta: [...meta, `${plural(rows.length, 'person', 'people')}`],
     summary: [
       { label: 'People', value: String(rows.length) },
+      ...BUCKETS.map(([b, label]) => ({ label, value: `${inBucket(rows, b).length} · ${sumOf(inBucket(rows, b))}` })),
       { label: 'Payable', value: inr2(sumPaise(rows.map(r => r.line.payable))) },
-      { label: 'Carried as advance', value: inr2(sumPaise(rows.map(r => r.line.carried_advance))) },
     ],
     sections,
   };
@@ -142,10 +231,13 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
   const finalised = run?.status === 'finalised';
   const banks = channels.filter(c => c.kind === 'bank' && c.active !== false);
   const [busy, setBusy] = useState('');
+  // Only lines still to pay: unpaid (not paid, not on hold) by default; on-hold lines only when asked for.
+  const [withHeld, setWithHeld] = useState(false);
+  const toPay = r => owes(r.line) && (bucketOf(r.line) === 'unpaid' || (withHeld && bucketOf(r.line) === 'on_hold'));
 
   const make = async channel => {
-    const lines = rows.filter(r => r.channel === channel.code && owes(r.line));
-    if (!lines.length) { toast.info('Nobody is to be paid through this channel.'); return; }
+    const lines = rows.filter(r => r.channel === channel.code && toPay(r));
+    if (!lines.length) { toast.info('Nobody is left to pay through this channel.'); return; }
     setBusy(channel.code);
     try {
       const people = await pool(lines, 5, r => hrApi.person(r.id));
@@ -165,7 +257,8 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
       await downloadBankList({
         fileName: `HR Bank list ${month} ${channel.label || channel.code}`,
         title: `Bank transfer list — ${channel.label || channel.code} — ${monthLabel(month)}`,
-        meta: [channel.bank_name && `Bank: ${channel.bank_name}`, plural(out.length, 'transfer')],
+        meta: [channel.bank_name && `Bank: ${channel.bank_name}`, plural(out.length, 'transfer'),
+          withHeld ? 'Unpaid lines, including lines on hold' : 'Unpaid lines only (paid and on-hold lines left out)'],
         rows: out,
         total: sumPaise(out.map(o => o.amount)),
       });
@@ -183,17 +276,26 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
         One Excel file per bank channel: beneficiary, account number, IFSC, amount and a reference (month and payroll code).
         {!canExport && ' Account numbers are shown only to operators and above, so this download is not available at your access level.'}
         {canExport && !finalised && ' Available once the month is finalised.'}
+        {' '}Only lines still to pay are listed: paid lines are never in it, and lines on hold only when ticked below.
       </p>
+      <label className="flex items-center gap-2 text-xs font-semibold text-[#515154]">
+        <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={withHeld} onChange={e => setWithHeld(e.target.checked)} />
+        Include lines on hold
+      </label>
       {banks.length === 0 && <p className="text-xs text-[#86868B]">No bank pay channel is set up (Settings → Pay channels).</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         {banks.map(c => {
-          const mine = rows.filter(r => r.channel === c.code && owes(r.line));
+          const mine = rows.filter(r => r.channel === c.code && toPay(r));
+          const held = rows.filter(r => r.channel === c.code && owes(r.line) && bucketOf(r.line) === 'on_hold').length;
           return (
             <div key={c.code} className="glass flex items-center gap-3 rounded-2xl border border-white/70 p-3 shadow-card">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E1EFFF] text-[#0064D2]"><Landmark size={16} /></span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold text-[#1D1D1F]">{channelLabel(c.code)}</p>
-                <p className="text-[11px] text-[#6E6E73]">{plural(mine.length, 'transfer')} · {inr2(sumPaise(mine.map(r => r.line.payable)))}</p>
+                <p className="text-[11px] text-[#6E6E73]">
+                  {plural(mine.length, 'transfer')} · {inr2(sumPaise(mine.map(r => r.line.payable)))}
+                  {held > 0 && !withHeld && <span className="text-amber-800"> · {held} on hold left out</span>}
+                </p>
               </div>
               {canExport && (
                 <Button size="sm" variant="secondary" disabled={!finalised || !mine.length || (busy !== '' && busy !== c.code)} onClick={() => make(c)}>
@@ -220,6 +322,9 @@ export default function Reports({ level }) {
     setParams(p => { const n = new URLSearchParams(p); n.set('month', m); return n; }, { replace: true });
   }, [setParams]);
   const [report, setReport] = useState('payment');
+  // Status / channel / department, shared by the payment sheet, the paid register and the on-hold report.
+  const [filters, setFilters] = useState(() => ({ status: new Set(), channel: new Set(), dept: new Set() }));
+  useEffect(() => { setFilters({ status: new Set(), channel: new Set(), dept: new Set() }); }, [month]);
 
   const [people, setPeople] = useState([]);
   const [channels, setChannels] = useState([]);
@@ -305,7 +410,15 @@ export default function Reports({ level }) {
         </div>
       )}
 
-      {needsRun && run && report === 'payment' && <PaymentReport month={month} run={run} rows={rows} channelLabel={channelLabel} />}
+      {needsRun && run && report === 'payment' && (
+        <PaymentReport month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters} />
+      )}
+      {needsRun && run && report === 'paid' && (
+        <PaidRegister month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters} />
+      )}
+      {needsRun && run && report === 'hold' && (
+        <OnHoldReport month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters} />
+      )}
       {needsRun && run && report === 'bank' && (
         <BankLists month={month} run={run} rows={rows} channels={channels} channelLabel={channelLabel} canExport={canExportBank} />
       )}
@@ -319,23 +432,114 @@ export default function Reports({ level }) {
 
 // ── Payment sheet (on screen) ───────────────────────────────────────────────
 
-function PaymentReport({ month, run, rows, channelLabel }) {
+function PaymentPillCell({ line }) {
+  if (!owes(line) && payStatus(line) === 'pending') return <span className="text-[#86868B]">Nothing to pay</span>;
+  const st = payStatus(line);
+  return <PaymentPill status={st} reason={st === 'on_hold' ? line.hold_reason || 'No reason recorded' : null} />;
+}
+
+function BucketTotals({ rows }) {
+  return (
+    <MiniTotals items={[['People', String(rows.length)],
+      ...BUCKETS.map(([b, label]) => {
+        const rs = rows.filter(r => bucketOf(r.line) === b);
+        return [`${label} · ${rs.length}`, inr2(sumPaise(rs.map(r => amountOf(r.line))))];
+      })]} />
+  );
+}
+
+function PaymentReport({ month, run, rows, channelLabel, filters, setFilters }) {
   const [q, setQ] = useState('');
+  const shown = useMemo(() => applyFilters(rows, filters), [rows, filters]);
   const columns = useMemo(() => [
-    text('name', 'Name', r => r.name), text('code', 'Code', r => r.code),
+    text('name', 'Name', r => r.name), text('code', 'Code', r => r.code), text('department', 'Department', r => r.department),
     text('channel', 'Channel', r => r.channelLabel || 'No pay channel'),
     money('payable', 'Payable', r => r.line.payable), money('carried', 'Carried as advance', r => r.line.carried_advance),
-    { key: 'payment', label: 'Payment', sortValue: r => r.line.payment_status, export: r => (owes(r.line) ? PAYMENT_STATUS[r.line.payment_status]?.label || '' : 'Nothing to pay'),
-      render: r => (owes(r.line) ? PAYMENT_STATUS[r.line.payment_status]?.label || 'Not paid yet' : <span className="text-[#86868B]">Nothing to pay</span>) },
+    { key: 'payment', label: 'Payment', sortValue: r => payStatus(r.line), export: r => statusLabel(r.line), render: r => <PaymentPillCell line={r.line} /> },
+    text('paid_on', 'Paid on', r => r.line.paid_on || ''), text('ref', 'Reference', r => r.line.paid_ref || ''),
   ], []);
   return (
     <>
-      <MiniTotals items={[['People', String(rows.length)], ['Payable', inr2(sumPaise(rows.map(r => r.line.payable)))],
-        ['Carried as advance', inr2(sumPaise(rows.map(r => r.line.carried_advance)))], ['Run', run.status]]} />
-      <DataTable columns={columns} rows={rows} getRowId={r => r.id} dense serialNumber={false}
+      <PayFilters rows={rows} filters={filters} setFilters={setFilters} channelLabel={channelLabel} />
+      <BucketTotals rows={shown} />
+      <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
         searchValue={q} onSearchChange={setQ} searchPlaceholder="Search name, code or channel…"
         defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR Payment sheet ${month}`}
-        exportSpec={sorted => paymentSpec({ month, run, rows: sorted, channelLabel })} empty="No lines in this run." />
+        exportSpec={sorted => paymentSpec({ month, run, rows: sorted, channelLabel, meta: [...filterMeta(filters, channelLabel), q.trim() && `Search: "${q.trim()}"`] })}
+        empty={rows.length ? 'No line matches these filters.' : 'No lines in this run.'} />
+    </>
+  );
+}
+
+// ── Paid register: who was paid, through what, how much, when and against which reference ──
+
+function PaidRegister({ month, run, rows, channelLabel, filters, setFilters }) {
+  const [q, setQ] = useState('');
+  const paid = useMemo(() => rows.filter(r => bucketOf(r.line) === 'paid'), [rows]);
+  const shown = useMemo(() => applyFilters(paid, { ...filters, status: new Set() }), [paid, filters]);
+  const columns = useMemo(() => [
+    text('name', 'Person', r => r.name), text('code', 'Code', r => r.code), text('department', 'Department', r => r.department),
+    text('channel', 'Channel', r => r.channelLabel || 'No pay channel'),
+    money('amount', 'Amount paid', r => amountOf(r.line)), text('paid_on', 'Paid on', r => r.line.paid_on || ''),
+    text('ref', 'Reference', r => r.line.paid_ref || ''),
+  ], []);
+  const spec = sorted => {
+    const cols = [
+      { key: 'name', label: 'Person' }, { key: 'code', label: 'Code' }, { key: 'channel', label: 'Channel' },
+      { key: 'amount', label: 'Amount paid', align: 'right' }, { key: 'paid_on', label: 'Paid on' }, { key: 'ref', label: 'Reference' },
+    ];
+    const sections = byChannel(sorted, channelLabel).map(([k, rs]) => ({
+      heading: k ? channelLabel(k) : 'No pay channel', columns: cols,
+      rows: [...rs.map(r => ({ name: r.name, code: r.code, channel: r.channelLabel || 'No pay channel', amount: inr2(amountOf(r.line)), paid_on: r.line.paid_on || '', ref: r.line.paid_ref || '' })),
+        { name: `Subtotal — ${plural(rs.length, 'person', 'people')}`, code: '', channel: '', amount: inr2(sumPaise(rs.map(r => amountOf(r.line)))), paid_on: '', ref: '', subtotal: true }],
+      pdfRowTone: r => (r.subtotal ? 'info' : null),
+    }));
+    return {
+      name: `HR Paid register ${month}`, title: `Paid register — ${monthLabel(month)}`,
+      subtitle: `HR & Payroll · ${run.status}`, orientation: 'portrait',
+      meta: [...filterMeta({ ...filters, status: new Set() }, channelLabel), q.trim() && `Search: "${q.trim()}"`, plural(sorted.length, 'person', 'people')],
+      summary: [{ label: 'People paid', value: String(sorted.length) }, { label: 'Amount paid', value: inr2(sumPaise(sorted.map(r => amountOf(r.line)))) }],
+      sections: sections.length ? sections : [{ columns: cols, rows: [] }],
+    };
+  };
+  return (
+    <>
+      <PayFilters rows={paid} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showStatus={false} />
+      <MiniTotals items={[['People paid', String(shown.length)], ['Amount paid', inr2(sumPaise(shown.map(r => amountOf(r.line))))],
+        ['Not paid yet', String(rows.length - paid.length)], ['Run', run.status]]} />
+      <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
+        searchValue={q} onSearchChange={setQ} searchPlaceholder="Search person, code, channel or reference…"
+        defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR Paid register ${month}`} exportSpec={spec}
+        empty={paid.length ? 'No paid line matches these filters.' : 'Nobody has been marked paid for this month yet.'} />
+    </>
+  );
+}
+
+// ── On hold: who is not to be paid, how much, why, and who put it on hold when ──
+
+function OnHoldReport({ month, run, rows, channelLabel, filters, setFilters }) {
+  const [q, setQ] = useState('');
+  const held = useMemo(() => rows.filter(r => bucketOf(r.line) === 'on_hold'), [rows]);
+  const shown = useMemo(() => applyFilters(held, { ...filters, status: new Set() }), [held, filters]);
+  const heldBy = r => r.line.held_by_name || (r.line.held_by != null ? `user #${r.line.held_by}` : '');
+  const heldAt = r => (r.line.held_at ? fmt.dt(r.line.held_at) : '');
+  const columns = useMemo(() => [
+    text('name', 'Person', r => r.name), text('code', 'Code', r => r.code), text('department', 'Department', r => r.department),
+    text('channel', 'Channel', r => r.channelLabel || 'No pay channel'),
+    money('amount', 'Amount', r => r.line.payable), text('reason', 'Why on hold', r => r.line.hold_reason || ''),
+    text('held_by', 'Held by', heldBy), { ...text('held_at', 'Held at', heldAt), sortValue: r => r.line.held_at || '' },
+  ], []);
+  return (
+    <>
+      <PayFilters rows={held} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showStatus={false} />
+      <MiniTotals items={[['On hold', String(shown.length)], ['Amount on hold', inr2(sumPaise(shown.map(r => r.line.payable)))], ['Run', run.status]]} />
+      <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
+        searchValue={q} onSearchChange={setQ} searchPlaceholder="Search person, code, channel or reason…"
+        defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR On hold ${month}`}
+        exportSubtitle={`HR & Payroll · Payments on hold · ${monthLabel(month)}`}
+        exportMeta={() => [...filterMeta({ ...filters, status: new Set() }, channelLabel), q.trim() && `Search: "${q.trim()}"`]}
+        exportSummary={rs => [{ label: 'On hold', value: String(rs.length) }, { label: 'Amount', value: inr2(sumPaise(rs.map(r => r.line.payable))) }]}
+        empty={held.length ? 'No line on hold matches these filters.' : 'No payment is on hold for this month.'} />
     </>
   );
 }
