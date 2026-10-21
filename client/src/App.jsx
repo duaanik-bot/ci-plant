@@ -27,6 +27,7 @@ const Track = lazy(() => import('./pages/Track.jsx'));
 const StatusSheet = lazy(() => import('./pages/StatusSheet.jsx'));
 const Invoice = lazy(() => import('./pages/Invoice.jsx'));
 const Accounts = lazy(() => import('./pages/Accounts.jsx'));
+const Finance = lazy(() => import('./pages/finance/Finance.jsx'));
 const PrintPlanning = lazy(() => import('./pages/PrintPlanning.jsx'));
 const PressLineup = lazy(() => import('./pages/PressLineup.jsx'));
 const Logbook = lazy(() => import('./pages/Logbook.jsx'));
@@ -176,6 +177,7 @@ export default function App() {
                 <Route path="/coas/:id" element={<COA />} />
                 <Route path="/coa-register" element={<CoaRegister />} />
                 <Route path="/accounts" element={<Accounts />} />
+                <Route path="/finance/*" element={<Finance />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/masters" element={<Masters />} />
                 <Route path="/tooling" element={<Navigate to="/tooling/plates" replace />} />

@@ -10,6 +10,7 @@ import {
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Users, FileCheck2,
+  BookOpenCheck, FileSpreadsheet, SlidersHorizontal,
 } from 'lucide-react';
 import { api, auth, currentUser, fmt } from '../api.js';
 import { recordDownload } from '../lib/fluenceDownloads.js';
@@ -28,7 +29,7 @@ import { useTier } from '../lib/tier.js';
 import { storage } from '../lib/safeStorage.js';
 import { hrApi, levelAtLeast } from '../lib/hr.js';
 
-// Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin,
+// Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Finance → Admin,
 // where Supply carries the chain to its end — Procurement, Warehouse, Dispatch, Accounts.
 // `module` keys line up with MODULES in modules.js — per-user access control.
 const NAV = [
@@ -83,6 +84,14 @@ const NAV = [
       { label: 'Warehouse', to: '/inventory', icon: Warehouse, roles: ['admin', 'planner', 'production', 'qc', 'viewer'], module: 'inventory' },
       { label: 'Dispatch & Invoice', to: '/dispatch-invoice', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'], module: 'dispatch_invoice' },
       { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'], module: 'accounts' },
+    ],
+  },
+  {
+    group: 'Finance',
+    items: [
+      { label: 'Vouchers', to: '/finance', end: true, icon: BookOpenCheck, roles: ['admin'], module: 'finance' },
+      { label: 'Reports', to: '/finance/reports', icon: FileSpreadsheet, roles: ['admin'], module: 'finance' },
+      { label: 'Setup', to: '/finance/setup', icon: SlidersHorizontal, roles: ['admin'], module: 'finance' },
     ],
   },
   {
@@ -702,6 +711,7 @@ const SHORT_LABEL = {
   '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
   '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
   '/shade-cards': 'Shades', '/hr': 'HR', '/coa-register': 'COAs',
+  '/finance/reports': 'Fin Rpts', '/finance/setup': 'Fin Setup',
 };
 
 // Phone bottom tab bar — the app's primary navigation on a handset. 64px of

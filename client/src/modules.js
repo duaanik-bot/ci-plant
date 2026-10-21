@@ -30,6 +30,8 @@ export const MODULES = [
   // Downloading a COA needs users.coa_download as well (server coa-register.js).
   { key: 'coa_register', label: 'COA Register', path: '/coa-register' },
   { key: 'shade_cards', label: 'Shade Cards', path: '/tooling/shade-cards', aliases: ['/shade-cards'] },
+  // Finance — the books of account. Before Fluence, which has to stay last (kit-studio.test.js).
+  { key: 'finance', label: 'Finance', path: '/finance' },
   // Fluence — kits, their prescriptions and Kit Studio, for Fluence
   // Pharmaceuticals only. Last, so no login's first-allowed module changes
   // because it exists. Kit Studio was a module of its own until the two became

@@ -49,6 +49,7 @@ import kitStudio from './routes/kitstudio.js';
 import hr from './routes/hr.js';
 import hrPayroll from './routes/hr-payroll.js';
 import hrLedgers from './routes/hr-ledgers.js';
+import finance from './routes/finance.js';
 import { dataTablesMiddleware } from './data-tables.js';
 import { heartbeatMiddleware } from './realtime-heartbeat.js';
 
@@ -72,8 +73,16 @@ const OCR_PATH = '/api/orders/import/parse-ocr';
 // a few hundred KB, so it gets its own ceiling too (routes/avs-robot.js).
 const AVS_FILE_PATH = '/api/avs/robot/file-report';
 const avsFileJson = express.json({ limit: '4mb' });
+// A Tally upload (Finance → Opening Balances) posts a whole trial balance, list of
+// accounts and bills outstanding as parsed rows, and the accountant's confirmation
+// of its matches lists every one of those rows again: a few thousand rows run well
+// past 100KB. Both get their own ceiling; the real guard is the row counts checked
+// inside the routes (finance-import.js).
+const FIN_IMPORT_PATHS = /^\/api\/finance\/imports(\/\d+\/matches)?$/;
+const finImportJson = express.json({ limit: '4mb' });
 app.use((req, res, next) => (req.path === OCR_PATH ? ocrJson
-  : req.path === AVS_FILE_PATH ? avsFileJson : standardJson)(req, res, next));
+  : req.path === AVS_FILE_PATH ? avsFileJson
+    : FIN_IMPORT_PATHS.test(req.path) ? finImportJson : standardJson)(req, res, next));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public
@@ -148,6 +157,9 @@ app.use('/api', hrPayroll);
 // HR & Payroll ledgers, behind the same guard: employee loans, advances, one-time and recurring adjustments, and
 // the one-time load from the salary workbook (routes/hr-ledgers.js).
 app.use('/api', hrLedgers);
+// Finance: the books of account (fin_*). Each route is authorised by the login's own Finance grant, never
+// by the plant role (finance-access.js), and the router sits after moduleGate like every other.
+app.use('/api', finance);
 
 // Central error handler — business errors carry .status; structured errors
 // (e.g. tolerance decisions) carry .body so the UI can offer choices.

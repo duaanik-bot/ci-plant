@@ -43,6 +43,8 @@ const OF_KIND = Object.freeze({
   // A new customer PO the order intake keyed in as a draft: somebody has to
   // check it against the PO and confirm it before Planning can see it.
   new_po: 'approvals',
+  // A Finance entry waiting for one of its book's Approvers to decide it.
+  fin_approval: 'approvals',
   // Addressed at a person by name. Loud enough to pierce mute (see chat.js),
   // so loud enough to deserve its own tab rather than sitting under Messages.
   mention: 'mentions',
@@ -51,6 +53,8 @@ const OF_KIND = Object.freeze({
   xs_decision: 'decisions',
   mgt_decision: 'decisions',
   ready_override: 'decisions',
+  // A Finance Approver's answer, approved or rejected, back to the maker.
+  fin_decision: 'decisions',
   xs_cutting: 'alerts',
   xs_received: 'alerts',
   // A plate died on the press and the run is standing still. Nobody approves it —

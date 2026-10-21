@@ -2862,4 +2862,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // COA Register — the Drive COA register mirrored in (no link to plant data),
   // and users.coa_download. Idempotent. 2026-10-17
   await pool.query(migration('20261017120000_coa_register.sql'));
+
+  // Finance ledger core — the thirteen fin_* tables: books, years, months,
+  // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables
+  // only, with no foreign key onto any ERP table; idempotent.
+  await pool.query(migration('20261017093446_finance_ledger_core.sql'));
 }
