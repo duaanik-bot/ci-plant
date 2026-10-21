@@ -20,6 +20,7 @@
     "check:parent": "node scripts/check-parent-fit.mjs",
     "check:stock": "node scripts/check-stock.mjs",
     "db:backup": "node scripts/backup-prod.mjs",
+    "coa:sync": "node scripts/coa-register-sync.mjs",
     "deploy:prod": "vercel deploy --prod --yes && node scripts/verify-prod.mjs"
   },
   "devDependencies": {

@@ -9,7 +9,7 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Users,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Users, FileCheck2,
 } from 'lucide-react';
 import { api, auth, currentUser, fmt } from '../api.js';
 import { recordDownload } from '../lib/fluenceDownloads.js';
@@ -100,6 +100,9 @@ const NAV = [
       // admin). `hr: true` ties the item to the HR access probe below: no level, no item.
       { label: 'HR & Payroll', to: '/hr', icon: Users, roles: 'all', hr: true },
       { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
+      // COA Register — every COA issued, as filed in Drive; a register you consult, so
+      // it sits with the Logbook. Viewing is the module tick; downloading is its own.
+      { label: 'COA Register', to: '/coa-register', icon: FileCheck2, roles: 'all', module: 'coa_register' },
       { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],
   },
@@ -698,7 +701,7 @@ const SHORT_LABEL = {
   '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
   '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
   '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
-  '/shade-cards': 'Shades', '/hr': 'HR',
+  '/shade-cards': 'Shades', '/hr': 'HR', '/coa-register': 'COAs',
 };
 
 // Phone bottom tab bar — the app's primary navigation on a handset. 64px of

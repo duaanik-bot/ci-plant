@@ -31,6 +31,7 @@ import shadecards from './routes/shadecards.js';
 import timeline from './routes/timeline.js';
 import logbook from './routes/logbook.js';
 import coa from './routes/coa.js';
+import coaRegister from './routes/coa-register.js';
 import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
@@ -111,6 +112,7 @@ app.use('/api', shadecards);
 app.use('/api', timeline);
 app.use('/api', logbook);
 app.use('/api', coa);
+app.use('/api', coaRegister);   // COA Register — the Drive register, mirrored in
 app.use('/api', masterHistory);
 app.use('/api', notifications);
 app.use('/api', chat);

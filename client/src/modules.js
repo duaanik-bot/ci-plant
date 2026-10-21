@@ -26,6 +26,9 @@ export const MODULES = [
   { key: 'reports', label: 'Reports', path: '/reports' },
   { key: 'masters', label: 'Masters', path: '/masters' },
   { key: 'tooling', label: 'Tooling Hub', path: '/tooling' },
+  // COA Register — the Certificates of Analysis as filed in Drive, mirrored in.
+  // Downloading a COA needs users.coa_download as well (server coa-register.js).
+  { key: 'coa_register', label: 'COA Register', path: '/coa-register' },
   { key: 'shade_cards', label: 'Shade Cards', path: '/tooling/shade-cards', aliases: ['/shade-cards'] },
   // Fluence — kits, their prescriptions and Kit Studio, for Fluence
   // Pharmaceuticals only. Last, so no login's first-allowed module changes

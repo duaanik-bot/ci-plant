@@ -59,7 +59,7 @@ authRouter.get('/auth/me', (req, res, next) => {
   requireAuth(req, res, async () => {
     try {
       const user = await one(
-        'SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver FROM users WHERE id=$1',
+        'SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver, coa_download FROM users WHERE id=$1',
         [req.user.id]);
       if (!user || !user.active) return res.status(401).json({ error: 'Account disabled' });
       res.json(userView(user));
@@ -83,6 +83,7 @@ function userView(u) {
     is_management: +(u.is_management ?? 0),
     reverse_approver: +(u.reverse_approver ?? 0),
     avs_approver: +(u.avs_approver ?? 0),
+    coa_download: +(u.coa_download ?? 0),
   };
 }
 
@@ -199,7 +200,7 @@ const cleanFlag = v => (+v ? 1 : 0);
 
 usersRouter.get('/users', requireRole(), async (_req, res, next) => {
   try {
-    res.json(await q('SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver, created_at FROM users ORDER BY name'));
+    res.json(await q('SELECT id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver, coa_download, created_at FROM users ORDER BY name'));
   } catch (e) { next(e); }
 });
 
@@ -210,14 +211,15 @@ usersRouter.post('/users', requireRole(), async (req, res, next) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const hash = bcrypt.hashSync(password, 10);
     const [u] = await q(
-      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver, fluence_tabs, avs_approver)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver`,
+      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver, fluence_tabs, avs_approver, coa_download)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver, coa_download`,
       [name, email, hash, role || 'viewer',
        cleanModules(req.body.modules), cleanSections(req.body.sections),
        cleanMachineIds(req.body.machine_ids), cleanPath(req.body.landing_path),
        cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management),
-       cleanFlag(req.body.reverse_approver), cleanFluenceTabs(req.body.fluence_tabs), cleanFlag(req.body.avs_approver)]);
+       cleanFlag(req.body.reverse_approver), cleanFluenceTabs(req.body.fluence_tabs), cleanFlag(req.body.avs_approver),
+       cleanFlag(req.body.coa_download)]);
     // Standing chat rooms flagged auto_add (Plant Floor) take every new login
     // the moment it exists — nobody joins the plant and misses the plant. A
     // customer's login (only Fluence ticked) is not the plant, and joins none.
@@ -257,6 +259,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if ('is_management' in req.body) { sets.push(`is_management=$${i++}`); vals.push(cleanFlag(req.body.is_management)); }
     if ('reverse_approver' in req.body) { sets.push(`reverse_approver=$${i++}`); vals.push(cleanFlag(req.body.reverse_approver)); }
     if ('avs_approver' in req.body) { sets.push(`avs_approver=$${i++}`); vals.push(cleanFlag(req.body.avs_approver)); }
+    if ('coa_download' in req.body) { sets.push(`coa_download=$${i++}`); vals.push(cleanFlag(req.body.coa_download)); }
     if (password) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       sets.push(`password_hash=$${i++}`); vals.push(bcrypt.hashSync(password, 10));
@@ -264,7 +267,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if (!sets.length) return res.json({});
     vals.push(req.params.id);
     const [u] = await q(
-      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver`, vals);
+      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, fluence_tabs, machine_ids, landing_path, xs_approver, is_management, reverse_approver, avs_approver, coa_download`, vals);
     await audit('user', +req.params.id, 'update', null, q, req.user.name);
     forgetAccess(+req.params.id);   // new ticks, a switch-off: at once, not in a few seconds
     res.json(u);
