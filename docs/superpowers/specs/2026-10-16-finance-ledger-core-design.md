@@ -656,7 +656,7 @@ FY 2026-27 profit in Finance equals Tally's.
 | 1 | `client/src/modules.js` | Insert `{ key: 'finance', label: 'Finance', path: '/finance' }` immediately **before** the Fluence entry (`kit-studio.test.js` requires Fluence last). |
 | 2 | `client/src/App.jsx` | One `lazy(() => import('./pages/finance/Finance.jsx'))` and one `<Route path="/finance/*" element={<Finance />} />` inside the AppLayout route. |
 | 3 | `client/src/components/AppLayout.jsx` | One `{ group: 'Finance', items: [Vouchers (end: true), Reports, Setup] }` between Supply and Admin, plus the icon imports. |
-| 4 | `server/src/app.js` | `import finance from './routes/finance.js';` and `app.use('/api', finance);` after the existing routers. **Amendment awaiting Anik's approval (R35, R41):** one more entry in the existing per-path JSON-ceiling switch, so that `POST /api/finance/imports` and `PUT /api/finance/imports/:id/matches` accept up to 4 MB. A real Tally upload is far over the 100 KB default; a 1,501-account upload measured 453 KB. The routes cap row counts themselves. To revert, remove those lines. |
+| 4 | `server/src/app.js` | `import finance from './routes/finance.js';` and `app.use('/api', finance);` after the existing routers. **Amendment approved by Anik on 2026-10-22 (R35, R41):** one more entry in the existing per-path JSON-ceiling switch, so that `POST /api/finance/imports` and `PUT /api/finance/imports/:id/matches` accept up to 4 MB. A real Tally upload is far over the 100 KB default; a 1,501-account upload measured 453 KB. The routes cap row counts themselves. To revert, remove those lines. |
 | 5 | `server/src/db.js` | One line at the end of `init()`: `await pool.query(migration('<file>'));`. Local only; production gets the named migration at go-live. |
 | 6 | `client/src/lib/writeOnce.js` | Add the Finance minting POST paths from §9.1 to `MINTING_POSTS`. |
 | 7 | `server/src/notify-categories.js` | `fin_approval: 'approvals'` (to Approvers when something waits) and `fin_decision: 'decisions'` (to the maker when approved or rejected). |
@@ -813,7 +813,7 @@ in the worktree; that folder is git-ignored. The rulings below change or extend 
 - **Excel reading.** It unwraps rich-text cells and refuses a formula cell with no saved value.
 
 ### 18.3 Changes that need Anik, and the go-live checklist
-- **Needs approval:** the `app.js` 4 MB JSON ceiling for the two import paths (§12, item 4).
+- **Approved 2026-10-22:** the `app.js` 4 MB JSON ceiling for the two import paths (§12, item 4).
 - **Accountant login.** `scripts/finance-setup.mjs --apply` needs `FIN_SETUP_ACCOUNTANT_EMAIL`, the Accounts login's email. It is no longer written into the public repo (R68). The host guard checks the host `pg` will really use. A re-run prints added, changed or unchanged for each grant. Note that a re-run restores a revoked default grant.
 - **Rebase onto main.** HR & Payroll shipped on 2026-10-17 and touches the same shared files, so merge or rebase the branch onto main. Then rename the migration to a fresh UTC timestamp, because it now sorts before main's newest. Update `db.js` and the pins that name the file.
 - **Real Tally exports, test-first.** Get the accountant's real List of Accounts, Trial Balance and Bills files (§11.1) and test against them first. Likely gaps:
