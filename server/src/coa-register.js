@@ -129,3 +129,30 @@ export function folderWithinCoa(folder) {
 // (users.coa_download); admins always may.
 export const mayViewCoa = u => canAccess(u, 'coa_register');
 export const mayDownloadCoa = u => mayViewCoa(u) && (u?.role === 'admin' || +(u?.coa_download ?? 0) === 1);
+
+// ─── The automatic sync's brakes ────────────────────────────────────────────
+// The background sync (scripts/coa-register-sync.mjs --auto, run every few
+// minutes on the Mac that holds the Drive) writes to the live plant with nobody
+// watching. A register caught half-saved by Drive, or a sheet emptied by
+// mistake, would otherwise mirror straight through and remove COAs from CI Plant.
+// So the automatic run refuses — and says why — when what it is about to do
+// looks like an accident. A person can still run the sync by hand.
+export const AUTO_MAX_REMOVALS = 3;
+export function autoSyncRefusal({ before = 0, records = [], removed = [], missing = [] }) {
+  if (!records.length) return 'the register reads as empty';
+  const needed = ['Customer', 'Invoice', 'COA file', 'Folder'].filter(h => missing.includes(h));
+  if (needed.length) return `the register has lost its ${needed.join(', ')} heading${needed.length > 1 ? 's' : ''}`;
+  if (removed.length > AUTO_MAX_REMOVALS || (removed.length && removed.length > before * 0.2)) {
+    return `it would remove ${removed.length} of ${before} COAs (${removed.slice(0, 5).join(', ')}${removed.length > 5 ? ', …' : ''})`;
+  }
+  return null;
+}
+
+// What the Drive folder looks like right now, as one string — the register's
+// size and time and every PDF's path, size and time. The automatic sync keeps the
+// last one it wrote and does nothing while it has not changed.
+export function driveFingerprint(registerStat, pdfs) {
+  const parts = [`${registerStat.name}|${registerStat.size}|${Math.round(registerStat.mtimeMs)}`,
+    ...pdfs.map(f => `${f.rel}|${f.size}|${Math.round(f.mtimeMs)}`).sort()];
+  return parts.join('\n');
+}

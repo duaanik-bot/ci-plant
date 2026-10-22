@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS } from './coa-register.js';
+import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS, autoSyncRefusal, driveFingerprint } from './coa-register.js';
 
 const HEAD = REGISTER_COLUMNS.map(c => c[0]);
 const row = over => HEAD.map(h => over[h] ?? null);
@@ -104,4 +104,26 @@ test('the Download COA right travels with the user save, like the other grants',
   assert.match(auth, /coa_download: \+\(u\.coa_download \?\? 0\)/);
   const masters = fs.readFileSync(new URL('../../client/src/pages/Masters.jsx', import.meta.url), 'utf8');
   assert.match(masters, /body\.coa_download = \+editing\.coa_download \? 1 : 0;/);
+});
+
+test('the automatic sync refuses what looks like an accident, and lets ordinary changes through', () => {
+  const recs = n => Array.from({ length: n }, (_, i) => ({ coa_no: `C${i}` }));
+  assert.equal(autoSyncRefusal({ before: 25, records: recs(27), removed: [] }), null, 'new COAs');
+  assert.equal(autoSyncRefusal({ before: 25, records: recs(24), removed: ['C9'] }), null, 'one COA taken out');
+  assert.equal(autoSyncRefusal({ before: 0, records: recs(25), removed: [] }), null, 'the first sync');
+  assert.match(autoSyncRefusal({ before: 25, records: [], removed: [] }), /empty/);
+  assert.match(autoSyncRefusal({ before: 25, records: recs(21), removed: ['a', 'b', 'c', 'd'] }), /remove 4 of 25/);
+  assert.match(autoSyncRefusal({ before: 5, records: recs(3), removed: ['a', 'b'] }), /remove 2 of 5/, 'a fifth of a small register');
+  assert.match(autoSyncRefusal({ before: 25, records: recs(25), missing: ['COA file'] }), /COA file heading/);
+});
+
+test('the Drive fingerprint moves with any register or PDF change and ignores listing order', () => {
+  const reg = { name: 'COA Register.xlsx', size: 9000, mtimeMs: 1000 };
+  const a = { rel: 'x/a.pdf', size: 10, mtimeMs: 1 };
+  const b = { rel: 'x/b.pdf', size: 20, mtimeMs: 2 };
+  const fp = driveFingerprint(reg, [a, b]);
+  assert.equal(driveFingerprint(reg, [b, a]), fp);
+  assert.notEqual(driveFingerprint({ ...reg, mtimeMs: 2000 }, [a, b]), fp, 'register re-saved');
+  assert.notEqual(driveFingerprint(reg, [a, b, { rel: 'y/c.pdf', size: 5, mtimeMs: 3 }]), fp, 'a PDF added');
+  assert.notEqual(driveFingerprint(reg, [a, { ...b, size: 21 }]), fp, 'a PDF replaced');
 });

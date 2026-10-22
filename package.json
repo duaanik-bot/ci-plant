@@ -21,6 +21,7 @@
     "check:stock": "node scripts/check-stock.mjs",
     "db:backup": "node scripts/backup-prod.mjs",
     "coa:sync": "node scripts/coa-register-sync.mjs",
+    "coa:auto-sync:install": "scripts/coa-sync/install.sh",
     "deploy:prod": "vercel deploy --prod --yes && node scripts/verify-prod.mjs"
   },
   "devDependencies": {
