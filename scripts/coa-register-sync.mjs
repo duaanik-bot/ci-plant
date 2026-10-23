@@ -29,7 +29,7 @@ import crypto from 'crypto';
 import pg from 'pg';
 import ExcelJS from 'exceljs';
 import { execFile } from 'child_process';
-import { parseRegister, pickPdf, folderWithinCoa, REGISTER_FIELDS, autoSyncRefusal, driveFingerprint } from '../server/src/coa-register.js';
+import { parseRegister, pickPdf, folderWithinCoa, REGISTER_FIELDS, autoSyncRefusal, driveFingerprint, isNetworkError, OFFLINE_ALERT_MS } from '../server/src/coa-register.js';
 
 const DEFAULT_LOCAL = 'postgresql://postgres:postgres@localhost:5439/cierp';
 const DEFAULT_DIR = path.join(os.homedir(),
@@ -198,12 +198,26 @@ try {
       fs.writeFileSync(STATE_FILE, fingerprint);
       clearNote('refused');
       clearNote('failed');
+      clearNote('offline');
       autoLog(`synced — ${n} COAs, ${p} with their PDF (new ${added}, removed ${removed.length}, PDFs changed ${pdfChanged}${notFound.length ? `, PDF missing: ${notFound.map(r => r.coa_no).join(', ')}` : ''})`);
     }
   }
 } catch (e) {
   if (!e.refused) {
     if (!AUTO) throw e;
+    if (isNetworkError(e)) {
+      // No network yet (just woken from sleep, Wi-Fi down): retried next round.
+      // Only an outage that lasts is worth telling anyone about — once.
+      const since = Number(readNote('offline')) || Date.now();
+      if (!readNote('offline')) { writeNote('offline', String(since)); autoLog(`offline — ${e.message}; trying again next round`); }
+      else if (Date.now() - since > OFFLINE_ALERT_MS && readNote('failed') !== 'offline') {
+        const mins = Math.round((Date.now() - since) / 60_000);
+        autoLog(`still offline after ${mins} min — ${e.message}`);
+        await notify(`No connection to CI Plant for ${mins} minutes — COAs in Drive are not reaching motionci.in.`);
+        writeNote('failed', 'offline');
+      }
+      process.exit(0);
+    }
     autoLog(`failed — ${e.message}`);
     // Retried every round; the Mac is told once per kind of failure, not each time.
     if (readNote('failed') !== e.message) { await notify(`Sync failed: ${e.message}`); writeNote('failed', e.message); }

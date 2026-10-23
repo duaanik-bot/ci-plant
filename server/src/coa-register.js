@@ -156,3 +156,17 @@ export function driveFingerprint(registerStat, pdfs) {
     ...pdfs.map(f => `${f.rel}|${f.size}|${Math.round(f.mtimeMs)}`).sort()];
   return parts.join('\n');
 }
+
+// A sync that could not reach the database because the Mac had no network yet —
+// the first round after waking from sleep runs before Wi-Fi and DNS are back.
+// That is not a failure of the sync: the next round, three minutes on, does it.
+const NETWORK_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+  'ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EPIPE']);
+export function isNetworkError(e) {
+  if (!e) return false;
+  if (NETWORK_CODES.has(e.code)) return true;
+  if (Array.isArray(e.errors) && e.errors.some(isNetworkError)) return true;   // AggregateError (IPv4 + IPv6)
+  return /getaddrinfo|Connection terminated unexpectedly|timeout expired|connect ETIMEDOUT/i.test(String(e.message || ''));
+}
+// How long the Mac may be offline before the sync says so.
+export const OFFLINE_ALERT_MS = 30 * 60_000;

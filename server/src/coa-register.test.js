@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS, autoSyncRefusal, driveFingerprint } from './coa-register.js';
+import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS, autoSyncRefusal, driveFingerprint, isNetworkError } from './coa-register.js';
 
 const HEAD = REGISTER_COLUMNS.map(c => c[0]);
 const row = over => HEAD.map(h => over[h] ?? null);
@@ -126,4 +126,14 @@ test('the Drive fingerprint moves with any register or PDF change and ignores li
   assert.notEqual(driveFingerprint({ ...reg, mtimeMs: 2000 }, [a, b]), fp, 'register re-saved');
   assert.notEqual(driveFingerprint(reg, [a, b, { rel: 'y/c.pdf', size: 5, mtimeMs: 3 }]), fp, 'a PDF added');
   assert.notEqual(driveFingerprint(reg, [a, { ...b, size: 21 }]), fp, 'a PDF replaced');
+});
+
+test('no network after waking is not a sync failure; a real error still is', () => {
+  const dns = Object.assign(new Error('getaddrinfo ENOTFOUND aws-1-ap-south-1.pooler.supabase.com'), { code: 'ENOTFOUND' });
+  assert.equal(isNetworkError(dns), true, 'the alert Anik saw');
+  assert.equal(isNetworkError(Object.assign(new Error(''), { errors: [{ code: 'ECONNREFUSED' }, { code: 'ECONNREFUSED' }] })), true);
+  assert.equal(isNetworkError(new Error('Connection terminated unexpectedly')), true);
+  assert.equal(isNetworkError(Object.assign(new Error('relation "coa_register" does not exist'), { code: '42P01' })), false);
+  assert.equal(isNetworkError(new Error('password authentication failed for user "postgres"')), false);
+  assert.equal(isNetworkError(null), false);
 });
