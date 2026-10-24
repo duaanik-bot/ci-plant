@@ -22,6 +22,7 @@ import {
   validateProductMaster,
 } from '../lib/productMasterConfig.js';
 import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf } from '../components/PrintColour.jsx';
+import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 
 // Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
 // new board when the grade is picked and the field is still blank; never
@@ -76,7 +77,7 @@ const CONFIGS = {
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
   },
   products: {
-    label: 'Products', endpoint: '/products', history: 'products', activeToggle: true,
+    label: 'Products', endpoint: '/products', history: 'products', activeToggle: true, activeFilter: true,
     defaults: PRODUCT_MASTER_DEFAULTS,
     fields: PRODUCT_MASTER_FIELDS,
     columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'printing', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
@@ -464,6 +465,10 @@ export default function Masters() {
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingEdit, setPendingEdit] = useState(null);
+  // Active / Inactive / All on a master that opts in (cfg.activeFilter). The
+  // list opens on Active: a retired carton stays in the master for its history
+  // but should not crowd the working list — it is one click away, not gone.
+  const [activeView, setActiveView] = useState('active');
 
   const isCompany = tab === 'company';
   const cfg = CONFIGS[tab];
@@ -484,6 +489,7 @@ export default function Masters() {
   // the user browsed.
   const selectTab = (k) => {
     setTab(k);
+    setActiveView('active');
     const u = new URL(window.location.href);
     u.searchParams.set('tab', k);
     window.history.replaceState({}, '', u);
@@ -1006,6 +1012,13 @@ export default function Masters() {
     toast.success(next ? 'Activated' : 'Deactivated'); load();
   };
 
+  // A blank flag reads as active — the same default the save applies.
+  const isActive = r => r.active == null || r.active === '' || !!Number(r.active);
+  const baseRows = cfg?.rowFilter ? rows.filter(cfg.rowFilter) : rows;
+  const activeCount = cfg?.activeFilter ? baseRows.filter(isActive).length : 0;
+  const shownRows = !cfg?.activeFilter || activeView === 'all' ? baseRows
+    : baseRows.filter(r => isActive(r) === (activeView === 'active'));
+
   return (
     <div>
       <PageHeader title="Masters" subtitle="Products we supply · materials we procure · organisation and system setup"
@@ -1082,7 +1095,20 @@ export default function Masters() {
           <div className="mt-4 flex justify-end"><Button onClick={saveCompany} disabled={!company?.name}>Save Company Profile</Button></div>
         </div>
       ) : (
-      <DataTable key={tab} searchable columns={columns} rows={cfg.rowFilter ? rows.filter(cfg.rowFilter) : rows} empty={`No ${cfg.label.toLowerCase()} yet`}
+      <>
+      {cfg.activeFilter && (
+        <FilterRail className="mb-3">
+          <FilterGroup label="Status" divider={false}>
+            <FilterChip label="Active" count={activeCount} on={activeView === 'active'} onClick={() => setActiveView('active')} />
+            <FilterChip label="Inactive" count={baseRows.length - activeCount} on={activeView === 'inactive'} onClick={() => setActiveView('inactive')} />
+            <FilterChip label="All" count={baseRows.length} on={activeView === 'all'} onClick={() => setActiveView('all')} />
+          </FilterGroup>
+        </FilterRail>
+      )}
+      <DataTable key={tab} searchable columns={columns} rows={shownRows}
+        empty={cfg.activeFilter && activeView !== 'all' && baseRows.length
+          ? `No ${activeView} ${cfg.label.toLowerCase()}`
+          : `No ${cfg.label.toLowerCase()} yet`}
         dense={tab === 'products'}
         rowClass={tab === 'products' ? (r => (r.is_draft ? DRAFT_ROW : '')) : undefined}
         onRowClick={cfg.history ? r => setViewing({ kind: cfg.history, record: r }) : undefined}
@@ -1090,6 +1116,7 @@ export default function Masters() {
           : tab === 'sections' ? { key: 'sort_order', dir: 'asc' } : undefined}
         exportName={`${cfg.label} Master`}
         exportSubtitle={`Masters · ${cfg.label}`} />
+      </>
       )}
 
       {cfg && <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products' || tab === 'machines' || tab === 'boards' || cfg.wideForm}
