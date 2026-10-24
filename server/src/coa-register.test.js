@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS, autoSyncRefusal, driveFingerprint, isNetworkError } from './coa-register.js';
+import { parseRegister, pickPdf, registerDate, folderWithinCoa, mayViewCoa, mayDownloadCoa, REGISTER_COLUMNS, autoSyncRefusal, driveFingerprint, isNetworkError, isDriveNotLocalError } from './coa-register.js';
 
 const HEAD = REGISTER_COLUMNS.map(c => c[0]);
 const row = over => HEAD.map(h => over[h] ?? null);
@@ -136,4 +136,12 @@ test('no network after waking is not a sync failure; a real error still is', () 
   assert.equal(isNetworkError(Object.assign(new Error('relation "coa_register" does not exist'), { code: '42P01' })), false);
   assert.equal(isNetworkError(new Error('password authentication failed for user "postgres"')), false);
   assert.equal(isNetworkError(null), false);
+});
+
+test('an online-only Drive file is told apart from a real failure', () => {
+  const notLocal = Object.assign(new Error('Unknown system error -11: Unknown system error -11, read'), { errno: -11, code: 'Unknown system error -11', syscall: 'read' });
+  assert.equal(isDriveNotLocalError(notLocal), true, 'what the laptop job hit 55 times');
+  assert.equal(isNetworkError(notLocal), false);
+  assert.equal(isDriveNotLocalError(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT', errno: -2 })), false);
+  assert.equal(isDriveNotLocalError(null), false);
 });

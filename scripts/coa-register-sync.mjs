@@ -29,7 +29,7 @@ import crypto from 'crypto';
 import pg from 'pg';
 import ExcelJS from 'exceljs';
 import { execFile } from 'child_process';
-import { parseRegister, pickPdf, folderWithinCoa, REGISTER_FIELDS, autoSyncRefusal, driveFingerprint, isNetworkError, OFFLINE_ALERT_MS } from '../server/src/coa-register.js';
+import { parseRegister, pickPdf, folderWithinCoa, REGISTER_FIELDS, autoSyncRefusal, driveFingerprint, isNetworkError, OFFLINE_ALERT_MS, isDriveNotLocalError } from '../server/src/coa-register.js';
 
 const DEFAULT_LOCAL = 'postgresql://postgres:postgres@localhost:5439/cierp';
 const DEFAULT_DIR = path.join(os.homedir(),
@@ -51,14 +51,58 @@ const readNote = kind => { try { return fs.readFileSync(notePath(kind), 'utf8');
 const writeNote = (kind, text) => { fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true }); fs.writeFileSync(notePath(kind), text); };
 const clearNote = kind => { try { fs.unlinkSync(notePath(kind)); } catch { /* none */ } };
 function notify(msg) {
-  if (!AUTO || process.platform !== 'darwin') return Promise.resolve();
-  const text = msg.replace(/["\\]/g, '');
-  return new Promise(res => execFile('osascript', ['-e', `display notification "${text}" with title "COA Register sync"`], () => res()));
+  if (!AUTO) return Promise.resolve();
+  const text = msg.replace(/["'`\\$]/g, '');
+  if (process.platform === 'darwin') {
+    return new Promise(res => execFile('osascript', ['-e', `display notification "${text}" with title "COA Register sync"`], () => res()));
+  }
+  if (process.platform === 'win32') {
+    // A tray balloon — needs nothing installed on the PC.
+    const ps = 'Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; '
+      + '$n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; '
+      + `$n.ShowBalloonTip(15000, 'COA Register sync', '${text}', 'Warning'); Start-Sleep -Seconds 16; $n.Dispose()`;
+    return new Promise(res => execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], () => res()));
+  }
+  return Promise.resolve();
 }
 const dirArg = argv.indexOf('--dir');
-const dir = dirArg >= 0 ? argv[dirArg + 1] : (process.env.COA_DRIVE_DIR || DEFAULT_DIR);
-const url = process.env.DATABASE_URL || DEFAULT_LOCAL;
+// The background job's settings file (written by its installer): where the COA
+// folder is and the live plant's database link. Read by --auto only, so a hand
+// run never reaches the live plant unless DATABASE_URL is given on purpose.
+const CONFIG_FILE = process.env.COA_SYNC_CONFIG || path.join(os.homedir(), '.config/ci-erp/coa-sync.json');
+let config = {};
+if (AUTO && fs.existsSync(CONFIG_FILE)) {
+  try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8').replace(/^\uFEFF/, '')); }   // a BOM from Windows editors
+  catch (e) { console.log(`[${stamp()}] refused — the settings file ${CONFIG_FILE} is not valid JSON: ${e.message}`); process.exit(0); }
+}
+// In the background nothing may crash out unexplained — a crash skips the round
+// and says nothing, which is how COAs piled up on the laptop. Every error ends
+// here as one log line; a file Drive has not downloaded is told once, with the cure.
+if (AUTO) {
+  const settle = async e => {
+    try {
+      if (isDriveNotLocalError(e)) {
+        autoLog(`waiting — Google Drive has not downloaded a COA file to this computer yet (${e.message}); trying again next round`);
+        if (readNote('failed') !== 'not-local') {
+          await notify('COA files in Google Drive are online-only here. Make the COA folder Available offline in Google Drive.');
+          writeNote('failed', 'not-local');
+        }
+      } else {
+        autoLog(`failed — ${e?.message || e}`);
+        if (readNote('failed') !== String(e?.message)) { await notify(`Sync failed: ${e?.message || e}`); writeNote('failed', String(e?.message)); }
+      }
+    } finally { process.exit(0); }
+  };
+  process.on('uncaughtException', settle);
+  process.on('unhandledRejection', settle);
+}
+const dir = dirArg >= 0 ? argv[dirArg + 1] : (process.env.COA_DRIVE_DIR || config.driveDir || DEFAULT_DIR);
+const url = process.env.DATABASE_URL || config.databaseUrl || DEFAULT_LOCAL;
 const isRemote = !/@(localhost|127\.0\.0\.1)[:/]/.test(url);
+if (AUTO && !process.env.DATABASE_URL && !config.databaseUrl) {
+  console.log(`[${stamp()}] refused — no database link: set DATABASE_URL or databaseUrl in ${CONFIG_FILE}`);
+  process.exit(0);
+}
 
 if (!dir || !fs.existsSync(dir)) {
   // In the background this is Drive not being up yet (after a restart) — the

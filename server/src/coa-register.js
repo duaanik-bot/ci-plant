@@ -170,3 +170,12 @@ export function isNetworkError(e) {
 }
 // How long the Mac may be offline before the sync says so.
 export const OFFLINE_ALERT_MS = 30 * 60_000;
+
+// A file Google Drive has not downloaded to this computer yet ("online only").
+// On macOS a background job may not make Drive fetch it: the read fails with
+// errno -11 (EDEADLK). The cure is the Drive setting "Available offline" on the
+// COA folder — then every new file is on disk before the sync looks for it.
+export function isDriveNotLocalError(e) {
+  if (!e) return false;
+  return e.errno === -11 || e.code === 'EDEADLK' || /Unknown system error -11/.test(String(e.message || e.code || ''));
+}
