@@ -145,6 +145,24 @@
           if (el.tagName === 'SCRIPT') recover(el.src);
           else if (el.tagName === 'LINK' && el.rel === 'stylesheet') recover(el.href);
         }, true);
+
+        // A poisoned entry is not always a 404. If the browser cached a 200
+        // that is not CSS (an HTML page served in its place), Chrome rejects
+        // the MIME type yet fires `load`, not `error` — the plant PC sat
+        // unstyled with the heal above never starting. Our own stylesheet
+        // loading with zero rules is that case; treat it as a failure. Reading
+        // the rules of a rejected sheet THROWS (SecurityError) even though it is
+        // same-origin — assetPath() already limits this to our own files, so a
+        // throw here means rejected too, not "someone else's sheet".
+        // On `document`, not `window`: an element's load event never reaches
+        // the Window (only `error` does), so a window listener hears nothing.
+        document.addEventListener('load', function (e) {
+          var el = e.target;
+          if (!el || el.tagName !== 'LINK' || el.rel !== 'stylesheet' || !assetPath(el.href)) return;
+          var n;
+          try { n = el.sheet ? el.sheet.cssRules.length : 0; } catch (err) { n = 0; }
+          if (n === 0) recover(el.href);
+        }, true);
         window.addEventListener('vite:preloadError', function (e) {
           // "Failed to fetch dynamically imported module: <url>" /
           // "Unable to preload CSS for <url>" — the URL is the last word.
