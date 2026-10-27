@@ -2863,6 +2863,10 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // and users.coa_download. Idempotent. 2026-10-17
   await pool.query(migration('20261017120000_coa_register.sql'));
 
+  // Costing — new-product costing, the Size Library, bulk batches, revisions and
+  // defaults (no link to plant data). Idempotent. 2026-10-27
+  await pool.query(migration('20261027120000_costing.sql'));
+
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables
   // only, with no foreign key onto any ERP table; idempotent.

@@ -44,6 +44,7 @@ const POPrint = lazy(() => import('./pages/POPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
 // COA Register — the Drive COA register mirrored in; free of the plant's own data.
 const CoaRegister = lazy(() => import('./pages/CoaRegister.jsx'));
+const Costing = lazy(() => import('./pages/Costing.jsx'));
 // Fluence — kits, prescriptions and Kit Studio, one module (Fluence Pharmaceuticals only).
 const Fluence = lazy(() => import('./pages/Fluence.jsx'));
 // HR & Payroll — private. No module key: a module tick cannot hide anything from an
@@ -176,6 +177,7 @@ export default function App() {
                 <Route path="/invoices/:id" element={<Invoice />} />
                 <Route path="/coas/:id" element={<COA />} />
                 <Route path="/coa-register" element={<CoaRegister />} />
+                <Route path="/costing" element={<Costing />} />
                 <Route path="/accounts" element={<Accounts />} />
                 <Route path="/finance/*" element={<Finance />} />
                 <Route path="/reports" element={<Reports />} />

@@ -7,6 +7,8 @@ export const MODULES = [
   { key: 'track', label: 'Tracking', path: '/track' },
   { key: 'status_sheet', label: 'Status Sheet', path: '/status-sheet' },
   { key: 'orders', label: 'Sales Orders', path: '/orders' },
+  // Costing — new-product costing and quotation prices. Tick-only (TICK_ONLY_MODULES).
+  { key: 'costing', label: 'Costing', path: '/costing' },
   { key: 'dispatch_invoice', label: 'Dispatch & Invoice', path: '/dispatch-invoice' },
   { key: 'accounts', label: 'Accounts', path: '/accounts' },
   { key: 'planning', label: 'Planning', path: '/planning' },
@@ -42,6 +44,11 @@ export const MODULES = [
 // The Fluence module's keys: its own, and Kit Studio's from before the merge —
 // a login given either opens the one module.
 export const FLUENCE_KEYS = ['fluence', 'kit_studio'];
+
+// Modules a login opens only when ticked by name. "No ticks" (users.modules
+// NULL) opens every other module, which suits plant screens; Costing holds
+// quotation prices and margins, so a login gets it by being given it.
+export const TICK_ONLY_MODULES = ['costing'];
 
 // The Fluence module's tabs — the chips along the top of its page, grouped as
 // the page shows them. users.fluence_tabs is NULL (= every tab) or an array of
@@ -133,6 +140,7 @@ export function canAccess(user, moduleKey) {
   const fluence = FLUENCE_KEYS.includes(moduleKey);
   // A customer's login: the Fluence module, when ticked, and nothing else.
   if (isFluenceOnly(user)) return fluence && user.modules.length > 0;
+  if (TICK_ONLY_MODULES.includes(moduleKey)) return Array.isArray(user.modules) && user.modules.includes(moduleKey);
   if (moduleKey === 'floor' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.modules == null) return true;
   // Either Fluence key opens the one Fluence module.

@@ -1,0 +1,134 @@
+# Costing module — design
+
+Written 2026-10-27. The owner asked for a Costing module for new-product development: single-product
+costing, bulk costing (5–15 products in one go), a historical size library kept apart from the physical
+Die Master, comparison with earlier costings, and exports. His one standing note: **it must be simple
+enough that a fresher can take out a costing.** He asked for decisions to be made without a round of
+questions, so the calls below are the builder's, listed at the end for him to check.
+
+## The method is his sheet, not a generic calculator
+
+Source: the cost sheet workbook in his Drive (`Cost Sheet Anik Final <date>.xlsx`, tabs `Multi costing
+sheet`, `Size chart`, `Sizer`, `Single cositng sheet`). The module reproduces the **Multi costing sheet**,
+the tab every real costing since Dec 2022 was taken on (3,164 rows).
+
+Per product:
+
+| Step | Sheet column | Rule |
+|---|---|---|
+| Sheets | AA | quantity ÷ ups + wastage sheets |
+| Board | AB | L × W × GSM ÷ 3100 ÷ 5 × ₹/kg ÷ 100 × sheets (L, W = print sheet, inches) |
+| Printing | AD | ₹ per 1,000 sheets per colour × colours × sheets ÷ 1000, never under the minimum (₹1,600) |
+| Coating | AE | L × W ÷ factor ÷ 100 × sheets — i.e. ₹1 per (factor × 100) sq in; blank = none |
+| Die & pasting | AF | ₹ per carton × quantity |
+| Process | AG | fixed ₹ for the job |
+| P&F | AI | % × subtotal |
+| Misc | AJ | % × (subtotal + P&F) |
+| Cost per carton | AL | (subtotal + P&F + misc) ÷ quantity + embossing ₹ per carton |
+| Quote | AM | cost per carton + ₹0.05 |
+
+The sheet changed its rules twice; each version is kept so an old costing reworks to its own figures:
+`SHEET-A` (2022: no embossing, no minimum), `SHEET-B` (2023: embossing added), `CI-1` (2024 on, and
+everything made in the ERP: embossing + minimum printing charge). A new rule is a new version; old
+versions are never edited (`server/src/costing-engine.js`, `FORMULAS`).
+
+**Validation against the real workbook (counts only, the workbook stays outside the repo):** 3,030 rows
+carry both complete inputs and a sheet result; the engine gives the sheet's own cost per carton for
+**3,021** of them (to 1 part in a million). The other 9 (sheet rows 1820, 2432, 2745, 2851–2855, 3050)
+are rows where the sheet broke its own rule — a cost cell pointing at another row or column (row 3050's
+Board cell multiplies by the die & pasting rate instead of the board rate; rows 2851–2855's Coating cell
+divides by GSM instead of the coating factor), or the per-carton cell adding die & pasting where
+embossing belongs (row 2432). 16 more rows typed a die & pasting rate into a row whose charging cell was
+empty, so the sheet charged nothing; those reproduce once that is recorded. None of these is "fixed":
+the old record keeps the sheet's figures and carries a note saying where it broke, and the register's
+"Sheet figure differs" chip lists them. 12 rows repeat an earlier row exactly; they load once, noted.
+
+**Not adopted, flagged for the owner:** the `Single cositng sheet` tab is a different method (adds 10%
+plant cost on everything but board, and 5% profit on a base that counts the subtotal twice —
+`=C19*SUM(F9:F13)` where F12 is already the sum of F4:F11). It holds one worked example and no history,
+so the module follows the Multi sheet. If the plant still uses the single tab for some quotes, that is
+a second formula version to add, not a change to this one.
+
+## Sizes: a library apart from the Die Master
+
+- `costing_sizes` is the **Size Library**: every size the plant has costed — 977 entries from the Size
+  chart (980 rows, 3 exact repeats merged) plus 299 layouts found only in costing rows = 1,276, and 11
+  more from a later copy of the workbook that holds only the Size chart. It never needs a die to exist.
+  The Die Master — the Tooling Hub's die family (`tools`, family `die`), not the legacy `dies` table it
+  was copied from — is read, never written.
+- One entry = size (L × W × H mm, or L × W for flat work) + pasting style + layout (sheet L × W in, ups).
+  Rows agreeing on all of these are merged, every source row kept in `source_refs` for tracing. The same
+  size with a different pasting or a different layout stays a separate entry because it costs
+  differently; such groups are listed under "Possible duplicates" for a person to retire one, never
+  merged automatically (127 same-size/several-layout groups, 50 same-size/different-pasting, 36 sizes
+  typed in another L/W/H order).
+- Typed sizes are read to one key whatever the spelling (`165X58X73`, `165 x 58 x 73`, `165*58*73`,
+  `165×58×73 mm`, `165X58X73R0`). L, W, H order is kept: a different order is a different key.
+- Size check (single form and every bulk row): exact library entries, near entries (each side within
+  ±2 mm, or the same three numbers in another order), and — shown separately — dies whose carton size
+  matches exactly or nearly. A near match raises "Did you mean …?" so a mistyped size is caught.
+- The `Sizer` tab is ported as the **Size helper** (blank L = ((L+W)×2 + 10 mm flap)/25.4 × across;
+  blank W = (((W/2+10)+H+W+12)×2 − W − 12)/25.4 × down; ups = across × down × 2). Tested against the
+  980 real layouts it is a guide only (half the real layouts are larger than it proposes, a sixth
+  smaller), so it fills a starting point for a new size and **never warns** about a chosen layout.
+
+## Screens (one top-level module, "Costing")
+
+1. **New costing** — one page, top to bottom, plain words and units on every field, typical values as
+   hints, defaults pre-filled from current practice (wastage 250, 4 colours, ₹400 printing, ₹1,600
+   minimum, ₹2,000 process, ₹0.30 die & pasting, 5% P&F, ₹0.05 margin). Board grade picks the ₹/kg from
+   the ERP's Board Rates; coating is a required choice ("No coating" is a choice). The result card
+   updates as you type: cost per carton, quote, order value, and a "How it was worked out" table with
+   one line per cost item in words and numbers. Below it: past costings of the same size with the
+   difference and the inputs that caused it.
+2. **Bulk costing** — a batch is a table, one row per product. Paste product / size / quantity rows
+   straight from Excel; each row's sheet layout fills from the Size Library (the most used layout of
+   that size) when the row has none. Common settings carry into the rows that still follow them (the
+   box is blank or holds the common value as it was); a row given its own value keeps it, and only the
+   ↓ button beside a setting copies it over every row. Each row keeps its own complete inputs, and on
+   save only a row whose inputs changed gets a new revision. Rows show status (Ready / Needs …),
+   earlier costings and dies of the size, notes; the folder button opens the full single-costing view
+   for one row. Save, reopen, export (internal breakdown, or a quotation sheet for the customer).
+3. **Saved costings** — every costing (ERP-made `CST-0001…`, and the old sheet's rows as `OLD-<row>`),
+   searchable by customer, product, size, date; filters for no size reference / big difference; each
+   one opens with its breakdown and its revision history.
+4. **Size library** — the entries with times costed, last costed, die match; "Possible duplicates" view.
+5. **Rates** — the defaults above, coating factors (name them), and the difference alert (15%).
+
+Exports (Excel or PDF through the app's export engine): a single costing's internal breakdown, a
+bulk batch's internal breakdown, and for either a quotation sheet for the customer (product, size,
+quantity, price — no board, rates, margins or internal cost); the saved-costings list and the Size
+Library as tables.
+
+Not built (left for a later round): a report across ALL costings of where the cost of the same carton
+moved by more than the alert %, and costing in more than one quantity at once (the sheet costs one
+quantity per row; a second quantity is a copied row).
+
+## Data
+
+New tables only (`supabase/migrations/20261027120000_costing.sql`): `costing_sizes`,
+`costing_batches`, `costings`, `costing_versions` (append-only revision history: inputs, formula
+version, result, note, who, when), `costing_settings` (one row). No foreign key leaves the costing
+tables: customer, product and user are kept as id + name snapshot, so plant masters can be edited or
+deleted without touching a quotation record (and the dev seed's `TRUNCATE … CASCADE` cannot wipe it).
+Old sheet rows are loaded by `scripts/costing-import-sheet.mjs` (dry run by default; `--apply`),
+which reads the workbook from outside the repo.
+
+## Access
+
+Module key `costing`, ticked per user in Masters → Users like every module. The server checks the tick
+on reads as well as writes for `/api/costing/*` — quotation prices are commercial data.
+
+## Calls made by the builder (for the owner to check)
+
+1. Multi sheet adopted as THE method; single-sheet method flagged, not built.
+2. Coating factors are kept as numbers and shown as "₹1 per 600 sq in" etc. The sheet never names them
+   and ERP product coatings do not line up one-to-one with factors, so naming them (e.g. "6 = aqueous
+   varnish") is left to the owner on the Rates tab.
+3. Pasting codes shown with a gloss: LOCK "Lock bottom", SIDE "Side pasting", LIT "Leaflet". HS and CC
+   are shown as typed (meaning unknown).
+4. Historical party names are kept as typed and not linked to ERP customers (271 rows carry a number in
+   the Party column instead of a name; they are flagged).
+5. The Size helper never blocks or warns (see above).
+6. Difference alert at ±15% against the most comparable earlier costing (same size and pasting, GSM
+   within ±10, newest first, then nearest quantity).

@@ -10,7 +10,7 @@ import {
   Warehouse, BarChart3, Settings2, Menu, X, Bell, BellRing, BellOff, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3, Pill, ScanSearch, Users, FileCheck2,
-  BookOpenCheck, FileSpreadsheet, SlidersHorizontal,
+  BookOpenCheck, FileSpreadsheet, SlidersHorizontal, Calculator,
 } from 'lucide-react';
 import { api, auth, currentUser, fmt } from '../api.js';
 import { recordDownload } from '../lib/fluenceDownloads.js';
@@ -45,6 +45,8 @@ const NAV = [
     group: 'Sales',
     items: [
       { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'], module: 'orders' },
+      // Costing — new-product costing and quotation prices; tick-only (modules.js TICK_ONLY_MODULES).
+      { label: 'Costing', to: '/costing', icon: Calculator, roles: 'all', module: 'costing' },
     ],
   },
   {
@@ -710,7 +712,7 @@ const SHORT_LABEL = {
   '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
   '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
   '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
-  '/shade-cards': 'Shades', '/hr': 'HR', '/coa-register': 'COAs',
+  '/shade-cards': 'Shades', '/hr': 'HR', '/coa-register': 'COAs', '/costing': 'Costing',
   '/finance/reports': 'Fin Rpts', '/finance/setup': 'Fin Setup',
 };
 
