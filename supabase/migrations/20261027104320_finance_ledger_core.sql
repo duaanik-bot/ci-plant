@@ -23,7 +23,13 @@
 -- No data is loaded here. Books, years, groups, rules and the first grants come
 -- from scripts/finance-setup.mjs.
 --
--- APPLIED to colour-impressions-prod: not yet. Filled in at go-live.
+-- Row-level security is on for every fin_* table, with no policies, and every
+-- privilege is revoked from Supabase's anon and authenticated roles, as with
+-- tooling_* (0035) and hr.*. The ERP server connects as the owner of these
+-- tables, which RLS without FORCE does not restrict.
+--
+-- APPLIED to colour-impressions-prod: 2026-10-27, as the named migration
+-- finance_ledger_core (go-live, spec section 18.3).
 --
 -- Mirrored locally by server/src/db.js init(), which replays this file — so it
 -- must stay idempotent.
@@ -701,6 +707,34 @@ create or replace trigger fin_no_truncate before truncate on fin_voucher_lines
   for each statement execute function fin_no_truncate();
 create or replace trigger fin_no_truncate before truncate on fin_audit_log
   for each statement execute function fin_no_truncate();
+
+-- Row-level security, as tooling_* (0035) and hr.*: on, with no policies, and the
+-- Supabase API roles revoked where they exist (a local database has neither).
+alter table fin_books enable row level security;
+alter table fin_years enable row level security;
+alter table fin_periods enable row level security;
+alter table fin_groups enable row level security;
+alter table fin_ledgers enable row level security;
+alter table fin_vouchers enable row level security;
+alter table fin_voucher_lines enable row level security;
+alter table fin_access enable row level security;
+alter table fin_approval_rules enable row level security;
+alter table fin_audit_log enable row level security;
+alter table fin_imports enable row level security;
+alter table fin_import_ledgers enable row level security;
+alter table fin_import_bills enable row level security;
+do $$
+begin
+  if exists (select 1 from pg_catalog.pg_roles where rolname = 'anon') then
+    revoke all on table fin_books, fin_years, fin_periods, fin_groups, fin_ledgers, fin_vouchers, fin_voucher_lines,
+      fin_access, fin_approval_rules, fin_audit_log, fin_imports, fin_import_ledgers, fin_import_bills from anon;
+  end if;
+  if exists (select 1 from pg_catalog.pg_roles where rolname = 'authenticated') then
+    revoke all on table fin_books, fin_years, fin_periods, fin_groups, fin_ledgers, fin_vouchers, fin_voucher_lines,
+      fin_access, fin_approval_rules, fin_audit_log, fin_imports, fin_import_ledgers, fin_import_bills from authenticated;
+  end if;
+end
+$$;
 
 -- Realtime: same guarded block as 20260918120000_fluence_realtime_ping.sql.
 do $$

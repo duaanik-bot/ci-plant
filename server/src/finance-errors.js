@@ -8,7 +8,7 @@
 //
 // The database refuses some things itself: the hard-stop triggers of spec §7.2 (a pg error whose DETAIL
 // is a FIN_ code) and a handful of constraints (the unique indexes, three CHECKs and the foreign keys,
-// named in migration 20261017093446). Those reach a route as pg errors. finMapDbError turns each into a
+// named in migration 20261027104320). Those reach a route as pg errors. finMapDbError turns each into a
 // refusal; every route ends  catch (e) { next(finMapDbError(e)); }.
 //
 // Every other error becomes ONE fixed 500, FIN_SERVER_ERROR, whose sentence says nothing of what went

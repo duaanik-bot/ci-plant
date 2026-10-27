@@ -29,7 +29,7 @@ test('finError: status and code on a standard refusal, structured detail only in
   assert.deepEqual(finError(404, 'FIN_NOT_FOUND').body, { code: 'FIN_NOT_FOUND' });
 });
 
-// The thirteen codes the hard-stop triggers raise (spec §7.2, migration 20261017093446). They are read off the
+// The thirteen codes the hard-stop triggers raise (spec §7.2, migration 20261027104320). They are read off the
 // migration as well as listed here, so a fourteenth trigger code cannot arrive without its sentence.
 const TRIGGER_CODES = [
   'FIN_AUDIT_APPEND_ONLY', 'FIN_BAD_DATE', 'FIN_BAD_REVERSAL', 'FIN_BEFORE_BOOKS', 'FIN_LEDGER_INACTIVE', 'FIN_NO_TRUNCATE',

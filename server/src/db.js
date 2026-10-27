@@ -2866,5 +2866,5 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables
   // only, with no foreign key onto any ERP table; idempotent.
-  await pool.query(migration('20261017093446_finance_ledger_core.sql'));
+  await pool.query(migration('20261027104320_finance_ledger_core.sql'));
 }
