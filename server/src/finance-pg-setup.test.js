@@ -552,34 +552,34 @@ test('setup runs on the qc and oc it is given: neither module nor the script imp
 
 test('the script refuses a database that is not local unless --prod is passed, before it connects', () => {
   for (const url of [
-    'postgresql://postgres:s3cret@db.example.invalid:5432/postgres',
-    'postgresql://localhost:s3cret@db.example.invalid:5432/postgres',          // "localhost" is the user name here, not the host
-    'postgresql://postgres:s3cret@localhost.example.invalid:5432/postgres',    // starts with "localhost" and is not
-    'postgresql://postgres:s3cret@0.0.0.0:1/postgres',                         // not on the list, whatever it happens to reach
-    'postgresql://postgres:s3cret@localhost:1/cierp?host=db.remote.example.invalid',   // pg connects to ?host=, not to the URL's host
-    'postgresql://postgres:s3cret@127.0.0.1:1/cierp?host=10.0.0.9',
+    'postgresql://postgres:password@db.example.invalid:5432/postgres',
+    'postgresql://localhost:password@db.example.invalid:5432/postgres',          // "localhost" is the user name here, not the host
+    'postgresql://postgres:password@localhost.example.invalid:5432/postgres',    // starts with "localhost" and is not
+    'postgresql://postgres:password@0.0.0.0:1/postgres',                         // not on the list, whatever it happens to reach
+    'postgresql://postgres:password@localhost:1/cierp?host=db.remote.example.invalid',   // pg connects to ?host=, not to the URL's host
+    'postgresql://postgres:password@127.0.0.1:1/cierp?host=10.0.0.9',
     'not a url at all',
   ]) {
     const r = runScript(url, ['--apply'], { FIN_SETUP_ACCOUNTANT_EMAIL: 'accounts@fin.test' });
     assert.equal(r.status, 1, url);
     assert.match(r.stderr, /Refusing a non-local database without --prod/, url);
-    assert.doesNotMatch(r.stdout + r.stderr, /s3cret/, 'the password is never echoed');
+    assert.doesNotMatch(r.stdout + r.stderr, /password/, 'the password is never echoed');
   }
   // the host it names is the one pg would really use
-  assert.match(runScript('postgresql://postgres:s3cret@localhost:1/cierp?host=db.remote.example.invalid', ['--apply']).stderr,
+  assert.match(runScript('postgresql://postgres:password@localhost:1/cierp?host=db.remote.example.invalid', ['--apply']).stderr,
     /host: db\.remote\.example\.invalid/);
   // Past the guard, each of these stops at the connection: nothing listens on port 1, so no database is reached.
   // Local addresses pass on their own, in any case; --prod is what lets the last one through.
   for (const [url, args] of [
-    ['postgresql://postgres:s3cret@127.0.0.1:1/postgres', []],
-    ['postgresql://postgres:s3cret@LOCALHOST:1/postgres', []],
-    ['postgresql://postgres:s3cret@0.0.0.0:1/postgres', ['--prod']],
-    ['postgresql://postgres:s3cret@localhost:1/cierp?host=127.0.0.1', []],       // a local ?host= is local
+    ['postgresql://postgres:password@127.0.0.1:1/postgres', []],
+    ['postgresql://postgres:password@LOCALHOST:1/postgres', []],
+    ['postgresql://postgres:password@0.0.0.0:1/postgres', ['--prod']],
+    ['postgresql://postgres:password@localhost:1/cierp?host=127.0.0.1', []],       // a local ?host= is local
   ]) {
     const r = runScript(url, args);
     assert.equal(r.status, 1, url);
     assert.doesNotMatch(r.stderr, /Refusing/, url);
     assert.match(r.stderr, /Could not connect/, url);
-    assert.doesNotMatch(r.stdout + r.stderr, /s3cret/);
+    assert.doesNotMatch(r.stdout + r.stderr, /password/);
   }
 });
