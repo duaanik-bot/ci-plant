@@ -109,7 +109,9 @@ test('/floor without ?lights=ref answers exactly what it always did', () => {
 
 test('Floor.jsx asks for refs and rehydrates before the board is set', () => {
   const src = readFileSync(new URL('../../client/src/pages/Floor.jsx', import.meta.url), 'utf8');
-  assert.match(src, /api\.get\('\/floor\?lights=ref'\)/);
+  // Always lights=ref; the idle param (idle-cards.js) rides after it, and is
+  // honoured by the server only beside lights=ref.
+  assert.match(src, /api\.get\(`\/floor\?lights=ref&idle=\$\{showIdleRef\.current \? 'mark' : 'hide'\}`\)/);
   // Rehydrated BEFORE setSections — search, SectionBand and MachineBlock all read
   // job.light — and memoised on the response object: api.get hands back the SAME
   // object for unchanged bytes, and a fresh rehydration of it would re-render the

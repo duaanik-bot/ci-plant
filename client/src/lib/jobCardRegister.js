@@ -70,10 +70,13 @@ export function historyIsStale(prevLive, nextLive, history, picked = null) {
 // over a newer one.
 //
 //   get(path)       → Promise of { cards, counts }
+//   getHideIdle()   → leave the idle cards out of the live half? true asks
+//                     ?idle=hide, false ?idle=mark (the full half, still counted)
+//                     — server/src/idle-cards.js: cards nobody touched for 14 days
 //   getTab()        → the tab open right now
 //   showsHistory(t) → does tab t list the history?
 //   onLive(cards) / onHistory(cards) / onCounts(counts) → the screen's setters
-export function createRegisterLoader({ get, getTab, getPicked = () => null, showsHistory, onLive, onHistory, onCounts }) {
+export function createRegisterLoader({ get, getTab, getPicked = () => null, getHideIdle = () => false, showsHistory, onLive, onHistory, onCounts }) {
   let live = null;
   // History is WANTED from the moment a card is seen leaving the live half until a
   // history answer that STARTED after that moment lands. A failed background fetch
@@ -116,16 +119,21 @@ export function createRegisterLoader({ get, getTab, getPicked = () => null, show
   const loadLive = () => {
     const n = ++liveSeq;
     const stamp = ++countsStarted;
-    return get('/job-cards?scope=live').then(d => {
+    return get(`/job-cards?scope=live&idle=${getHideIdle() ? 'hide' : 'mark'}`).then(d => {
       if (n !== liveSeq) return;
+      // A card that went idle has left the live half too, but it did not close —
+      // the history has nothing new. The server names the cards it held back.
+      const held = new Set(d.cards.map(j => j.id));
+      const away = (d.idle_ids || []).filter(id => !held.has(id));
+      const stillLive = away.length ? [...d.cards, ...away.map(id => ({ id }))] : d.cards;
       // A card that just closed has left the live half and is not yet in the
       // history held from earlier (or no history is held and the card was ticked
       // for printing); a reopened one is in both. Refetch the history then, so a
       // card ticked for printing never drops out of the selection just because it
       // finished while the planner was on another tab. (On a history tab load()
       // is already fetching it alongside.)
-      if (historyIsStale(live, d.cards, history, getPicked())) wantedAfter = clock;
-      live = d.cards;
+      if (historyIsStale(live, stillLive, history, getPicked())) wantedAfter = clock;
+      live = stillLive;
       onLive(d.cards);
       takeCounts(stamp, d.counts);
       const covered = historyInFlightFrom != null && historyInFlightFrom > (wantedAfter ?? Infinity);

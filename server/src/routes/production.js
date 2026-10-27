@@ -30,6 +30,7 @@ import { avsGateForCard, avsLockedError, avsMandatorySql } from '../avs-gate.js'
 // A carton made in parts: a part card ends at die cutting, and the carton's
 // pasting card is made once every part is die-cut (carton-parts.js holds the rules).
 import { closePartCard, maybeCreateAssemblyCard } from '../carton-parts-db.js';
+import { loadIdleCardIds, idleModeOf } from '../idle-cards.js';
 import { shouldJoinAtDieCut } from '../carton-parts.js';
 
 const r = Router();
@@ -524,9 +525,21 @@ const LIVE_JOB_CARD = `jc.status <> 'closed' AND (jc.gang_run_id IS NOT NULL OR 
 
 // The register, for one scope. `deps` exists for the test suite, which runs the
 // real board and plate stamping over a fixture with a fake query function.
-export async function jobCardRegister(scope, deps = {}) {
-  const { q: qq = q, one: oo = one, readiness: ready = readiness, readinessBatch: readyBatch = readinessBatch } = deps;
+//
+// `idle: 'hide'` (?scope=live&idle=hide, idle-cards.js) leaves out the live cards
+// nobody has touched for IDLE_DAYS: they are dropped BEFORE the stages, the
+// readiness pass and the board/plate stamping, which is where the time goes.
+// The rule never splits a gang run, so every run that is stamped is stamped
+// whole and an active card reads exactly what it reads in the full list. The
+// rung counts are still counted over every card, so the tab badges do not move;
+// `counts.idle` and `idle_ids` say what was left out. `idle: 'mark'` is the
+// full live half with the same two fields, for a screen that is showing them.
+export async function jobCardRegister(scope, deps = {}, { idle: idleMode = null } = {}) {
+  const { q: qq = q, one: oo = one, readiness: ready = readiness, readinessBatch: readyBatch = readinessBatch,
+    idleIds: loadIdle = () => loadIdleCardIds(qq) } = deps;
   const scoped = JOB_CARD_SCOPES.includes(scope) ? scope : null;
+  const idle = scoped === 'live' && idleMode ? await loadIdle() : null;
+  const hidden = idleMode === 'hide' ? idle : null;
   // The live scope still loads SPLIT gang cards, though it does not return
   // them: the board and plate verdicts below are computed over a SET of cards
   // and collapse a gang run to its weakest member, and a split gang parent sits
@@ -537,7 +550,7 @@ export async function jobCardRegister(scope, deps = {}) {
   const rows = await qq(scoped === 'live'
     ? `${JC_VIEW} WHERE ${LIVE_JOB_CARD} ORDER BY (jc.status='closed'), jc.id DESC`
     : `${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
-  const inScope = scoped === 'live' ? rows.filter(jc => jobCardRung(jc) !== 'closed')
+  const inScope = scoped === 'live' ? rows.filter(jc => jobCardRung(jc) !== 'closed' && !hidden?.has(jc.id))
     : scoped === 'history' ? rows.filter(jc => jobCardRung(jc) === 'closed')
     : rows;
   // A card's receipts read only its own stages, so a scope asks only for the
@@ -562,7 +575,7 @@ export async function jobCardRegister(scope, deps = {}) {
   // and it moves on its own the moment procurement receives the board.
   // Only OPEN cards are worth the readiness pass: a closed job drew its board
   // long ago and would read covered anyway.
-  const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null);
+  const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null && !hidden?.has(jc.id));
   const jcAnchorIds = [...new Set(live.map(jc => jc.anchor_line_id))];
   const jcAnchors = jcAnchorIds.length
     ? await qq('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
@@ -604,12 +617,17 @@ export async function jobCardRegister(scope, deps = {}) {
                         JOIN materials bm ON bm.id = p.board_material_id
                         WHERE NOT (${LIVE_JOB_CARD})`))[0]?.n) || 0
     : 0;
-  return { cards, counts: jobCardCounts(rows, closedNotLoaded) };
+  const counts = jobCardCounts(rows, closedNotLoaded);
+  if (!idle) return { cards, counts };
+  // Only ids of cards the live half shows (or would have): a card the live
+  // scope never returns cannot be idle in it.
+  const idleIds = rows.filter(jc => jobCardRung(jc) !== 'closed' && idle.has(jc.id)).map(jc => jc.id);
+  return { cards, counts: { ...counts, idle: idleIds.length }, idle_ids: idleIds };
 }
 
 r.get('/job-cards', async (req, res, next) => {
   try {
-    res.json(await jobCardRegister(req.query.scope));
+    res.json(await jobCardRegister(req.query.scope, {}, { idle: idleModeOf(req.query) }));
   } catch (e) { next(e); }
 });
 

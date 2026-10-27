@@ -17,13 +17,14 @@ import assert from 'node:assert/strict';
 import { createRegisterLoader, mergeRegister, printRunIds } from '../../client/src/lib/jobCardRegister.js';
 
 // A fake api.get whose responses the test releases one by one, in any order.
-function harness({ tab = 'running', picked = new Set() } = {}) {
+function harness({ tab = 'running', picked = new Set(), hideIdle = false } = {}) {
   const requests = [];
-  const screen = { live: [], history: null, counts: null, tab, picked };
+  const screen = { live: [], history: null, counts: null, tab, picked, hideIdle };
   const loader = createRegisterLoader({
     get: path => new Promise((resolve, reject) => requests.push({ path, resolve, reject })),
     getTab: () => screen.tab,
     getPicked: () => screen.picked,
+    getHideIdle: () => screen.hideIdle,
     showsHistory: t => t === 'closed' || t === 'all',
     onLive: cards => { screen.live = cards; },
     onHistory: cards => { screen.history = cards; },
@@ -82,7 +83,7 @@ test('a slow background history refetch never paints the badges over a newer liv
   // ~600 ms later a new job card is created; realtime runs L', which returns first.
   loader.load();
   const L2 = requests[4];
-  assert.equal(L2.path, '/job-cards?scope=live');
+  assert.equal(L2.path, '/job-cards?scope=live&idle=mark');
   await release(L2, { cards: [card(10, 'open'), card(8, 'open')], counts: { all: 4 } });
   assert.equal(screen.counts.all, 4);
 
@@ -149,4 +150,32 @@ test('the print run never drops a ticked card the screen does not currently hold
   assert.deepEqual(printRunIds(jobs, new Set([7, 12])), [12, 7]);
   assert.deepEqual(printRunIds(jobs, new Set([3, 10, 9])), [10, 9, 3]);
   assert.deepEqual(printRunIds(jobs, new Set()), []);
+});
+
+// ── ?idle=hide ────────────────────────────────────────────────────────────────
+// A card that goes quiet for 14 days leaves the live half (server/src/
+// idle-cards.js) but has not closed. Read as "closed", a ticked idle card would
+// pull the whole history onto a live tab on every refresh for nothing.
+test('the live half asks for idle=hide only while the screen hides idle cards', async () => {
+  const { loader, requests, screen, release } = harness({ hideIdle: true });
+  loader.load();
+  assert.equal(requests[0].path, '/job-cards?scope=live&idle=hide');
+  await release(requests[0], { cards: [card(9, 'in_progress')], counts: { all: 2, idle: 1 }, idle_ids: [8] });
+  assert.deepEqual(screen.counts, { all: 2, idle: 1 });
+  screen.hideIdle = false;
+  loader.load();
+  assert.equal(requests[1].path, '/job-cards?scope=live&idle=mark');
+});
+
+test('a ticked card that went idle is not mistaken for a closed one', async () => {
+  const { loader, requests, release } = harness({ tab: 'running', picked: new Set([9, 8]), hideIdle: true });
+  loader.load();
+  await release(requests[0], { cards: [card(9, 'in_progress'), card(8, 'open')], counts: { all: 2, idle: 0 }, idle_ids: [] });
+  loader.load();
+  await release(requests[1], { cards: [card(9, 'in_progress')], counts: { all: 2, idle: 1 }, idle_ids: [8] });
+  assert.equal(historyRequests(requests).length, 0, 'card 8 went idle, it did not close');
+  // …and a ticked card that really closes is still fetched back.
+  loader.load();
+  await release(requests[2], { cards: [], counts: { all: 2, idle: 1 }, idle_ids: [8] });
+  assert.equal(historyRequests(requests).length, 1, 'card 9 left and is not idle — it closed');
 });

@@ -16,6 +16,7 @@ import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { CARTON_STATUS_SQL } from '../carton-status.js';
 import { avsMandatorySql, qaStampsForCards } from '../avs-gate.js';
 import { markUncacheable } from '../data-tables.js';
+import { loadIdleCardIds, idleModeOf, idleBySection } from '../idle-cards.js';
 import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 import { completedKpiRow } from '../../../client/src/lib/sectionCompleted.js';
 import { internLights } from '../../../client/src/lib/floorLights.js';
@@ -436,6 +437,16 @@ export const completedRunsSql = query => `${
 
 r.get('/floor', async (req, res, next) => {
   try {
+    // ?idle=hide | mark (idle-cards.js, new bundles only, and only with
+    // lights=ref — the object-shaped answer that can carry the count). hide:
+    // cards nobody has touched for a fortnight stay in the database until
+    // "Show" is clicked; mark: the whole board plus the same count, so "Hide"
+    // can be offered. Every card the board does draw is drawn exactly as
+    // before — a light is per card, and nothing below compares one card with
+    // another.
+    const idleMode = req.query.lights === 'ref' ? idleModeOf(req.query) : null;
+    const hideIdle = idleMode === 'hide';
+    const idleIds = idleMode ? [...await loadIdleCardIds()] : [];
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
              js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason, js.floor_pos,
@@ -515,8 +526,9 @@ r.get('/floor', async (req, res, next) => {
         WHERE job_card_id = jc.id AND status='issued'
         ORDER BY issued_at DESC NULLS LAST, id DESC LIMIT 1) lxs ON true
       ${MIX_CUTS_LATERAL}
-      WHERE jc.status IN ('open','in_progress')
-      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
+      WHERE jc.status IN ('open','in_progress')${hideIdle ? `
+        AND NOT (jc.id = ANY($1::int[]))` : ''}
+      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`, hideIdle ? [idleIds] : []);
 
     // Active machines only — a decommissioned press must not come back as a
     // controllable row inside its band (the old Machine Control grid filtered
@@ -723,7 +735,13 @@ r.get('/floor', async (req, res, next) => {
       };
     });
     if (allowSec) payload = payload.filter(s => allowSec.includes(s.section));
-    res.json(floorResponse(payload, req.query));
+    if (!idleMode) return res.json(floorResponse(payload, req.query));
+    const idleRows = idleIds.length ? await q(`
+      SELECT js.job_card_id, js.stage, js.status, COALESCE(js.machine_id, jc.machine_id) AS machine_id
+      FROM job_stages js JOIN job_cards jc ON jc.id = js.job_card_id
+      WHERE js.job_card_id = ANY($1::int[])`, [idleIds]) : [];
+    res.json({ ...floorResponse(payload, req.query),
+      idle: idleBySection(idleRows, allowSec ? SECTIONS.filter(s => allowSec.includes(s)) : SECTIONS, machineIds) });
   } catch (e) { next(e); }
 });
 

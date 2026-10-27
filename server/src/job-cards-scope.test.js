@@ -301,3 +301,64 @@ test('the closed count joins exactly what JC_VIEW inner-joins', async () => {
   for (const join of topLevelInner) assert.ok(count.includes(join), `the closed count must ${join}`);
   assert.equal(count.match(/\bJOIN\b/g).length, topLevelInner.length, 'and join nothing else');
 });
+
+// ── ?scope=live&idle=hide (idle-cards.js) ─────────────────────────────────────
+// Cards nobody has touched for a fortnight wait for "Show". What must not move:
+// every card still shown is the legacy card, byte for byte; the rung badges
+// still count every card; the hidden cards never reach the expensive passes.
+const withIdle = (ids, base = fakeDeps()) => {
+  let asked = 0;
+  base.deps.idleIds = async () => { asked += 1; return new Set(ids); };
+  return { ...base, asked: () => asked };
+};
+
+test('idle=hide with nothing idle is the live register plus a zero count', async () => {
+  const plain = await jobCardRegister('live', fakeDeps().deps);
+  const out = await jobCardRegister('live', withIdle([]).deps, { idle: 'hide' });
+  assert.equal(JSON.stringify(out.cards), JSON.stringify(plain.cards));
+  assert.deepEqual(out.counts, { ...plain.counts, idle: 0 });
+  assert.deepEqual(out.idle_ids, []);
+});
+
+test('idle=hide leaves the idle card out of the cards, the stages and the readiness pass', async () => {
+  const legacy = await legacyRegister(fakeDeps().deps);
+  const probe = withIdle([8]);
+  const seenLines = [];
+  const readiness = probe.deps.readiness;
+  probe.deps.readiness = async (line, ...rest) => { seenLines.push(line.id); return readiness(line, ...rest); };
+  const out = await jobCardRegister('live', probe.deps, { idle: 'hide' });
+  assert.deepEqual(out.cards.map(c => c.id), [9, 6]);
+  for (const card of out.cards) assert.deepEqual(card, legacy.find(c => c.id === card.id), `card ${card.id}`);
+  assert.deepEqual(out.idle_ids, [8]);
+  assert.deepEqual(out.counts, { pending: 1, finalised: 1, running: 1, closed: 3, all: 6, idle: 1 },
+    'the rung badges still count the hidden card');
+  const stageCall = probe.sql.find(s => s.includes('FROM job_stages js'));
+  assert.ok(stageCall);
+  assert.ok(!seenLines.includes(80), 'the idle card’s line must not be put through readiness');
+});
+
+test('the idle list is asked for only when the screen asks to hide it, and only on the live half', async () => {
+  const off = withIdle([8]);
+  const plain = await jobCardRegister('live', off.deps);
+  assert.equal(off.asked(), 0);
+  assert.equal('idle_ids' in plain, false, 'an old bundle gets exactly today’s shape');
+  const hist = withIdle([8]);
+  const history = await jobCardRegister('history', hist.deps, { idle: 'hide' });
+  assert.equal(hist.asked(), 0);
+  assert.deepEqual(history.cards.map(c => c.id), [5, 3, 2]);
+});
+
+test('an id the live half would never show is not reported as hidden', async () => {
+  // 5 is a split parent (history), 3 is closed: neither is a live card.
+  const out = await jobCardRegister('live', withIdle([5, 3, 6]).deps, { idle: 'hide' });
+  assert.deepEqual(out.idle_ids, [6]);
+  assert.equal(out.counts.idle, 1);
+});
+
+test('idle=mark keeps every live card and still says which are idle', async () => {
+  const plain = await jobCardRegister('live', fakeDeps().deps);
+  const out = await jobCardRegister('live', withIdle([8]).deps, { idle: 'mark' });
+  assert.equal(JSON.stringify(out.cards), JSON.stringify(plain.cards));
+  assert.deepEqual(out.idle_ids, [8]);
+  assert.deepEqual(out.counts, { ...plain.counts, idle: 1 });
+});

@@ -44,6 +44,8 @@ import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/board
 // tab opens. The merge, the rung rule and the staleness check live in one lib
 // the server suite can hold to the legacy response.
 import { createRegisterLoader, jobCardRung, mergeRegister, printRunIds } from '../lib/jobCardRegister.js';
+import { readShowIdle, writeShowIdle } from '../lib/idleCards.js';
+import IdleCardsChip from '../components/IdleCardsChip.jsx';
 import { GangChip, GangMemberList, GangBanner, GangOriginLine } from '../components/Gang.jsx';
 import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -181,6 +183,8 @@ const TAB_LABELS = {
   all: 'All',
 };
 
+const SHOW_IDLE_KEY = 'ci_job_cards_show_idle';
+
 export default function Production() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -295,12 +299,18 @@ export default function Production() {
   tabRef.current = tab;
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
+  // Idle cards (lib/idleCards.js): hidden unless this browser chose Show. A ref
+  // for the same reason as the tab — load() runs from closures made earlier.
+  const [showIdle, setShowIdle] = useState(() => readShowIdle(SHOW_IDLE_KEY));
+  const showIdleRef = useRef(showIdle);
+  showIdleRef.current = showIdle;
   const loaderRef = useRef(null);
   if (!loaderRef.current) {
     loaderRef.current = createRegisterLoader({
       get: path => api.get(path),
       getTab: () => tabRef.current,
       getPicked: () => pickedRef.current,
+      getHideIdle: () => !showIdleRef.current,
       showsHistory,
       onLive: setLiveJobs,
       onHistory: setHistoryJobs,
@@ -309,6 +319,13 @@ export default function Production() {
   }
   const { load, loadHistory } = loaderRef.current;
   useEffect(() => { load(); }, []);
+  const toggleIdle = () => {
+    const next = !showIdle;
+    showIdleRef.current = next;
+    setShowIdle(next);
+    writeShowIdle(SHOW_IDLE_KEY, next);
+    load();
+  };
   // Opening Completed or All fetches the history fresh — never a copy from
   // whenever the tab was last open.
   useEffect(() => {
@@ -761,13 +778,19 @@ export default function Production() {
         })} />
         </>} />
       <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'pending', label: 'Pending Finalisation', count: rungs.pending.length },
-        { key: 'finalised', label: 'Finalised', count: rungs.finalised.length },
-        { key: 'running', label: 'In Progress', count: rungs.running.length },
+        // Served counts once they arrive: they count every card, the idle ones
+        // held back by ?idle=hide included, so a badge never shrinks because a
+        // card went quiet — the chip below says how many the list is holding back.
+        { key: 'pending', label: 'Pending Finalisation', count: counts ? counts.pending : rungs.pending.length },
+        { key: 'finalised', label: 'Finalised', count: counts ? counts.finalised : rungs.finalised.length },
+        { key: 'running', label: 'In Progress', count: counts ? counts.running : rungs.running.length },
         // Served counts for the two tabs whose cards may not be loaded yet.
         { key: 'closed', label: 'Completed', count: counts ? counts.closed : rungs.closed.length },
         { key: 'all', label: 'All', count: counts ? counts.all : jobs.length },
       ]} />
+      {counts?.idle > 0 && tab !== 'closed' && (
+        <div className="mb-3"><IdleCardsChip count={counts.idle} showing={showIdle} onToggle={toggleIdle} /></div>
+      )}
 
       {/* Timeline — by PLANNED date, the day the job runs on the press. Sits
           under the tabs because it narrows whichever rung is open, and carries

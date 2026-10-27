@@ -26,7 +26,9 @@ const machineNote = machines => {
     .join(' · ');
 };
 
-export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches = null, expanded = false, collapsible = false }) {
+// `idleHidden` — rows of this section held back as idle (Floor.jsx, ?idle=hide):
+// a quiet pill, so a band never claims "0 in queue" without saying so.
+export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches = null, expanded = false, collapsible = false, idleHidden = 0 }) {
   const meta = sec.merged ? SORT_PASTE_META : SECTION_META[sec.section];
   const Icon = meta.icon;
   const to = sec.merged ? '/floor/sort-paste' : `/floor/${sec.section}`;
@@ -77,6 +79,10 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
             {incoming > 0 && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{incoming} in</span>
             )}
+            {idleHidden > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-400"
+                title="Cards here with no activity for 14 days — hidden. Use “Show” above the board.">+{idleHidden} idle</span>
+            )}
             {extraCount > 0 && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">XS {extraCount}</span>
             )}
@@ -100,7 +106,7 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
         </span>
         <span className="shrink-0 text-sm font-extrabold text-slate-400 group-hover:text-slate-700">{meta.label}</span>
         <span className="truncate text-[11px] text-slate-400">
-          clear · 0 in queue{machines.length > 0 && ` · ${machineNote(machines)}`}
+          clear · 0 in queue{idleHidden > 0 && ` · ${idleHidden} idle hidden`}{machines.length > 0 && ` · ${machineNote(machines)}`}
         </span>
         <ChevronRight size={14} className="ml-auto shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5" />
       </Link>
@@ -136,6 +142,10 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${queued ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
                 {queued} queued
               </span>
+              {idleHidden > 0 && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-400"
+                  title="Cards here with no activity for 14 days — hidden. Use “Show” above the board.">+{idleHidden} idle</span>
+              )}
               {extraCount > 0 && (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">XS {extraCount}</span>
               )}
@@ -181,6 +191,10 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
               title="Waiting on the stage before this one — not yet this section's queue">
               {incoming} incoming
             </span>
+          )}
+          {idleHidden > 0 && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-400"
+              title="Cards here with no activity for 14 days — hidden. Use “Show” above the board.">+{idleHidden} idle</span>
           )}
           {extraCount > 0 && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800"

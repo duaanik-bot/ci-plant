@@ -29,6 +29,8 @@ import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
 import { useTier } from '../lib/tier.js';
 import { rehydrateLights } from '../lib/floorLights.js';
+import { readShowIdle, writeShowIdle, idleForBand } from '../lib/idleCards.js';
+import IdleCardsChip from '../components/IdleCardsChip.jsx';
 
 // One label for a gang parent job everywhere on the floor board — every member
 // product named, in gang order, so the chip reads as one unit.
@@ -38,6 +40,8 @@ const jobLabel = job => job.gang_members?.length
 const jobProductSearch = job => job.gang_members?.length
   ? job.gang_members.map(productSearchText).join(' ')
   : productSearchText(job);
+
+const SHOW_IDLE_KEY = 'ci_live_floor_show_idle';
 
 export default function Floor() {
   const touch = useTier() !== 'desktop';
@@ -119,11 +123,22 @@ export default function Floor() {
   // Rehydration builds new objects, so it is memoised on the response itself: an
   // unchanged board comes back from api.get as the SAME object, and must reach
   // setSections as the same array or the whole floor re-renders every 30 s.
+  //
+  // Idle cards (lib/idleCards.js): the board asks `idle=hide` — cards nobody has
+  // touched for 14 days stay on the server, counted per section — unless this
+  // browser chose Show, when it asks `idle=mark` (the whole board, still
+  // counted, so Hide can be offered). Read through a ref: realtime and the poll
+  // call load() from closures made before the click.
   const hydrated = useRef({ res: null, secs: null });
-  const load = () => api.get('/floor?lights=ref')
+  const [showIdle, setShowIdle] = useState(() => readShowIdle(SHOW_IDLE_KEY));
+  const showIdleRef = useRef(showIdle);
+  showIdleRef.current = showIdle;
+  const [idle, setIdle] = useState(null);
+  const load = () => api.get(`/floor?lights=ref&idle=${showIdleRef.current ? 'mark' : 'hide'}`)
     .then(res => {
       if (hydrated.current.res !== res) hydrated.current = { res, secs: rehydrateLights(res) };
       seenAt.current = new Date(); setSections(hydrated.current.secs); setFailed(null);
+      setIdle(prev => (JSON.stringify(prev) === JSON.stringify(res?.idle ?? null) ? prev : (res?.idle ?? null)));
       fails.current = 0; skips.current = 0;
     })
     .catch(e => {
@@ -138,6 +153,13 @@ export default function Floor() {
     return load();
   }, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 300 });
+  const toggleIdle = () => {
+    const next = !showIdle;
+    showIdleRef.current = next;
+    setShowIdle(next);
+    writeShowIdle(SHOW_IDLE_KEY, next);
+    load();
+  };
 
   const allMachines = useMemo(() => (sections || []).flatMap(s => s.machines || []), [sections]);
 
@@ -485,6 +507,10 @@ export default function Floor() {
         </div>
       )}
 
+      {idle?.cards > 0 && (
+        <div className="mb-3"><IdleCardsChip count={idle.cards} showing={showIdle} onToggle={toggleIdle} /></div>
+      )}
+
       {q.trim() && !searched.length && (
         <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
           Nothing on the floor matches “{q}”.
@@ -495,6 +521,7 @@ export default function Floor() {
           // A searched band draws its own matching rows and stays open even when
           // it is otherwise clear — an idle machine is exactly what someone looks up.
           <SectionBand key={sec.section} sec={sec} onLog={openLog} onStatus={setMachineStatus}
+            idleHidden={showIdle ? 0 : idleForBand(idle, sec.section, sec.merged)}
             collapsible={touch}
             matches={q.trim() ? sec.matches : null} expanded={!!q.trim()}
             jobHandlers={sec.merged ? sortPasteHandlers : jobHandlers} />
