@@ -50,12 +50,56 @@
          `sessionStorage` throws outright on a device with site data restricted,
          and the first version treated that as "do nothing" — a guard that is
          silently inert on exactly the locked-down tablets a plant hands out.
-         Navigation Timing needs no permission and still bounds us to one retry. -->
+         Navigation Timing needs no permission and still bounds us to one retry.
+
+         A plain reload is NOT enough on its own, and that is how the office's
+         Print Planning sat unstyled after the 2026-10-27 deploy with this guard
+         in place. Vercel sends `max-age=31536000, immutable` on an /assets 404
+         too, so a request that lands mid-deploy stores the 404 in the browser
+         cache for a year — and both reloads were served that same cached 404.
+         So before reloading we re-request every failed asset with
+         `cache: 'reload'`, which goes to the network and overwrites the poisoned
+         entry. Only same-origin /assets files are touched, the wait is capped,
+         and the reload happens whether or not the refetch worked. -->
     <script>
       (function () {
         var KEY = 'ci:stale-build-reload';
         var WINDOW_MS = 60000;   // one incident's worth of time
         var MAX_TRIES = 2;       // reloads allowed inside it
+        var HEAL_WAIT_MS = 4000; // longest we hold the reload for the refetch
+
+        function assetPath(u) {
+          try {
+            var url = new URL(u, location.href);
+            return url.origin === location.origin && url.pathname.indexOf('/assets/') === 0 ? url.href : null;
+          } catch (e) { return null; }
+        }
+
+        // The asset that fired the error, plus anything else this page got a
+        // 4xx/5xx for — a lazy chunk usually fails on a DEPENDENCY it imports,
+        // and only Resource Timing knows which one that was.
+        function failedAssets(first) {
+          var seen = {}, out = [];
+          function add(u) { var p = u && assetPath(u); if (p && !seen[p]) { seen[p] = 1; out.push(p); } }
+          add(first);
+          try {
+            performance.getEntriesByType('resource').forEach(function (r) {
+              if (r.responseStatus >= 400) add(r.name);
+            });
+          } catch (e) {}
+          return out;
+        }
+
+        function reloadFresh(first) {
+          var urls = failedAssets(first);
+          if (!urls.length || !window.fetch) { location.reload(); return; }
+          var done = false;
+          function go() { if (!done) { done = true; location.reload(); } }
+          setTimeout(go, HEAL_WAIT_MS);
+          Promise.all(urls.map(function (u) {
+            return fetch(u, { cache: 'reload', credentials: 'same-origin' }).catch(function () {});
+          })).then(go, go);
+        }
 
         // null means storage is unusable — a different, weaker path below.
         function budget() {
@@ -67,7 +111,10 @@
           } catch (e) { return null; }
         }
 
-        function recover() {
+        var started = false;   // one heal per document, however many assets fail
+
+        function recover(failedUrl) {
+          if (started) return;
           var now = Date.now();
           var b = budget();
 
@@ -79,7 +126,8 @@
               var nav = performance.getEntriesByType('navigation')[0];
               if (nav && nav.type === 'reload') return;
             } catch (e) { return; }
-            location.reload();
+            started = true;
+            reloadFresh(failedUrl);
             return;
           }
 
@@ -87,15 +135,23 @@
           if (b.n >= MAX_TRIES) return;
           b.n += 1;
           try { sessionStorage.setItem(KEY, JSON.stringify(b)); } catch (e) { return; }
-          location.reload();
+          started = true;
+          reloadFresh(failedUrl);
         }
 
         window.addEventListener('error', function (e) {
           var el = e.target;
           if (!el || el === window) return;
-          if (el.tagName === 'SCRIPT' || (el.tagName === 'LINK' && el.rel === 'stylesheet')) recover();
+          if (el.tagName === 'SCRIPT') recover(el.src);
+          else if (el.tagName === 'LINK' && el.rel === 'stylesheet') recover(el.href);
         }, true);
-        window.addEventListener('vite:preloadError', recover);
+        window.addEventListener('vite:preloadError', function (e) {
+          // "Failed to fetch dynamically imported module: <url>" /
+          // "Unable to preload CSS for <url>" — the URL is the last word.
+          var msg = String((e && e.payload && e.payload.message) || '');
+          var m = msg.match(/(\S+\.(?:js|css))\s*$/);
+          recover(m ? m[1] : null);
+        });
       })();
     </script>
 
