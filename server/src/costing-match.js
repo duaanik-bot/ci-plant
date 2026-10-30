@@ -11,6 +11,7 @@
 //           most often the same carton typed slightly wrong, so the screen asks "Did you mean …?"
 import { parseSize } from './costing-engine.js';
 import { canAccess } from '../../client/src/modules.js';
+import { canDecideManagement } from './approvals.js';
 
 export const NEAR_MM = 2;
 
@@ -45,3 +46,6 @@ export function matchDies(target, dies) {
 // tick — never merely because a login has no ticks at all (modules.js TICK_ONLY_MODULES).
 export const mayCost = u => !!u && canAccess(u, 'costing');
 export const mayEditCostingRates = u => !!u && u.role === 'admin';
+// Approving a costing is a management decision — the same users.is_management right that approves
+// planning requests (approvals.js), read fresh from users on every request.
+export const mayApproveCosting = u => mayCost(u) && canDecideManagement(u);

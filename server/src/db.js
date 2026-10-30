@@ -2866,6 +2866,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Costing — new-product costing, the Size Library, bulk batches, revisions and
   // defaults (no link to plant data). Idempotent. 2026-10-27
   await pool.query(migration('20261027120000_costing.sql'));
+  // Costing approval — Draft / Approved, who and when, per costing and per revision. 2026-10-30
+  await pool.query(migration('20261030120000_costing_approval.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

@@ -2,18 +2,26 @@
 // comparison with earlier costings of the same size. An old cost-sheet row shows the figures the sheet
 // itself showed, and every place the sheet broke its own rule.
 import { useEffect, useState } from 'react';
-import { Archive, ArchiveRestore, Copy, FileSpreadsheet, PencilLine } from 'lucide-react';
+import { Archive, ArchiveRestore, BadgeCheck, Copy, FileSpreadsheet, PencilLine } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, ExportMenu, Modal, useToast } from '../../components/ui.jsx';
 import { computeCosting, INPUTS, num, styleLabel } from '../../lib/costing.js';
 import { costingExportSpec, perUnit, plain, rupees, valueFromSaved } from '../../lib/costingUi.js';
 import { ResultCard, SizeKnowledge, Working } from './CostingEditor.jsx';
+import { ApprovalChip } from './SingleCosting.jsx';
 
 export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, onChanged }) {
   const toast = useToast();
   const [c, setC] = useState(null);
   const load = () => api.get(`/costing/costings/${id}`).then(setC).catch(() => onClose());
   useEffect(() => { if (id) load(); else setC(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id]);
+
+  const approve = async () => {
+    await api.post(`/costing/costings/${c.id}/approve`, {});
+    toast.success(`${c.costing_no} approved`);
+    await load();
+    onChanged?.();
+  };
 
   const archive = async () => {
     await api.post(`/costing/costings/${c.id}/archive`, { archived: !c.archived });
@@ -34,6 +42,9 @@ export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, 
         <>
           <Button variant="secondary" onClick={archive}>{c.archived ? <><ArchiveRestore size={15} className="mr-1.5 inline" />Show again</> : <><Archive size={15} className="mr-1.5 inline" />Hide</>}</Button>
           <ExportMenu build={() => costingExportSpec(c)} />
+          {boot?.can_approve && !sheet && !c.archived && c.complete && c.status !== 'approved' && (
+            <Button variant="success" onClick={approve}><BadgeCheck size={15} className="mr-1.5 inline" />Approve</Button>
+          )}
           <Button variant="secondary" onClick={() => onCostAgain(c.id)}><Copy size={15} className="mr-1.5 inline" />Cost again</Button>
           {!sheet && !c.archived && <Button onClick={() => onRevise(c.id)}><PencilLine size={15} className="mr-1.5 inline" />Revise</Button>}
         </>
@@ -50,6 +61,7 @@ export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, 
               <Item k="Rules used" v={formula ? formula.label : c.formula} />
               {c.batch_no && <Item k="Bulk costing" v={`${c.batch_no}${c.batch_title ? ` · ${c.batch_title}` : ''}`} />}
               <Item k="Made by" v={c.created_by_name || '—'} />
+              {!sheet && <Item k="Approval" v={<ApprovalChip c={c} />} />}
               {c.remarks && <Item k="Remarks" v={c.remarks} wide />}
             </dl>
 
@@ -86,6 +98,7 @@ export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, 
                       <b>Revision {v.version}</b>
                       <span className="tabular-nums">{v.result?.ok ? perUnit(v.result.cost_per_unit) : 'incomplete'}</span>
                       <span className="text-slate-500">{v.note || '—'}</span>
+                      {v.approved_by_name && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-px text-[11px] font-bold text-emerald-800"><BadgeCheck size={11} />approved by {v.approved_by_name}, {v.approved_at}</span>}
                       <span className="ml-auto text-xs text-slate-400">{v.created_by_name} · {v.created_at}</span>
                     </li>
                   ))}

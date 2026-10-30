@@ -8,6 +8,8 @@
 //   printing = print ₹ (per 1,000 sheets, per colour) × colours × sheets ÷ 1000,
 //              but never less than the minimum printing charge (₹1,600 on the sheet)
 //   coating  = L × W ÷ coating factor ÷ 100 × sheets                    (factor 2, 3, 6 …; blank = none)
+//              — in plain words ₹ (1 ÷ factor) per 100 sq in of sheet; a costing may give that rate
+//              directly (coat_rate) and the sheets to coat (coat_sheets, blank = every sheet)
 //   die & pasting = ₹ per carton × quantity
 //   process  = a fixed ₹ for the job
 //   subtotal = board + printing + coating + die & pasting + process
@@ -62,6 +64,8 @@ export const INPUTS = Object.freeze([
   { key: 'print_rate',     label: 'Printing rate',            unit: '₹ per 1,000 sheets, per colour' },
   { key: 'print_min',      label: 'Minimum printing charge',  unit: '₹' },
   { key: 'coat_factor',    label: 'Coating factor',           unit: 'blank = no coating' },
+  { key: 'coat_rate',      label: 'Coating rate',             unit: '₹ per 100 sq inch' },
+  { key: 'coat_sheets',    label: 'Sheets to coat',           unit: 'blank = every sheet' },
   { key: 'dp_rate',        label: 'Die & pasting',            unit: '₹ per carton' },
   { key: 'emb_rate',       label: 'Embossing',                unit: '₹ per carton' },
   { key: 'process',        label: 'Process charge',           unit: '₹ for the job' },
@@ -128,8 +132,12 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   if (printFixed != null) print = printFixed;
   else if (printMin > 0 && !(printCalc > printMin)) { print = printFloor; printAtMin = true; }
 
-  const coatPerSheet = coatFactor > 0 ? L * W / coatFactor / 100 : 0;
-  const coat = coatPerSheet * sheets;
+  // Coating: a rate per 100 sq in, given directly (coat_rate) or as the sheet's factor — the factor's
+  // expression is kept exactly as the sheet has it, so old costings rework to the paisa.
+  const coatRate = z(v.coat_rate);
+  const coatPerSheet = coatRate > 0 ? L * W * coatRate / 100 : coatFactor > 0 ? L * W / coatFactor / 100 : 0;
+  const coatSheets = v.coat_sheets > 0 ? v.coat_sheets : sheets;
+  const coat = coatPerSheet * coatSheets;
   const dp = dpRate * qty;
   const subtotal = board + print + coat + dp + processCharge;
   const pf = pfPct / 100 * subtotal;
@@ -152,8 +160,8 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
           ? `${fmtFlex(sheets, 1)} sheets × ${fmtFlex(colours)} colours × ₹${fmtFlex(printRate, 2)} ÷ 1,000 = ${rs(printCalc)} — under the minimum, so ${rs(printFloor)}`
           : `${fmtFlex(sheets, 1)} sheets × ${fmtFlex(colours)} colours × ₹${fmtFlex(printRate, 2)} ÷ 1,000` },
     { key: 'coat', label: 'Coating', amount: coat, per_unit: per(coat),
-      how: coatFactor > 0
-        ? `${fmtFlex(sheets, 1)} sheets × ₹${fmtFlex(coatPerSheet, 4)} a sheet (${fmtFlex(L, 2)} × ${fmtFlex(W, 2)} sq in ÷ ${fmtFlex(coatFactor, 2)} ÷ 100)`
+      how: coatPerSheet > 0
+        ? `${fmtFlex(coatSheets, 1)} sheets × ₹${fmtFlex(coatPerSheet, 4)} a sheet (${fmtFlex(L, 2)} × ${fmtFlex(W, 2)} = ${fmtFlex(L * W, 1)} sq in at ₹${fmtFlex(coatRate > 0 ? coatRate : 1 / coatFactor, 4)} per 100 sq in)`
         : 'No coating' },
     { key: 'dp', label: 'Die & pasting', amount: dp, per_unit: per(dp),
       how: `${fmt(qty)} cartons × ₹${fmtFlex(dpRate, 3)}` },
@@ -175,6 +183,17 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
       how: `Cost per carton + ₹${fmtFlex(margin, 3)} margin` },
   );
 
+  // Set-up (fixed) and running (variable) cost — the same total, split. Set-up is what a job costs
+  // whatever its quantity: the wastage sheets' board, printing and coating, the process charge, and a
+  // printing charge held at its minimum. P&F and misc follow each part in proportion.
+  const wasteShare = sheets > 0 ? wastage / sheets : 0;
+  const printFix = printFixed != null || printAtMin ? print : printRate * colours * wastage / 1000;
+  const subFix = sheetKg * v.board_rate * wastage + printFix + coat * wasteShare + processCharge;
+  const subVar = subtotal - subFix;
+  const pfFix = pfPct / 100 * subFix;
+  const fixed = subFix + pfFix + miscPct / 100 * (subFix + pfFix);
+  const variable = net - fixed + emb * qty;
+
   const target = v.target_price > 0
     ? { price: v.target_price, margin_per_unit: v.target_price - costPerUnit,
         margin_pct: (v.target_price - costPerUnit) / v.target_price * 100 }
@@ -191,12 +210,43 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   return {
     formula, ok: true, missing: [], warnings, lines,
     qty, sheets, sheet_kg: sheetKg,
-    parts: { board, print, print_calc: printCalc, print_at_min: printAtMin, coat, dp, process: processCharge,
-             subtotal, pf, misc, net, emb_total: emb * qty },
+    parts: { board, print, print_calc: printCalc, print_at_min: printAtMin, coat, coat_sheets: coatSheets,
+             coat_per_sheet: coatPerSheet, dp, process: processCharge, subtotal, pf, misc, net, emb_total: emb * qty },
+    split: { fixed, variable, running_per_unit: variable / qty, setup_per_unit: fixed / qty, sub_fixed: subFix, sub_variable: subVar },
     cost_per_unit: costPerUnit, quote_per_unit: quotePerUnit,
     cost_value: costPerUnit * qty, quote_value: quotePerUnit * qty,
     target,
   };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Quantity breaks — the same costing at other quantities, every other input as it is. Wastage stays
+// fixed (the plant's practice: a median 300 sheets whatever the run). Sheets to coat, when given, scale
+// with the sheets. Each answer is computeCosting's own, so a break can never disagree with a costing.
+export function quantityBreaks(input = {}, quantities = [], formula = CURRENT_FORMULA) {
+  const base = computeCosting(input, formula);
+  return [...new Set(quantities.map(num).filter(q => q > 0))].sort((a, b) => a - b).map(qty => {
+    const inp = { ...input, qty };
+    if (base.ok && num(input.coat_sheets) > 0) inp.coat_sheets = num(input.coat_sheets) * (qty / num(input.ups) + z(input.wastage)) / base.sheets;
+    const r = computeCosting(inp, formula);
+    return r.ok
+      ? { qty, ok: true, sheets: r.sheets, cost_per_unit: r.cost_per_unit, quote_per_unit: r.quote_per_unit, cost_value: r.cost_value,
+          quote_value: r.quote_value, setup: r.split.fixed, running_per_unit: r.split.running_per_unit, setup_per_unit: r.split.setup_per_unit }
+      : { qty, ok: false };
+  });
+}
+
+// Round quantities to try beside the one entered: half, double, five and ten times, each rounded to a
+// figure people quote in (1, 2, 2.5, 5 × a power of ten).
+export function suggestQuantities(qty) {
+  const q = num(qty);
+  if (!(q > 0)) return [];
+  const nice = x => {
+    const p = 10 ** Math.floor(Math.log10(x));
+    const m = x / p;
+    return (m < 1.5 ? 1 : m < 2.25 ? 2 : m < 3.75 ? 2.5 : m < 7.5 ? 5 : 10) * p;
+  };
+  return [...new Set([nice(q / 2), q, nice(q * 2), nice(q * 5), nice(q * 10)].filter(x => x >= 100))].sort((a, b) => a - b);
 }
 
 // ---------------------------------------------------------------------------------------------------

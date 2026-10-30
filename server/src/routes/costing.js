@@ -12,6 +12,8 @@
 //   GET  /costing/batches · GET /costing/batches/:id · POST /costing/batches (new) · POST /costing/batches/:id/save
 //   GET  /costing/sizes · POST /costing/sizes · PUT /costing/sizes/:id · GET /costing/sizes/duplicates
 //   PUT  /costing/settings               defaults, coating names, alert % (admins)
+//   POST /costing/costings/:id/approve · POST /costing/batches/:id/approve   (the Management right)
+//   POST /costing/products/match         Product Master entries for names pasted into a bulk costing
 //
 // The figures are ALWAYS worked out here on save — whatever the browser showed is not trusted.
 // Audit lines carry the costing number and what happened, never a price: the audit log is read by
@@ -22,11 +24,11 @@ import { audit, nextNumber, lockDocNumber, optionalText } from '../helpers.js';
 import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { computeCosting, parseSize, normStyle, num, CURRENT_FORMULA, FORMULAS, INPUTS, STYLES } from '../costing-engine.js';
 import { possibleDuplicates, sizeEntryKey } from '../costing-sheet.js';
-import { matchDies, sizeRelation, mayCost, mayEditCostingRates } from '../costing-match.js';
+import { matchDies, sizeRelation, mayCost, mayEditCostingRates, mayApproveCosting } from '../costing-match.js';
 
 const r = Router();
 
-const loginOf = req => one('SELECT id, name, role, active, modules FROM users WHERE id = $1 AND active = 1', [req.user?.id]);
+const loginOf = req => one('SELECT id, name, role, active, modules, is_management FROM users WHERE id = $1 AND active = 1', [req.user?.id]);
 const fail = (status, error) => Object.assign(new Error(error), { status });
 
 // Every /costing route: the Costing tick, read fresh (ticks change mid-session; the token does not).
@@ -58,7 +60,8 @@ const COSTING_COLS = `
   to_char(c.costed_on, 'YYYY-MM-DD') AS costed_on, c.version, c.formula, c.complete, c.reproduced,
   c.qty::float8 AS qty, c.gsm::float8 AS gsm, c.cost_per_unit::float8 AS cost_per_unit,
   c.quote_per_unit::float8 AS quote_per_unit, c.cost_value::float8 AS cost_value,
-  c.remarks, c.archived, jsonb_array_length(c.notes) AS note_count,
+  c.remarks, c.archived, jsonb_array_length(c.notes) AS note_count, c.status, c.approved_by_name,
+  to_char(c.approved_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS approved_at, c.approved_version,
   c.created_by_name, c.created_at, c.updated_by_name, c.updated_at`;
 
 // ── reference data ────────────────────────────────────────────────────────────────────────────────
@@ -73,11 +76,35 @@ async function boardGrades() {
      ORDER BY grade, effective_from DESC NULLS LAST, id DESC`);
 }
 
+// What the plant's own costings usually carry, worked out live from the last two years so the
+// recommendations move with practice: die & pasting by pasting style, embossing when used, and the
+// process charge per colour (the history says ~₹500 a colour).
+async function typicalFigures() {
+  const since = `(${PLANT_TODAY_SQL} - interval '2 years')`;
+  const [dp, emb, proc] = await Promise.all([
+    q(`SELECT style, percentile_cont(0.5) WITHIN GROUP (ORDER BY (inputs->>'dp_rate')::numeric)::float8 AS value, count(*)::int AS n
+         FROM costings WHERE complete AND NOT archived AND style IS NOT NULL AND costed_on >= ${since}
+          AND (inputs->>'dp_rate')::numeric > 0 GROUP BY style HAVING count(*) >= 5`),
+    one(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY (inputs->>'emb_rate')::numeric)::float8 AS value, count(*)::int AS n
+           FROM costings WHERE complete AND NOT archived AND costed_on >= ${since} AND (inputs->>'emb_rate')::numeric > 0`),
+    one(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY (inputs->>'process')::numeric / (inputs->>'colours')::numeric)::float8 AS value, count(*)::int AS n
+           FROM costings WHERE complete AND NOT archived AND costed_on >= ${since}
+            AND (inputs->>'colours')::numeric > 0 AND (inputs->>'process')::numeric > 0`),
+  ]);
+  return {
+    dp_by_style: Object.fromEntries(dp.map(r => [r.style, { value: r.value, n: r.n }])),
+    emb: emb?.n >= 5 ? { value: emb.value, n: emb.n } : null,
+    process_per_colour: proc?.n >= 5 ? { value: proc.value, n: proc.n } : null,
+  };
+}
+
 r.get('/costing/bootstrap', async (req, res, next) => {
   try {
     const settings = await one('SELECT defaults, coatings, alert_pct::float8 AS alert_pct FROM costing_settings WHERE id = 1');
     res.json({
       settings: settings || { defaults: {}, coatings: [], alert_pct: 15 },
+      typical: await typicalFigures(),
+      can_approve: mayApproveCosting(req.costingUser),
       board_grades: await boardGrades(),
       formulas: Object.entries(FORMULAS).map(([key, f]) => ({ key, label: f.label })),
       current_formula: CURRENT_FORMULA,
@@ -173,17 +200,44 @@ r.post('/costing/size-check/bulk', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// What a costing takes from a Product Master entry.
+const PRODUCT_COLS = `
+  p.id, p.name, p.code, p.size, p.gsm::float8 AS gsm, p.child_l::float8 AS sheet_l, p.child_w::float8 AS sheet_w,
+  p.ups::float8 AS ups, p.coating, p.pasting_type, p.board_grade, p.colors::float8 AS colours, p.emboss, p.leafing,
+  p.special, p.customer_id, cu.name AS customer_name`;
+
 r.get('/costing/products', async (req, res, next) => {
   try {
     const s = text(req.query.search, 80);
     if (!s) return res.json([]);
     const rows = await q(`
-      SELECT p.id, p.name, p.code, p.size, p.gsm::float8 AS gsm, p.child_l::float8 AS sheet_l, p.child_w::float8 AS sheet_w,
-             p.ups::float8 AS ups, p.coating, p.pasting_type, p.board_grade, p.colors, p.customer_id, cu.name AS customer_name
+      SELECT ${PRODUCT_COLS}
         FROM products p LEFT JOIN customers cu ON cu.id = p.customer_id
-       WHERE p.active = 1 AND (p.name ILIKE $1 OR p.code ILIKE $1 OR p.size ILIKE $1 OR cu.name ILIKE $1)
-       ORDER BY p.name LIMIT 25`, [`%${s}%`]);
+       WHERE p.active = 1 AND (p.name ILIKE $1 OR p.code ILIKE $1 OR p.size ILIKE $1 OR cu.name ILIKE $1
+             OR p.party_item_code ILIKE $1)
+       ORDER BY (lower(p.code) = lower($2) OR lower(p.name) = lower($2)) DESC, p.name LIMIT 25`, [`%${s}%`, s]);
     res.json(rows);
+  } catch (e) { next(e); }
+});
+
+// Names (or codes) pasted into a bulk costing, each matched to ONE active Product Master entry by its
+// exact name or code, case and spacing aside. A name two products share is left unmatched: a guess
+// would cost the wrong carton.
+r.post('/costing/products/match', async (req, res, next) => {
+  try {
+    const names = (Array.isArray(req.body?.names) ? req.body.names : []).map(n => text(n, 200)).filter(Boolean).slice(0, 200);
+    if (!names.length) return res.json({});
+    const keys = [...new Set(names.map(n => n.toLowerCase().replace(/\s+/g, ' ')))];
+    const rows = await q(`
+      SELECT ${PRODUCT_COLS}, lower(regexp_replace(p.name, '\\s+', ' ', 'g')) AS name_key, lower(p.code) AS code_key
+        FROM products p LEFT JOIN customers cu ON cu.id = p.customer_id
+       WHERE p.active = 1 AND (lower(regexp_replace(p.name, '\\s+', ' ', 'g')) = ANY($1::text[]) OR lower(p.code) = ANY($1::text[]))`, [keys]);
+    const out = {};
+    for (const k of keys) {
+      const hits = rows.filter(r => r.name_key === k || r.code_key === k);
+      if (hits.length === 1) { const { name_key, code_key, ...p } = hits[0]; out[k] = p; }
+    }
+    res.json(out);
   } catch (e) { next(e); }
 });
 
@@ -281,6 +335,11 @@ async function reviseCosting(id, c, { batchId, batchPos, note } = {}, qc, oc, us
            quote_per_unit = $21, cost_value = $22, remarks = $23, version = $24,
            batch_id = COALESCE($25::int, batch_id), batch_pos = COALESCE($26::int, batch_pos),
            costed_on = CASE WHEN $27::boolean THEN costed_on ELSE ${PLANT_TODAY_SQL} END,
+           status = CASE WHEN $27::boolean THEN status ELSE 'draft' END,
+           approved_by = CASE WHEN $27::boolean THEN approved_by END,
+           approved_by_name = CASE WHEN $27::boolean THEN approved_by_name END,
+           approved_at = CASE WHEN $27::boolean THEN approved_at END,
+           approved_version = CASE WHEN $27::boolean THEN approved_version END,
            updated_at = now(), updated_by = $28, updated_by_name = $29
      WHERE id = $1`,
   [id, c.customer_id, c.customer_name, c.product_id, c.product_name, c.size_text, c.size?.key ?? null,
@@ -302,7 +361,8 @@ async function costingById(id) {
                          FROM costings c LEFT JOIN costing_batches b ON b.id = c.batch_id
                         WHERE c.id = $1`, [id]);
   if (!c) return null;
-  c.versions = await q(`SELECT version, formula, inputs, result, note, created_by_name,
+  c.versions = await q(`SELECT version, formula, inputs, result, note, created_by_name, approved_by_name,
+                               to_char(approved_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS approved_at,
                                to_char(created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS created_at
                           FROM costing_versions WHERE costing_id = $1 ORDER BY version DESC`, [id]);
   return c;
@@ -331,6 +391,46 @@ r.get('/costing/costings/:id', async (req, res, next) => {
     const c = await costingById(intOrNull(req.params.id) || 0);
     if (!c) throw fail(404, 'No such costing.');
     res.json(c);
+  } catch (e) { next(e); }
+});
+
+// Approve a costing at its current revision. The stamp goes on the costing and on that revision, so a
+// later revision (which sends the costing back to Draft) leaves the record of what was approved.
+async function approveCosting(id, user, qc, oc) {
+  const c = await oc(`SELECT id, costing_no, source, complete, archived, status, version FROM costings WHERE id = $1 FOR UPDATE`, [id]);
+  if (!c) throw fail(404, 'No such costing.');
+  if (c.source !== 'erp') throw fail(409, 'Old cost-sheet records are not approved — cost it again to make a costing that can be.');
+  if (!c.complete) throw fail(409, `${c.costing_no} is not complete — fill it in before it is approved.`);
+  if (c.archived) throw fail(409, `${c.costing_no} is hidden — show it again before approving it.`);
+  if (c.status === 'approved') return { id, costing_no: c.costing_no, already: true };
+  await qc(`UPDATE costings SET status = 'approved', approved_by = $2, approved_by_name = $3, approved_at = now(), approved_version = version
+             WHERE id = $1`, [id, user.id, user.name]);
+  await qc(`UPDATE costing_versions SET approved_by_name = $3, approved_at = now() WHERE costing_id = $1 AND version = $2`,
+    [id, c.version, user.name]);
+  await audit('costing', id, 'approve', `${c.costing_no} — revision ${c.version}`, qc, user.name);
+  return { id, costing_no: c.costing_no, already: false };
+}
+
+r.post('/costing/costings/:id/approve', async (req, res, next) => {
+  try {
+    if (!mayApproveCosting(req.costingUser)) throw fail(403, 'Approving a costing needs the Management right.');
+    const id = intOrNull(req.params.id) || 0;
+    await tx((qc, oc) => approveCosting(id, req.costingUser, qc, oc));
+    res.json(await costingById(id));
+  } catch (e) { next(e); }
+});
+
+// Every complete row of a batch, approved together. Rows still being filled in are left as Draft.
+r.post('/costing/batches/:id/approve', async (req, res, next) => {
+  try {
+    if (!mayApproveCosting(req.costingUser)) throw fail(403, 'Approving a costing needs the Management right.');
+    const id = intOrNull(req.params.id) || 0;
+    const done = await tx(async (qc, oc) => {
+      const rows = await qc(`SELECT id FROM costings WHERE batch_id = $1 AND NOT archived AND complete AND status = 'draft' ORDER BY id`, [id]);
+      for (const r of rows) await approveCosting(r.id, req.costingUser, qc, oc);
+      return rows.length;
+    });
+    res.json({ approved: done, batch: await batchById(id) });
   } catch (e) { next(e); }
 });
 
@@ -371,6 +471,8 @@ r.get('/costing/costings', async (req, res, next) => {
     if (flag === 'not_reproduced') where.push('c.reproduced = false');
     if (flag === 'sheet_notes') where.push("jsonb_array_length(c.notes) > 0");
     if (flag === 'no_size') where.push('c.size_id IS NULL');
+    if (flag === 'awaiting') where.push(`c.source = 'erp' AND c.complete AND c.status = 'draft'`);
+    if (flag === 'approved') where.push(`c.status = 'approved'`);
     const limit = Math.min(Math.max(+req.query.limit || 300, 1), 5000);
     const offset = Math.max(+req.query.offset || 0, 0);
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -414,7 +516,10 @@ function batchFrom(body) {
   const rows = Array.isArray(body?.rows) ? body.rows : [];
   if (!rows.length) throw fail(400, 'Add at least one product to the batch.');
   if (rows.length > MAX_BATCH_ROWS) throw fail(400, `A batch holds up to ${MAX_BATCH_ROWS} products — split it into two.`);
-  const common = cleanInputs(body?.common);
+  // The common settings, plus the extra quantities every row is also priced at (up to six).
+  const quantities = [...new Set((Array.isArray(body?.common?.quantities) ? body.common.quantities : []).map(num).filter(x => x > 0))]
+    .sort((a, b) => a - b).slice(0, 6);
+  const common = { ...cleanInputs(body?.common), quantities };
   return {
     title: text(body?.title, 200),
     customer_id: intOrNull(body?.customer_id),

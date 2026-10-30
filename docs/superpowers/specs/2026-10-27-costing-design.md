@@ -132,3 +132,73 @@ on reads as well as writes for `/api/costing/*` — quotation prices are commerc
 5. The Size helper never blocks or warns (see above).
 6. Difference alert at ±15% against the most comparable earlier costing (same size and pasting, GSM
    within ±10, newest first, then nearest quantity).
+
+---
+
+# Upgrade, 2026-10-30 — an estimating engine that fills itself in
+
+The owner's second brief: make the costing model intelligent, automated and much simpler on screen,
+simplify coating, rework bulk costing around quantities, and make the one engine the centre of single,
+bulk and quotation work. Nobody had saved a costing in production yet, so the screens could be reshaped.
+
+## Audit of what was live (main@8d024ef7)
+
+| Brief asks | What was there |
+|---|---|
+| Auto-fill from the ERP | Optional "start from a product" search; Size Library "Use" buttons; board rate by grade. Nothing chosen automatically, no sign of where a value came from. |
+| Simple screen | Five steps, ~22 boxes all open at once. |
+| Simple coating | A factor dropdown ("₹1 per 600 sq in (factor 6)"). No way to say how many sheets get coated. |
+| Bulk by quantity | Bulk = many products in one table. No way to compare quantities; set-up and running cost not separated. |
+| Approval + quotation | Customer quotation export only; no approval. |
+
+## Benchmark (vendor material on carton / print estimating)
+
+What the estimating tools have in common and fits the plant's method: quantity breaks with set-up cost
+amortised over the run and shown apart from running cost; make-ready (set-up) waste as a per-job
+allowance; automatic choice of the most efficient layout with the alternatives and their cost still
+visible; templates from the product record; an approval step before a quote goes out. Not adopted:
+machine-hour cost centres — the plant's sheet has no machine rates, and inventing them would change the
+method.
+
+## What the history says (3,152 old costings, read-only study)
+
+- **Wastage does not grow with run length**: median 300 sheets in every run band from <500 to 20,000+
+  sheets. It is a fixed set-up allowance; the quantity comparison keeps it fixed.
+- **Die & pasting follows the pasting style**: Lock bottom ₹0.30, Side ₹0.20, Leaflet ₹0.15 (medians, 2024 on).
+- **Process charge ≈ ₹500 a colour** (2 → ₹1,000, 4 → ₹2,000, 8 → ₹4,000–5,000).
+- **Embossing when used**: ₹0.10 / ₹0.15 / ₹0.20 (median ₹0.15).
+- **Coating factor does NOT follow the Product Master's coating name** (Aqueous jobs were costed at
+  factor 6, 2 and 3; Drip Off at 2, 6 and 3), so coating is never guessed from the name: it comes from the
+  same product's or the same size's last costing.
+
+These "typical" figures are worked out live from the costings table, so they move with practice.
+
+## The upgrade
+
+1. **One engine** (`computeCosting`) for single costing, bulk rows, quantity breaks and quotations.
+   - New, optional coating inputs: `coat_rate` (₹ per 100 sq in — the factor's plain form, 1 ÷ factor)
+     and `coat_sheets` (sheets to coat; blank = every sheet). Without them every costing works out
+     exactly as before (CI-1 unchanged; all 3,021 reproduced rows still reproduce).
+   - Every result splits **set-up (fixed)** — wastage sheets' board, printing and coating, the process
+     charge, a minimum printing charge — from **running (variable)** cost; P&F and misc follow each part.
+     Set-up + running = the total, to the paisa.
+   - `quantityBreaks()` reprices the same costing at other quantities: the per-carton fall shows
+     economies of scale from the set-up cost spreading.
+2. **Recommendations with a visible source.** Pick a product → size, pasting (LOCK BOTTOM → Lock, BSO →
+   Side), print sheet and ups, GSM, colours, board grade → today's ₹/kg, and embossing come from the
+   Product Master; the sheet layout from the Size Library (most used; the others listed with their
+   cost a carton, cheapest marked); coating and die & pasting from the last costing of the product or
+   size, else typical for the style; process from colours. Every box shows where its value came from —
+   Product, Size Library, Board Rates, Past costing, Typical, Default — or Edited once typed. A typed
+   value is never overwritten.
+3. **A short screen.** Product · customer · quantity, then Carton and Print & finish; the rate boxes
+   (wastage, printing rate, minimum, die & pasting, process, P&F, misc, margin, target) sit under
+   "More settings", closed. The working is a click away.
+4. **Coating in plain words**: choose a rate (₹ per 100 sq in, the plant's usual three as buttons) or
+   none; sheets to coat fill themselves (editable); the screen shows ₹ a sheet and the coating total.
+5. **Bulk**: pasted product names that match the Product Master fill their specs; die & pasting follows
+   each row's style unless set in common; "Also price at" quantities add per-carton columns; the
+   quotation sheet carries a price column per quantity.
+6. **Approval**: a logged-in user with the Management right approves a complete costing (or every ready
+   row of a batch); changing its figures sends it back to Draft. The quotation export of an unapproved
+   costing is stamped DRAFT. Migration `20261030120000_costing_approval.sql`.

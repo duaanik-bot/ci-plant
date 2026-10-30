@@ -57,15 +57,16 @@ describe('Costing — through the real app', {
 
     const { default: jwt } = await import('jsonwebtoken');
     const { JWT_SECRET: secret } = await import('./auth.js');
-    const mk = async (key, role, modules) => {
-      const u = await db.one(`INSERT INTO users (name, email, password_hash, role, modules) VALUES ($1, $2, 'x', $3, $4) RETURNING id, name, role`,
-        [`Costing ${key}`, `costing-${key}@test.local`, role, modules && JSON.stringify(modules)]);
+    const mk = async (key, role, modules, mgmt = 0) => {
+      const u = await db.one(`INSERT INTO users (name, email, password_hash, role, modules, is_management) VALUES ($1, $2, 'x', $3, $4, $5) RETURNING id, name, role`,
+        [`Costing ${key}`, `costing-${key}@test.local`, role, modules && JSON.stringify(modules), mgmt]);
       tokens[key] = jwt.sign({ id: u.id, name: u.name, role: u.role }, secret);
     };
     await mk('admin', 'admin', null);
     await mk('clerk', 'planner', ['costing']);
     await mk('plain', 'planner', null);
     await mk('orders', 'planner', ['orders']);
+    await mk('md', 'planner', ['costing'], 1);
 
     // One die of a size, in the Die Master (the Tooling Hub's die family).
     await db.q(`INSERT INTO tools (family, code, title, ups, carton_size, zone, condition, active)
@@ -193,5 +194,61 @@ describe('Costing — through the real app', {
     const boot = await call('clerk', 'GET', '/costing/bootstrap');
     assert.equal(boot.body.settings.alert_pct, 20);
     assert.deepEqual(boot.body.settings.coatings, [{ factor: 6, name: 'Test varnish' }]);
+  });
+
+  test('approval: only the Management right approves; a new revision goes back to Draft, the approved one keeps its stamp', async () => {
+    const made = await call('clerk', 'POST', '/costing/costings', { product_name: 'Test carton C', size_text: '110x40x80', style: 'SIDE', inputs: JOB });
+    const id = made.body.id;
+    assert.equal(made.body.status, 'draft');
+    assert.equal((await call('clerk', 'POST', `/costing/costings/${id}/approve`, {})).status, 403);
+    assert.equal((await call('admin', 'POST', `/costing/costings/${id}/approve`, {})).status, 403, 'an admin without the Management right does not approve');
+    const ok = await call('md', 'POST', `/costing/costings/${id}/approve`, {});
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.status, 'approved');
+    assert.equal(ok.body.approved_by_name, 'Costing md');
+    assert.equal(ok.body.approved_version, 1);
+    const boot = await call('md', 'GET', '/costing/bootstrap');
+    assert.equal(boot.body.can_approve, true);
+    assert.equal((await call('clerk', 'GET', '/costing/bootstrap')).body.can_approve, false);
+    // a remark is not a new price: still approved
+    const remark = await call('clerk', 'PUT', `/costing/costings/${id}`, { product_name: 'Test carton C', size_text: '110x40x80', style: 'SIDE', inputs: JOB, remarks: 'checked' });
+    assert.equal(remark.body.status, 'approved');
+    // new figures: back to Draft; revision 1 keeps who approved it
+    const rev = await call('clerk', 'PUT', `/costing/costings/${id}`, { product_name: 'Test carton C', size_text: '110x40x80', style: 'SIDE', inputs: { ...JOB, gsm: 320 } });
+    assert.equal(rev.body.status, 'draft');
+    assert.equal(rev.body.approved_by_name, null);
+    const v1 = rev.body.versions.find(v => v.version === 1);
+    assert.equal(v1.approved_by_name, 'Costing md');
+    assert.ok(v1.approved_at);
+    assert.equal(rev.body.versions.find(v => v.version === 2).approved_by_name, null);
+    const awaiting = await call('clerk', 'GET', '/costing/costings?flag=awaiting');
+    assert.ok(awaiting.body.rows.some(r => r.id === id));
+    // incomplete costings and old sheet records are not approved
+    const half = await call('clerk', 'POST', '/costing/costings', { product_name: 'Half', inputs: { qty: 10 } });
+    assert.equal((await call('md', 'POST', `/costing/costings/${half.body.id}/approve`, {})).status, 409);
+  });
+
+  test('a batch keeps its extra quantities, and approving it approves every complete row only', async () => {
+    const rows = [
+      { product_name: 'Test carton D1', size_text: '90x40x60', style: 'SIDE', inputs: { ...JOB } },
+      { product_name: 'Test carton D2', size_text: '95x40x60', style: 'LOCK', inputs: { ...JOB, qty: 3000 } },
+      { product_name: 'Test carton D3', size_text: '99x40x60', style: 'LOCK', inputs: { qty: 500 } },
+    ];
+    const made = await call('clerk', 'POST', '/costing/batches', { title: 'Test RFQ 2', common: { ...JOB, quantities: [20000, '5,000', 0, 'x'] }, rows });
+    assert.deepEqual(made.body.common.quantities, [5000, 20000]);
+    assert.equal((await call('clerk', 'POST', `/costing/batches/${made.body.id}/approve`, {})).status, 403);
+    const r = await call('md', 'POST', `/costing/batches/${made.body.id}/approve`, {});
+    assert.equal(r.body.approved, 2);
+    assert.deepEqual(r.body.batch.rows.map(x => x.status), ['approved', 'approved', 'draft']);
+  });
+
+  test('pasted product names are matched to ONE Product Master entry by exact name or code', async () => {
+    const p = await db.one(`SELECT name, code FROM products WHERE active = 1 ORDER BY id LIMIT 1`);
+    const m = await call('clerk', 'POST', '/costing/products/match', { names: [`  ${p.name.toUpperCase()}  `, p.code, 'No such carton'] });
+    assert.equal(m.status, 200);
+    const nameKey = p.name.toLowerCase().replace(/\s+/g, ' ');
+    assert.equal(m.body[nameKey]?.code, p.code);
+    assert.equal(m.body[p.code.toLowerCase()]?.name, p.name);
+    assert.equal(m.body['no such carton'], undefined);
   });
 });

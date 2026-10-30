@@ -47,13 +47,16 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
     { key: 'gsm', label: 'GSM', align: 'right', render: r => plain(r.gsm, 0), export: r => r.gsm ?? '' },
     { key: 'cost_per_unit', label: 'Cost / carton', align: 'right', render: r => <span className="tabular-nums">{perUnit(r.cost_per_unit)}</span>, export: r => r.cost_per_unit ?? '' },
     { key: 'quote_per_unit', label: 'Quote', align: 'right', render: r => <span className="tabular-nums">{perUnit(r.quote_per_unit)}</span>, export: r => r.quote_per_unit ?? '' },
-    { key: '_source', label: 'Made', sortValue: r => r.source, export: r => (r.source === 'sheet' ? 'Old cost sheet' : 'ERP'),
+    { key: '_source', label: 'Made', sortValue: r => r.source, export: r => (r.source === 'sheet' ? 'Old cost sheet' : `ERP · ${r.status === 'approved' ? 'Approved' : 'Draft'}`),
       render: r => (
         <span className="flex flex-wrap gap-1">
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${r.source === 'sheet' ? 'bg-slate-100 text-slate-600' : 'bg-brand-50 text-brand-700'}`}>{r.source === 'sheet' ? 'Old sheet' : `ERP · rev ${r.version}`}</span>
           {!r.complete && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">Incomplete</span>}
           {r.reproduced === false && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700" title="The sheet's figure differs from what its own inputs give">Sheet differs</span>}
           {r.archived && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">Hidden</span>}
+          {r.source === 'erp' && r.complete && (r.status === 'approved'
+            ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800" title={`Approved by ${r.approved_by_name} on ${r.approved_at}`}>Approved</span>
+            : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">Draft</span>)}
         </span>
       ) },
   ];
@@ -69,6 +72,10 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
           {chip('All', source === 'all', () => setSource('all'))}
           {chip('In the ERP', source === 'erp', () => setSource('erp'))}
           {chip('Old cost sheet', source === 'sheet', () => setSource('sheet'))}
+        </FilterGroup>
+        <FilterGroup label="Approval">
+          {chip('Awaiting approval', flag === 'awaiting', () => setFlag(flag === 'awaiting' ? '' : 'awaiting'), 'Complete costings made here, not yet approved')}
+          {chip('Approved', flag === 'approved', () => setFlag(flag === 'approved' ? '' : 'approved'))}
         </FilterGroup>
         <FilterGroup label="Look at">
           {chip('Incomplete', flag === 'incomplete', () => setFlag(flag === 'incomplete' ? '' : 'incomplete'))}

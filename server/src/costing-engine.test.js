@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as server from './costing-engine.js';
 import * as client from '../../client/src/lib/costing.js';
 
-const { computeCosting, parseSize, normStyle, sizerProposals, compareCostings, CURRENT_FORMULA, FORMULAS } = server;
+const { computeCosting, parseSize, normStyle, sizerProposals, compareCostings, quantityBreaks, suggestQuantities, CURRENT_FORMULA, FORMULAS } = server;
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps * Math.max(1, Math.abs(b)), `${a} !== ${b}`);
 
 // Invented job — not a real customer's figures.
@@ -108,6 +108,66 @@ test('formulas: a printing amount typed on the old sheet, and a floor under a hi
   near(r.parts.print, 3000);
 });
 
+test('coating: a rate per 100 sq in is the factor in plain words, to the paisa', () => {
+  const byFactor = computeCosting({ ...JOB, coat_factor: 4 });
+  const byRate = computeCosting({ ...JOB, coat_factor: '', coat_rate: 0.25 });
+  near(byRate.parts.coat, byFactor.parts.coat, 1e-12);
+  near(byRate.cost_per_unit, byFactor.cost_per_unit, 1e-12);
+  // a rate wins over a factor when both are given
+  near(computeCosting({ ...JOB, coat_factor: 4, coat_rate: 0.5 }).parts.coat, computeCosting({ ...JOB, coat_factor: 2 }).parts.coat, 1e-12);
+});
+
+test('coating: sheets to coat, when given, replace "every sheet"', () => {
+  const all = computeCosting(JOB);
+  const some = computeCosting({ ...JOB, coat_sheets: 1000 });
+  near(some.parts.coat, all.parts.coat_per_sheet * 1000);
+  assert.equal(all.parts.coat_sheets, all.sheets);
+  assert.match(some.lines.find(l => l.key === 'coat').how, /^1,000 sheets × ₹/);
+});
+
+test('split: set-up plus running is the whole cost; running a carton does not move with quantity', () => {
+  const a = computeCosting(JOB);
+  near(a.split.fixed + a.split.variable, a.cost_value);
+  const b = computeCosting({ ...JOB, qty: JOB.qty * 3 });
+  near(b.split.fixed, a.split.fixed);
+  near(b.split.running_per_unit, a.split.running_per_unit);
+  assert.ok(b.cost_per_unit < a.cost_per_unit, 'the same set-up spread over more cartons');
+  // the process charge and the wastage sheets are set-up
+  const k = 20 * 30 * 280 / 3100 / 5 / 100;
+  const subFix = k * 90 * 200 + 450 * 4 * 200 / 1000 + (20 * 30 / 4 / 100) * 200 + 1800;
+  near(a.split.sub_fixed, subFix);
+});
+
+test('split: printing held at its minimum is set-up, all of it', () => {
+  const r = computeCosting({ ...JOB, qty: 600, wastage: 100 });
+  assert.equal(r.parts.print_at_min, true);
+  const k = 20 * 30 * 280 / 3100 / 5 / 100;
+  near(r.split.sub_fixed, k * 90 * 100 + 1600 + r.parts.coat * 100 / r.sheets + 1800);
+  near(r.split.fixed + r.split.variable, r.cost_value);
+});
+
+test('quantityBreaks: each break is computeCosting at that quantity; the cost a carton falls', () => {
+  const rows = quantityBreaks(JOB, [25000, 6000, 12000, 6000, 'x']);
+  assert.deepEqual(rows.map(r => r.qty), [6000, 12000, 25000]);
+  for (const r of rows) near(r.cost_per_unit, computeCosting({ ...JOB, qty: r.qty }).cost_per_unit);
+  assert.ok(rows[0].cost_per_unit > rows[1].cost_per_unit && rows[1].cost_per_unit > rows[2].cost_per_unit);
+  near(rows[1].setup, rows[2].setup);
+  assert.deepEqual(quantityBreaks({ qty: 5 }, [100]), [{ qty: 100, ok: false }]);
+});
+
+test('quantityBreaks: sheets to coat scale with the sheets', () => {
+  const base = computeCosting({ ...JOB, coat_sheets: 1100 });
+  const [r] = quantityBreaks({ ...JOB, coat_sheets: 1100 }, [24000]);
+  const sheets24 = 24000 / 6 + 200;
+  near(r.cost_per_unit, computeCosting({ ...JOB, qty: 24000, coat_sheets: 1100 * sheets24 / base.sheets }).cost_per_unit);
+});
+
+test('suggestQuantities: half, double, five and ten times, rounded to quoting figures', () => {
+  assert.deepEqual(suggestQuantities(12000), [5000, 12000, 25000, 50000, 100000]);
+  assert.deepEqual(suggestQuantities('1,000'), [500, 1000, 2000, 5000, 10000]);
+  assert.deepEqual(suggestQuantities(0), []);
+});
+
 test('parseSize: the ways a size was typed all read to one key, order kept', () => {
   for (const t of ['165x58x73', '165X58X73', ' 165 x 58 x 73 ', '165*58*73', '165×58×73 MM', '165XX58X73', '165X58X73R0']) {
     assert.equal(parseSize(t).key, '165x58x73', t);
@@ -171,6 +231,9 @@ test('client twin gives the same answers as the server, field for field', () => 
   }
   for (const t of ['165X58X73R0', '100x140', '700 ML', '']) assert.deepEqual(client.parseSize(t), server.parseSize(t));
   assert.deepEqual(client.sizerProposals({ l: 120, w: 45, h: 60 }), server.sizerProposals({ l: 120, w: 45, h: 60 }));
+  assert.deepEqual(client.quantityBreaks({ ...JOB, coat_sheets: 900 }, [3000, 9000, 40000]), server.quantityBreaks({ ...JOB, coat_sheets: 900 }, [3000, 9000, 40000]));
+  assert.deepEqual(client.suggestQuantities(7500), server.suggestQuantities(7500));
+  assert.deepEqual(client.computeCosting({ ...JOB, coat_rate: 0.3, coat_sheets: 2000 }), server.computeCosting({ ...JOB, coat_rate: 0.3, coat_sheets: 2000 }));
   const a = { inputs: JOB, result: server.computeCosting(JOB) };
   const bIn = { ...JOB, gsm: 320, colours: 5 };
   const b = { inputs: bIn, result: server.computeCosting(bIn) };
