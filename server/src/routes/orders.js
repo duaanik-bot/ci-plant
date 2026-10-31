@@ -75,7 +75,7 @@ const LINE_VIEW = `
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance_pct,
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
          p.internal_carton_code,
-         p.party_item_code, p.is_draft AS product_is_draft, o.status AS order_status,
+         p.party_item_code, p.mrp, p.is_draft AS product_is_draft, o.status AS order_status,
          COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          -- The output number, from helpers.js outputNumberSql — the same rule
          -- the job cards and the station queues resolve, so the Planning
@@ -902,7 +902,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
                c.id AS customer_id, c.name AS customer_name,
                p.id AS product_id, p.name AS product_name, p.code AS product_code,
                COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
-               p.party_item_code, p.size,
+               p.party_item_code, p.size, p.mrp,
                ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
                ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
                -- The sales-facing status (carton-status.js): a carton made in

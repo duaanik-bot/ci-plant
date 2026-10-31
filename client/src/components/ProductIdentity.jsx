@@ -5,6 +5,7 @@ import { api, fmt } from '../api.js';
 import { canOpenProductHistory } from '../lib/productHistoryAccess.js';
 import { declaresFontSize } from '../lib/fontSizeClass.js';
 import { createIdBatchLoader } from '../lib/idBatchLoader.js';
+import { mrpText } from '../lib/mrp.js';
 
 const CODE_META = [
   { key: 'internal', label: 'INT', tone: 'bg-slate-100 text-slate-600 ring-slate-200/70' },
@@ -89,6 +90,20 @@ export function ProductCodes({ row, className = '', compact = false, limit = 3 }
   );
 }
 
+// The MRP that goes on the carton, big and yellow so the designer checks it at a
+// glance while setting the output. It comes from the master, so a PO always shows
+// today's figure. No MRP on the master, no badge.
+export function ProductMrp({ value, compact = false, className = '' }) {
+  const text = mrpText(value);
+  if (!text) return null;
+  return (
+    <span data-mrp="1" title={`MRP to print: ${text}`}
+      className={`inline-flex items-baseline gap-1 whitespace-nowrap rounded-lg bg-yellow-300 px-2 py-0.5 font-extrabold tabular-nums text-slate-900 ring-1 ring-yellow-500/70 ${compact ? 'text-[13px]' : 'text-[16px]'} ${className}`}>
+      <span className="text-[10px] font-bold opacity-70">MRP</span>{text}
+    </span>
+  );
+}
+
 export default function ProductIdentity({
   row,
   product,
@@ -113,6 +128,8 @@ export default function ProductIdentity({
   compact = false,
   codes = true,
   stopPropagation = true,
+  // Planning and the PO only: the floor and the printed job card keep their row.
+  showMrp = false,
 }) {
   const location = useLocation();
   const r = useMemo(() => {
@@ -185,6 +202,7 @@ export default function ProductIdentity({
             <span className="line-clamp-2 break-words">{enriched.name || '—'}</span>
           </div>
         )}
+        {showMrp && mrpText(enriched.mrp) && <div className="mt-1"><ProductMrp value={enriched.mrp} compact={compact} /></div>}
         {/* THE LINE'S OWN NOTE — typed once at order entry and carried the whole
             way: planning, job card, press, cutting, dispatch, and the FG shelf.
             It lives HERE rather than in each table because this component is

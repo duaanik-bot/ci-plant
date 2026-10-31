@@ -291,7 +291,7 @@ r.get('/drafts', async (_req, res, next) => {
     const lines = orderIds.length ? await q(`
       SELECT ol.id, ol.order_id, ol.product_id, ol.qty, ol.rate, ol.status, ol.line_remark,
              p.name AS product_name, p.code AS product_code, p.party_item_code,
-             p.party_artwork_code, p.output_number, p.size, p.is_draft AS product_is_draft,
+             p.party_artwork_code, p.output_number, p.size, p.mrp, p.is_draft AS product_is_draft,
              p.board_material_id, p.spec_incomplete
         FROM order_lines ol JOIN products p ON p.id = ol.product_id
        WHERE ol.order_id = ANY($1::int[]) AND ol.part_of_line_id IS NULL

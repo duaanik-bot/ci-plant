@@ -3830,7 +3830,7 @@ export default function Planning() {
                   {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <ProductIdentity row={m} compact className="min-w-0 max-w-[200px]"
+                    <ProductIdentity row={m} compact showMrp className="min-w-0 max-w-[200px]"
                       meta={[m.colors != null ? `${m.colors}c` : null, m.special && m.special !== 'none' ? fmt.title(m.special) : null].filter(Boolean).join(' · ')} />
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
@@ -3844,7 +3844,7 @@ export default function Planning() {
             // identifies the row, so it wraps to a second line rather than
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
-            : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1"
+            : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} showMrp className="min-w-0 flex-1"
                 meta={[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')} />
               {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div>
               <PartChip row={l} summary={cartonBoards} />
@@ -5203,7 +5203,7 @@ export default function Planning() {
                     <div className="space-y-1.5">
                       {ctx.gang.members.map(m => (
                         <div key={m.id} className={`flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs ${m.id === planLine.id ? 'bg-violet-50' : 'bg-slate-50'}`}>
-                          <ProductIdentity row={m} compact className="min-w-0" codesClassName="max-w-[220px]"
+                          <ProductIdentity row={m} compact showMrp className="min-w-0" codesClassName="max-w-[220px]"
                             meta={m.id === planLine.id ? 'this job' : ''} />
                           <span className="shrink-0 tabular-nums text-slate-500">{fmt.num(m.parent_sheets)} parent</span>
                         </div>

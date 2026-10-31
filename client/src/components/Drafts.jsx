@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ExternalLink, FileText, PackagePlus } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import { Button, Modal, Textarea, useToast } from './ui.jsx';
+import { ProductMrp } from './ProductIdentity.jsx';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import PhoneAlertsPrompt from './PhoneAlerts.jsx';
@@ -208,6 +209,7 @@ export function DraftsPanel({ open, onClose, onOpenOrder, canConfirm, onChanged 
                                   <span className="block font-semibold text-slate-800">{l.product_name}</span>
                                   <span className="font-mono text-[11px] text-slate-500">{[l.product_code, l.party_item_code, l.size].filter(Boolean).join(' · ')}</span>
                                   {l.product_is_draft ? <span className="ml-1.5 rounded-full bg-orange-500 px-1.5 py-px text-[9px] font-bold text-white">NEW MASTER</span> : null}
+                                  <ProductMrp value={l.mrp} compact className="mt-1 w-fit" />
                                 </td>
                                 <td className="py-1.5 pr-3 text-right tabular-nums">{fmt.num(l.qty)}</td>
                                 <td className="py-1.5 pr-3 text-right tabular-nums">{fmt.inr(l.rate)}</td>

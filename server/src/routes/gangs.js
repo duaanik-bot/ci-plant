@@ -46,7 +46,7 @@ const MEMBER_VIEW = `
          -- batch split from a repeat order — so it must travel with the member.
          ol.line_remark,
          o.po_number, o.delivery_date, c.name AS customer_name,
-         p.id AS product_id, p.name AS product_name, p.code AS product_code, p.party_item_code, p.gsm,
+         p.id AS product_id, p.name AS product_name, p.code AS product_code, p.party_item_code, p.mrp, p.gsm,
          p.ups AS master_ups, p.wastage_pct,
          COALESCE(ol.spec_override->>'coating', p.coating) AS coating,
          COALESCE(ol.spec_override->>'special', p.special) AS special,
