@@ -302,7 +302,7 @@ const STAGE_VIEW = `
          -- AVS before printing can be completed — Planning's switch (avs-gate.js).
          ${avsMandatorySql('jc')} AS avs_mandatory,
          jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
-         p.name AS product_name, p.code AS product_code, p.party_item_code,
+         p.name AS product_name, p.code AS product_code, p.party_item_code, p.mrp,
          -- Customer WIP — the customer is chasing this item; the station queue
          -- wears the flag so urgency needs no phone call. A run is WIP when
          -- ANY member line is (the sheet prints together).
@@ -1378,7 +1378,7 @@ r.get('/floor/:section', async (req, res, next) => {
              GREATEST(jc.sheets_issued - COALESCE(xsum.qty, 0), 0) AS original_issued_qty,
              COALESCE(xsum.qty, 0) AS additional_issued_qty,
              jc.sheets_issued AS total_issued_qty,
-             p.name AS product_name, p.code AS product_code, p.party_item_code,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.mrp,
              p.child_l, p.child_w, p.ups,
              ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'`, run: 'gg' })} AS output_number,
              c.name AS customer_name, o.po_number,
@@ -1448,7 +1448,7 @@ r.get('/track', async (_req, res, next) => {
     res.json(await q(`
       SELECT ol.id, ol.qty, ol.dispatched_qty, ${CARTON_STATUS_SQL} AS status, ol.planned_date, ol.line_remark,
              o.po_number, o.delivery_date, c.name AS customer_name,
-             p.name AS product_name, p.code AS product_code, p.party_item_code,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.mrp,
              jc.jc_number, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              (jc.id IS NOT NULL AND jc.order_line_id IS NULL) AS gang_parent_job,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,

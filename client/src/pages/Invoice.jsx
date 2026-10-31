@@ -199,7 +199,7 @@ export default function Invoice() {
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-2 py-2 align-top text-gray-500">{i + 1}</td>
                 <td className="w-full min-w-[180px] px-2 py-2 align-top">
-                  <ProductIdentity row={l} compact
+                  <ProductIdentity row={l} compact showMrp={false}
                     meta={`PO ${l.po_number}${l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes${l.pack_qty_per_box ? ` x ${fmt.num(l.pack_qty_per_box)}` : ''}` : ''}`} />
                   <div className="no-print mt-1">
                     {l.coa_id ? (
@@ -299,7 +299,7 @@ export default function Invoice() {
               {inv.lines.map(l => (
                 <tr key={l.id} className="border-b border-slate-100">
                   <td className="px-3 py-2">
-                    <ProductIdentity row={l}
+                    <ProductIdentity row={l} showMrp={false}
                       meta={`${l.challan_number}${l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes` : ''}`} />
                   </td>
                   <td className="px-3 py-2"><Input className="text-right" type="number" min="1" value={l.qty} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, qty: e.target.value } : x) })} /></td>

@@ -31,11 +31,31 @@ test('every other query behind these screens carries it too', () => {
   assert.match(gangs.slice(gangs.indexOf('p.id AS product_id, p.name AS product_name'), gangs.indexOf('FROM order_lines ol')), /\bp\.mrp\b/, 'a gang\'s members in the planner');
 });
 
-test('Planning and the PO ask for the big MRP; every other screen keeps its row', () => {
-  const planning = read('client/src/pages/Planning.jsx');
-  assert.equal((planning.match(/<ProductIdentity\b[^>]*\bshowMrp\b/g) || []).length, 3, 'the row, a gang member, the planner\'s gang card');
-  const orders = read('client/src/pages/Orders.jsx');
-  assert.equal((orders.match(/<ProductIdentity\b[^>]*\bshowMrp\b/g) || []).length, 3, 'both PO line shapes and Sales Pendency');
+test('every screen that names a product shows the MRP; only customer paperwork leaves it off', () => {
+  const identity = read('client/src/components/ProductIdentity.jsx');
+  assert.match(identity, /showMrp = true,/, 'on unless a screen says otherwise');
+  for (const f of ['client/src/pages/Invoice.jsx', 'client/src/pages/Challan.jsx', 'client/src/pages/COA.jsx']) {
+    const tags = read(f).match(/<ProductIdentity\b[\s\S]*?\/>/g) || [];
+    assert.ok(tags.length, f);
+    for (const t of tags) assert.match(t, /showMrp=\{false\}/, `${f}: goes to the customer`);
+  }
   assert.match(read('client/src/components/Drafts.jsx'), /<ProductMrp value=\{l\.mrp\}/);
-  assert.doesNotMatch(read('client/src/components/JobCardSheet.jsx'), /showMrp/);
+});
+
+test('the job card carries it itself: a card prints at once, with no lookup to wait for', () => {
+  const production = read('server/src/routes/production.js');
+  const view = sqlAfter(production, 'const JC_VIEW');
+  assert.match(view, /p\.mrp\b/);
+  assert.match(view, /'mrp', p3\.mrp/, 'each gang member\'s own MRP');
+});
+
+test('a station queue carries it, so a tablet needs no second request', () => {
+  assert.match(read('server/src/routes/floor.js'), /p\.code AS product_code, p\.party_item_code, p\.mrp,/);
+});
+
+test('a row without the MRP asks the master, and only by a real product id', () => {
+  const identity = read('client/src/components/ProductIdentity.jsx');
+  assert.match(identity, /const explicitId = row\?\.product_id \?\? product\?\.product_id \?\? productId/,
+    'a job card row\'s own id is not a product: never price one from it');
+  assert.match(identity, /showMrp && r\.mrp === undefined && explicitId != null/);
 });

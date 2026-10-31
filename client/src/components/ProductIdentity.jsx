@@ -128,8 +128,8 @@ export default function ProductIdentity({
   compact = false,
   codes = true,
   stopPropagation = true,
-  // Planning and the PO only: the floor and the printed job card keep their row.
-  showMrp = false,
+  // On wherever a product is named. Off only on paper that goes to the customer.
+  showMrp = true,
 }) {
   const location = useLocation();
   const r = useMemo(() => {
@@ -140,15 +140,20 @@ export default function ProductIdentity({
     return productRecord(base);
   }, [row, product, name, productId, code]);
   const [master, setMaster] = useState(null);
-  const detailKey = [r.id, r.party_item_code, r.party_artwork_code, r.internal_carton_code].join('|');
+  // A row whose own query has no MRP takes it from the master, by product_id
+  // only: a job card row's `id` is the job card, and the wrong figure here is a
+  // wrong MRP on a carton.
+  const explicitId = row?.product_id ?? product?.product_id ?? productId;
+  const detailKey = [r.id, r.party_item_code, r.party_artwork_code, r.internal_carton_code, explicitId, r.mrp === undefined].join('|');
 
   useEffect(() => {
     let alive = true;
-    if (!needsMasterLookup(r)) {
+    const askForMrp = showMrp && r.mrp === undefined && explicitId != null;
+    if (!needsMasterLookup(r) && !askForMrp) {
       setMaster(null);
       return () => { alive = false; };
     }
-    productMaster.load(r.id).then(record => {
+    productMaster.load(askForMrp ? explicitId : r.id).then(record => {
       if (alive) setMaster(record || null);
     });
     return () => { alive = false; };
@@ -166,6 +171,7 @@ export default function ProductIdentity({
       product_name: hasValue(r.product_name) ? r.product_name : master.name,
     });
   }, [r, master]);
+  const mrp = r.mrp !== undefined ? r.mrp : (explicitId != null ? master?.mrp : undefined);
   const [open, setOpen] = useState(false);
   const canOpen = canOpenProductHistory(location.pathname) && enriched.id && enriched.name;
   const title = [
@@ -202,7 +208,7 @@ export default function ProductIdentity({
             <span className="line-clamp-2 break-words">{enriched.name || '—'}</span>
           </div>
         )}
-        {showMrp && mrpText(enriched.mrp) && <div className="mt-1"><ProductMrp value={enriched.mrp} compact={compact} /></div>}
+        {showMrp && mrpText(mrp) && <div className="mt-1"><ProductMrp value={mrp} compact={compact} /></div>}
         {/* THE LINE'S OWN NOTE — typed once at order entry and carried the whole
             way: planning, job card, press, cutting, dispatch, and the FG shelf.
             It lives HERE rather than in each table because this component is

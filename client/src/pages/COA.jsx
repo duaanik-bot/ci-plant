@@ -41,7 +41,7 @@ function CoaSheet({ coa, leadPage = false }) {
           {coa.gstin && <div className="text-xs text-gray-500">GSTIN: {coa.gstin}</div>}
         </div>
         <div className="text-right text-xs text-gray-600">
-          <div className="flex justify-end"><ProductIdentity row={coa} compact className="max-w-[280px] text-right" /></div>
+          <div className="flex justify-end"><ProductIdentity row={coa} compact showMrp={false} className="max-w-[280px] text-right" /></div>
           <div>Batch / JC: <b>{coa.batch_no || coa.jc_number || '—'}</b></div>
           {/* Declared GSM — read-only here, changed only through Edit COA. */}
           {coa.gsm != null && <div>GSM: <b>{coa.gsm}</b></div>}

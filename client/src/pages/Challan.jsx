@@ -103,7 +103,7 @@ export default function Challan() {
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-3 py-2.5 text-gray-500">{i + 1}</td>
                 <td className="px-3 py-2.5">
-                  <ProductIdentity row={l} />
+                  <ProductIdentity row={l} showMrp={false} />
                   <div className="no-print mt-1">
                     {l.coa_id ? (
                       <Link to={`/coas/${l.coa_id}`} className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:underline">
@@ -162,7 +162,7 @@ export default function Challan() {
             <tbody>
               {d.lines.map(l => (
                 <tr key={l.id} className="border-b border-slate-100">
-                  <td className="px-3 py-2"><ProductIdentity row={l} compact /></td>
+                  <td className="px-3 py-2"><ProductIdentity row={l} compact showMrp={false} /></td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.ordered_qty)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.fg_qty)}</td>
                   <td className="px-3 py-2">

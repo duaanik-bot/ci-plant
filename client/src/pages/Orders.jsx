@@ -1054,7 +1054,7 @@ export default function Orders() {
                     { key: 'product_name', label: 'Product',
                       export: productExport,
                       searchValue: productSearchText,
-                      render: l => <ProductIdentity row={l} meta={l.size} showMrp /> },
+                      render: l => <ProductIdentity row={l} meta={l.size} /> },
                     { key: 'qty', label: 'Ordered', align: 'right', render: l => fmt.num(l.qty) },
                     { key: 'dispatched_qty', label: 'Dispatched', align: 'right', render: l => fmt.num(l.dispatched_qty) },
                     { key: 'fulfillment', label: 'Fulfillment', sortValue: l => (l.qty > 0 ? (l.dispatched_qty / l.qty) * 100 : 0),
@@ -1289,13 +1289,13 @@ export default function Orders() {
                         <div className="pl-5">
                           <div className="flex items-start gap-1.5">
                             <span className="shrink-0 whitespace-nowrap font-semibold leading-snug text-slate-500">↳ {l.part_label || 'Part'}</span>
-                            <ProductIdentity row={l} showMrp />
+                            <ProductIdentity row={l} />
                           </div>
                           <ProductSpec product={l} />
                         </div>
                       ) : (
                         <>
-                          <ProductIdentity row={l} showMrp />
+                          <ProductIdentity row={l} />
                           {l.product_is_draft ? <span className="mt-0.5 inline-block rounded-full bg-orange-500 px-1.5 py-px text-[9px] font-bold text-white" title="A product master the AVS intake created for this PO — confirmed with the order">NEW MASTER</span> : null}
                           <ProductSpec product={l} />
                         </>

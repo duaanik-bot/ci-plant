@@ -41,7 +41,7 @@ const canRun = requireRole('production');
 // sheets consumed for this card and available stock is below sheets_issued.
 // Computed live so the alarm clears itself the moment a GRN lands.
 const JC_VIEW = `
-  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.party_item_code, p.size,
+  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.party_item_code, p.size, p.mrp,
          p.gsm, p.special,
          -- Effective spec: the job override wins over the product master for a
          -- plain card (ol) and a gang parent (gol = lead member) alike — a
@@ -210,7 +210,7 @@ const JC_VIEW = `
     SELECT json_agg(json_build_object(
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
-             'party_item_code', p3.party_item_code,
+             'party_item_code', p3.party_item_code, 'mrp', p3.mrp,
              -- Each member's own PO date, so a gang can answer for its OLDEST
              -- one: a run is as overdue as the longest-waiting order on it.
              'qty', ol3.qty, 'po_number', o3.po_number, 'po_date', o3.po_date,
