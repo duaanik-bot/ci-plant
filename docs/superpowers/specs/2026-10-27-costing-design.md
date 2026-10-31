@@ -202,3 +202,12 @@ These "typical" figures are worked out live from the costings table, so they mov
 6. **Approval**: a logged-in user with the Management right approves a complete costing (or every ready
    row of a batch); changing its figures sends it back to Draft. The quotation export of an unapproved
    costing is stamped DRAFT. Migration `20261030120000_costing_approval.sql`.
+7. **Coating factors** (owner's ask): 5, 4, 2.5, 1 and 0.5 join the sheet's 6, 3 and 2 as buttons, cheapest
+   first, each showing its factor under its rate. An old costing's factor that is not a button gets one
+   while it is the choice in force. Migration `20261030130000_costing_coating_factors.sql` (starting list
+   only; an edited list is left alone).
+8. **A new size joins the library on a yes** (owner's ask), no longer silently on saving. Typing a size +
+   pasting + layout the library has not seen raises the question in the form (Yes, save it · Not now);
+   left unanswered, saving asks. "No" saves the costing without an entry (`save_size: false`), and it
+   shows under "No size in library" in Saved costings; a different layout is a new question. Bulk asks
+   once on saving, listing the new sizes.

@@ -70,12 +70,14 @@ export default function CostingRates({ boot, onSaved }) {
           <p className="text-xs text-slate-500">The buttons a costing offers for coating: a rate in ₹ per 100 sq inch of sheet (the cost sheet's factor 6 is ₹0.17, factor 3 is ₹0.33, factor 2 is ₹0.50). Give each the name the plant uses, so the choice is obvious.</p>
           <fieldset disabled={!canEdit} className="mt-2 space-y-2">
             {f.coatings.map((c, i) => (
-              <div key={i} className="flex items-end gap-2">
-                <NumField className="w-36" label="Rate" unit="₹ / 100 sq in" value={c.rate ?? (coatingRate(c.factor) != null ? +coatingRate(c.factor).toFixed(4) : '')}
-                  onChange={v => setC(i, { rate: v, factor: +v > 0 ? 1 / +v : '' })} />
-                <Field label="Name" className="flex-1"><Input value={c.name || ''} onChange={e => setC(i, { name: e.target.value })} placeholder="e.g. Aqueous varnish" /></Field>
-                <span className="mb-2.5 w-28 text-xs text-slate-500">{+c.factor > 0 ? `sheet factor ${plain(+c.factor, 2)}` : ''}</span>
-                {canEdit && <button type="button" onClick={() => setF(x => ({ ...x, coatings: x.coatings.filter((_, j) => j !== i) }))} className="mb-1.5 rounded-md p-1.5 text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>}
+              <div key={i}>
+                <div className="flex items-end gap-2">
+                  <NumField className="w-36" label="Rate" unit="₹ / 100 sq in" value={c.rate ?? (coatingRate(c.factor) != null ? +coatingRate(c.factor).toFixed(4) : '')}
+                    onChange={v => setC(i, { rate: v, factor: +v > 0 ? 1 / +v : '' })} />
+                  <Field label="Name" className="flex-1"><Input value={c.name || ''} onChange={e => setC(i, { name: e.target.value })} placeholder="e.g. Aqueous varnish" /></Field>
+                  {canEdit && <button type="button" onClick={() => setF(x => ({ ...x, coatings: x.coatings.filter((_, j) => j !== i) }))} className="mb-1.5 rounded-md p-1.5 text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>}
+                </div>
+                {+c.factor > 0 && <div className="mt-0.5 text-xs font-semibold text-brand-700">Factor {plain(+c.factor, 2)}</div>}
               </div>
             ))}
             {canEdit && <Button size="sm" variant="secondary" onClick={() => setF(x => ({ ...x, coatings: [...x.coatings, { factor: '', rate: '', name: '' }] }))}><Plus size={14} className="mr-1 inline" />Add a coating</Button>}

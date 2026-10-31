@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeCosting } from './costing-engine.js';
 import {
-  parsePaste, rankHistory, closestComparison, batchExportSpec, valueFromSaved, blankValue, stillNeeded, coatingWords, perUnit,
-  recommend, markEdited, layoutOptions, gradeFor, pastingFromProduct,
+  parsePaste, rankHistory, closestComparison, batchExportSpec, valueFromSaved, blankValue, stillNeeded, coatingWords, coatingLabel, coatingChoices, perUnit,
+  recommend, markEdited, layoutOptions, gradeFor, pastingFromProduct, newLibraryEntry, libraryKey, libraryDeclined, savePayload,
 } from '../../client/src/lib/costingUi.js';
 
 // Invented figures, not a customer's.
@@ -90,9 +90,74 @@ test('valueFromSaved / blankValue: a saved costing reopens with its coating choi
   assert.ok(stillNeeded(b).includes('Product name'));
 });
 
+test('a coating choice names its sheet factor beside the rate', () => {
+  assert.equal(coatingLabel({ factor: 2.5, name: '' }), '₹0.40 per 100 sq in · factor 2.5');
+  assert.equal(coatingLabel({ factor: 6, name: 'Test varnish' }), 'Test varnish — ₹0.17 per 100 sq in · factor 6');
+});
+
+test('coating buttons run cheapest first, and a factor off the list still shows', () => {
+  const list = [{ factor: 2, name: '' }, { factor: 6, name: '' }, { factor: 0.5, name: '' }, { factor: 2.5, name: '' }];
+  assert.deepEqual(coatingChoices(list).map(c => c.factor), [6, 2.5, 2, 0.5]);
+  // An old costing's factor 7 is not a button: it gets one while it is the choice in force.
+  assert.deepEqual(coatingChoices(list, '7').map(c => c.factor), [7, 6, 2.5, 2, 0.5]);
+  for (const choice of ['', 'none', 'rate', '2.5', undefined]) {
+    assert.deepEqual(coatingChoices(list, choice).map(c => c.factor), [6, 2.5, 2, 0.5]);
+  }
+  assert.deepEqual(list.map(c => c.factor), [2, 6, 0.5, 2.5], 'the Rates tab list is not reordered');
+});
+
+test('every factor on the buttons costs as area ÷ factor ÷ 100 × sheets', () => {
+  const sheets = 10000 / 8 + 250;
+  for (const f of [6, 5, 4, 3, 2.5, 2, 1, 0.5]) {
+    assert.ok(Math.abs(computeCosting({ ...JOB, coat_factor: f }).parts.coat - (18 * 24 / f / 100) * sheets) < 1e-9, `factor ${f}`);
+  }
+});
+
+// A form's size + pasting + layout, against the Size Library.
+const FORM = { size_text: '70 x 47 x 74', style: 'LOCK', inputs: { sheet_l: 20, sheet_w: 28, ups: 8 } };
+const ENTRY = { style: 'LOCK', sheet_l: 20, sheet_w: 28, ups: 8 };
+
+test('a new size is raised at once, and can be saved once its sheet and ups are in', () => {
+  const early = newLibraryEntry({ ...FORM, inputs: {} });
+  assert.equal(early.new_size, true);
+  assert.equal(early.ready, false);
+  const entry = newLibraryEntry(FORM);
+  assert.equal(entry.new_size, true);
+  assert.equal(entry.ready, true);
+  assert.equal(entry.text, '70 × 47 × 74 mm · Lock bottom · 20 × 28 in · 8 ups');
+  assert.equal(newLibraryEntry({ ...FORM, size_text: '' }), null, 'no size, nothing to ask');
+});
+
+test('a new layout of a known size is asked about; a known entry is not', () => {
+  assert.equal(newLibraryEntry(FORM, [ENTRY]), null);
+  assert.equal(newLibraryEntry({ ...FORM, inputs: { sheet_l: '20', sheet_w: '28.0', ups: '8' } }, [ENTRY]), null, 'typed text matches too');
+  assert.equal(newLibraryEntry({ ...FORM, style: 'SIDE' }, [ENTRY]).new_size, false);
+  assert.equal(newLibraryEntry({ ...FORM, inputs: { ...FORM.inputs, ups: 6 } }, [ENTRY]).new_size, false);
+  assert.equal(newLibraryEntry({ ...FORM, inputs: {} }, [ENTRY]), null, 'a known size with no sheet yet: its layouts are on screen');
+});
+
+test('"Not now" holds for that layout only, and reaches the server', () => {
+  assert.equal(savePayload(FORM).save_size, true);
+  const no = { ...FORM, skip_library: libraryKey(FORM) };
+  assert.equal(libraryDeclined(no), true);
+  assert.equal(savePayload(no).save_size, false);
+  const other = { ...no, inputs: { ...no.inputs, ups: 6 } };
+  assert.equal(libraryDeclined(other), false, 'a different layout is a new question');
+  assert.equal(savePayload(other).save_size, true);
+});
+
+test('a complete saved costing with no library entry was answered no; others were not', () => {
+  const c = { id: 1, complete: true, size_id: null, size_key: '70x47x74', style: 'LOCK', inputs: FORM.inputs };
+  assert.equal(libraryDeclined(valueFromSaved(c)), true);
+  assert.equal(libraryDeclined(valueFromSaved(c, { asNew: true })), false, 'costing it again is a new question');
+  assert.equal(libraryDeclined(valueFromSaved({ ...c, complete: false })), false, 'never got as far as asking');
+  assert.equal(libraryDeclined(valueFromSaved({ ...c, size_id: 5 })), false);
+});
+
 test('money and coating in words', () => {
   assert.equal(coatingWords(6), '₹0.17 per 100 sq in');
-  assert.equal(coatingWords(2), '₹0.5 per 100 sq in');
+  assert.equal(coatingWords(2), '₹0.50 per 100 sq in');
+  assert.equal(coatingWords(0.5), '₹2.00 per 100 sq in');
   assert.equal(coatingWords(''), 'No coating');
   assert.equal(perUnit(3.1415926), '₹3.142');
   assert.equal(perUnit(null), '—');

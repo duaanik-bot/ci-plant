@@ -2868,6 +2868,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261027120000_costing.sql'));
   // Costing approval — Draft / Approved, who and when, per costing and per revision. 2026-10-30
   await pool.query(migration('20261030120000_costing_approval.sql'));
+  // Costing — five more coating factors on the starting list; a replay does nothing. 2026-10-30
+  await pool.query(migration('20261030130000_costing_coating_factors.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

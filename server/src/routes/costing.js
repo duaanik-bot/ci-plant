@@ -258,11 +258,12 @@ function costingFrom(body) {
     remarks: text(body?.remarks, 1000),
     inputs,
     result,
+    save_size: body?.save_size !== false,
   };
 }
 
-// The library entry for a complete costing's size + pasting + layout — found, or made now. Every
-// size the plant costs ends up in the library this way.
+// The library entry for a complete costing's size + pasting + layout — found, or made now, unless the
+// user was asked and said no (save_size false): the costing is then saved without one.
 async function sizeEntryFor(c, qc, oc, user) {
   if (!c.size || !c.result.ok) return null;
   const { sheet_l, sheet_w, ups } = c.inputs;
@@ -271,6 +272,7 @@ async function sizeEntryFor(c, qc, oc, user) {
                              AND COALESCE(sheet_l, 0) = $3 AND COALESCE(sheet_w, 0) = $4 AND COALESCE(ups, 0) = $5`,
   [c.size.key, c.style, sheet_l, sheet_w, ups]);
   if (found) return found.id;
+  if (!c.save_size) return null;
   const made = await oc(`
     INSERT INTO costing_sizes (size_key, kind, l_mm, w_mm, h_mm, style, sheet_l, sheet_w, ups, source, source_refs, created_by, updated_by)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'costing', '[]', $10, $10)

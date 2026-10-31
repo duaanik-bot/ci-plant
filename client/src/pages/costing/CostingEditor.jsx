@@ -10,14 +10,15 @@
 // size — the Size Library and the Die Master shown apart (one does not imply the other).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, History, Info, Layers, Lightbulb, Plus, Ruler, Search,
+  AlertTriangle, BookmarkPlus, CheckCircle2, ChevronDown, CircleDashed, History, Info, Layers, Lightbulb, Plus, Ruler, Search,
   SlidersHorizontal, Sparkles, TrendingDown, Wrench, X,
 } from 'lucide-react';
 import { api } from '../../api.js';
-import { Field, Input, Select, Textarea } from '../../components/ui.jsx';
+import { Button, Field, Input, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { computeCosting, parseSize, sizerProposals, num, styleLabel, quantityBreaks, suggestQuantities } from '../../lib/costing.js';
 import {
-  SOURCES, closestComparison, coatingRate, layoutOptions, markEdited, perUnit, pct, plain, rankHistory, recommend, rupees, stillNeeded,
+  SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
+  rankHistory, recommend, rupees, stillNeeded,
 } from '../../lib/costingUi.js';
 
 // ── small pieces ─────────────────────────────────────────────────────────────────────────────────
@@ -213,7 +214,8 @@ export function QuantityCard({ inputs, quantities, onQuantities }) {
 }
 
 // ── what the plant knows about this size ─────────────────────────────────────────────────────────
-export function useSizeCheck(sizeKey, excludeId) {
+// `again` looks the size up afresh when it changes (after a save added to the library).
+export function useSizeCheck(sizeKey, excludeId, again) {
   const [state, setState] = useState({ key: null, data: null, loading: false });
   useEffect(() => {
     if (!sizeKey) { setState({ key: null, data: null, loading: false }); return undefined; }
@@ -225,7 +227,7 @@ export function useSizeCheck(sizeKey, excludeId) {
         .catch(() => { if (live) setState({ key: sizeKey, data: null, loading: false }); });
     }, 300);
     return () => { live = false; clearTimeout(t); };
-  }, [sizeKey, excludeId]);
+  }, [sizeKey, excludeId, again]);
   return state;
 }
 
@@ -401,6 +403,22 @@ function SizeHelper({ size, onUse }) {
   );
 }
 
+// A size + pasting + layout the library has not seen, asked as soon as it is typed. Left unanswered, the
+// same question comes up on saving.
+function SaveSizeAsk({ entry, onYes, onNo }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
+      <BookmarkPlus size={18} className="shrink-0 text-amber-600" />
+      <div className="min-w-[200px] flex-1 text-xs">
+        <div className="text-[13px] font-bold text-[#1D1D1F]">{entry.new_size ? 'New size' : 'New layout for this size'} — save it to the Size Library?</div>
+        <div className="text-slate-600">{entry.ready ? entry.text : 'Fill in the sheet and ups first, then it can be saved.'}</div>
+      </div>
+      <Button type="button" size="sm" onClick={onYes} disabled={!entry.ready}>Yes, save it</Button>
+      {entry.ready && <Button type="button" size="sm" variant="secondary" onClick={onNo}>Not now</Button>}
+    </div>
+  );
+}
+
 // ── coating ──────────────────────────────────────────────────────────────────────────────────────
 // Coating in the sheet's own terms, said plainly: a rate per 100 sq in of sheet (the plant's usual ones
 // as buttons, named on the Rates tab), and how many sheets are coated — every sheet unless said.
@@ -413,22 +431,29 @@ function CoatingField({ value, coatings, set, src }) {
     else set({ coat_choice: String(c), inputs: { ...inputs, coat_factor: c, coat_rate: '' } }, ['coat_choice', 'coat_factor', 'coat_rate']);
   };
   const r = computeCosting(inputs);
-  const chip = (key, label, sub) => (
-    <button key={key} type="button" onClick={() => pick(key)}
-      className={`rounded-xl px-3 py-1.5 text-left text-xs ring-1 transition ${String(choice) === String(key) ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white/80 ring-slate-200 hover:ring-brand-300'}`}>
-      <b>{label}</b>{sub && <span className={String(choice) === String(key) ? 'text-white/80' : 'text-slate-500'}> {sub}</span>}
-    </button>
-  );
+  const chip = (key, label, sub, under) => {
+    const on = String(choice) === String(key);
+    return (
+      <button key={key} type="button" onClick={() => pick(key)}
+        className={`rounded-xl px-3 py-1.5 text-left text-xs ring-1 transition ${on ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white/80 ring-slate-200 hover:ring-brand-300'}`}>
+        <b>{label}</b>{sub && <span className={on ? 'text-white/80' : 'text-slate-500'}> {sub}</span>}
+        {under && <span className={`block font-semibold ${on ? 'text-white/90' : 'text-brand-700'}`}>{under}</span>}
+      </button>
+    );
+  };
   return (
     <div className="sm:col-span-3">
       <div className="mb-1 text-xs font-medium text-slate-600">
         Coating <span className="text-brand-500">*</span>
-        <span title="The cost sheet charges coating by sheet area: a rate per 100 sq in of the print sheet, times the sheets coated." className="ml-1 inline-flex cursor-help align-middle text-slate-400"><Info size={12} /></span>
+        <span title="The cost sheet charges coating by sheet area: a rate per 100 sq in of the print sheet, times the sheets coated. Rate = ₹1 ÷ factor." className="ml-1 inline-flex cursor-help align-middle text-slate-400"><Info size={12} /></span>
         <SourceTag source={src('coat_choice')} />
       </div>
       <div className="flex flex-wrap gap-1.5">
         {chip('none', 'No coating')}
-        {coatings.map(c => chip(String(c.factor), c.name || `₹${plain(coatingRate(c.factor), 2)}`, c.name ? `₹${plain(coatingRate(c.factor), 2)} / 100 sq in` : '/ 100 sq in'))}
+        {coatingChoices(coatings, choice).map(c => {
+          const rate = `₹${coatingRate(c.factor).toFixed(2)}`;
+          return chip(String(c.factor), c.name || rate, c.name ? `${rate} / 100 sq in` : '/ 100 sq in', `Factor ${plain(c.factor, 2)}`);
+        })}
         {chip('rate', 'Another rate…')}
       </div>
       {choice && choice !== 'none' && (
@@ -498,7 +523,8 @@ function ProductBox({ value, onPick, onName, onUnlink }) {
 }
 
 // ── the editor ───────────────────────────────────────────────────────────────────────────────────
-export default function CostingEditor({ boot, customers = [], value, onChange, excludeId, hideProductStep = false }) {
+export default function CostingEditor({ boot, customers = [], value, onChange, excludeId, hideProductStep = false, askLibrary = false, recheck = 0 }) {
+  const toast = useToast();
   const inputs = value.inputs || {};
   const settings = boot?.settings || { coatings: [], alert_pct: 15, defaults: {} };
   const grades = boot?.board_grades || [];
@@ -509,7 +535,15 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   const result = useMemo(() => computeCosting(inputs), [inputs]);
   const missing = stillNeeded(value);
   const size = parseSize(value.size_text);
-  const check = useSizeCheck(size?.key, excludeId);
+  const [filed, setFiled] = useState(null);               // the entry just saved from the question below
+  const check = useSizeCheck(size?.key, excludeId, `${recheck}|${filed}`);
+  const checked = !!size && check.key === size.key && !!check.data;
+  const entry = askLibrary && checked && !libraryDeclined(value) ? newLibraryEntry(value, check.data.library?.exact) : null;
+  const toLibrary = async () => {
+    await api.post('/costing/sizes', { size_text: value.size_text, style: value.style, sheet_l: inputs.sheet_l, sheet_w: inputs.sheet_w, ups: inputs.ups });
+    setFiled(entry.key);
+    toast.success('Saved to the Size Library');
+  };
 
   // Fill (and refill) the suggestions whenever what they depend on changes: the product, the size check,
   // the pasting (die & pasting follows it), the colours (process follows them). A costing reopened from
@@ -594,6 +628,7 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
               {(check.data?.library?.exact?.length || 0) > 1 && <span className="ml-1.5 text-slate-400">— the recommended layout is chosen; the others are priced for you</span>}
             </div>
             <LayoutChooser value={value} entries={check.key === size?.key ? check.data?.library?.exact || [] : []} size={size} onPick={pickLayout} setIn={setIn} src={src} />
+            {entry && entry.key !== filed && <SaveSizeAsk entry={entry} onYes={toLibrary} onNo={() => onChange({ ...value, skip_library: entry.key })} />}
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-4">
             <NumField label="GSM" source={src('gsm')} value={inputs.gsm} onChange={x => setIn('gsm', x)} placeholder="e.g. 300" />

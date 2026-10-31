@@ -2,13 +2,14 @@
 // (?id=), or as a copy of any costing — an old cost-sheet row included — to cost it again (?from=).
 // A saved costing keeps every revision; "What changed?" is written beside each one. A complete costing
 // is approved by a login with the Management right; changing its figures sends it back to Draft, and the
-// quotation of a Draft costing is stamped DRAFT.
+// quotation of a Draft costing is stamped DRAFT. A size + pasting + layout new to the Size Library joins
+// it only on a yes: the form asks, and saving asks if that went unanswered.
 import { useEffect, useState } from 'react';
 import { BadgeCheck, FilePlus2, RotateCcw, Save } from 'lucide-react';
 import { api } from '../../api.js';
-import { Button, ExportMenu, Input, useToast } from '../../components/ui.jsx';
-import { computeCosting, num } from '../../lib/costing.js';
-import { batchExportSpec, blankValue, costingExportSpec, savePayload, stillNeeded, valueFromSaved } from '../../lib/costingUi.js';
+import { Button, ExportMenu, Input, Modal, useToast } from '../../components/ui.jsx';
+import { computeCosting, num, parseSize } from '../../lib/costing.js';
+import { batchExportSpec, blankValue, costingExportSpec, libraryDeclined, newLibraryEntry, savePayload, stillNeeded, valueFromSaved } from '../../lib/costingUi.js';
 import CostingEditor from './CostingEditor.jsx';
 
 // What the page remembers about a saved costing.
@@ -36,6 +37,8 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [asking, setAsking] = useState(null);     // the library entry put to the user on saving
+  const [saves, setSaves] = useState(0);          // the editor looks the size up again after each save
 
   useEffect(() => {
     const id = openId || fromId;
@@ -60,8 +63,8 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   const canSave = !!value.product_name?.trim();
   const result = computeCosting(value.inputs);
 
-  const save = async () => {
-    const body = savePayload(value, note.trim());
+  const store = async v => {
+    const body = savePayload(v, note.trim());
     const c = saved
       ? await api.put(`/costing/costings/${saved.id}`, body)
       : await api.post('/costing/costings', body);
@@ -71,7 +74,29 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
     toast.success(saved
       ? (c.version > saved.version ? `${c.costing_no} saved as revision ${c.version}${saved.status === 'approved' ? ' — back to Draft for approval' : ''}` : `${c.costing_no} saved`)
       : `Saved as ${c.costing_no}${c.complete ? '' : ' (incomplete — open it again to finish)'}`);
+    setSaves(n => n + 1);
     onSaved?.(c);
+  };
+
+  // Only a complete costing can add to the library. The look-up failing never stops a save.
+  const save = async () => {
+    const size = parseSize(value.size_text);
+    let entry = null;
+    if (size && result.ok && !libraryDeclined(value)) {
+      try {
+        const check = await api.get(`/costing/size-check?size=${encodeURIComponent(size.key)}`);
+        entry = newLibraryEntry(value, check.library?.exact);
+      } catch { entry = null; }
+    }
+    if (entry) setAsking(entry);
+    else await store(value);
+  };
+
+  const answer = async yes => {
+    const v = yes ? value : { ...value, skip_library: asking.key };
+    setValue(v);
+    await store(v);
+    setAsking(null);
   };
 
   const approve = async () => {
@@ -116,7 +141,12 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
           { customer: true, quantities: quoteQuantities.length > 1 ? quoteQuantities : [], draft: !approved })} />
         <Button variant="secondary" onClick={fresh}>{saved ? <><FilePlus2 size={15} className="mr-1.5 inline" />New costing</> : <><RotateCcw size={15} className="mr-1.5 inline" />Start over</>}</Button>
       </div>
-      <CostingEditor boot={boot} customers={customers} value={value} onChange={change} excludeId={saved?.id} />
+      <CostingEditor boot={boot} customers={customers} value={value} onChange={change} excludeId={saved?.id} askLibrary recheck={saves} />
+      <Modal open={!!asking} onClose={() => setAsking(null)} title={asking?.new_size ? 'Save this new size to the Size Library?' : 'Save this new layout to the Size Library?'}
+        footer={<><Button variant="secondary" onClick={() => answer(false)}>No, only the costing</Button><Button onClick={() => answer(true)}>Yes, save it</Button></>}>
+        <p className="text-sm font-bold text-[#1D1D1F]">{asking?.text}</p>
+        <p className="mt-1 text-sm text-slate-600">The next costing of this size will offer this sheet and ups.</p>
+      </Modal>
     </div>
   );
 }

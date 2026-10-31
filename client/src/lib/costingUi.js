@@ -9,12 +9,12 @@ export const rupees = n => (n == null || !Number.isFinite(+n) ? '—' : `₹${Ma
 export const pct = (n, dp = 1) => (n == null || !Number.isFinite(+n) ? '—' : `${n > 0 ? '+' : ''}${(+n).toFixed(dp)}%`);
 export const plain = (n, dp = 2) => (n == null || !Number.isFinite(+n) ? '—' : (+n).toLocaleString('en-IN', { maximumFractionDigits: dp }));
 
-// A coating factor in words a new joiner can check: factor 6 → "₹1 per 600 sq in".
 // A coating factor in words a new joiner can check: factor 6 → "₹0.17 per 100 sq in".
-export const coatingWords = factor => (num(factor) > 0 ? `₹${plain(1 / num(factor), 2)} per 100 sq in` : 'No coating');
+export const coatingWords = factor => (num(factor) > 0 ? `₹${(1 / num(factor)).toFixed(2)} per 100 sq in` : 'No coating');
 export function coatingLabel(c) {
   const words = coatingWords(c.factor);
-  return c.name ? `${c.name} — ${words}` : words;
+  const label = c.name ? `${c.name} — ${words}` : words;
+  return num(c.factor) > 0 ? `${label} · factor ${plain(c.factor, 2)}` : label;
 }
 
 // The inputs a new costing starts with: the Rates tab's defaults, nothing job-specific.
@@ -194,7 +194,7 @@ export function valueFromSaved(c, { asNew = false } = {}) {
   for (const { key } of INPUTS) inputs[key] = c?.inputs?.[key] ?? '';
   const f = num(inputs.coat_factor);
   const rate = num(inputs.coat_rate);
-  return {
+  const value = {
     customer_id: c?.customer_id ?? null,
     customer_name: c?.customer_name || '',
     product_id: c?.product_id ?? null,
@@ -206,6 +206,7 @@ export function valueFromSaved(c, { asNew = false } = {}) {
     remarks: asNew ? '' : (c?.remarks || ''),
     sources: {},
   };
+  return !asNew && answeredNo(c) ? { ...value, skip_library: libraryKey(value) } : value;
 }
 
 // A blank costing for a new product, or one started from a Size Library entry.
@@ -228,8 +229,41 @@ export function savePayload(v, note) {
   return {
     customer_id: v.customer_id, customer_name: v.customer_name, product_id: v.product_id, product_name: v.product_name,
     size_text: v.size_text, style: v.style, inputs: v.inputs, remarks: v.remarks, note: note || undefined,
+    save_size: !libraryDeclined(v),
   };
 }
+
+// ── The Size Library ─────────────────────────────────────────────────────────────────────────────
+// A library entry is a size + pasting + layout, matched as the server matches them on saving.
+export function libraryKey(v) {
+  const size = parseSize(v?.size_text);
+  if (!size) return null;
+  const i = v.inputs || {};
+  return [size.key, v.style || '', num(i.sheet_l) ?? '', num(i.sheet_w) ?? '', num(i.ups) ?? ''].join('|');
+}
+
+// What a form would add to the library (`entries` = the library's entries for its size), or null with
+// nothing to ask. A new size is raised at once; `ready` says whether its sheet and ups are in yet, as an
+// entry without them would fill nothing in next time.
+export function newLibraryEntry(v, entries = []) {
+  const size = parseSize(v?.size_text);
+  if (!size) return null;
+  const i = v.inputs || {};
+  const l = num(i.sheet_l), w = num(i.sheet_w), ups = num(i.ups);
+  const ready = l > 0 && w > 0 && ups > 0;
+  if (!ready && entries.length) return null;
+  if (entries.some(e => (e.style || null) === (v.style || null) && num(e.sheet_l) === l && num(e.sheet_w) === w && num(e.ups) === ups)) return null;
+  return {
+    key: libraryKey(v), ready, new_size: !entries.length,
+    text: `${size.label} mm · ${v.style ? styleLabel(v.style) : 'pasting not set'} · ${plain(l)} × ${plain(w)} in · ${plain(ups)} ups`,
+  };
+}
+
+// "Not now" holds for that size + pasting + layout only: a different layout is a new question.
+export const libraryDeclined = v => !!v?.skip_library && v.skip_library === libraryKey(v);
+
+// A complete saved costing with no library entry: the question was asked and the answer was no.
+export const answeredNo = c => !!c?.complete && !c?.size_id;
 
 // ── Recommendations ──────────────────────────────────────────────────────────────────────────────
 // Where a value in the form came from. Shown beside every box, so a new joiner can see what the system
@@ -399,3 +433,12 @@ export function layoutOptions(value, entries = []) {
 
 // The coating choices offered as buttons: the Rates tab's list, each as its plain rate.
 export const coatingRate = factor => (num(factor) > 0 ? 1 / num(factor) : null);
+
+// The buttons in order, cheapest first. An old costing's factor that is not on the list gets one too,
+// or the coating in force would show as nothing chosen.
+export function coatingChoices(coatings = [], current) {
+  const list = coatings.filter(c => num(c.factor) > 0);
+  const f = num(current);
+  if (f > 0 && !list.some(c => num(c.factor) === f)) list.push({ factor: f, name: '' });
+  return list.sort((a, b) => num(b.factor) - num(a.factor));
+}

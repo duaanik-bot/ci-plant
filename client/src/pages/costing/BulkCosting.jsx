@@ -15,7 +15,10 @@ import { ArrowDownToLine, BadgeCheck, ClipboardPaste, Copy, FolderOpen, Plus, Sa
 import { api, fmt } from '../../api.js';
 import { Button, DataTable, ExportMenu, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { computeCosting, parseSize, styleLabel, num, quantityBreaks } from '../../lib/costing.js';
-import { batchExportSpec, coatingLabel, gradeFor, parsePaste, pastingFromProduct, perUnit, plain, rupees, startingInputs } from '../../lib/costingUi.js';
+import {
+  answeredNo, batchExportSpec, coatingChoices, coatingLabel, gradeFor, libraryDeclined, libraryKey, newLibraryEntry, parsePaste, pastingFromProduct,
+  perUnit, plain, rupees, startingInputs,
+} from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
@@ -54,11 +57,14 @@ const newRow = (common, typical, extra = {}) => {
 };
 const coatChoiceOf = inputs => (num(inputs?.coat_rate) > 0 ? 'rate' : num(inputs?.coat_factor) > 0 ? String(num(inputs.coat_factor)) : 'none');
 // A batch's rows as the server holds them, back into the table's shape.
-const rowsFromServer = rows => rows.map(r => ({
-  key: rowKey(), id: r.id, costing_no: r.costing_no, version: r.version, status: r.status, approved_by_name: r.approved_by_name,
-  complete: r.complete, product_id: r.product_id, product_name: r.product_name, size_text: r.size_text || r.size_key || '', style: r.style,
-  inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false,
-}));
+const rowsFromServer = rows => rows.map(r => {
+  const row = {
+    key: rowKey(), id: r.id, costing_no: r.costing_no, version: r.version, status: r.status, approved_by_name: r.approved_by_name,
+    complete: r.complete, product_id: r.product_id, product_name: r.product_name, size_text: r.size_text || r.size_key || '', style: r.style,
+    inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false,
+  };
+  return answeredNo(r) ? { ...row, skip_library: libraryKey(row) } : row;
+});
 
 export default function BulkCosting({ boot, customers }) {
   const [openBatch, setOpenBatch] = useState(null);   // null = list; 'new' or an id
@@ -105,6 +111,7 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState(null);       // row key open in the full editor
   const [pasting, setPasting] = useState(false);
+  const [asking, setAsking] = useState(null);         // the new library entries, put to the user on saving
   const [checks, setChecks] = useState({});           // size key → bulk size check
   const [addQty, setAddQty] = useState('');
 
@@ -206,10 +213,28 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
       const empty = batch.rows.filter(r => !r.product_name.trim() && !r.size_text.trim() && !r.inputs.qty);
       if (empty.length !== batch.rows.length - named.length) { toast.error('Every row needs a product name (or clear the row).'); return; }
     }
+    // Only complete rows can add to the library. The look-up failing never stops a save.
+    const fresh = new Map();
+    const complete = named.filter(r => computeCosting(r.inputs).ok && !libraryDeclined(r));
+    const keys = [...new Set(complete.map(r => parseSize(r.size_text)?.key).filter(Boolean))];
+    if (keys.length) {
+      try {
+        const map = await api.post('/costing/size-check/bulk', { sizes: keys });
+        for (const r of complete) {
+          const entry = newLibraryEntry(r, map[parseSize(r.size_text)?.key]?.library);
+          if (entry) fresh.set(entry.key, entry);
+        }
+      } catch { fresh.clear(); }
+    }
+    if (fresh.size) setAsking([...fresh.values()]);
+    else await store(named);
+  };
+
+  const store = async named => {
     const body = {
       title: batch.title, customer_id: batch.customer_id, customer_name: batch.customer_name,
       common: { ...batch.common.inputs, quantities: qs },
-      rows: named.map(r => ({ id: r.id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs })),
+      rows: named.map(r => ({ id: r.id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, save_size: !libraryDeclined(r) })),
     };
     const b = batch.id ? await api.post(`/costing/batches/${batch.id}/save`, body) : await api.post('/costing/batches', body);
     toast.success(`${b.batch_no} saved — ${b.rows.length} products`);
@@ -217,6 +242,14 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
     if (!batch.id) onOpened(b.id);
     else setBatch(cur => ({ ...cur, batch_no: b.batch_no,
       rows: rowsFromServer(b.rows).map(r => ({ ...r, dp_auto: blank(cur.common.inputs.dp_rate) && String(r.inputs.dp_rate) === String(styleDp(typical, r.style)) })) }));
+  };
+
+  const answer = async yes => {
+    const asked = new Set(asking.map(e => e.key));
+    const rows = yes ? batch.rows : batch.rows.map(r => (asked.has(libraryKey(r)) ? { ...r, skip_library: libraryKey(r) } : r));
+    if (!yes) setBatch(b => ({ ...b, rows }));
+    await store(rows.filter(r => r.product_name.trim()));
+    setAsking(null);
   };
 
   const approveAll = async () => {
@@ -318,12 +351,12 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
                   className="absolute right-1.5 top-[26px] rounded-md p-1 text-slate-400 hover:bg-brand-50 hover:text-brand-600"><ArrowDownToLine size={14} /></button>
               </div>
             ))}
-            <div className="relative lg:col-span-2">
+            <div className="relative sm:col-span-2 lg:col-span-4">
               <Field label={<>Coating <span className="text-brand-500">*</span></>}>
                 <Select value={batch.common.coat_choice || ''} onChange={e => setCoat(e.target.value)} placeholder="Choose…">
                   <option value="">Choose…</option>
                   <option value="none">No coating</option>
-                  {coatings.map(c => <option key={c.factor} value={String(c.factor)}>{coatingLabel(c)}</option>)}
+                  {coatingChoices(coatings, batch.common.coat_choice).map(c => <option key={c.factor} value={String(c.factor)}>{coatingLabel(c)}</option>)}
                 </Select>
               </Field>
               <button type="button" title="Copy into all rows" onClick={applyCoatAll}
@@ -444,6 +477,14 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
         )}
       </Modal>
       <PasteModal open={pasting} onClose={() => setPasting(false)} onAdd={addPasted} />
+      <Modal open={!!asking} onClose={() => setAsking(null)}
+        title={asking?.length === 1 ? 'Save this new size to the Size Library?' : `Save these ${asking?.length} new sizes to the Size Library?`}
+        footer={<><Button variant="secondary" onClick={() => answer(false)}>No, only the costing</Button><Button onClick={() => answer(true)}>{asking?.length === 1 ? 'Yes, save it' : 'Yes, save them'}</Button></>}>
+        <ul className="max-h-60 space-y-1 overflow-auto text-sm font-bold text-[#1D1D1F]">
+          {asking?.map(e => <li key={e.key}>{e.text}</li>)}
+        </ul>
+        <p className="mt-2 text-sm text-slate-600">The next costing of a size will offer its sheet and ups.</p>
+      </Modal>
     </div>
   );
 }

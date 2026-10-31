@@ -187,6 +187,33 @@ describe('Costing — through the real app', {
     assert.equal((await add({ size_text: '90x30x60', style: 'LOCK', sheet_l: 18, sheet_w: 23, ups: 8 })).status, 201, 'another pasting is another entry');
   });
 
+  test('the library joins on a yes: "no" saves the costing alone, and an entry already there still links', async () => {
+    const size = { size_text: '71x48x75', style: 'LOCK' };
+    const no = await call('clerk', 'POST', '/costing/costings', { ...size, product_name: 'Test carton N', inputs: JOB, save_size: false });
+    assert.equal(no.status, 201);
+    assert.equal(no.body.complete, true);
+    assert.equal(no.body.size_id, null);
+    assert.equal((await call('clerk', 'GET', '/costing/size-check?size=71x48x75')).body.library.exact.length, 0);
+
+    assert.equal((await call('clerk', 'POST', '/costing/sizes', { ...size, sheet_l: JOB.sheet_l, sheet_w: JOB.sheet_w, ups: JOB.ups })).status, 201);
+    const linked = await call('clerk', 'POST', '/costing/costings', { ...size, product_name: 'Test carton L', inputs: JOB, save_size: false });
+    assert.ok(linked.body.size_id, 'a "no" only stops a new entry being made');
+  });
+
+  test('a bulk costing keeps each row\'s answer: only the yes joins the library', async () => {
+    const r = await call('clerk', 'POST', '/costing/batches', { title: 'Library answers', common: {}, rows: [
+      { product_name: 'Test row yes', size_text: '72x49x76', style: 'LOCK', inputs: JOB, save_size: true },
+      { product_name: 'Test row no', size_text: '73x50x77', style: 'LOCK', inputs: JOB, save_size: false },
+    ] });
+    assert.equal(r.status, 201);
+    assert.equal((await call('clerk', 'GET', '/costing/size-check?size=72x49x76')).body.library.exact.length, 1);
+    assert.equal((await call('clerk', 'GET', '/costing/size-check?size=73x50x77')).body.library.exact.length, 0);
+    const saved = (await call('clerk', 'GET', `/costing/batches/${r.body.id}`)).body;
+    const no = saved.rows.find(x => x.product_name === 'Test row no');
+    assert.equal(no.complete, true);
+    assert.equal(no.size_id, null, 'the row comes back marked as answered no');
+  });
+
   test('only an admin changes the rates', async () => {
     const body = { defaults: { wastage: 300 }, coatings: [{ factor: 6, name: 'Test varnish' }], alert_pct: 20 };
     assert.equal((await call('clerk', 'PUT', '/costing/settings', body)).status, 403);
