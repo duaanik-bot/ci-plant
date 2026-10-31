@@ -53,6 +53,12 @@ test('a station queue carries it, so a tablet needs no second request', () => {
   assert.match(read('server/src/routes/floor.js'), /p\.code AS product_code, p\.party_item_code, p\.mrp,/);
 });
 
+test('the MRP rides the name\'s own line, and one client number is one chip', () => {
+  const identity = read('client/src/components/ProductIdentity.jsx');
+  assert.match(identity, /<ProductMrp value=\{mrp\} compact=\{compact\} className="shrink-0" \/>\}\s*<\/div>/);
+  assert.match(identity, /label: 'AW · PARTY'/);
+});
+
 test('a row without the MRP asks the master, and only by a real product id', () => {
   const identity = read('client/src/components/ProductIdentity.jsx');
   assert.match(identity, /const explicitId = row\?\.product_id \?\? product\?\.product_id \?\? productId/,

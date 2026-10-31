@@ -414,7 +414,7 @@ test('Planning: the part chip sits on the plain row, fed by every loaded line', 
   const page = src('../../client/src/pages/Planning.jsx');
   assert.match(page, /import PartChip from '\.\.\/components\/PartChip\.jsx';/);
   assert.match(page, /const boardGate = m => \(m\.readiness\?\.material \? 'covered' : 'short'\);[\s\S]{0,1200}const cartonBoards = useMemo\(\(\) => cartonBoardSummary\(lines, boardGate\), \[lines\]\);/);
-  assert.match(page, /<PartChip row=\{l\} summary=\{cartonBoards\} \/>\s*\n\s*<FluenceButton productId=\{l\.product_id\} context="planning" className="mt-1" \/>/);
+  assert.match(page, /<PartChip row=\{l\} summary=\{cartonBoards\} \/>\s*\n\s*<FluenceButton productId=\{l\.product_id\} context="planning" compact \/>/);
 });
 
 test('rollback dialog on a part row: the whole carton goes, and Delete is not offered', () => {

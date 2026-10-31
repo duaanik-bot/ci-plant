@@ -143,7 +143,7 @@ function SpecText({ line, pick, format, className = '' }) {
 // so it sits under the product rather than in a spec column of its own. Folded
 // on the gang: a run shares ONE sheet, so members that disagree say "mixed"
 // rather than quietly reporting the first one's ink.
-function ColourScheme({ line }) {
+function ColourScheme({ line, inline = false }) {
   const lead = gangLead(line);
   const mixed = specCell(line, colourTypeOf).mixed || specCell(line, processOf).mixed;
   const coat = specCell(line, coatingOf, fmt.title);
@@ -151,7 +151,7 @@ function ColourScheme({ line }) {
   const hasInk = colourTypeOf(lead) || lead.print_process;
   if (!coat.text && !coat.mixed && !mixed && !hasInk) return null;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-4">
+    <div className={`${inline ? '' : 'mt-1 '}flex flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-4`}>
       <SpecText line={line} pick={coatingOf} format={fmt.title}
         className="whitespace-nowrap text-[11px] font-semibold text-slate-600" />
       {mixed
@@ -3844,11 +3844,13 @@ export default function Planning() {
             // identifies the row, so it wraps to a second line rather than
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
-            : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1"
-                meta={[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')} />
+            : (<div className="max-w-[230px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1" />
               {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <span className="text-[11px] text-slate-400">{[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')}</span>
               <PartChip row={l} summary={cartonBoards} />
-              <FluenceButton productId={l.product_id} context="planning" className="mt-1" /></div>)}<ColourScheme line={l} /></div>) },
+              <FluenceButton productId={l.product_id} context="planning" compact />
+              <div className="basis-full"><ColourScheme line={l} inline /></div></div></div>)}{l._gang && <ColourScheme line={l} />}</div>) },
           // ── BOARD ─────────────────────────────────────────────────────────
           // What the job prints ON, and nothing else: grade, weight, and the
           // sheet actually being bought. Its own column because this is the

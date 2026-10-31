@@ -73,8 +73,17 @@ export function productSearchText(row = {}) {
   ].filter(Boolean).join(' ');
 }
 
+// When the customer's artwork and item codes are one number, as they are on every
+// Fluence carton, one chip says both and the row keeps the line. Display only.
+function sameClientCode(parts) {
+  const artwork = parts.find(p => p.key === 'artwork');
+  const party = parts.find(p => p.key === 'party');
+  if (!artwork || !party || String(artwork.value).trim() !== String(party.value).trim()) return parts;
+  return parts.filter(p => p !== party).map(p => (p === artwork ? { ...p, label: 'AW · PARTY' } : p));
+}
+
 export function ProductCodes({ row, className = '', compact = false, limit = 3 }) {
-  const parts = productCodeParts(row).slice(0, limit);
+  const parts = sameClientCode(productCodeParts(row)).slice(0, limit);
   if (!parts.length) return null;
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-1 ${className}`}>
@@ -98,7 +107,7 @@ export function ProductMrp({ value, compact = false, className = '' }) {
   if (!text) return null;
   return (
     <span data-mrp="1" title={`MRP to print: ${text}`}
-      className={`inline-flex items-baseline gap-1 whitespace-nowrap rounded-lg bg-yellow-300 px-2 py-0.5 font-extrabold tabular-nums text-slate-900 ring-1 ring-yellow-500/70 ${compact ? 'text-[13px]' : 'text-[16px]'} ${className}`}>
+      className={`inline-flex items-baseline gap-1 whitespace-nowrap rounded-lg bg-yellow-300 px-2 py-0.5 font-extrabold tabular-nums text-slate-900 ring-1 ring-yellow-500/70 ${compact ? 'text-[13px]' : 'text-[15px] leading-5'} ${className}`}>
       <span className="text-[10px] font-bold opacity-70">MRP</span>{text}
     </span>
   );
@@ -198,17 +207,19 @@ export default function ProductIdentity({
   return (
     <>
       <div className={`min-w-0 ${className}`} title={title}>
+        <div className="flex min-w-0 items-start justify-between gap-2">
         {canOpen ? (
           <button type="button" onClick={onClick}
-            className={`block max-w-full text-left font-semibold leading-snug text-slate-800 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35 ${compactSize} ${nameClassName}`}>
+            className={`block min-w-0 max-w-full text-left font-semibold leading-snug text-slate-800 transition-colors hover:text-[#007AFF] focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-[#0A84FF]/35 ${compactSize} ${nameClassName}`}>
             <span className="line-clamp-2 break-words">{enriched.name}</span>
           </button>
         ) : (
-          <div className={`font-semibold leading-snug text-slate-800 ${compactSize} ${nameClassName}`}>
+          <div className={`min-w-0 font-semibold leading-snug text-slate-800 ${compactSize} ${nameClassName}`}>
             <span className="line-clamp-2 break-words">{enriched.name || '—'}</span>
           </div>
         )}
-        {showMrp && mrpText(mrp) && <div className="mt-1"><ProductMrp value={mrp} compact={compact} /></div>}
+        {showMrp && <ProductMrp value={mrp} compact={compact} className="shrink-0" />}
+        </div>
         {/* THE LINE'S OWN NOTE — typed once at order entry and carried the whole
             way: planning, job card, press, cutting, dispatch, and the FG shelf.
             It lives HERE rather than in each table because this component is
