@@ -148,34 +148,45 @@ export default function CoaRegister() {
     </button>
   );
 
+  // Every column must fit the screen, so the second line of a cell carries what
+  // would otherwise be a column of its own (generated date, job card). The whole
+  // row opens the COA, so only Download needs a button.
+  const sub = 'text-[11px] font-normal leading-4 text-slate-400';
   const columns = [
-    { key: 'coa_no', label: 'COA No.', render: r => openBtn(r, <span className="whitespace-nowrap">{r.coa_no}</span>) },
-    { key: 'invoice_no', label: 'Invoice', export: r => `${r.invoice_no || ''} ${r.invoice_date ? fmt.date(r.invoice_date) : ''}`.trim(),
-      render: r => <div className="whitespace-nowrap">{dash(r.invoice_no)}<div className="text-[11px] font-normal text-slate-400">{r.invoice_date ? fmt.date(r.invoice_date) : ''}</div></div> },
-    { key: 'customer', label: 'Customer', render: r => <div>{dash(r.customer)}<div className="text-[11px] font-normal text-slate-400">{r.company || ''}</div></div> },
-    { key: 'product', label: 'Product', width: 'min-w-[240px]',
-      render: r => <div>{openBtn(r, r.product || r.coa_no)}<div className="text-[11px] font-normal text-slate-400">{r.party_item_code || ''}</div></div> },
-    { key: 'po_no', label: 'PO No.', export: r => `${r.po_no || ''} ${r.po_date ? fmt.date(r.po_date) : ''}`.trim(),
-      render: r => <div className="whitespace-nowrap">{dash(r.po_no)}<div className="text-[11px] font-normal text-slate-400">{r.po_date ? fmt.date(r.po_date) : ''}</div></div> },
-    { key: 'job_card', label: 'Job card', render: r => <span className="whitespace-nowrap">{dash(r.job_card)}</span> },
-    { key: 'qty', label: 'Qty', align: 'right', export: r => r.qty ?? '', render: r => (r.qty == null ? '—' : fmt.num(r.qty)) },
-    { key: 'std_gsm', label: 'GSM', align: 'right', export: r => r.std_gsm ?? '', render: r => (r.std_gsm == null ? '—' : fmt.num(r.std_gsm)) },
-    { key: 'date_generated', label: 'Generated', export: r => (r.date_generated ? fmt.date(r.date_generated) : ''),
-      render: r => <span className="whitespace-nowrap">{r.date_generated ? fmt.date(r.date_generated) : '—'}</span> },
-    { key: '_pdf', label: '', align: 'right', sortable: false, render: r => (
-      <div className="flex justify-end gap-1.5">
-        <Button size="sm" variant="secondary" onClick={e => { e.stopPropagation(); setOpen(r); }} disabled={!r.pdf_size}
-          title={r.pdf_size ? 'Open this COA here' : 'No PDF is filed for this COA in Drive'}>
-          <FileCheck2 size={13} /> Open
-        </Button>
-        {canDownload && (
-          <Button size="sm" variant="secondary" onClick={e => { e.stopPropagation(); download(r); }} disabled={!r.pdf_size || saving === r.coa_no}
-            title="Download the PDF">
-            <Download size={13} />
-          </Button>
-        )}
-      </div>
-    ) },
+    { key: 'coa_no', label: 'COA No.', width: 'w-[104px]',
+      render: r => <div>{openBtn(r, <span className="whitespace-nowrap">{r.coa_no}</span>)}<div className={`${sub} whitespace-nowrap`}>{r.date_generated ? fmt.date(r.date_generated) : ''}</div></div> },
+    { key: 'invoice_no', label: 'Invoice', width: 'w-[104px]',
+      render: r => <div className="whitespace-nowrap">{dash(r.invoice_no)}<div className={sub}>{r.invoice_date ? fmt.date(r.invoice_date) : ''}</div></div> },
+    { key: 'customer', label: 'Customer', width: 'w-[124px]', render: r => <div className="leading-snug">{dash(r.customer)}</div> },
+    { key: 'product', label: 'Product',
+      render: r => <div className="leading-snug">{openBtn(r, r.product || r.coa_no)}<div className={sub}>{r.party_item_code || ''}</div></div> },
+    { key: 'po_no', label: 'PO No. / Job card', width: 'w-[176px]',
+      render: r => <div className="whitespace-nowrap">{dash(r.po_no)}<div className={sub}>{[r.po_date ? fmt.date(r.po_date) : '', r.job_card].filter(Boolean).join(' · ')}</div></div> },
+    { key: 'qty', label: 'Qty', align: 'right', width: 'w-[64px]', render: r => (r.qty == null ? '—' : fmt.num(r.qty)) },
+    { key: 'std_gsm', label: 'GSM', align: 'right', width: 'w-[52px]', render: r => (r.std_gsm == null ? '—' : fmt.num(r.std_gsm)) },
+    ...(canDownload ? [{ key: '_pdf', label: '', align: 'right', sortable: false, width: 'w-[40px]', render: r => (
+      <Button size="sm" variant="secondary" onClick={e => { e.stopPropagation(); download(r); }} disabled={!r.pdf_size || saving === r.coa_no}
+        title={r.pdf_size ? 'Download the PDF' : 'No PDF is filed for this COA in Drive'}>
+        <Download size={13} />
+      </Button>
+    ) }] : []),
+  ];
+  // The export keeps every field as its own column, whatever the screen merges.
+  const dateOf = key => r => (r[key] ? fmt.date(r[key]) : '');
+  const exportColumns = [
+    { key: 'coa_no', label: 'COA No.' },
+    { key: 'invoice_no', label: 'Invoice' },
+    { key: 'invoice_date', label: 'Invoice date', export: dateOf('invoice_date') },
+    { key: 'company', label: 'Company' },
+    { key: 'customer', label: 'Customer' },
+    { key: 'product', label: 'Product' },
+    { key: 'party_item_code', label: 'Party item code' },
+    { key: 'po_no', label: 'PO No.' },
+    { key: 'po_date', label: 'PO date', export: dateOf('po_date') },
+    { key: 'job_card', label: 'Job card' },
+    { key: 'qty', label: 'Qty', align: 'right', export: r => r.qty ?? '' },
+    { key: 'std_gsm', label: 'GSM', align: 'right', export: r => r.std_gsm ?? '' },
+    { key: 'date_generated', label: 'Generated', export: dateOf('date_generated') },
   ];
 
   return (
@@ -231,6 +242,8 @@ export default function CoaRegister() {
           ? 'Server unreachable — nothing to show until it reconnects.'
           : rows.length ? 'No COA matches these filters.' : 'The register is empty — run the COA sync to bring it in from Drive.'}
         columns={columns}
+        exportColumns={exportColumns}
+        dense
       />
 
       <Modal open={!!open} onClose={() => setOpen(null)} size="xl"
