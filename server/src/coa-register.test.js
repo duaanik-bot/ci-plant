@@ -145,3 +145,10 @@ test('an online-only Drive file is told apart from a real failure', () => {
   assert.equal(isDriveNotLocalError(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT', errno: -2 })), false);
   assert.equal(isDriveNotLocalError(null), false);
 });
+
+test('the COA Register shows no status: no column, tile, filter or field', () => {
+  const page = fs.readFileSync(new URL('../../client/src/pages/CoaRegister.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /Awaiting QC|coaStage|StageChip|QC signed|COA status|Date approved|On hold/);
+  const route = fs.readFileSync(new URL('./routes/coa-register.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(route, /c\.status|c\.qc_signed|c\.rows_on_hold|c\.date_approved/, 'not sent to the screen, so a search cannot match it');
+});

@@ -9,32 +9,7 @@ import { api, auth, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, KpiCard, Modal, PageHeader, ResetFilters, rowMatches, useFilterReset, useToast } from '../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
-import { AlertTriangle, Building2, CheckCircle2, Download, FileCheck2, FileWarning, Hourglass, Lock, ReceiptText } from 'lucide-react';
-
-// What stage a COA is at, from the register's own words. Approved once it
-// carries an approval date or QC has signed; held when rows are on hold;
-// otherwise it is awaiting QC's signature.
-export function coaStage(r) {
-  const s = String(r.status || '').toLowerCase();
-  const signed = /^y/i.test(String(r.qc_signed || '').trim());
-  if (r.date_approved || signed || (/approved|signed/.test(s) && !/draft|ready for|pending/.test(s))) return 'approved';
-  if ((r.rows_on_hold && r.rows_on_hold !== '-' && r.rows_on_hold !== '0') || /hold|reject/.test(s)) return 'hold';
-  return 'pending';
-}
-const STAGE = {
-  approved: { label: 'Approved', cls: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200', icon: CheckCircle2 },
-  pending: { label: 'Awaiting QC', cls: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200', icon: Hourglass },
-  hold: { label: 'On hold', cls: 'bg-red-50 text-red-700 ring-1 ring-red-200', icon: AlertTriangle },
-};
-function StageChip({ row }) {
-  const st = STAGE[coaStage(row)];
-  const Icon = st.icon;
-  return (
-    <span title={row.status || ''} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>
-      <Icon size={11} />{st.label}
-    </span>
-  );
-}
+import { AlertTriangle, Building2, Download, FileCheck2, FileWarning, Lock, ReceiptText } from 'lucide-react';
 
 const pdfUrl = (no, download) => `/api/coa-register/${encodeURIComponent(no)}/pdf${download ? '?download=1' : ''}`;
 async function fetchPdf(no, download = false) {
@@ -126,7 +101,6 @@ export default function CoaRegister() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
-  const [stage, setStage] = useState('all');
   const [customer, setCustomer] = useState('all');
   const [open, setOpen] = useState(null);
   const [saving, setSaving] = useState(null);
@@ -138,22 +112,15 @@ export default function CoaRegister() {
 
   const rows = data.rows;
   const canDownload = !!data.can_download;
-  const filters = useFilterReset([[q, setQ, '', 'search'], [stage, setStage, 'all', 'status'], [customer, setCustomer, 'all', 'customer']]);
+  const filters = useFilterReset([[q, setQ, '', 'search'], [customer, setCustomer, 'all', 'customer']]);
 
   const customers = useMemo(() => {
     const m = new Map();
     for (const r of rows) if (r.customer) m.set(r.customer, (m.get(r.customer) || 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [rows]);
-  const byStage = useMemo(() => {
-    const c = { approved: 0, pending: 0, hold: 0 };
-    for (const r of rows) c[coaStage(r)]++;
-    return c;
-  }, [rows]);
-
   const shown = rows.filter(r =>
-    (stage === 'all' || coaStage(r) === stage)
-    && (customer === 'all' || r.customer === customer)
+    (customer === 'all' || r.customer === customer)
     && (!q || rowMatches(r, q)));
   const lastSync = rows.reduce((m, r) => (r.synced_at && (!m || r.synced_at > m) ? r.synced_at : m), null);
 
@@ -193,8 +160,6 @@ export default function CoaRegister() {
     { key: 'job_card', label: 'Job card', render: r => <span className="whitespace-nowrap">{dash(r.job_card)}</span> },
     { key: 'qty', label: 'Qty', align: 'right', export: r => r.qty ?? '', render: r => (r.qty == null ? '—' : fmt.num(r.qty)) },
     { key: 'std_gsm', label: 'GSM', align: 'right', export: r => r.std_gsm ?? '', render: r => (r.std_gsm == null ? '—' : fmt.num(r.std_gsm)) },
-    { key: '_stage', label: 'Status', export: r => r.status || STAGE[coaStage(r)].label, searchValue: r => `${STAGE[coaStage(r)].label} ${r.status || ''}`,
-      sortValue: r => coaStage(r), render: r => <StageChip row={r} /> },
     { key: 'date_generated', label: 'Generated', export: r => (r.date_generated ? fmt.date(r.date_generated) : ''),
       render: r => <span className="whitespace-nowrap">{r.date_generated ? fmt.date(r.date_generated) : '—'}</span> },
     { key: '_pdf', label: '', align: 'right', sortable: false, render: r => (
@@ -219,29 +184,15 @@ export default function CoaRegister() {
         subtitle={<>Every Certificate of Analysis issued, as filed in Drive (mppchd › COLOUR IMPRESSION › COA). Click a COA No. or product to open it.
           {lastSync && <> Last synced {fmt.dt(lastSync)}.</>}</>} />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard icon={FileCheck2} label="COAs" value={fmt.num(rows.length)} sub={`${fmt.num(new Set(rows.map(r => r.invoice_no)).size)} invoices`} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <KpiCard icon={FileCheck2} label="COAs" value={fmt.num(rows.length)} />
+        <KpiCard icon={ReceiptText} label="Invoices" value={fmt.num(new Set(rows.map(r => r.invoice_no)).size)} />
         <KpiCard icon={Building2} label="Customers" value={fmt.num(customers.length)} />
-        <KpiCard icon={Hourglass} tone="warn" label="Awaiting QC" value={fmt.num(byStage.pending)} sub={byStage.hold ? `${fmt.num(byStage.hold)} on hold` : 'ready for signature'}
-          onClick={() => setStage(s => (s === 'pending' ? 'all' : 'pending'))} active={stage === 'pending'} />
-        <KpiCard icon={CheckCircle2} tone="good" label="Approved" value={fmt.num(byStage.approved)}
-          onClick={() => setStage(s => (s === 'approved' ? 'all' : 'approved'))} active={stage === 'approved'} />
       </div>
 
       <FilterRail className="mb-3 mt-4">
-        <FilterGroup label="Status" divider={false}>
-          <FilterChip label="All" count={rows.length} on={stage === 'all'} onClick={() => setStage('all')} />
-          <FilterChip label="Awaiting QC" count={byStage.pending} on={stage === 'pending'} onClick={() => setStage('pending')}
-            tone="border-amber-300 bg-amber-50 text-amber-800" />
-          <FilterChip label="Approved" count={byStage.approved} on={stage === 'approved'} onClick={() => setStage('approved')}
-            tone="border-emerald-300 bg-emerald-50 text-emerald-800" />
-          {byStage.hold > 0 && (
-            <FilterChip label="On hold" count={byStage.hold} on={stage === 'hold'} onClick={() => setStage('hold')}
-              tone="border-red-300 bg-red-50 text-red-800" />
-          )}
-        </FilterGroup>
         {customers.length > 1 && (
-          <FilterGroup label="Customer">
+          <FilterGroup label="Customer" divider={false}>
             <FilterChip label="All" on={customer === 'all'} onClick={() => setCustomer('all')} />
             {customers.map(([name, n]) => (
               <FilterChip key={name} label={name} count={n} on={customer === name} onClick={() => setCustomer(name)} />
@@ -300,10 +251,7 @@ export default function CoaRegister() {
         {open && (
           <div className="grid gap-4 lg:grid-cols-[minmax(280px,360px)_1fr]">
             <section className="ci-summary-panel h-fit">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <StageChip row={open} />
-                <span className="text-[11px] font-semibold text-slate-400">Line {dash(open.line_no)}</span>
-              </div>
+              <div className="mb-3 text-right text-[11px] font-semibold text-slate-400">Line {dash(open.line_no)}</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                 <Detail label="Product" wide>{dash(open.product)}</Detail>
                 <Detail label="Party item code">{dash(open.party_item_code)}</Detail>
@@ -316,12 +264,8 @@ export default function CoaRegister() {
                 <Detail label="PO date">{open.po_date ? fmt.date(open.po_date) : '—'}</Detail>
                 <Detail label="Qty">{open.qty == null ? '—' : fmt.num(open.qty)}</Detail>
                 <Detail label="Std GSM">{open.std_gsm == null ? '—' : fmt.num(open.std_gsm)}</Detail>
-                <Detail label="QC signed">{dash(open.qc_signed)}</Detail>
-                <Detail label="COA status" wide>{dash(open.status)}</Detail>
-                <Detail label="Rows on hold">{dash(open.rows_on_hold)}</Detail>
-                <Detail label="Remarks">{dash(open.remarks)}</Detail>
                 <Detail label="Date generated">{open.date_generated ? fmt.date(open.date_generated) : '—'}</Detail>
-                <Detail label="Date approved">{open.date_approved ? fmt.date(open.date_approved) : '—'}</Detail>
+                <Detail label="Remarks">{dash(open.remarks)}</Detail>
                 <Detail label="COA file" wide><span className="font-mono text-[11px]">{dash(open.file_name)}</span></Detail>
                 <Detail label="Filed in Drive" wide><span className="font-mono text-[11px] text-slate-500">{dash(open.pdf_path || open.folder)}</span></Detail>
               </div>

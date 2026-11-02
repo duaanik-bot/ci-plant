@@ -27,10 +27,9 @@ r.get('/coa-register', async (req, res, next) => {
       SELECT c.coa_no, c.company, c.customer, c.invoice_no,
              to_char(c.invoice_date, 'YYYY-MM-DD') AS invoice_date, c.line_no, c.product,
              c.party_item_code, c.po_no, to_char(c.po_date, 'YYYY-MM-DD') AS po_date,
-             c.job_card, c.qty::float8 AS qty, c.std_gsm::float8 AS std_gsm, c.status,
-             c.rows_on_hold, c.qc_signed, c.remarks, c.file_name, c.folder,
+             c.job_card, c.qty::float8 AS qty, c.std_gsm::float8 AS std_gsm,
+             c.remarks, c.file_name, c.folder,
              to_char(c.date_generated, 'YYYY-MM-DD') AS date_generated,
-             to_char(c.date_approved, 'YYYY-MM-DD') AS date_approved,
              c.pdf_path, c.synced_at,
              f.size_bytes AS pdf_size
         FROM coa_register c
