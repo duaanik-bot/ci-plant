@@ -1357,6 +1357,13 @@ export function DataTable({
   selectedIds = [],
   onToggleRow,
   onToggleAll,
+  // Keyboard selection, opt-in (HR payroll register): every row takes focus;
+  // Space ticks / unticks it, ↑ ↓ move, Shift+↑ ↓ tick as they move, Shift+Space
+  // (or a Shift-click on a tick box) ticks every row from the last one ticked,
+  // Enter opens it (onRowClick). `onSelectRange(rows, on)` takes a range in one
+  // go; without it each row goes through onToggleRow. Off → nothing changes.
+  keyboardSelect = false,
+  onSelectRange,
   // Column knobs beyond the basics: `width` puts a Tailwind width/min-width
   // class on BOTH the th and every td of that column (e.g. 'w-[168px]'), so a
   // table can set its own proportions instead of letting the widest cell win;
@@ -1509,6 +1516,39 @@ export function DataTable({
     return () => io.disconnect();
   }, [display.length, limit]);
   const selectedSet = new Set(selectedIds.map(String));
+  const anchorRef = useRef(null);
+  const bodyRef = useRef(null);
+  const kb = keyboardSelect && selectable;
+  const tickRange = (r, on = true) => {
+    const at = display.findIndex(x => String(getRowId(x)) === String(getRowId(r)));
+    const from = anchorRef.current == null ? -1 : display.findIndex(x => String(getRowId(x)) === anchorRef.current);
+    const span = from < 0 || at < 0 ? [r] : display.slice(Math.min(from, at), Math.max(from, at) + 1);
+    if (onSelectRange) onSelectRange(span, on); else span.forEach(x => onToggleRow?.(x, on));
+    anchorRef.current = String(getRowId(r));
+  };
+  const tickOne = (r, on) => { onToggleRow?.(r, on); anchorRef.current = String(getRowId(r)); };
+  const rowKey = (e, r, checked) => {
+    if (e.target !== e.currentTarget) return; // a key inside a cell's own button or field is that control's
+    const rowsHere = [...(bodyRef.current?.querySelectorAll('tr[data-kb-row]') ?? [])];
+    const here = rowsHere.indexOf(e.currentTarget);
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      if (e.shiftKey) tickRange(r, true); else tickOne(r, !checked);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = rowsHere[here + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (!next) return;
+      next.focus();
+      if (e.shiftKey) {
+        const id = next.getAttribute('data-row-id');
+        const nr = display.find(x => String(getRowId(x)) === id);
+        if (nr) { if (!checked) tickOne(r, true); tickOne(nr, true); }
+      }
+    } else if (e.key === 'Enter' && onRowClick) {
+      e.preventDefault();
+      onRowClick(r);
+    }
+  };
   const visibleIds = sorted.map(getRowId).filter(id => id != null).map(String);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedSet.has(id));
   const toggleSort = key => setSort(current => ({
@@ -1823,7 +1863,7 @@ export function DataTable({
               })}
             </tr>
           </thead>
-          <tbody>
+          <tbody ref={bodyRef}>
             {sorted.length === 0 && (
               <tr><td colSpan={columns.length + (selectable ? 1 : 0) + (serialNumber ? 1 : 0)} className="px-4 py-12">
                 <div className="flex flex-col items-center gap-2.5">
@@ -1859,12 +1899,16 @@ export function DataTable({
                 )}
               <tr
                 data-row-id={rowId}
+                {...(kb ? {
+                  'data-kb-row': '', tabIndex: 0, 'aria-selected': checked,
+                  onKeyDown: e => rowKey(e, r, checked),
+                } : {})}
                 onClick={onRowClick ? e => {
                   // Bubbling guard — clicks on interactive cells must not fire row navigation.
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
+                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${onRowClick ? 'cursor-pointer' : ''} ${kb ? 'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0A84FF]' : ''} ${rowClass?.(r) || ''}`}>
                 {selectable && (
                   // align-top, like every other cell: the default middle
                   // alignment floated the tick halfway down a three-line board
@@ -1876,7 +1920,8 @@ export function DataTable({
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
                       checked={checked}
-                      onChange={e => onToggleRow?.(r, e.target.checked)}
+                      onClick={kb ? e => { if (e.shiftKey) { e.preventDefault(); tickRange(r, true); } } : undefined}
+                      onChange={e => (kb ? tickOne(r, e.target.checked) : onToggleRow?.(r, e.target.checked))}
                     />
                   </td>
                 )}

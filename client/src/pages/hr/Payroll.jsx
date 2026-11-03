@@ -1397,6 +1397,10 @@ export default function Payroll({ level }) {
               <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Select</span>
               <FilterChip label="All" count={filtered.length} on={allShownPicked} onClick={() => pickShown()} />
               <FilterChip label="None" on={false} onClick={() => setSelected(new Set())} />
+              <span className="order-last w-full text-[11px] text-[#86868B]">
+                Keyboard: click a row (or Tab to it), <b>Space</b> ticks it, <b>↑ ↓</b> move, <b>Shift + ↑ ↓</b> tick as you go,
+                {' '}<b>Shift + Space</b> or Shift-click a tick box ticks everything from the last one, <b>Enter</b> opens the person.
+              </span>
               <FilterChip label="Unpaid" count={filtered.filter(r => payBucket(r.line) === 'unpaid').length} on={false}
                 onClick={() => pickShown(r => payBucket(r.line) === 'unpaid')} />
               <FilterChip label="On hold" count={filtered.filter(r => r.payment === 'on_hold').length} on={false}
@@ -1459,6 +1463,12 @@ export default function Payroll({ level }) {
             selectedIds={allShownPicked ? [...selected, '__total'] : [...selected]}
             onToggleRow={toggleRow}
             onToggleAll={toggleAllShown}
+            keyboardSelect
+            onSelectRange={(rs, on) => setSelected(cur => {
+              const n = new Set(cur);
+              for (const x of rs) if (!x._total) { if (on) n.add(x.id); else n.delete(x.id); }
+              return n;
+            })}
             pinTop={r => r._total === true}
             serialNumber={false}
             dense
