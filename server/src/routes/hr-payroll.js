@@ -71,10 +71,10 @@
 //     the channel batch skips it and lists it in `held`, the per-line route refuses it. POST /hr/runs/:month/lines/
 //     status sets paid / unpaid (pending) / on hold for many lines at once; GET /hr/runs/:month carries
 //     payment_totals (paid / unpaid / on_hold, each {count, amount}, and the same per channel; hr/payment-status.js).
-//   * Per-person PAYMENT APPROVAL (owner's request 2026-11-03; migration 20261103120000_hr_line_approval.sql). Once a
-//     run is approved (or finalised) the amounts are fixed, and each line is approved for payment or not
+//   * Per-person PAYMENT APPROVAL (owner's request 2026-11-03; migration 20261103120000_hr_line_approval.sql). From submit
+//     on (submitted, approved, finalised) the amounts are fixed, and each line is approved for payment or not
 //     (run_lines.approval_status, approved_by/at, approval_note). POST /hr/runs/:month/lines/approval {person_ids,
-//     action:'approve'|'unapprove', reason?} is approver+, 409 RUN_NOT_APPROVED on a draft or submitted run; undoing
+//     action:'approve'|'unapprove', reason?} is approver+, 409 RUN_NOT_APPROVED on a draft run (2026-11-03: submitted allowed); undoing
 //     an approval needs a reason, and undoing it on a PAID line is 409 ALREADY_PAID (mark the payment unpaid first —
 //     an approver, through lines/status). Marking a line PAID (the channel batch, lines/status, the per-line PUT) now
 //     also needs the line approved: the batch and lines/status skip and report an unapproved line, the per-line PUT
@@ -1755,8 +1755,8 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
 //
 // { person_ids:[…], action:'approve'|'unapprove', reason? }, approver and up, one transaction, one audit row per line
 // that changes (entity run_line, action approve / unapprove, with who, when, why and what it replaced).
-//   * The run must be approved or finalised — the amounts are fixed from the run's approval on: 409 RUN_NOT_APPROVED
-//     otherwise.
+//   * The run must be submitted, approved or finalised — the amounts are fixed from submit on: 409 RUN_NOT_APPROVED
+//     on a draft.
 //   * approve: the reason is an optional note (approval_note). A line with nothing to pay (payable below zero or not
 //     worked out) is skipped. A line on hold CAN be approved — the hold still stops the money until it is released —
 //     and is listed in `on_hold` so the screen can say so.
@@ -1780,9 +1780,11 @@ r.post('/hr/runs/:month/lines/approval', requireHr('approver'), async (req, res,
 
     const out = await tx(async (qc) => {
       const run = await lockRunOf(qc, month);
-      if (run.status !== 'approved' && run.status !== 'finalised') {
-        throw fail(409, `${monthLabel(month)} is ${run.status}: people are approved for payment once the month's salary is `
-          + 'approved, because the amounts are fixed only then', 'RUN_NOT_APPROVED', { status: run.status });
+      // From submit on the amounts no longer change (only a draft is recalculated, and sending a run back to draft
+      // undoes every line approval), so people can be approved while the month itself waits for approval.
+      if (run.status === 'draft') {
+        throw fail(409, `${monthLabel(month)} is still a draft: submit it first, then approve people for payment — `
+          + 'a draft can still be recalculated, so its amounts are not fixed yet', 'RUN_NOT_APPROVED', { status: run.status });
       }
       const lines = await qc(
         `SELECT id, person_id, payment_status, approval_status, approved_by, approved_at, approval_note,

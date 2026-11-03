@@ -20,11 +20,13 @@
 //                  reason) and Clear selection — POST /hr/runs/:month/lines/status. Status chips filter the register
 //                  (several at once), and the strip under the KPIs is the server's payment_totals.
 //   payment approval
-//                  once the month's salary is approved (run approved or finalised), each person is approved for payment
+//                  once the month is submitted (submitted, approved or finalised), each person is approved for payment
 //                  or not (Approval column: Unapproved grey / Approved blue, hover = who, when, note). Approval chips
 //                  (Approved · Unapproved) filter alongside the payment chips; quick picks Unapproved and Approved &
 //                  unpaid; the selection bar adds Approve and Unapprove (undo, with a reason) — approver and up, shown
-//                  disabled with a hint below that — POST /hr/runs/:month/lines/approval. Only an approved line is marked
+//                  disabled with a hint below that — POST /hr/runs/:month/lines/approval. Each row also carries its own
+//                  Approve (one click) and Undo (dialog, reason) in the Approval column; the Payments panel shows from
+//                  submit on, its Mark paid only once finalised. Only an approved line is marked
 //                  paid. A step banner reads Salary approved → Approve people → Export payment advice → Mark paid.
 //
 // Refusals. Inside a dialog (submit, approve, send back, finalise, mark paid) the server's message is
@@ -322,7 +324,7 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   );
 }
 
-function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen }) {
+function PaymentsPanel({ lines, channelLabel, canOperate, final, nameOf, onPay, onOpen }) {
   const [open, setOpen] = useState(null);
   const groups = useMemo(() => {
     const by = new Map();
@@ -390,7 +392,8 @@ function PaymentsPanel({ lines, channelLabel, canOperate, nameOf, onPay, onOpen 
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.failed + g.reversed ? 'font-bold text-red-700' : ''}`}>{g.failed + g.reversed}</td>
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.unapproved ? 'font-bold text-[#515154]' : ''}`}>{g.unapproved}</td>
                   <td className="px-2.5 py-2 text-right">
-                    {canOperate && g.code && waiting > g.unapproved && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
+                    {canOperate && final && g.code && waiting > g.unapproved && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
+                    {!final && g.code && waiting > g.unapproved && <span className="text-[11px] text-[#515154]">Paid once the month is finalised</span>}
                     {g.code && waiting > 0 && waiting === g.unapproved && <span className="text-[11px] text-[#515154]">Approve people to pay them</span>}
                     {!g.code && waiting > 0 && <span className="text-[11px] text-amber-700">Mark each person from their line</span>}
                     {waiting === 0 && g.held === 0 && g.due.length > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700"><Check size={12} /> All paid</span>}
@@ -520,6 +523,8 @@ export default function Payroll({ level }) {
   const status = run ? (run.status || 'draft') : 'none';
   const rank = RANK[status] ?? 0;
   const final = status === 'finalised';
+  // People are approved for payment from submit on: the amounts no longer change (only a draft is recalculated).
+  const approvable = status === 'submitted' || status === 'approved' || final;
   const linesById = useMemo(() => new Map(lines.map(l => [String(l.person_id), l])), [lines]);
   const inputsById = useMemo(() => new Map(inputs.map(i => [String(i.person_id), i])), [inputs]);
   const nameOf = useCallback(id => {
@@ -744,6 +749,18 @@ export default function Payroll({ level }) {
     return () => { live = false; };
   }, [drawer, run, prevMonth, month, varianceKey, variance.key]);
 
+  // ── Row-level approval: one click approves one person; the undo opens the dialog (it needs a reason) ──
+  const [dialog, setDialog] = useState(null); // { kind } | { kind:'pay', group } | { kind:'approval', action, only? }
+  const [rowBusy, setRowBusy] = useState(null);
+  const afterRef = useRef(null);
+  const approveOne = useCallback(async r => {
+    setRowBusy(r.id);
+    try {
+      const res = await hrApi.setLineApproval(month, { person_ids: [toId(r.id)], action: 'approve' });
+      await afterRef.current?.(res, 'approve');
+    } catch { /* refused — the central toast says why */ } finally { setRowBusy(null); }
+  }, [month]);
+
   // ── Register columns ──
   const columns = useMemo(() => {
     const money = (key, label, pick, { card = 'detail', strong = false } = {}) => ({
@@ -824,7 +841,25 @@ export default function Payroll({ level }) {
         export: r => (r._total ? `${r.approvedN} approved` : APPROVAL_STATUS[r.approval].label),
         render: r => (r._total
           ? <span className="whitespace-nowrap text-[11px] font-bold text-[#515154]">{r.approvedN} approved</span>
-          : <ApprovalPill line={r.line} />) },
+          : (
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <ApprovalPill line={r.line} />
+              {approvable && canApprove && r.approval !== 'approved' && owes(r.line) && (
+                <button type="button" disabled={rowBusy === r.id} onClick={e => { e.stopPropagation(); approveOne(r); }}
+                  title={`Approve ${r.name} for payment`}
+                  className="rounded-full bg-[#007AFF] px-2.5 py-0.5 text-[11px] font-bold text-white hover:bg-[#0064D2] disabled:opacity-50">
+                  {rowBusy === r.id ? '…' : 'Approve'}
+                </button>
+              )}
+              {approvable && canApprove && r.approval === 'approved' && r.payment !== 'paid' && (
+                <button type="button" onClick={e => { e.stopPropagation(); setDialog({ kind: 'approval', action: 'unapprove', only: [r] }); }}
+                  title={`Undo the approval of ${r.name}`}
+                  className="rounded-full border border-[#1D1D1F]/15 bg-white/80 px-2.5 py-0.5 text-[11px] font-bold text-[#515154] hover:text-red-700">
+                  Undo
+                </button>
+              )}
+            </span>
+          )) },
       { key: 'flags', label: 'Flags', card: 'status', sortValue: r => (r._total ? null : (r.blocked ? 1000 : 0) + r.flags.length),
         export: r => (r._total ? '' : r.flags.map(f => flagLabel(f.code)).join(', ')),
         render: r => (r._total ? (
@@ -836,7 +871,7 @@ export default function Payroll({ level }) {
           </span>
         ) : <FlagDots flags={r.flags} />) },
     ];
-  }, [openDrawer, showPaidSep]);
+  }, [openDrawer, showPaidSep, approvable, canApprove, rowBusy, approveOne]);
 
   // ── Export: every component in its own column; grouped views export one section per group ──
   const exportSpec = useCallback(sorted => {
@@ -936,7 +971,6 @@ export default function Payroll({ level }) {
   }, [run, lines]);
 
   // ── Actions ──
-  const [dialog, setDialog] = useState(null); // { kind } | { kind:'pay', group }
   const [wizard, setWizard] = useState(null); // { key, resume }
   const [forget, setForget] = useState(false);
   const openWizard = resume => setWizard({ key: Date.now(), resume: resume ?? null });
@@ -970,6 +1004,7 @@ export default function Payroll({ level }) {
     if (heldApproved.length) toast.info(`${plural(heldApproved.length, 'approved line')} ${heldApproved.length === 1 ? 'is' : 'are'} on hold — released, ${heldApproved.length === 1 ? 'it' : 'they'} can be paid`);
     await load();
   }, [toast, nameOf, load]);
+  afterRef.current = afterStatus;
 
   const recalc = async () => {
     try {
@@ -1091,8 +1126,7 @@ export default function Payroll({ level }) {
       sub: rank >= 4 ? [`${paidLines} of ${dueLines.length} paid`, whenText(dueLines.map(l => l.paid_at || l.paid_on).filter(Boolean).sort().pop())] : [] },
   ];
 
-  // ── Payment approval: Salary approved → Approve people → Export payment advice → Mark paid ──
-  const approvable = status === 'approved' || final;
+  // ── Payment approval: Salary submitted → Approve people → Export payment advice → Mark paid ──
   const pt = here?.paymentTotals || null;
   const rec = pt?.reconciliation || null;
   const approvedN = rows.filter(r => r.approval === 'approved').length;
@@ -1104,7 +1138,7 @@ export default function Payroll({ level }) {
     return n;
   });
   const approvalSteps = [
-    { key: 'salary', label: 'Salary approved', state: rank >= 3 ? 'done' : 'todo', sub: rank >= 3 ? [by('approved_by', 'approved_at')] : [] },
+    { key: 'salary', label: 'Salary submitted', state: rank >= 2 ? 'done' : 'todo', sub: rank >= 3 ? [`approved ${by('approved_by', 'approved_at')}`] : rank === 2 ? [by('submitted_by', 'submitted_at')] : [] },
     { key: 'people', label: 'Approve people', state: !approvable ? 'todo' : toApproveN === 0 ? 'done' : 'current',
       sub: approvable ? [`${approvedN} of ${plural(rows.length, 'person', 'people')} approved`, rec ? inr2(rec.approved.amount) : ''] : [] },
     { key: 'advice', label: 'Export payment advice', state: !approvable ? 'todo' : adviceN > 0 ? 'current' : approvedN > 0 ? 'done' : 'todo',
@@ -1305,8 +1339,8 @@ export default function Payroll({ level }) {
             )}
           </section>
 
-          {final && (
-            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canOperate} nameOf={nameOf}
+          {approvable && (
+            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canOperate} final={final} nameOf={nameOf}
               onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer} />
           )}
 
@@ -1413,7 +1447,7 @@ export default function Payroll({ level }) {
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'pending' })}>Mark unpaid</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
               </span>
-              {!final && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is finalised; a hold can be set now.{!approvable ? ' People are approved for payment once the month’s salary is approved.' : ''}</span>}
+              {!final && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is finalised; a hold can be set now.{!approvable ? ' People are approved for payment once the month is submitted.' : ''}</span>}
               {approvable && !canApprove && <span className="w-full text-[11px] text-[#515154]">Approve and Unapprove need HR approver access; only approved people can be marked paid.</span>}
             </div>
           )}
@@ -1536,7 +1570,7 @@ export default function Payroll({ level }) {
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
       )}
       {dialog?.kind === 'approval' && (
-        <ApprovalDialog month={month} action={dialog.action} picked={picked} refusal={refusal}
+        <ApprovalDialog month={month} action={dialog.action} picked={dialog.only ?? picked} refusal={refusal}
           onClose={() => setDialog(null)} onDone={afterStatus} />
       )}
       {dialog?.kind === 'pay' && (
