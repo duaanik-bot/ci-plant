@@ -968,7 +968,7 @@ export function usePersonActions(level, { onDone } = {}) {
   return { items, node };
 }
 
-export default function PersonDrawer({ id = null, seed = null, level, channels = [], onClose, onChanged }) {
+export default function PersonDrawer({ id = null, seed = null, level, channels = [], onClose, onChanged, initialTab = 'details' }) {
   const toast = useToast();
   const canEdit = levelAtLeast(level, 'operator');
   // null = a person not yet saved. Saving one promotes the drawer to that person in place.
@@ -977,7 +977,7 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
   const [person, setPerson] = useState(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [tab, setTab] = useState('details');
+  const [tab, setTab] = useState(initialTab);
   const [reveal, setReveal] = useState(false);
   const [aliasText, setAliasText] = useState('');
   const [operators, setOperators] = useState(null);

@@ -27,6 +27,10 @@
 // Balances: once the month is finalised its recovery is already posted (after = outstanding); before that, after =
 // outstanding − this month's deduction.
 //
+// Edit here (2026-11-03): the pencil on the card face and the "Edit here" links in the details open the person's
+// master (PersonDrawer: details, salary & pay setup, bank, loans & advances) over the payroll, and "Give advance /
+// loan" opens Pay staff for that person — nothing needs another screen. The month is worked out again after.
+//
 // Holiday pay / Overtime switches (2026-11-03): at the top of the details (PaySwitches.jsx), on the person's
 // pay setup; the open month is worked out again at once.
 //
@@ -36,7 +40,7 @@
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText, Pencil } from 'lucide-react';
 import { Button, SearchInput } from '../../components/ui.jsx';
 import LoanDeductionModal from './LoanDeductionModal.jsx';
 import PaySwitches from './PaySwitches.jsx';
@@ -193,11 +197,28 @@ function Shortfall({ r, carryTo }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change, switches }) {
+function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change, switches, onMaster, onPayStaff }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
     <>
+    {onMaster && (
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-[#1D1D1F]/[0.06] px-4 pt-3">
+        <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">Edit here</span>
+        {[['details', 'Details'], ['pay', 'Salary & pay setup'], ['bank', 'Bank'], ['money', 'Loans & advances']].map(([tab, label]) => (
+          <button key={tab} type="button" onClick={() => onMaster(r, tab)}
+            className="rounded-full border border-[#1D1D1F]/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold text-[#515154] hover:border-[#0A84FF]/40 hover:text-[#007AFF]">
+            {label}
+          </button>
+        ))}
+        {onPayStaff && (
+          <button type="button" onClick={() => onPayStaff(r)}
+            className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-800 hover:bg-violet-100">
+            Give advance / loan
+          </button>
+        )}
+      </div>
+    )}
     <div className="border-t border-[#1D1D1F]/[0.06] px-4 pt-3">
       <PaySwitches personId={r.id} setup={r.person?.current_setup} compact {...switches} />
     </div>
@@ -279,7 +300,7 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
-  month = '', final = false, status = 'draft', onLoanChanged, onSwitched,
+  month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff,
 }) {
   const approvedCount = rows.filter(x => x.approval === 'approved').length;
   const change = canOperate && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
@@ -412,7 +433,7 @@ export default function PersonCards({
                           <Figure label="Advance" value={inr2(r.line.advance_recovery)} tone={nonZero(r.line.advance_recovery) ? '' : 'text-[#86868B]'} />
                           <LoanFigure pos={pos} />
                           <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''} />
-                          <div className="flex w-[262px] shrink-0 items-center justify-end gap-1.5">
+                          <div className="flex w-[290px] shrink-0 items-center justify-end gap-1.5">
                             {r.payment !== 'pending' && <PaymentPill status={r.payment} reason={r.payment === 'on_hold' ? r.line.hold_reason || 'No reason recorded' : null} />}
                             {carried
                               ? <span title={approvalTitle(r.line)} className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">Carried forward</span>
@@ -430,6 +451,12 @@ export default function PersonCards({
                                 {busyId === r.id ? '…' : 'Approve'}
                               </button>
                             )}
+                            {onMaster && (
+                              <button type="button" onClick={() => onMaster(r, 'details')} title={`Edit ${r.name} — details, salary, bank, loans`} aria-label={`Edit ${r.name}`}
+                                className="rounded-full p-1 text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#007AFF]">
+                                <Pencil size={14} />
+                              </button>
+                            )}
                             <button type="button" onClick={() => onPayslip(r)} title={`${r.name}'s payslip`} aria-label={`${r.name}'s payslip`}
                               className="rounded-full p-1 text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#007AFF]">
                               <FileText size={15} />
@@ -443,7 +470,7 @@ export default function PersonCards({
                           </div>
                         </div>
                         {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} switches={switches} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} switches={switches} onMaster={onMaster} onPayStaff={onPayStaff} />}
                       </li>
                     );
                   })}

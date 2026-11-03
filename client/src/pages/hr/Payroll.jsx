@@ -70,7 +70,7 @@ import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
   plantToday, plural, qtyText, shiftMonth, sumPaise, sumQty, whenText,
 } from './RunLineDrawer.jsx';
-import { InlineError, refusalText } from './PersonDrawer.jsx';
+import PersonDrawer, { InlineError, refusalText } from './PersonDrawer.jsx';
 
 const RUN_STATUS = {
   none: { label: 'Not started', tone: 'bg-gray-100 text-gray-600' },
@@ -803,6 +803,22 @@ export default function Payroll({ level }) {
     } catch { /* refused — the central toast says why */ } finally { setRowBusy(null); }
   }, [month]);
   const [slipFor, setSlipFor] = useState(null);
+  // The person's master over the payroll (details, salary & pay setup, bank, loans & advances), and Pay staff for one
+  // person. When the drawer closes after a change, a draft month is worked out again so the card shows it at once.
+  const [master, setMaster] = useState(null);   // { id, tab, key, changed }
+  const masterKey = useRef(0);
+  const [payFor, setPayFor] = useState(null);
+  const closeMaster = async () => {
+    const was = master;
+    setMaster(null);
+    if (!was?.changed) return;
+    if (status === 'draft' && canOperate) {
+      try { await hrApi.recalcRun(month); toast.success(`${monthLabel(month)} worked out again with the change`); } catch { /* the central toast says why */ }
+    } else if (run && !final) {
+      toast.info(`${monthLabel(month)} is ${status}: a salary or pay-setup change shows in it once it is sent back to draft`);
+    }
+    await load();
+  };
 
   // ── Register columns ──
   const columns = useMemo(() => {
@@ -1512,6 +1528,8 @@ export default function Payroll({ level }) {
               showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
               carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)} month={month} final={final}
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
+              onMaster={(r, tab) => setMaster({ id: toId(r.id), tab, key: ++masterKey.current, changed: false })}
+              onPayStaff={canOperate ? r => setPayFor(toId(r.id)) : undefined}
               onSwitched={async (res, change) => {
                 const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
                 const later = list(res?.not_recalculated).map(x => monthLabel(x.month));
@@ -1641,6 +1659,15 @@ export default function Payroll({ level }) {
       {dialog?.kind === 'status' && (
         <StatusDialog month={month} status={dialog.status} picked={picked} canApprove={canApprove}
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
+      )}
+      {master && (
+        <PersonDrawer key={master.key} id={master.id} level={level} channels={channels} initialTab={master.tab}
+          onClose={closeMaster}
+          onChanged={() => { setMaster(m => (m ? { ...m, changed: true } : m)); reloadPeople(); }} />
+      )}
+      {payFor != null && (
+        <PayStaffModal personId={payFor} people={people} channels={channels} onClose={() => setPayFor(null)}
+          onDone={afterPayment} />
       )}
       {slipFor && <PayslipModal month={month} personId={toId(slipFor.id)} name={slipFor.name} onClose={() => setSlipFor(null)} />}
       {dialog?.kind === 'approval' && (
