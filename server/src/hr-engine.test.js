@@ -573,3 +573,13 @@ test('effectiveSetup: any array order, the 1st of the month counts, nothing yet 
   assert.equal(effectiveSetup(s, '2026-04').base, '1'); assert.equal(effectiveSetup(s, '2026-03'), null);
   assert.equal(effectiveSetup([], '2026-07'), null); assert.equal(effectiveSetup(undefined, '2026-07'), null);
   assert.throws(() => effectiveSetup(s, '2026-7'), TypeError); });
+
+test('a one-month loan deduction other than the EMI: more, less or the payoff, and the EMI again with no override', () => {
+  const run = (inputs, out = '20000') => computeLine(base({ balances:{advance:'0', loans:[loan(1,'3000',out)]}, inputs }));
+  assert.equal(run({ loan_recovery_override:'5000' }).loan_recovery, '5000.00');   // more this month
+  assert.equal(run({ loan_recovery_override:'2000' }).loan_recovery, '2000.00');   // less this month
+  assert.equal(run({}).loan_recovery, '3000.00');                                    // no override: the EMI
+  assert.equal(run({ loan_recovery_override:'5000' }, '4000').loan_recovery, '4000.00'); // never past the payoff
+  assert.equal(run({}, '1000').loan_recovery, '1000.00');                            // a last part-instalment
+  assert.equal(run({}, '0').loan_recovery, '0.00');                                  // a repaid loan takes nothing
+});

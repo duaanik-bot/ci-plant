@@ -1508,6 +1508,7 @@ export default function Payroll({ level }) {
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
               showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
               carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)} month={month} final={final}
+              status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
               toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
           ) : (
           <DataTable

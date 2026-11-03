@@ -27,11 +27,15 @@
 // Balances: once the month is finalised its recovery is already posted (after = outstanding); before that, after =
 // outstanding − this month's deduction.
 //
+// Change deduction (2026-11-03): each loan panel offers it (operator, month not finalised) — LoanDeductionModal asks
+// for the amount and "only this time" or "change the EMI", and the line is worked out again at once.
+//
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText } from 'lucide-react';
 import { Button, SearchInput } from '../../components/ui.jsx';
+import LoanDeductionModal from './LoanDeductionModal.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import {
   ApprovalPill, approvalTitle, batchText, flagLabel, FlagDots, LEVEL_META, levelOf, list, paiseOf, PAYMENT_STATUS, PaymentPill,
@@ -93,9 +97,10 @@ function LoanFigure({ pos }) {
 
 const STATUS_WORD = { recovered: 'Deducted', partial: 'Part deducted', holiday: 'Held', projected: 'Expected' };
 
-function LoanPanel({ pos, month, final }) {
+function LoanPanel({ pos, month, final, change }) {
   const { ln, rec, before, after, held, closes } = pos;
   const [detail, setDetail] = useState(null);
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     let live = true;
     hrApi.loan(ln.id).then(d => { if (live) setDetail(d); }, () => { if (live) setDetail({ error: true }); });
@@ -116,7 +121,15 @@ function LoanPanel({ pos, month, final }) {
         <span className="text-xs text-[#3A3A3C]">{ln.is_opening ? 'Opening balance' : 'Loan amount'} <b className="tabular-nums">{inr2(ln.principal)}</b></span>
         <span className="text-xs text-[#3A3A3C]">Instalment <b className="tabular-nums">{inr2(ln.instalment)}</b>/month</span>
         {opened && <span className="text-[11px] text-[#86868B]">{ln.is_opening ? 'Loaded' : 'Given'} {String(opened.txn_date).slice(0, 10).split('-').reverse().join('-')}</span>}
+        {change && !final && ln.status === 'active' && (
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setEditing(true)}>Change deduction</Button>
+        )}
       </div>
+      {editing && change && (
+        <LoanDeductionModal month={month} status={change.status} canApprove={change.canApprove} person={change.person} pos={pos}
+          otherRec={change.otherRec(ln.id)} approvedCount={change.approvedCount}
+          onClose={() => setEditing(false)} onDone={async msg => { setEditing(false); await change.onDone(msg); }} />
+      )}
       <div className="mt-2 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-white/80 px-2 py-1.5"><div className="text-[10px] font-bold uppercase text-[#86868B]">Before {monthLabel(month)}</div><div className="text-sm font-bold tabular-nums">{inr2(fromP(before))}</div></div>
         <div className="rounded-lg bg-white/80 px-2 py-1.5"><div className="text-[10px] font-bold uppercase text-[#86868B]">Deducted now</div><div className="text-sm font-bold tabular-nums">{held ? 'Held' : inr2(fromP(rec))}</div></div>
@@ -176,14 +189,16 @@ function Shortfall({ r, carryTo }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final }) {
+function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
     <>
     {pos.length > 0 && (
       <div className="grid gap-2 border-t border-[#1D1D1F]/[0.06] px-4 pt-3 lg:grid-cols-2">
-        {pos.map(x => <LoanPanel key={x.ln.id} pos={x} month={month} final={final} />)}
+        {pos.map(x => <LoanPanel key={x.ln.id} pos={x} month={month} final={final} change={change && {
+          ...change, person: r, otherRec: id => pos.filter(o => o.ln.id !== id).reduce((t, o) => t + o.rec, 0n),
+        }} />)}
       </div>
     )}
     <div className="grid gap-x-6 gap-y-3 border-t border-[#1D1D1F]/[0.06] px-4 pb-4 pt-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -257,8 +272,10 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final }) {
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
-  month = '', final = false,
+  month = '', final = false, status = 'draft', onLoanChanged,
 }) {
+  const approvedCount = rows.filter(x => x.approval === 'approved').length;
+  const change = canOperate && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
   const [open, setOpen] = useState(() => new Set());
   const anchor = useRef(null);
   const listRef = useRef(null);
@@ -418,7 +435,7 @@ export default function PersonCards({
                           </div>
                         </div>
                         {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} />}
                       </li>
                     );
                   })}
