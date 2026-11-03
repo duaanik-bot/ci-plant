@@ -21,11 +21,15 @@
 // per person from GET /hr/people/:id, which gives them to operator and above), so its button is not
 // offered to a viewer, and only for a finalised month. The server enforces the same.
 //
+// Monthly schedule (2026-11-03, the default report): every month newest first — payroll, approval and payment, cash
+// and bank, advances (salary sheet and Pay staff, cash / bank), loans given and recovered, contractors — read live
+// from GET /hr/reports/monthly, so it keeps itself up to date as months are approved and paid.
+//
 // Money is only formatted. Where figures are added (subtotals, totals) each amount is read as exact paise
 // (sumPaise) and the result kept as a decimal string. Nothing is logged: no amount, no account number.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, Landmark, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, Landmark, RefreshCw } from 'lucide-react';
 import { Button, DataTable, Input, SubTabs, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
@@ -37,6 +41,7 @@ import { refusalText } from './PersonDrawer.jsx';
 import { downloadBankList, downloadPaymentAdvice } from './bankFile.js';
 
 const REPORTS = [
+  { key: 'schedule', label: 'Monthly schedule' },
   { key: 'advice', label: 'Payment advice' },
   { key: 'payment', label: 'Payment sheet' },
   { key: 'paid', label: 'Payment register' },
@@ -48,7 +53,7 @@ const REPORTS = [
   { key: 'loans', label: 'Loan register' },
   { key: 'advances', label: 'Advance register' },
 ];
-const MONTHLESS = new Set(['loans', 'advances']);
+const MONTHLESS = new Set(['schedule', 'loans', 'advances']);
 
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
 const num = v => { const p = paiseOf(v); return p === null ? null : Number(p); }; // for sorting only
@@ -348,7 +353,7 @@ export default function Reports({ level }) {
   }, [setParams]);
   // ?report= opens a report (the Payroll tab's "Payment advice" and "Approval report" buttons link here).
   const askedReport = params.get('report');
-  const [report, setReport] = useState(() => (REPORTS.some(x => x.key === askedReport) ? askedReport : 'payment'));
+  const [report, setReport] = useState(() => (REPORTS.some(x => x.key === askedReport) ? askedReport : 'schedule'));
   useEffect(() => { if (REPORTS.some(x => x.key === askedReport)) setReport(askedReport); }, [askedReport]);
   // Status / approval / channel / department, shared by the payment reports.
   const [filters, setFilters] = useState(NO_FILTERS);
@@ -422,7 +427,7 @@ export default function Reports({ level }) {
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[#86868B] hover:bg-[#1D1D1F]/[0.05]"><RefreshCw size={14} /></button>
             </>
           )}
-          {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">As of today</h2>}
+          {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">{report === 'schedule' ? 'Every month, as it stands today' : 'As of today'}</h2>}
         </div>
         <div className="mt-3"><SubTabs views={REPORTS} active={report} onChange={k => {
           setReport(k);
@@ -468,6 +473,7 @@ export default function Reports({ level }) {
       )}
       {needsRun && run && report === 'register' && <RegisterReport month={month} run={run} rows={rows} />}
       {needsRun && run && report === 'variance' && <VarianceReport month={month} rows={rows} />}
+      {report === 'schedule' && <MonthlySchedule />}
       {report === 'loans' && <LoanRegister />}
       {report === 'advances' && <AdvanceRegister />}
     </div>
@@ -1044,6 +1050,134 @@ function AdvanceRegister() {
         exportName="HR Advance register" exportSubtitle="HR & Payroll · Advance register" exportMeta={() => [owing && 'Only people who owe']}
         exportSummary={rs => [{ label: 'People', value: String(rs.length) }, { label: 'Outstanding', value: inr2(sumPaise(rs.map(a => a.balance))) }]}
         empty="No advances." />
+    </>
+  );
+}
+
+// ── Monthly schedule: every month's payroll, payments, cash / bank, advances, loans and contractors ──
+// (owner's request 2026-11-03). Read live from GET /hr/reports/monthly, so a month updates itself as its people are
+// approved and paid. One card per month, newest first and open; Table view carries every figure and the PDF / Excel.
+const RUN_WORD = { draft: 'Draft', submitted: 'Submitted', approved: 'Approved', finalised: 'Finalised' };
+const z = v => (v == null ? '0.00' : v);
+const scheduleFetch = () => hrApi.monthlySchedule();
+
+function Block({ title, rows }) {
+  return (
+    <div className="rounded-xl bg-white/70 px-3 py-2">
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">{title}</div>
+      <dl className="divide-y divide-[#1D1D1F]/[0.05]">
+        {rows.filter(Boolean).map(([k, v, strong]) => (
+          <div key={k} className="flex items-baseline justify-between gap-3 py-0.5">
+            <dt className="text-xs text-[#6E6E73]">{k}</dt>
+            <dd className={`whitespace-nowrap text-xs tabular-nums ${strong ? 'font-bold text-[#1D1D1F]' : 'font-semibold text-[#3A3A3C]'}`}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+export function MonthlySchedule() {
+  const [{ rows, error }, reload] = useLoaded(scheduleFetch);
+  const [view, setView] = useState('cards');
+  const [open, setOpen] = useState(() => new Set());
+  const all = rows || [];
+  useEffect(() => { if (all[0] && open.size === 0) setOpen(new Set([all[0].month])); }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cnt = (c, a) => `${c ?? 0} · ${inr2(z(a))}`;
+  const columns = useMemo(() => {
+    const m = (key, label, pick) => money(key, label, r => z(pick(r)));
+    return [
+      text('month', 'Month', r => monthLabel(r.month)),
+      text('status', 'Status', r => (r.run ? RUN_WORD[r.run.status] || r.run.status : 'No payroll')),
+      { key: 'people', label: 'People', align: 'right', sortValue: r => r.run?.people ?? 0, export: r => String(r.run?.people ?? 0), render: r => r.run?.people ?? 0 },
+      m('gross', 'Gross', r => r.run?.gross), m('adv_rec', 'Advance recovered', r => r.run?.advance_recovered),
+      m('loan_rec', 'Loan recovered', r => r.run?.loan_recovered), m('payable', 'Payable', r => r.run?.payable),
+      m('approved', 'Approved', r => r.run?.approved?.amount), m('paid', 'Paid', r => r.run?.paid?.amount),
+      m('unpaid', 'Unpaid', r => r.run?.unpaid?.amount), m('held', 'On hold', r => r.run?.on_hold?.amount),
+      m('cash_pay', 'Cash payable', r => r.run?.channels?.cash?.payable), m('cash_paid', 'Cash paid', r => r.run?.channels?.cash?.paid),
+      m('bank_pay', 'Bank payable', r => r.run?.channels?.bank?.payable), m('bank_paid', 'Bank paid', r => r.run?.channels?.bank?.paid),
+      m('adv_sheet', 'Advances (salary sheet)', r => r.run?.advance_given_sheet),
+      m('adv_cash', 'Advances Pay staff · cash', r => r.advances_pay_staff?.cash), m('adv_bank', 'Advances Pay staff · bank', r => r.advances_pay_staff?.bank),
+      m('loan_cash', 'Loans given · cash', r => r.loans_issued?.cash), m('loan_bank', 'Loans given · bank', r => r.loans_issued?.bank),
+      m('short', 'Short pay carried', r => r.run?.short?.amount),
+      m('con_pay', 'Contractors payable', r => r.run?.contractors?.payable), m('con_paid', 'Contractors paid', r => r.run?.contractors?.paid),
+    ];
+  }, []);
+  if (error) return <div role="alert" className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}<Button size="sm" variant="secondary" onClick={reload}>Try again</Button></div>;
+  if (!rows) return <div className="p-8 text-sm text-slate-400">Reading every month…</div>;
+  if (!all.length) return <p className="rounded-xl bg-white/70 px-4 py-3 text-sm text-[#515154]">No payroll month yet.</p>;
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <SubTabs active={view} onChange={setView} views={[{ key: 'cards', label: 'Months' }, { key: 'table', label: 'Table & export' }]} />
+        <span className="text-[11px] text-[#86868B]">Updates by itself: each month follows its approvals and payments as they happen.</span>
+        <button type="button" aria-label="Reload" title="Reload" onClick={reload}
+          className="ml-auto flex h-8 w-8 items-center justify-center rounded-full text-[#86868B] hover:bg-[#1D1D1F]/[0.05]"><RefreshCw size={14} /></button>
+      </div>
+      {view === 'table' ? (
+        <DataTable columns={columns} rows={all} getRowId={r => r.month} dense serialNumber={false} defaultSort={{ key: 'month', dir: 'desc' }}
+          exportName="HR Monthly payment schedule" exportSubtitle="HR & Payroll · Month-wise payment schedule"
+          exportSummary={rs => [{ label: 'Months', value: String(rs.length) },
+            { label: 'Paid', value: inr2(sumPaise(rs.map(r => z(r.run?.paid?.amount)))) },
+            { label: 'Unpaid', value: inr2(sumPaise(rs.map(r => z(r.run?.unpaid?.amount)))) }]}
+          empty="No month yet." />
+      ) : (
+        <div className="space-y-2">
+          {all.map(r => {
+            const run = r.run;
+            const isOpen = open.has(r.month);
+            const toggle = () => setOpen(c => { const n = new Set(c); if (n.has(r.month)) n.delete(r.month); else n.add(r.month); return n; });
+            const allPaid = run && run.unpaid?.count === 0 && run.on_hold?.count === 0 && run.paid?.count > 0;
+            return (
+              <section key={r.month} className="glass overflow-hidden rounded-[22px] border border-white/70 shadow-card">
+                <button type="button" onClick={toggle} className="flex w-full flex-wrap items-center gap-x-5 gap-y-1 px-4 py-3 text-left">
+                  {isOpen ? <ChevronDown size={15} className="text-[#007AFF]" /> : <ChevronRight size={15} className="text-[#86868B]" />}
+                  <span className="min-w-[140px] text-base font-extrabold tracking-[-0.02em] text-[#1D1D1F]">{monthLabel(r.month)}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${allPaid ? 'bg-emerald-50 text-emerald-700' : run ? 'bg-[#1D1D1F]/[0.05] text-[#515154]' : 'bg-amber-50 text-amber-800'}`}>
+                    {run ? (allPaid ? 'All paid' : RUN_WORD[run.status] || run.status) : 'No payroll'}
+                  </span>
+                  {run && <span className="text-xs text-[#6E6E73]">{run.people} people · Gross <b className="tabular-nums text-[#1D1D1F]">{inr2(run.gross)}</b></span>}
+                  {run && <span className="text-xs text-[#6E6E73]">Payable <b className="tabular-nums text-[#1D1D1F]">{inr2(run.payable)}</b></span>}
+                  {run && <span className="ml-auto text-xs text-[#6E6E73]">Paid <b className="tabular-nums text-emerald-700">{inr2(run.paid.amount)}</b> · Unpaid <b className="tabular-nums text-[#1D1D1F]">{inr2(run.unpaid.amount)}</b></span>}
+                </button>
+                {isOpen && (
+                  <div className="grid gap-2 border-t border-[#1D1D1F]/[0.06] px-4 pb-4 pt-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {run && <Block title="Payroll" rows={[
+                      ['Status', RUN_WORD[run.status] || run.status], ['People', String(run.people)], ['Gross', inr2(run.gross), true],
+                      ['Advance recovered', inr2(run.advance_recovered)], ['Loan recovered', inr2(run.loan_recovered)],
+                      (paiseOf(run.other_deductions) ?? 0n) !== 0n && ['Other deductions', inr2(run.other_deductions)],
+                      ['Total deductions', inr2(run.deductions)], ['Payable', inr2(run.payable), true],
+                      run.short.count > 0 && ['Short pay carried as advance', cnt(run.short.count, run.short.amount)],
+                    ]} />}
+                    {run && <Block title="Approval & payment" rows={[
+                      ['Approved', cnt(run.approved.count, run.approved.amount)], ['Paid', cnt(run.paid.count, run.paid.amount), true],
+                      ['Unpaid', cnt(run.unpaid.count, run.unpaid.amount)], ['On hold', cnt(run.on_hold.count, run.on_hold.amount)],
+                    ]} />}
+                    {run && <Block title="Cash & bank" rows={[
+                      ['Cash — payable', inr2(z(run.channels.cash.payable))], ['Cash — paid', inr2(z(run.channels.cash.paid)), true],
+                      ['Bank — payable', inr2(z(run.channels.bank.payable))], ['Bank — paid', inr2(z(run.channels.bank.paid)), true],
+                      (paiseOf(run.channels.none.payable) ?? 0n) !== 0n && ['No pay channel', inr2(run.channels.none.payable)],
+                    ]} />}
+                    <Block title="Advances given" rows={[
+                      run && ['On the salary sheet', inr2(z(run.advance_given_sheet))],
+                      ['Pay staff — cash', inr2(z(r.advances_pay_staff.cash))], ['Pay staff — bank', inr2(z(r.advances_pay_staff.bank))],
+                      ['Pay staff entries', String(r.advances_pay_staff.count)],
+                    ]} />
+                    <Block title="Loans" rows={[
+                      ['Given — cash', inr2(z(r.loans_issued.cash))], ['Given — bank', inr2(z(r.loans_issued.bank))],
+                      ['Loans given', String(r.loans_issued.count)], run && ['Recovered through payroll', inr2(run.loan_recovered), true],
+                    ]} />
+                    {run && <Block title="Contractors" rows={[
+                      ['Contractors', String(run.contractors.count)], ['Gross (bills)', inr2(z(run.contractors.gross))],
+                      ['Payable', inr2(z(run.contractors.payable))], ['Paid', inr2(z(run.contractors.paid)), true],
+                    ]} />}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }

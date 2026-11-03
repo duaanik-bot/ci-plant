@@ -505,7 +505,7 @@ export default function Payroll({ level }) {
         lines: list(d?.lines),
         inputs: list(d?.inputs),
         holds: list(held),
-        loans: list(loans).filter(x => x?.status === 'active' && (paiseOf(x?.outstanding) ?? 0n) > 0n),
+        loans: list(loans).filter(x => x?.status !== 'cancelled'),   // closed ones too: a last instalment this month
         paymentTotals: d?.payment_totals && typeof d.payment_totals === 'object' ? d.payment_totals : null,
         hasServerPending,
         missing: Array.isArray(d?.missing) ? d.missing : null,
@@ -1507,7 +1507,7 @@ export default function Payroll({ level }) {
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
               showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
-              carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)}
+              carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)} month={month} final={final}
               toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
           ) : (
           <DataTable

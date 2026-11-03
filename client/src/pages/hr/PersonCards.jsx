@@ -19,15 +19,23 @@
 // Loan badge: a person with an active loan shows "Loan ₹outstanding · ₹instalment/mo" under the name (Held when this
 // month's instalment is held). Payslip: the slip button on every card opens PayslipModal (screen + PDF).
 //
+// Loans on the card (2026-11-03): a Loan figure on the face — this month's deduction, and under it the balance after
+// it (or "closes" on the last instalment: the engine never takes more than is outstanding, and finalising closes a
+// loan that reaches ₹0, so nothing is deducted from the next month on). The details show each loan: amount (or the
+// opening balance it was loaded with), instalment, balance before and after this month, and its repayment record
+// month by month (GET /hr/loans/:id schedule: what payroll took, held months, and the months still expected).
+// Balances: once the month is finalised its recovery is already posted (after = outstanding); before that, after =
+// outstanding − this month's deduction.
+//
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText } from 'lucide-react';
 import { Button, SearchInput } from '../../components/ui.jsx';
-import { inr2 } from '../../lib/hr.js';
+import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import {
   ApprovalPill, approvalTitle, batchText, flagLabel, FlagDots, LEVEL_META, levelOf, list, paiseOf, PAYMENT_STATUS, PaymentPill,
-  plural, qtyText, sumPaise, whenText,
+  plural, qtyText, shiftMonth, sumPaise, whenText,
 } from './RunLineDrawer.jsx';
 
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
@@ -43,11 +51,102 @@ const SECTION_META = {
   all: { label: 'People', ink: 'text-[#1D1D1F]', rail: 'border-l-[#86868B]/50' },
 };
 
-function Figure({ label, value, strong = false, tone = '' }) {
+function Figure({ label, value, strong = false, tone = '', sub, subTone = 'text-[#86868B]', title }) {
   return (
-    <div className="min-w-[92px] text-right">
+    <div className="min-w-[92px] text-right" title={title}>
       <div className="text-[10px] font-bold uppercase tracking-[0.06em] text-[#1D1D1F]/40">{label}</div>
       <div className={`whitespace-nowrap tabular-nums ${strong ? 'text-[15px] font-bold text-[#1D1D1F]' : 'text-sm font-semibold text-[#3A3A3C]'} ${tone}`}>{value}</div>
+      {sub && <div className={`whitespace-nowrap text-[10px] font-semibold tabular-nums ${subTone}`}>{sub}</div>}
+    </div>
+  );
+}
+
+const P = v => paiseOf(v) ?? 0n;
+const fromP = p => { const a = p < 0n ? -p : p; return `${p < 0n ? '-' : ''}${a / 100n}.${String(a % 100n).padStart(2, '0')}`; };
+
+// This month's position on each loan the person carries (or finished this month).
+export function loanPositions(r, loans, final) {
+  const recs = list(r.line?.loan_recoveries);
+  return loans.map(ln => {
+    const rec = P(recs.find(x => String(x?.loan_id) === String(ln.id))?.amount);
+    const out = P(ln.outstanding);
+    const before = final ? out + rec : out;
+    const after = final ? out : out - rec;
+    const held = r.held.some(h => h.loan_no === ln.loan_no);
+    return { ln, rec, before, after, held, closes: rec > 0n && after <= 0n };
+  }).filter(x => x.rec > 0n || (x.ln.status === 'active' && x.before > 0n));
+}
+
+function LoanFigure({ pos }) {
+  if (!pos.length) return <Figure label="Loan" value="—" tone="!text-[#C7C7CC]" />;
+  const rec = pos.reduce((t, x) => t + x.rec, 0n);
+  const after = pos.reduce((t, x) => t + (x.after > 0n ? x.after : 0n), 0n);
+  const closes = pos.every(x => x.closes);
+  const held = pos.some(x => x.held);
+  return (
+    <Figure label="Loan" value={inr2(fromP(rec))} tone={rec ? '' : 'text-[#86868B]'}
+      title={pos.map(x => `${x.ln.loan_no}: ${inr2(fromP(x.before))} before, ${inr2(fromP(x.rec))} this month, ${inr2(fromP(x.after < 0n ? 0n : x.after))} after`).join('\n')}
+      sub={closes ? 'Closes · bal ₹0.00' : held ? `Held · bal ${inr2(fromP(after))}` : `Bal ${inr2(fromP(after))}`}
+      subTone={closes ? 'text-emerald-700' : held ? 'text-amber-700' : 'text-violet-700'} />
+  );
+}
+
+const STATUS_WORD = { recovered: 'Deducted', partial: 'Part deducted', holiday: 'Held', projected: 'Expected' };
+
+function LoanPanel({ pos, month, final }) {
+  const { ln, rec, before, after, held, closes } = pos;
+  const [detail, setDetail] = useState(null);
+  useEffect(() => {
+    let live = true;
+    hrApi.loan(ln.id).then(d => { if (live) setDetail(d); }, () => { if (live) setDetail({ error: true }); });
+    return () => { live = false; };
+  }, [ln.id]);
+  const schedule = list(detail?.schedule);
+  // This month while it is not finalised: the run's own deduction, not the projection.
+  const rowsShown = schedule.map(x => (!final && x.month === month
+    ? { ...x, recovered: fromP(rec), closing: fromP(after < 0n ? 0n : after), status: held ? 'holiday' : 'this' } : x));
+  const past = rowsShown.filter(x => x.month <= month);
+  const ahead = rowsShown.filter(x => x.month > month);
+  const next = shiftMonth(month, 1);
+  const opened = list(detail?.txns).find(t => t.kind === 'disbursed' || t.kind === 'opening');
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50/50 px-3 py-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-mono text-xs font-bold text-violet-900">{ln.loan_no}</span>
+        <span className="text-xs text-[#3A3A3C]">{ln.is_opening ? 'Opening balance' : 'Loan amount'} <b className="tabular-nums">{inr2(ln.principal)}</b></span>
+        <span className="text-xs text-[#3A3A3C]">Instalment <b className="tabular-nums">{inr2(ln.instalment)}</b>/month</span>
+        {opened && <span className="text-[11px] text-[#86868B]">{ln.is_opening ? 'Loaded' : 'Given'} {String(opened.txn_date).slice(0, 10).split('-').reverse().join('-')}</span>}
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg bg-white/80 px-2 py-1.5"><div className="text-[10px] font-bold uppercase text-[#86868B]">Before {monthLabel(month)}</div><div className="text-sm font-bold tabular-nums">{inr2(fromP(before))}</div></div>
+        <div className="rounded-lg bg-white/80 px-2 py-1.5"><div className="text-[10px] font-bold uppercase text-[#86868B]">Deducted now</div><div className="text-sm font-bold tabular-nums">{held ? 'Held' : inr2(fromP(rec))}</div></div>
+        <div className={`rounded-lg px-2 py-1.5 ${closes ? 'bg-emerald-50' : 'bg-white/80'}`}><div className="text-[10px] font-bold uppercase text-[#86868B]">Balance after</div><div className={`text-sm font-bold tabular-nums ${closes ? 'text-emerald-700' : ''}`}>{inr2(fromP(after < 0n ? 0n : after))}</div></div>
+      </div>
+      {closes && (
+        <p className="mt-2 text-xs font-semibold text-emerald-800">
+          Last instalment — the loan is fully repaid. It closes when {monthLabel(month)} is finalised, and nothing is deducted from {monthLabel(next)} on.
+        </p>
+      )}
+      <h5 className="mt-3 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">Repayment record</h5>
+      {!detail && <p className="text-[11px] text-[#86868B]">Reading the loan…</p>}
+      {detail?.error && <p className="text-[11px] text-red-700">The loan's record could not be read.</p>}
+      {detail && !detail.error && (
+        <table className="mt-1 w-full text-[11px]">
+          <thead><tr className="text-left text-[10px] uppercase text-[#86868B]"><th className="py-0.5">Month</th><th className="py-0.5 text-right">Deducted</th><th className="py-0.5 text-right">Balance after</th><th className="py-0.5 pl-2">Status</th></tr></thead>
+          <tbody className="divide-y divide-violet-100">
+            {past.length === 0 && <tr><td colSpan={4} className="py-1 text-[#86868B]">Nothing deducted yet.</td></tr>}
+            {[...past, ...ahead.slice(0, 6)].map(x => (
+              <tr key={x.month} className={x.month === month ? 'font-bold text-[#1D1D1F]' : x.status === 'projected' ? 'text-[#86868B]' : 'text-[#3A3A3C]'}>
+                <td className="py-0.5">{monthLabel(x.month)}</td>
+                <td className="py-0.5 text-right tabular-nums">{x.status === 'projected' ? inr2(x.due) : inr2(x.recovered)}</td>
+                <td className="py-0.5 text-right tabular-nums">{inr2(x.closing)}</td>
+                <td className="py-0.5 pl-2">{x.status === 'this' ? (final ? 'Deducted' : 'This month') : STATUS_WORD[x.status] || x.status}</td>
+              </tr>
+            ))}
+            {ahead.length > 6 && <tr><td colSpan={4} className="py-1 text-[#86868B]">and {ahead.length - 6} more months expected</td></tr>}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -77,10 +176,16 @@ function Shortfall({ r, carryTo }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen, onPayslip }) {
+function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
+    <>
+    {pos.length > 0 && (
+      <div className="grid gap-2 border-t border-[#1D1D1F]/[0.06] px-4 pt-3 lg:grid-cols-2">
+        {pos.map(x => <LoanPanel key={x.ln.id} pos={x} month={month} final={final} />)}
+      </div>
+    )}
     <div className="grid gap-x-6 gap-y-3 border-t border-[#1D1D1F]/[0.06] px-4 pb-4 pt-3 sm:grid-cols-2 xl:grid-cols-4">
       <section>
         <h4 className="mb-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">Attendance</h4>
@@ -145,12 +250,14 @@ function Details({ r, showPaidSep, onOpen, onPayslip }) {
         </div>
       </section>
     </div>
+    </>
   );
 }
 
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
+  month = '', final = false,
 }) {
   const [open, setOpen] = useState(() => new Set());
   const anchor = useRef(null);
@@ -245,7 +352,7 @@ export default function PersonCards({
                     const ticked = selected.has(r.id);
                     const short = isShort(r);
                     const carried = short && r.approval === 'approved';
-                    const loans = loansBy.get(r.id) ?? [];
+                    const pos = loanPositions(r, loansBy.get(r.id) ?? [], final);
                     return (
                       <li key={r.id} data-card={r.id} tabIndex={0} aria-selected={ticked} aria-expanded={isOpen} onKeyDown={e => onKey(e, r)}
                         className={`overflow-hidden rounded-2xl border border-l-[3px] bg-white/70 shadow-[0_1px_2px_rgba(29,29,31,0.04)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0A84FF]
@@ -266,10 +373,10 @@ export default function PersonCards({
                               </span>
                               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-[#86868B]">
                                 <span className="truncate">{[r.code, r.department, r.channelLabel].filter(Boolean).join(' · ')}</span>
-                                {loans.map(ln => (
-                                  <span key={ln.id} title={`${ln.loan_no}: ${inr2(ln.outstanding)} outstanding, instalment ${inr2(ln.instalment)} a month${nonZero(r.line.loan_recovery) ? `; ${inr2(r.line.loan_recovery)} recovered this month` : ''}`}
+                                {pos.map(x => (
+                                  <span key={x.ln.id} title={`${x.ln.loan_no}: ${x.ln.is_opening ? 'opening balance' : 'loan'} ${inr2(x.ln.principal)}, instalment ${inr2(x.ln.instalment)} a month`}
                                     className="rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-bold text-violet-800">
-                                    Loan {inr2(ln.outstanding)} · {inr2(ln.instalment)}/mo{r.held.some(h => h.loan_no === ln.loan_no) ? ' · held' : ''}
+                                    Loan {inr2(x.ln.principal)}
                                   </span>
                                 ))}
                                 {short && <span className="rounded-full bg-red-100 px-1.5 py-px text-[10px] font-bold text-red-700">Short pay</span>}
@@ -278,6 +385,7 @@ export default function PersonCards({
                           </button>
                           <Figure label="Gross" value={inr2(r.line.gross)} />
                           <Figure label="Advance" value={inr2(r.line.advance_recovery)} tone={nonZero(r.line.advance_recovery) ? '' : 'text-[#86868B]'} />
+                          <LoanFigure pos={pos} />
                           <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''} />
                           <div className="flex w-[262px] shrink-0 items-center justify-end gap-1.5">
                             {r.payment !== 'pending' && <PaymentPill status={r.payment} reason={r.payment === 'on_hold' ? r.line.hold_reason || 'No reason recorded' : null} />}
@@ -310,7 +418,7 @@ export default function PersonCards({
                           </div>
                         </div>
                         {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} />}
                       </li>
                     );
                   })}

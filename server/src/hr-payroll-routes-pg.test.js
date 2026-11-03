@@ -862,6 +862,24 @@ describe('HR payroll routes through the real app', {
       dash.body.payments.reconciled], [3, 0, 1, true]);
   });
 
+  test('the monthly schedule reads every month live and adds up to each run\'s own totals', T, async () => {
+    const res = await call('viewer', 'GET', '/hr/reports/monthly');
+    assert.equal(res.status, 200, res.text);
+    const months = res.body.map((m) => m.month);
+    assert.deepEqual(months, [...months].sort().reverse(), 'newest first');
+    for (const m of res.body.filter((x) => x.run)) {
+      const run = await call('viewer', 'GET', `/hr/runs/${m.month}`);
+      const t = run.body.payment_totals;
+      assert.equal(m.run.people, run.body.lines.length, `${m.month} people`);
+      assert.equal(cents(m.run.payable), cents(run.body.run.totals.payable), `${m.month} payable`);
+      assert.equal(m.run.paid.count, t.paid.count, `${m.month} paid count`);
+      assert.equal(cents(m.run.paid.amount), cents(t.paid.amount), `${m.month} paid amount`);
+      assert.equal(m.run.on_hold.count, t.on_hold.count, `${m.month} held`);
+      assert.equal(cents(m.run.channels.cash.payable) + cents(m.run.channels.bank.payable) + cents(m.run.channels.none.payable),
+        cents(m.run.payable), `${m.month} cash + bank + none = payable`);
+    }
+  });
+
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
     const actions = new Set((await db.q(`SELECT entity || ':' || action AS a FROM hr.audit_log`)).map((x) => x.a));
     for (const a of ['import:upload', 'import:map', 'import_row:decide', 'import:apply', 'import:discard', 'run_input:edit', 'run:submit',

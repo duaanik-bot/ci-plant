@@ -117,6 +117,7 @@ import { cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
 import { ensureRun, finaliseRun, recalcRun } from '../hr/runs.js';
+import { monthlySchedule } from '../hr/monthly-report.js';
 
 const r = Router();
 
@@ -1121,6 +1122,14 @@ r.get('/hr/runs', requireHr('viewer'), async (_req, res, next) => {
         ORDER BY r.month DESC`);
     const names = await userNames(q, runs.flatMap((run) => RUN_BY.map((k) => run[k])));
     res.json(runs.map((run) => runWithNames(run, names)));
+  } catch (e) { next(e); }
+});
+
+// ── GET /hr/reports/monthly — the month-wise payment schedule (hr/monthly-report.js) ──
+// Viewer and up, like every report. Read live each time: a month's figures follow its approvals and payments.
+r.get('/hr/reports/monthly', requireHr('viewer'), async (_req, res, next) => {
+  try {
+    res.json(await monthlySchedule(q));
   } catch (e) { next(e); }
 });
 
