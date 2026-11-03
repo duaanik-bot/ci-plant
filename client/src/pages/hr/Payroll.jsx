@@ -29,6 +29,11 @@
 //                  submit on, its Mark paid only once finalised. Only an approved line is marked
 //                  paid. A step banner reads Salary approved → Approve people → Export payment advice → Mark paid.
 //
+//   register layout
+//                  People (default, PersonCards.jsx): one card per person — name, gross, advance, payable, approval on the
+//                  face; the rest opens underneath (hide / unhide, Expand all); sections To approve · Approved · Nothing
+//                  to pay, so an approved person moves down at once. Full table: every column, grouping and the export.
+//                  The choice is remembered in this browser.
 // Refusals. Inside a dialog (submit, approve, send back, finalise, mark paid) the server's message is
 // said inline and the dialog stays open with what was typed; codes that carry people (RUN_BLOCKED,
 // RUN_CHANGED_SINCE_APPROVAL) name them and can narrow the register to them, and codes that name a
@@ -59,6 +64,7 @@ import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { storage } from '../../lib/safeStorage.js';
 import ImportWizard, { batchSummary } from './ImportWizard.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
+import PersonCards from './PersonCards.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
   plantToday, plural, qtyText, shiftMonth, sumPaise, sumQty, whenText,
@@ -83,6 +89,8 @@ const payStatus = l => (PAYMENT_STATUS[l?.payment_status] ? l.payment_status : '
 const payBucket = l => { const s = payStatus(l); return s === 'paid' ? 'paid' : s === 'on_hold' ? 'on_hold' : 'unpaid'; };
 const PAY_FILTERS = ['pending', 'paid', 'on_hold', 'failed', 'reversed'];
 const APPROVAL_FILTERS = ['approved', 'unapproved'];
+const LAYOUT_KEY = 'hr.payroll.layout';
+const readLayout = () => { try { return storage.getItem(LAYOUT_KEY) === 'table' ? 'table' : 'cards'; } catch { return 'cards'; } };
 
 // ── The upload this browser left unapplied, per month ───────────────────────
 // A fallback only. GET /hr/runs/:month carries pending_import (the month's latest parsed upload, made
@@ -709,6 +717,14 @@ export default function Payroll({ level }) {
   // rows no longer shown, so a hidden row is never ticked and never sent.
   const [selected, setSelected] = useState(() => new Set());
   useEffect(() => { setSelected(new Set()); }, [month]);
+  // Person cards (default) or the full table (every column, grouping, export). Remembered in this browser only.
+  const [layout, setLayoutState] = useState(readLayout);
+  const setLayout = v => { setLayoutState(v); try { storage.setItem(LAYOUT_KEY, v); } catch { /* private window */ } };
+  const selectRange = (rs, on) => setSelected(cur => {
+    const n = new Set(cur);
+    for (const x of rs) if (!x._total) { if (on) n.add(x.id); else n.delete(x.id); }
+    return n;
+  });
   // Only rows on screen are ever acted on: picked is the selection ∩ the rows shown, and the selection itself is
   // pruned to the rows shown whenever the filters, chips, search or the run change (below).
   const shownIds = useMemo(() => new Set(filtered.map(r => r.id)), [filtered]);
@@ -1386,10 +1402,17 @@ export default function Payroll({ level }) {
                 <FilterChip label={`${plural(focus.size, 'person', 'people')} ×`} on onClick={() => setFocus(null)} />
               </FilterGroup>
             )}
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Group</span>
-              <SubTabs active={groupBy} onChange={setGroupBy}
-                views={[{ key: 'none', label: 'None' }, { key: 'department', label: 'Department' }, { key: 'channel', label: 'Channel' }]} />
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">View</span>
+              <SubTabs active={layout} onChange={setLayout}
+                views={[{ key: 'cards', label: 'People' }, { key: 'table', label: 'Full table' }]} />
+              {layout === 'table' && (
+                <>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Group</span>
+                  <SubTabs active={groupBy} onChange={setGroupBy}
+                    views={[{ key: 'none', label: 'None' }, { key: 'department', label: 'Department' }, { key: 'channel', label: 'Channel' }]} />
+                </>
+              )}
             </div>
           </FilterRail>
           {canOperate && filtered.length > 0 && (
@@ -1399,7 +1422,7 @@ export default function Payroll({ level }) {
               <FilterChip label="None" on={false} onClick={() => setSelected(new Set())} />
               <span className="order-last w-full text-[11px] text-[#86868B]">
                 Keyboard: click a row (or Tab to it), <b>Space</b> ticks it, <b>↑ ↓</b> move, <b>Shift + ↑ ↓</b> tick as you go,
-                {' '}<b>Shift + Space</b> or Shift-click a tick box ticks everything from the last one, <b>Enter</b> opens the person.
+                {' '}<b>Shift + Space</b> or Shift-click a tick box ticks everything from the last one, <b>Enter</b> {layout === 'cards' ? 'shows or hides the details' : 'opens the person'}.
               </span>
               <FilterChip label="Unpaid" count={filtered.filter(r => payBucket(r.line) === 'unpaid').length} on={false}
                 onClick={() => pickShown(r => payBucket(r.line) === 'unpaid')} />
@@ -1455,6 +1478,13 @@ export default function Payroll({ level }) {
               {approvable && !canApprove && <span className="w-full text-[11px] text-[#515154]">Approve and Unapprove need HR approver access; only approved people can be marked paid.</span>}
             </div>
           )}
+          {layout === 'cards' ? (
+            <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate}
+              selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
+              onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
+              showPaidSep={showPaidSep} search={q} onSearch={setQ}
+              toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
+          ) : (
           <DataTable
             columns={columns}
             rows={filtered.length ? [totalRow, ...filtered] : []}
@@ -1464,11 +1494,7 @@ export default function Payroll({ level }) {
             onToggleRow={toggleRow}
             onToggleAll={toggleAllShown}
             keyboardSelect
-            onSelectRange={(rs, on) => setSelected(cur => {
-              const n = new Set(cur);
-              for (const x of rs) if (!x._total) { if (on) n.add(x.id); else n.delete(x.id); }
-              return n;
-            })}
+            onSelectRange={selectRange}
             pinTop={r => r._total === true}
             serialNumber={false}
             dense
@@ -1484,6 +1510,7 @@ export default function Payroll({ level }) {
             exportSpec={exportSpec}
             empty={lines.length ? 'No line matches these filters.' : 'No lines yet — import the sheet, or recalculate the run.'}
           />
+          )}
         </>
       )}
 
