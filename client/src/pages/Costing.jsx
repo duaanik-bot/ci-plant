@@ -1,6 +1,7 @@
 // Costing — new-product costing worked out the way the plant's cost sheet does it, simple enough for
-// anyone new to take out a costing. Tabs (?tab=): New costing · Bulk costing · Saved costings ·
-// Size library · Rates & method. Open for admins and for logins given the Costing tick (it shows
+// anyone new to take out a costing. Tabs (?tab=): Enquiry desk · New costing · Bulk costing · Saved costings ·
+// Size library · Rates & method. The desk pushes an enquiry to New costing (?enquiry=) or several to
+// Bulk costing (?enquiries=). Open for admins and for logins given the Costing tick (it shows
 // quotation prices); the server holds the same rule.
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -13,8 +14,10 @@ import CostingRegister from './costing/CostingRegister.jsx';
 import CostingView from './costing/CostingView.jsx';
 import SizeLibrary from './costing/SizeLibrary.jsx';
 import CostingRates from './costing/CostingRates.jsx';
+import EnquiryDesk from './costing/EnquiryDesk.jsx';
 
 const GROUPS = [
+  { label: 'Enquiries', items: [{ key: 'enquiries', label: 'Enquiry desk' }] },
   { label: 'Cost', items: [{ key: 'new', label: 'New costing' }, { key: 'bulk', label: 'Bulk costing' }] },
   { label: 'Records', items: [{ key: 'saved', label: 'Saved costings' }, { key: 'sizes', label: 'Size library' }] },
   { label: 'Settings', items: [{ key: 'rates', label: 'Rates & method' }] },
@@ -57,10 +60,18 @@ export default function Costing() {
       <GroupedTabs groups={GROUPS} active={tab} onChange={key => { setStartSize(null); go(key); }} />
       {tab === 'new' && (
         <SingleCosting boot={boot} customers={customers} openId={params.get('id')} fromId={params.get('from')} startSize={startSize}
+          enquiryId={params.get('enquiry')}
           onSaved={c => { setReload(n => n + 1); if (!params.get('id') || params.get('from')) go('new', { id: String(c.id) }); }}
           onFresh={() => { setStartSize(null); go('new'); }} />
       )}
-      {tab === 'bulk' && <BulkCosting boot={boot} customers={customers} />}
+      {tab === 'bulk' && <BulkCosting key={`${params.get('enquiries') || ''}|${params.get('batch') || ''}`} boot={boot} customers={customers}
+        enquiryIds={(params.get('enquiries') || '').split(',').map(Number).filter(n => n > 0)} batchId={Number(params.get('batch')) || null} />}
+      {tab === 'enquiries' && (
+        <EnquiryDesk
+          onPushSingle={e => go('new', { enquiry: String(e.id) })}
+          onPushBulk={ids => go('bulk', { enquiries: ids.join(',') })}
+          onOpenCosting={e => (e.batch_id ? go('bulk', { batch: String(e.batch_id) }) : e.costing_id ? go('new', { id: String(e.costing_id) }) : go('new', { enquiry: String(e.id) }))} />
+      )}
       {tab === 'saved' && <CostingRegister onOpen={setViewing} reloadSignal={reload} />}
       {tab === 'sizes' && <SizeLibrary onCostSize={entry => { setStartSize(entry); go('new'); }} />}
       {tab === 'rates' && <CostingRates boot={boot} onSaved={loadBoot} />}

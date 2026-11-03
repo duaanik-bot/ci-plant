@@ -7,6 +7,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
+      "includeFiles": "skills/enquiry-desk/**",
       "excludeFiles": "{backups/**,*BACKUP*.json,*-FLAGGED-*.csv,docs/**,scripts/**,supabase/**,server/.pgdata/**}"
     }
   },

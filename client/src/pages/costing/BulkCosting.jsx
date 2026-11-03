@@ -20,6 +20,7 @@ import {
   perUnit, plain, rupees, startingInputs,
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
+import { bulkSeedFromEnquiry } from '../../lib/enquiryUi.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -66,9 +67,11 @@ const rowsFromServer = rows => rows.map(r => {
   return answeredNo(r) ? { ...row, skip_library: libraryKey(row) } : row;
 });
 
-export default function BulkCosting({ boot, customers }) {
-  const [openBatch, setOpenBatch] = useState(null);   // null = list; 'new' or an id
-  if (openBatch) return <BatchEditor boot={boot} customers={customers} batchId={openBatch === 'new' ? null : openBatch} onClose={() => setOpenBatch(null)} onOpened={setOpenBatch} />;
+// enquiryIds: pushed from the enquiry desk — a new batch opens with one row per enquiry. batchId: opened
+// from the desk on an enquiry already costed in a batch.
+export default function BulkCosting({ boot, customers, enquiryIds = [], batchId = null }) {
+  const [openBatch, setOpenBatch] = useState(enquiryIds.length ? 'new' : batchId);   // null = list; 'new' or an id
+  if (openBatch) return <BatchEditor boot={boot} customers={customers} batchId={openBatch === 'new' ? null : openBatch} seedIds={openBatch === 'new' ? enquiryIds : []} onClose={() => setOpenBatch(null)} onOpened={setOpenBatch} />;
   return <BatchList onOpen={setOpenBatch} />;
 }
 
@@ -95,7 +98,7 @@ function BatchList({ onOpen }) {
   );
 }
 
-function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
+function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened }) {
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const typical = boot?.typical || {};
@@ -114,6 +117,7 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
   const [asking, setAsking] = useState(null);         // the new library entries, put to the user on saving
   const [checks, setChecks] = useState({});           // size key → bulk size check
   const [addQty, setAddQty] = useState('');
+  const seeded = useRef(false);
 
   const load = id => api.get(`/costing/batches/${id}`).then(b => {
     const { quantities = [], ...saved } = b.common || {};
@@ -124,6 +128,19 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
     setDirty(false);
   });
   useEffect(() => {
+    if (!batchId && seedIds.length) {
+      // Once: a second run of this effect (React's development check) must not add the rows twice.
+      if (seeded.current) return;
+      seeded.current = true;
+      api.get(`/costing/enquiries?ids=${seedIds.join(',')}`).then(async es => {
+        const names = [...new Set(es.map(e => e.customer_name).filter(Boolean))];
+        const ids = [...new Set(es.map(e => e.customer_id).filter(Boolean))];
+        setBatch(b => ({ ...b, title: `Enquiries ${es.map(e => e.enquiry_no).join(', ')}`.slice(0, 200),
+          ...(names.length === 1 ? { customer_name: names[0], customer_id: ids.length === 1 ? ids[0] : null } : {}) }));
+        await addRows(es.map(bulkSeedFromEnquiry), 'from the enquiry desk');
+      }).catch(() => {});
+      return;
+    }
     if (!batchId) {
       setBatch(b => ({ ...b, rows: b.rows.length ? b.rows : [newRow(b.common, typical), newRow(b.common, typical), newRow(b.common, typical)] }));
       return;
@@ -234,7 +251,7 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
     const body = {
       title: batch.title, customer_id: batch.customer_id, customer_name: batch.customer_name,
       common: { ...batch.common.inputs, quantities: qs },
-      rows: named.map(r => ({ id: r.id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, save_size: !libraryDeclined(r) })),
+      rows: named.map(r => ({ id: r.id || undefined, enquiry_id: r.enquiry_id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, save_size: !libraryDeclined(r) })),
     };
     const b = batch.id ? await api.post(`/costing/batches/${batch.id}/save`, body) : await api.post('/costing/batches', body);
     toast.success(`${b.batch_no} saved — ${b.rows.length} products`);
@@ -263,6 +280,10 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
     const pasted = parsePaste(text);
     if (!pasted.length) { toast.error('Nothing to add — paste rows of Product · Size · Quantity.'); return; }
     setPasting(false);
+    await addRows(pasted, 'added');
+  };
+  // Rows of { product_name, size_text, qty } (and, from the enquiry desk, style, gsm, colours, enquiry_id).
+  const addRows = async (pasted, how) => {
     let matches = {};
     try { matches = await api.post('/costing/products/match', { names: pasted.map(p => p.product_name).filter(Boolean) }); } catch { matches = {}; }
     // The rows are made here, not inside the state update (React may run an updater later, or twice).
@@ -270,13 +291,15 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
     let matched = 0;
     const fresh = pasted.map(p => {
         const m = matches[String(p.product_name || '').trim().toLowerCase().replace(/\s+/g, ' ')];
+        const asked = { ...(num(p.gsm) > 0 ? { gsm: num(p.gsm) } : {}), ...(num(p.colours) > 0 ? { colours: num(p.colours) } : {}) };
+        const desk = p.enquiry_id ? { enquiry_id: p.enquiry_id, enquiry_no: p.enquiry_no } : {};
         if (!m) {
-          const row = newRow(common, typical, { product_name: p.product_name, size_text: p.size_text });
-          return { ...row, inputs: { ...row.inputs, qty: p.qty ?? '' } };
+          const row = newRow(common, typical, { product_name: p.product_name, size_text: p.size_text, ...(p.style ? { style: p.style } : {}), ...desk });
+          return { ...row, inputs: { ...row.inputs, qty: p.qty ?? '', ...asked } };
         }
         matched++;
-        const style = pastingFromProduct(m.pasting_type) || common.style || null;
-        const row = newRow(common, typical, { product_name: m.name, product_id: m.id, style, size_text: p.size_text || parseSize(m.size)?.key || '' });
+        const style = p.style || pastingFromProduct(m.pasting_type) || common.style || null;
+        const row = newRow(common, typical, { product_name: m.name, product_id: m.id, style, size_text: p.size_text || parseSize(m.size)?.key || '', ...desk });
         const g = gradeFor(m.board_grade, grades);
         const layout = num(m.sheet_l) > 0 && num(m.sheet_w) > 0 && num(m.ups) > 1;
         return {
@@ -289,11 +312,12 @@ function BatchEditor({ boot, customers, batchId, onClose, onOpened }) {
             ...(num(m.colours) > 0 ? { colours: num(m.colours) } : {}),
             ...(g ? { board_rate: g.rate_per_kg } : {}),
             ...(+m.emboss !== 1 ? { emb_rate: 0 } : {}),
+            ...asked,
           },
         };
       });
     update(b => ({ ...b, rows: [...b.rows.filter(r => r.product_name.trim() || r.size_text.trim() || r.inputs.qty), ...fresh] }));
-    toast.success(`${pasted.length} row${pasted.length === 1 ? '' : 's'} added${matched ? ` — ${matched} filled from the Product Master` : ''}`);
+    toast.success(`${pasted.length} row${pasted.length === 1 ? '' : 's'} ${how}${matched ? ` — ${matched} filled from the Product Master` : ''}`);
   };
 
   const pickCustomer = name => {

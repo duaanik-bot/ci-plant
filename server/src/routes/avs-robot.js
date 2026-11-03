@@ -40,7 +40,8 @@ const sameKey = (given, real) => {
   return crypto.timingSafeEqual(digest(given), digest(real));
 };
 
-const keyOk = async req => {
+// Also the enquiry desk's way in (routes/enquiry-robot.js): the same key.
+export const keyOk = async req => {
   const key = await one(`SELECT value FROM avs.settings WHERE key = 'robot_key'`);
   return sameKey(req.get('x-avs-robot-key'), key?.value);
 };

@@ -33,6 +33,8 @@ import logbook from './routes/logbook.js';
 import coa from './routes/coa.js';
 import coaRegister from './routes/coa-register.js';
 import costing from './routes/costing.js';
+import enquiries from './routes/enquiries.js';
+import enquiryRobot from './routes/enquiry-robot.js';
 import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
@@ -89,6 +91,8 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api', authRouter);          // login is public
 // The AVS check fetches photos kept in CI Plant with its own key, not a login.
 app.use('/api', avsRobot);
+// The enquiry desk's jobs, for the same AVS robot with the same key (routes/enquiry-robot.js).
+app.use('/api', enquiryRobot);
 app.use('/api', requireAuth);         // everything below needs a token
 app.use('/api', heartbeatMiddleware); // keeps the browsers' change feed provably alive
 // The modules ticked for a login in Masters → Users hold on the server too: a
@@ -124,6 +128,7 @@ app.use('/api', logbook);
 app.use('/api', coa);
 app.use('/api', coaRegister);   // COA Register — the Drive register, mirrored in
 app.use('/api', costing);       // Costing — new-product costing, Size Library, bulk batches (tick-only)
+app.use('/api', enquiries);     // Enquiry desk — mailbox enquiries → costing → final price → quotation (Costing tick)
 app.use('/api', masterHistory);
 app.use('/api', notifications);
 app.use('/api', chat);

@@ -10,6 +10,7 @@ import { api } from '../../api.js';
 import { Button, ExportMenu, Input, Modal, useToast } from '../../components/ui.jsx';
 import { computeCosting, num, parseSize } from '../../lib/costing.js';
 import { batchExportSpec, blankValue, costingExportSpec, libraryDeclined, newLibraryEntry, savePayload, stillNeeded, valueFromSaved } from '../../lib/costingUi.js';
+import { costingValueFromEnquiry } from '../../lib/enquiryUi.js';
 import CostingEditor from './CostingEditor.jsx';
 
 // What the page remembers about a saved costing.
@@ -29,7 +30,7 @@ export function ApprovalChip({ c }) {
   return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">Draft — not approved</span>;
 }
 
-export default function SingleCosting({ boot, customers, openId, fromId, startSize, onSaved, onFresh }) {
+export default function SingleCosting({ boot, customers, openId, fromId, startSize, enquiryId, onSaved, onFresh }) {
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const [value, setValue] = useState(() => blankValue(defaults, startSize));
@@ -42,8 +43,22 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
 
   useEffect(() => {
     const id = openId || fromId;
-    if (!id) { setValue(blankValue(defaults, startSize)); setSaved(null); setDirty(false); return undefined; }
     let live = true;
+    // Pushed from the enquiry desk: what the customer asked, then the module's own auto-fill.
+    if (!id && enquiryId) {
+      setLoading(true);
+      api.get(`/costing/enquiries/${enquiryId}`).then(async e => {
+        const v = costingValueFromEnquiry(e, defaults);
+        if (e.product_id && e.product_name) {
+          const hits = await api.get(`/costing/products?search=${encodeURIComponent(e.product_name)}`).catch(() => []);
+          v.product = hits.find(p => p.id === e.product_id) || null;
+        }
+        if (!live) return;
+        setValue(v); setSaved(null); setDirty(true);
+      }).catch(() => {}).finally(() => live && setLoading(false));
+      return () => { live = false; };
+    }
+    if (!id) { setValue(blankValue(defaults, startSize)); setSaved(null); setDirty(false); return undefined; }
     setLoading(true);
     api.get(`/costing/costings/${id}`).then(c => {
       if (!live) return;
@@ -56,7 +71,7 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
     }).catch(() => {}).finally(() => live && setLoading(false));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId, fromId, startSize]);
+  }, [openId, fromId, startSize, enquiryId]);
 
   const change = v => { setValue(v); setDirty(true); };
   const missing = stillNeeded(value);
@@ -119,6 +134,7 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
         <div className="mr-auto min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-[#1D1D1F]">
             {saved ? <span>Editing <span className="text-brand-600">{saved.costing_no}</span> · revision {saved.version}</span> : 'New costing'}
+            {value.enquiry_no && !saved && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">For enquiry {value.enquiry_no}</span>}
             {saved && <ApprovalChip c={saved} />}
             {dirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">Not saved</span>}
           </div>

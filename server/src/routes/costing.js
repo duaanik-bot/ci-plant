@@ -25,6 +25,7 @@ import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { computeCosting, parseSize, normStyle, num, CURRENT_FORMULA, FORMULAS, INPUTS, STYLES } from '../costing-engine.js';
 import { possibleDuplicates, sizeEntryKey } from '../costing-sheet.js';
 import { matchDies, sizeRelation, mayCost, mayEditCostingRates, mayApproveCosting } from '../costing-match.js';
+import { linkEnquiry } from './enquiries.js';
 
 const r = Router();
 
@@ -373,7 +374,12 @@ async function costingById(id) {
 r.post('/costing/costings', async (req, res, next) => {
   try {
     const c = costingFrom(req.body);
-    const row = await tx((qc, oc) => insertCosting(c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser));
+    // Pushed from the enquiry desk: the costing is linked to its enquiry in the same transaction.
+    const row = await tx(async (qc, oc) => {
+      const made = await insertCosting(c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser);
+      await linkEnquiry(qc, req.body?.enquiry_id, made, null, req.costingUser);
+      return made;
+    });
     res.status(201).json(await costingById(row.id));
   } catch (e) { next(e); }
 });
@@ -383,7 +389,10 @@ r.put('/costing/costings/:id', async (req, res, next) => {
     const id = intOrNull(req.params.id);
     if (!id) throw fail(404, 'No such costing.');
     const c = costingFrom(req.body);
-    await tx((qc, oc) => reviseCosting(id, c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser));
+    await tx(async (qc, oc) => {
+      const done = await reviseCosting(id, c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser);
+      await linkEnquiry(qc, req.body?.enquiry_id, done, null, req.costingUser);
+    });
     res.json(await costingById(id));
   } catch (e) { next(e); }
 });
@@ -530,7 +539,7 @@ function batchFrom(body) {
     rows: rows.map((row, i) => {
       const c = costingFrom({ customer_id: body?.customer_id, customer_name: body?.customer_name, ...row });
       if (!c.product_name) throw fail(400, `Row ${i + 1} has no product name.`);
-      return { id: intOrNull(row?.id), c };
+      return { id: intOrNull(row?.id), enquiryId: intOrNull(row?.enquiry_id), c };
     }),
   };
 }
@@ -544,8 +553,9 @@ r.post('/costing/batches', async (req, res, next) => {
       const row = await oc(`INSERT INTO costing_batches (batch_no, title, customer_id, customer_name, common, created_by, created_by_name, updated_by, updated_by_name)
                             VALUES ($1, $2, $3, $4, $5, $6, $7, $6, $7) RETURNING id`,
       [batchNo, b.title, b.customer_id, b.customer_name, b.common, user.id, user.name]);
-      for (const [i, { c }] of b.rows.entries()) {
-        await insertCosting(c, { batchId: row.id, batchPos: i + 1, note: `Bulk costing ${batchNo}` }, qc, oc, user);
+      for (const [i, { c, enquiryId }] of b.rows.entries()) {
+        const made = await insertCosting(c, { batchId: row.id, batchPos: i + 1, note: `Bulk costing ${batchNo}` }, qc, oc, user);
+        await linkEnquiry(qc, enquiryId, made, row.id, user);
       }
       await audit('costing_batch', row.id, 'create', `${batchNo} — ${b.rows.length} products`, qc, user.name);
       return row.id;
@@ -577,9 +587,11 @@ r.post('/costing/batches/:id/save', async (req, res, next) => {
       for (const [i, x] of b.rows.entries()) {
         if (x.id) {
           kept.add(x.id);
-          await reviseCosting(x.id, x.c, { batchId: id, batchPos: i + 1, note: `Changed in bulk costing ${cur.batch_no}` }, qc, oc, user);
+          const done = await reviseCosting(x.id, x.c, { batchId: id, batchPos: i + 1, note: `Changed in bulk costing ${cur.batch_no}` }, qc, oc, user);
+          await linkEnquiry(qc, x.enquiryId, done, id, user);
         } else {
-          await insertCosting(x.c, { batchId: id, batchPos: i + 1, note: `Bulk costing ${cur.batch_no}` }, qc, oc, user);
+          const made = await insertCosting(x.c, { batchId: id, batchPos: i + 1, note: `Bulk costing ${cur.batch_no}` }, qc, oc, user);
+          await linkEnquiry(qc, x.enquiryId, made, id, user);
         }
       }
       // A row taken out of the batch is kept as a costing, hidden, not deleted.

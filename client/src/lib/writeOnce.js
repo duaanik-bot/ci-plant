@@ -34,11 +34,14 @@
 // SW-769 Internal Code, …).
 export const MINTING_POSTS = Object.freeze([
   '/approvals',
+  '/avs/robot/enquiry-jobs/:id/mails',
   '/board/move',
   '/coas',
   '/costing/batches',
   '/costing/batches/:id/save',
   '/costing/costings',
+  '/costing/enquiries',
+  '/costing/quotations',
   '/dispatches',
   '/extra-sheets',
   '/fg-lots',

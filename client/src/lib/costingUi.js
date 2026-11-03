@@ -230,6 +230,8 @@ export function savePayload(v, note) {
     customer_id: v.customer_id, customer_name: v.customer_name, product_id: v.product_id, product_name: v.product_name,
     size_text: v.size_text, style: v.style, inputs: v.inputs, remarks: v.remarks, note: note || undefined,
     save_size: !libraryDeclined(v),
+    // Pushed from the enquiry desk: the server links the costing to its enquiry.
+    enquiry_id: v.enquiry_id || undefined,
   };
 }
 
