@@ -466,6 +466,137 @@ r.put('/hr/people/:id', requireHr('operator'), async (req, res, next) => {
   } catch (e) { next(refusal(e)); }
 });
 
+// ── People: activate, deactivate, delete, duplicate ─────────────────────────
+
+// A body that may be absent altogether (a button with nothing to say): no body reads as {}.
+const optBody = (req) => (req.body === undefined || req.body === null ? {} : bodyOf(req));
+
+// The runs not yet finalised that still carry this person: deactivating them is allowed, but whoever does it
+// is told, because their line (or input) in that run will still be there.
+async function openRunsOf(qc, personId) {
+  const rows = await qc(
+    `SELECT DISTINCT r.month FROM hr.runs r
+      WHERE r.status <> 'finalised'
+        AND (EXISTS (SELECT 1 FROM hr.run_lines l WHERE l.run_id = r.id AND l.person_id = $1)
+          OR EXISTS (SELECT 1 FROM hr.run_inputs i WHERE i.run_id = r.id AND i.person_id = $1))
+      ORDER BY r.month`, [personId]);
+  return rows.map((x) => x.month);
+}
+
+r.post('/hr/people/:id/deactivate', requireHr('operator'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Person');
+    const body = optBody(req);
+    const reason = textOf(body.reason, 'The reason', 500);
+    const given = dateOf(body.exited_on, 'The exit date');
+    const months = await tx(async (qc, oc) => {
+      const was = await oc(`SELECT id, code, name, status, joined_on::text AS joined_on FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
+      if (!was) throw missing('Person');
+      if (was.status === 'exited') throw fail(409, `${was.name} (${was.code}) is already inactive`, 'ALREADY_INACTIVE');
+      const exitedOn = given ?? plantDateStr();
+      if (was.joined_on && exitedOn < was.joined_on) throw bad('The exit date is before the joining date');
+      await oc(`UPDATE hr.people SET status = 'exited', exited_on = $2::date, updated_at = now() WHERE id = $1 RETURNING id`, [id, exitedOn]);
+      const open = await openRunsOf(qc, id);
+      await hrAudit(qc, req, 'person', id, 'deactivate', {
+        code: was.code, from: was.status, exited_on: exitedOn, reason, ...(open.length ? { open_runs: open } : {}),
+      });
+      return open;
+    });
+    const person = await personDetail(id, req.hr.level);
+    res.json(months.length
+      ? { ...person, warning: `${person.name} is still in the payroll run for ${months.map(monthName).join(', ')}, which is not finalised. Remove the line there if they should not be paid.` }
+      : person);
+  } catch (e) { next(refusal(e)); }
+});
+
+r.post('/hr/people/:id/activate', requireHr('operator'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Person');
+    await tx(async (qc, oc) => {
+      const was = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
+      if (!was) throw missing('Person');
+      if (was.status === 'active') throw fail(409, `${was.name} (${was.code}) is already active`, 'ALREADY_ACTIVE');
+      await oc(`UPDATE hr.people SET status = 'active', exited_on = NULL, updated_at = now() WHERE id = $1 RETURNING id`, [id]);
+      await hrAudit(qc, req, 'person', id, 'activate', { code: was.code, from: was.status, was_exited_on: was.exited_on });
+    });
+    res.json(await personDetail(id, req.hr.level));
+  } catch (e) { next(refusal(e)); }
+});
+
+// Every table that holds payroll history for a person. Any row in any of them and the person stays: they
+// are deactivated instead. (hr.import_rows counts too: a row there names the person and the database
+// would refuse the delete.)
+const HISTORY_TABLES = ['run_inputs', 'run_lines', 'advance_txns', 'loans', 'adjustments', 'import_rows'];
+
+r.delete('/hr/people/:id', requireHr('admin'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Person');
+    await tx(async (qc, oc) => {
+      await lockNames(qc);
+      const was = await oc(`SELECT ${PERSON_COLS}, ${SECRETS_FULL} FROM hr.people p WHERE p.id = $1 FOR UPDATE OF p`, [id]);
+      if (!was) throw missing('Person');
+      for (const table of HISTORY_TABLES) {
+        const used = await oc(`SELECT 1 AS x FROM hr.${table} WHERE person_id = $1 LIMIT 1`, [id]);
+        if (used) {
+          throw fail(409, `${was.name} (${was.code}) has payroll history: deactivate instead`, 'HAS_PAY_HISTORY');
+        }
+      }
+      const setups = await qc(`DELETE FROM hr.pay_setups WHERE person_id = $1 RETURNING id`, [id]);
+      const aliases = await qc(`DELETE FROM hr.person_aliases WHERE person_id = $1 RETURNING alias_norm`, [id]);
+      await oc(`DELETE FROM hr.people WHERE id = $1 RETURNING id`, [id]);
+      const snapshot = {};
+      for (const c of ['code', 'name', 'display_name', 'father_name', 'firm', 'department', 'designation', 'worker_type',
+        'status', 'joined_on', 'exited_on', 'pay_channel', 'employee_id', 'bank_last4']) snapshot[c] = was[c] ?? null;
+      await hrAudit(qc, req, 'person', id, 'delete', {
+        ...snapshot, pay_setups_deleted: setups.length, aliases_deleted: aliases.map((a) => a.alias_norm),
+      });
+    });
+    res.json({ ok: true });
+  } catch (e) { next(refusal(e)); }
+});
+
+// A copy to start from: same firm, department, designation, worker type and pay channel, active, and the pay
+// setup in force this month as its first setup (from the 1st of this month). No bank details, PAN, UAN, ESI
+// number, aliases, ERP operator, loans, advances or payroll lines.
+r.post('/hr/people/:id/duplicate', requireHr('operator'), async (req, res, next) => {
+  try {
+    const fromId = idOf(req.params.id, 'Person');
+    const body = bodyOf(req);
+    const asked = readPerson({ code: body.code, name: body.name, display_name: body.display_name }, true);
+    const month = plantDateStr().slice(0, 7);
+    const newId = await tx(async (qc, oc) => {
+      await lockNames(qc);
+      const src = await oc(`SELECT id, code, firm, department, designation, worker_type, pay_channel FROM hr.people WHERE id = $1`, [fromId]);
+      if (!src) throw missing('Person');
+      await assertCodeFree(qc, asked.code, null);
+      await assertNameFree(qc, { personId: null, name: asked.name, displayName: asked.display_name });
+      const made = await oc(
+        `INSERT INTO hr.people (code, name, display_name, firm, department, designation, worker_type, pay_channel, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active') RETURNING id`,
+        [asked.code, asked.name, asked.display_name, src.firm, src.department, src.designation, src.worker_type, src.pay_channel]);
+      const setups = await qc(`SELECT ${SETUP_COLS} FROM hr.pay_setups WHERE person_id = $1 ORDER BY effective_from DESC, id DESC`, [fromId]);
+      const now = effectiveSetup(setups, month);
+      let setupId = null;
+      if (now) {
+        const copy = await oc(
+          `INSERT INTO hr.pay_setups (person_id, created_by, effective_from, pay_basis, base, absence_basis, absence_divisor,
+             ot_hours_per_day, ot_multiplier, ot_fixed_rate, holiday_mode, holiday_divisor, holiday_multiplier, holiday_fixed, note)
+           VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+          [made.id, req.user.id, `${month}-01`, now.pay_basis, now.base, now.absence_basis, now.absence_divisor,
+            now.ot_hours_per_day, now.ot_multiplier, now.ot_fixed_rate, now.holiday_mode, now.holiday_divisor,
+            now.holiday_multiplier, now.holiday_fixed, now.note]);
+        setupId = copy.id;
+      }
+      await hrAudit(qc, req, 'person', made.id, 'duplicate', {
+        code: asked.code, name: asked.name, copied_from: { id: fromId, code: src.code },
+        pay_setup_id: setupId, setup_from: setupId ? `${month}-01` : null,
+      });
+      return made.id;
+    });
+    res.json(await personDetail(newId, req.hr.level));
+  } catch (e) { next(refusal(e)); }
+});
+
 // ── Pay setups ──────────────────────────────────────────────────────────────
 
 // A pay revision, validated. Every numeric field is checked for sign and size whatever the pay basis or

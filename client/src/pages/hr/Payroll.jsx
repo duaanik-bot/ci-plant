@@ -458,9 +458,10 @@ export default function Payroll({ level }) {
       const all = Array.isArray(raw) ? raw : list(raw?.runs);
       if (mine !== seq.current) return;
       setRuns(all);
-      const [d, dash] = await Promise.all([
+      const [d, dash, held] = await Promise.all([
         hrApi.run(month),
         hrApi.dashboard(month).catch(() => null),
+        hrApi.loanHolds(month).catch(() => []),   // instalments held for the month: a marker in the Loan column
       ]);
       if (mine !== seq.current) return;
       const hasServerPending = Boolean(d) && typeof d === 'object' && Object.prototype.hasOwnProperty.call(d, 'pending_import');
@@ -470,6 +471,7 @@ export default function Payroll({ level }) {
         run: d?.run && typeof d.run === 'object' ? d.run : null,
         lines: list(d?.lines),
         inputs: list(d?.inputs),
+        holds: list(held),
         paymentTotals: d?.payment_totals && typeof d.payment_totals === 'object' ? d.payment_totals : null,
         hasServerPending,
         missing: Array.isArray(d?.missing) ? d.missing : null,
@@ -487,6 +489,14 @@ export default function Payroll({ level }) {
   const run = here?.run ?? null;
   const lines = useMemo(() => (here ? here.lines : []), [here]);
   const inputs = useMemo(() => (here ? here.inputs : []), [here]);
+  const holdsById = useMemo(() => {
+    const by = new Map();
+    for (const h of here ? list(here.holds) : []) {
+      const k = String(h.person_id);
+      by.set(k, [...(by.get(k) ?? []), h]);
+    }
+    return by;
+  }, [here]);
   const status = run ? (run.status || 'draft') : 'none';
   const rank = RANK[status] ?? 0;
   const final = status === 'finalised';
@@ -581,8 +591,9 @@ export default function Payroll({ level }) {
       misc: sumPaise([l.misc_earning, l.bonus, l.adj_earnings]),
       other: sumPaise([l.misc_deduction, l.adj_deductions]),
       payment: payStatus(l),
+      held: holdsById.get(id) ?? [],
     };
-  }), [lines, peopleById, inputsById, channelLabel]);
+  }), [lines, peopleById, inputsById, channelLabel, holdsById]);
   const blockedCount = rows.filter(r => r.blocked).length;
   const warnCount = rows.filter(r => !r.blocked && r.warned).length;
 
@@ -752,7 +763,21 @@ export default function Payroll({ level }) {
         } },
       money('gross', 'Gross', r => r.line.gross, { card: 'metric', strong: true }),
       money('advance', 'Advance', r => r.line.advance_recovery),
-      money('loan', 'Loan', r => r.line.loan_recovery),
+      { ...money('loan', 'Loan', r => r.line.loan_recovery),
+        render: r => {
+          const held = r._total ? [] : r.held;
+          const why = held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
+          return (
+            <span className={`whitespace-nowrap ${r._total ? 'font-bold text-[#1D1D1F]' : ''}`}>
+              {inr2(r._total ? r.sums.loan : r.line.loan_recovery)}
+              {held.length > 0 && (
+                <span title={`Instalment held this month: ${why}`}
+                  className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase text-amber-800">Held</span>
+              )}
+            </span>
+          );
+        },
+        export: r => (r._total ? inr2(r.sums.loan) : `${inr2(r.line.loan_recovery)}${r.held.length ? ' (instalment held)' : ''}`) },
       { ...money('other', 'Other', r => r.other),
         render: r => (
           <span className={`whitespace-nowrap ${r._total ? 'font-bold text-[#1D1D1F]' : ''}`}

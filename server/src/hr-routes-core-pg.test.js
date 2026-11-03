@@ -534,8 +534,8 @@ describe('HR core routes through the real app', {
     assert.deepEqual(two.body.map((p) => p.id), [p3]);
     assert.equal((await call('viewer', 'GET', '/hr/people?status=')).body.length, 3, 'an empty status is every status');
     refused(await call('viewer', 'GET', '/hr/people?status=bogus'), 400);
-    // No row is ever deleted: there is no DELETE for a person.
-    assert.notEqual((await call('admin', 'DELETE', `/hr/people/${p3}`)).status, 200);
+    // Deleting a person is the admin's alone (the delete tests below); an operator's try changes nothing.
+    assert.equal((await call('operator', 'DELETE', `/hr/people/${p3}`)).status, 403);
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people`)).n, 3);
   });
 
@@ -961,6 +961,172 @@ describe('HR core routes through the real app', {
     const timeline = await call('plain', 'GET', '/timeline');
     assert.equal(timeline.status, 200, timeline.text);
     assert.ok(!timeline.text.includes('Test Person'), 'no HR name reaches the timeline');
+  });
+
+  // ── Activate, deactivate, delete, duplicate ──
+
+  test('deactivate / activate round trip: status, exit date, audit, an open-run warning, levels', T, async () => {
+    const made = await call('operator', 'POST', '/hr/people', { code: 'ACT-1', name: 'Toggle Person', joined_on: '2026-01-05' });
+    assert.equal(made.status, 200, made.text);
+    const id = made.body.id;
+    await refusedWrite('viewer', 'POST', `/hr/people/${id}/deactivate`, {}, 403, 'HR_LEVEL');
+    await refusedWrite('operator', 'POST', '/hr/people/999999/deactivate', {}, 404);
+    await refusedWrite('operator', 'POST', `/hr/people/${id}/deactivate`, { exited_on: '2025-01-01' }, 400);
+
+    // A draft run that carries the person: allowed, with a warning.
+    const run = await db.one(`INSERT INTO hr.runs (month, days_in_month, status) VALUES ('2026-11', 30, 'draft') RETURNING id`);
+    await db.q(`INSERT INTO hr.run_inputs (run_id, person_id, source) VALUES ($1, $2, 'manual')`, [run.id, id]);
+    const off = await call('operator', 'POST', `/hr/people/${id}/deactivate`, { reason: 'Left for another job' });
+    assert.equal(off.status, 200, off.text);
+    assert.equal(off.body.status, 'exited');
+    assert.equal(off.body.exited_on, plantDateStr(), 'the exit date defaults to today');
+    assert.match(off.body.warning, /November 2026/);
+    const audit = await lastAudit('person', id);
+    assert.equal(audit.action, 'deactivate');
+    assert.equal(audit.detail.reason, 'Left for another job');
+    assert.deepEqual(audit.detail.open_runs, ['2026-11']);
+    await refusedWrite('operator', 'POST', `/hr/people/${id}/deactivate`, {}, 409, 'ALREADY_INACTIVE');
+
+    // The list still returns every status; the person is there, exited.
+    const list = await call('viewer', 'GET', '/hr/people');
+    assert.equal(list.body.find((x) => x.id === id).status, 'exited');
+
+    await refusedWrite('viewer', 'POST', `/hr/people/${id}/activate`, {}, 403, 'HR_LEVEL');
+    const on = await call('operator', 'POST', `/hr/people/${id}/activate`, {});
+    assert.equal(on.status, 200, on.text);
+    assert.equal(on.body.status, 'active');
+    assert.equal(on.body.exited_on, null);
+    assert.equal((await lastAudit('person', id)).action, 'activate');
+    await refusedWrite('operator', 'POST', `/hr/people/${id}/activate`, {}, 409, 'ALREADY_ACTIVE');
+
+    // A dated exit, with no warning once the run no longer carries them.
+    await db.q(`DELETE FROM hr.run_inputs WHERE person_id = $1`, [id]);
+    await db.q(`DELETE FROM hr.runs WHERE id = $1`, [run.id]);
+    const dated = await call('operator', 'POST', `/hr/people/${id}/deactivate`, { exited_on: '2026-10-20' });
+    assert.equal(dated.body.exited_on, '2026-10-20');
+    assert.equal(dated.body.warning, undefined);
+  });
+
+  test('delete: admin only; allowed with no history (setups and aliases go too, audit has no bank number); 409 HAS_PAY_HISTORY otherwise', T, async () => {
+    const mk = async (code, name, extra = {}) => {
+      const res = await call('operator', 'POST', '/hr/people', { code, name, bank_account: '555566667777', pan: PAN_2, ...extra });
+      assert.equal(res.status, 200, res.text);
+      return res.body.id;
+    };
+    const clean = await mk('DEL-1', 'Deletable Person');
+    await call('operator', 'POST', `/hr/people/${clean}/setups`, { effective_from: '2026-08-01', pay_basis: 'monthly', base: '9000' });
+    await call('operator', 'POST', `/hr/people/${clean}/aliases`, { alias: 'Deletable P' });
+
+    await refusedWrite('operator', 'DELETE', `/hr/people/${clean}`, undefined, 403, 'HR_LEVEL');
+    await refusedWrite('viewer', 'DELETE', `/hr/people/${clean}`, undefined, 403, 'HR_LEVEL');
+    await refusedWrite('admin', 'DELETE', '/hr/people/999999', undefined, 404);
+
+    const gone = await call('admin', 'DELETE', `/hr/people/${clean}`);
+    assert.equal(gone.status, 200, gone.text);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people WHERE id = $1`, [clean])).n, 0);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.pay_setups WHERE person_id = $1`, [clean])).n, 0);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.person_aliases WHERE person_id = $1`, [clean])).n, 0);
+    const audit = await lastAudit('person', clean);
+    assert.equal(audit.action, 'delete');
+    assert.equal(audit.detail.code, 'DEL-1');
+    assert.equal(audit.detail.bank_last4, '7777');
+    assert.equal(audit.detail.pay_setups_deleted, 1);
+    const text = JSON.stringify(audit.detail);
+    assert.ok(!text.includes('555566667777') && !text.includes(PAN_2), 'no bank number or PAN in the audit');
+    await refusedWrite('admin', 'DELETE', `/hr/people/${clean}`, undefined, 404);
+
+    // Payroll history keeps a person: a run line, a loan, an advance.
+    const withLine = await mk('DEL-2', 'Has A Line');
+    const run = await db.one(`INSERT INTO hr.runs (month, days_in_month, status) VALUES ('2026-12', 31, 'draft') RETURNING id`);
+    await db.q(`INSERT INTO hr.run_lines (run_id, person_id, gross, payable) VALUES ($1, $2, 100, 100)`, [run.id, withLine]);
+    const r1 = await refusedWrite('admin', 'DELETE', `/hr/people/${withLine}`, undefined, 409, 'HAS_PAY_HISTORY');
+    assert.match(r1.body.error, /Has A Line \(DEL-2\) has payroll history: deactivate instead/);
+
+    const withLoan = await mk('DEL-3', 'Has A Loan');
+    await db.q(
+      `INSERT INTO hr.loans (loan_no, person_id, principal, issued_on, instalment, first_due_month)
+       VALUES ('CI-LN-9001', $1, 1000, '2026-08-01', 500, '2026-09')`, [withLoan]);
+    await refusedWrite('admin', 'DELETE', `/hr/people/${withLoan}`, undefined, 409, 'HAS_PAY_HISTORY');
+
+    const withAdvance = await mk('DEL-4', 'Has An Advance');
+    await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source) VALUES ($1, '2026-08-05', 'given', 100, 'manual')`, [withAdvance]);
+    await refusedWrite('admin', 'DELETE', `/hr/people/${withAdvance}`, undefined, 409, 'HAS_PAY_HISTORY');
+    for (const keep of [withLine, withLoan, withAdvance]) {
+      assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people WHERE id = $1`, [keep])).n, 1, 'a refused delete removes nothing');
+    }
+    // The way out the message names works.
+    assert.equal((await call('operator', 'POST', `/hr/people/${withLine}/deactivate`, {})).status, 200);
+    await db.q(`DELETE FROM hr.run_lines WHERE run_id = $1`, [run.id]);
+    await db.q(`DELETE FROM hr.runs WHERE id = $1`, [run.id]);
+  });
+
+  test('duplicate: copies the work fields and this month\'s pay setup, nothing personal; the code must be new and the name guards apply', T, async () => {
+    const src = await call('operator', 'POST', '/hr/people', {
+      code: 'DUP-SRC', name: 'Source Person', firm: 'Synthetic Firm', department: 'Binding', designation: 'Helper',
+      worker_type: 'contractor', pay_channel: 'BANK1', bank_account: ACCOUNT_2, bank_holder: 'Source Person', bank_ifsc: 'TEST0000001',
+      pan: PAN, pf_uan: UAN, esi_no: ESI_NO, esi_applicable: true, phone: '9000000000', father_name: 'Somebody', status: 'on_leave',
+    });
+    assert.equal(src.status, 200, src.text);
+    const sid = src.body.id;
+    const first = plantDateStr().slice(0, 7) + '-01';
+    const setup = await call('operator', 'POST', `/hr/people/${sid}/setups`, {
+      effective_from: '2026-01-01', pay_basis: 'daily', base: '650.50', ot_hours_per_day: '2', ot_multiplier: '1.5',
+      holiday_mode: 'formula', holiday_divisor: '26', holiday_multiplier: '1', note: 'copy me',
+    });
+    assert.equal(setup.status, 200, setup.text);
+    await call('operator', 'POST', `/hr/people/${sid}/aliases`, { alias: 'Source P' });
+    await db.q(
+      `INSERT INTO hr.loans (loan_no, person_id, principal, issued_on, instalment, first_due_month)
+       VALUES ('CI-LN-9002', $1, 1000, '2026-08-01', 500, '2026-09')`, [sid]);
+
+    await refusedWrite('viewer', 'POST', `/hr/people/${sid}/duplicate`, { code: 'DUP-A', name: 'Copy A' }, 403, 'HR_LEVEL');
+    await refusedWrite('operator', 'POST', '/hr/people/999999/duplicate', { code: 'DUP-A', name: 'Copy A' }, 404);
+    await refusedWrite('operator', 'POST', `/hr/people/${sid}/duplicate`, { name: 'Copy A' }, 400);
+    await refusedWrite('operator', 'POST', `/hr/people/${sid}/duplicate`, { code: 'DUP-A' }, 400);
+    await refusedWrite('operator', 'POST', `/hr/people/${sid}/duplicate`, { code: 'dup-src', name: 'Copy A' }, 409, 'CODE_EXISTS');
+    await refusedWrite('operator', 'POST', `/hr/people/${sid}/duplicate`, { code: 'DUP-A', name: 'Source P' }, 409, 'NAME_IS_AN_ALIAS');
+
+    const dup = await call('operator', 'POST', `/hr/people/${sid}/duplicate`, { code: 'dup-a', name: '  Copy   A ', display_name: 'Copy' });
+    assert.equal(dup.status, 200, dup.text);
+    const d = dup.body;
+    assert.notEqual(d.id, sid);
+    assert.equal(d.code, 'DUP-A');
+    assert.equal(d.name, 'Copy A');
+    assert.equal(d.display_name, 'Copy');
+    assert.equal(d.status, 'active');
+    for (const k of ['firm', 'department', 'designation', 'worker_type', 'pay_channel']) assert.equal(d[k], src.body[k], k);
+    for (const k of ['bank_holder', 'bank_ifsc', 'pan', 'pf_uan', 'esi_no', 'phone', 'father_name', 'employee_id', 'joined_on', 'exited_on', 'notes']) {
+      assert.equal(d[k] ?? null, null, `${k} is not copied`);
+    }
+    assert.equal(d.bank_last4, null);
+    assert.equal(d.esi_applicable, false);
+    assert.equal(d.aliases.length, 0);
+    assert.equal(d.loans.length, 0);
+    assert.equal(d.setups.length, 1);
+    const s0 = d.setups[0];
+    assert.equal(s0.effective_from, first);
+    assert.equal(s0.pay_basis, 'daily');
+    assert.equal(Number(s0.base), 650.5);
+    assert.equal(Number(s0.ot_multiplier), 1.5);
+    assert.equal(s0.holiday_mode, 'formula');
+    assert.equal(s0.note, 'copy me');
+    assert.equal(d.current_setup.id, s0.id);
+    for (const table of ['run_lines', 'run_inputs', 'advance_txns', 'adjustments', 'loans']) {
+      assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.${table} WHERE person_id = $1`, [d.id])).n, 0, table);
+    }
+    const audit = await lastAudit('person', d.id);
+    assert.equal(audit.action, 'duplicate');
+    assert.deepEqual(audit.detail.copied_from, { id: sid, code: 'DUP-SRC' });
+    // The source is untouched.
+    const after = await call('operator', 'GET', `/hr/people/${sid}`);
+    assert.equal(after.body.status, 'on_leave');
+    assert.equal(after.body.setups.length, 1);
+
+    // A person with no setup in force copies to a person with none.
+    const bare = await call('operator', 'POST', '/hr/people', { code: 'DUP-BARE', name: 'Bare Source' });
+    const bareCopy = await call('operator', 'POST', `/hr/people/${bare.body.id}/duplicate`, { code: 'DUP-B', name: 'Bare Copy' });
+    assert.equal(bareCopy.status, 200, bareCopy.text);
+    assert.equal(bareCopy.body.setups.length, 0);
   });
 
   test('the constraints the route maps to 409s still exist under those names', T, async () => {

@@ -244,17 +244,24 @@ function PrepayDialog({ loan, onClose, onDone }) {
 function HolidayDialog({ loan, onClose, onDone }) {
   const toast = useToast();
   const [month, setMonth] = useState(plantMonth());
+  const [note, setNote] = useState('');
   const submit = async () => {
     if (!MONTH_RE.test(month)) return 'Choose the month to skip.';
-    await hrApi.loanHoliday(loan.id, month);
+    const res = await hrApi.loanHoliday(loan.id, month, note.trim());
     toast.success(`No instalment in ${monthLabel(month)}`);
+    if (res?.warning) toast.info(res.warning);
     onDone();
     return undefined;
   };
   return (
     <Dialog title={`Repayment holiday — ${loan.loan_no}`} confirmLabel="Skip that month" onClose={onClose} onSubmit={submit}>
-      <p className="text-xs text-[#515154]">No instalment is taken in the month you pick; the schedule runs one month longer.</p>
-      <Field label="Month to skip" required><Input type="month" min={plantMonth()} value={month} onChange={e => setMonth(e.target.value)} /></Field>
+      <p className="text-xs text-[#515154]">
+        No instalment is taken in the month you pick; the schedule runs one month longer. Any month whose payroll is not
+        finalised can be held, including an earlier one still open. To hold or release it for one person while looking at
+        their pay, use their line in Payroll.
+      </p>
+      <Field label="Month to skip" required><Input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
+      <Field label="Reason (optional)"><Input autoComplete="off" maxLength={200} value={note} onChange={e => setNote(e.target.value)} /></Field>
     </Dialog>
   );
 }

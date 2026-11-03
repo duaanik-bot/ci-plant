@@ -139,6 +139,15 @@ export const hrApi = {
   addAlias: (personId, alias) => api.post(`/hr/people/${seg(personId)}/aliases`, { alias }),
   // DELETE /hr/aliases/:id — operator.
   removeAlias: aliasId => api.del(`/hr/aliases/${seg(aliasId)}`),
+  // POST /hr/people/:id/deactivate — operator. { reason?, exited_on? } → the person (status 'exited', shown as Inactive),
+  // plus a `warning` when they are still in an unfinalised run.
+  deactivatePerson: (id, body = {}) => api.post(`/hr/people/${seg(id)}/deactivate`, body),
+  // POST /hr/people/:id/activate — operator. Back to Active, exit date cleared.
+  activatePerson: id => api.post(`/hr/people/${seg(id)}/activate`, {}),
+  // DELETE /hr/people/:id — admin. 409 HAS_PAY_HISTORY when any payroll row names the person (deactivate instead).
+  deletePerson: id => api.del(`/hr/people/${seg(id)}`),
+  // POST /hr/people/:id/duplicate — operator. { code, name, display_name? } → the new person (409 CODE_EXISTS / name guards).
+  duplicatePerson: (id, body) => api.post(`/hr/people/${seg(id)}/duplicate`, body),
 
   // ── Settings, pay channels, access, audit ──
   // GET /hr/settings — viewer.
@@ -223,8 +232,15 @@ export const hrApi = {
   createLoan: loan => api.post('/hr/loans', loan),
   // POST /hr/loans/:id/prepay — operator. { amount, date }.
   prepayLoan: (id, prepayment) => api.post(`/hr/loans/${seg(id)}/prepay`, prepayment),
-  // POST /hr/loans/:id/holiday — operator. Skips the instalment of one month ('YYYY-MM').
-  loanHoliday: (id, month) => api.post(`/hr/loans/${seg(id)}/holiday`, { month }),
+  // POST /hr/loans/:id/holiday — operator. Holds (skips) the instalment of one month ('YYYY-MM'), any month whose
+  // payroll is not finalised (409 RUN_FINALISED otherwise); optional `note` is the reason. A draft run is
+  // recalculated; a submitted/approved one answers with `warning`.
+  loanHoliday: (id, month, note) => api.post(`/hr/loans/${seg(id)}/holiday`, note ? { month, note } : { month }),
+  // DELETE /hr/loans/:id/holiday/:month — operator. Releases the hold ("deduct after all"); same rules and answer.
+  releaseLoanHoliday: (id, month) => api.del(`/hr/loans/${seg(id)}/holiday/${seg(month)}`),
+  // GET /hr/loan-holds?month= — viewer. The month's holds [{ loan_id, loan_no, person_id, note }]; with personId, that
+  // person's open loans [{ loan_id, loan_no, instalment, due, outstanding, held, note }].
+  loanHolds: (month, personId) => api.get(`/hr/loan-holds${qs({ month, person_id: personId })}`),
   // POST /hr/loans/:id/cancel — operator. Only while nothing has been recovered.
   cancelLoan: id => api.post(`/hr/loans/${seg(id)}/cancel`, {}),
   // PUT /hr/loans/:id/instalment — operator. { instalment, from_month }.

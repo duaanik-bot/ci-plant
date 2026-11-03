@@ -9,10 +9,14 @@
 // reaches an operator's drawer, nowhere else). Pay figures are formatted here, never summed.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Plus } from 'lucide-react';
-import { Button, DataTable, ResetFilters, rowMatches, useFilterReset } from '../../components/ui.jsx';
+import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, levelAtLeast } from '../../lib/hr.js';
-import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText } from './PersonDrawer.jsx';
+import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText, usePersonActions } from './PersonDrawer.jsx';
+
+// The register opens on active people only; Inactive and On leave are one chip away.
+const DEFAULT_STATUS = ['active'];
+const STATUS_CHIPS = ['active', 'exited', 'on_leave']; // Active · Inactive · On leave (then All)
 
 // The "channel" chip for people with no pay channel at all. A string no real code can be.
 const NO_CHANNEL = '\u0000none';
@@ -37,7 +41,7 @@ export default function People({ level }) {
   const [channels, setChannels] = useState([]);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState(DEFAULT_STATUS); // statuses shown; empty = all
   const [dept, setDept] = useState('');
   const [channel, setChannel] = useState('');
   const [noSetup, setNoSetup] = useState(false);
@@ -74,7 +78,7 @@ export default function People({ level }) {
 
   const filters = useFilterReset([
     [q, setQ, '', 'search'],
-    [status, setStatus, '', 'status'],
+    [status, setStatus, DEFAULT_STATUS, 'status'],
     [dept, setDept, '', 'department'],
     [channel, setChannel, '', 'channel'],
     [noSetup, setNoSetup, false, 'no pay setup'],
@@ -89,6 +93,14 @@ export default function People({ level }) {
   const chans = useMemo(() => tally(all, r => r.pay_channel), [all]);
   const unchannelled = useMemo(() => all.filter(r => !r.pay_channel).length, [all]);
   const unset = useMemo(() => all.filter(r => !r.current_setup).length, [all]);
+
+  // Activate / Deactivate / Duplicate / Delete from the row menu; a copy opens in its own drawer.
+  const actions = usePersonActions(level, {
+    onDone: (kind, result) => {
+      load();
+      if (kind === 'duplicate' && result?.id != null) setDrawer({ id: result.id, seed: result, key: ++drawerKey.current });
+    },
+  });
 
   const openPerson = useCallback(r => setDrawer({ id: r.id, seed: r, key: ++drawerKey.current }), []);
   const addPerson = () => setDrawer({ id: null, seed: null, key: ++drawerKey.current });
@@ -124,7 +136,9 @@ export default function People({ level }) {
     { key: 'bank_last4', label: 'Bank', card: 'detail',
       render: r => (r.bank_last4 ? <span className="whitespace-nowrap font-mono text-xs">•••• {r.bank_last4}</span> : '—'),
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
-  ], [labelOf, openPerson]);
+    ...(canEdit ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
+      render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
+  ], [labelOf, openPerson, canEdit, actions.items]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';
@@ -133,11 +147,11 @@ export default function People({ level }) {
     <div>
       <FilterRail className="mb-2">
         <FilterGroup label="Status" divider={false} className={WRAP}>
-          <FilterChip label="All" count={all.length} on={!status} onClick={() => setStatus('')} />
-          {Object.entries(PERSON_STATUS).map(([key, meta]) => (
-            <FilterChip key={key} label={meta.label} count={statusCounts[key] || 0} on={status === key}
-              onClick={() => setStatus(cur => (cur === key ? '' : key))} />
+          {STATUS_CHIPS.map(key => (
+            <FilterChip key={key} label={PERSON_STATUS[key].label} count={statusCounts[key] || 0} on={status.includes(key)}
+              onClick={() => setStatus(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]))} />
           ))}
+          <FilterChip label="All" count={all.length} on={status.length === 0} onClick={() => setStatus([])} />
         </FilterGroup>
         {depts.length > 0 && (
           <FilterGroup label="Department" className={WRAP}>
@@ -196,7 +210,7 @@ export default function People({ level }) {
           exportName="HR People"
           exportSubtitle="HR & Payroll · People register"
           exportMeta={() => [
-            status && `Status: ${PERSON_STATUS[status]?.label || status}`,
+            `Status: ${status.length ? status.map(k => PERSON_STATUS[k]?.label || k).join(', ') : 'All'}`,
             dept && `Department: ${dept}`,
             channel && `Channel: ${channel === NO_CHANNEL ? 'none' : labelOf(channel)}`,
             noSetup && 'Only people without a pay setup',
@@ -204,6 +218,7 @@ export default function People({ level }) {
         />
       )}
 
+      {actions.node}
       {drawer && (
         <PersonDrawer key={drawer.key} id={drawer.id} seed={drawer.seed} level={level} channels={channels}
           onClose={() => setDrawer(null)} onChanged={load} />

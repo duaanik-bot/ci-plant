@@ -10,6 +10,7 @@
 //   viewer    GET  /hr/loans · /hr/loans/:id · /hr/advances · /hr/advances/:personId · /hr/adjustments
 //             GET  /hr/people/:id/ledger
 //   operator  POST /hr/loans · /hr/loans/:id/prepay · /holiday · /cancel      PUT /hr/loans/:id/instalment
+//             DELETE /hr/loans/:id/holiday/:month        (viewer: GET /hr/loan-holds?month=[&person_id=])
 //             POST /hr/advances · /hr/adjustments · /hr/adjustments/:id/cancel · /hr/staff-payments
 //   approver  POST /hr/advances/:personId/waive · /hr/adjustments/:id/approve
 //   admin     POST /hr/loader/preview · /hr/loader/apply
@@ -41,7 +42,9 @@
 // Loans (spec §11)
 //   * Interest is stored but must be 0: anything else is 400 INTEREST_NOT_YET.
 //   * Prepayment is at most what is outstanding, and one that brings it to 0 closes the loan (status 'closed').
-//   * A repayment holiday is this plant month or later. Asking twice for the same month is the same holiday.
+//   * A repayment holiday ("hold this month") is any month whose payroll is not finalised; a finalised one is 409
+//     RUN_FINALISED. DELETE /hr/loans/:id/holiday/:month releases it. Both recalculate a draft run for the person,
+//     and warn (never refuse) when the run is submitted or approved. Asking twice is the same holiday.
 //   * An instalment change is audited with the old value. The schema keeps ONE instalment per loan, so the new
 //     value is what every payroll not yet finalised takes: from_month is audited, and a warning comes back when
 //     it is later than the first payroll that could use it.
@@ -76,6 +79,7 @@ import { plantDateStr } from '../plant-calendar.js';
 import { hrGuard, requireHr } from '../hr/access.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
+import { recalcRun } from '../hr/runs.js';
 import { advanceBalances } from '../hr/ledger.js';
 import { dueForMonth, loanOutstanding, nextMonth, projectSchedule } from '../hr/loans.js';
 import { normCode, normName } from '../hr/match.js';
@@ -116,6 +120,7 @@ const ADVANCE_SIGN = new Map([['opening', 1], ['given', 1], ['adjustment', 1], [
 // Structured refusal bodies. A refusal is { status, body }: app.js spreads body into the answer.
 const INTEREST_NOT_YET = Object.freeze({ code: 'INTEREST_NOT_YET' });
 const LOAN_NOT_ACTIVE = Object.freeze({ code: 'LOAN_NOT_ACTIVE' });
+const RUN_FINALISED = Object.freeze({ code: 'RUN_FINALISED' });
 const LOAN_HAS_RECOVERIES = Object.freeze({ code: 'LOAN_HAS_RECOVERIES' });
 const LOAN_NUMBER_TAKEN = Object.freeze({ code: 'LOAN_NUMBER_TAKEN' });
 const ADJUSTMENT_STATE = Object.freeze({ code: 'ADJUSTMENT_STATE' });
@@ -499,26 +504,101 @@ r.post('/hr/loans/:id/prepay', requireHr('operator'), async (req, res, next) => 
   } catch (e) { next(refusal(e)); }
 });
 
-// A month in which no instalment is due. This plant month or later.
-r.post('/hr/loans/:id/holiday', requireHr('operator'), async (req, res, next) => {
-  try {
-    const id = idOf(req.params.id, 'Loan');
-    const body = bodyOf(req);
-    const month = monthOf(body.month, 'The holiday month');
-    const now = plantMonth();
-    if (month < now) throw bad(`A repayment holiday must be ${now} or later: ${month} is in the past`);
-    const note = textOf(body.note, 'The note', 200);
-    await tx(async (qc, oc) => {
-      const loan = await lockedLoan(qc, oc, id);
-      mustBeActive(loan);
-      const made = await oc(
+// ── Holding an instalment (a repayment holiday) ────────────────────────────
+// A month in which no instalment is due for ONE loan. Any month whose payroll is not finalised: a past month
+// still open, this month, or a future one. Only a finalised month refuses (409 RUN_FINALISED): its money has
+// been posted and the month cannot change. The schedule just runs one month longer.
+//
+// The month's run, when there is one, is locked FIRST (finalise's order: run, then the person, then the loans),
+// then the person and loans (lockedLoan). A draft run is recalculated for this person in the same transaction,
+// so the line shows the change at once. A submitted or approved run is not touched: the answer carries a
+// `warning` saying it must go back to draft. A month with no run needs nothing: the run will read the hold.
+// The reason is stored on the holiday row (note) and in the audit detail.
+function monthName(month) {
+  const [y, m] = month.split('-').map(Number);
+  return `${['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+    'November', 'December'][m - 1]} ${y}`;
+}
+
+async function changeHold(req, hold) {
+  const id = idOf(req.params.id, 'Loan');
+  const month = monthOf(hold ? bodyOf(req).month : req.params.month, 'The holiday month');
+  const note = hold ? textOf(bodyOf(req).note, 'The reason', 200) : null;
+  let warning = null;
+  let recalculated = false;
+  await tx(async (qc, oc) => {
+    if (!(await oc(`SELECT 1 AS one FROM hr.loans WHERE id = $1`, [id]))) throw missing('Loan');
+    const run = await oc(`SELECT id, status FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+    if (run?.status === 'finalised') {
+      throw refuse(409, `Payroll for ${monthName(month)} is finalised and can no longer change: the instalment was `
+        + 'taken or not taken as it stood. Change a later month instead', RUN_FINALISED);
+    }
+    const loan = await lockedLoan(qc, oc, id);
+    mustBeActive(loan);
+    const changed = hold
+      ? await oc(
         `INSERT INTO hr.loan_holidays (loan_id, month, note, created_by) VALUES ($1, $2, $3, $4)
          ON CONFLICT (loan_id, month) DO NOTHING RETURNING id`,
-        [id, month, note, req.user.id]);
-      if (made) await hrAudit(qc, req, 'loan', id, 'holiday', { loan_no: loan.loan_no, month });
+        [id, month, note, req.user.id])
+      : await oc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2 RETURNING id`, [id, month]);
+    if (!changed) return;                                  // the same hold twice, or nothing to release: no change
+    if (run && run.status === 'draft') {
+      await recalcRun(qc, run, { personIds: [loan.person_id] });
+      recalculated = true;
+    } else if (run) {
+      warning = `The ${monthName(month)} payroll is ${run.status}: send it back to draft for the change to show`;
+    }
+    await hrAudit(qc, req, 'loan', id, hold ? 'holiday' : 'holiday_release', {
+      loan_no: loan.loan_no, month, note, run_status: run?.status ?? null, recalculated,
     });
-    res.json(await loanView(id));
+  });
+  const view = await loanView(id);
+  return { ...view, ...(warning ? { warning } : {}), run_recalculated: recalculated };
+}
+
+r.post('/hr/loans/:id/holiday', requireHr('operator'), async (req, res, next) => {
+  try {
+    res.json(await changeHold(req, true));
   } catch (e) { next(refusal(e)); }
+});
+
+// Deduct after all: the hold on that month is released. Releasing a month with no hold is the same as done.
+r.delete('/hr/loans/:id/holiday/:month', requireHr('operator'), async (req, res, next) => {
+  try {
+    res.json(await changeHold(req, false));
+  } catch (e) { next(refusal(e)); }
+});
+
+// The holds of a month, for the payroll register: [{loan_id, loan_no, person_id, note}]. With person_id, that
+// person's open loans instead, each with what its instalment is for the month: {loan_id, loan_no, person_id,
+// instalment, due, outstanding, held, note}. `due` is what payroll would take with no hold.
+r.get('/hr/loan-holds', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.query.month, 'The month');
+    if (blank(req.query.person_id)) {
+      res.json(await q(
+        `SELECT h.loan_id, l.loan_no, l.person_id, h.note
+           FROM hr.loan_holidays h JOIN hr.loans l ON l.id = h.loan_id
+          WHERE h.month = $1 AND l.status = 'active'
+          ORDER BY l.person_id, l.id`, [month]));
+      return;
+    }
+    const loans = await q(
+      `SELECT id, loan_no, person_id, instalment, first_due_month, status FROM hr.loans
+        WHERE person_id = $1 AND status = 'active' ORDER BY issued_on, id`, [personIdOf(req.query.person_id)]);
+    if (!loans.length) { res.json([]); return; }
+    const ids = loans.map((l) => l.id);
+    const txns = groupBy(await q(LOAN_TXNS, [ids]), 'loan_id');
+    const held = new Map((await q(`SELECT loan_id, note FROM hr.loan_holidays WHERE month = $1 AND loan_id = ANY($2::int[])`,
+      [month, ids])).map((h) => [h.loan_id, h.note]));
+    res.json(loans.map((loan) => {
+      const { due, outstanding } = dueForMonth(loan, txns.get(loan.id) ?? [], [], month);
+      return {
+        loan_id: loan.id, loan_no: loan.loan_no, person_id: loan.person_id, instalment: loan.instalment,
+        due, outstanding, held: held.has(loan.id), note: held.get(loan.id) ?? null,
+      };
+    }));
+  } catch (e) { next(e); }
 });
 
 // One instalment per loan, so the new value is what every payroll not yet finalised takes. from_month is

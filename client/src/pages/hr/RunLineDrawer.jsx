@@ -31,7 +31,7 @@ import {
   AlertTriangle, Banknote, CheckCircle2, ExternalLink, HandCoins, History, Info, Landmark, Loader2, OctagonAlert, Pencil,
   Receipt, X,
 } from 'lucide-react';
-import { Button, Checkbox, ConfirmDialog, Field, Input, Select, Textarea, useToast } from '../../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { fmt } from '../../api.js';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { InlineError, StatusPill, parseNum, refusalText } from './PersonDrawer.jsx';
@@ -666,6 +666,118 @@ function RecoveriesBox({ line, ledger, form, errors, tried, canEdit, set }) {
   );
 }
 
+// ── Holding a loan instalment for this month ────────────────────────────────
+// Each open loan of the person with what its instalment is for the run's month. "Hold this month" skips it for
+// that month only (the schedule runs a month longer); "Deduct after all" releases the hold. Any run that is not
+// finalised can change (the server recalculates a draft; for a submitted or approved run it answers with a
+// warning that the run must go back to draft). A refusal is said inline, in the server's words.
+
+function LoanHolds({ month, run, personId, level, version, onChanged }) {
+  const toast = useToast();
+  const status = run?.status || null;
+  const finalised = status === 'finalised';
+  const canHold = levelAtLeast(level, 'operator');
+  const [rows, setRows] = useState(null);
+  const [tick, setTick] = useState(0);
+  const [ask, setAsk] = useState(null);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    let live = true;
+    hrApi.loanHolds(month, personId).then(d => { if (live) setRows(list(d)); }, () => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, [month, personId, tick, version]);
+
+  const done = async (res, message) => {
+    setTick(t => t + 1);
+    toast.success(message);
+    setNotice(res?.warning || '');
+    if (res?.warning) toast.info(res.warning);
+    onChanged?.();
+  };
+  const hold = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await hrApi.loanHoliday(ask.loan_id, month, reason.trim());
+      setAsk(null);
+      setReason('');
+      await done(res, `${ask.loan_no} instalment held for ${monthLabel(month)}`);
+    } catch (e) {
+      setError(refusalText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const release = async row => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await done(await hrApi.releaseLoanHoliday(row.loan_id, month), `${row.loan_no} will be deducted in ${monthLabel(month)}`);
+    } catch (e) {
+      setError(refusalText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shownRows = list(rows).filter(l => l.held || (paiseOf(l.due) ?? 0n) > 0n);
+  if (!shownRows.length) return null;
+  const closeAsk = () => { setAsk(null); setReason(''); setError(''); };
+  return (
+    <div className="mb-3 rounded-2xl border border-amber-200/70 bg-amber-50/40 p-3">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.1em] text-amber-800">Loan instalments · {monthLabel(month)}</p>
+      <ul className="space-y-2">
+        {shownRows.map(l => (
+          <li key={l.loan_id} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 text-xs font-semibold text-[#1D1D1F]">
+              {l.loan_no} · This month: {inr2(l.due)} instalment
+              {l.held && l.note ? <span className="ml-1 font-medium text-[#6E6E73]">({l.note})</span> : null}
+            </span>
+            {l.held && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                Instalment held for {monthLabel(month)}
+              </span>
+            )}
+            {canHold && (l.held
+              ? <Button size="sm" variant="secondary" disabled={finalised || busy} title={finalised ? 'This month is finalised' : undefined}
+                onClick={() => release(l)}>Deduct after all</Button>
+              : <Button size="sm" variant="secondary" disabled={finalised || busy} title={finalised ? 'This month is finalised' : undefined}
+                onClick={() => { setError(''); setAsk(l); }}>Hold this month</Button>)}
+          </li>
+        ))}
+      </ul>
+      {canHold && finalised && (
+        <p className="mt-2 text-[11px] text-[#6E6E73]">{monthLabel(month)} is finalised, so an instalment can no longer be held or released for it.</p>
+      )}
+      {canHold && status && !finalised && status !== 'draft' && (
+        <p className="mt-2 text-[11px] text-[#6E6E73]">This run is {status}: a change here shows only after it is sent back to draft.</p>
+      )}
+      {notice && <Note>{notice}</Note>}
+      {!ask && <InlineError message={error} className="mt-2" />}
+      {ask && (
+        <Modal open onClose={closeAsk} title={`Hold ${ask.loan_no} for ${monthLabel(month)}`}
+          footer={<><Button variant="secondary" onClick={closeAsk}>Cancel</Button><Button onClick={hold} disabled={busy}>Hold this month</Button></>}>
+          <p className="text-xs text-[#515154]">
+            No {inr2(ask.due)} is taken from this person’s pay in {monthLabel(month)}. Other months are not touched, and the
+            loan’s schedule runs one month longer.
+          </p>
+          <div data-ci-form className="mt-3">
+            <Field label="Reason (optional)" hint="Kept with the hold in the HR audit log.">
+              <Textarea value={reason} maxLength={200} onChange={e => { setReason(e.target.value); setError(''); }} />
+            </Field>
+          </div>
+          <InlineError message={error} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ── The drawer ──────────────────────────────────────────────────────────────
 
 export default function RunLineDrawer({
@@ -878,6 +990,8 @@ export default function RunLineDrawer({
             <Section title="Advances and loans" icon={Landmark} right={canPay && (
               <Button size="sm" variant="secondary" onClick={() => setPaying(true)}><HandCoins size={13} /> Pay staff</Button>
             )}>
+              <LoanHolds month={month} run={run} personId={personId} level={level} version={ledgerVersion}
+                onChanged={() => { setLedgerVersion(v => v + 1); onChanged?.(); }} />
               <PersonLedger personId={personId} version={ledgerVersion} ledger={ledger} compact />
               {canPay && status !== 'draft' && (
                 <p className="mt-2 text-[11px] text-[#86868B]">

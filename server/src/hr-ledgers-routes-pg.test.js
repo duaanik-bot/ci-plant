@@ -335,9 +335,8 @@ describe('HR ledger routes through the real app', {
     refused(await call('viewer', 'GET', '/hr/loans?status=bogus'), 400);
   });
 
-  test('a repayment holiday in the past is refused; this month or later is kept, shown in the schedule, and asking again is harmless', T, async () => {
-    await refusedWrite('operator', 'POST', `/hr/loans/${loan2}/holiday`, { month: '2020-01' }, 400);
-    await refusedWrite('operator', 'POST', `/hr/loans/${loan2}/holiday`, { month: nextMonth('2020-01') }, 400);
+  test('a repayment holiday is kept for any month whose payroll is open, shown in the schedule, and asking again is harmless', T, async () => {
+    await refusedWrite('operator', 'POST', `/hr/loans/${loan2}/holiday`, { month: 'soon' }, 400);
     await refusedWrite('operator', 'POST', `/hr/loans/${loan2}/holiday`, { month: '2026-8' }, 400);
     await refusedWrite('operator', 'POST', `/hr/loans/${loan2}/holiday`, {}, 400);
     assert.equal(await count('hr.loan_holidays'), 0);
@@ -441,6 +440,84 @@ describe('HR ledger routes through the real app', {
     const person = await call('viewer', 'GET', `/hr/loans?person_id=${p3}`);
     assert.equal(person.body.length, 3);
     assert.ok(person.body.every((l) => l.person_id === p3));
+  });
+
+  test('hold an instalment: a past month still open is allowed, its draft line drops the loan, release restores it; a finalised month is 409; a submitted run warns', T, async () => {
+    const MAY_END = '2026-07';     // loanC: first due 2026-06 (finalised above); July is open, so it is a past month still unfinalised
+    await db.q(`INSERT INTO hr.pay_setups (person_id, effective_from, pay_basis, base) VALUES ($1, '2026-04-01', 'monthly', 20000)`, [p3]);
+    const lineOf = () => db.one(`SELECT l.loan_recovery::text AS loan_recovery, l.loan_recoveries FROM hr.run_lines l
+        JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [MAY_END, p3]);
+    const made = await call('operator', 'PUT', `/hr/runs/${MAY_END}/inputs/${p3}`, { reason: 'Test July inputs', remarks: 'test' });
+    assert.equal(made.status, 200, made.text);
+    assert.equal((await lineOf()).loan_recovery, '1000.00', 'before the hold the line takes the instalment');
+
+    // The drawer's read: the loan, what its instalment is for the month, and that it is not held.
+    const before = await call('viewer', 'GET', `/hr/loan-holds?month=${MAY_END}&person_id=${p3}`);
+    assert.equal(before.status, 200, before.text);
+    const mine = before.body.find((l) => l.loan_id === loanC);
+    assert.deepEqual([mine.due, mine.held], ['1000.00', false]);
+    assert.deepEqual((await call('viewer', 'GET', `/hr/loan-holds?month=${MAY_END}`)).body, []);
+
+    // Hold it: allowed (a month in the past that is not finalised), the draft line is recalculated in the same breath.
+    refused(await call('viewer', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END }), 403, 'HR_LEVEL');
+    const held = await audited('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END, note: 'Medical expense' });
+    assert.equal(held.body.warning, undefined);
+    assert.equal((await lineOf()).loan_recovery, '0.00', 'the draft line no longer takes this loan');
+    assert.deepEqual((await lineOf()).loan_recoveries, []);
+    const audit = await lastAudit('loan', loanC, 'holiday');
+    assert.deepEqual([audit.detail.month, audit.detail.note, audit.detail.run_status, audit.detail.recalculated],
+      [MAY_END, 'Medical expense', 'draft', true]);
+    assert.equal((await db.one(`SELECT note FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2`, [loanC, MAY_END])).note, 'Medical expense');
+    const sched = await call('viewer', 'GET', `/hr/loans/${loanC}`);
+    assert.equal(sched.body.schedule.find((s) => s.month === MAY_END).status, 'holiday');
+    assert.equal(sched.body.schedule.at(-1).month, '2026-11', 'the schedule runs one month longer (was 2026-10)');
+    const marks = await call('viewer', 'GET', `/hr/loan-holds?month=${MAY_END}`);
+    assert.deepEqual(marks.body.map((h) => [h.loan_id, h.person_id, h.note]), [[loanC, p3, 'Medical expense']]);
+    assert.equal((await call('viewer', 'GET', `/hr/loan-holds?month=${MAY_END}&person_id=${p3}`)).body.find((l) => l.loan_id === loanC).held, true);
+
+    // Holding twice is one hold and one audit row.
+    const n = await auditCount();
+    assert.equal((await call('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END })).status, 200);
+    assert.equal(await auditCount(), n);
+
+    // Release: deduct after all. The line takes it again.
+    refused(await call('viewer', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`), 403, 'HR_LEVEL');
+    await refusedWrite('operator', 'DELETE', `/hr/loans/${loanC}/holiday/soon`, undefined, 400);
+    await refusedWrite('operator', 'DELETE', `/hr/loans/999999/holiday/${MAY_END}`, undefined, 404);
+    await audited('operator', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`);
+    assert.equal((await lineOf()).loan_recovery, '1000.00', 'released: the instalment is back');
+    assert.equal(await count('hr.loan_holidays', `loan_id = ${loanC}`), 0);
+    const rel = await lastAudit('loan', loanC, 'holiday_release');
+    assert.deepEqual([rel.detail.month, rel.detail.recalculated], [MAY_END, true]);
+    const n2 = await auditCount();
+    assert.equal((await call('operator', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`)).status, 200, 'releasing nothing is harmless');
+    assert.equal(await auditCount(), n2);
+
+    // A finalised month cannot change (2026-06 was finalised above): 409 RUN_FINALISED, nothing written, nothing audited.
+    const fin = await refusedWrite('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: '2026-06' }, 409, 'RUN_FINALISED');
+    assert.match(fin.body.error, /June 2026.*finalised/);
+    await refusedWrite('operator', 'DELETE', `/hr/loans/${loanC}/holiday/2026-06`, undefined, 409, 'RUN_FINALISED');
+    assert.equal(await count('hr.loan_holidays', `loan_id = ${loanC}`), 0);
+
+    // A submitted run is not recalculated: the answer warns instead, and the hold is kept.
+    await db.q(`UPDATE hr.runs SET status = 'submitted' WHERE month = $1`, [MAY_END]);
+    const warned = await audited('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END });
+    assert.match(warned.body.warning, /July 2026 payroll is submitted: send it back to draft for the change to show/);
+    assert.equal((await lineOf()).loan_recovery, '1000.00', 'a submitted line is left as it was');
+    assert.equal((await lastAudit('loan', loanC, 'holiday')).detail.recalculated, false);
+    const warnedOff = await audited('operator', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`);
+    assert.match(warnedOff.body.warning, /submitted/);
+
+    // A month with no run yet is kept without any warning.
+    const far = await audited('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: '2027-01' });
+    assert.equal(far.body.warning, undefined);
+    await audited('operator', 'DELETE', `/hr/loans/${loanC}/holiday/2027-01`);
+
+    // Put the story back as it was.
+    await db.q(`DELETE FROM hr.run_lines WHERE run_id IN (SELECT id FROM hr.runs WHERE month = $1)`, [MAY_END]);
+    await db.q(`DELETE FROM hr.run_inputs WHERE run_id IN (SELECT id FROM hr.runs WHERE month = $1)`, [MAY_END]);
+    await db.q(`DELETE FROM hr.runs WHERE month = $1`, [MAY_END]);
+    await db.q(`DELETE FROM hr.pay_setups WHERE person_id = $1`, [p3]);
   });
 
   // ── Advances ──

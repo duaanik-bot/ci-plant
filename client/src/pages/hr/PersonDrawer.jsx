@@ -33,9 +33,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AlertTriangle, Banknote, Eye, EyeOff, Landmark, Link2, Loader2, Plus, Tag, Trash2, Unlink, UserRound, Wallet, X,
+  AlertTriangle, Banknote, Copy, Eye, EyeOff, Landmark, Link2, Loader2, Plus, Tag, Trash2, Unlink, UserCheck, UserRound, UserX, Wallet, X,
 } from 'lucide-react';
-import { Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, searchText, useToast } from '../../components/ui.jsx';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, searchText, useToast } from '../../components/ui.jsx';
 import { dayOf } from '../../lib/dayOf.js';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 
@@ -44,7 +44,7 @@ import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 export const PERSON_STATUS = {
   active: { label: 'Active', tone: 'bg-emerald-50 text-emerald-700' },
   on_leave: { label: 'On leave', tone: 'bg-amber-50 text-amber-700' },
-  exited: { label: 'Exited', tone: 'bg-slate-200 text-slate-600' },
+  exited: { label: 'Inactive', tone: 'bg-slate-200 text-slate-600' },
 };
 export const WORKER_TYPE = { employee: 'Employee', contractor: 'Contractor' };
 export const PAY_BASIS = { monthly: 'Monthly', daily: 'Daily', hourly: 'Hourly', contract: 'Contract' };
@@ -291,7 +291,7 @@ function DetailsTab({ form, set, canEdit, channels, person }) {
             <Select value={form.status} disabled={off} onChange={e => set('status', e.target.value)}>
               <option value="active">Active</option>
               <option value="on_leave">On leave</option>
-              <option value="exited">Exited</option>
+              <option value="exited">Inactive</option>
             </Select>
           </Field>
           <Field label="Pay channel" hint="How this person is paid.">
@@ -842,6 +842,126 @@ function RevisionModal({ pid, setups, onClose, onSaved }) {
 
 // ── The drawer ──────────────────────────────────────────────────────────────
 
+// ── Activate · Deactivate · Duplicate · Delete ──────────────────────────────
+// Shared by the drawer header and the register's row menu. `items(person)` is what the level may do to that
+// person, as ActionMenu items (none for a viewer); `node` is the dialogs, rendered once by the caller.
+// A refusal is said inside the dialog, which stays open with what was typed. `onDone(kind, result)` runs after
+// a success: kind is 'deactivate' | 'activate' | 'duplicate' | 'delete', result the person (nothing for delete).
+export function usePersonActions(level, { onDone } = {}) {
+  const toast = useToast();
+  const canEdit = levelAtLeast(level, 'operator');
+  const canDelete = levelAtLeast(level, 'admin');
+  const [dlg, setDlg] = useState(null); // { kind, person, error, busy, reason, date, code, name, display }
+  const busyRef = useRef(false);
+  const patch = p => setDlg(d => (d ? { ...d, error: null, ...p } : d));
+
+  const items = useCallback(person => {
+    if (!person) return [];
+    const out = [];
+    if (canEdit) {
+      out.push({ key: 'duplicate', label: 'Duplicate', icon: Copy,
+        onClick: () => setDlg({ kind: 'duplicate', person, code: '', name: '', display: '' }) });
+      out.push(person.status === 'exited'
+        ? { key: 'activate', label: 'Activate', icon: UserCheck, onClick: () => setDlg({ kind: 'activate', person }) }
+        : { key: 'deactivate', label: 'Deactivate', icon: UserX, onClick: () => setDlg({ kind: 'deactivate', person, reason: '', date: '' }) });
+    }
+    if (canDelete) out.push({ key: 'delete', label: 'Delete', icon: Trash2, tone: 'danger', onClick: () => setDlg({ kind: 'delete', person }) });
+    return out;
+  }, [canEdit, canDelete]);
+
+  const submit = async () => {
+    if (!dlg || busyRef.current) return;
+    const { kind, person } = dlg;
+    if (kind === 'duplicate' && (!dlg.code.trim() || !dlg.name.trim())) { patch({ error: 'Enter the new code and the new name.' }); return; }
+    busyRef.current = true;
+    patch({ busy: true });
+    try {
+      let result;
+      if (kind === 'deactivate') {
+        result = await hrApi.deactivatePerson(person.id, {
+          ...(dlg.reason.trim() ? { reason: dlg.reason.trim() } : {}), ...(dlg.date ? { exited_on: dlg.date } : {}),
+        });
+        toast.success(`${person.name} is now inactive`);
+      } else if (kind === 'activate') {
+        result = await hrApi.activatePerson(person.id);
+        toast.success(`${person.name} is active again`);
+      } else if (kind === 'duplicate') {
+        result = await hrApi.duplicatePerson(person.id, {
+          code: dlg.code.trim(), name: dlg.name.trim(), ...(dlg.display.trim() ? { display_name: dlg.display.trim() } : {}),
+        });
+        toast.success(`${result?.name ?? 'Copy'} added`);
+      } else {
+        await hrApi.deletePerson(person.id);
+        toast.success(`${person.name} deleted`);
+      }
+      setDlg(null);
+      onDone?.(kind, result);
+      if (kind === 'deactivate' && typeof result?.warning === 'string' && result.warning) toast.info(result.warning);
+    } catch (e) {
+      // Delete refused for payroll history: say so, and offer the other door right here.
+      if (kind === 'delete' && e?.data?.code === 'HAS_PAY_HISTORY') patch({ kind: 'history', busy: false, error: refusalText(e) });
+      else patch({ busy: false, error: refusalText(e) });
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  const close = () => { if (!busyRef.current) setDlg(null); };
+  const who = dlg ? `${dlg.person.name} (${dlg.person.code})` : '';
+  const titles = { deactivate: 'Deactivate this person?', activate: 'Activate this person?', duplicate: 'Duplicate this person',
+    delete: 'Delete this person?', history: 'Cannot delete — has payroll history' };
+  const node = dlg && (
+    <Modal open onClose={close} title={titles[dlg.kind]}
+      footer={<>
+        <Button variant="secondary" onClick={close} disabled={dlg.busy}>Cancel</Button>
+        {dlg.kind === 'history'
+          ? <Button onClick={() => setDlg({ kind: 'deactivate', person: dlg.person, reason: '', date: '' })}>Deactivate instead</Button>
+          : (
+            <Button variant={dlg.kind === 'delete' ? 'danger' : 'primary'} onClick={submit} disabled={dlg.busy}>
+              {{ deactivate: 'Deactivate', activate: 'Activate', duplicate: 'Create copy', delete: 'Delete person' }[dlg.kind]}
+            </Button>
+          )}
+      </>}>
+      <div data-ci-form className="space-y-3">
+        {dlg.kind === 'deactivate' && (<>
+          <p className="text-sm text-gray-600">{who} will be shown as Inactive and left out of the default list and the sheet import's missing list. Their history stays.</p>
+          <Field label="Reason" hint="Optional.">
+            <Textarea value={dlg.reason} onChange={e => patch({ reason: e.target.value })} />
+          </Field>
+          <Field label="Left on" hint="Leave blank for today.">
+            <Input type="date" value={dlg.date} onChange={e => patch({ date: e.target.value })} />
+          </Field>
+        </>)}
+        {dlg.kind === 'activate' && <p className="text-sm text-gray-600">{who} will be active again and their exit date cleared.</p>}
+        {dlg.kind === 'delete' && (
+          <p className="text-sm text-gray-600">
+            Delete {who} for good, with their pay setups and aliases? This cannot be undone. It is only possible for someone with no payroll history.
+          </p>
+        )}
+        {dlg.kind === 'history' && <p className="text-sm text-gray-600">{who} has payroll history, so they cannot be deleted. Deactivate them instead — their records stay.</p>}
+        {dlg.kind === 'duplicate' && (<>
+          <p className="text-sm text-gray-600">
+            A new person like {who}: same firm, department, designation, worker type, pay channel and this month’s pay setup. Bank details, PAN, UAN, ESI, aliases, ERP operator, loans and advances are not copied.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="New code" required>
+              <Input autoComplete="off" value={dlg.code} onChange={e => patch({ code: e.target.value })} />
+            </Field>
+            <Field label="New name" required>
+              <Input autoComplete="off" value={dlg.name} onChange={e => patch({ name: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Display name" hint="Optional.">
+            <Input autoComplete="off" value={dlg.display} onChange={e => patch({ display: e.target.value })} />
+          </Field>
+        </>)}
+        <InlineError message={dlg.error} className="mt-0" />
+      </div>
+    </Modal>
+  );
+  return { items, node };
+}
+
 export default function PersonDrawer({ id = null, seed = null, level, channels = [], onClose, onChanged }) {
   const toast = useToast();
   const canEdit = levelAtLeast(level, 'operator');
@@ -862,6 +982,17 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
   const [saveError, setSaveError] = useState(null);
   const [aliasError, setAliasError] = useState(null);
   const [payNotice, setPayNotice] = useState(null); // the server's warning about the revision just saved
+
+  // Activate / Deactivate / Duplicate / Delete (usePersonActions above). The drawer follows the result:
+  // the changed person stays open, a copy opens in place, a deleted person closes it.
+  const actions = usePersonActions(level, {
+    onDone: (kind, result) => {
+      onChanged?.();
+      if (kind === 'delete') { onClose(); return; }
+      if (kind === 'duplicate' && result?.id != null) { setPerson(null); setPid(result.id); setTab('details'); return; }
+      if (result) { setPerson(result); setForm(formFromPerson(result)); }
+    },
+  });
 
   const baseline = useMemo(() => formFromPerson(person), [person]);
   const dirty = canEdit && !sameForm(form, baseline);
@@ -1024,6 +1155,7 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
               </div>
               {sub && <p className="truncate text-[11px] text-[#6E6E73]">{sub}</p>}
             </div>
+            {!isNew && person && actions.items(person).length > 0 && <ActionMenu items={actions.items(person)} label="Person actions" />}
             <button type="button" onClick={requestClose} aria-label="Close"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">
               <X size={16} />
@@ -1085,6 +1217,7 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
         <RevisionModal pid={pid} setups={setups} onClose={() => setRevisionOpen(false)}
           onSaved={warning => { setRevisionOpen(false); setPayNotice(warning); onChanged?.(); refresh(); }} />
       )}
+      {actions.node}
       <ConfirmDialog open={Boolean(ask)} onClose={() => setAsk(null)} onConfirm={confirmAsk}
         title={ask?.title} confirmLabel={ask?.label} danger={ask?.danger}
         message={ask && <>{ask.body}<InlineError message={ask.error} /></>} />
