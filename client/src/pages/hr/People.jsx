@@ -9,9 +9,10 @@
 // reaches an operator's drawer, nowhere else). Pay figures are formatted here, never summed.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Plus } from 'lucide-react';
-import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset } from '../../components/ui.jsx';
+import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
-import { hrApi, levelAtLeast } from '../../lib/hr.js';
+import { hrApi, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import { OtDayPicker } from './PaySwitches.jsx';
 import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText, usePersonActions } from './PersonDrawer.jsx';
 
 // The register opens on active people only; Inactive and On leave are one chip away.
@@ -37,6 +38,21 @@ function tally(rows, pick) {
 
 export default function People({ level }) {
   const canEdit = levelAtLeast(level, 'operator');
+  const toast = useToast();
+  // OT hours a day, set right in the list (Off · 6 h · 8 h · Other) — the person's current pay setup, switched in place.
+  const [otBusy, setOtBusy] = useState(null);
+  const setOt = useCallback(async (r, h) => {
+    const s = r.current_setup;
+    if (!s || Number(s.ot_hours_per_day || 0) === h) return;
+    setOtBusy(r.id);
+    try {
+      const res = await hrApi.setPaySwitches(r.id, s.id, h > 0 ? { overtime: true, ot_hours_per_day: h } : { overtime: false });
+      const later = Array.isArray(res?.not_recalculated) ? res.not_recalculated : [];
+      toast.success(`${r.name}: overtime ${h > 0 ? `${h} h a day` : 'off'}`);
+      if (later.length) toast.info(`${later.map(x => monthLabel(x.month)).join(', ')} not changed: send ${later.length === 1 ? 'it' : 'them'} back to draft to apply`);
+      await load();
+    } catch { /* refused — the central toast says why */ } finally { setOtBusy(null); }
+  }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
   const [rows, setRows] = useState(null); // null until the first answer
   const [channels, setChannels] = useState([]);
   const [loadError, setLoadError] = useState(false);
@@ -128,9 +144,12 @@ export default function People({ level }) {
         ? <span className="whitespace-nowrap">{baseText(r.current_setup)}</span>
         : <span className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">No pay setup</span>),
       export: r => (r.current_setup ? baseText(r.current_setup) : 'No pay setup') },
-    { key: 'ot', label: 'OT h/day', align: 'right', card: 'metric',
+    { key: 'ot', label: 'OT hours a day', align: 'right', card: 'metric',
       sortValue: r => r.current_setup?.ot_hours_per_day ?? null,
-      render: r => numText(r.current_setup?.ot_hours_per_day), export: r => numText(r.current_setup?.ot_hours_per_day) },
+      render: r => (canEdit && r.current_setup
+        ? <OtDayPicker size="sm" value={r.current_setup.ot_hours_per_day} disabled={otBusy === r.id} onPick={h => setOt(r, h)} />
+        : numText(r.current_setup?.ot_hours_per_day)),
+      export: r => (Number(r.current_setup?.ot_hours_per_day || 0) > 0 ? numText(r.current_setup.ot_hours_per_day) : 'Off') },
     { key: 'holiday', label: 'Holiday', card: 'detail', sortValue: r => holidayText(r.current_setup),
       render: r => <span className="whitespace-nowrap">{holidayText(r.current_setup)}</span>, export: r => holidayText(r.current_setup) },
     { key: 'bank_last4', label: 'Bank', card: 'detail',
@@ -138,7 +157,7 @@ export default function People({ level }) {
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
     ...(canEdit ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
       render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
-  ], [labelOf, openPerson, canEdit, actions.items]);
+  ], [labelOf, openPerson, canEdit, actions.items, otBusy, setOt]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';
