@@ -65,6 +65,7 @@ import { storage } from '../../lib/safeStorage.js';
 import ImportWizard, { batchSummary } from './ImportWizard.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
 import PersonCards from './PersonCards.jsx';
+import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
   plantToday, plural, qtyText, shiftMonth, sumPaise, sumQty, whenText,
@@ -489,10 +490,11 @@ export default function Payroll({ level }) {
       const all = Array.isArray(raw) ? raw : list(raw?.runs);
       if (mine !== seq.current) return;
       setRuns(all);
-      const [d, dash, held] = await Promise.all([
+      const [d, dash, held, loans] = await Promise.all([
         hrApi.run(month),
         hrApi.dashboard(month).catch(() => null),
         hrApi.loanHolds(month).catch(() => []),   // instalments held for the month: a marker in the Loan column
+        hrApi.loans().catch(() => []),            // active loans: the Loan badge on each person's card
       ]);
       if (mine !== seq.current) return;
       const hasServerPending = Boolean(d) && typeof d === 'object' && Object.prototype.hasOwnProperty.call(d, 'pending_import');
@@ -503,6 +505,7 @@ export default function Payroll({ level }) {
         lines: list(d?.lines),
         inputs: list(d?.inputs),
         holds: list(held),
+        loans: list(loans).filter(x => x?.status === 'active' && (paiseOf(x?.outstanding) ?? 0n) > 0n),
         paymentTotals: d?.payment_totals && typeof d.payment_totals === 'object' ? d.payment_totals : null,
         hasServerPending,
         missing: Array.isArray(d?.missing) ? d.missing : null,
@@ -525,6 +528,14 @@ export default function Payroll({ level }) {
     for (const h of here ? list(here.holds) : []) {
       const k = String(h.person_id);
       by.set(k, [...(by.get(k) ?? []), h]);
+    }
+    return by;
+  }, [here]);
+  const loansBy = useMemo(() => {
+    const by = new Map();
+    for (const ln of here ? list(here.loans) : []) {
+      const k = String(ln.person_id);
+      by.set(k, [...(by.get(k) ?? []), ln]);
     }
     return by;
   }, [here]);
@@ -776,6 +787,19 @@ export default function Payroll({ level }) {
       await afterRef.current?.(res, 'approve');
     } catch { /* refused — the central toast says why */ } finally { setRowBusy(null); }
   }, [month]);
+  // Short pay: carrying it forward approves the line with the note that says so (audited); nothing is paid on it.
+  const carryOne = useCallback(async r => {
+    setRowBusy(r.id);
+    try {
+      const short = String(r.line.net_before_cap).replace('-', '');
+      const res = await hrApi.setLineApproval(month, {
+        person_ids: [toId(r.id)], action: 'approve',
+        reason: `Short pay ${inr2(short)} carried forward to ${monthLabel(shiftMonth(month, 1))} as advance`,
+      });
+      await afterRef.current?.(res, 'approve');
+    } catch { /* refused — the central toast says why */ } finally { setRowBusy(null); }
+  }, [month]);
+  const [slipFor, setSlipFor] = useState(null);
 
   // ── Register columns ──
   const columns = useMemo(() => {
@@ -1482,7 +1506,8 @@ export default function Payroll({ level }) {
             <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate}
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
-              showPaidSep={showPaidSep} search={q} onSearch={setQ}
+              showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
+              carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)}
               toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
           ) : (
           <DataTable
@@ -1606,6 +1631,7 @@ export default function Payroll({ level }) {
         <StatusDialog month={month} status={dialog.status} picked={picked} canApprove={canApprove}
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
       )}
+      {slipFor && <PayslipModal month={month} personId={toId(slipFor.id)} name={slipFor.name} onClose={() => setSlipFor(null)} />}
       {dialog?.kind === 'approval' && (
         <ApprovalDialog month={month} action={dialog.action} picked={dialog.only ?? picked} refusal={refusal}
           onClose={() => setDialog(null)} onDone={afterStatus} />

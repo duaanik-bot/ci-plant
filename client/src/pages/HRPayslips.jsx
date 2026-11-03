@@ -45,7 +45,7 @@ function PaymentLine({ payment }) {
   );
 }
 
-function Slip({ slip, company, monthName }) {
+export function Slip({ slip, company, monthName }) {
   const p = slip.person || {};
   const t = slip.totals || {};
   const comps = list(slip.components).filter(c => c && typeof c === 'object');

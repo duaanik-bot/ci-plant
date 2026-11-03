@@ -9,21 +9,34 @@
 // Sections, once people can be approved (submitted run on): To approve · Approved · Nothing to pay — approving a card
 // moves it from the first to the second at once (the run is read again). Before that, one section: People.
 //
+// Short pay (2026-11-03): the engine never pays below ₹0 — when the deductions are more than the pay it cuts the
+// advance recovery first (then loans, then the rest), and what was not recovered stays owing: an advance carries to
+// next month as advance, a loan instalment stays on the loan. A short card is tinted red and its Payable shows the
+// shortfall as a negative figure (net_before_cap). Once people can be approved, short cards sit first in "Short pay —
+// decide" with Carry forward: that approves the line with the note "carried forward to <next month> as advance"
+// (audited; nothing is paid on it), and the card moves to Approved marked Carried forward. Undo puts it back.
+//
+// Loan badge: a person with an active loan shows "Loan ₹outstanding · ₹instalment/mo" under the name (Held when this
+// month's instalment is held). Payslip: the slip button on every card opens PayslipModal (screen + PDF).
+//
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
 import { useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText } from 'lucide-react';
 import { Button, SearchInput } from '../../components/ui.jsx';
 import { inr2 } from '../../lib/hr.js';
 import {
-  ApprovalPill, approvalTitle, batchText, flagLabel, FlagDots, LEVEL_META, levelOf, paiseOf, PAYMENT_STATUS, PaymentPill,
+  ApprovalPill, approvalTitle, batchText, flagLabel, FlagDots, LEVEL_META, levelOf, list, paiseOf, PAYMENT_STATUS, PaymentPill,
   plural, qtyText, sumPaise, whenText,
 } from './RunLineDrawer.jsx';
 
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
 const nonZero = v => (paiseOf(v) ?? 0n) !== 0n;
+const isShort = r => (paiseOf(r.line?.net_before_cap) ?? 0n) < 0n;
+const negInr = v => inr2(v); // inr2 prints a negative as -₹…
 
 const SECTION_META = {
+  short: { label: 'Short pay — decide', ink: 'text-red-700', rail: 'border-l-red-500' },
   todo: { label: 'To approve', ink: 'text-[#1D1D1F]', rail: 'border-l-[#86868B]/50' },
   approved: { label: 'Approved', ink: 'text-[#0064D2]', rail: 'border-l-[#0A84FF]' },
   none: { label: 'Nothing to pay', ink: 'text-[#6E6E73]', rail: 'border-l-[#D2D2D7]' },
@@ -48,7 +61,23 @@ function Pair({ label, value, strong = false, hint }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen }) {
+function Shortfall({ r, carryTo }) {
+  const u = r.line.unrecovered && typeof r.line.unrecovered === 'object' ? r.line.unrecovered : {};
+  const loans = list(u.loans).filter(x => nonZero(x?.amount));
+  return (
+    <div className="mx-4 mt-3 rounded-xl border border-red-200 bg-red-50/80 px-3 py-2 text-xs text-red-900">
+      <b>Pay falls short by {inr2(String(r.line.net_before_cap).replace('-', ''))}.</b> Nothing is paid this month (payable ₹0.00); what could not
+      be recovered stays owing:
+      <ul className="mt-1 list-disc pl-5">
+        {nonZero(u.advance) && <li>{inr2(u.advance)} of advance carries to {carryTo} as advance, recovered from that month’s pay.</li>}
+        {loans.map(x => <li key={x.loan_id}>{inr2(x.amount)} of loan instalment stays on the loan.</li>)}
+        {nonZero(u.other) && <li>{inr2(u.other)} of other deductions could not be taken.</li>}
+      </ul>
+    </div>
+  );
+}
+
+function Details({ r, showPaidSep, onOpen, onPayslip }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
@@ -86,6 +115,7 @@ function Details({ r, showPaidSep, onOpen }) {
           <Pair label="Net" value={inr2(l.net)} />
           {(showPaidSep || nonZero(l.paid_separately)) && <Pair label="Paid separately" value={inr2(l.paid_separately)} />}
           {nonZero(l.rounding) && <Pair label="Rounding" value={inr2(l.rounding)} />}
+          {isShort(r) && <Pair label="Final pay (short)" value={negInr(l.net_before_cap)} strong />}
           <Pair label="Payable" value={inr2(l.payable)} strong />
           {nonZero(l.carried_advance) && <Pair label="Advance carried forward" value={inr2(l.carried_advance)} />}
         </dl>
@@ -109,9 +139,10 @@ function Details({ r, showPaidSep, onOpen }) {
             ))}
           </ul>
         )}
-        <Button size="sm" variant="secondary" className="mt-3" onClick={() => onOpen(r.id)}>
-          <ExternalLink size={13} /> Open full record
-        </Button>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <Button size="sm" variant="secondary" onClick={() => onPayslip(r)}><FileText size={13} /> Payslip</Button>
+          <Button size="sm" variant="secondary" onClick={() => onOpen(r.id)}><ExternalLink size={13} /> Open full record</Button>
+        </div>
       </section>
     </div>
   );
@@ -119,7 +150,7 @@ function Details({ r, showPaidSep, onOpen }) {
 
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
-  showPaidSep, search, onSearch, toolbar,
+  showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
 }) {
   const [open, setOpen] = useState(() => new Set());
   const anchor = useRef(null);
@@ -128,10 +159,11 @@ export default function PersonCards({
   const sections = useMemo(() => {
     const byName = (a, b) => String(a.name).localeCompare(String(b.name));
     if (!approvable) return [{ key: 'all', rows: [...rows].sort(byName) }];
-    const todo = []; const approved = []; const none = [];
-    for (const r of rows) (r.approval === 'approved' ? approved : owes(r.line) ? todo : none).push(r);
-    return [{ key: 'todo', rows: todo.sort(byName) }, { key: 'approved', rows: approved.sort(byName) }, { key: 'none', rows: none.sort(byName) }]
-      .filter(s => s.rows.length || s.key !== 'none');
+    const short = []; const todo = []; const approved = []; const none = [];
+    for (const r of rows) (r.approval === 'approved' ? approved : isShort(r) ? short : owes(r.line) ? todo : none).push(r);
+    return [{ key: 'short', rows: short.sort(byName) }, { key: 'todo', rows: todo.sort(byName) },
+      { key: 'approved', rows: approved.sort(byName) }, { key: 'none', rows: none.sort(byName) }]
+      .filter(s => s.rows.length || (s.key !== 'none' && s.key !== 'short'));
   }, [rows, approvable]);
   const ordered = useMemo(() => sections.flatMap(s => s.rows), [sections]);
 
@@ -190,7 +222,12 @@ export default function PersonCards({
                 )}
                 <h3 className={`text-sm font-bold tracking-[-0.01em] ${meta.ink}`}>{meta.label}</h3>
                 <span className="text-xs text-[#6E6E73]">{plural(s.rows.length, 'person', 'people')}</span>
-                {s.rows.length > 0 && (
+                {s.key === 'short' && (
+                  <span className="text-xs font-semibold text-red-700">
+                    Short by {inr2(String(sumPaise(s.rows.map(r => r.line.net_before_cap))).replace('-', ''))} in all — carry each forward to {carryTo} as advance
+                  </span>
+                )}
+                {s.rows.length > 0 && s.key !== 'short' && (
                   <span className="text-xs text-[#6E6E73]">
                     Gross <b className="tabular-nums text-[#1D1D1F]">{inr2(sumPaise(s.rows.map(r => r.line.gross)))}</b>
                     {' · '}Payable <b className="tabular-nums text-[#1D1D1F]">{inr2(sumPaise(s.rows.map(r => r.line.payable)))}</b>
@@ -206,10 +243,13 @@ export default function PersonCards({
                   {s.rows.map(r => {
                     const isOpen = open.has(r.id);
                     const ticked = selected.has(r.id);
+                    const short = isShort(r);
+                    const carried = short && r.approval === 'approved';
+                    const loans = loansBy.get(r.id) ?? [];
                     return (
                       <li key={r.id} data-card={r.id} tabIndex={0} aria-selected={ticked} aria-expanded={isOpen} onKeyDown={e => onKey(e, r)}
                         className={`overflow-hidden rounded-2xl border border-l-[3px] bg-white/70 shadow-[0_1px_2px_rgba(29,29,31,0.04)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0A84FF]
-                          ${meta.rail} ${ticked ? 'border-[#0A84FF]/40 bg-[#E1EFFF]/70' : 'border-white/80'} ${r.blocked ? '!bg-red-50/70' : ''}`}>
+                          ${short && !carried ? 'border-l-red-500' : meta.rail} ${ticked ? 'border-[#0A84FF]/40 bg-[#E1EFFF]/70' : short ? 'border-red-200' : 'border-white/80'} ${r.blocked || (short && !ticked) ? '!bg-red-50/70' : ''}`}>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
                           {canOperate && (
                             <input type="checkbox" aria-label={`Tick ${r.name}`} className="h-4 w-4 accent-[#007AFF]" checked={ticked}
@@ -224,23 +264,43 @@ export default function PersonCards({
                                 <span className="truncate text-sm font-semibold text-[#1D1D1F]">{r.name}</span>
                                 {r.flags.length > 0 && <FlagDots flags={r.flags} />}
                               </span>
-                              <span className="block truncate text-[11px] text-[#86868B]">
-                                {[r.code, r.department, r.channelLabel].filter(Boolean).join(' · ')}
+                              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-[#86868B]">
+                                <span className="truncate">{[r.code, r.department, r.channelLabel].filter(Boolean).join(' · ')}</span>
+                                {loans.map(ln => (
+                                  <span key={ln.id} title={`${ln.loan_no}: ${inr2(ln.outstanding)} outstanding, instalment ${inr2(ln.instalment)} a month${nonZero(r.line.loan_recovery) ? `; ${inr2(r.line.loan_recovery)} recovered this month` : ''}`}
+                                    className="rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-bold text-violet-800">
+                                    Loan {inr2(ln.outstanding)} · {inr2(ln.instalment)}/mo{r.held.some(h => h.loan_no === ln.loan_no) ? ' · held' : ''}
+                                  </span>
+                                ))}
+                                {short && <span className="rounded-full bg-red-100 px-1.5 py-px text-[10px] font-bold text-red-700">Short pay</span>}
                               </span>
                             </span>
                           </button>
                           <Figure label="Gross" value={inr2(r.line.gross)} />
                           <Figure label="Advance" value={inr2(r.line.advance_recovery)} tone={nonZero(r.line.advance_recovery) ? '' : 'text-[#86868B]'} />
-                          <Figure label="Payable" value={inr2(r.line.payable)} strong />
-                          <div className="flex w-[230px] shrink-0 items-center justify-end gap-1.5">
+                          <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''} />
+                          <div className="flex w-[262px] shrink-0 items-center justify-end gap-1.5">
                             {r.payment !== 'pending' && <PaymentPill status={r.payment} reason={r.payment === 'on_hold' ? r.line.hold_reason || 'No reason recorded' : null} />}
-                            <ApprovalPill line={r.line} />
+                            {carried
+                              ? <span title={approvalTitle(r.line)} className="whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">Carried forward</span>
+                              : <ApprovalPill line={r.line} />}
+                            {approvable && canApprove && short && !carried && (
+                              <button type="button" disabled={busyId === r.id} onClick={() => onCarry(r)}
+                                title={`Carry ${r.name}'s shortfall forward to ${carryTo} as advance`}
+                                className="whitespace-nowrap rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50">
+                                {busyId === r.id ? '…' : 'Carry forward'}
+                              </button>
+                            )}
                             {approvable && canApprove && r.approval !== 'approved' && owes(r.line) && (
                               <button type="button" disabled={busyId === r.id} onClick={() => onApprove(r)} title={`Approve ${r.name} for payment`}
                                 className="rounded-full bg-[#007AFF] px-2.5 py-0.5 text-[11px] font-bold text-white hover:bg-[#0064D2] disabled:opacity-50">
                                 {busyId === r.id ? '…' : 'Approve'}
                               </button>
                             )}
+                            <button type="button" onClick={() => onPayslip(r)} title={`${r.name}'s payslip`} aria-label={`${r.name}'s payslip`}
+                              className="rounded-full p-1 text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#007AFF]">
+                              <FileText size={15} />
+                            </button>
                             {approvable && canApprove && r.approval === 'approved' && r.payment !== 'paid' && (
                               <button type="button" onClick={() => onUndo(r)} title={`Undo the approval of ${r.name}`}
                                 className="rounded-full border border-[#1D1D1F]/15 bg-white/80 px-2.5 py-0.5 text-[11px] font-bold text-[#515154] hover:text-red-700">
@@ -249,7 +309,8 @@ export default function PersonCards({
                             )}
                           </div>
                         </div>
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} />}
+                        {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} />}
                       </li>
                     );
                   })}
