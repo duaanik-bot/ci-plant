@@ -48,6 +48,7 @@ import { normCode, normName } from '../hr/match.js';
 import { assertAliasFree, assertNameFree, lockNames } from '../hr/names.js';
 import { add, cmp, fmtPaise, rat, toPaise } from '../hr/money.js';
 import { paymentTotals } from '../hr/payment-status.js';
+import { recalcRun } from '../hr/runs.js';
 
 const r = Router();
 
@@ -682,6 +683,91 @@ r.post('/hr/people/:id/setups', requireHr('operator'), async (req, res, next) =>
       };
     });
     res.json(warning ? { ...row, warning } : row);
+  } catch (e) { next(refusal(e)); }
+});
+
+// ── POST /hr/people/:id/setups/:setupId/switches — Holiday pay and Overtime on / off ──
+//
+// Owner's request 2026-11-03: a switch for whether a person gets holiday pay, and one for whether they get overtime
+// (contractors and some staff do not: off means OT is 0 whatever hours the sheet carries). { holiday?: bool,
+// overtime?: bool, ot_hours_per_day? (needed to switch overtime on), reason? }, operator and up.
+//   * holiday off → holiday_mode 'none' (the divisor / multiplier / amount stay on the row, so on again restores
+//     them); on → 'fixed' when a fixed amount is kept and no divisor, else 'formula' with the kept divisor (blank =
+//     the policy default, 30.5) and the kept multiplier, or 1.5 — the workbook's usual base ÷ 30.5 × 1.5.
+//   * overtime off → ot_hours_per_day 0 and no fixed OT rate; on → ot_hours_per_day as sent (above 0).
+// The setup is changed in place, because it is the one the open months use — but never one a finalised month used
+// (409 SETUP_LOCKED: add a pay revision from the next open month instead). Every draft month the setup covers is
+// worked out again for this person at once; a submitted / approved month is listed in `not_recalculated` (send it
+// back to apply the change; finalising it would refuse, because the line no longer matches its inputs).
+r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (req, res, next) => {
+  try {
+    const personId = idOf(req.params.id, 'Person');
+    const setupId = idOf(req.params.setupId, 'Pay setup');
+    const body = bodyOf(req);
+    const has = (k) => Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined && body[k] !== null;
+    if (!has('holiday') && !has('overtime')) throw bad('Send holiday and / or overtime as true or false');
+    for (const k of ['holiday', 'overtime']) if (has(k) && typeof body[k] !== 'boolean') throw bad(`${k} must be true or false`);
+    const reason = textOf(body.reason, 'The reason', 500);
+    let otPerDay = null;
+    if (body.overtime === true) {
+      const n = Number(body.ot_hours_per_day);
+      if (!Number.isFinite(n) || n <= 0 || n > 24) throw bad('Say how many OT hours make a day (above 0, at most 24) to switch overtime on');
+      otPerDay = String(n);
+    }
+    const out = await tx(async (qc, oc) => {
+      const setup = await oc(`SELECT ${SETUP_COLS} FROM hr.pay_setups WHERE id = $1 AND person_id = $2 FOR UPDATE`, [setupId, personId]);
+      if (!setup) throw missing('Pay setup');
+      const used = await oc(
+        `SELECT r.month FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+          WHERE l.pay_setup_id = $1 AND r.status = 'finalised' ORDER BY r.month DESC LIMIT 1`, [setupId]);
+      if (used) {
+        throw fail(409, `This pay setup was used by ${monthName(used.month)}, which is finalised, so it cannot change: add a pay `
+          + 'revision from the next open month instead', 'SETUP_LOCKED');
+      }
+      const next = {};
+      if (has('holiday')) {
+        if (body.holiday === false) next.holiday_mode = 'none';
+        else if (setup.holiday_mode === 'none') {
+          const fixed = setup.holiday_fixed !== null && setup.holiday_divisor === null;
+          next.holiday_mode = fixed ? 'fixed' : 'formula';
+          if (!fixed && setup.holiday_multiplier === null) next.holiday_multiplier = '1.5';
+        }
+      }
+      if (has('overtime')) {
+        if (body.overtime === false) { next.ot_hours_per_day = '0'; next.ot_fixed_rate = null; }
+        else next.ot_hours_per_day = otPerDay;
+      }
+      const cols = Object.keys(next);
+      let row = setup;
+      if (cols.length) {
+        row = await oc(
+          `UPDATE hr.pay_setups SET ${cols.map((c, i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1 RETURNING ${SETUP_COLS}`,
+          [setupId, ...cols.map((c) => next[c])]);
+        await hrAudit(qc, req, 'pay_setup', setupId, 'switches', {
+          person_id: personId, reason,
+          changes: Object.fromEntries(cols.map((c) => [c, { from: setup[c] ?? null, to: row[c] ?? null }])),
+        });
+      }
+      // The months this setup covers: from its own month to the day before the person's next setup.
+      const later = await oc(
+        `SELECT effective_from::text AS effective_from FROM hr.pay_setups WHERE person_id = $1 AND effective_from > $2::date
+          ORDER BY effective_from LIMIT 1`, [personId, setup.effective_from]);
+      const runs = await qc(
+        `SELECT r.id, r.month, r.status FROM hr.runs r
+          WHERE r.month >= $1 AND ($2::text IS NULL OR r.month < $2)
+            AND EXISTS (SELECT 1 FROM hr.run_lines l WHERE l.run_id = r.id AND l.person_id = $3)
+          ORDER BY r.month`, [setup.effective_from.slice(0, 7), later ? later.effective_from.slice(0, 7) : null, personId]);
+      const recalculated = [];
+      const notRecalculated = [];
+      if (cols.length) {
+        for (const run of runs) {
+          if (run.status === 'draft') { await recalcRun(qc, run, { personIds: [personId] }); recalculated.push(run.month); }
+          else if (run.status !== 'finalised') notRecalculated.push({ month: run.month, status: run.status });
+        }
+      }
+      return { setup: row, recalculated, not_recalculated: notRecalculated };
+    });
+    res.json(out);
   } catch (e) { next(refusal(e)); }
 });
 

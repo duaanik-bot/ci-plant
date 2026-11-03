@@ -472,6 +472,9 @@ export default function Payroll({ level }) {
     return () => { live = false; };
   }, []);
   const peopleById = useMemo(() => new Map(people.map(p => [String(p.id), p])), [people]);
+  const reloadPeople = useCallback(async () => {
+    try { const p = await hrApi.people(); if (Array.isArray(p)) setPeople(p); } catch { /* the central toast says why */ }
+  }, []);
   const channelBy = useMemo(() => new Map(channels.map(c => [c.code, c])), [channels]);
   const channelLabel = useCallback(code => (code ? (channelBy.get(code)?.label || code) : ''), [channelBy]);
 
@@ -1509,6 +1512,13 @@ export default function Payroll({ level }) {
               showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
               carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)} month={month} final={final}
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
+              onSwitched={async (res, change) => {
+                const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
+                const later = list(res?.not_recalculated).map(x => monthLabel(x.month));
+                toast.success(`${what}${list(res?.recalculated).length ? ` — ${list(res.recalculated).map(monthLabel).join(', ')} worked out again` : ''}`);
+                if (later.length) toast.info(`${later.join(', ')} not changed: send ${later.length === 1 ? 'it' : 'them'} back to draft to apply`);
+                await Promise.all([reloadPeople(), load()]);
+              }}
               toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
           ) : (
           <DataTable

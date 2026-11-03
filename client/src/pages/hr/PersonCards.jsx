@@ -27,6 +27,9 @@
 // Balances: once the month is finalised its recovery is already posted (after = outstanding); before that, after =
 // outstanding − this month's deduction.
 //
+// Holiday pay / Overtime switches (2026-11-03): at the top of the details (PaySwitches.jsx), on the person's
+// pay setup; the open month is worked out again at once.
+//
 // Change deduction (2026-11-03): each loan panel offers it (operator, month not finalised) — LoanDeductionModal asks
 // for the amount and "only this time" or "change the EMI", and the line is worked out again at once.
 //
@@ -36,6 +39,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ExternalLink, FileText } from 'lucide-react';
 import { Button, SearchInput } from '../../components/ui.jsx';
 import LoanDeductionModal from './LoanDeductionModal.jsx';
+import PaySwitches from './PaySwitches.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import {
   ApprovalPill, approvalTitle, batchText, flagLabel, FlagDots, LEVEL_META, levelOf, list, paiseOf, PAYMENT_STATUS, PaymentPill,
@@ -189,11 +193,14 @@ function Shortfall({ r, carryTo }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change }) {
+function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change, switches }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
     <>
+    <div className="border-t border-[#1D1D1F]/[0.06] px-4 pt-3">
+      <PaySwitches personId={r.id} setup={r.person?.current_setup} compact {...switches} />
+    </div>
     {pos.length > 0 && (
       <div className="grid gap-2 border-t border-[#1D1D1F]/[0.06] px-4 pt-3 lg:grid-cols-2">
         {pos.map(x => <LoanPanel key={x.ln.id} pos={x} month={month} final={final} change={change && {
@@ -272,10 +279,11 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change 
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
-  month = '', final = false, status = 'draft', onLoanChanged,
+  month = '', final = false, status = 'draft', onLoanChanged, onSwitched,
 }) {
   const approvedCount = rows.filter(x => x.approval === 'approved').length;
   const change = canOperate && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
+  const switches = { canEdit: canOperate && !final && Boolean(onSwitched), month, status, canApprove, approvedCount, onChanged: onSwitched };
   const [open, setOpen] = useState(() => new Set());
   const anchor = useRef(null);
   const listRef = useRef(null);
@@ -435,7 +443,7 @@ export default function PersonCards({
                           </div>
                         </div>
                         {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} switches={switches} />}
                       </li>
                     );
                   })}

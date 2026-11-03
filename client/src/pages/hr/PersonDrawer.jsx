@@ -38,6 +38,7 @@ import {
 import { ActionMenu, Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, searchText, useToast } from '../../components/ui.jsx';
 import { dayOf } from '../../lib/dayOf.js';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import PaySwitches from './PaySwitches.jsx';
 
 // ── Shared words and formatters (People.jsx imports these) ──────────────────
 
@@ -343,18 +344,23 @@ function DetailsTab({ form, set, canEdit, channels, person }) {
   );
 }
 
-function PayTab({ setups, canEdit, onNew, notice, onDismissNotice }) {
+function PayTab({ pid, setups, canEdit, onNew, notice, onDismissNotice, onSwitched }) {
   const sorted = useMemo(() => [...setups].sort(byEffectiveDesc), [setups]);
   const now = currentMonth();
   const inForce = sorted.find(s => monthOf(s.effective_from) <= now);
   return (
     <div className="space-y-3">
+      {sorted[0] && (
+        <Section title={`Holiday pay & overtime · from ${monthLabel(monthOf(sorted[0].effective_from))}`}>
+          <PaySwitches personId={pid} setup={sorted[0]} canEdit={canEdit} onChanged={onSwitched} />
+        </Section>
+      )}
       {/* The server's warning about the revision just saved. Not a toast: it is a sentence someone has
           to read and act on, so it stays until it is dismissed (or the drawer is closed). */}
       {notice && (
         <div role="status" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span className="min-w-0 flex-1 break-words"><b>Revision saved, with a warning.</b> {notice}</span>
+          <span className="min-w-0 flex-1 break-words">{/^The switch/.test(notice) ? null : <b>Revision saved, with a warning. </b>}{notice}</span>
           <button type="button" onClick={onDismissNotice}
             className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold underline hover:bg-amber-100">Dismiss</button>
         </div>
@@ -1186,8 +1192,13 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
             )}
             {ready && tab === 'details' && <DetailsTab form={form} set={set} canEdit={canEdit} channels={channels} person={person} />}
             {ready && tab === 'pay' && (
-              <PayTab setups={setups} canEdit={canEdit} onNew={() => setRevisionOpen(true)}
-                notice={payNotice} onDismissNotice={() => setPayNotice(null)} />
+              <PayTab pid={pid} setups={setups} canEdit={canEdit} onNew={() => setRevisionOpen(true)}
+                notice={payNotice} onDismissNotice={() => setPayNotice(null)}
+                onSwitched={(res) => {
+                  const later = Array.isArray(res?.not_recalculated) ? res.not_recalculated : [];
+                  setPayNotice(later.length ? `The switch is saved, but ${later.map(x => `${monthLabel(x.month)} is ${x.status}`).join('; ')} — send it back to draft for the switch to apply there.` : null);
+                  onChanged?.(); refresh();
+                }} />
             )}
             {ready && tab === 'bank' && <BankTab form={form} set={set} canEdit={canEdit} person={person} reveal={reveal} setReveal={setReveal} />}
             {ready && tab === 'aliases' && (

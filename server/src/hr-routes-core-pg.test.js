@@ -1132,6 +1132,52 @@ describe('HR core routes through the real app', {
     assert.equal(bareCopy.body.setups.length, 0);
   });
 
+  test('Holiday pay and Overtime switches: off and on again keep the figures, the open month is worked out again', T, async () => {
+    const person = await call('operator', 'POST', '/hr/people', { code: 'SW-1', name: 'Switch Test Person' });
+    assert.equal(person.status, 200, person.text);
+    const pid = person.body.id;
+    const made = await call('operator', 'POST', `/hr/people/${pid}/setups`, {
+      effective_from: '2030-01-01', pay_basis: 'monthly', base: 31000, absence_basis: 'calendar_days',
+      ot_hours_per_day: 6, ot_multiplier: 1, holiday_mode: 'formula', holiday_divisor: '30.5', holiday_multiplier: 1.5,
+    });
+    assert.equal(made.status, 200, made.text);
+    const url = `/hr/people/${pid}/setups/${made.body.id}/switches`;
+    // An open month with OT hours on the sheet.
+    const input = await call('operator', 'PUT', `/hr/runs/2030-01/inputs/${pid}`, { ot_hours: 12, reason: 'Test: OT hours' });
+    assert.equal(input.status, 200, input.text);
+    assert.equal(input.body.line.ot_amount, 2000, '12 h ÷ 6 × ₹1,000 a day (₹31,000 ÷ 31)');
+    assert.equal(input.body.line.holiday_amount, 1524.59, '₹31,000 ÷ 30.5 × 1.5');
+
+    refused(await call('viewer', 'POST', url, { holiday: false }), 403, 'HR_LEVEL');
+    refused(await call('operator', 'POST', url, {}), 400);
+    refused(await call('operator', 'POST', url, { overtime: true }), 400, undefined);
+
+    const off = await call('operator', 'POST', url, { holiday: false, overtime: false, reason: 'Test: contractor-style' });
+    assert.equal(off.status, 200, off.text);
+    assert.deepEqual([off.body.setup.holiday_mode, off.body.setup.ot_hours_per_day], ['none', 0]);
+    assert.equal(off.body.setup.holiday_multiplier, 1.5, 'the figures stay for when it is switched on again');
+    assert.deepEqual(off.body.recalculated, ['2030-01']);
+    let line = (await db.q(`SELECT l.ot_amount::text ot, l.holiday_amount::text hol FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+      WHERE r.month = '2030-01' AND l.person_id = $1`, [pid]))[0];
+    assert.deepEqual([line.ot, line.hol], ['0.00', '0.00'], 'OT off pays no OT whatever the hours; holiday off pays none');
+    assert.equal((await lastAudit('pay_setup', made.body.id)).action, 'switches');
+
+    const on = await call('operator', 'POST', url, { holiday: true, overtime: true, ot_hours_per_day: 8 });
+    assert.equal(on.status, 200, on.text);
+    assert.deepEqual([on.body.setup.holiday_mode, on.body.setup.holiday_multiplier, on.body.setup.ot_hours_per_day], ['formula', 1.5, 8]);
+    line = (await db.q(`SELECT l.ot_amount::text ot, l.holiday_amount::text hol FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+      WHERE r.month = '2030-01' AND l.person_id = $1`, [pid]))[0];
+    assert.deepEqual([line.ot, line.hol], ['1500.00', '1524.59'], '12 h ÷ 8 × ₹1,000; holiday back');
+
+    // A setup that never had holiday pay switches on to the workbook's usual base ÷ 30.5 × 1.5.
+    const bare = await call('operator', 'POST', `/hr/people/${pid}/setups`, {
+      effective_from: '2030-03-01', pay_basis: 'monthly', base: 30500, absence_basis: 'calendar_days', holiday_mode: 'none',
+    });
+    const bareOn = await call('operator', 'POST', `/hr/people/${pid}/setups/${bare.body.id}/switches`, { holiday: true });
+    assert.deepEqual([bareOn.body.setup.holiday_mode, bareOn.body.setup.holiday_multiplier], ['formula', 1.5]);
+    refused(await call('operator', 'POST', `/hr/people/${pid}/setups/${made.body.id + 99999}/switches`, { holiday: true }), 404);
+  });
+
   test('the constraints the route maps to 409s still exist under those names', T, async () => {
     const found = (await db.q(
       `SELECT conname AS name FROM pg_constraint WHERE connamespace = 'hr'::regnamespace

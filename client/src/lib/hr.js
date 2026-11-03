@@ -135,6 +135,9 @@ export const hrApi = {
     : api.post('/hr/people', fields)),
   // POST /hr/people/:id/setups — operator. effective_from is 'YYYY-MM-01'; 409 SETUP_EXISTS if that month has one.
   addSetup: (personId, setup) => api.post(`/hr/people/${seg(personId)}/setups`, setup),
+  // POST /hr/people/:id/setups/:setupId/switches — operator. { holiday?, overtime?, ot_hours_per_day?, reason? };
+  // answers { setup, recalculated: [months], not_recalculated: [{month, status}] }.
+  setPaySwitches: (personId, setupId, change) => api.post(`/hr/people/${seg(personId)}/setups/${seg(setupId)}/switches`, change),
   // POST /hr/people/:id/aliases — operator. `alias` is the spelling to remember.
   addAlias: (personId, alias) => api.post(`/hr/people/${seg(personId)}/aliases`, { alias }),
   // DELETE /hr/aliases/:id — operator.

@@ -312,7 +312,7 @@ export function computeLine(p) {
     }
     if (isZero(rate)) {
       formula = `${hours} entered but there is no OT rate`;
-      flag('warn', 'OT_NO_RATE', `${fmtDecimal(otHours)} OT hours entered but there is no OT rate, so OT pays 0`);
+      flag('warn', 'OT_NO_RATE', `Overtime is off for this person (no OT rate): ${fmtDecimal(otHours)} OT hours on the sheet are not paid`);
     }
     amt.ot_amount = earn('OT', 'Overtime', fmtDecimal(otHours), rateText(rate), formula, mul(otHours, rate));
     if (cmp(otHours, policy.otHigh) > 0) {
