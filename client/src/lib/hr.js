@@ -218,6 +218,14 @@ export const hrApi = {
   // needs a reason; paid needs a finalised run, 409 RUN_NOT_FINAL). Answers { changed, unchanged, skipped:[{ person_id,
   // reason }], batches }.
   setLineStatuses: (month, change) => api.post(`/hr/runs/${seg(month)}/lines/status`, change),
+  // POST /hr/runs/:month/lines/approval — approver. Per-person payment approval, many lines at once:
+  // { person_ids, action:'approve'|'unapprove', reason? } (the undo needs a reason). The run must be approved or
+  // finalised (409 RUN_NOT_APPROVED); undoing a PAID line's approval is 409 ALREADY_PAID with its person_ids.
+  // Answers { changed, unchanged, skipped:[{ person_id, reason }], on_hold }.
+  setLineApproval: (month, change) => api.post(`/hr/runs/${seg(month)}/lines/approval`, change),
+  // GET /hr/runs/:month/lines/:personId/history — viewer. The line's decisions, oldest first:
+  // [{ at, by, action, label, from, to, reason, reference, paid_on, batch_no, pay_channel, amount }].
+  lineHistory: (month, personId) => api.get(`/hr/runs/${seg(month)}/lines/${seg(personId)}/history`),
   // GET /hr/runs/:month/payslips?person_ids=&channel= — viewer. person_ids is an array (sent as a comma list).
   payslips: (month, { person_ids, channel } = {}) => api.get(`/hr/runs/${seg(month)}/payslips${qs({ person_ids, channel })}`),
   // GET /hr/runs/:month/variance — viewer.

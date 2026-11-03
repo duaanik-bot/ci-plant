@@ -706,8 +706,8 @@ describe('HR core routes through the real app', {
        VALUES ('2026-08', 31, 'finalised', $1::jsonb, now()) RETURNING id`,
       [JSON.stringify({ lines: 2, blocked: 1, gross: '8000.00', payable: '8000.00', by_channel: [{ pay_channel: 'BANK1', lines: 1, payable: '5000.00', carried_advance: '0.00' }] })]);
     await db.q(
-      `INSERT INTO hr.run_lines (run_id, person_id, gross, payable, payment_status, flags, pay_channel) VALUES
-         ($1, $2, 5000, 5000, 'paid', $3::jsonb, 'BANK1'), ($1, $4, 3000, 3000, 'pending', $5::jsonb, 'CASH')`,
+      `INSERT INTO hr.run_lines (run_id, person_id, gross, payable, payment_status, flags, pay_channel, approval_status) VALUES
+         ($1, $2, 5000, 5000, 'paid', $3::jsonb, 'BANK1', 'approved'), ($1, $4, 3000, 3000, 'pending', $5::jsonb, 'CASH', 'unapproved')`,
       [run.id, p1,
         JSON.stringify([{ level: 'warn', code: 'INSUFFICIENT_PAY', message: 'm' }, { level: 'info', code: 'VARIANCE', message: 'm' }]),
         p2, JSON.stringify([{ level: 'block', code: 'NO_SETUP', message: 'm' }])]);
@@ -732,7 +732,10 @@ describe('HR core routes through the real app', {
     assert.equal(d.run.totals.by_channel[0].pay_channel, 'BANK1');
     assert.deepEqual(d.payments, {
       paid_lines: 1, paid_amount: '5000.00', pending_lines: 1, pending_amount: '3000.00', on_hold_lines: 0, on_hold_amount: '0.00',
-      final: true,
+      // Per-person payment approval: the paid line is approved, the unpaid one not yet; the approved lines reconcile.
+      approved_lines: 1, approved_amount: '5000.00', unapproved_lines: 1, unapproved_amount: '3000.00',
+      approved_unpaid_lines: 0, approved_unpaid_amount: '0.00', approved_on_hold_lines: 0, approved_on_hold_amount: '0.00',
+      reconciled: true, approvable: true, final: true,
     });
     assert.deepEqual(d.loans, { count: 1, outstanding: '12000.00' });
     assert.deepEqual(d.advances, { count: 1, outstanding: '2000.00' });

@@ -59,6 +59,8 @@ export const MINTING_POSTS = Object.freeze([
   '/grns/substitute',
   '/hr/loader/apply',
   '/hr/loans',
+  '/hr/runs/:month/lines/status',
+  '/hr/runs/:month/payments',
   '/hr/staff-payments',
   '/invoices',
   '/direct-invoices',

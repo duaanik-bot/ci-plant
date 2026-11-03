@@ -71,6 +71,22 @@
 //     the channel batch skips it and lists it in `held`, the per-line route refuses it. POST /hr/runs/:month/lines/
 //     status sets paid / unpaid (pending) / on hold for many lines at once; GET /hr/runs/:month carries
 //     payment_totals (paid / unpaid / on_hold, each {count, amount}, and the same per channel; hr/payment-status.js).
+//   * Per-person PAYMENT APPROVAL (owner's request 2026-11-03; migration 20261103120000_hr_line_approval.sql). Once a
+//     run is approved (or finalised) the amounts are fixed, and each line is approved for payment or not
+//     (run_lines.approval_status, approved_by/at, approval_note). POST /hr/runs/:month/lines/approval {person_ids,
+//     action:'approve'|'unapprove', reason?} is approver+, 409 RUN_NOT_APPROVED on a draft or submitted run; undoing
+//     an approval needs a reason, and undoing it on a PAID line is 409 ALREADY_PAID (mark the payment unpaid first —
+//     an approver, through lines/status). Marking a line PAID (the channel batch, lines/status, the per-line PUT) now
+//     also needs the line approved: the batch and lines/status skip and report an unapproved line, the per-line PUT
+//     is 409 NOT_APPROVED. On hold is allowed any time, whatever the approval. Sending a run back to draft undoes
+//     every line approval of it (the amounts can change), audited.
+//   * Every "Mark paid" of a set is a numbered payment batch, CI-PAY-0001 …, minted by nextNumber() as the FIRST
+//     statement of its transaction (the batch route and lines/status; both are in client lib/writeOnce.js
+//     MINTING_POSTS). A line with no pay channel is paid without a batch, as before.
+//   * GET /hr/runs/:month/lines/:personId/history is the line's decisions from hr.audit_log: approve / unapprove,
+//     hold / release, paid / unpaid / failed / reversed, and the batches that paid it, with who, when and why.
+//   * payment_totals also carries approved / unapproved {count, amount} and `reconciliation` (approved =
+//     approved_paid + approved_unpaid + approved_on_hold; paid_unapproved should be 0).
 //
 // What a response carries
 //   * Lines and inputs (GET /hr/runs/:month) are the numbers pg gives for NUMERIC, as in routes/hr.js; runs.totals
@@ -87,7 +103,7 @@ import multer from 'multer';
 import { createHash } from 'node:crypto';
 import { q, one, tx } from '../db.js';
 import { markUncacheable } from '../data-tables.js';
-import { notify, optionalText } from '../helpers.js';
+import { nextNumber, notify, optionalText } from '../helpers.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { billingEntity } from '../billing-entity.js';
 import { hrGuard, levelAtLeast, requireHr } from '../hr/access.js';
@@ -1126,12 +1142,23 @@ function flagsSummary(lines) {
   return out;
 }
 
+// A paid line's batch (number and who made it) and, for a line paid on its own (no batch), who marked it paid.
 const LINE_SELECT = `
   SELECT l.*, l.paid_on::text AS paid_on, p.code, p.name, p.display_name, p.department, p.designation, p.status AS person_status,
-         c.label AS pay_channel_label
+         c.label AS pay_channel_label, b.batch_no AS payment_batch_no, b.created_by AS paid_by,
+         coalesce(bu.name, pa.user_name) AS paid_by_name
     FROM hr.run_lines l
     JOIN hr.people p ON p.id = l.person_id
-    LEFT JOIN hr.pay_channels c ON c.code = l.pay_channel`;
+    LEFT JOIN hr.pay_channels c ON c.code = l.pay_channel
+    LEFT JOIN hr.payment_batches b ON b.id = l.payment_batch_id
+    LEFT JOIN public.users bu ON bu.id = b.created_by
+    LEFT JOIN LATERAL (
+      SELECT a.user_name FROM hr.audit_log a
+       WHERE a.entity = 'run_line' AND a.entity_id = l.id::text AND a.detail->>'to' = 'paid'
+       ORDER BY a.id DESC LIMIT 1) pa ON l.payment_status = 'paid' AND l.payment_batch_id IS NULL`;
+// What payment_totals reads.
+const TOTALS_SELECT = `SELECT payment_status, approval_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
+  FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`;
 const INPUT_SELECT = `
   SELECT i.*, p.code, p.name, p.display_name
     FROM hr.run_inputs i
@@ -1185,16 +1212,18 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
       });
     }
     const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 ORDER BY l.person_id`, [run.id]);
-    const heldBy = await userNames(q, found.map((l) => l.held_by));
-    const lines = found.map((l) => ({ ...l, held_by_name: given(l.held_by) ? heldBy.get(l.held_by) ?? null : null }));
+    const names = await userNames(q, found.flatMap((l) => [l.held_by, l.approved_by]));
+    const lines = found.map((l) => ({
+      ...l,
+      held_by_name: given(l.held_by) ? names.get(l.held_by) ?? null : null,
+      approved_by_name: given(l.approved_by) ? names.get(l.approved_by) ?? null : null,
+    }));
     const inputs = await q(`${INPUT_SELECT} WHERE i.run_id = $1 ORDER BY i.person_id`, [run.id]);
     res.json({
       run: await runView(q, run),
       lines,
       inputs,
-      payment_totals: paymentTotals(await q(
-        `SELECT payment_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
-           FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [run.id])),
+      payment_totals: paymentTotals(await q(TOTALS_SELECT, [run.id])),
       flags_summary: flagsSummary(lines),
       missing: await peopleWithoutInputs(q, run.id, month),
       imports: importViews,
@@ -1363,6 +1392,21 @@ r.post('/hr/runs/:month/send-back', requireHr('approver'), async (req, res, next
           WHERE id = $1
           RETURNING *`, [locked.id, userId, reason]);
       await hrAudit(qc, req, 'run', locked.id, 'send_back', { month, from: locked.status, reason });
+      // Back in draft the amounts can change, so every line approval of the run is undone (each audited). No line of
+      // a run that is not finalised can be paid, so none of these is a paid line.
+      const undone = await qc(
+        `UPDATE hr.run_lines o
+            SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
+           FROM hr.run_lines w
+          WHERE o.id = w.id AND o.run_id = $1 AND o.approval_status = 'approved'
+          RETURNING o.id, o.person_id, w.approved_by, w.approved_at, w.approval_note`,
+        [locked.id, `Run sent back to draft: ${reason}`.slice(0, 500)]);
+      for (const l of undone) {
+        await hrAudit(qc, req, 'run_line', l.id, 'unapprove', {
+          month, run_id: locked.id, person_id: l.person_id, from: 'approved', to: 'unapproved', reason: `Run sent back to draft: ${reason}`,
+          via: 'send-back', was: { approved_by: l.approved_by, approved_at: l.approved_at, approval_note: l.approval_note },
+        });
+      }
       // The words name the month and who; the reason stays in the app (free text could carry an amount).
       await notify([locked.prepared_by, locked.submitted_by].filter(given), {
         kind: 'hr_run_sent_back',
@@ -1420,6 +1464,11 @@ r.post('/hr/runs/:month/finalise', requireHr('approver'), async (req, res, next)
 
 // ── Payments (a finalised run only; finalised is never proof of payment) ────
 
+// Payment batch numbers: CI-PAY-0001 … (nextNumber FIRST in the transaction, through oc).
+const PAY_PREFIX = 'CI-PAY-';
+const nextBatchNo = (oc) => nextNumber(PAY_PREFIX, 'hr.payment_batches', 'batch_no', oc);
+const NOT_APPROVED_WHY = 'Not approved for payment yet: an approver approves the line first';
+
 r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
@@ -1432,11 +1481,12 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
     const only = idListOf(body.person_ids, 'person_ids');
     const userId = userIdOf(req);
 
-    const batch = await tx(async (qc) => {
+    const batch = await tx(async (qc, oc) => {
+      const batchNo = await nextBatchNo(oc);
       const run = await lockRunOf(qc, month);
       if (run.status !== 'finalised') throw runState(run, 'a finalised', 'paid');
       const unpaid = await qc(
-        `SELECT id, person_id, payment_status, hold_reason FROM hr.run_lines
+        `SELECT id, person_id, payment_status, approval_status, hold_reason FROM hr.run_lines
           WHERE run_id = $1 AND pay_channel = $2 AND payment_status <> 'paid' AND payable IS NOT NULL AND payable >= 0
             ${only ? 'AND person_id = ANY($3::int[])' : ''}
           ORDER BY person_id
@@ -1451,33 +1501,38 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
       // A line on hold is not payable: the batch leaves it as it is and says so.
       const held = unpaid.filter((l) => l.payment_status === 'on_hold')
         .map((l) => ({ person_id: l.person_id, reason: l.hold_reason ?? null }));
-      const lines = unpaid.filter((l) => l.payment_status !== 'on_hold');
+      // A line not approved for payment is not payable either: left as it is and listed in `unapproved`.
+      const unapproved = unpaid.filter((l) => l.payment_status !== 'on_hold' && l.approval_status !== 'approved')
+        .map((l) => ({ person_id: l.person_id, reason: NOT_APPROVED_WHY }));
+      const lines = unpaid.filter((l) => l.payment_status !== 'on_hold' && l.approval_status === 'approved');
       if (!lines.length) {
         const [any] = await qc(`SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND pay_channel = $2 LIMIT 1`, [run.id, channel]);
         if (!any) throw bad(`No line of ${monthLabel(month)} is paid through ${channel}`);
-        if (held.length) {
-          throw fail(409, `Nothing to pay through ${channel}: ${held.length === 1 ? 'the one unpaid line is' : `all ${held.length} unpaid lines are`} `
-            + 'on hold. Release a hold (mark the line unpaid) to pay it', 'NOTHING_TO_PAY', { held });
+        if (held.length || unapproved.length) {
+          const why = [held.length && `${held.length} on hold (release a hold to pay it)`,
+            unapproved.length && `${unapproved.length} not approved for payment yet`].filter(Boolean).join(' and ');
+          throw fail(409, `Nothing to pay through ${channel}: of the unpaid lines, ${why}`, 'NOTHING_TO_PAY', { held, unapproved });
         }
         throw fail(409, `Every line of ${monthLabel(month)} paid through ${channel} is already paid`, 'NOTHING_TO_PAY');
       }
       const ids = lines.map((l) => l.id);
       const [made] = await qc(
         `INSERT INTO hr.payment_batches (run_id, pay_channel, count, total, status, reference, paid_on,
-                                         confirmed_by, confirmed_at, created_by)
-         SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5
+                                         confirmed_by, confirmed_at, created_by, batch_no)
+         SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7
            FROM hr.run_lines WHERE id = ANY($6::int[])
-         RETURNING *`, [run.id, channel, reference, paidOn, userId, ids]);
+         RETURNING *`, [run.id, channel, reference, paidOn, userId, ids, batchNo]);
       await qc(
         `UPDATE hr.run_lines
             SET payment_status = 'paid', payment_batch_id = $2, paid_amount = payable, paid_on = $3::date,
                 paid_at = now(), paid_ref = $4
           WHERE id = ANY($1::int[])`, [ids, made.id, paidOn, reference]);
       await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
-        month, run_id: run.id, pay_channel: channel, count: made.count, total: money(made.total), reference, paid_on: paidOn,
-        person_ids: lines.map((l) => l.person_id), held: held.map((h) => h.person_id),
+        month, run_id: run.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), reference,
+        paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held: held.map((h) => h.person_id),
+        unapproved: unapproved.map((u) => u.person_id),
       });
-      return { ...made, paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held };
+      return { ...made, paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held, unapproved };
     });
     res.json(batch);
   } catch (e) { next(e); }
@@ -1500,7 +1555,7 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
       const run = await lockRunOf(qc, month);
       if (run.status !== 'finalised') throw runState(run, 'a finalised', 'paid');
       const [line] = await qc(
-        `SELECT id, payment_status, payable::text AS payable, paid_ref FROM hr.run_lines
+        `SELECT id, payment_status, approval_status, payable::text AS payable, paid_ref FROM hr.run_lines
           WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
       if (!line) throw notFound('Line');
       const from = line.payment_status;
@@ -1510,6 +1565,9 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
       }
       if (!allowed.includes(from)) {
         throw fail(409, `This line is ${STATUS_WORD[from] ?? from}, so it cannot be marked ${STATUS_WORD[status] ?? status}`, 'PAYMENT_STATE');
+      }
+      if (status === 'paid' && line.approval_status !== 'approved') {
+        throw fail(409, `${NOT_APPROVED_WHY}, then it can be marked paid`, 'NOT_APPROVED');
       }
       if (status === 'paid') {
         // A zero-payable line can be marked paid (paid_amount 0.00), as the batch does; only a line whose pay is
@@ -1544,7 +1602,8 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
 //   paid      a finalised run only (the payable is fixed only then): 409 RUN_NOT_FINAL otherwise. paid_amount =
 //             payable, paid_on defaults to today at the plant, the reference is optional. The lines are grouped into
 //             one payment_batches row per pay channel (a line with no channel is paid without a batch, as the per-line
-//             route does). A line on hold, or with nothing to pay (payable below zero or not worked out), is skipped.
+//             route does), each numbered CI-PAY-####. A line on hold, not approved for payment, or with nothing to pay
+//             (payable below zero or not worked out), is skipped.
 //   on_hold   any run status; the reason is required (400). Records held_by / held_at. A paid line is skipped: it must
 //             be marked unpaid first. A line already on hold with a different reason takes the new reason (and held_by /
 //             held_at), audited with the old one; with the same reason it is unchanged.
@@ -1573,7 +1632,9 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
     const approver = levelAtLeast(req.hr?.level, 'approver');
     const userId = userIdOf(req);
 
-    const out = await tx(async (qc) => {
+    const out = await tx(async (qc, oc) => {
+      // The first batch number comes FIRST (a mark-paid makes one batch per channel); unused, it is never written.
+      let batchNo = target === 'paid' ? await nextBatchNo(oc) : null;
       const run = await lockRunOf(qc, month);
       if (target === 'paid' && run.status !== 'finalised') {
         throw fail(409, `${monthLabel(month)} is ${run.status}: a line can be marked paid only once the month is finalised, `
@@ -1581,7 +1642,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
       }
       const lines = await qc(
         `SELECT id, person_id, pay_channel, payment_status, payable::text AS payable, paid_amount::text AS paid_amount,
-                paid_on::text AS paid_on, paid_ref, payment_batch_id, hold_reason
+                paid_on::text AS paid_on, paid_ref, payment_batch_id, hold_reason, approval_status
            FROM hr.run_lines WHERE run_id = $1 AND person_id = ANY($2::int[])
           ORDER BY person_id
             FOR UPDATE`, [run.id, personIds]);
@@ -1603,6 +1664,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
             skipped.push({ person_id: id, reason: 'On hold: release the hold (mark it unpaid) before marking it paid' });
             continue;
           }
+          if (line.approval_status !== 'approved') { skipped.push({ person_id: id, reason: NOT_APPROVED_WHY }); continue; }
           const due = line.payable === null ? null : paiseOf(line.payable);
           if (due === null || due < 0n) { skipped.push({ person_id: id, reason: 'Nothing to pay on this line' }); continue; }
         }
@@ -1620,6 +1682,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
       if (undoPaid.length && !reason) throw bad('Say why a paid line is being marked unpaid');
 
       const batches = [];
+      const batchNoOf = new Map();                                   // line id → the CI-PAY- number that paid it
       if (target === 'paid' && moving.length) {
         const groups = new Map();
         for (const l of moving) {
@@ -1632,18 +1695,21 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
           const ids = groups.get(channel).map((l) => l.id);
           let batchId = null;
           if (channel !== null) {
+            const no = batchNo ?? await nextBatchNo(oc);   // the advisory lock is already held: this sees the batches above
+            batchNo = null;
             const [made] = await qc(
               `INSERT INTO hr.payment_batches (run_id, pay_channel, count, total, status, reference, paid_on,
-                                               confirmed_by, confirmed_at, created_by)
-               SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5
+                                               confirmed_by, confirmed_at, created_by, batch_no)
+               SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7
                  FROM hr.run_lines WHERE id = ANY($6::int[])
-               RETURNING id, pay_channel, count, total::text AS total`, [run.id, channel, reference, paidOn, userId, ids]);
+               RETURNING id, batch_no, pay_channel, count, total::text AS total`, [run.id, channel, reference, paidOn, userId, ids, no]);
             batchId = made.id;
+            for (const id of ids) batchNoOf.set(id, made.batch_no);
             const people = groups.get(channel).map((l) => l.person_id);
-            batches.push({ id: made.id, pay_channel: channel, count: made.count, total: money(made.total), person_ids: people });
+            batches.push({ id: made.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), person_ids: people });
             await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
-              month, run_id: run.id, pay_channel: channel, count: made.count, total: money(made.total), reference, paid_on: paidOn,
-              person_ids: people, via: 'lines/status',
+              month, run_id: run.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), reference,
+              paid_on: paidOn, person_ids: people, via: 'lines/status',
             });
           }
           await qc(
@@ -1667,7 +1733,9 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
 
       for (const l of moving) {
         const detail = { month, run_id: run.id, person_id: l.person_id, from: l.payment_status, to: target, reason };
-        if (target === 'paid') Object.assign(detail, { reference, paid_on: paidOn, paid_amount: money(l.payable) });
+        if (target === 'paid') {
+          Object.assign(detail, { reference, paid_on: paidOn, paid_amount: money(l.payable), batch_no: batchNoOf.get(l.id) ?? null });
+        }
         if (l.payment_status === 'paid') {
           detail.was = {
             paid_amount: given(l.paid_amount) ? money(l.paid_amount) : null, paid_on: l.paid_on, paid_ref: l.paid_ref,
@@ -1680,6 +1748,135 @@ r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, n
       return { changed: moving.map((l) => l.person_id), unchanged, skipped, batches };
     });
     res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── POST /hr/runs/:month/lines/approval — approve / undo the approval of many lines at once ──
+//
+// { person_ids:[…], action:'approve'|'unapprove', reason? }, approver and up, one transaction, one audit row per line
+// that changes (entity run_line, action approve / unapprove, with who, when, why and what it replaced).
+//   * The run must be approved or finalised — the amounts are fixed from the run's approval on: 409 RUN_NOT_APPROVED
+//     otherwise.
+//   * approve: the reason is an optional note (approval_note). A line with nothing to pay (payable below zero or not
+//     worked out) is skipped. A line on hold CAN be approved — the hold still stops the money until it is released —
+//     and is listed in `on_hold` so the screen can say so.
+//   * unapprove (the undo): the reason is required (400). A PAID line is refused for the whole request, 409
+//     ALREADY_PAID with its person_ids: money that went is undone first (an approver marks it unpaid), and nothing
+//     changes.
+// A line already in the asked state is `unchanged`; a person with no line is `skipped` with the reason.
+const APPROVAL_ACTIONS = ['approve', 'unapprove'];
+
+r.post('/hr/runs/:month/lines/approval', requireHr('approver'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const body = bodyOf(req);
+    const action = choiceOf(body.action, APPROVAL_ACTIONS, 'action');
+    const personIds = idListOf(body.person_ids, 'person_ids');
+    if (!personIds || !personIds.length) throw bad('Choose at least one person');
+    const reason = textOf(body.reason, 'The reason', 500);
+    if (action === 'unapprove' && !reason) throw bad('Say why the approval is being undone: the reason is kept with the decision');
+    const target = action === 'approve' ? 'approved' : 'unapproved';
+    const userId = userIdOf(req);
+
+    const out = await tx(async (qc) => {
+      const run = await lockRunOf(qc, month);
+      if (run.status !== 'approved' && run.status !== 'finalised') {
+        throw fail(409, `${monthLabel(month)} is ${run.status}: people are approved for payment once the month's salary is `
+          + 'approved, because the amounts are fixed only then', 'RUN_NOT_APPROVED', { status: run.status });
+      }
+      const lines = await qc(
+        `SELECT id, person_id, payment_status, approval_status, approved_by, approved_at, approval_note,
+                payable::text AS payable
+           FROM hr.run_lines WHERE run_id = $1 AND person_id = ANY($2::int[])
+          ORDER BY person_id
+            FOR UPDATE`, [run.id, personIds]);
+      const byPerson = new Map(lines.map((l) => [l.person_id, l]));
+      const unchanged = [];
+      const skipped = [];
+      const moving = [];
+      for (const id of personIds) {
+        const line = byPerson.get(id);
+        if (!line) { skipped.push({ person_id: id, reason: `No line for this person in ${monthLabel(month)}` }); continue; }
+        if (line.approval_status === target) { unchanged.push(id); continue; }
+        if (target === 'approved') {
+          const due = line.payable === null ? null : paiseOf(line.payable);
+          if (due === null || due < 0n) { skipped.push({ person_id: id, reason: 'Nothing to pay on this line' }); continue; }
+        }
+        moving.push(line);
+      }
+      const paid = target === 'unapproved' ? moving.filter((l) => l.payment_status === 'paid') : [];
+      if (paid.length) {
+        throw fail(409, `${paid.length === 1 ? '1 selected line is' : `${paid.length} selected lines are`} already paid, so the `
+          + 'approval cannot be undone: an approver marks the payment unpaid first, then the approval can be undone',
+        'ALREADY_PAID', { person_ids: paid.map((l) => l.person_id) });
+      }
+      if (moving.length) {
+        if (target === 'approved') {
+          await qc(
+            `UPDATE hr.run_lines SET approval_status = 'approved', approved_by = $2, approved_at = now(), approval_note = $3
+              WHERE id = ANY($1::int[])`, [moving.map((l) => l.id), userId, reason]);
+        } else {
+          await qc(
+            `UPDATE hr.run_lines SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
+              WHERE id = ANY($1::int[])`, [moving.map((l) => l.id), reason]);
+        }
+      }
+      for (const l of moving) {
+        const detail = {
+          month, run_id: run.id, person_id: l.person_id, from: l.approval_status, to: target, reason,
+          payable: given(l.payable) ? money(l.payable) : null, payment_status: l.payment_status,
+        };
+        if (target === 'unapproved') {
+          detail.was = { approved_by: l.approved_by, approved_at: l.approved_at, approval_note: l.approval_note };
+        }
+        await hrAudit(qc, req, 'run_line', l.id, action, detail);
+      }
+      return {
+        changed: moving.map((l) => l.person_id), unchanged, skipped,
+        on_hold: target === 'approved' ? moving.filter((l) => l.payment_status === 'on_hold').map((l) => l.person_id) : [],
+      };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── GET /hr/runs/:month/lines/:personId/history — the line's decisions ─────
+//
+// From hr.audit_log, oldest first: approve / unapprove, hold / release / paid / unpaid (lines/status), paid / failed /
+// reversed (the per-line PUT), and the payment batches that included the person. Each row is { at, by, action, from,
+// to, reason, reference, paid_on, batch_no, pay_channel, amount }. Viewer and up: the same people who read the register.
+const HISTORY_WORD = {
+  approve: 'approved', unapprove: 'approval undone', payment_status: 'payment status', payment: 'payment', batch: 'paid in a batch',
+};
+
+r.get('/hr/runs/:month/lines/:personId/history', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const personId = idOf(req.params.personId, 'Line');
+    const [line] = await q(
+      `SELECT l.id, l.run_id FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`,
+      [month, personId]);
+    if (!line) throw notFound('Line');
+    const rows = await q(
+      `SELECT a.id, a.at, a.user_id, a.user_name, a.entity, a.action, a.detail
+         FROM hr.audit_log a
+        WHERE (a.entity = 'run_line' AND a.entity_id = $1 AND a.action IN ('approve', 'unapprove', 'payment_status', 'payment'))
+           OR (a.entity = 'payment_batch' AND a.action = 'create' AND (a.detail->>'run_id') = $2
+               AND jsonb_typeof(a.detail->'person_ids') = 'array' AND (a.detail->'person_ids') @> to_jsonb(ARRAY[$3::int])
+               AND a.detail->>'via' IS DISTINCT FROM 'lines/status')
+        ORDER BY a.id`, [String(line.id), String(line.run_id), personId]);
+    res.json(rows.map((a) => {
+      const d = a.detail && typeof a.detail === 'object' ? a.detail : {};
+      const batch = a.entity === 'payment_batch';
+      return {
+        id: a.id, at: a.at, by: a.user_name ?? null, by_id: a.user_id ?? null,
+        action: batch ? 'batch' : a.action, label: HISTORY_WORD[batch ? 'batch' : a.action] ?? a.action,
+        from: batch ? null : d.from ?? null, to: batch ? 'paid' : d.to ?? null,
+        reason: d.reason ?? null, reference: d.reference ?? null, paid_on: d.paid_on ?? null,
+        batch_no: d.batch_no ?? null, pay_channel: batch ? d.pay_channel ?? null : null,
+        amount: d.paid_amount ?? d.payable ?? null, via: d.via ?? null,
+      };
+    }));
   } catch (e) { next(e); }
 });
 

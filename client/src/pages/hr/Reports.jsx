@@ -2,9 +2,20 @@
 // lists, the payroll register, the variance report, and the loan and advance registers. The payment sheet is split
 // into Paid / Unpaid / On hold (per-channel subtotals, grand totals); the payment sheet, paid register and on-hold
 // report share multi-select filters (status, channel, department) that drive the screen and the PDF / Excel alike.
-// The bank list carries only lines still to pay (unpaid, not on hold) unless on-hold lines are asked for. Each shows on screen and exports through the
+// The bank list carries only the Payment advice's lines (approved, unpaid, not on hold, something to pay). Each shows on screen and exports through the
 // ERP's exporter (lib/exporter.js sections: specs → branded PDF + Excel), except the bank transfer list,
 // which is an Excel file of its own (bankFile.js — an account number must stay text).
+//
+// Payment approval (owner's request 2026-11-03). Once the month's salary is approved, each person is approved for
+// payment or not. Three reports follow that through, for the team that clears the payments:
+//   * Payment advice — what to pay now: approved, unpaid, not on hold, with something to pay; per channel with
+//     subtotals; code, name, department, channel, account holder, account, IFSC, amount and a reference (month and
+//     code). PDF (the exporter) and Excel (bankFile.js, account and IFSC kept as text). Full account numbers only from
+//     operator up (GET /hr/people/:id); a viewer's copy shows the last four digits, so the team can review it later.
+//   * Payment register — after payment: batch number (CI-PAY-…), paid on, reference, amount, approved by / at, paid by.
+//   * Approval status — approved / unapproved / on hold lists with totals.
+// Each has the shared multi-select filters (channel, department, and approval / status where they apply) that drive
+// the screen and the exports, and a reconciliation block: gross, deductions, net payable, approved, paid, pending, held.
 //
 // Access. Every report reads from viewer up. The bank transfer list carries FULL account numbers (read
 // per person from GET /hr/people/:id, which gives them to operator and above), so its button is not
@@ -19,15 +30,17 @@ import { Button, DataTable, Input, SubTabs, useToast } from '../../components/ui
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import {
-  MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
+  APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, approverName, batchText, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
 } from './RunLineDrawer.jsx';
 import { fmt } from '../../api.js';
 import { refusalText } from './PersonDrawer.jsx';
-import { downloadBankList } from './bankFile.js';
+import { downloadBankList, downloadPaymentAdvice } from './bankFile.js';
 
 const REPORTS = [
+  { key: 'advice', label: 'Payment advice' },
   { key: 'payment', label: 'Payment sheet' },
-  { key: 'paid', label: 'Paid register' },
+  { key: 'paid', label: 'Payment register' },
+  { key: 'approval', label: 'Approval status' },
   { key: 'hold', label: 'On hold' },
   { key: 'bank', label: 'Bank transfer lists' },
   { key: 'register', label: 'Payroll register' },
@@ -87,19 +100,23 @@ const byChannel = (rows, channelLabel) => {
 
 // The multi-select filters (status, channel, department) the payment reports share: the same rows drive the screen
 // and the PDF / Excel. An empty set is "every".
+const APPROVALS = [['approved', 'Approved'], ['unapproved', 'Unapproved']];
+const NO_FILTERS = () => ({ status: new Set(), channel: new Set(), dept: new Set(), approval: new Set() });
+
 function filterMeta(f, channelLabel) {
   return [
     f.status.size > 0 && `Status: ${BUCKETS.filter(([k]) => f.status.has(k)).map(([, l]) => l).join(', ')}`,
+    f.approval?.size > 0 && `Approval: ${APPROVALS.filter(([k]) => f.approval.has(k)).map(([, l]) => l).join(', ')}`,
     f.channel.size > 0 && `Channel: ${[...f.channel].map(c => (c ? channelLabel(c) : 'No pay channel')).join(', ')}`,
     f.dept.size > 0 && `Department: ${[...f.dept].map(d => d || 'No department').join(', ')}`,
   ];
 }
 
-function PayFilters({ rows, filters, setFilters, channelLabel, showStatus = true }) {
+function PayFilters({ rows, filters, setFilters, channelLabel, showStatus = true, showApproval = false }) {
   const toggle = (axis, v) => setFilters(f => { const n = new Set(f[axis]); if (n.has(v)) n.delete(v); else n.add(v); return { ...f, [axis]: n }; });
   const channels = [...new Set(rows.map(r => r.channel ?? ''))].sort((a, b) => (a === '') - (b === '') || byText(channelLabel(a), channelLabel(b)));
   const depts = [...new Set(rows.map(r => r.department || ''))].sort((a, b) => (a === '') - (b === '') || byText(a, b));
-  const any = filters.status.size + filters.channel.size + filters.dept.size > 0;
+  const any = filters.status.size + filters.channel.size + filters.dept.size + (filters.approval?.size || 0) > 0;
   return (
     <FilterRail className="mb-2">
       {showStatus && (
@@ -110,8 +127,16 @@ function PayFilters({ rows, filters, setFilters, channelLabel, showStatus = true
           ))}
         </FilterGroup>
       )}
+      {showApproval && (
+        <FilterGroup label="Approval" divider={showStatus}>
+          {APPROVALS.map(([k, label]) => (
+            <FilterChip key={k} label={label} count={rows.filter(r => approvalOf(r.line) === k).length} on={filters.approval.has(k)}
+              dot={k === 'approved' ? 'bg-[#0A84FF]' : 'bg-gray-400'} onClick={() => toggle('approval', k)} />
+          ))}
+        </FilterGroup>
+      )}
       {channels.length > 1 && (
-        <FilterGroup label="Channel" divider={showStatus}>
+        <FilterGroup label="Channel" divider={showStatus || showApproval}>
           {channels.map(c => (
             <FilterChip key={c || '_'} label={c ? channelLabel(c) : 'No pay channel'} count={rows.filter(r => (r.channel ?? '') === c).length}
               on={filters.channel.has(c)} onClick={() => toggle('channel', c)} />
@@ -126,13 +151,16 @@ function PayFilters({ rows, filters, setFilters, channelLabel, showStatus = true
           ))}
         </FilterGroup>
       )}
-      {any && <FilterChip label="Clear filters" on={false} onClick={() => setFilters({ status: new Set(), channel: new Set(), dept: new Set() })} />}
+      {any && <FilterChip label="Clear filters" on={false} onClick={() => setFilters(NO_FILTERS())} />}
     </FilterRail>
   );
 }
 
 const applyFilters = (rows, f) => rows.filter(r => (!f.status.size || f.status.has(bucketOf(r.line)))
+  && (!f.approval?.size || f.approval.has(approvalOf(r.line)))
   && (!f.channel.size || f.channel.has(r.channel ?? '')) && (!f.dept.size || f.dept.has(r.department || '')));
+// The axes a report does not offer are not applied to it (a filter set on another report stays for that report).
+const without = (f, ...axes) => ({ ...f, ...Object.fromEntries(axes.map(a => [a, new Set()])) });
 
 // ── Payment sheet ───────────────────────────────────────────────────────────
 
@@ -231,9 +259,8 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
   const finalised = run?.status === 'finalised';
   const banks = channels.filter(c => c.kind === 'bank' && c.active !== false);
   const [busy, setBusy] = useState('');
-  // Only lines still to pay: unpaid (not paid, not on hold) by default; on-hold lines only when asked for.
-  const [withHeld, setWithHeld] = useState(false);
-  const toPay = r => owes(r.line) && (bucketOf(r.line) === 'unpaid' || (withHeld && bucketOf(r.line) === 'on_hold'));
+  // The same rule as the Payment advice (isAdvice): approved for payment, unpaid, not on hold, with something to pay.
+  const toPay = isAdvice;
 
   const make = async channel => {
     const lines = rows.filter(r => r.channel === channel.code && toPay(r));
@@ -258,7 +285,7 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
         fileName: `HR Bank list ${month} ${channel.label || channel.code}`,
         title: `Bank transfer list — ${channel.label || channel.code} — ${monthLabel(month)}`,
         meta: [channel.bank_name && `Bank: ${channel.bank_name}`, plural(out.length, 'transfer'),
-          withHeld ? 'Unpaid lines, including lines on hold' : 'Unpaid lines only (paid and on-hold lines left out)'],
+          'Approved, unpaid lines only (paid, on-hold and unapproved lines left out)'],
         rows: out,
         total: sumPaise(out.map(o => o.amount)),
       });
@@ -276,17 +303,14 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
         One Excel file per bank channel: beneficiary, account number, IFSC, amount and a reference (month and payroll code).
         {!canExport && ' Account numbers are shown only to operators and above, so this download is not available at your access level.'}
         {canExport && !finalised && ' Available once the month is finalised.'}
-        {' '}Only lines still to pay are listed: paid lines are never in it, and lines on hold only when ticked below.
+        {' '}Only people approved for payment, not yet paid and not on hold are listed — the same people as the Payment advice.
       </p>
-      <label className="flex items-center gap-2 text-xs font-semibold text-[#515154]">
-        <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={withHeld} onChange={e => setWithHeld(e.target.checked)} />
-        Include lines on hold
-      </label>
       {banks.length === 0 && <p className="text-xs text-[#86868B]">No bank pay channel is set up (Settings → Pay channels).</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         {banks.map(c => {
           const mine = rows.filter(r => r.channel === c.code && toPay(r));
           const held = rows.filter(r => r.channel === c.code && owes(r.line) && bucketOf(r.line) === 'on_hold').length;
+          const unapproved = rows.filter(r => r.channel === c.code && owes(r.line) && bucketOf(r.line) === 'unpaid' && approvalOf(r.line) !== 'approved').length;
           return (
             <div key={c.code} className="glass flex items-center gap-3 rounded-2xl border border-white/70 p-3 shadow-card">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E1EFFF] text-[#0064D2]"><Landmark size={16} /></span>
@@ -294,7 +318,8 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
                 <p className="truncate text-sm font-bold text-[#1D1D1F]">{channelLabel(c.code)}</p>
                 <p className="text-[11px] text-[#6E6E73]">
                   {plural(mine.length, 'transfer')} · {inr2(sumPaise(mine.map(r => r.line.payable)))}
-                  {held > 0 && !withHeld && <span className="text-amber-800"> · {held} on hold left out</span>}
+                  {held > 0 && <span className="text-amber-800"> · {held} on hold left out</span>}
+                  {unapproved > 0 && <span className="text-[#515154]"> · {unapproved} not approved left out</span>}
                 </p>
               </div>
               {canExport && (
@@ -321,10 +346,13 @@ export default function Reports({ level }) {
     if (!MONTH_RE.test(m || '')) return;
     setParams(p => { const n = new URLSearchParams(p); n.set('month', m); return n; }, { replace: true });
   }, [setParams]);
-  const [report, setReport] = useState('payment');
-  // Status / channel / department, shared by the payment sheet, the paid register and the on-hold report.
-  const [filters, setFilters] = useState(() => ({ status: new Set(), channel: new Set(), dept: new Set() }));
-  useEffect(() => { setFilters({ status: new Set(), channel: new Set(), dept: new Set() }); }, [month]);
+  // ?report= opens a report (the Payroll tab's "Payment advice" and "Approval report" buttons link here).
+  const askedReport = params.get('report');
+  const [report, setReport] = useState(() => (REPORTS.some(x => x.key === askedReport) ? askedReport : 'payment'));
+  useEffect(() => { if (REPORTS.some(x => x.key === askedReport)) setReport(askedReport); }, [askedReport]);
+  // Status / approval / channel / department, shared by the payment reports.
+  const [filters, setFilters] = useState(NO_FILTERS);
+  useEffect(() => { setFilters(NO_FILTERS()); }, [month]);
 
   const [people, setPeople] = useState([]);
   const [channels, setChannels] = useState([]);
@@ -349,7 +377,10 @@ export default function Reports({ level }) {
       const runs = await hrApi.runs();
       const found = list(Array.isArray(runs) ? runs : runs?.runs).some(r => String(r?.month ?? '').slice(0, 7) === month);
       const d = found ? await hrApi.run(month) : null;
-      if (mine === seq.current) setMonth$({ month, run: d?.run || null, lines: list(d?.lines), inputs: list(d?.inputs) });
+      if (mine === seq.current) {
+        setMonth$({ month, run: d?.run || null, lines: list(d?.lines), inputs: list(d?.inputs),
+          totals: d?.payment_totals && typeof d.payment_totals === 'object' ? d.payment_totals : null });
+      }
     } catch (e) {
       if (mine === seq.current) setMonth$({ month, error: refusalText(e) });
     }
@@ -393,7 +424,10 @@ export default function Reports({ level }) {
           )}
           {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">As of today</h2>}
         </div>
-        <div className="mt-3"><SubTabs views={REPORTS} active={report} onChange={setReport} /></div>
+        <div className="mt-3"><SubTabs views={REPORTS} active={report} onChange={k => {
+          setReport(k);
+          if (params.get('report')) setParams(p => { const n = new URLSearchParams(p); n.delete('report'); return n; }, { replace: true });
+        }} /></div>
       </section>
 
       {needsRun && here?.error && (
@@ -410,6 +444,16 @@ export default function Reports({ level }) {
         </div>
       )}
 
+      {needsRun && run && ['advice', 'payment', 'paid', 'approval'].includes(report) && (
+        <Reconciliation month={month} run={run} totals={here?.totals} />
+      )}
+      {needsRun && run && report === 'advice' && (
+        <PaymentAdvice month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters}
+          canSeeAccounts={canExportBank} totals={here?.totals} />
+      )}
+      {needsRun && run && report === 'approval' && (
+        <ApprovalReport month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters} totals={here?.totals} />
+      )}
       {needsRun && run && report === 'payment' && (
         <PaymentReport month={month} run={run} rows={rows} channelLabel={channelLabel} filters={filters} setFilters={setFilters} />
       )}
@@ -456,11 +500,12 @@ function PaymentReport({ month, run, rows, channelLabel, filters, setFilters }) 
     text('channel', 'Channel', r => r.channelLabel || 'No pay channel'),
     money('payable', 'Payable', r => r.line.payable), money('carried', 'Carried as advance', r => r.line.carried_advance),
     { key: 'payment', label: 'Payment', sortValue: r => payStatus(r.line), export: r => statusLabel(r.line), render: r => <PaymentPillCell line={r.line} /> },
+    { key: 'approval', label: 'Approval', sortValue: r => approvalOf(r.line), export: r => APPROVAL_STATUS[approvalOf(r.line)].label, render: r => <ApprovalPill line={r.line} /> },
     text('paid_on', 'Paid on', r => r.line.paid_on || ''), text('ref', 'Reference', r => r.line.paid_ref || ''),
   ], []);
   return (
     <>
-      <PayFilters rows={rows} filters={filters} setFilters={setFilters} channelLabel={channelLabel} />
+      <PayFilters rows={rows} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showApproval />
       <BucketTotals rows={shown} />
       <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
         searchValue={q} onSearchChange={setQ} searchPlaceholder="Search name, code or channel…"
@@ -471,34 +516,48 @@ function PaymentReport({ month, run, rows, channelLabel, filters, setFilters }) 
   );
 }
 
-// ── Paid register: who was paid, through what, how much, when and against which reference ──
+// ── Payment register: after payment — batch, paid on, reference, amount, who approved it and who marked it paid ──
+
+const approvedBy = l => approverName(l) || '—';
+const paidBy = l => l?.paid_by_name || '';
 
 function PaidRegister({ month, run, rows, channelLabel, filters, setFilters }) {
   const [q, setQ] = useState('');
   const paid = useMemo(() => rows.filter(r => bucketOf(r.line) === 'paid'), [rows]);
-  const shown = useMemo(() => applyFilters(paid, { ...filters, status: new Set() }), [paid, filters]);
+  const f = without(filters, 'status', 'approval');
+  const shown = useMemo(() => applyFilters(paid, without(filters, 'status', 'approval')), [paid, filters]);
   const columns = useMemo(() => [
+    { ...text('batch', 'Batch', r => batchText(r.line)), sortValue: r => r.line.payment_batch_no || '' },
     text('name', 'Person', r => r.name), text('code', 'Code', r => r.code), text('department', 'Department', r => r.department),
     text('channel', 'Channel', r => r.channelLabel || 'No pay channel'),
     money('amount', 'Amount paid', r => amountOf(r.line)), text('paid_on', 'Paid on', r => r.line.paid_on || ''),
     text('ref', 'Reference', r => r.line.paid_ref || ''),
+    text('approved_by', 'Approved by', r => approvedBy(r.line)),
+    { ...text('approved_at', 'Approved at', r => (r.line.approved_at ? fmt.dt(r.line.approved_at) : '')), sortValue: r => r.line.approved_at || '' },
+    text('paid_by', 'Paid by', r => paidBy(r.line)),
   ], []);
   const spec = sorted => {
     const cols = [
-      { key: 'name', label: 'Person' }, { key: 'code', label: 'Code' }, { key: 'channel', label: 'Channel' },
+      { key: 'batch', label: 'Batch' }, { key: 'name', label: 'Person' }, { key: 'code', label: 'Code' },
       { key: 'amount', label: 'Amount paid', align: 'right' }, { key: 'paid_on', label: 'Paid on' }, { key: 'ref', label: 'Reference' },
+      { key: 'approved', label: 'Approved by / at' }, { key: 'paid_by', label: 'Paid by' },
     ];
     const sections = byChannel(sorted, channelLabel).map(([k, rs]) => ({
       heading: k ? channelLabel(k) : 'No pay channel', columns: cols,
-      rows: [...rs.map(r => ({ name: r.name, code: r.code, channel: r.channelLabel || 'No pay channel', amount: inr2(amountOf(r.line)), paid_on: r.line.paid_on || '', ref: r.line.paid_ref || '' })),
-        { name: `Subtotal — ${plural(rs.length, 'person', 'people')}`, code: '', channel: '', amount: inr2(sumPaise(rs.map(r => amountOf(r.line)))), paid_on: '', ref: '', subtotal: true }],
+      rows: [...rs.map(r => ({
+        batch: batchText(r.line), name: r.name, code: r.code, amount: inr2(amountOf(r.line)), paid_on: r.line.paid_on || '',
+        ref: r.line.paid_ref || '', approved: [approvedBy(r.line), r.line.approved_at ? fmt.dt(r.line.approved_at) : ''].filter(Boolean).join(' · '),
+        paid_by: paidBy(r.line),
+      })),
+      { batch: '', name: `Subtotal — ${plural(rs.length, 'person', 'people')}`, code: '', amount: inr2(sumPaise(rs.map(r => amountOf(r.line)))), subtotal: true }],
       pdfRowTone: r => (r.subtotal ? 'info' : null),
     }));
     return {
-      name: `HR Paid register ${month}`, title: `Paid register — ${monthLabel(month)}`,
-      subtitle: `HR & Payroll · ${run.status}`, orientation: 'portrait',
-      meta: [...filterMeta({ ...filters, status: new Set() }, channelLabel), q.trim() && `Search: "${q.trim()}"`, plural(sorted.length, 'person', 'people')],
-      summary: [{ label: 'People paid', value: String(sorted.length) }, { label: 'Amount paid', value: inr2(sumPaise(sorted.map(r => amountOf(r.line)))) }],
+      name: `HR Payment register ${month}`, title: `Payment register — ${monthLabel(month)}`,
+      subtitle: `HR & Payroll · ${run.status}`, orientation: 'landscape',
+      meta: [...filterMeta(f, channelLabel), q.trim() && `Search: "${q.trim()}"`, plural(sorted.length, 'person', 'people')],
+      summary: [{ label: 'People paid', value: String(sorted.length) }, { label: 'Amount paid', value: inr2(sumPaise(sorted.map(r => amountOf(r.line)))) },
+        { label: 'Batches', value: String(new Set(sorted.map(r => r.line.payment_batch_no).filter(Boolean)).size) }],
       sections: sections.length ? sections : [{ columns: cols, rows: [] }],
     };
   };
@@ -506,10 +565,10 @@ function PaidRegister({ month, run, rows, channelLabel, filters, setFilters }) {
     <>
       <PayFilters rows={paid} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showStatus={false} />
       <MiniTotals items={[['People paid', String(shown.length)], ['Amount paid', inr2(sumPaise(shown.map(r => amountOf(r.line))))],
-        ['Not paid yet', String(rows.length - paid.length)], ['Run', run.status]]} />
+        ['Batches', String(new Set(shown.map(r => r.line.payment_batch_no).filter(Boolean)).size)], ['Not paid yet', String(rows.length - paid.length)]]} />
       <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
-        searchValue={q} onSearchChange={setQ} searchPlaceholder="Search person, code, channel or reference…"
-        defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR Paid register ${month}`} exportSpec={spec}
+        searchValue={q} onSearchChange={setQ} searchPlaceholder="Search batch, person, code, channel or reference…"
+        defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR Payment register ${month}`} exportSpec={spec}
         empty={paid.length ? 'No paid line matches these filters.' : 'Nobody has been marked paid for this month yet.'} />
     </>
   );
@@ -520,7 +579,7 @@ function PaidRegister({ month, run, rows, channelLabel, filters, setFilters }) {
 function OnHoldReport({ month, run, rows, channelLabel, filters, setFilters }) {
   const [q, setQ] = useState('');
   const held = useMemo(() => rows.filter(r => bucketOf(r.line) === 'on_hold'), [rows]);
-  const shown = useMemo(() => applyFilters(held, { ...filters, status: new Set() }), [held, filters]);
+  const shown = useMemo(() => applyFilters(held, without(filters, 'status', 'approval')), [held, filters]);
   const heldBy = r => r.line.held_by_name || (r.line.held_by != null ? `user #${r.line.held_by}` : '');
   const heldAt = r => (r.line.held_at ? fmt.dt(r.line.held_at) : '');
   const columns = useMemo(() => [
@@ -537,9 +596,251 @@ function OnHoldReport({ month, run, rows, channelLabel, filters, setFilters }) {
         searchValue={q} onSearchChange={setQ} searchPlaceholder="Search person, code, channel or reason…"
         defaultSort={{ key: 'name', dir: 'asc' }} exportName={`HR On hold ${month}`}
         exportSubtitle={`HR & Payroll · Payments on hold · ${monthLabel(month)}`}
-        exportMeta={() => [...filterMeta({ ...filters, status: new Set() }, channelLabel), q.trim() && `Search: "${q.trim()}"`]}
+        exportMeta={() => [...filterMeta(without(filters, 'status', 'approval'), channelLabel), q.trim() && `Search: "${q.trim()}"`]}
         exportSummary={rs => [{ label: 'On hold', value: String(rs.length) }, { label: 'Amount', value: inr2(sumPaise(rs.map(r => r.line.payable))) }]}
         empty={held.length ? 'No line on hold matches these filters.' : 'No payment is on hold for this month.'} />
+    </>
+  );
+}
+
+// ── Reconciliation: gross, deductions, net payable, approved, paid, pending, held ──
+// Gross, deductions and net payable are the run's stored totals; approved / paid / pending / held are the server's
+// payment_totals (every line in exactly one of paid, pending — unpaid, not held — and held; approved = paid + still to
+// pay + held among the approved lines).
+
+function reconItems(run, totals) {
+  const t = run?.totals && typeof run.totals === 'object' ? run.totals : {};
+  const pair = k => (totals?.[k] ? `${totals[k].count} · ${inr2(totals[k].amount)}` : '—');
+  return [
+    ['Gross', inr2(t.gross)], ['Deductions', inr2(t.total_deductions)], ['Net payable', inr2(t.payable)],
+    ['Approved', pair('approved')], ['Paid', pair('paid')], ['Pending', pair('unpaid')], ['Held', pair('on_hold')],
+  ];
+}
+const reconSummary = (run, totals) => reconItems(run, totals).map(([label, value]) => ({ label, value }));
+
+function Reconciliation({ month, run, totals }) {
+  const rec = totals?.reconciliation;
+  return (
+    <section className="mb-3 rounded-2xl border border-white/70 bg-white/55 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6E6E73]">Reconciliation — {monthLabel(month)}</h3>
+        {rec && (
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${rec.balanced ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+            {rec.balanced ? 'Reconciled' : 'Does not reconcile'}: approved {inr2(rec.approved.amount)} = paid {inr2(rec.approved_paid.amount)} + to pay {inr2(rec.approved_unpaid.amount)} + held {inr2(rec.approved_on_hold.amount)}
+          </span>
+        )}
+      </div>
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        {reconItems(run, totals).map(([label, value]) => (
+          <div key={label} className="rounded-xl bg-[#1D1D1F]/[0.04] px-3 py-2">
+            <dt className="text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{label}</dt>
+            <dd className="text-sm font-extrabold tabular-nums text-[#1D1D1F]">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {rec && rec.paid_unapproved?.count > 0 && (
+        <p className="mt-2 text-xs font-semibold text-red-700">{plural(rec.paid_unapproved.count, 'paid line')} not approved ({inr2(rec.paid_unapproved.amount)}).</p>
+      )}
+    </section>
+  );
+}
+
+// ── Payment advice: the list for the team that clears the payments ─────────
+// Approved for payment, not paid, not on hold, with something to pay. Per channel, with subtotals.
+
+const isAdvice = r => approvalOf(r.line) === 'approved' && bucketOf(r.line) === 'unpaid' && owes(r.line);
+
+function PaymentAdvice({ month, run, rows, channelLabel, filters, setFilters, canSeeAccounts, totals }) {
+  const toast = useToast();
+  const due = useMemo(() => rows.filter(isAdvice), [rows]);
+  const f = without(filters, 'status', 'approval');
+  const shown = useMemo(() => applyFilters(due, without(filters, 'status', 'approval')), [due, filters]);
+  // Bank details per person (GET /hr/people/:id): holder and IFSC for everyone, the full account from operator up.
+  const [bank, setBank] = useState(() => new Map());
+  const [reading, setReading] = useState(false);
+  const bankRef = useRef(bank);
+  bankRef.current = bank;
+  useEffect(() => {
+    const need = due.map(r => r.id).filter(id => !bankRef.current.has(id));
+    if (!need.length) return undefined;
+    let live = true;
+    setReading(true);
+    pool(need, 5, id => hrApi.person(id).catch(() => null)).then(found => {
+      if (!live) return;
+      setBank(m => { const n = new Map(m); need.forEach((id, i) => n.set(id, found[i] || {})); return n; });
+      setReading(false);
+    });
+    return () => { live = false; };
+  }, [due]);
+  const [busy, setBusy] = useState('');
+
+  const accountOf = p => {
+    const full = String(p?.bank_account ?? '').replace(/\s+/g, '');
+    if (canSeeAccounts && full && /^[0-9A-Za-z]+$/.test(full)) return full;
+    return p?.bank_last4 ? `••••${p.bank_last4}` : '';
+  };
+  const lineOf = r => {
+    const p = bank.get(r.id) || null;
+    return {
+      id: r.id, code: r.code, name: r.name, department: r.department || '', channel: r.channelLabel || 'No pay channel',
+      holder: p ? p.bank_holder || p.name || r.name : '', account: p ? accountOf(p) : '', ifsc: p ? String(p.bank_ifsc ?? '').toUpperCase() : '',
+      amount: String(r.line.payable), reference: `${month} ${r.code}`, missing: Boolean(p) && !accountOf(p),
+    };
+  };
+  const groups = byChannel(shown, channelLabel).map(([k, rs]) => ({
+    heading: k ? channelLabel(k) : 'No pay channel', rows: rs.map(lineOf), subtotal: sumPaise(rs.map(r => r.line.payable)),
+  }));
+  const total = sumPaise(shown.map(r => r.line.payable));
+  const missing = groups.flatMap(g => g.rows).filter(x => x.missing).length;
+  const meta = [...filterMeta(f, channelLabel), plural(shown.length, 'person', 'people'),
+    canSeeAccounts ? 'Full account numbers — confidential' : 'Account numbers masked to the last four digits (viewer copy)',
+    run.status === 'finalised' ? 'Month finalised' : `Run is ${run.status} — payments are marked once it is finalised`];
+  const summary = [...reconSummary(run, totals), { label: 'To pay now', value: `${shown.length} · ${inr2(total)}` }];
+
+  const cols = [
+    { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' },
+    { key: 'channel', label: 'Channel' }, { key: 'holder', label: 'Account holder' }, { key: 'account', label: 'Account' },
+    { key: 'ifsc', label: 'IFSC' }, { key: 'amount_t', label: 'Amount', align: 'right' }, { key: 'reference', label: 'Reference' },
+  ];
+  const pdf = async () => {
+    setBusy('pdf');
+    try {
+      const { exportPDF } = await import('../../lib/exporter.js');
+      await exportPDF({
+        name: `HR Payment advice ${month}`, title: `Payment advice — ${monthLabel(month)}`,
+        subtitle: 'HR & Payroll · approved for payment, not yet paid, not on hold', orientation: 'landscape', meta, summary,
+        sections: [
+          { heading: 'Summary by channel', columns: [{ key: 'channel', label: 'Channel' }, { key: 'people', label: 'People', align: 'right' }, { key: 'amount', label: 'Amount', align: 'right' }],
+            rows: [...groups.map(g => ({ channel: g.heading, people: String(g.rows.length), amount: inr2(g.subtotal) })),
+              { channel: 'Total', people: String(shown.length), amount: inr2(total), total: true }],
+            pdfRowTone: r => (r.total ? 'info' : null) },
+          ...groups.map(g => ({
+            heading: g.heading, columns: cols,
+            rows: [...g.rows.map(x => ({ ...x, amount_t: inr2(x.amount) })),
+              { code: '', name: `Subtotal — ${plural(g.rows.length, 'person', 'people')}`, amount_t: inr2(g.subtotal), subtotal: true }],
+            pdfRowTone: r => (r.subtotal ? 'info' : null),
+          })),
+        ],
+      });
+    } catch (e) {
+      toast.error(`The PDF could not be made: ${refusalText(e)}`);
+    } finally { setBusy(''); }
+  };
+  const excel = async () => {
+    setBusy('xlsx');
+    try {
+      await downloadPaymentAdvice({
+        fileName: `HR Payment advice ${month}`, title: `Payment advice — ${monthLabel(month)}`, meta,
+        summary: summary.map(x => [x.label, x.value]), groups, total,
+      });
+    } catch (e) {
+      toast.error(`The Excel file could not be made: ${refusalText(e)}`);
+    } finally { setBusy(''); }
+  };
+
+  const columns = useMemo(() => [
+    text('code', 'Code', x => x.code), text('name', 'Name', x => x.name), text('department', 'Department', x => x.department),
+    text('channel', 'Channel', x => x.channel), text('holder', 'Account holder', x => x.holder),
+    { key: 'account', label: 'Account', sortValue: x => x.account, render: x => (x.account ? <span className="font-mono">{x.account}</span> : <span className="text-amber-700">{reading ? '…' : 'none on file'}</span>) },
+    text('ifsc', 'IFSC', x => x.ifsc), money('amount', 'Amount', x => x.amount), text('reference', 'Reference', x => x.reference),
+  ], [reading]);
+  const flat = groups.flatMap(g => g.rows);
+  return (
+    <>
+      <PayFilters rows={due} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showStatus={false} />
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <MiniTotals items={[['To pay now', String(shown.length)], ['Amount', inr2(total)], ['Channels', String(groups.length)],
+          ['Not approved yet', String(rows.filter(r => approvalOf(r.line) !== 'approved' && bucketOf(r.line) !== 'paid').length)]]} />
+        <span className="ml-auto flex gap-1.5">
+          <Button size="sm" variant="secondary" disabled={!shown.length || reading || busy !== ''} onClick={pdf}><Download size={13} /> {busy === 'pdf' ? 'Preparing…' : 'PDF'}</Button>
+          <Button size="sm" variant="secondary" disabled={!shown.length || reading || busy !== ''} onClick={excel}><Download size={13} /> {busy === 'xlsx' ? 'Preparing…' : 'Excel'}</Button>
+        </span>
+      </div>
+      <p className="mb-2 text-xs text-[#515154]">
+        Everyone approved for payment and not yet paid, leaving out lines on hold and lines with nothing to pay. Send it to the
+        team clearing the payments; once the money has gone, mark them paid on the Payroll tab and the Payment register shows each batch.
+        {!canSeeAccounts && ' Account numbers show only the last four digits at your access level.'}
+        {missing > 0 && <span className="font-semibold text-amber-800"> {plural(missing, 'person', 'people')} {missing === 1 ? 'has' : 'have'} no bank account on file.</span>}
+      </p>
+      <DataTable columns={columns} rows={flat} getRowId={x => x.id} dense serialNumber={false}
+        defaultSort={{ key: 'channel', dir: 'asc' }}
+        empty={due.length ? 'Nobody matches these filters.' : 'Nobody is waiting to be paid: approve people on the Payroll tab, or everyone approved is paid or on hold.'} />
+    </>
+  );
+}
+
+// ── Approval status: approved / unapproved / on hold, with totals ───────────
+// Every line in exactly one list: on hold (whatever its approval), else approved or unapproved — so the three add up
+// to the run. The lists chosen (several at once; none = all three) drive the screen and the export.
+
+const LISTS = [['approved', 'Approved'], ['unapproved', 'Unapproved'], ['on_hold', 'On hold']];
+const listOf = r => (bucketOf(r.line) === 'on_hold' ? 'on_hold' : approvalOf(r.line));
+
+function ApprovalReport({ month, run, rows, channelLabel, filters, setFilters, totals }) {
+  const [q, setQ] = useState('');
+  const [lists, setLists] = useState(() => new Set());
+  const base = useMemo(() => applyFilters(rows, without(filters, 'status', 'approval')), [rows, filters]);
+  const shown = useMemo(() => base.filter(r => !lists.size || lists.has(listOf(r))), [base, lists]);
+  const toggle = k => setLists(cur => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const columns = useMemo(() => [
+    { key: 'list', label: 'List', sortValue: r => listOf(r), export: r => LISTS.find(([k]) => k === listOf(r))[1],
+      render: r => (listOf(r) === 'on_hold' ? <PaymentPillCell line={r.line} /> : <ApprovalPill line={r.line} />) },
+    text('name', 'Name', r => r.name), text('code', 'Code', r => r.code), text('department', 'Department', r => r.department),
+    text('channel', 'Channel', r => r.channelLabel || 'No pay channel'), money('payable', 'Payable', r => r.line.payable),
+    { key: 'payment', label: 'Payment', sortValue: r => payStatus(r.line), export: r => statusLabel(r.line), render: r => <PaymentPillCell line={r.line} /> },
+    text('decision', 'Approval', r => approvalTitle(r.line)),
+    text('hold', 'Why on hold', r => (bucketOf(r.line) === 'on_hold' ? r.line.hold_reason || '' : '')),
+  ], []);
+  const spec = sorted => {
+    const cols = [
+      { key: 'code', label: 'Code' }, { key: 'name', label: 'Name' }, { key: 'department', label: 'Department' }, { key: 'channel', label: 'Channel' },
+      { key: 'payable', label: 'Payable', align: 'right' }, { key: 'payment', label: 'Payment' }, { key: 'note', label: 'Approval / hold' },
+    ];
+    const sections = LISTS.filter(([k]) => !lists.size || lists.has(k)).map(([k, label]) => {
+      const rs = sorted.filter(r => listOf(r) === k);
+      return {
+        heading: `${label} — ${plural(rs.length, 'person', 'people')} · ${inr2(sumPaise(rs.map(r => r.line.payable)))}`, columns: cols,
+        rows: [...rs.map(r => ({
+          code: r.code, name: r.name, department: r.department, channel: r.channelLabel || 'No pay channel', payable: inr2(r.line.payable),
+          payment: statusLabel(r.line), note: k === 'on_hold' ? `${APPROVAL_STATUS[approvalOf(r.line)].label} · held: ${r.line.hold_reason || '—'}` : approvalTitle(r.line),
+        })), { code: '', name: `Total ${label.toLowerCase()}`, payable: inr2(sumPaise(rs.map(r => r.line.payable))), total: true }],
+        pdfRowTone: r => (r.total ? 'info' : null),
+      };
+    });
+    return {
+      name: `HR Approval status ${month}`, title: `Payment approval status — ${monthLabel(month)}`,
+      subtitle: `HR & Payroll · ${run.status}`, orientation: 'landscape',
+      meta: [...filterMeta(without(filters, 'status', 'approval'), channelLabel), lists.size > 0 && `Lists: ${LISTS.filter(([k]) => lists.has(k)).map(([, l]) => l).join(', ')}`,
+        q.trim() && `Search: "${q.trim()}"`],
+      summary: [...LISTS.map(([k, label]) => {
+        const rs = sorted.filter(r => listOf(r) === k);
+        return { label, value: `${rs.length} · ${inr2(sumPaise(rs.map(r => r.line.payable)))}` };
+      }), ...reconSummary(run, totals)],
+      sections,
+    };
+  };
+  return (
+    <>
+      <FilterRail className="mb-2">
+        <FilterGroup label="List" divider={false}>
+          {LISTS.map(([k, label]) => (
+            <FilterChip key={k} label={label} count={base.filter(r => listOf(r) === k).length} on={lists.has(k)}
+              dot={k === 'approved' ? 'bg-[#0A84FF]' : k === 'on_hold' ? 'bg-amber-500' : 'bg-gray-400'} onClick={() => toggle(k)} />
+          ))}
+        </FilterGroup>
+      </FilterRail>
+      <PayFilters rows={rows} filters={filters} setFilters={setFilters} channelLabel={channelLabel} showStatus={false} />
+      <MiniTotals items={LISTS.map(([k, label]) => {
+        const rs = base.filter(r => listOf(r) === k);
+        return [`${label} · ${rs.length}`, inr2(sumPaise(rs.map(r => r.line.payable)))];
+      })} />
+      <DataTable columns={columns} rows={shown} getRowId={r => r.id} dense serialNumber={false}
+        searchValue={q} onSearchChange={setQ} searchPlaceholder="Search name, code, channel or note…"
+        defaultSort={{ key: 'list', dir: 'asc' }} exportName={`HR Approval status ${month}`} exportSpec={spec}
+        empty="No line matches these filters." />
+      {run.status !== 'approved' && run.status !== 'finalised' && (
+        <p className="mt-2 text-xs text-[#86868B]">People are approved for payment once the month’s salary is approved; until then everyone is unapproved.</p>
+      )}
     </>
   );
 }

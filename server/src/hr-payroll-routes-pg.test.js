@@ -136,6 +136,13 @@ describe('HR payroll routes through the real app', {
     loan: (await db.one(`SELECT count(*)::int AS n FROM hr.loan_txns`)).n,
   });
   const rowOf = (payload, code) => payload.rows.find((r) => r.fields.code === code);
+  // Per-person payment approval (approver), needed before a line can be marked paid.
+  const approveLines = async (month, personIds, reason) => {
+    const res = await call('approver', 'POST', `/hr/runs/${month}/lines/approval`,
+      { person_ids: personIds, action: 'approve', ...(reason ? { reason } : {}) });
+    assert.equal(res.status, 200, res.text);
+    return res;
+  };
 
   // ── The import ──
 
@@ -361,9 +368,16 @@ describe('HR payroll routes through the real app', {
 
     assert.equal((await lineOf(A)).payment_status, 'pending', 'finalised is not paid');
     assert.equal((await lineOf(B)).payment_status, 'pending');
+    // Nobody is approved for payment yet, so the batch has nothing to pay and says who is waiting.
+    const early = await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH', reference: 'CASH-AUG' });
+    refused(early, 409, 'NOTHING_TO_PAY');
+    assert.deepEqual(early.body.unapproved.map((u) => u.person_id).sort((x, y) => x - y), [A, B].sort((x, y) => x - y));
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.payment_batches`)).n, 0, 'a refused batch is never written');
+    await approveLines(MONTH, [A, B]);
     const paid = await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH', reference: 'CASH-AUG' });
     assert.equal(paid.status, 200, paid.text);
     assert.equal(paid.body.count, 2);
+    assert.equal(paid.body.batch_no, 'CI-PAY-0001', 'the first payment batch is CI-PAY-0001');
     assert.equal((await lineOf(A)).payment_status, 'paid');
     refused(await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH' }), 409, 'NOTHING_TO_PAY');
     refused(await call('operator', 'PUT', `/hr/runs/${MONTH}/lines/${A}/payment`, { status: 'reversed' }), 403, 'HR_LEVEL');
@@ -440,9 +454,11 @@ describe('HR payroll routes through the real app', {
     assert.equal((await call('approver', 'POST', `/hr/runs/${SEPT}/approve`, {})).status, 200);
     const fin = await call('approver', 'POST', `/hr/runs/${SEPT}/finalise`, {});
     assert.equal(fin.status, 200, fin.text);
+    await approveLines(SEPT, [A, B, E]);
     const paid = await call('operator', 'POST', `/hr/runs/${SEPT}/payments`, { pay_channel: 'TCASH', reference: 'CASH-SEP' });
     assert.equal(paid.status, 200, paid.text);
     assert.equal(paid.body.count, 3);
+    assert.equal(paid.body.batch_no, 'CI-PAY-0002');
     assert.deepEqual(paid.body.person_ids.sort((x, y) => x - y), [A, B, E].sort((x, y) => x - y));
     assert.deepEqual(await septLine(B), { payable: '0.00', payment_status: 'paid', paid_amount: '0.00' });
     refused(await call('operator', 'POST', `/hr/runs/${SEPT}/payments`, { pay_channel: 'TCASH' }), 409, 'NOTHING_TO_PAY');
@@ -566,6 +582,9 @@ describe('HR payroll routes through the real app', {
     const fin = await call('approver', 'POST', `/hr/runs/${OCT}/finalise`, {});
     assert.equal(fin.status, 200, fin.text);
     assert.equal((await octLine(A)).payment_status, 'on_hold', 'finalising keeps the hold');
+    // A held line can be approved; the hold still stops the money.
+    const ok = await approveLines(OCT, [A, B, H]);
+    assert.deepEqual(ok.body.on_hold, [A]);
 
     const paid = await call('operator', 'POST', `/hr/runs/${OCT}/payments`, { pay_channel: 'TCASH', reference: 'CASH-OCT' });
     assert.equal(paid.status, 200, paid.text);
@@ -599,7 +618,8 @@ describe('HR payroll routes through the real app', {
     assert.deepEqual(res.body.changed, [A, H].sort((x, y) => x - y));
     assert.deepEqual(res.body.unchanged, [B]);
     assert.deepEqual(res.body.skipped.map((x) => x.person_id), [G], 'G has no October line');
-    assert.deepEqual(res.body.batches.map((b) => [b.pay_channel, b.count]), [['TBANK', 1], ['TCASH', 1]]);
+    assert.deepEqual(res.body.batches.map((b) => [b.pay_channel, b.count, b.batch_no]),
+      [['TBANK', 1, 'CI-PAY-0004'], ['TCASH', 1, 'CI-PAY-0005']], 'one numbered batch per channel, in sequence');
     for (const id of [A, H]) {
       const l = await octLine(id);
       assert.deepEqual([l.payment_status, l.paid_amount, l.paid_on, l.paid_ref], ['paid', l.payable, '2026-10-16', 'BULK-OCT']);
@@ -665,10 +685,182 @@ describe('HR payroll routes through the real app', {
       [2, 1, '31000.00']);
   });
 
+  // ── November: per-person payment approval (POST /hr/runs/:month/lines/approval) ──
+
+  const NOV = '2026-11';
+  const novLine = (personId) => db.one(
+    `SELECT l.id, l.payable::text AS payable, l.payment_status, l.approval_status, l.approved_by, l.approved_at, l.approval_note,
+            l.payment_batch_id
+       FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [NOV, personId]);
+  const approval = (who, body) => call(who, 'POST', `/hr/runs/${NOV}/lines/approval`, body);
+  const novStatus = (who, body) => call(who, 'POST', `/hr/runs/${NOV}/lines/status`, body);
+  const lineAudits = async (personId, actions) => db.q(
+    `SELECT action, user_id, detail FROM hr.audit_log
+      WHERE entity = 'run_line' AND entity_id = $1 AND action = ANY($2::text[]) ORDER BY id`,
+    [String((await novLine(personId)).id), actions]);
+
+  test('approval is refused on a draft run (409 RUN_NOT_APPROVED), and an operator cannot approve at all', T, async () => {
+    const up = await uploadAs('operator', await sheet([
+      ['Test Person Alpha', 'T-201', 0, 0], ['Test Person Beta', 'T-202', null, 0], ['Test Person Eta', 'T-205', null, 0],
+    ]), NOV);
+    assert.equal(up.status, 200, up.text);
+    assert.equal((await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, {})).status, 200);
+    const draft = await approval('approver', { person_ids: [A], action: 'approve' });
+    refused(draft, 409, 'RUN_NOT_APPROVED');
+    assert.match(draft.body.error, /approved/);
+    refused(await approval('operator', { person_ids: [A], action: 'approve' }), 403, 'HR_LEVEL');
+    refused(await approval('viewer', { person_ids: [A], action: 'approve' }), 403, 'HR_LEVEL');
+    refused(await approval('approver', { person_ids: [A], action: 'sign' }), 400, undefined);
+    refused(await approval('approver', { person_ids: [], action: 'approve' }), 400, undefined);
+    assert.equal((await novLine(A)).approval_status, 'unapproved', 'a new line starts unapproved');
+
+    assert.equal((await call('operator', 'POST', `/hr/runs/${NOV}/submit`, {})).status, 200);
+    refused(await approval('approver', { person_ids: [A], action: 'approve' }), 409, 'RUN_NOT_APPROVED');
+    assert.equal((await call('approver', 'POST', `/hr/runs/${NOV}/approve`, {})).status, 200);
+  });
+
+  test('approve and unapprove on an approved run: audited, unchanged reported, the undo needs a reason', T, async () => {
+    const res = await approval('approver', { person_ids: [A, B, G], action: 'approve', reason: 'Test: checked against the register' });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.changed, [A, B].sort((x, y) => x - y));
+    assert.deepEqual(res.body.skipped.map((x) => x.person_id), [G], 'G has no November line');
+    const a = await novLine(A);
+    assert.deepEqual([a.approval_status, a.approved_by, a.approval_note], ['approved', ids.approver, 'Test: checked against the register']);
+    assert.ok(a.approved_at);
+    const [audit] = await lineAudits(A, ['approve']);
+    assert.deepEqual([audit.user_id, audit.detail.from, audit.detail.to, audit.detail.reason, audit.detail.payable],
+      [ids.approver, 'unapproved', 'approved', 'Test: checked against the register', a.payable]);
+
+    const again = await approval('approver', { person_ids: [A], action: 'approve' });
+    assert.deepEqual([again.body.changed, again.body.unchanged], [[], [A]], 'already approved: unchanged');
+    assert.equal((await lineAudits(A, ['approve'])).length, 1, 'and nothing audited');
+
+    refused(await approval('approver', { person_ids: [B], action: 'unapprove' }), 400, undefined);
+    refused(await approval('approver', { person_ids: [B], action: 'unapprove', reason: '  ' }), 400, undefined);
+    assert.equal((await novLine(B)).approval_status, 'approved');
+    const undo = await approval('approver', { person_ids: [B, H], action: 'unapprove', reason: 'Test: attendance query' });
+    assert.equal(undo.status, 200, undo.text);
+    assert.deepEqual([undo.body.changed, undo.body.unchanged], [[B], [H]]);
+    const b = await novLine(B);
+    assert.deepEqual([b.approval_status, b.approved_by, b.approved_at, b.approval_note], ['unapproved', null, null, 'Test: attendance query']);
+    const [u] = await lineAudits(B, ['unapprove']);
+    assert.deepEqual([u.detail.from, u.detail.to, u.detail.reason, u.detail.was.approved_by], ['approved', 'unapproved', 'Test: attendance query', ids.approver]);
+  });
+
+  test('sending the run back to draft undoes every line approval (audited); re-approving the run starts afresh', T, async () => {
+    await approveLines(NOV, [H]);
+    const back = await call('approver', 'POST', `/hr/runs/${NOV}/send-back`, { reason: 'Test: one more look' });
+    assert.equal(back.status, 200, back.text);
+    for (const id of [A, H]) assert.equal((await novLine(id)).approval_status, 'unapproved', `${id} unapproved by the send-back`);
+    const [u] = await lineAudits(H, ['unapprove']);
+    assert.deepEqual([u.detail.via, u.detail.reason], ['send-back', 'Run sent back to draft: Test: one more look']);
+    assert.equal((await call('operator', 'POST', `/hr/runs/${NOV}/submit`, {})).status, 200);
+    assert.equal((await call('approver', 'POST', `/hr/runs/${NOV}/approve`, {})).status, 200);
+    await approveLines(NOV, [A, B, H]);
+  });
+
+  test('paid needs an approved line on a finalised run; a held line is not paid; batch numbers run on', T, async () => {
+    // B on hold (any time, whatever the approval); H's approval undone again.
+    assert.deepEqual((await novStatus('operator', { person_ids: [B], status: 'on_hold', reason: 'Test: bank details' })).body.changed, [B]);
+    assert.equal((await approval('approver', { person_ids: [H], action: 'unapprove', reason: 'Test: account to confirm' })).status, 200);
+    refused(await novStatus('operator', { person_ids: [A], status: 'paid' }), 409, 'RUN_NOT_FINAL');
+    const fin = await call('approver', 'POST', `/hr/runs/${NOV}/finalise`, {});
+    assert.equal(fin.status, 200, fin.text);
+    assert.equal((await novLine(A)).approval_status, 'approved', 'finalising keeps the approvals');
+
+    const res = await novStatus('operator', { person_ids: [A, B, H], status: 'paid', reference: 'NOV-PAY' });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.changed, [A]);
+    const why = new Map(res.body.skipped.map((x) => [x.person_id, x.reason]));
+    assert.match(why.get(B), /hold/i);
+    assert.match(why.get(H), /not approved/i);
+    assert.deepEqual(res.body.batches.map((x) => [x.pay_channel, x.batch_no]), [['TCASH', 'CI-PAY-0006']]);
+    assert.equal((await novLine(A)).payment_status, 'paid');
+    assert.equal((await novLine(H)).payment_status, 'pending');
+
+    // The channel batch and the single-line route refuse an unapproved line too, and a held one.
+    const bank = await call('operator', 'POST', `/hr/runs/${NOV}/payments`, { pay_channel: 'TBANK', reference: 'NOV-BANK' });
+    refused(bank, 409, 'NOTHING_TO_PAY');
+    assert.deepEqual(bank.body.unapproved.map((u) => u.person_id), [H]);
+    refused(await call('operator', 'PUT', `/hr/runs/${NOV}/lines/${H}/payment`, { status: 'paid' }), 409, 'NOT_APPROVED');
+    refused(await call('operator', 'PUT', `/hr/runs/${NOV}/lines/${B}/payment`, { status: 'paid' }), 409, 'PAYMENT_STATE');
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.payment_batches WHERE reference = 'NOV-BANK'`)).n, 0);
+
+    // Approved after all: now it pays, as the next number.
+    await approveLines(NOV, [H]);
+    const paid = await call('operator', 'POST', `/hr/runs/${NOV}/payments`, { pay_channel: 'TBANK', reference: 'NOV-BANK' });
+    assert.equal(paid.status, 200, paid.text);
+    assert.deepEqual([paid.body.person_ids, paid.body.batch_no], [[H], 'CI-PAY-0007']);
+    const nos = (await db.q(`SELECT batch_no FROM hr.payment_batches ORDER BY id`)).map((x) => x.batch_no);
+    assert.deepEqual(nos, ['CI-PAY-0001', 'CI-PAY-0002', 'CI-PAY-0003', 'CI-PAY-0004', 'CI-PAY-0005', 'CI-PAY-0006', 'CI-PAY-0007']);
+  });
+
+  test('undoing the approval of a PAID line is 409 ALREADY_PAID and changes nothing; after mark-unpaid it can be undone', T, async () => {
+    const before = await novLine(A);
+    const res = await approval('approver', { person_ids: [A, B], action: 'unapprove', reason: 'Test: wrong person' });
+    refused(res, 409, 'ALREADY_PAID');
+    assert.deepEqual(res.body.person_ids, [A]);
+    assert.deepEqual(await novLine(A), before);
+    assert.equal((await novLine(B)).approval_status, 'approved', 'nothing in the request changed');
+
+    assert.equal((await novStatus('approver', { person_ids: [A], status: 'pending', reason: 'Test: cash not handed over' })).status, 200);
+    const undo = await approval('approver', { person_ids: [A], action: 'unapprove', reason: 'Test: wrong person' });
+    assert.deepEqual(undo.body.changed, [A]);
+    // Approve and pay A again, so the month closes.
+    await approveLines(NOV, [A]);
+    assert.deepEqual((await novStatus('operator', { person_ids: [A], status: 'paid', reference: 'NOV-PAY-2' })).body.changed, [A]);
+  });
+
+  test('a line\'s history lists every decision with who, when and why', T, async () => {
+    const res = await call('viewer', 'GET', `/hr/runs/${NOV}/lines/${A}/history`);
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.map((h) => [h.action, h.to]), [
+      ['approve', 'approved'], ['unapprove', 'unapproved'], ['approve', 'approved'], ['payment_status', 'paid'],
+      ['payment_status', 'pending'], ['unapprove', 'unapproved'], ['approve', 'approved'], ['payment_status', 'paid'],
+    ]);
+    const first = res.body[0];
+    assert.equal(first.by, 'Test Approver');
+    assert.ok(first.at);
+    assert.equal(first.reason, 'Test: checked against the register');
+    assert.equal(res.body[3].batch_no, 'CI-PAY-0006');
+    assert.equal(res.body[3].reference, 'NOV-PAY');
+    assert.equal(res.body[4].reason, 'Test: cash not handed over');
+
+    const h = await call('viewer', 'GET', `/hr/runs/${NOV}/lines/${H}/history`);
+    assert.equal(h.status, 200, h.text);
+    const last = h.body[h.body.length - 1];
+    assert.deepEqual([last.action, last.to, last.batch_no, last.reference, last.pay_channel], ['batch', 'paid', 'CI-PAY-0007', 'NOV-BANK', 'TBANK']);
+    refused(await call('viewer', 'GET', `/hr/runs/${NOV}/lines/${G}/history`), 404, undefined);
+  });
+
+  test('payment_totals reconcile: approved = paid + approved-unpaid + approved-held; the lines carry who approved and the batch', T, async () => {
+    const run = await call('viewer', 'GET', `/hr/runs/${NOV}`);
+    assert.equal(run.status, 200, run.text);
+    const t = run.body.payment_totals;
+    addsUp(t, run.body.lines.length, run.body.run.totals.payable);
+    assert.equal(t.approved.count + t.unapproved.count, run.body.lines.length);
+    assert.equal(cents(t.approved.amount) + cents(t.unapproved.amount), cents(run.body.run.totals.payable));
+    const r = t.reconciliation;
+    assert.equal(r.balanced, true);
+    assert.equal(r.paid_unapproved.count, 0);
+    assert.equal(r.approved.count, r.approved_paid.count + r.approved_unpaid.count + r.approved_on_hold.count);
+    assert.equal(cents(r.approved.amount), cents(r.approved_paid.amount) + cents(r.approved_unpaid.amount) + cents(r.approved_on_hold.amount));
+    assert.deepEqual([r.approved.count, r.approved_paid.count, r.approved_on_hold.count], [3, 2, 1]);
+    assert.equal(r.approved_on_hold.amount, (await novLine(B)).payable);
+
+    const a = run.body.lines.find((l) => l.person_id === A);
+    assert.deepEqual([a.approval_status, a.approved_by_name, a.payment_batch_no, a.paid_by_name], ['approved', 'Test Approver', 'CI-PAY-0008', 'Test Operator']);
+    const dash = await call('viewer', 'GET', `/hr/dashboard?month=${NOV}`);
+    assert.equal(dash.status, 200, dash.text);
+    assert.deepEqual([dash.body.payments.approved_lines, dash.body.payments.unapproved_lines, dash.body.payments.approved_on_hold_lines,
+      dash.body.payments.reconciled], [3, 0, 1, true]);
+  });
+
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
     const actions = new Set((await db.q(`SELECT entity || ':' || action AS a FROM hr.audit_log`)).map((x) => x.a));
     for (const a of ['import:upload', 'import:map', 'import_row:decide', 'import:apply', 'import:discard', 'run_input:edit', 'run:submit',
-      'run:send_back', 'run:approve', 'run:finalise', 'payment_batch:create', 'run_line:payment', 'run_line:payment_status']) {
+      'run:send_back', 'run:approve', 'run:finalise', 'payment_batch:create', 'run_line:payment', 'run_line:payment_status',
+      'run_line:approve', 'run_line:unapprove']) {
       assert.ok(actions.has(a), `no audit row for ${a}`);
     }
     const plant = await db.one(`SELECT count(*)::int AS n FROM audit_log WHERE entity ILIKE 'hr%' OR entity IN ('run', 'import')`)

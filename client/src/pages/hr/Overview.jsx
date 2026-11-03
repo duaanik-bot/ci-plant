@@ -135,6 +135,21 @@ export default function Overview() {
                       <span className="rounded-xl bg-amber-50 px-3 py-2 text-amber-800"><b className="block tabular-nums">{inr2(pay.on_hold_amount ?? '0')}</b>on hold · {plural(pay.on_hold_lines ?? 0, 'person', 'people')}</span>
                     </Link>
                     {pay.final === false && <p className="mt-1 text-[11px] text-[#86868B]">Lines are marked paid once the month is finalised.</p>}
+                    {pay.approved_lines != null && (
+                      <>
+                        <h4 className="mb-1 mt-3 text-[11px] font-bold uppercase tracking-[0.12em] text-[#6E6E73]">Approved for payment</h4>
+                        <Link to={to('payroll', month)} className="grid grid-cols-3 gap-2 text-xs">
+                          <span className="rounded-xl bg-sky-50 px-3 py-2 text-[#0064D2]"><b className="block tabular-nums">{inr2(pay.approved_amount)}</b>approved · {plural(pay.approved_lines ?? 0, 'person', 'people')}</span>
+                          <span className="rounded-xl bg-gray-100 px-3 py-2 text-gray-700"><b className="block tabular-nums">{inr2(pay.unapproved_amount)}</b>unapproved · {plural(pay.unapproved_lines ?? 0, 'person', 'people')}</span>
+                          <span className="rounded-xl bg-white/70 px-3 py-2 text-[#3A3A3C]"><b className="block tabular-nums">{inr2(pay.approved_unpaid_amount)}</b>approved, to pay · {plural(pay.approved_unpaid_lines ?? 0, 'person', 'people')}</span>
+                        </Link>
+                        <p className="mt-1 text-[11px] text-[#86868B]">
+                          {pay.approvable === false
+                            ? 'People are approved for payment once the month’s salary is approved.'
+                            : `${pay.reconciled ? 'Reconciled' : 'Does not reconcile'}: approved = paid + to pay + ${plural(pay.approved_on_hold_lines ?? 0, 'approved line')} on hold (${inr2(pay.approved_on_hold_amount)}).`}
+                        </p>
+                      </>
+                    )}
                   </>
                 ) : <p className="text-xs text-[#86868B]">No run for this month yet.</p>}
               </div>

@@ -294,6 +294,89 @@ export function PaymentPill({ status, reason }) {
   );
 }
 
+// ── Payment approval words ──────────────────────────────────────────────────
+// Once the month's salary is approved, each person's line is approved for payment (or not) by an approver;
+// only an approved line can be marked paid. The pill's hover says who approved it, when, and the note (or, for an
+// undone approval, why it was undone).
+export const APPROVAL_STATUS = {
+  unapproved: { label: 'Unapproved', tone: 'bg-gray-100 text-gray-600' },
+  approved: { label: 'Approved', tone: 'bg-sky-50 text-[#0064D2]' },
+};
+export const approvalOf = line => (line?.approval_status === 'approved' ? 'approved' : 'unapproved');
+// Who approved a line: a name, else the user id; an approved line with nobody recorded was paid before per-person
+// approval existed and was marked approved by the migration (20261103120000) — shown as "Migration".
+export function approverName(line) {
+  if (line?.approved_by_name) return line.approved_by_name;
+  if (line?.approved_by != null) return `user #${line.approved_by}`;
+  return approvalOf(line) === 'approved' ? 'Migration' : '';
+}
+// A paid line's batch number, or '—' (a line paid on its own or with no pay channel has none).
+export const batchText = line => line?.payment_batch_no || '—';
+export function approvalTitle(line) {
+  const st = approvalOf(line);
+  const who = approverName(line);
+  if (st === 'approved') {
+    return [`Approved for payment${who ? ` by ${who}` : ''}`, line?.approved_at ? whenText(line.approved_at) : '',
+      line?.approval_note ? `“${line.approval_note}”` : ''].filter(Boolean).join(' · ');
+  }
+  return line?.approval_note ? `Not approved for payment · last undone: “${line.approval_note}”` : 'Not approved for payment yet';
+}
+
+export function ApprovalPill({ line }) {
+  const st = approvalOf(line);
+  const meta = APPROVAL_STATUS[st];
+  const title = approvalTitle(line);
+  return (
+    <span title={title} aria-label={title}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${meta.tone}`}>
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
+      {meta.label}
+    </span>
+  );
+}
+
+// ── Decision history (GET /hr/runs/:month/lines/:personId/history) ──────────
+
+const HISTORY_TO = { approved: 'Approved for payment', unapproved: 'Approval undone', paid: 'Marked paid', pending: 'Marked unpaid',
+  on_hold: 'Put on hold', failed: 'Payment failed', reversed: 'Payment reversed' };
+function historyText(h) {
+  if (h.action === 'batch') return 'Paid in a payment batch';
+  if (h.action === 'payment_status' && h.to === 'on_hold' && h.from === 'on_hold') return 'Hold reason changed';
+  if (h.action === 'payment_status' && h.to === 'pending' && h.from === 'on_hold') return 'Hold released';
+  return HISTORY_TO[h.to] || h.label || h.action;
+}
+
+function LineHistory({ month, personId, version }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    setError('');
+    hrApi.lineHistory(month, personId).then(d => { if (live) setRows(list(d)); },
+      e => { if (live) { setRows([]); setError(refusalText(e)); } });
+    return () => { live = false; };
+  }, [month, personId, version]);
+  if (error) return <InlineError message={error} />;
+  if (!rows) return <p className="text-xs text-[#86868B]">Reading the history…</p>;
+  if (!rows.length) return <p className="text-xs text-[#86868B]">No approval or payment decision on this line yet.</p>;
+  return (
+    <ol className="space-y-1.5 text-xs">
+      {[...rows].reverse().map(h => (
+        <li key={h.id} className="rounded-xl bg-white/60 px-3 py-2">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-bold text-[#1D1D1F]">{historyText(h)}</span>
+            {h.batch_no && <span className="font-mono text-[11px] text-[#0064D2]">{h.batch_no}</span>}
+            {h.reference && <span className="font-mono text-[11px] text-[#6E6E73]">ref {h.reference}</span>}
+            <span className="ml-auto text-[11px] text-[#86868B]">{[h.by && `by ${h.by}`, whenText(h.at)].filter(Boolean).join(' · ')}</span>
+          </div>
+          {h.reason && <p className="mt-0.5 text-[11px] text-[#515154]">“{h.reason}”</p>}
+          {h.via === 'send-back' && <p className="mt-0.5 text-[11px] text-[#86868B]">Undone automatically when the run went back to draft.</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 // ── The inputs form ─────────────────────────────────────────────────────────
 // Exactly the run_inputs columns (spec §7). Blank is "not given" and is sent as null — for a typed
 // holiday or a typed recovery, blank and 0 mean different things, so the text is kept as typed.
@@ -556,7 +639,7 @@ function LastMonth({ prevMonth, loadPrevious, personId, line, input, variance })
 
 // ── Payment marks (a finalised line) ────────────────────────────────────────
 
-function PaymentBox({ month, personId, line, level, onChanged }) {
+function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
   const toast = useToast();
   const status = line?.payment_status || 'pending';
   const canMark = levelAtLeast(level, 'operator');
@@ -565,8 +648,9 @@ function PaymentBox({ month, personId, line, level, onChanged }) {
   const [ref, setRef] = useState('');
   const [error, setError] = useState('');
   const held = status === 'on_hold';
+  const approved = approvalOf(line) === 'approved';
   const offers = held ? [] : [
-    status !== 'paid' && { key: 'paid', label: 'Mark paid' },
+    status !== 'paid' && approved && { key: 'paid', label: 'Mark paid' },
     (status === 'pending' || status === 'paid') && { key: 'failed', label: 'Mark failed' },
     status === 'paid' && canReverse && { key: 'reversed', label: 'Reverse payment' },
   ].filter(Boolean);
@@ -582,6 +666,7 @@ function PaymentBox({ month, personId, line, level, onChanged }) {
     setAct(null);
     setRef('');
     onChanged?.();
+    onDecided?.();
   };
   return (
     <div className="space-y-2">
@@ -598,6 +683,11 @@ function PaymentBox({ month, personId, line, level, onChanged }) {
             {[line.held_by_name && `by ${line.held_by_name}`, line.held_at && fmt.dt(line.held_at)].filter(Boolean).join(' · ')}
           </span>}
           <span className="mt-1 block text-[11px]">A line on hold is not paid. To release it, tick it in the register and choose Mark unpaid.</span>
+        </p>
+      )}
+      {!approved && status !== 'paid' && (
+        <p className="rounded-xl border border-[#1D1D1F]/[0.06] bg-white/60 px-3 py-2 text-xs text-[#515154]">
+          Not approved for payment yet, so it cannot be marked paid. An approver ticks it in the register and chooses Approve.
         </p>
       )}
       {canMark && !act && offers.length > 0 && (
@@ -877,6 +967,11 @@ export default function RunLineDrawer({
   const leftOut = input && input.include === false;
   const notInRun = !input && !line;
   const final = status === 'finalised';
+  const approvable = status === 'approved' || final;
+  // The history is read again when the line's decisions change (a reload after an action) or after a mark here.
+  const [historyBump, setHistoryBump] = useState(0);
+  const historyVersion = [line?.approval_status, line?.approved_at, line?.payment_status, line?.paid_at, line?.held_at,
+    line?.hold_reason, historyBump].join('|');
   const slipHref = `/hr/payslips/${month}?person_ids=${encodeURIComponent(String(personId))}`;
 
   return createPortal(
@@ -895,6 +990,7 @@ export default function RunLineDrawer({
                 {leftOut && <span className="rounded-full bg-[#1D1D1F]/[0.07] px-2 py-0.5 text-[11px] font-bold text-[#515154]">Left out this month</span>}
                 {notInRun && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Not in this run</span>}
                 {(final || shown?.payment_status === 'on_hold') && shown && <PaymentPill status={shown.payment_status || 'pending'} reason={shown.hold_reason} />}
+                {approvable && shown && <ApprovalPill line={shown} />}
               </div>
               <p className="truncate text-[11px] text-[#6E6E73]">{monthLabel(month)}{sub ? ` · ${sub}` : ''}</p>
             </div>
@@ -1007,7 +1103,15 @@ export default function RunLineDrawer({
 
             {(final || shown?.payment_status === 'on_hold') && shown && (
               <Section title="Payment" icon={CheckCircle2}>
-                <PaymentBox month={month} personId={personId} line={shown} level={level} onChanged={onChanged} />
+                <PaymentBox month={month} personId={personId} line={shown} level={level} onChanged={onChanged}
+                  onDecided={() => setHistoryBump(v => v + 1)} />
+              </Section>
+            )}
+
+            {shown && (approvable || shown.payment_status !== 'pending') && (
+              <Section title="Approval and payment history" icon={History} right={<ApprovalPill line={shown} />}>
+                <p className="mb-2 text-[11px] text-[#6E6E73]">{approvalTitle(shown)}</p>
+                <LineHistory month={month} personId={personId} version={historyVersion} />
               </Section>
             )}
           </div>

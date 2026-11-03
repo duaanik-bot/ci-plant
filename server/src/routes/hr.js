@@ -1050,13 +1050,22 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
       });
       // Paid / unpaid / on hold for the month (hr/payment-status.js): every line in exactly one, so the three add up to
       // the run. A line can be put on hold before the run is finalised, so this is reported at any run status.
+      // Approved / not approved for payment (per person, once the run is approved), and the approved lines
+      // reconciled: approved = paid + still to pay + on hold among them.
       const t = paymentTotals(await q(
-        `SELECT payment_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
+        `SELECT payment_status, approval_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
            FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [run.id]));
+      const rec = t.reconciliation;
       payments = {
         paid_lines: t.paid.count, paid_amount: t.paid.amount,
         pending_lines: t.unpaid.count, pending_amount: t.unpaid.amount,
         on_hold_lines: t.on_hold.count, on_hold_amount: t.on_hold.amount,
+        approved_lines: t.approved.count, approved_amount: t.approved.amount,
+        unapproved_lines: t.unapproved.count, unapproved_amount: t.unapproved.amount,
+        approved_unpaid_lines: rec.approved_unpaid.count, approved_unpaid_amount: rec.approved_unpaid.amount,
+        approved_on_hold_lines: rec.approved_on_hold.count, approved_on_hold_amount: rec.approved_on_hold.amount,
+        reconciled: rec.balanced,
+        approvable: run.status === 'approved' || run.status === 'finalised',
         final: run.status === 'finalised',
       };
     }

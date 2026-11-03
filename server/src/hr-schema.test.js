@@ -341,3 +341,49 @@ test('init() replays the hold migration right after the HR one, once', () => {
   assert.match(src, /await pool\.query\(migration\('20261016120000_hr_payroll\.sql'\)\);\n\s*\/\/ HR payment hold[^\n]*\n\s*await pool\.query\(migration\('20261018120000_hr_payment_hold\.sql'\)\);/);
   assert.equal(src.split("migration('20261018120000_hr_payment_hold.sql')").length, 2, 'replayed once');
 });
+
+// ── Per-person payment approval (supabase/migrations/20261103120000_hr_line_approval.sql) ──
+
+const approvalPath = fileURLToPath(new URL('../../supabase/migrations/20261103120000_hr_line_approval.sql', import.meta.url));
+const approvalCode = () => fs.readFileSync(approvalPath, 'utf8').replace(/--[^\n]*/g, '');
+
+test('the approval migration opens with a transaction-local lock timeout and drops nothing', () => {
+  const code = approvalCode();
+  assert.match(code.trimStart(), /^set local lock_timeout = '1s';/, 'the first statement');
+  assert.doesNotMatch(code, /(^|\n)\s*set\s+lock_timeout/i);
+  assert.doesNotMatch(code, /\bdrop\b/i);
+  assert.doesNotMatch(code, /\btruncate\b/i);
+  assert.doesNotMatch(code, /\bdelete\s+from\b/i);
+  assert.doesNotMatch(code, /\bgrant\b/i);
+  assert.doesNotMatch(code, /references\s+(public\.|users\b|employees\b)/i);
+});
+
+test('the approval migration adds the four approval columns, batch_no and the index, each only when missing', () => {
+  const flat = approvalCode().replace(/\s+/g, ' ');
+  assert.match(flat, /alter table hr\.run_lines add column if not exists approval_status text not null default 'unapproved' constraint run_lines_approval_status_check check \(approval_status in \('unapproved', 'approved'\)\);/);
+  for (const [c, type] of [['approved_by', 'integer'], ['approved_at', 'timestamptz'], ['approval_note', 'text']]) {
+    assert.match(flat, new RegExp(`alter table hr\\.run_lines add column if not exists ${c} ${type};`), c);
+    assert.match(flat, new RegExp(`table_schema = 'hr' and table_name = 'run_lines' and column_name = '${c}'`), `${c} is added only when missing`);
+  }
+  assert.match(flat, /table_schema = 'hr' and table_name = 'run_lines' and column_name = 'approval_status'/);
+  assert.match(flat, /alter table hr\.payment_batches add column if not exists batch_no text constraint payment_batches_batch_no_key unique;/);
+  assert.match(flat, /table_schema = 'hr' and table_name = 'payment_batches' and column_name = 'batch_no'/);
+  assert.match(flat, /create index if not exists run_lines_approval_idx on hr\.run_lines \(run_id, approval_status\);/);
+  assert.match(flat, /indexname = 'run_lines_approval_idx'/);
+});
+
+test('the approval migration fills rows only in the branch that adds the column (a replay rewrites nothing)', () => {
+  const code = approvalCode();
+  // Every UPDATE sits inside an `if fresh then` / `if not exists (… batch_no …) then` branch, never at the top level.
+  const updates = [...code.matchAll(/\bupdate\s+hr\.(\w+)/gi)].map((m) => m[1]);
+  assert.deepEqual(updates, ['run_lines', 'payment_batches']);
+  const flat = code.replace(/\s+/g, ' ');
+  assert.match(flat, /if fresh then alter table hr\.run_lines add column if not exists approval_status [^;]*;\s*update hr\.run_lines set approval_status = 'approved'[^;]* where payment_status = 'paid';\s*end if;/);
+  assert.match(flat, /add column if not exists batch_no text constraint payment_batches_batch_no_key unique;\s*update hr\.payment_batches b set batch_no = 'CI-PAY-' \|\| lpad\(n\.rn::text, 4, '0'\)[^;]*;\s*end if;/);
+});
+
+test('init() replays the approval migration right after the hold one, once', () => {
+  const src = fs.readFileSync(dbJs, 'utf8');
+  assert.match(src, /await pool\.query\(migration\('20261018120000_hr_payment_hold\.sql'\)\);\n\s*\/\/ HR line approval[^\n]*\n\s*await pool\.query\(migration\('20261103120000_hr_line_approval\.sql'\)\);/);
+  assert.equal(src.split("migration('20261103120000_hr_line_approval.sql')").length, 2, 'replayed once');
+});
