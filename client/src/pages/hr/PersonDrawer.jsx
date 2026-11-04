@@ -1161,6 +1161,14 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
               </div>
               {sub && <p className="truncate text-[11px] text-[#6E6E73]">{sub}</p>}
             </div>
+            {/* Duplicate in plain sight (owner's request 2026-11-04): a copy with the same department, channel and pay setup,
+                needing only a new code and name. The rest stays in the menu. */}
+            {!isNew && person && actions.items(person).some(x => x.key === 'duplicate') && (
+              <Button size="sm" variant="secondary" onClick={() => actions.items(person).find(x => x.key === 'duplicate').onClick()}
+                title="Make a copy of this person — same department, channel and salary setup; you give the new code and name">
+                <Copy size={13} /> Duplicate
+              </Button>
+            )}
             {!isNew && person && actions.items(person).length > 0 && <ActionMenu items={actions.items(person)} label="Person actions" />}
             <button type="button" onClick={requestClose} aria-label="Close"
               className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">

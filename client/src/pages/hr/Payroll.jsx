@@ -54,7 +54,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, Calculator, Check, ChevronLeft, ChevronRight, CornerUpLeft, FileUp, HandCoins, Lock, RefreshCw, Send,
-  ShieldCheck, Wallet,
+  ShieldCheck, UserPlus, Wallet,
 } from 'lucide-react';
 import {
   Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiRow, Modal, SubTabs, Textarea, rowMatches, useToast,
@@ -1246,6 +1246,12 @@ export default function Payroll({ level }) {
               <Button variant="secondary" onClick={() => openWizard(null)}><FileUp size={14} /> {pend ? 'Import a new sheet' : 'Import sheet'}</Button>
             )}
             {canOperate && <Button variant="secondary" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button>}
+            {canOperate && (
+              <Button variant="secondary" title="Add a new person to the payroll master — details, salary setup, bank — without leaving Payroll"
+                onClick={() => setMaster({ id: null, tab: 'details', key: ++masterKey.current, changed: false })}>
+                <UserPlus size={14} /> New person
+              </Button>
+            )}
             {status === 'draft' && canOperate && <Button variant="secondary" onClick={recalc}><Calculator size={14} /> Recalculate</Button>}
             {status === 'draft' && canOperate && (
               <Button onClick={() => setDialog({ kind: 'submit' })} disabled={submitBlocked}><Send size={14} /> Submit for approval</Button>
