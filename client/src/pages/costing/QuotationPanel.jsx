@@ -63,7 +63,7 @@ export default function QuotationPanel({ id, canMarkSent, onClose, onChanged }) 
   const act = async kind => {
     if (kind === 'draft') {
       const r = await api.post(`/costing/quotations/${id}/draft`, {});
-      toast.success(r.fired?.ok ? `Claude is on it — job ${r.job.id}` : `Job ${r.job.id} is waiting for Claude${r.fired?.error ? ` (${r.fired.error})` : ''}`);
+      toast.success(`Job ${r.job.id} queued — the draft appears in Gmail when the enquiry desk robot next runs`);
       setQt(r.quotation);
     } else if (kind === 'cancel') {
       setQt(await api.post(`/costing/quotations/${id}/cancel`, {}));

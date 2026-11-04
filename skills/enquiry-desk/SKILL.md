@@ -37,21 +37,28 @@ sends it from Gmail. There is no send job.
 
 ## 1. Set up
 
-You need the CI Plant address and the AVS robot key (the same key the AVS check uses):
+**Who runs this:** the Claude that has the job's mailbox connected as its Gmail — never the AVS photo-check
+routine at claude.ai. The owner's AVS mailbox rule keeps that routine off dua.anik@gmail.com, and it reads
+mppchd@gmail.com only in Chrome on the office computer.
 
-- **In the AVS routine at claude.ai**: the routine prompt reads the key from `avs.settings` (Supabase,
-  project `ylbfeptgefzimcqnwphy`) and writes `/tmp/enq/env`. `CI_PLANT_URL` is `https://motionci.in`.
-- **On a PC**: put them in `~/.config/ci-plant/enquiry-desk.env`:
+| Mailbox  | Address            | Run by                                                           |
+|----------|--------------------|------------------------------------------------------------------|
+| trial    | dua.anik@gmail.com | Claude on the owner's Mac, whose Gmail connector is this mailbox |
+| business | mppchd@gmail.com   | a Claude whose Gmail connector is mppchd@gmail.com               |
 
-      CI_PLANT_URL=https://motionci.in
-      CI_ROBOT_KEY=<the key>
+You need the CI Plant address and the AVS robot key (the same key the AVS check uses). Read the key with the
+Supabase connector (project `ylbfeptgefzimcqnwphy`): `select value from avs.settings where key = 'robot_key'`,
+and put it in `~/.config/ci-plant/enquiry-desk.env` (`chmod 600`) without printing it:
+
+    CI_PLANT_URL=https://motionci.in
+    CI_ROBOT_KEY=<the key>
 
 The helper `scripts/desk.py` (Python 3, nothing to install) talks to CI Plant. If it is not beside this
 file, fetch it:
 
     curl -sS -H "x-avs-robot-key: $CI_ROBOT_KEY" "$CI_PLANT_URL/api/avs/robot/enquiry-desk/desk.py" -o desk.py
 
-    python3 desk.py jobs                     the jobs waiting
+    python3 desk.py jobs [<mailbox email>]   the jobs waiting (for that mailbox only)
     python3 desk.py claim <n> > brief.json   take job n; prints its brief
     python3 desk.py file <n> mails.json      file mails read for a fetch (up to 25 a call)
     python3 desk.py attachment <n> out.pdf   the quotation PDF of a draft job (checks its sha256)
@@ -59,12 +66,15 @@ file, fetch it:
     python3 desk.py done <n> '<json>'        finish the job with its result
     python3 desk.py fail <n> "<why>"         finish the job as failed
 
-## 2. Claim the job and check the mailbox
+## 2. Check your mailbox, then claim a job for it
 
-1. The job number is in the message ("CI Plant enquiry job 12"). No number: `desk.py jobs` and take the
-   oldest. Claim it: `python3 desk.py claim 12 > brief.json`. A 409 answer means another run has it: stop.
-2. Check your Gmail is the job's mailbox: Gmail `search_threads` with
-   `deliveredto:<brief.mailbox.email> newer_than:90d`, page size 1. **No thread → wrong mailbox**:
+1. Which mailbox is your Gmail? Gmail `search_threads` with `deliveredto:dua.anik@gmail.com newer_than:90d`,
+   page size 1 — a thread means you are the trial mailbox; otherwise try `deliveredto:mppchd@gmail.com`. Neither
+   → stop: this Claude cannot work the desk.
+2. `python3 desk.py jobs <your mailbox address>` lists only that mailbox's jobs. Never claim a job for another
+   mailbox: leave it for the Claude that has it. Take the job the message names, else the oldest:
+   `python3 desk.py claim 12 > brief.json`. A 409 answer means another run has it: stop.
+3. Check `brief.mailbox.email` is your mailbox. If it is not (a claim made by mistake):
    `desk.py fail 12 "This Claude's Gmail is not <email>"` and stop.
 
 ## 3. A fetch

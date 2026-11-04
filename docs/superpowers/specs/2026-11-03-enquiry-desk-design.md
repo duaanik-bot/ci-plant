@@ -15,20 +15,21 @@ with the internal costing never reaching the customer.
 ## Built on AVS (the owner's call)
 
 The AVS robot already reads the company mailbox with Claude (the order intake keys POs from mppchd@gmail.com)
-and CI Plant already holds its keys in `avs.settings`: the robot key (`x-avs-robot-key`) for CI Plant's robot
-routes and the Claude link (the AVS routine's API trigger) that CI Plant fires. The enquiry desk uses those
-and nothing new:
+and CI Plant already holds its key in `avs.settings`: the robot key (`x-avs-robot-key`) for CI Plant's robot
+routes. The enquiry desk uses that and nothing new:
 
 - **Reading the mailbox and writing the reply is Claude's job, through the Gmail connector of the Claude
   account that runs it.** No Google Cloud project, OAuth client or Apps Script change. The mailbox is
   whichever Gmail that Claude has connected — the same skill works on any account. Each account is
   authorised once, in its own Claude, by Google's own consent screen.
-- **CI Plant queues the work** (`enquiry_jobs`): Fetch and Draft in Gmail (never a send). It fires the AVS routine with
-  `CI Plant enquiry job <n>`; the routine (or anyone running the skill) claims the job through the robot
-  routes, does it, and reports back. A job nobody claims waits; nothing is lost.
-- **The procedure lives once**, in `skills/enquiry-desk/SKILL.md`. CI Plant serves it to the routine
-  (`GET /api/avs/robot/enquiry-desk/procedure`), and the same folder zips into a Claude skill — so the cloud
-  routine, the office PC and a person's Claude follow one text.
+- **CI Plant queues the work** (`enquiry_jobs`): Fetch and Draft in Gmail (never a send). The job waits for
+  the enquiry desk robot — the Claude that has that mailbox's Gmail, running the skill — which claims it
+  through the robot routes, does it, and reports back. A job nobody claims waits; nothing is lost.
+- **Never the AVS photo-check routine** (found in the live trial, 4 Nov): the owner's AVS mailbox rule (30 Sep)
+  keeps AVS's Claude off dua.anik@gmail.com, and AVS reads mppchd@gmail.com only in Chrome on the office
+  computer. So CI Plant does not start that routine for an enquiry job, and its prompt has no enquiry branch.
+- **The procedure lives once**, in `skills/enquiry-desk/SKILL.md`. CI Plant serves it
+  (`GET /api/avs/robot/enquiry-desk/procedure`), and the same folder zips into a Claude skill.
 
 ## Two mailboxes, never confused
 
@@ -115,10 +116,9 @@ Enquiries can also be added by hand (phone, WhatsApp).
 
 ## Owner's one-time steps (none needs a developer)
 
-1. Business: in the AVS routine at claude.ai, paste the updated prompt from AVS → Setup (it adds the enquiry
-   branch at the top; AVS checks run as before). Its Gmail connector is already the business mailbox.
-2. Trial: nothing — Claude on this Mac has dua.anik@gmail.com connected; the skill runs here.
-3. After the trial is approved: upload `enquiry-desk.zip` to the Claude account(s) that will run it.
+1. Trial: nothing — Claude on the owner's Mac has dua.anik@gmail.com connected and the skill installed.
+2. Business, when the trial is approved: a Claude whose Gmail connector is mppchd@gmail.com, with the skill
+   (`enquiry-desk-skill.zip`) added; then switch the desk to Business in Settings.
 
 ## Non-goals
 

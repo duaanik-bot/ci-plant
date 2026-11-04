@@ -140,7 +140,8 @@ describe('Enquiry desk — through the real app', {
     assert.equal(f.status, 201);
     fetchJob = f.body.job;
     assert.equal(fetchJob.status, 'queued');
-    assert.equal(fetchJob.fire_status, 'not_linked');
+    // CI Plant never starts the AVS cloud routine for an enquiry job: the job waits for the desk robot.
+    assert.equal(fetchJob.fire_status, 'waiting');
     const again = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
     assert.equal(again.body.already, true);
     assert.equal(again.body.job.id, fetchJob.id);

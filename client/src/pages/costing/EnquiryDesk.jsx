@@ -33,8 +33,7 @@ function JobLine({ job }) {
   if (!job) return <span className="text-xs text-slate-500">No fetch yet.</span>;
   const r = job.result || {};
   const text = {
-    queued: job.fire_status === 'fired' ? 'Claude has been started — it picks the job up in a minute or two.'
-      : 'Waiting for Claude. It runs the job when the enquiry desk skill or the AVS robot next runs.',
+    queued: 'Waiting for Claude — the enquiry desk robot (Claude with this mailbox\'s Gmail) picks it up when it next runs.',
     working: `${job.claimed_by || 'Claude'} is reading the mailbox…`,
     done: `Done ${dateText(job.finished_at)}${r.filed != null ? ` — ${plural(r.filed, 'mail')} filed${r.skipped ? `, ${r.skipped} filed before` : ''}` : ''}.`,
     failed: `Failed: ${job.error}`,
@@ -95,7 +94,7 @@ export default function EnquiryDesk({ onPushSingle, onPushBulk, onOpenCosting })
 
   const fetchMail = async () => {
     const r = await api.post('/costing/enquiry-desk/fetch', {});
-    toast.success(r.already ? `Job ${r.job.id} is already with Claude` : r.fired?.ok ? 'Claude is reading the mailbox' : `Fetch queued (job ${r.job.id}) — waiting for Claude`);
+    toast.success(r.already ? `Job ${r.job.id} is already waiting for Claude` : `Fetch queued (job ${r.job.id}) — Claude reads the mailbox when the enquiry desk robot next runs`);
     await loadDesk();
   };
 
@@ -309,7 +308,7 @@ function DeskSettings({ desk, onSaved }) {
         <Field label="Terms on every quotation"><Textarea rows={4} value={s.terms} onChange={e => setS({ ...s, terms: e.target.value })} /></Field>
         <Field label="First fetch looks back (days)"><Input inputMode="numeric" value={s.fetch_days} onChange={e => setS({ ...s, fetch_days: e.target.value })} /></Field>
       </div>
-      <div className="text-xs text-slate-500">Claude link: {desk.claude_linked ? 'set (AVS → Setup) — Fetch and Send start Claude at once.' : 'not set on this database — jobs wait until the enquiry desk skill runs.'}</div>
+      <div className="text-xs text-slate-500">The robot that reads and drafts mail is Claude with the mailbox's own Gmail, running the enquiry desk skill — not the AVS photo-check routine.</div>
       <Button onClick={save}>Save settings</Button>
     </div>
   );

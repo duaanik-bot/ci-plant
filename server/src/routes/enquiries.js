@@ -3,7 +3,10 @@
 // Under the Costing tick (it shows prices); Finalise and Mark as sent need the Management right; Settings, an admin.
 // CI Plant never sends a mail (owner, 3 Nov 2026): a reply is only ever saved as a Gmail draft in the customer's
 // thread, and a person checks it and sends it from Gmail.
-// The mailbox itself is read and written by Claude through the AVS robot (routes/enquiry-robot.js).
+// The mailbox itself is read and written by Claude — the enquiry-desk skill, run by the Claude that has the
+// mailbox's Gmail — through the robot routes (routes/enquiry-robot.js). CI Plant only queues the job and waits: it
+// never starts the AVS cloud routine, which by AVS's own mailbox rule never reads dua.anik@gmail.com and reads
+// mppchd@gmail.com only in Chrome on the office computer (owner's rule, 30 Sep 2026).
 //
 //   GET  /costing/enquiry-desk                 mailboxes, settings, rights, counts, the latest jobs
 //   PUT  /costing/enquiry-desk/settings        mailbox in use, who a mailbox replies to, terms, words (admin)
@@ -24,7 +27,6 @@ import crypto from 'node:crypto';
 import { q, one, tx } from '../db.js';
 import { audit, nextNumber, lockDocNumber } from '../helpers.js';
 import { mayCost, mayApproveCosting } from '../costing-match.js';
-import { avsSettings, fireRoutine, linked } from './avs-intake.js';
 import {
   STAGE_SQL, STATUS_LABEL, stageOf, cleanItem, priceRows, ceilPaise, quotationLines, groupByCustomer,
   composeReply, replySubject, replyRecipient,
@@ -76,28 +78,23 @@ const MAILBOX_COLS = `key, email, label, send_to, in_use`;
 const mailboxes = () => q(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes ORDER BY key DESC`);
 const inUse = async () => (await one(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes WHERE in_use`)) || null;
 const settings = () => one('SELECT terms, opening, closing, fetch_days FROM enquiry_settings WHERE id = 1');
-// AVS's own keys, when this database has AVS (every local one does not).
-async function avsCfg() {
-  try { return await avsSettings(); } catch { return {}; }
-}
 
 const JOB_COLS = `j.id, j.kind, j.mailbox, j.mailbox_email, j.quotation_id, j.status, j.error, j.result, j.fire_status,
   j.queued_by_name, j.claimed_by, j.queued_at, j.claimed_at, j.finished_at`;
 
 r.get('/costing/enquiry-desk', async (req, res, next) => {
   try {
-    const [boxes, s, counts, jobs, cfg] = await Promise.all([
+    const [boxes, s, counts, jobs] = await Promise.all([
       mailboxes(), settings(),
       q(`SELECT ${STAGE_SQL} AS stage, count(*)::int AS n FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id GROUP BY 1`),
       q(`SELECT ${JOB_COLS} FROM enquiry_jobs j ORDER BY j.id DESC LIMIT 10`),
-      avsCfg(),
     ]);
     const quotes = await q(`SELECT status, count(*)::int AS n FROM quotations GROUP BY status`);
     res.json({
       mailboxes: boxes, in_use: boxes.find(b => b.in_use) || null, settings: s,
       counts: Object.fromEntries(counts.map(x => [x.stage, x.n])),
       quotation_counts: Object.fromEntries(quotes.map(x => [x.status, x.n])),
-      jobs, claude_linked: linked(cfg).claude,
+      jobs,
       can_finalise: mayApproveCosting(req.costingUser), can_admin: req.costingUser.role === 'admin',
       statuses: STATUS_LABEL,
     });
@@ -135,13 +132,7 @@ r.put('/costing/enquiry-desk/settings', async (req, res, next) => {
 });
 
 // ── jobs: what Claude is asked to do ─────────────────────────────────────────────────────────────
-// Claude is started with a pointer only; it reads the job from CI Plant with the robot key.
-async function startClaude(jobId, kind, mailboxEmail) {
-  const cfg = await avsCfg();
-  const out = await fireRoutine(cfg, `CI Plant enquiry job ${jobId} (${kind}, ${mailboxEmail}). Follow the enquiry desk procedure.`);
-  await q(`UPDATE enquiry_jobs SET fire_status = $2 WHERE id = $1`, [jobId, out.status]);
-  return out;
-}
+// A job waits for the enquiry desk robot — Claude with this mailbox's Gmail — to claim it with the robot key.
 const jobById = id => one(`SELECT ${JOB_COLS} FROM enquiry_jobs j WHERE j.id = $1`, [id]);
 
 r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
@@ -156,12 +147,11 @@ r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
     // From the last finished fetch of this mailbox (a day's overlap; a mail filed twice is refused), else fetch_days back.
     const last = await one(`SELECT finished_at FROM enquiry_jobs WHERE kind = 'fetch' AND mailbox_email = $1 AND status = 'done' ORDER BY id DESC LIMIT 1`, [box.email]);
     const since = new Date((last?.finished_at ? new Date(last.finished_at).getTime() : Date.now() - (s?.fetch_days || 7) * 864e5) - 864e5);
-    const job = await one(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, brief, queued_by, queued_by_name)
-                           VALUES ('fetch', $1, $2, $3, $4, $5) RETURNING id`,
+    const job = await one(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, brief, queued_by, queued_by_name, fire_status)
+                           VALUES ('fetch', $1, $2, $3, $4, $5, 'waiting') RETURNING id`,
     [box.key, box.email, { since: plantDateStr(since) }, u.id, u.name]);
     await audit('enquiry_job', job.id, 'fetch', `Fetch enquiries — job ${job.id}`, q, u.name);
-    const fired = await startClaude(job.id, 'fetch', box.email);
-    res.status(201).json({ job: await jobById(job.id), fired });
+    res.status(201).json({ job: await jobById(job.id) });
   } catch (e) { next(e); }
 });
 
@@ -622,16 +612,15 @@ r.post('/costing/quotations/:id/draft', async (req, res, next) => {
     const job = await tx(async (qc, oc) => {
       const cur = await oc(`SELECT status FROM quotations WHERE id = $1 FOR UPDATE`, [id]);
       if (!['ready', 'drafted'].includes(cur?.status)) throw fail(409, `${qt.quotation_no} changed meanwhile — open it again.`);
-      const j = await oc(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, quotation_id, brief, attachment, attachment_name, attachment_sha256, queued_by, queued_by_name)
-                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      const j = await oc(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, quotation_id, brief, attachment, attachment_name, attachment_sha256, queued_by, queued_by_name, fire_status)
+                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'waiting') RETURNING id`,
       ['draft', box.key, box.email, id, brief, pdf, `${qt.quotation_no}.pdf`, sha, u.id, u.name]);
       await qc(`UPDATE quotations SET status = 'queued', job_id = $2, updated_at = now(), updated_by_name = $3 WHERE id = $1`, [id, j.id, u.name]);
       await enquiryEvent(qc, { quotationId: id, action: 'draft', detail: { job: j.id, to: brief.to, trial: brief.trial, replaces_draft: qt.gmail_draft_id || null } }, u);
       await audit('quotation', id, 'draft', `${qt.quotation_no} — job ${j.id}`, qc, u.name);
       return j;
     });
-    const fired = await startClaude(job.id, 'draft', box.email);
-    res.status(201).json({ job: await jobById(job.id), fired, quotation: await quotationById(id) });
+    res.status(201).json({ job: await jobById(job.id), quotation: await quotationById(id) });
   } catch (e) { next(e); }
 });
 

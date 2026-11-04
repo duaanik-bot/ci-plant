@@ -66,7 +66,10 @@ def main(argv):
         sys.exit(__doc__)
     cmd, args = argv[0], argv[1:]
     if cmd == 'jobs':
-        return out(call('GET', '/enquiry-jobs'))
+        jobs = call('GET', '/enquiry-jobs')
+        if args:
+            jobs = [j for j in jobs if j.get('mailbox_email', '').lower() == args[0].lower()]
+        return out(jobs)
     if cmd == 'claim' and len(args) == 1:
         return out(call('POST', f'/enquiry-jobs/{int(args[0])}/claim', {}))
     if cmd == 'file' and len(args) == 2:
