@@ -77,6 +77,7 @@ import { markUncacheable } from '../data-tables.js';
 import { lockDocNumber, nextNumber, optionalText } from '../helpers.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { hrGuard, requireHr } from '../hr/access.js';
+import { assertPayVisible, canSeePay, hiddenIds } from '../hr/privacy.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
 import { recalcRun } from '../hr/runs.js';
@@ -367,8 +368,9 @@ r.get('/hr/loans', requireHr('viewer'), async (req, res, next) => {
     const rows = await q(
       `SELECT ${LOAN_COLS} ${LOAN_FROM}
         WHERE ($1::text[] IS NULL OR l.status = ANY($1::text[])) AND ($2::int IS NULL OR l.person_id = $2::int)
+          AND l.person_id <> ALL($3::int[])
         ORDER BY l.issued_on DESC, l.id DESC`,
-      [statuses, person]);
+      [statuses, person, hiddenIds(req)]);
     res.json(await loanViews(q, rows));
   } catch (e) { next(e); }
 });
@@ -379,7 +381,7 @@ r.get('/hr/loans/:id', requireHr('viewer'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Loan');
     const [row] = await q(`SELECT ${LOAN_COLS} ${LOAN_FROM} WHERE l.id = $1`, [id]);
-    if (!row) throw missing('Loan');
+    if (!row || !canSeePay(req, row.person_id)) throw missing('Loan');
     const txns = await q(LOAN_TXNS, [[id]]);
     const holidays = (await q(LOAN_HOLIDAYS, [[id]])).map((h) => h.month);
     const [loan] = await loanViews(q, [row]);
@@ -685,14 +687,15 @@ const postAdvance = (oc, req, personId, txnType, amount, date, source, note) => 
   [personId, date, txnType, amount, source, note, req.user.id]);
 
 // Everyone with an advance history, with what they owe now.
-r.get('/hr/advances', requireHr('viewer'), async (_req, res, next) => {
+r.get('/hr/advances', requireHr('viewer'), async (req, res, next) => {
   try {
     const people = await q(
       `SELECT p.id AS person_id, p.code AS person_code, p.name AS person_name, p.department, p.status,
               count(*)::int AS txn_count, max(t.txn_date)::text AS last_txn_date
          FROM hr.advance_txns t JOIN hr.people p ON p.id = t.person_id
+        WHERE p.id <> ALL($1::int[])
         GROUP BY p.id
-        ORDER BY lower(p.name), p.id`);
+        ORDER BY lower(p.name), p.id`, [hiddenIds(req)]);
     const balances = await advanceBalances(q, people.map((p) => p.person_id));
     res.json(people.map((p) => ({ ...p, balance: balances.get(p.person_id) })));
   } catch (e) { next(e); }
@@ -702,6 +705,7 @@ r.get('/hr/advances', requireHr('viewer'), async (_req, res, next) => {
 r.get('/hr/advances/:personId', requireHr('viewer'), async (req, res, next) => {
   try {
     const personId = idOf(req.params.personId, 'Person');
+    assertPayVisible(req, personId);
     const [person] = await q(`SELECT id, code, name, department, status FROM hr.people WHERE id = $1`, [personId]);
     if (!person) throw missing('Person');
     const txns = await q(ADVANCE_TXNS, [personId]);
@@ -710,10 +714,11 @@ r.get('/hr/advances/:personId', requireHr('viewer'), async (req, res, next) => {
 });
 
 // "Give advance" in the app: a 'given' row with source 'manual', posted straight away.
-r.post('/hr/advances', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/advances', requireHr('accounts'), async (req, res, next) => {
   try {
     const body = bodyOf(req);
     const personId = personIdOf(body.person_id);
+    assertPayVisible(req, personId);
     const amount = positiveOf(body.amount, 'The advance');
     const date = dateOf(body.txn_date ?? body.date, 'The date') ?? plantDateStr();
     const note = textOf(body.note, 'The note', 500);
@@ -894,15 +899,18 @@ async function personLedger(read, personId) {
 
 r.get('/hr/people/:id/ledger', requireHr('viewer'), async (req, res, next) => {
   try {
-    const ledger = await personLedger(q, idOf(req.params.id, 'Person'));
+    const id = idOf(req.params.id, 'Person');
+    assertPayVisible(req, id);
+    const ledger = await personLedger(q, id);
     if (!ledger) throw missing('Person');
     res.json(ledger);
   } catch (e) { next(e); }
 });
 
-r.post('/hr/staff-payments', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
   try {
     const pay = readStaffPayment(bodyOf(req));
+    assertPayVisible(req, pay.personId);
     const out = await tx(async (qc, oc) => {
       // The loan number FIRST, before any row lock (helpers.js document-number lock order).
       const loanNo = pay.kind === 'loan' ? await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc) : null;

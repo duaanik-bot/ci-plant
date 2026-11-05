@@ -229,6 +229,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setError(''); };
 
   const staffOptions = useMemo(() => list(people)
+    .filter(p => !p.pay_hidden)   // a person whose pay is hidden from this login cannot be paid by it
     .filter(p => p.status === 'active' || String(p.id) === String(form.person))
     .slice().sort((a, b) => String(a.display_name || a.name).localeCompare(String(b.display_name || b.name)))
     .map(p => ({ value: String(p.id), label: personLabel(p), search: [p.name, p.display_name, p.code, p.department].filter(Boolean).join(' ') })),

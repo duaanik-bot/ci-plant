@@ -39,6 +39,9 @@ import { markUncacheable } from '../data-tables.js';
 import { optionalText } from '../helpers.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { HR_LEVELS, hrGuard, levelAtLeast, requireHr } from '../hr/access.js';
+import {
+  HIDE_MODES, RESTRICTABLE, canSeePay, canSeePerson, goneIds, hiddenIds, identityOnly, notThere, restricted,
+} from '../hr/privacy.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
 import { FIELDS } from '../hr/import-parse.js';
@@ -48,7 +51,7 @@ import { normCode, normName } from '../hr/match.js';
 import { assertAliasFree, assertNameFree, lockNames } from '../hr/names.js';
 import { add, cmp, fmtPaise, rat, toPaise } from '../hr/money.js';
 import { paymentTotals } from '../hr/payment-status.js';
-import { recalcRun } from '../hr/runs.js';
+import { recalcRun, totalsOf } from '../hr/runs.js';
 
 const r = Router();
 
@@ -291,7 +294,7 @@ function statusFilter(raw) {
 }
 
 r.get('/hr/me', requireHr('viewer'), (req, res) => {
-  res.json({ level: req.hr.level, user: { id: req.user.id, name: req.user.name ?? null } });
+  res.json({ level: req.hr.level, restricted: restricted(req), user: { id: req.user.id, name: req.user.name ?? null } });
 });
 
 r.get('/hr/people', requireHr('viewer'), async (req, res, next) => {
@@ -312,15 +315,21 @@ r.get('/hr/people', requireHr('viewer'), async (req, res, next) => {
       byPerson.get(s.person_id).push(s);
     }
     const month = plantDateStr().slice(0, 7);
-    res.json(people.map((p) => ({ ...p, current_setup: effectiveSetup(byPerson.get(p.id) ?? [], month) })));
+    // A restricted login (hr/privacy.js): a person hidden completely is not listed; one whose pay is hidden is
+    // listed by who they are only.
+    res.json(people.filter((p) => canSeePerson(req, p.id)).map((p) => (canSeePay(req, p.id)
+      ? { ...p, current_setup: effectiveSetup(byPerson.get(p.id) ?? [], month) }
+      : identityOnly(p))));
   } catch (e) { next(e); }
 });
 
 r.get('/hr/people/:id', requireHr('viewer'), async (req, res, next) => {
   try {
-    const person = await personDetail(idOf(req.params.id, 'Person'), req.hr.level);
+    const id = idOf(req.params.id, 'Person');
+    if (!canSeePerson(req, id)) throw notThere('Person');
+    const person = await personDetail(id, req.hr.level);
     if (!person) throw missing('Person');
-    res.json(person);
+    res.json(canSeePay(req, id) ? person : identityOnly(person));
   } catch (e) { next(e); }
 });
 
@@ -1034,6 +1043,70 @@ r.put('/hr/access/:userId', requireHr('admin'), async (req, res, next) => {
   } catch (e) { next(refusal(e)); }
 });
 
+// ── Who a viewer / accounts login sees (hr/privacy.js) ─────────────────────
+//
+// GET  /hr/access/:userId/people — everyone (any status) with how this login sees them: 'show' | 'pay' | 'all'.
+// PUT  /hr/access/:userId/people {changes:[{person_id, mode:'show'|'pay'|'all'}]} — admin only, one transaction,
+//      one audit row per person that changes. 'show' removes the person from the hide list.
+// A level that cannot be restricted (operator and up) can still be given a list — it takes effect only if the login
+// is set back to viewer or accounts — and the answer says so in `applies`.
+const peopleSeenBy = async (userId) => {
+  const [acc] = await q(`SELECT level FROM hr.access WHERE user_id = $1`, [userId]);
+  const people = await q(
+    `SELECT p.id, p.code, p.name, p.department, p.designation, p.status, p.worker_type, coalesce(h.mode, 'show') AS mode
+       FROM hr.people p LEFT JOIN hr.access_hidden h ON h.person_id = p.id AND h.user_id = $1
+      ORDER BY lower(p.name), p.id`, [userId]);
+  return { level: acc?.level ?? null, applies: RESTRICTABLE.includes(acc?.level), people };
+};
+
+r.get('/hr/access/:userId/people', requireHr('admin'), async (req, res, next) => {
+  try { res.json(await peopleSeenBy(idOf(req.params.userId, 'User'))); } catch (e) { next(e); }
+});
+
+r.put('/hr/access/:userId/people', requireHr('admin'), async (req, res, next) => {
+  try {
+    const userId = idOf(req.params.userId, 'User');
+    const body = bodyOf(req);
+    const changes = Array.isArray(body.changes) ? body.changes : null;
+    if (!changes || !changes.length) throw bad('Send { "changes": [{ "person_id": 1, "mode": "show" | "pay" | "all" }] }');
+    if (changes.length > 2000) throw bad('Too many changes at once');
+    const wanted = new Map();
+    for (const c of changes) {
+      const id = idOf(String(c?.person_id ?? ''), 'Person');
+      const mode = c?.mode;
+      if (mode !== 'show' && !HIDE_MODES.includes(mode)) throw bad('mode must be show, pay or all');
+      wanted.set(id, mode);
+    }
+    if (Number(userId) === Number(req.user.id)) throw bad('Your own login always sees everyone');
+    await tx(async (qc, oc) => {
+      await qc(ACCESS_LOCK);
+      const user = await oc(`SELECT id, name FROM public.users WHERE id = $1`, [userId]);
+      if (!user) throw missing('User');
+      const ids = [...wanted.keys()];
+      const known = new Set((await qc(`SELECT id FROM hr.people WHERE id = ANY($1::int[])`, [ids])).map((p) => p.id));
+      const absent = ids.filter((id) => !known.has(id));
+      if (absent.length) throw bad(`No such person: ${absent.slice(0, 5).join(', ')}`);
+      const before = new Map((await qc(
+        `SELECT person_id, mode FROM hr.access_hidden WHERE user_id = $1 AND person_id = ANY($2::int[]) FOR UPDATE`,
+        [userId, ids])).map((h) => [h.person_id, h.mode]));
+      for (const [personId, mode] of wanted) {
+        const was = before.get(personId) ?? 'show';
+        if (was === mode) continue;
+        if (mode === 'show') {
+          await qc(`DELETE FROM hr.access_hidden WHERE user_id = $1 AND person_id = $2`, [userId, personId]);
+        } else {
+          await qc(
+            `INSERT INTO hr.access_hidden (user_id, person_id, mode, set_by, set_at) VALUES ($1, $2, $3, $4, now())
+             ON CONFLICT (user_id, person_id) DO UPDATE SET mode = EXCLUDED.mode, set_by = EXCLUDED.set_by, set_at = now()`,
+            [userId, personId, mode, req.user.id]);
+        }
+        await hrAudit(qc, req, 'access_hidden', userId, 'change', { user: user.name, person_id: personId, from: was, to: mode });
+      }
+    });
+    res.json(await peopleSeenBy(userId));
+  } catch (e) { next(refusal(e)); }
+});
+
 // ── Audit ───────────────────────────────────────────────────────────────────
 
 // Newest first. Filter by entity (person, pay_setup, alias, setting, pay_channel, access, run ...) and its id.
@@ -1065,8 +1138,8 @@ const LEVEL_ORDER = { block: 0, warn: 1, info: 2 };
 
 // What is still owed in the ledgers: the count of loans and of people with a balance above zero, and the
 // totals, worked out exactly by the ledger code (never summed as floats).
-async function owedLoans(month) {
-  const holders = await q(`SELECT DISTINCT person_id FROM hr.loans WHERE status = 'active'`);
+async function owedLoans(month, exclude = []) {
+  const holders = await q(`SELECT DISTINCT person_id FROM hr.loans WHERE status = 'active' AND person_id <> ALL($1::int[])`, [exclude]);
   const positions = await loanPositions(q, holders.map((h) => h.person_id), month);
   let count = 0;
   let total = ZERO;
@@ -1079,8 +1152,8 @@ async function owedLoans(month) {
   return { count, outstanding: exact(total) };
 }
 
-async function owedAdvances() {
-  const holders = await q(`SELECT DISTINCT person_id FROM hr.advance_txns`);
+async function owedAdvances(exclude = []) {
+  const holders = await q(`SELECT DISTINCT person_id FROM hr.advance_txns WHERE person_id <> ALL($1::int[])`, [exclude]);
   const balances = await advanceBalances(q, holders.map((h) => h.person_id));
   let count = 0;
   let total = ZERO;
@@ -1103,6 +1176,9 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
     if (asked !== undefined && !(typeof asked === 'string' && MONTH.test(asked))) throw bad('month must look like 2026-08');
     const month = asked ?? plantDateStr().slice(0, 7);
     const first = `${month}-01`;
+    // A restricted login (hr/privacy.js): hidden people are out of every count and total here.
+    const ex = hiddenIds(req);
+    const gone = goneIds(req);
 
     const headcount = await one(
       `SELECT count(*) FILTER (WHERE status = 'active')::int AS active,
@@ -1110,7 +1186,7 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
               count(*) FILTER (WHERE status = 'exited')::int AS exited,
               count(*) FILTER (WHERE joined_on >= $1::date AND joined_on < ($1::date + interval '1 month')::date)::int AS joined_this_month,
               count(*) FILTER (WHERE exited_on >= $1::date AND exited_on < ($1::date + interval '1 month')::date)::int AS exited_this_month
-         FROM hr.people`, [first]);
+         FROM hr.people WHERE id <> ALL($2::int[])`, [first, gone]);
     const run = await one(
       `SELECT id, month, status, days_in_month, engine_version, prepared_at, submitted_at, approved_at, finalised_at,
               sent_back_at, sent_back_reason, totals
@@ -1123,13 +1199,13 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
         `SELECT count(*)::int AS lines,
                 count(*) FILTER (WHERE flags @> '[{"level":"block"}]'::jsonb)::int AS blocked,
                 count(*) FILTER (WHERE flags @> '[{"level":"warn"}]'::jsonb AND NOT flags @> '[{"level":"block"}]'::jsonb)::int AS warned
-           FROM hr.run_lines WHERE run_id = $1`, [run.id]);
+           FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[])`, [run.id, ex]);
       const byCode = await q(
         `SELECT f.flag->>'level' AS level, f.flag->>'code' AS code, count(DISTINCT l.person_id)::int AS people
            FROM hr.run_lines l
           CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(l.flags) = 'array' THEN l.flags ELSE '[]'::jsonb END) AS f(flag)
-          WHERE l.run_id = $1 AND f.flag->>'code' IS NOT NULL
-          GROUP BY 1, 2`, [run.id]);
+          WHERE l.run_id = $1 AND f.flag->>'code' IS NOT NULL AND l.person_id <> ALL($2::int[])
+          GROUP BY 1, 2`, [run.id, ex]);
       Object.assign(exceptions, counts, {
         by_code: byCode.sort((a, b) => (LEVEL_ORDER[a.level] ?? 3) - (LEVEL_ORDER[b.level] ?? 3)
           || b.people - a.people || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)),
@@ -1140,7 +1216,7 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
       // reconciled: approved = paid + still to pay + on hold among them.
       const t = paymentTotals(await q(
         `SELECT payment_status, approval_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
-           FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [run.id]));
+           FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[]) ORDER BY person_id`, [run.id, ex]));
       const rec = t.reconciliation;
       payments = {
         paid_lines: t.paid.count, paid_amount: t.paid.amount,
@@ -1157,22 +1233,23 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
     }
     exceptions.people_without_setup = (await one(
       `SELECT count(*)::int AS n FROM hr.people p
-        WHERE p.status <> 'exited'
+        WHERE p.status <> 'exited' AND p.id <> ALL($2::int[])
           AND NOT EXISTS (SELECT 1 FROM hr.pay_setups s WHERE s.person_id = p.id AND s.effective_from <= $1::date)`,
-      [first])).n;
-    exceptions.unresolved_import_rows = (await one(
+      [first, gone])).n;
+    exceptions.unresolved_import_rows = restricted(req) ? 0 : (await one(
       `SELECT count(*)::int AS n
          FROM hr.import_rows ir JOIN hr.import_batches b ON b.id = ir.batch_id
         WHERE b.month = $1 AND b.status = 'parsed' AND ir.decision IS NULL
           AND ir.match IN ('conflict', 'unknown_code', 'ambiguous', 'unmatched')`, [month])).n;
 
+    if (run && restricted(req)) run.totals = await totalsOf(q, run.id, { exclude: ex });
     res.json({
       month,
       headcount,
       run,
       payments,
-      loans: await owedLoans(month),
-      advances: await owedAdvances(),
+      loans: await owedLoans(month, ex),
+      advances: await owedAdvances(ex),
       exceptions,
     });
   } catch (e) { next(e); }

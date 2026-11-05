@@ -53,6 +53,7 @@ const RUN_SQL = `
     JOIN hr.run_lines l ON l.run_id = r.id
     JOIN hr.people p ON p.id = l.person_id
     LEFT JOIN hr.pay_channels c ON c.code = l.pay_channel
+   WHERE l.person_id <> ALL($1::int[])
    GROUP BY r.id, r.month, r.status`;
 
 // Pay-staff advances: the channel code is in the note ("Paid via <code>" or "Paid via <code> · <note>").
@@ -63,7 +64,7 @@ const ADVANCE_SQL = `
     FROM hr.advance_txns a
     LEFT JOIN LATERAL (SELECT substring(a.note FROM '^Paid via ([^ ]+)') AS code) m ON true
     LEFT JOIN hr.pay_channels k ON k.code = m.code
-   WHERE a.kind = 'given' AND a.source = 'manual' AND a.reverses_id IS NULL
+   WHERE a.kind = 'given' AND a.source = 'manual' AND a.reverses_id IS NULL AND a.person_id <> ALL($1::int[])
    GROUP BY 1, 2`;
 
 const LOAN_SQL = `
@@ -72,7 +73,7 @@ const LOAN_SQL = `
          count(*)::int AS n, sum(l.principal)::text AS amount
     FROM hr.loans l
     LEFT JOIN hr.pay_channels k ON k.code = l.paid_via
-   WHERE NOT l.is_opening AND l.status <> 'cancelled'
+   WHERE NOT l.is_opening AND l.status <> 'cancelled' AND l.person_id <> ALL($1::int[])
    GROUP BY 1, 2`;
 
 // Adds 2-dp decimal strings exactly (paise as BigInt).
@@ -93,8 +94,9 @@ const plus = (...xs) => text(xs.reduce((t, x) => t + paise(x), 0n));
 const ZERO = '0.00';
 const emptySplit = () => ({ count: 0, amount: ZERO, cash: ZERO, bank: ZERO });
 
-export async function monthlySchedule(qx) {
-  const [runs, advances, loans] = await Promise.all([qx(RUN_SQL), qx(ADVANCE_SQL), qx(LOAN_SQL)]);
+// exclude: people left out of every figure (a restricted login's hidden people, hr/privacy.js).
+export async function monthlySchedule(qx, { exclude = [] } = {}) {
+  const [runs, advances, loans] = await Promise.all([qx(RUN_SQL, [exclude]), qx(ADVANCE_SQL, [exclude]), qx(LOAN_SQL, [exclude])]);
   const months = new Map();
   const row = (month) => {
     if (!months.has(month)) {

@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { fmt } from '../../api.js';
-import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { InlineError, StatusPill, parseNum, refusalText } from './PersonDrawer.jsx';
 import PayStaffModal, { PersonLedger } from './PayStaffModal.jsx';
 
@@ -642,7 +642,7 @@ function LastMonth({ prevMonth, loadPrevious, personId, line, input, variance })
 function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
   const toast = useToast();
   const status = line?.payment_status || 'pending';
-  const canMark = levelAtLeast(level, 'operator');
+  const canMark = levelAtLeast(level, 'accounts');
   const canReverse = levelAtLeast(level, 'approver');
   const [act, setAct] = useState(null); // 'paid' | 'failed' | 'reversed'
   const [ref, setRef] = useState('');
@@ -776,6 +776,7 @@ function LoanHolds({ month, run, personId, level, version, onChanged }) {
   const [notice, setNotice] = useState('');
   useEffect(() => {
     let live = true;
+    if (hrRestricted()) { setRows([]); return () => { live = false; }; }
     hrApi.loanHolds(month, personId).then(d => { if (live) setRows(list(d)); }, () => { if (live) setRows([]); });
     return () => { live = false; };
   }, [month, personId, tick, version]);
@@ -879,7 +880,7 @@ export default function RunLineDrawer({
   // A submitted month stays editable one person at a time (2026-11-04): the save works out only this line again and
   // undoes this person's approval for payment. Approved and finalised months are locked.
   const canEdit = levelAtLeast(level, 'operator') && (status === 'draft' || status === 'submitted');
-  const canPay = levelAtLeast(level, 'operator');
+  const canPay = levelAtLeast(level, 'accounts');
   const [ledgerVersion, setLedgerVersion] = useState(0);
   const [ledger, setLedger] = useState(null);
   const [paying, setPaying] = useState(false);

@@ -23,7 +23,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Ban, CalendarOff, HandCoins, Loader2, Pencil, Plus, Undo2, X } from 'lucide-react';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
-import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { MONTH_RE, list, paiseOf, plantMonth, plantToday, shiftMonth } from './RunLineDrawer.jsx';
 import { InlineError, parseNum, refusalText } from './PersonDrawer.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
@@ -530,9 +530,9 @@ function AdvanceDrawer({ personId, level, people, onClose, onChanged }) {
   return (
     <Drawer title={d?.person ? `${d.person.name} · advance` : 'Advance'} onClose={onClose}
       sub={d?.person ? [d.person.code, d.person.department].filter(Boolean).join(' · ') : ''}
-      actions={d && (canOperate || canApprove) && (
+      actions={d && (levelAtLeast(level, 'accounts') || canApprove) && (
         <>
-          {canOperate && <Button size="sm" variant="secondary" onClick={() => setDialog('give')}><Plus size={13} /> Give advance</Button>}
+          {levelAtLeast(level, 'accounts') && <Button size="sm" variant="secondary" onClick={() => setDialog('give')}><Plus size={13} /> Give advance</Button>}
           {canApprove && isPositive(d.balance) && <Button size="sm" variant="ghost" className="!text-red-600" onClick={() => setDialog('waive')}><Ban size={13} /> Waive</Button>}
         </>
       )}>
@@ -605,7 +605,7 @@ function AdvancesTab({ level, people }) {
           <FilterChip label="Owing" count={all.filter(a => (paiseOf(a.balance) ?? 0n) !== 0n).length} on={owing} onClick={() => setOwing(true)} />
           <FilterChip label="Everyone with a history" count={all.length} on={!owing} onClick={() => setOwing(false)} />
         </FilterGroup>
-        {canOperate && <div className="ml-auto"><Button size="sm" onClick={() => setGiving(true)}><Plus size={14} /> Give advance</Button></div>}
+        {levelAtLeast(level, 'accounts') && <div className="ml-auto"><Button size="sm" onClick={() => setGiving(true)}><Plus size={14} /> Give advance</Button></div>}
       </FilterRail>
       {failed && <LoadFailed rows={rows} onRetry={load} what="the advances" />}
       {rows == null && !failed ? <div className="p-8 text-sm text-slate-400">Loading advances…</div> : (
@@ -754,7 +754,9 @@ function AdjustmentsTab({ level, people }) {
 export default function LoansAdvances({ level }) {
   const [params, setParams] = useSearchParams();
   const asked = params.get('sub');
-  const sub = SUBS.some(s => s.key === asked) ? asked : 'loans';
+  // A restricted login (lib/hr.js) has no Adjustments: they are amounts for anyone.
+  const subs = hrRestricted() ? SUBS.filter(x => x.key !== 'adjustments') : SUBS;
+  const sub = subs.some(s => s.key === asked) ? asked : 'loans';
   const setSub = useCallback(key => setParams(p => { const n = new URLSearchParams(p); n.set('sub', key); return n; }, { replace: true }), [setParams]);
 
   // People for the pickers (anyone not marked as left).
@@ -765,23 +767,23 @@ export default function LoansAdvances({ level }) {
     return () => { live = false; };
   }, []);
 
-  // Pay channels for the Pay staff form; read once, only when the form is offered.
-  const canOperate = levelAtLeast(level, 'operator');
+  // Pay channels for the Pay staff form; read once, only when the form is offered. Accounts and up pay staff.
+  const canPay = levelAtLeast(level, 'accounts');
   const [channels, setChannels] = useState([]);
   useEffect(() => {
-    if (!canOperate) return undefined;
+    if (!canPay) return undefined;
     let live = true;
     hrApi.payChannels().then(c => { if (live && Array.isArray(list(c))) setChannels(list(c)); }, () => {});
     return () => { live = false; };
-  }, [canOperate]);
+  }, [canPay]);
   const [paying, setPaying] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);   // remounts the tabs so they re-read after a payment
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <SubTabs views={SUBS} active={sub} onChange={setSub} />
-        {canOperate && <div className="ml-auto"><Button size="sm" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button></div>}
+        <SubTabs views={subs} active={sub} onChange={setSub} />
+        {canPay && <div className="ml-auto"><Button size="sm" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button></div>}
       </div>
       <div key={reloadKey}>
         {sub === 'loans' && <LoansTab level={level} people={people} />}

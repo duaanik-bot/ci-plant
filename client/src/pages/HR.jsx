@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { Button, GroupedTabs, PageHeader } from '../components/ui.jsx';
-import { HR_LEVELS, HR_LEVEL_LABELS, HR_TABS, hrApi, levelAtLeast } from '../lib/hr.js';
+import { HR_LEVELS, HR_LEVEL_LABELS, HR_TABS, hrApi, levelAtLeast, setHrRestricted } from '../lib/hr.js';
 import Overview from './hr/Overview.jsx';
 import Payroll from './hr/Payroll.jsx';
 import People from './hr/People.jsx';
@@ -74,7 +74,8 @@ export default function HR() {
       me => {
         if (!live) return;
         // A level this build does not know is no access: never guess upward.
-        setAccess(HR_LEVELS.includes(me?.level) ? { state: 'ready', level: me.level } : { state: 'private' });
+        setHrRestricted(me?.restricted === true);
+        setAccess(HR_LEVELS.includes(me?.level) ? { state: 'ready', level: me.level, restricted: me?.restricted === true } : { state: 'private' });
       },
       err => {
         if (!live) return;
@@ -113,7 +114,7 @@ export default function HR() {
         actions={(
           <span title="Your HR & Payroll access level"
             className="rounded-full border border-white/70 bg-white/65 px-3 py-1.5 text-xs font-bold text-[#515154] backdrop-blur-xl">
-            {HR_LEVEL_LABELS[level]} access
+            {HR_LEVEL_LABELS[level]} access{access.restricted ? ' · limited' : ''}
           </span>
         )} />
       <GroupedTabs groups={groups} active={tab} onChange={setTab} />

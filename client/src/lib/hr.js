@@ -17,10 +17,17 @@ import { api, auth } from '../api.js';
 // Each level includes the ones before it (spec §6) and mirrors HR_LEVELS in
 // server/src/hr/access.js. The UI only decides what to OFFER with these; the server
 // refuses what a level may not do.
-export const HR_LEVELS = Object.freeze(['viewer', 'operator', 'approver', 'admin']);
+export const HR_LEVELS = Object.freeze(['viewer', 'accounts', 'operator', 'approver', 'admin']);
 export const HR_LEVEL_LABELS = Object.freeze({
-  viewer: 'Viewer', operator: 'Operator', approver: 'Approver', admin: 'Admin',
+  viewer: 'Viewer', accounts: 'Accounts', operator: 'Operator', approver: 'Approver', admin: 'Admin',
 });
+
+// A restricted login (an accounts login, or a viewer with anyone hidden — server/src/hr/privacy.js) reaches only
+// the registers, payslips, reports, ledgers and payments; the screens leave out what it cannot open. Set from
+// GET /hr/me by pages/HR.jsx.
+let RESTRICTED = false;
+export const hrRestricted = () => RESTRICTED;
+export function setHrRestricted(v) { RESTRICTED = Boolean(v); }
 
 // Does `level` reach `min`? An unknown level, or an unknown `min`, is a no — a typo
 // must close a door, never open it.
@@ -167,6 +174,11 @@ export const hrApi = {
   accessList: () => api.get('/hr/access'),
   // PUT /hr/access/:userId — admin. A level, or null / '' to take the access away; 409 LAST_ADMIN.
   setAccess: (userId, level) => api.put(`/hr/access/${seg(userId)}`, { level: level || null }),
+  // GET /hr/access/:userId/people — admin. { level, applies, people:[{ id, code, name, department, status, mode }] },
+  // mode 'show' | 'pay' (name only) | 'all' (not there at all).
+  accessPeople: userId => api.get(`/hr/access/${seg(userId)}/people`),
+  // PUT /hr/access/:userId/people — admin. changes: [{ person_id, mode }]; answers as accessPeople.
+  setAccessPeople: (userId, changes) => api.put(`/hr/access/${seg(userId)}/people`, { changes }),
   // GET /hr/audit?entity=&entity_id= — approver.
   audit: (entity, entityId) => api.get(`/hr/audit${qs({ entity, entity_id: entityId })}`),
 

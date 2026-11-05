@@ -116,7 +116,8 @@ import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
 import { cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
-import { ensureRun, finaliseRun, recalcRun } from '../hr/runs.js';
+import { ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
+import { assertPayVisible, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
 import { monthlySchedule } from '../hr/monthly-report.js';
 
 const r = Router();
@@ -292,9 +293,12 @@ function runWithNames(run, names) {
   return out;
 }
 
-async function runView(qx, run) {
+async function runView(qx, run, req = null) {
   if (!run) return null;
-  return runWithNames(run, await userNames(qx, RUN_BY.map((k) => run[k])));
+  const out = runWithNames(run, await userNames(qx, RUN_BY.map((k) => run[k])));
+  // A restricted login (hr/privacy.js) sees totals of the people it can see, never the stored whole-run totals.
+  if (req && restricted(req)) out.totals = await totalsOf(qx, run.id, { exclude: hiddenIds(req) });
+  return out;
 }
 
 function runLocked(month, status) {
@@ -1112,24 +1116,28 @@ r.post('/hr/imports/:id/apply', requireHr('operator'), async (req, res, next) =>
 
 // ── GET /hr/runs, GET /hr/runs/:month ───────────────────────────────────────
 
-r.get('/hr/runs', requireHr('viewer'), async (_req, res, next) => {
+r.get('/hr/runs', requireHr('viewer'), async (req, res, next) => {
   try {
+    const ex = hiddenIds(req);
     const runs = await q(
       `SELECT r.*,
-              (SELECT count(*)::int FROM hr.run_lines l WHERE l.run_id = r.id) AS line_count,
-              (SELECT count(*)::int FROM hr.run_lines l WHERE l.run_id = r.id AND l.payment_status = 'paid') AS paid_count
+              (SELECT count(*)::int FROM hr.run_lines l WHERE l.run_id = r.id AND l.person_id <> ALL($1::int[])) AS line_count,
+              (SELECT count(*)::int FROM hr.run_lines l WHERE l.run_id = r.id AND l.payment_status = 'paid'
+                 AND l.person_id <> ALL($1::int[])) AS paid_count
          FROM hr.runs r
-        ORDER BY r.month DESC`);
+        ORDER BY r.month DESC`, [ex]);
     const names = await userNames(q, runs.flatMap((run) => RUN_BY.map((k) => run[k])));
-    res.json(runs.map((run) => runWithNames(run, names)));
+    const out = runs.map((run) => runWithNames(run, names));
+    if (restricted(req)) for (const run of out) run.totals = await totalsOf(q, run.id, { exclude: ex });
+    res.json(out);
   } catch (e) { next(e); }
 });
 
 // ── GET /hr/reports/monthly — the month-wise payment schedule (hr/monthly-report.js) ──
 // Viewer and up, like every report. Read live each time: a month's figures follow its approvals and payments.
-r.get('/hr/reports/monthly', requireHr('viewer'), async (_req, res, next) => {
+r.get('/hr/reports/monthly', requireHr('viewer'), async (req, res, next) => {
   try {
-    res.json(await monthlySchedule(q));
+    res.json(await monthlySchedule(q, { exclude: hiddenIds(req) }));
   } catch (e) { next(e); }
 });
 
@@ -1167,7 +1175,7 @@ const LINE_SELECT = `
        ORDER BY a.id DESC LIMIT 1) pa ON l.payment_status = 'paid' AND l.payment_batch_id IS NULL`;
 // What payment_totals reads.
 const TOTALS_SELECT = `SELECT payment_status, approval_status, pay_channel, payable::text AS payable, paid_amount::text AS paid_amount
-  FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`;
+  FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[]) ORDER BY person_id`;
 const INPUT_SELECT = `
   SELECT i.*, p.code, p.name, p.display_name
     FROM hr.run_inputs i
@@ -1214,29 +1222,41 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
       applied_by_name: given(b.applied_by) ? importNames.get(b.applied_by) ?? null : null,
     }));
     const pendingImport = await pendingImportOf(q, importViews);
+    // A restricted login (hr/privacy.js): no uploads (a sheet has everyone on it), hidden people out of every list
+    // and total, and the people whose pay is hidden named in pay_hidden_people.
+    const ex = hiddenIds(req);
+    const limited = restricted(req);
+    if (limited) { importViews.length = 0; }
     if (!run) {
       return res.json({
         run: null, lines: [], inputs: [], payment_totals: paymentTotals([]), flags_summary: flagsSummary([]),
-        missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: pendingImport,
+        missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: limited ? null : pendingImport,
+        ...(limited ? { pay_hidden_people: [] } : {}),
       });
     }
-    const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 ORDER BY l.person_id`, [run.id]);
+    const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
     const names = await userNames(q, found.flatMap((l) => [l.held_by, l.approved_by]));
     const lines = found.map((l) => ({
       ...l,
       held_by_name: given(l.held_by) ? names.get(l.held_by) ?? null : null,
       approved_by_name: given(l.approved_by) ? names.get(l.approved_by) ?? null : null,
     }));
-    const inputs = await q(`${INPUT_SELECT} WHERE i.run_id = $1 ORDER BY i.person_id`, [run.id]);
+    const inputs = await q(`${INPUT_SELECT} WHERE i.run_id = $1 AND i.person_id <> ALL($2::int[]) ORDER BY i.person_id`, [run.id, ex]);
+    const payHidden = limited
+      ? (await q(`SELECT p.id, p.code, p.name, p.department FROM hr.run_lines l JOIN hr.people p ON p.id = l.person_id
+                   WHERE l.run_id = $1 AND l.person_id = ANY($2::int[]) ORDER BY lower(p.name)`, [run.id, ex]))
+        .filter((p) => canSeePerson(req, p.id))
+      : null;
     res.json({
-      run: await runView(q, run),
+      ...(limited ? { pay_hidden_people: payHidden } : {}),
+      run: await runView(q, run, req),
       lines,
       inputs,
-      payment_totals: paymentTotals(await q(TOTALS_SELECT, [run.id])),
+      payment_totals: paymentTotals(await q(TOTALS_SELECT, [run.id, hiddenIds(req)])),
       flags_summary: flagsSummary(lines),
       missing: await peopleWithoutInputs(q, run.id, month),
       imports: importViews,
-      pending_import: pendingImport,
+      pending_import: limited ? null : pendingImport,
     });
   } catch (e) { next(e); }
 });
@@ -1499,7 +1519,7 @@ const PAY_PREFIX = 'CI-PAY-';
 const nextBatchNo = (oc) => nextNumber(PAY_PREFIX, 'hr.payment_batches', 'batch_no', oc);
 const NOT_APPROVED_WHY = 'Not approved for payment yet: an approver approves the line first';
 
-r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/runs/:month/payments', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const body = bodyOf(req);
@@ -1509,6 +1529,9 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
     const paidOn = dateOf(body.paid_on, 'The payment date') ?? plantDateStr();
     if (paidOn > plantDateStr()) throw bad('The payment date cannot be in the future');
     const only = idListOf(body.person_ids, 'person_ids');
+    if (only) assertPayVisible(req, only);
+    // A restricted login pays only the people it can see; the hidden ones stay for the owner to pay.
+    const ex = hiddenIds(req);
     const userId = userIdOf(req);
 
     const batch = await tx(async (qc, oc) => {
@@ -1518,9 +1541,10 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
       const unpaid = await qc(
         `SELECT id, person_id, payment_status, approval_status, hold_reason FROM hr.run_lines
           WHERE run_id = $1 AND pay_channel = $2 AND payment_status <> 'paid' AND payable IS NOT NULL AND payable >= 0
-            ${only ? 'AND person_id = ANY($3::int[])' : ''}
+            AND person_id <> ALL($3::int[])
+            ${only ? 'AND person_id = ANY($4::int[])' : ''}
           ORDER BY person_id
-            FOR UPDATE`, only ? [run.id, channel, only] : [run.id, channel]);
+            FOR UPDATE`, only ? [run.id, channel, ex, only] : [run.id, channel, ex]);
       if (only) {
         const found = new Set(unpaid.map((l) => l.person_id));
         const absent = only.filter((id) => !found.has(id));
@@ -1536,7 +1560,8 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
         .map((l) => ({ person_id: l.person_id, reason: NOT_APPROVED_WHY }));
       const lines = unpaid.filter((l) => l.payment_status !== 'on_hold' && l.approval_status === 'approved');
       if (!lines.length) {
-        const [any] = await qc(`SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND pay_channel = $2 LIMIT 1`, [run.id, channel]);
+        const [any] = await qc(`SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND pay_channel = $2 AND person_id <> ALL($3::int[]) LIMIT 1`,
+          [run.id, channel, ex]);
         if (!any) throw bad(`No line of ${monthLabel(month)} is paid through ${channel}`);
         if (held.length || unapproved.length) {
           const why = [held.length && `${held.length} on hold (release a hold to pay it)`,
@@ -1568,10 +1593,11 @@ r.post('/hr/runs/:month/payments', requireHr('operator'), async (req, res, next)
   } catch (e) { next(e); }
 });
 
-r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (req, res, next) => {
+r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const personId = idOf(req.params.personId, 'Line');
+    assertPayVisible(req, personId, 'Line');
     const body = bodyOf(req);
     const status = choiceOf(body.status, ['paid', 'failed', 'reversed'], 'status');
     if (status === 'reversed' && !levelAtLeast(req.hr?.level, 'approver')) {
@@ -1644,13 +1670,14 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('operator'), async (r
 // the status, is in `skipped` with the reason. Nothing else refuses: warn, don't block.
 const STATUS_TARGETS = ['paid', 'pending', 'on_hold'];
 
-r.post('/hr/runs/:month/lines/status', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const body = bodyOf(req);
     const target = choiceOf(body.status, STATUS_TARGETS, 'status');
     const personIds = idListOf(body.person_ids, 'person_ids');
     if (!personIds || !personIds.length) throw bad('Choose at least one person');
+    assertPayVisible(req, personIds);
     const reference = textOf(body.reference, 'The reference', 120);
     const reason = textOf(body.reason, 'The reason', 500);
     let paidOn = null;
@@ -1885,6 +1912,7 @@ r.get('/hr/runs/:month/lines/:personId/history', requireHr('viewer'), async (req
   try {
     const month = monthOf(req.params.month);
     const personId = idOf(req.params.personId, 'Line');
+    assertPayVisible(req, personId, 'Line');
     const [line] = await q(
       `SELECT l.id, l.run_id FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`,
       [month, personId]);
@@ -1977,8 +2005,8 @@ r.get('/hr/runs/:month/payslips', requireHr('viewer'), async (req, res, next) =>
     const [run] = await q(`SELECT * FROM hr.runs WHERE month = $1`, [month]);
     if (!run) return res.json({ company, run: null, slips: [] });
 
-    const params = [run.id];
-    let filter = '';
+    const params = [run.id, hiddenIds(req)];
+    let filter = ' AND l.person_id <> ALL($2::int[])';
     if (only) { params.push(only); filter += ` AND l.person_id = ANY($${params.length}::int[])`; }
     if (channel) { params.push(channel); filter += ` AND l.pay_channel = $${params.length}`; }
     const lines = await q(
@@ -2024,7 +2052,7 @@ r.get('/hr/runs/:month/payslips', requireHr('viewer'), async (req, res, next) =>
         },
       };
     });
-    res.json({ company, run: await runView(q, run), slips });
+    res.json({ company, run: await runView(q, run, req), slips });
   } catch (e) { next(e); }
 });
 

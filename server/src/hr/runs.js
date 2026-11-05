@@ -421,11 +421,12 @@ async function lockRun(qc, runId) {
 const TOTAL_MONEY = ['gross', 'total_deductions', 'net', 'paid_separately', 'payable', 'rounding',
   'advance_given', 'advance_recovery', 'loan_recovery', 'carried_advance'];
 
-async function totalsOf(qc, runId) {
+// exclude: person ids left out of the totals (a restricted login's hidden people, hr/privacy.js).
+export async function totalsOf(qc, runId, { exclude = [] } = {}) {
   const lines = await qc(
     `SELECT person_id, pay_channel, flags, ${TOTAL_MONEY.map((c) => `${c}::text AS ${c}`).join(', ')}
-       FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`,
-    [runId],
+       FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[]) ORDER BY person_id`,
+    [runId, exclude],
   );
   const sum = Object.fromEntries(TOTAL_MONEY.map((c) => [c, 0n]));
   const channels = new Map();

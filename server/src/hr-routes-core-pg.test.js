@@ -150,7 +150,7 @@ describe('HR core routes through the real app', {
   test('a viewer reads (me, lists) but every write is 403 HR_LEVEL', T, async () => {
     const me = await call('viewer', 'GET', '/hr/me');
     assert.equal(me.status, 200, me.text);
-    assert.deepEqual(me.body, { level: 'viewer', user: { id: ids.viewer, name: 'HR Viewer' } });
+    assert.deepEqual(me.body, { level: 'viewer', restricted: false, user: { id: ids.viewer, name: 'HR Viewer' } });
     const list = await call('viewer', 'GET', '/hr/people');
     assert.equal(list.status, 200, list.text);
     assert.deepEqual(list.body, []);

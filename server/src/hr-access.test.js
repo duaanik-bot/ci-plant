@@ -31,7 +31,7 @@ test('brief: levels and requireHr', () => {
 // ── Levels ─────────────────────────────────────────────────────────────
 
 test('HR_LEVELS is the ladder, lowest first, and cannot be changed', () => {
-  assert.deepEqual(HR_LEVELS, ['viewer', 'operator', 'approver', 'admin']);
+  assert.deepEqual(HR_LEVELS, ['viewer', 'accounts', 'operator', 'approver', 'admin']);
   assert.ok(Object.isFrozen(HR_LEVELS));
 });
 

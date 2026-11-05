@@ -2860,6 +2860,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261018120000_hr_payment_hold.sql'));
   // HR line approval (hr.run_lines approval_status + who/when/note, payment_batches.batch_no) — 2026-11-03
   await pool.query(migration('20261103120000_hr_line_approval.sql'));
+  // HR accounts level + per-login hide list (hr.access_hidden) — 2026-11-05
+  await pool.query(migration('20261105120000_hr_access_privacy.sql'));
 
   // COA Register — the Drive COA register mirrored in (no link to plant data),
   // and users.coa_download. Idempotent. 2026-10-17

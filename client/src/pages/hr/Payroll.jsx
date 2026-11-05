@@ -60,7 +60,7 @@ import {
   Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiRow, Modal, SubTabs, Textarea, rowMatches, useToast,
 } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
-import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { storage } from '../../lib/safeStorage.js';
 import ImportWizard, { batchSummary } from './ImportWizard.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
@@ -445,6 +445,9 @@ function PaymentsPanel({ lines, channelLabel, canOperate, final, nameOf, onPay, 
 export default function Payroll({ level }) {
   const toast = useToast();
   const canOperate = levelAtLeast(level, 'operator');
+  // Accounts and up pay: mark paid / on hold, payment batches, Pay staff (server: requireHr('accounts')).
+  const canPay = levelAtLeast(level, 'accounts');
+  const limited = hrRestricted();
   const canApprove = levelAtLeast(level, 'approver');
   const [params, setParams] = useSearchParams();
   const thisMonth = plantMonth();
@@ -496,7 +499,7 @@ export default function Payroll({ level }) {
       const [d, dash, held, loans] = await Promise.all([
         hrApi.run(month),
         hrApi.dashboard(month).catch(() => null),
-        hrApi.loanHolds(month).catch(() => []),   // instalments held for the month: a marker in the Loan column
+        limited ? Promise.resolve([]) : hrApi.loanHolds(month).catch(() => []),   // instalments held for the month: a marker in the Loan column
         hrApi.loans().catch(() => []),            // active loans: the Loan badge on each person's card
       ]);
       if (mine !== seq.current) return;
@@ -514,6 +517,7 @@ export default function Payroll({ level }) {
         missing: Array.isArray(d?.missing) ? d.missing : null,
         serverPending: d?.pending_import && typeof d.pending_import === 'object' ? d.pending_import : null,
         unresolved: Number(dash?.exceptions?.unresolved_import_rows) || 0,
+        payHidden: list(d?.pay_hidden_people),   // a restricted login: people shown by name only, no pay
       });
       setVersion(v => v + 1);
     } catch (e) {
@@ -771,7 +775,7 @@ export default function Payroll({ level }) {
   const [variance, setVariance] = useState({ key: null, map: new Map() });
   const varianceKey = `${month}:${version}`;
   useEffect(() => {
-    if (!drawer || !run || !prevMonth || variance.key === varianceKey) return undefined;
+    if (limited || !drawer || !run || !prevMonth || variance.key === varianceKey) return undefined;
     let live = true;
     hrApi.variance(month).then(v => {
       if (live) setVariance({ key: varianceKey, map: new Map(list(v).map(x => [String(x?.person_id), x])) });
@@ -1245,7 +1249,7 @@ export default function Payroll({ level }) {
             {(status === 'none' || status === 'draft') && canOperate && !monthClosed && (
               <Button variant="secondary" onClick={() => openWizard(null)}><FileUp size={14} /> {pend ? 'Import a new sheet' : 'Import sheet'}</Button>
             )}
-            {canOperate && <Button variant="secondary" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button>}
+            {canPay && <Button variant="secondary" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button>}
             {canOperate && (
               <Button variant="secondary" title="Add a new person to the payroll master — details, salary setup, bank — without leaving Payroll"
                 onClick={() => setMaster({ id: null, tab: 'details', key: ++masterKey.current, changed: false })}>
@@ -1404,8 +1408,14 @@ export default function Payroll({ level }) {
             )}
           </section>
 
+          {list(here?.payHidden).length > 0 && (
+            <p className="mb-3 rounded-2xl border border-[#1D1D1F]/[0.08] bg-white/60 px-3 py-2 text-xs text-[#515154]">
+              <b>Pay not shown to you:</b> {list(here.payHidden).map(p => p.name).join(', ')}. They are left out of every figure on this
+              page, and their payment is handled separately.
+            </p>
+          )}
           {approvable && (
-            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canOperate} final={final} nameOf={nameOf}
+            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} nameOf={nameOf}
               onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer} />
           )}
 
@@ -1464,7 +1474,7 @@ export default function Payroll({ level }) {
               )}
             </div>
           </FilterRail>
-          {canOperate && filtered.length > 0 && (
+          {canPay && filtered.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Select</span>
               <FilterChip label="All" count={filtered.length} on={allShownPicked} onClick={() => pickShown()} />
@@ -1497,7 +1507,7 @@ export default function Payroll({ level }) {
               )}
             </div>
           )}
-          {canOperate && picked.length > 0 && (
+          {canPay && picked.length > 0 && (
             <div className="sticky top-2 z-10 mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-[#0A84FF]/25 bg-[#E1EFFF]/90 px-3 py-2 text-xs shadow-card backdrop-blur">
               <span className="font-bold text-[#0064D2]">{picked.length} selected · <span className="tabular-nums">{inr2(pickedSum)}</span></span>
               <span className="text-[11px] text-[#515154]">
@@ -1528,14 +1538,14 @@ export default function Payroll({ level }) {
             </div>
           )}
           {layout === 'cards' ? (
-            <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate}
+            <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate} canSelect={canPay}
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
               showPaidSep={showPaidSep} search={q} onSearch={setQ} loansBy={loansBy}
               carryTo={monthLabel(shiftMonth(month, 1))} onCarry={carryOne} onPayslip={r => setSlipFor(r)} month={month} final={final}
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
               onMaster={(r, tab) => setMaster({ id: toId(r.id), tab, key: ++masterKey.current, changed: false })}
-              onPayStaff={canOperate ? r => setPayFor(toId(r.id)) : undefined}
+              onPayStaff={canPay ? r => setPayFor(toId(r.id)) : undefined}
               onSwitched={async (res, change) => {
                 const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
                 const later = list(res?.not_recalculated).map(x => monthLabel(x.month));
@@ -1549,7 +1559,7 @@ export default function Payroll({ level }) {
             columns={columns}
             rows={filtered.length ? [totalRow, ...filtered] : []}
             getRowId={r => r.id}
-            selectable={canOperate}
+            selectable={canPay}
             selectedIds={allShownPicked ? [...selected, '__total'] : [...selected]}
             onToggleRow={toggleRow}
             onToggleAll={toggleAllShown}

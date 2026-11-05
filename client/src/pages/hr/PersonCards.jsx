@@ -298,7 +298,7 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
 }
 
 export default function PersonCards({
-  rows, approvable, canApprove, canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
+  rows, approvable, canApprove, canOperate, canSelect = canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
   month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff,
 }) {
@@ -334,14 +334,14 @@ export default function PersonCards({
     const here = cards.indexOf(e.currentTarget);
     if (e.key === ' ' || e.key === 'Spacebar') {
       e.preventDefault();
-      if (!canOperate) return;
+      if (!canSelect) return;
       if (e.shiftKey) tickRange(r); else tickOne(r, !selected.has(r.id));
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const next = cards[here + (e.key === 'ArrowDown' ? 1 : -1)];
       if (!next) return;
       next.focus();
-      if (e.shiftKey && canOperate) {
+      if (e.shiftKey && canSelect) {
         const nr = ordered.find(x => x.id === next.getAttribute('data-card'));
         if (!selected.has(r.id)) tickOne(r, true);
         if (nr) tickOne(nr, true);
@@ -369,7 +369,7 @@ export default function PersonCards({
           return (
             <section key={s.key}>
               <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
-                {canOperate && s.rows.length > 0 && (
+                {canSelect && s.rows.length > 0 && (
                   <input type="checkbox" aria-label={`Tick everyone in ${meta.label}`} className="h-4 w-4 accent-[#007AFF]"
                     checked={shownTicked} onChange={e => onRange(s.rows, e.target.checked)} />
                 )}
@@ -404,7 +404,7 @@ export default function PersonCards({
                         className={`overflow-hidden rounded-2xl border border-l-[3px] bg-white/70 shadow-[0_1px_2px_rgba(29,29,31,0.04)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0A84FF]
                           ${short && !carried ? 'border-l-red-500' : meta.rail} ${ticked ? 'border-[#0A84FF]/40 bg-[#E1EFFF]/70' : short ? 'border-red-200' : 'border-white/80'} ${r.blocked || (short && !ticked) ? '!bg-red-50/70' : ''}`}>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
-                          {canOperate && (
+                          {canSelect && (
                             <input type="checkbox" aria-label={`Tick ${r.name}`} className="h-4 w-4 accent-[#007AFF]" checked={ticked}
                               onClick={e => { if (e.shiftKey) { e.preventDefault(); tickRange(r); } }}
                               onChange={e => tickOne(r, e.target.checked)} />

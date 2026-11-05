@@ -32,7 +32,7 @@ import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Download, Landmark, RefreshCw } from 'lucide-react';
 import { Button, DataTable, Input, SubTabs, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
-import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
+import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, approverName, batchText, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
 } from './RunLineDrawer.jsx';
@@ -54,6 +54,8 @@ const REPORTS = [
   { key: 'advances', label: 'Advance register' },
 ];
 const MONTHLESS = new Set(['schedule', 'loans', 'advances']);
+// A restricted login (lib/hr.js hrRestricted) cannot open the variance (it compares everyone).
+const reportsFor = () => (hrRestricted() ? REPORTS.filter(x => x.key !== 'variance') : REPORTS);
 
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
 const num = v => { const p = paiseOf(v); return p === null ? null : Number(p); }; // for sorting only
@@ -343,7 +345,7 @@ function BankLists({ month, run, rows, channels, channelLabel, canExport }) {
 // ── The screen ──────────────────────────────────────────────────────────────
 
 export default function Reports({ level }) {
-  const canExportBank = levelAtLeast(level, 'operator');
+  const canExportBank = levelAtLeast(level, 'accounts');
   const [params, setParams] = useSearchParams();
   const asked = params.get('month');
   const month = MONTH_RE.test(asked || '') ? asked : plantMonth();
@@ -353,8 +355,8 @@ export default function Reports({ level }) {
   }, [setParams]);
   // ?report= opens a report (the Payroll tab's "Payment advice" and "Approval report" buttons link here).
   const askedReport = params.get('report');
-  const [report, setReport] = useState(() => (REPORTS.some(x => x.key === askedReport) ? askedReport : 'schedule'));
-  useEffect(() => { if (REPORTS.some(x => x.key === askedReport)) setReport(askedReport); }, [askedReport]);
+  const [report, setReport] = useState(() => (reportsFor().some(x => x.key === askedReport) ? askedReport : 'schedule'));
+  useEffect(() => { if (reportsFor().some(x => x.key === askedReport)) setReport(askedReport); }, [askedReport]);
   // Status / approval / channel / department, shared by the payment reports.
   const [filters, setFilters] = useState(NO_FILTERS);
   useEffect(() => { setFilters(NO_FILTERS()); }, [month]);
@@ -429,7 +431,7 @@ export default function Reports({ level }) {
           )}
           {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">{report === 'schedule' ? 'Every month, as it stands today' : 'As of today'}</h2>}
         </div>
-        <div className="mt-3"><SubTabs views={REPORTS} active={report} onChange={k => {
+        <div className="mt-3"><SubTabs views={reportsFor()} active={report} onChange={k => {
           setReport(k);
           if (params.get('report')) setParams(p => { const n = new URLSearchParams(p); n.delete('report'); return n; }, { replace: true });
         }} /></div>

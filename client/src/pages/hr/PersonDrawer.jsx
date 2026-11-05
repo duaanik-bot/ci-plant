@@ -1198,6 +1198,11 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
                 This person could not be loaded. Close the drawer and try again.
               </p>
             )}
+            {person?.pay_hidden && (
+              <p className="rounded-xl border border-[#1D1D1F]/[0.08] bg-white/60 px-3 py-2 text-xs font-medium text-[#515154]">
+                This person&rsquo;s pay, bank details, advances and loans are not shown to your login.
+              </p>
+            )}
             {ready && tab === 'details' && <DetailsTab form={form} set={set} canEdit={canEdit} channels={channels} person={person} />}
             {ready && tab === 'pay' && (
               <PayTab pid={pid} setups={setups} canEdit={canEdit} onNew={() => setRevisionOpen(true)}

@@ -9,7 +9,7 @@
 //   r.get('/hr/…', requireHr('approver'), …)   the route's minimum level
 //
 // Levels climb, each including the ones before it: viewer reads registers, payslips and
-// reports; operator keeps people, setups, imports and draft runs, submits and marks paid;
+// reports; accounts (2026-11-05) also pays — marks lines paid / on hold, pays staff advances; operator keeps people, setups, imports and draft runs, submits and marks paid;
 // approver approves, sends back, finalises and reverses a payment; admin owns settings,
 // access grants and the workbook loader.
 //
@@ -18,8 +18,9 @@
 // is defined.
 import { one } from '../db.js';
 import { withoutLedger } from '../data-tables.js';
+import { privacyFor, restrictedGate } from './privacy.js';
 
-export const HR_LEVELS = Object.freeze(['viewer', 'operator', 'approver', 'admin']);
+export const HR_LEVELS = Object.freeze(['viewer', 'accounts', 'operator', 'approver', 'admin']);
 
 // True when `level` is `min` or above. Anything that is not a level is no access.
 export function levelAtLeast(level, min) {
@@ -65,25 +66,32 @@ export async function hrAccessFor(userId) {
 // The guard over a given lookup. Several HR routers each install it on '/hr', so it
 // remembers its answer on the request: one read of hr.access per request, however many
 // routers the request passes through. Only a level it set itself counts as remembered.
-export function hrGuardWith(lookup) {
+//
+// A viewer or accounts login also gets its hide list (hr/privacy.js): req.hr.restricted, gone, noPay. A
+// restricted login then meets restrictedGate — only the allow-listed routes, every answer scrubbed.
+export function hrGuardWith(lookup, privacy = async () => null) {
   return async function hrGuard(req, res, next) {
-    if (req.hr && HR_LEVELS.includes(req.hr.level)) return next();
+    if (req.hr && HR_LEVELS.includes(req.hr.level)) return restrictedGate(req, res, next);
     let level = null;
+    let seen = null;
     const id = userIdOf(req.user?.id);
     if (id !== null) {
       try {
         level = await lookup(id);
+        if (HR_LEVELS.includes(level)) seen = await privacy(id, level);
       } catch (e) {
         return next(e);                       // the error handler answers; the route never runs
       }
     }
     if (!HR_LEVELS.includes(level)) return res.status(403).json({ ...NO_ACCESS });
-    req.hr = Object.freeze({ level });
-    return next();
+    req.hr = Object.freeze(seen?.restricted
+      ? { level, restricted: true, gone: seen.gone, noPay: seen.noPay }
+      : { level });
+    return restrictedGate(req, res, next);
   };
 }
 
-export const hrGuard = hrGuardWith(hrAccessFor);
+export const hrGuard = hrGuardWith(hrAccessFor, privacyFor);
 
 // The route's minimum level. Without hrGuard before it, nothing passes.
 export function requireHr(min) {

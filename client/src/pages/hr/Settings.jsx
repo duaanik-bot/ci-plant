@@ -306,12 +306,110 @@ function ChannelsPanel() {
 // A change is saved the moment it is picked. The select shows the SERVER's answer: a refused
 // change (the last admin cannot be removed) is reloaded away rather than left looking saved.
 
+// ── Who a viewer / accounts login sees (server/src/hr/privacy.js) ───────────
+// Everyone is listed with three choices: Visible · Hide pay (the name shows, no amount of theirs) · Hide completely
+// (not there at all). Nothing is saved until Save; only the people changed are sent. A new person is visible until
+// hidden here.
+const SEE = [
+  { key: 'show', label: 'Visible', on: 'bg-[#34C759] text-white' },
+  { key: 'pay', label: 'Hide pay', on: 'bg-amber-500 text-white' },
+  { key: 'all', label: 'Hide completely', on: 'bg-[#1D1D1F]/80 text-white' },
+];
+
+export function WhoTheySee({ row, onClose }) {
+  const toast = useToast();
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [draft, setDraft] = useState(new Map());
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    hrApi.accessPeople(row.user_id).then(d => { if (live) setData(d); }, e => { if (live) setError(refusalText(e)); });
+    return () => { live = false; };
+  }, [row.user_id]);
+  const people = data?.people || [];
+  const modeOf = p => draft.get(p.id) ?? p.mode;
+  const needle = q.trim().toLowerCase();
+  const shown = people.filter(p => !needle || `${p.name} ${p.code} ${p.department || ''}`.toLowerCase().includes(needle));
+  const set = (ids, mode) => setDraft(d => {
+    const n = new Map(d);
+    for (const id of ids) {
+      const p = people.find(x => x.id === id);
+      if (p && p.mode === mode) n.delete(id); else n.set(id, mode);
+    }
+    return n;
+  });
+  const count = k => people.filter(p => modeOf(p) === k).length;
+  const save = async () => {
+    setBusy(true); setError('');
+    try {
+      const d = await hrApi.setAccessPeople(row.user_id, [...draft].map(([person_id, mode]) => ({ person_id, mode })));
+      setData(d); setDraft(new Map());
+      toast.success(`${row.name}: who they see is saved`);
+      onClose();
+    } catch (e) { setError(refusalText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal open onClose={onClose} wide title={`Who ${row.name} sees`}
+      footer={(
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-xs text-[#6E6E73]">{draft.size ? `${draft.size} change${draft.size === 1 ? '' : 's'} not saved` : 'No changes'}</span>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={busy || !draft.size}>{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      )}>
+      <div className="space-y-3 text-sm">
+        <p className="text-xs text-[#515154]">
+          <b>Hide pay</b>: the name shows, but none of their salary, advances, loans or payslips — and they are left out of every
+          total. <b>Hide completely</b>: they are not there at all. {row.name} can pay only the people whose pay they can see.
+          {data && !data.applies && <b className="text-amber-700"> This login is {HR_LEVEL_LABELS[data.level] || 'without access'}: hiding works only for Viewer and Accounts logins, so this list takes effect if you set it to one of those.</b>}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, code, department…" className="max-w-xs" />
+          <span className="text-xs text-[#6E6E73]">{count('show')} visible · {count('pay')} pay hidden · {count('all')} hidden</span>
+          <span className="ml-auto flex flex-wrap gap-1 text-xs">
+            <span className="self-center text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">{needle ? 'These' : 'Everyone'}:</span>
+            {SEE.map(o => <Button key={o.key} size="sm" variant="secondary" onClick={() => set(shown.map(p => p.id), o.key)}>{o.label}</Button>)}
+          </span>
+        </div>
+        {error && <InlineError message={error} className="" />}
+        {!data ? <Loading /> : (
+          <div className="max-h-[55vh] divide-y divide-[#1D1D1F]/[0.06] overflow-y-auto rounded-2xl border border-white/70 bg-white/60">
+            {shown.map(p => {
+              const m = modeOf(p);
+              return (
+                <div key={p.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 ${draft.has(p.id) ? 'bg-[#E1EFFF]/60' : ''}`}>
+                  <div className="min-w-0 flex-1">
+                    <div className={`truncate font-semibold ${m === 'all' ? 'text-[#86868B] line-through' : 'text-[#1D1D1F]'}`}>{p.name}</div>
+                    <div className="text-[11px] text-[#6E6E73]">{p.code}{p.department ? ` · ${p.department}` : ''}{p.status !== 'active' ? ` · ${fmt.title(p.status)}` : ''}</div>
+                  </div>
+                  <span className="inline-flex gap-0.5 rounded-full bg-[#1D1D1F]/[0.06] p-0.5" role="group" aria-label={`How ${row.name} sees ${p.name}`}>
+                    {SEE.map(o => (
+                      <button key={o.key} type="button" onClick={() => set([p.id], o.key)} aria-pressed={m === o.key}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${m === o.key ? o.on : 'text-[#515154] hover:bg-white'}`}>
+                        {o.label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
+            {!shown.length && <p className="px-3 py-4 text-xs text-[#86868B]">Nobody matches.</p>}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function AccessPanel() {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [failed, setFailed] = useState(false);
   const [rev, setRev] = useState(0); // bumped after every attempt so each select shows the server's level
   const [refusal, setRefusal] = useState(null); // the server's reason the last change was refused
+  const [seeing, setSeeing] = useState(null);   // the login whose "who they see" list is open
 
   const load = useCallback(async () => {
     try {
@@ -353,6 +451,10 @@ function AccessPanel() {
           </Select>
         </div>
       ) },
+    { key: 'sees', label: 'Who they see', sortable: false,
+      render: r => (r.level === 'viewer' || r.level === 'accounts'
+        ? <Button size="sm" variant="secondary" onClick={() => setSeeing(r)}>Choose people</Button>
+        : <span className="text-xs text-[#86868B]">{r.level ? 'Everyone' : '—'}</span>) },
   ], [rev]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const withAccess = (rows || []).filter(r => r.level).length;
@@ -361,6 +463,8 @@ function AccessPanel() {
       <p className="mb-3 text-sm text-[#515154]">
         Only the logins given a level here can open HR &amp; Payroll — a login&rsquo;s ERP role, even admin, gives none. The list
         is read afresh on every request, so a change takes effect at once. Keep the shared plant login off it.
+        <b> Accounts</b> reads the registers, payslips and reports and makes payments, but changes no salary and approves
+        nothing; for an Accounts or Viewer login, <b>Choose people</b> hides anyone&rsquo;s pay, or the person altogether.
         {rows && <span className="ml-1 font-semibold text-[#1D1D1F]">{withAccess} of {rows.length} logins have access.</span>}
       </p>
       <InlineError message={refusal} className="mb-3" />
@@ -369,6 +473,7 @@ function AccessPanel() {
           searchPlaceholder="Search logins…" defaultSort={{ key: 'name', dir: 'asc' }}
           empty={failed ? 'The access list could not be loaded.' : 'No logins.'} />
       )}
+      {seeing && <WhoTheySee row={seeing} onClose={() => setSeeing(null)} />}
     </div>
   );
 }
