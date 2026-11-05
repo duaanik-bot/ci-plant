@@ -460,7 +460,7 @@ const TD = 'px-2.5 py-2 align-top';
 // The engine's components exactly as stored ({code, label, kind, qty, rate, formula, amount}), with
 // the line's own totals between them. Deductions read with a minus; nothing is recomputed here.
 
-function Breakdown({ line }) {
+export function Breakdown({ line }) {
   const comps = list(line?.breakdown).filter(c => c && typeof c === 'object');
   const earnings = comps.filter(c => c.kind === 'earning');
   const deductions = comps.filter(c => c.kind === 'deduction');

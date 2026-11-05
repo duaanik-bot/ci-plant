@@ -33,12 +33,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AlertTriangle, Banknote, Copy, Eye, EyeOff, Landmark, Link2, Loader2, Plus, Tag, Trash2, Unlink, UserCheck, UserRound, UserX, Wallet, X,
+  AlertTriangle, Banknote, BookOpen, Copy, Eye, EyeOff, Landmark, Link2, Loader2, Plus, Tag, Trash2, Unlink, UserCheck, UserRound, UserX, Wallet, X,
 } from 'lucide-react';
 import { ActionMenu, Button, Checkbox, ConfirmDialog, Field, Input, Modal, Select, Textarea, searchText, useToast } from '../../components/ui.jsx';
 import { dayOf } from '../../lib/dayOf.js';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import PaySwitches from './PaySwitches.jsx';
+import SalaryLedger from './SalaryLedger.jsx';
 
 // ── Shared words and formatters (People.jsx imports these) ──────────────────
 
@@ -247,6 +248,7 @@ const TABS = [
   { key: 'aliases', label: 'Aliases', icon: Tag },
   { key: 'erp', label: 'ERP operator', icon: Link2 },
   { key: 'money', label: 'Money', icon: Wallet },
+  { key: 'ledger', label: 'Salary ledger', icon: BookOpen },
 ];
 // The tabs that edit the person record and so share its Save bar.
 const FORM_TABS = new Set(['details', 'bank', 'erp']);
@@ -1220,6 +1222,9 @@ export default function PersonDrawer({ id = null, seed = null, level, channels =
             )}
             {ready && tab === 'erp' && <ErpTab form={form} set={set} canEdit={canEdit} operators={operators} />}
             {ready && tab === 'money' && <MoneyTab person={person} pid={pid} />}
+            {ready && tab === 'ledger' && (person?.pay_hidden
+              ? <p className="text-xs text-[#86868B]">This person&rsquo;s pay is not shown to your login.</p>
+              : <SalaryLedger pid={pid} />)}
           </div>
 
           {ready && canEdit && FORM_TABS.has(tab) && (

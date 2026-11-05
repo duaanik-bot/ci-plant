@@ -333,6 +333,38 @@ r.get('/hr/people/:id', requireHr('viewer'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── GET /hr/people/:id/salary-ledger — every month's pay since the person joined ──
+// (owner's request 2026-11-05.) One row per month the person has a payroll line in, oldest first, any run status:
+// the days, the inputs that drove it, earnings, each deduction, net, payable, short pay, the advance carried, and
+// payment. `breakdown` is the line's own worked-out components. Viewer and up; a restricted login (hr/privacy.js)
+// gets 404 for anyone whose pay is hidden from it.
+const LEDGER_MONEY = ['basic', 'ot_amount', 'holiday_amount', 'misc_earning', 'bonus', 'adj_earnings', 'gross',
+  'advance_recovery', 'loan_recovery', 'misc_deduction', 'adj_deductions', 'total_deductions', 'net', 'paid_separately',
+  'rounding', 'payable', 'net_before_cap', 'advance_given', 'carried_advance', 'paid_amount'];
+r.get('/hr/people/:id/salary-ledger', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, id)) throw notThere('Person');
+    const person = await one(
+      `SELECT id, code, name, display_name, department, designation, status, worker_type,
+              joined_on::text AS joined_on, exited_on::text AS exited_on, pay_channel
+         FROM hr.people WHERE id = $1`, [id]);
+    if (!person) throw missing('Person');
+    const months = await q(
+      `SELECT r.month, r.status AS run_status, l.days::text AS days, l.present_days::text AS present_days,
+              ${LEDGER_MONEY.map((c) => `l.${c}::text AS ${c}`).join(', ')},
+              l.payment_status, l.paid_on::text AS paid_on, l.paid_ref, l.approval_status, l.pay_channel,
+              l.breakdown, l.loan_recoveries, l.unrecovered,
+              i.ot_hours::text AS ot_hours, i.absent_days::text AS absent_days, i.remarks
+         FROM hr.run_lines l
+         JOIN hr.runs r ON r.id = l.run_id
+         LEFT JOIN hr.run_inputs i ON i.run_id = l.run_id AND i.person_id = l.person_id
+        WHERE l.person_id = $1
+        ORDER BY r.month`, [id]);
+    res.json({ person, months });
+  } catch (e) { next(e); }
+});
+
 // ── People: writing ─────────────────────────────────────────────────────────
 
 // [column, label, longest, tidy (inner spaces squashed)]

@@ -176,6 +176,8 @@ export const hrApi = {
   setAccess: (userId, level) => api.put(`/hr/access/${seg(userId)}`, { level: level || null }),
   // GET /hr/access/:userId/people — admin. { level, applies, people:[{ id, code, name, department, status, mode }] },
   // mode 'show' | 'pay' (name only) | 'all' (not there at all).
+  // GET /hr/people/:id/salary-ledger — { person, months:[every payroll line of the person, oldest first] }.
+  salaryLedger: personId => api.get(`/hr/people/${seg(personId)}/salary-ledger`),
   accessPeople: userId => api.get(`/hr/access/${seg(userId)}/people`),
   // PUT /hr/access/:userId/people — admin. changes: [{ person_id, mode }]; answers as accessPeople.
   setAccessPeople: (userId, changes) => api.put(`/hr/access/${seg(userId)}/people`, { changes }),

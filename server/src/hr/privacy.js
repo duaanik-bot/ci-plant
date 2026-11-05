@@ -43,7 +43,7 @@ export async function privacyFor(userId, level) {
 // The routes a restricted login may reach (method, path after /api). Everything else is refused.
 const M = '\\d{4}-\\d{2}';
 const ALLOW = [
-  ['GET', '/hr/me'], ['GET', '/hr/people'], ['GET', '/hr/people/\\d+'], ['GET', '/hr/people/\\d+/ledger'],
+  ['GET', '/hr/me'], ['GET', '/hr/people'], ['GET', '/hr/people/\\d+'], ['GET', '/hr/people/\\d+/ledger'], ['GET', '/hr/people/\\d+/salary-ledger'],
   ['GET', '/hr/pay-channels'], ['GET', '/hr/settings'], ['GET', '/hr/dashboard'],
   ['GET', '/hr/runs'], ['GET', `/hr/runs/${M}`], ['GET', `/hr/runs/${M}/payslips`],
   ['GET', `/hr/runs/${M}/lines/\\d+/history`], ['GET', '/hr/reports/monthly'],

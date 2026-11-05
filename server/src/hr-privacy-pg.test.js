@@ -203,6 +203,17 @@ describe('HR accounts level and hide list', {
     assert.ok((await call('accounts', 'GET', '/hr/people')).body.some((p) => p.code === 'T-303'));
   });
 
+  test('salary ledger: every month of a person, oldest first; 404 for a hidden person on a restricted login', T, async () => {
+    const mine = ok(await call('admin', 'GET', `/hr/people/${P}/salary-ledger`)).body;
+    assert.equal(mine.person.code, 'T-302');
+    assert.deepEqual(mine.months.map((m) => [m.month, m.run_status]), [[MONTH, 'finalised']]);
+    assert.ok(Number(mine.months[0].gross) > 0 && Array.isArray(mine.months[0].breakdown));
+    const seen = ok(await call('accounts', 'GET', `/hr/people/${S}/salary-ledger`));
+    clean(seen, 'salary-ledger');
+    assert.equal(seen.body.months.length, 1);
+    assert.equal((await call('accounts', 'GET', `/hr/people/${P}/salary-ledger`)).status, 404);
+  });
+
   test('a person short last month is listed in the next month as carried forward, before any run or upload', T, async () => {
     const C = (await db.one(`INSERT INTO hr.people (code, name, pay_channel) VALUES ('T-304', 'Test Carry Person', 'TCASH') RETURNING id`)).id;
     await db.q(`INSERT INTO hr.pay_setups (person_id, effective_from, pay_basis, base, holiday_mode) VALUES ($1, '2026-04-01', 'monthly', 30000, 'none')`, [C]);
