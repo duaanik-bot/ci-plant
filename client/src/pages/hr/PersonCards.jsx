@@ -255,6 +255,10 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
         <h4 className="mb-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">Deductions</h4>
         <dl className="divide-y divide-[#1D1D1F]/[0.05]">
           <Pair label="Advance recovered" value={inr2(l.advance_recovery)} />
+          {r.carriedIn && (
+            <Pair label={`of which carried forward from ${monthLabel(r.carriedIn.from_month)}`} value={inr2(r.carriedIn.advance)}
+              hint={`Short pay in ${monthLabel(r.carriedIn.from_month)}: ${inr2(r.carriedIn.amount)}${r.carriedIn.final ? '' : ` — in the balance once ${monthLabel(r.carriedIn.from_month)} is finalised`}`} />
+          )}
           <Pair label={r.held.length ? 'Loan recovered (instalment held)' : 'Loan recovered'} value={inr2(l.loan_recovery)}
             hint={held ? `Instalment held this month: ${held}` : undefined} />
           {nonZero(l.misc_deduction) && <Pair label="Misc deduction" value={inr2(l.misc_deduction)} />}
@@ -430,7 +434,9 @@ export default function PersonCards({
                             </span>
                           </button>
                           <Figure label="Gross" value={inr2(r.line.gross)} />
-                          <Figure label="Advance" value={inr2(r.line.advance_recovery)} tone={nonZero(r.line.advance_recovery) ? '' : 'text-[#86868B]'} />
+                          <Figure label="Advance" value={inr2(r.line.advance_recovery)} tone={nonZero(r.line.advance_recovery) ? '' : 'text-[#86868B]'}
+                            sub={r.carriedIn ? `incl. ${inr2(r.carriedIn.advance)} c/f` : undefined} subTone="text-amber-700"
+                            title={r.carriedIn ? `${inr2(r.carriedIn.amount)} short pay carried forward from ${monthLabel(r.carriedIn.from_month)}` : undefined} />
                           <LoanFigure pos={pos} />
                           <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''} />
                           <div className="flex w-[290px] shrink-0 items-center justify-end gap-1.5">

@@ -874,6 +874,7 @@ function LoanHolds({ month, run, personId, level, version, onChanged }) {
 export default function RunLineDrawer({
   month, run, personId, person = null, line = null, input = null, channelLabel = c => c || '',
   level, variance = null, prevMonth = null, loadPrevious = null, people = null, channels = null, onClose, onChanged,
+  carried = null,   // short pay carried in from last month (GET /hr/runs/:month carried_forward), or null
 }) {
   const toast = useToast();
   const status = run?.status || 'draft';
@@ -1018,6 +1019,17 @@ export default function RunLineDrawer({
                 <ExternalLink size={12} /> {final ? 'Payslip' : 'Payslip preview (not final)'}
               </a>
             )}>
+              {carried && (
+                <div className="mb-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                  <div className="font-bold">Carried forward from {monthLabel(carried.from_month)}: {inr2(carried.amount)} short pay</div>
+                  <div className="mt-0.5 text-amber-900/85">
+                    {(paiseOf(carried.advance) ?? 0n) > 0n && <>Advance {inr2(carried.advance)} {carried.final ? 'added to the advance balance' : `goes into the advance balance when ${monthLabel(carried.from_month)} is finalised`}
+                      {shown ? <> — this month&rsquo;s advance recovery is <b>{inr2(shown.advance_recovery)}</b>{(paiseOf(shown.advance_recovery) ?? 0n) < (paiseOf(carried.advance) ?? 0n) ? ', so part of it carries on' : ''}.</> : '.'} </>}
+                    {(paiseOf(carried.loans) ?? 0n) > 0n && <>Loan instalment {inr2(carried.loans)} not recovered stays on the loan. </>}
+                    {(paiseOf(carried.other) ?? 0n) > 0n && <>Other deductions {inr2(carried.other)} were not recovered. </>}
+                  </div>
+                </div>
+              )}
               {shown ? (
                 <>
                   <Breakdown line={shown} />

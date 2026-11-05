@@ -113,7 +113,7 @@ import { FIELDS, autoMap, extractRows, pickSheet, readWorkbook } from '../hr/imp
 import { inAppAdvancesInMonth } from '../hr/ledger.js';
 import { loanOutstanding, nextMonth } from '../hr/loans.js';
 import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
-import { cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
+import { add, cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
 import { ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
@@ -1208,6 +1208,37 @@ async function pendingImportOf(qx, imports) {
   };
 }
 
+// ── Carried forward from the month before (owner's request 2026-11-05) ─────
+// A person whose pay fell short last month (the cap trimmed a recovery: unrecovered advance / loan instalments /
+// other deductions) carries that into this month: the unrecovered advance stays in the advance balance and is
+// recovered here, a loan instalment stays on the loan. Read from the previous month's run lines, whatever their
+// status — `final` says whether that month is finalised (only then is the advance in the balance this month reads).
+// Listed even when this month has no run or upload yet. A restricted login's hidden people are left out.
+async function carriedInto(qx, month, exclude = []) {
+  const [y, m] = month.split('-').map(Number);
+  const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`;
+  const rows = await qx(
+    `SELECT l.person_id, p.code, p.name, p.department, r.month AS from_month, r.status AS from_status,
+            coalesce((l.unrecovered->>'advance')::numeric, 0)::text AS advance,
+            coalesce((SELECT sum((x->>'amount')::numeric) FROM jsonb_array_elements(
+              CASE WHEN jsonb_typeof(l.unrecovered->'loans') = 'array' THEN l.unrecovered->'loans' ELSE '[]'::jsonb END) x), 0)::text AS loans,
+            coalesce((l.unrecovered->>'other')::numeric, 0)::text AS other,
+            l.net_before_cap::text AS net_before_cap, l.carried_advance::text AS carried_advance
+       FROM hr.run_lines l
+       JOIN hr.runs r ON r.id = l.run_id
+       JOIN hr.people p ON p.id = l.person_id
+      WHERE r.month = $1 AND l.person_id <> ALL($2::int[])
+        AND (coalesce((l.unrecovered->>'advance')::numeric, 0) > 0 OR coalesce((l.unrecovered->>'other')::numeric, 0) > 0
+             OR jsonb_array_length(CASE WHEN jsonb_typeof(l.unrecovered->'loans') = 'array' THEN l.unrecovered->'loans' ELSE '[]'::jsonb END) > 0)
+      ORDER BY lower(p.name), p.id`, [prev, exclude]);
+  return rows.map((r) => ({
+    ...r,
+    amount: fmtPaise(toPaise(add(add(rat(r.advance), rat(r.loans)), rat(r.other)))),
+    advance: money(r.advance), loans: money(r.loans), other: money(r.other),
+    final: r.from_status === 'finalised',
+  }));
+}
+
 r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
@@ -1232,6 +1263,7 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
         run: null, lines: [], inputs: [], payment_totals: paymentTotals([]), flags_summary: flagsSummary([]),
         missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: limited ? null : pendingImport,
         ...(limited ? { pay_hidden_people: [] } : {}),
+        carried_forward: await carriedInto(q, month, ex),
       });
     }
     const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
@@ -1257,6 +1289,7 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
       missing: await peopleWithoutInputs(q, run.id, month),
       imports: importViews,
       pending_import: limited ? null : pendingImport,
+      carried_forward: await carriedInto(q, month, ex),
     });
   } catch (e) { next(e); }
 });

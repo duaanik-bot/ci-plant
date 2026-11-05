@@ -518,6 +518,7 @@ export default function Payroll({ level }) {
         serverPending: d?.pending_import && typeof d.pending_import === 'object' ? d.pending_import : null,
         unresolved: Number(dash?.exceptions?.unresolved_import_rows) || 0,
         payHidden: list(d?.pay_hidden_people),   // a restricted login: people shown by name only, no pay
+        carried: list(d?.carried_forward),       // short last month: carried into this month (server carriedInto)
       });
       setVersion(v => v + 1);
     } catch (e) {
@@ -625,6 +626,8 @@ export default function Payroll({ level }) {
   const monthClosed = !run && laterFinal;
 
   // ── Register rows ──
+  // People whose pay fell short last month, by person: what they carried into this month.
+  const carriedBy = useMemo(() => new Map(list(here?.carried).map(c => [String(c.person_id), c])), [here]);
   const rows = useMemo(() => lines.map(l => {
     const id = String(l.person_id);
     const p = peopleById.get(id);
@@ -644,8 +647,9 @@ export default function Payroll({ level }) {
       payment: payStatus(l),
       approval: approvalOf(l),
       held: holdsById.get(id) ?? [],
+      carriedIn: carriedBy.get(id) ?? null,
     };
-  }), [lines, peopleById, inputsById, channelLabel, holdsById]);
+  }), [lines, peopleById, inputsById, channelLabel, holdsById, carriedBy]);
   const blockedCount = rows.filter(r => r.blocked).length;
   const warnCount = rows.filter(r => !r.blocked && r.warned).length;
 
@@ -867,7 +871,18 @@ export default function Payroll({ level }) {
           );
         } },
       money('gross', 'Gross', r => r.line.gross, { card: 'metric', strong: true }),
-      money('advance', 'Advance', r => r.line.advance_recovery),
+      { ...money('advance', 'Advance', r => r.line.advance_recovery),
+        render: r => (
+          <span className={`whitespace-nowrap ${r._total ? 'font-bold text-[#1D1D1F]' : ''}`}>
+            {inr2(r._total ? r.sums.advance : r.line.advance_recovery)}
+            {!r._total && r.carriedIn && (
+              <span title={`${inr2(r.carriedIn.amount)} short pay carried forward from ${monthLabel(r.carriedIn.from_month)}`}
+                className="ml-1 rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-bold text-amber-900">
+                incl. {inr2(r.carriedIn.advance)} c/f
+              </span>
+            )}
+          </span>
+        ) },
       { ...money('loan', 'Loan', r => r.line.loan_recovery),
         render: r => {
           const held = r._total ? [] : r.held;
@@ -1294,6 +1309,45 @@ export default function Payroll({ level }) {
 
       {!here && !loadError && <div className="p-8 text-sm text-slate-400">Loading {monthLabel(month)}…</div>}
 
+      {here && list(here.carried).length > 0 && (() => {
+        const from = here.carried[0].from_month;
+        const fromFinal = here.carried.every(c => c.final);
+        const total = sumPaise(here.carried.map(c => c.amount));
+        return (
+          <section className="mb-3 rounded-[22px] border border-amber-200 bg-amber-50/80 p-4 shadow-card">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="text-sm font-bold text-amber-950">Carried forward from {monthLabel(from)}</h3>
+              <span className="text-xs text-amber-900">{plural(here.carried.length, 'person', 'people')} · <b className="tabular-nums">{inr2(total)}</b> short pay</span>
+            </div>
+            <p className="mt-1 text-[11px] text-amber-900/80">
+              Their pay in {monthLabel(from)} did not cover the recoveries. The unrecovered advance
+              {fromFinal ? ' is in their advance balance' : ` goes into their advance balance when ${monthLabel(from)} is finalised`} and is
+              recovered from {monthLabel(month)}&rsquo;s pay; a loan instalment not recovered stays on the loan.
+              {!run && ' They are listed here before the sheet is uploaded; the settlement starts once the month is worked out.'}
+            </p>
+            <div className="mt-2 divide-y divide-amber-200/70 overflow-hidden rounded-2xl border border-amber-200/70 bg-white/70">
+              {here.carried.map(c => {
+                const line = lines.find(l => String(l.person_id) === String(c.person_id));
+                return (
+                  <button key={c.person_id} type="button" onClick={() => run && openDrawer(c.person_id)} disabled={!run}
+                    className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-left text-xs hover:bg-white disabled:cursor-default">
+                    <span className="min-w-[180px] flex-1">
+                      <span className="font-semibold text-[#1D1D1F]">{c.name}</span>
+                      <span className="ml-1.5 text-[#6E6E73]">{c.code}{c.department ? ` · ${c.department}` : ''}</span>
+                    </span>
+                    <span className="tabular-nums text-amber-950">Short in {monthLabel(c.from_month).split(' ')[0]}: <b>{inr2(c.amount)}</b></span>
+                    {(paiseOf(c.loans) ?? 0n) > 0n && <span className="tabular-nums text-[#515154]">loan {inr2(c.loans)} stays on the loan</span>}
+                    {(paiseOf(c.other) ?? 0n) > 0n && <span className="tabular-nums text-[#515154]">other deductions {inr2(c.other)} not recovered</span>}
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${line ? 'bg-emerald-100 text-emerald-800' : 'bg-[#1D1D1F]/[0.07] text-[#515154]'}`}>
+                      {line ? `In ${monthLabel(month).split(' ')[0]}: advance recovered ${inr2(line.advance_recovery)}` : run ? 'Not in this run yet' : 'Waiting for the sheet'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
       {here && !run && (
         <div className="glass rounded-[22px] border border-white/70 p-8 text-center shadow-card">
           <p className="text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">No payroll for {monthLabel(month)} yet.</p>
@@ -1724,7 +1778,7 @@ export default function Payroll({ level }) {
       {drawer && (
         <RunLineDrawer key={drawer.key} month={month} run={run} personId={drawer.id}
           person={drawerPerson} line={linesById.get(drawer.id) ?? null} input={inputsById.get(drawer.id) ?? null}
-          channelLabel={channelLabel} level={level}
+          channelLabel={channelLabel} level={level} carried={carriedBy.get(drawer.id) ?? null}
           variance={variance.key === varianceKey ? variance.map.get(drawer.id) ?? null : null}
           prevMonth={prevMonth} loadPrevious={loadPrevious} people={people} channels={channels}
           onClose={() => setDrawer(null)} onChanged={load} />

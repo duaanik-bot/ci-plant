@@ -203,6 +203,21 @@ describe('HR accounts level and hide list', {
     assert.ok((await call('accounts', 'GET', '/hr/people')).body.some((p) => p.code === 'T-303'));
   });
 
+  test('a person short last month is listed in the next month as carried forward, before any run or upload', T, async () => {
+    const C = (await db.one(`INSERT INTO hr.people (code, name, pay_channel) VALUES ('T-304', 'Test Carry Person', 'TCASH') RETURNING id`)).id;
+    await db.q(`INSERT INTO hr.pay_setups (person_id, effective_from, pay_basis, base, holiday_mode) VALUES ($1, '2026-04-01', 'monthly', 30000, 'none')`, [C]);
+    ok(await call('operator', 'PUT', `/hr/runs/2026-09/inputs/${C}`, { absent_days: 0, advance_given: 50000, reason: 'Test' }));
+    const sept = (await call('admin', 'GET', '/hr/runs/2026-09')).body.lines.find((l) => l.person_id === C);
+    assert.equal(Number(sept.payable), 0, 'pay is capped at zero');
+    const oct = ok(await call('admin', 'GET', '/hr/runs/2026-10')).body;
+    assert.equal(oct.run, null, 'October has no run yet');
+    const c = oct.carried_forward.find((x) => x.person_id === C);
+    assert.deepEqual([c.from_month, c.from_status, c.final, c.advance, c.amount], ['2026-09', 'draft', false, '20000.00', '20000.00']);
+    // Hidden from a restricted login: not listed there.
+    ok(await call('admin', 'PUT', `/hr/access/${ids.accounts}/people`, { changes: [{ person_id: C, mode: 'pay' }] }));
+    assert.ok(!(await call('accounts', 'GET', '/hr/runs/2026-10')).body.carried_forward.some((x) => x.person_id === C));
+  });
+
   function refused(res, status, code) {
     assert.equal(res.status, status, res.text);
     if (code) assert.equal(res.body?.code, code, res.text);
