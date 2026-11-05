@@ -25,6 +25,8 @@ routes. The enquiry desk uses that and nothing new:
 - **CI Plant queues the work** (`enquiry_jobs`): Fetch and Draft in Gmail (never a send). The job waits for
   the enquiry desk robot — the Claude that has that mailbox's Gmail, running the skill — which claims it
   through the robot routes, does it, and reports back. A job nobody claims waits; nothing is lost.
+  Since 5 Nov a scheduled task on the owner's Mac works the trial queue every 15 minutes (see "The robot on a
+  schedule" below).
 - **Never the AVS photo-check routine** (found in the live trial, 4 Nov): the owner's AVS mailbox rule (30 Sep)
   keeps AVS's Claude off dua.anik@gmail.com, and AVS reads mppchd@gmail.com only in Chrome on the office
   computer. So CI Plant does not start that routine for an enquiry job, and its prompt has no enquiry branch.
@@ -114,11 +116,29 @@ Enquiries can also be added by hand (phone, WhatsApp).
     POST /api/avs/robot/enquiry-jobs/:id/sent-drafts a Fetch reports drafts the person has sent from Gmail
     POST /api/avs/robot/enquiry-jobs/:id/done       result (sent / draft ids) or an error
 
+## The robot on a schedule (5 Nov)
+
+A Claude desktop scheduled task, `enquiry-desk-robot`, runs every 15 minutes on the owner's Mac.
+
+- **Each run:** it lists the trial mailbox's jobs first. With none waiting it stops in seconds. Otherwise it works
+  each job with the skill.
+- **Permissions:** an unattended run cannot answer permission prompts, so the task runs with Bypass permissions.
+- **The guard:** a hook in the task's folder keeps the run to the skill's own work. Gmail is read-only apart from
+  `create_draft`. Sending, forwarding, trashing and labels, other connectors, the web and subagents are refused,
+  and so is Bash that reaches outside. A hook's refusal holds in Bypass mode (tested 5 Nov).
+
+The setup, the guard and its tests, and the prompt are in `skills/enquiry-desk/robot/`.
+
+**Live test, 5 Nov:** fetch job 2 was queued like the Fetch button. The 15-minute run picked it up and finished
+it in 23 s: 77 mails since 3 Nov, none an enquiry. Nothing was refused, and Gmail works in scheduled runs.
+
 ## Owner's one-time steps (none needs a developer)
 
-1. Trial: nothing — Claude on the owner's Mac has dua.anik@gmail.com connected and the skill installed.
+1. Trial: done. Claude on the owner's Mac has dua.anik@gmail.com connected and the skill installed, with the
+   scheduled task and its guard (5 Nov).
 2. Business, when the trial is approved: a Claude whose Gmail connector is mppchd@gmail.com, with the skill
-   (`enquiry-desk-skill.zip`) added; then switch the desk to Business in Settings.
+   (`enquiry-desk-skill.zip`) added and the same scheduled task and guard (`robot/scheduled-task.md`). Then
+   switch the desk to Business in Settings.
 
 ## Non-goals
 
@@ -133,3 +153,5 @@ Enquiries can also be added by hand (phone, WhatsApp).
 - The value kept inside counts each item's first quantity only (the customer sees no total).
 - Trial drafts are addressed to itself only; an admin can widen that.
 - New tables carry no foreign key to plant tables (as Costing), and get the realtime ping triggers.
+- The robot runs every 15 minutes round the clock, with Bypass permissions, kept to its job by the guard hook
+  (5 Nov). Narrow its hours if idle runs cost too much.

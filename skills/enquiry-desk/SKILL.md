@@ -46,6 +46,11 @@ mppchd@gmail.com only in Chrome on the office computer.
 | trial    | dua.anik@gmail.com | Claude on the owner's Mac, whose Gmail connector is this mailbox |
 | business | mppchd@gmail.com   | a Claude whose Gmail connector is mppchd@gmail.com               |
 
+**On a schedule:** on the owner's Mac a Claude scheduled task, `enquiry-desk-robot`, works the trial mailbox's
+jobs every 15 minutes. A guard hook lets each run read Gmail and save one draft, and never send. The setup,
+the guard and the task's prompt are in `robot/` (`robot/scheduled-task.md`). Set up the business mailbox the
+same way, on the Claude that has it.
+
 You need the CI Plant address and the AVS robot key (the same key the AVS check uses). Read the key with the
 Supabase connector (project `ylbfeptgefzimcqnwphy`): `select value from avs.settings where key = 'robot_key'`,
 and put it in `~/.config/ci-plant/enquiry-desk.env` (`chmod 600`) without printing it:
