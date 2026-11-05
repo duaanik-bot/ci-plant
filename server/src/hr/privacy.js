@@ -51,6 +51,10 @@ const ALLOW = [
   // Paying (accounts; a viewer is stopped by requireHr): batches, one line, paid / unpaid / hold, staff advances.
   ['POST', `/hr/runs/${M}/payments`], ['PUT', `/hr/runs/${M}/lines/\\d+/payment`], ['POST', `/hr/runs/${M}/lines/status`],
   ['POST', '/hr/staff-payments'], ['POST', '/hr/advances'],
+  // Bulk advance sheets: the restricted login sees and enters only its visible people (routes/hr-ledgers.js).
+  ['GET', '/hr/advance-sheets'], ['GET', '/hr/advance-sheets/\\d+'], ['POST', '/hr/advance-sheets'], ['PUT', '/hr/advance-sheets/\\d+'],
+  ['PUT', '/hr/advance-sheets/\\d+/lines'], ['POST', '/hr/advance-sheets/\\d+/submit'], ['POST', '/hr/advance-sheets/\\d+/post'],
+  ['DELETE', '/hr/advance-sheets/\\d+'],
 ].map(([method, path]) => [method, new RegExp(`^${path}/?$`)]);
 
 const pathOf = (req) => {

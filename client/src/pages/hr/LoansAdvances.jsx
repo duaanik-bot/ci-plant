@@ -27,8 +27,9 @@ import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/h
 import { MONTH_RE, list, paiseOf, plantMonth, plantToday, shiftMonth } from './RunLineDrawer.jsx';
 import { InlineError, parseNum, refusalText } from './PersonDrawer.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
+import BulkAdvances from './BulkAdvances.jsx';
 
-const SUBS = [{ key: 'loans', label: 'Loans' }, { key: 'advances', label: 'Advances' }, { key: 'adjustments', label: 'Adjustments' }];
+const SUBS = [{ key: 'loans', label: 'Loans' }, { key: 'advances', label: 'Advances' }, { key: 'bulk', label: 'Bulk advances' }, { key: 'adjustments', label: 'Adjustments' }];
 
 const TONE = {
   active: 'bg-emerald-50 text-emerald-700', closed: 'bg-slate-200 text-slate-600', cancelled: 'bg-red-50 text-red-700',
@@ -789,6 +790,7 @@ export default function LoansAdvances({ level }) {
         {sub === 'loans' && <LoansTab level={level} people={people} />}
         {sub === 'advances' && <AdvancesTab level={level} people={people} />}
         {sub === 'adjustments' && <AdjustmentsTab level={level} people={people} />}
+        {sub === 'bulk' && <BulkAdvances level={level} channels={channels} />}
       </div>
       {paying && <PayStaffModal people={people} channels={channels} onClose={() => setPaying(false)} onDone={() => setReloadKey(k => k + 1)} />}
     </div>

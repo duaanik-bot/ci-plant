@@ -60,6 +60,8 @@ export const MINTING_POSTS = Object.freeze([
   '/grns/bulk',
   '/grns/direct',
   '/grns/substitute',
+  '/hr/advance-sheets',
+  '/hr/advance-sheets/:id/post',
   '/hr/loader/apply',
   '/hr/loans',
   '/hr/runs/:month/lines/status',

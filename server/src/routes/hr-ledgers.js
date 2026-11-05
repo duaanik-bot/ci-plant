@@ -74,7 +74,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { q, tx } from '../db.js';
 import { markUncacheable } from '../data-tables.js';
-import { lockDocNumber, nextNumber, optionalText } from '../helpers.js';
+import { lockDocNumber, nextNumber, notify, optionalText } from '../helpers.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { hrGuard, requireHr } from '../hr/access.js';
 import { assertPayVisible, canSeePay, hiddenIds } from '../hr/privacy.js';
@@ -907,6 +907,73 @@ r.get('/hr/people/:id/ledger', requireHr('viewer'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Pays one person an advance or a loan inside the caller's transaction — Pay staff, and a bulk advance sheet's
+// posting. `loanNo` is minted by the caller BEFORE any row lock (helpers.js document-number lock order). `via` in
+// the audit says which door it came through. Returns { type, advanceId, loanId, warnings }.
+async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payment') {
+    // Then the locks every ledger write takes, in finalise's order: the person's row, then the person's loans.
+    const person = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`,
+      [pay.personId]);
+    if (!person) throw bad('That person does not exist');
+    await qc(`SELECT id FROM hr.loans WHERE person_id = $1 ORDER BY id FOR UPDATE`, [pay.personId]);
+
+    let via = 'Cash';
+    if (pay.paidVia !== CASH) {
+      const channel = await oc(`SELECT code, label FROM hr.pay_channels WHERE code = $1`, [pay.paidVia]);
+      if (!channel) {
+        throw refuse(400, `${pay.paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
+      }
+      via = channel.label || channel.code;
+    }
+
+    const warnings = [];
+    if (person.status === 'exited') {
+      warnings.push(`${person.name} (${person.code}) is marked as left${person.exited_on ? ` (last day ${person.exited_on})` : ''}`);
+    }
+    const latest = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+    const closed = latest?.month ?? null;
+    const paidMonth = pay.paidOn.slice(0, 7);
+    const open = closed && paidMonth <= closed ? nextMonth(closed) : paidMonth;
+
+    if (pay.kind === 'advance') {
+      const note = pay.note ? `Paid via ${via} · ${pay.note}` : `Paid via ${via}`;
+      const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note);
+      const balance = (await advanceBalances(qc, [pay.personId])).get(pay.personId);
+      if (open !== paidMonth) {
+        warnings.push(`Payroll for ${paidMonth}, the month this advance was given in, is already finalised, so it is `
+          + `recovered from ${open}, the next open payroll month`);
+      }
+      await hrAudit(qc, req, 'advance', pay.personId, 'give', {
+        via: viaDoor, txn_id: row.id, amount: money(pay.amount), date: pay.paidOn, paid_via: pay.paidVia,
+        balance_after: balance,
+      });
+      return { type: 'advance', advanceId: row.id, loanId: null, warnings };
+    }
+
+    const instalment = instalmentOf(pay.amount, pay.instalments);
+    const firstDue = pay.firstDue ?? open;
+    if (closed && firstDue <= closed) {
+      warnings.push(`Payroll for ${firstDue} is already finalised: the first instalment is taken from ${nextMonth(closed)}, `
+        + 'the next open payroll month');
+    }
+    const made = await oc(
+      `INSERT INTO hr.loans (loan_no, person_id, principal, issued_on, purpose, interest_rate, instalment, first_due_month,
+                             paid_via, is_opening, note, created_by)
+       VALUES ($1, $2, $3, $4::date, $10, 0, $5, $6, $7, false, $8, $9)
+       RETURNING id, loan_no`,
+      [loanNo, pay.personId, pay.amount, pay.paidOn, instalment, firstDue, pay.paidVia, pay.note, req.user.id, pay.purpose ?? null]);
+    await qc(
+      `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
+       VALUES ($1, $2::date, 'disbursed', $3, $4, $5)`,
+      [made.id, pay.paidOn, pay.amount, `Paid out via ${via}`, req.user.id]);
+    await hrAudit(qc, req, 'loan', made.id, 'create', {
+      via: viaDoor, loan_no: made.loan_no, person_id: pay.personId, principal: money(pay.amount),
+      instalments: pay.instalments, instalment, first_due_month: firstDue, issued_on: pay.paidOn, paid_via: pay.paidVia,
+      is_opening: false,
+    });
+    return { type: 'loan', advanceId: null, loanId: made.id, warnings };
+}
+
 r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
   try {
     const pay = readStaffPayment(bodyOf(req));
@@ -914,67 +981,7 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       // The loan number FIRST, before any row lock (helpers.js document-number lock order).
       const loanNo = pay.kind === 'loan' ? await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc) : null;
-      // Then the locks every ledger write takes, in finalise's order: the person's row, then the person's loans.
-      const person = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`,
-        [pay.personId]);
-      if (!person) throw bad('That person does not exist');
-      await qc(`SELECT id FROM hr.loans WHERE person_id = $1 ORDER BY id FOR UPDATE`, [pay.personId]);
-
-      let via = 'Cash';
-      if (pay.paidVia !== CASH) {
-        const channel = await oc(`SELECT code, label FROM hr.pay_channels WHERE code = $1`, [pay.paidVia]);
-        if (!channel) {
-          throw refuse(400, `${pay.paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
-        }
-        via = channel.label || channel.code;
-      }
-
-      const warnings = [];
-      if (person.status === 'exited') {
-        warnings.push(`${person.name} (${person.code}) is marked as left${person.exited_on ? ` (last day ${person.exited_on})` : ''}`);
-      }
-      const latest = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
-      const closed = latest?.month ?? null;
-      const paidMonth = pay.paidOn.slice(0, 7);
-      const open = closed && paidMonth <= closed ? nextMonth(closed) : paidMonth;
-
-      if (pay.kind === 'advance') {
-        const note = pay.note ? `Paid via ${via} · ${pay.note}` : `Paid via ${via}`;
-        const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note);
-        const balance = (await advanceBalances(qc, [pay.personId])).get(pay.personId);
-        if (open !== paidMonth) {
-          warnings.push(`Payroll for ${paidMonth}, the month this advance was given in, is already finalised, so it is `
-            + `recovered from ${open}, the next open payroll month`);
-        }
-        await hrAudit(qc, req, 'advance', pay.personId, 'give', {
-          via: 'staff_payment', txn_id: row.id, amount: money(pay.amount), date: pay.paidOn, paid_via: pay.paidVia,
-          balance_after: balance,
-        });
-        return { type: 'advance', advanceId: row.id, loanId: null, warnings };
-      }
-
-      const instalment = instalmentOf(pay.amount, pay.instalments);
-      const firstDue = pay.firstDue ?? open;
-      if (closed && firstDue <= closed) {
-        warnings.push(`Payroll for ${firstDue} is already finalised: the first instalment is taken from ${nextMonth(closed)}, `
-          + 'the next open payroll month');
-      }
-      const made = await oc(
-        `INSERT INTO hr.loans (loan_no, person_id, principal, issued_on, purpose, interest_rate, instalment, first_due_month,
-                               paid_via, is_opening, note, created_by)
-         VALUES ($1, $2, $3, $4::date, NULL, 0, $5, $6, $7, false, $8, $9)
-         RETURNING id, loan_no`,
-        [loanNo, pay.personId, pay.amount, pay.paidOn, instalment, firstDue, pay.paidVia, pay.note, req.user.id]);
-      await qc(
-        `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-         VALUES ($1, $2::date, 'disbursed', $3, $4, $5)`,
-        [made.id, pay.paidOn, pay.amount, `Paid out via ${via}`, req.user.id]);
-      await hrAudit(qc, req, 'loan', made.id, 'create', {
-        via: 'staff_payment', loan_no: made.loan_no, person_id: pay.personId, principal: money(pay.amount),
-        instalments: pay.instalments, instalment, first_due_month: firstDue, issued_on: pay.paidOn, paid_via: pay.paidVia,
-        is_opening: false,
-      });
-      return { type: 'loan', advanceId: null, loanId: made.id, warnings };
+      return postStaffPayment(qc, oc, req, pay, loanNo);
     });
 
     const ledger = await personLedger(q, pay.personId);
@@ -986,6 +993,350 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
       warnings: out.warnings,
       ledger,
     });
+  } catch (e) { next(refusal(e)); }
+});
+
+// ── Bulk advance sheets (owner's request 2026-11-05; migration 20261105150000_hr_advance_sheets) ──
+//
+// Near the 24th–25th most people take an advance. A sheet holds them all for one payroll month:
+//   POST /hr/advance-sheets {month, paid_on?, paid_via?, note?}          accounts+  → a draft CI-ADV-####
+//   GET  /hr/advance-sheets                                              viewer+    → every sheet with its totals
+//   GET  /hr/advance-sheets/:id                                          viewer+    → the sheet, its lines and the
+//        roster (every active person with the advance owed now and loans outstanding), for the grid
+//   PUT  /hr/advance-sheets/:id/lines {lines:[{person_id, kind, amount, instalments?, purpose?, remarks?}]}
+//        accounts+, a draft only: the sheet's lines become exactly these (a blank or 0 amount drops the person)
+//   POST /hr/advance-sheets/:id/submit                                   accounts+  → notifies management
+//   POST /hr/advance-sheets/:id/decide {person_ids, decision:'approved'|'rejected'|'pending', mgmt_remarks?}
+//        approver+, a submitted sheet; 'pending' is the undo
+//   POST /hr/advance-sheets/:id/send-back {reason}                       approver+  → draft again (decisions kept)
+//   POST /hr/advance-sheets/:id/post                                     accounts+  → every approved line becomes
+//        an advance (or a loan) exactly as Pay staff makes it; the sheet is posted, its lines locked
+//   DELETE /hr/advance-sheets/:id                                        accounts+, a draft that nothing was posted from
+// A restricted login (hr/privacy.js) sees, edits, totals and posts only the people whose pay it can see.
+const SHEET_STATUSES = ['draft', 'submitted', 'posted'];
+const DECISIONS = ['approved', 'rejected', 'pending'];
+
+const sheetTotals = (lines) => {
+  const t = { lines: 0, amount: ZERO_P, advance: ZERO_P, loan: ZERO_P, approved: ZERO_P, approved_lines: 0, rejected_lines: 0, pending_lines: 0 };
+  for (const l of lines) {
+    const a = toPaise(rat(l.amount));
+    t.lines += 1; t.amount += a;
+    if (l.kind === 'loan') t.loan += a; else t.advance += a;
+    if (l.decision === 'approved') { t.approved += a; t.approved_lines += 1; }
+    else if (l.decision === 'rejected') t.rejected_lines += 1; else t.pending_lines += 1;
+  }
+  return { ...t, amount: fmtPaise(t.amount), advance: fmtPaise(t.advance), loan: fmtPaise(t.loan), approved: fmtPaise(t.approved) };
+};
+const ZERO_P = 0n;
+
+const SHEET_LINE_COLS = `sl.id, sl.sheet_id, sl.person_id, p.code, p.name, p.department, p.pay_channel, sl.kind, sl.amount::text AS amount,
+  sl.instalments, sl.purpose, sl.remarks, sl.mgmt_remarks, sl.decision, sl.decided_by, du.name AS decided_by_name, sl.decided_at,
+  sl.advance_txn_id, sl.loan_id, ln.loan_no, sl.posted_at`;
+const sheetLines = (qx, sheetId, exclude) => qx(
+  `SELECT ${SHEET_LINE_COLS}
+     FROM hr.advance_sheet_lines sl JOIN hr.people p ON p.id = sl.person_id
+     LEFT JOIN public.users du ON du.id = sl.decided_by
+     LEFT JOIN hr.loans ln ON ln.id = sl.loan_id
+    WHERE sl.sheet_id = $1 AND sl.person_id <> ALL($2::int[])
+    ORDER BY lower(p.name), p.id`, [sheetId, exclude]);
+const SHEET_COLS = `s.*, s.paid_on::text AS paid_on, cu.name AS created_by_name, su.name AS submitted_by_name, pu.name AS posted_by_name,
+  bu.name AS sent_back_by_name`;
+const SHEET_FROM = `FROM hr.advance_sheets s LEFT JOIN public.users cu ON cu.id = s.created_by
+  LEFT JOIN public.users su ON su.id = s.submitted_by LEFT JOIN public.users pu ON pu.id = s.posted_by
+  LEFT JOIN public.users bu ON bu.id = s.sent_back_by`;
+
+async function lockSheet(qc, id) {
+  const sheet = await qc(
+    `SELECT id, sheet_no, month, paid_on::text AS paid_on, paid_via, status, note, created_by, submitted_by
+       FROM hr.advance_sheets WHERE id = $1 FOR UPDATE`, [id]);
+  if (!sheet[0]) throw missing('Advance sheet');
+  return sheet[0];
+}
+const sheetState = (sheet, wanted, doing) =>
+  refuse(409, `${sheet.sheet_no} is ${sheet.status}: only a ${wanted} sheet can be ${doing}`, { code: 'SHEET_STATE' });
+
+async function sheetView(req, id) {
+  const [sheet] = await q(`SELECT ${SHEET_COLS} ${SHEET_FROM} WHERE s.id = $1`, [id]);
+  if (!sheet) throw missing('Advance sheet');
+  const lines = await sheetLines(q, id, hiddenIds(req));
+  return { sheet, lines, totals: sheetTotals(lines) };
+}
+
+// The date a sheet's advances are paid must fall inside its payroll month: payroll takes an advance up in the month
+// it is given. Left blank: today when the month is this one, else the month's last day (an earlier month) or its
+// first (a later one).
+function sheetPaidOn(month, raw) {
+  const today = plantDateStr();
+  const last = `${month}-${String(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()).padStart(2, '0')}`;
+  const paidOn = dateOf(raw, 'The date it is paid')
+    ?? (today.slice(0, 7) === month ? today : month < today.slice(0, 7) ? last : `${month}-01`);
+  if (paidOn.slice(0, 7) !== month) {
+    throw bad(`The date it is paid must fall in ${month}: payroll takes an advance up in the month it is given`);
+  }
+  return paidOn;
+}
+
+r.get('/hr/advance-sheets', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const sheets = await q(`SELECT ${SHEET_COLS} ${SHEET_FROM} ORDER BY s.month DESC, s.id DESC`);
+    const ex = hiddenIds(req);
+    const out = [];
+    for (const s of sheets) out.push({ ...s, totals: sheetTotals(await sheetLines(q, s.id, ex)) });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+r.get('/hr/advance-sheets/:id', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const view = await sheetView(req, id);
+    // The grid's roster: everyone active (and anyone already on the sheet), with what they owe now.
+    const ex = hiddenIds(req);
+    const people = await q(
+      `SELECT p.id, p.code, p.name, p.department, p.status, p.pay_channel FROM hr.people p
+        WHERE (p.status = 'active' OR p.id IN (SELECT person_id FROM hr.advance_sheet_lines WHERE sheet_id = $1))
+          AND p.id <> ALL($2::int[])
+        ORDER BY lower(p.name), p.id`, [id, ex]);
+    const ids = people.map((p) => p.id);
+    const balances = await advanceBalances(q, ids);
+    const owed = await q(
+      `SELECT l.person_id, coalesce(sum(t.principal_amount) FILTER (WHERE t.kind IN ('disbursed', 'opening')), 0)
+              - coalesce(sum(t.principal_amount) FILTER (WHERE t.kind NOT IN ('disbursed', 'opening')), 0) AS outstanding
+         FROM hr.loans l JOIN hr.loan_txns t ON t.loan_id = l.id
+        WHERE l.person_id = ANY($1::int[]) AND l.status = 'active'
+        GROUP BY l.person_id`, [ids]);
+    const loanBy = new Map(owed.map((o) => [o.person_id, money(o.outstanding)]));
+    res.json({ ...view, people: people.map((p) => ({ ...p, advance_balance: balances.get(p.id) ?? money(0), loans_outstanding: loanBy.get(p.id) ?? money(0) })) });
+  } catch (e) { next(e); }
+});
+
+r.post('/hr/advance-sheets', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const body = bodyOf(req);
+    const month = monthOf(body.month, 'The payroll month');
+    const paidOn = sheetPaidOn(month, body.paid_on);
+    let paidVia = textOf(body.paid_via, 'Paid via', 60, true) ?? CASH;
+    if (paidVia.toLowerCase() === CASH) paidVia = CASH;
+    const note = textOf(body.note, 'The note', 500);
+    const id = await tx(async (qc, oc) => {
+      const sheetNo = await nextNumber('CI-ADV-', 'hr.advance_sheets', 'sheet_no', oc);
+      if (paidVia !== CASH && !(await oc(`SELECT code FROM hr.pay_channels WHERE code = $1`, [paidVia]))) {
+        throw refuse(400, `${paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
+      }
+      const made = await oc(
+        `INSERT INTO hr.advance_sheets (sheet_no, month, paid_on, paid_via, note, created_by) VALUES ($1, $2, $3::date, $4, $5, $6)
+         RETURNING id`, [sheetNo, month, paidOn, paidVia, note, req.user.id]);
+      await hrAudit(qc, req, 'advance_sheet', made.id, 'create', { sheet_no: sheetNo, month, paid_on: paidOn, paid_via: paidVia });
+      return made.id;
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+r.put('/hr/advance-sheets/:id', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const body = bodyOf(req);
+    await tx(async (qc, oc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'changed');
+      const month = blank(body.month) ? sheet.month : monthOf(body.month, 'The payroll month');
+      const kept = sheet.paid_on;
+      const paidOn = sheetPaidOn(month, blank(body.paid_on) ? (kept.slice(0, 7) === month ? kept : null) : body.paid_on);
+      let paidVia = blank(body.paid_via) ? sheet.paid_via : textOf(body.paid_via, 'Paid via', 60, true);
+      if (paidVia.toLowerCase() === CASH) paidVia = CASH;
+      if (paidVia !== CASH && !(await oc(`SELECT code FROM hr.pay_channels WHERE code = $1`, [paidVia]))) {
+        throw refuse(400, `${paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
+      }
+      const note = Object.hasOwn(body, 'note') ? textOf(body.note, 'The note', 500) : sheet.note;
+      await qc(`UPDATE hr.advance_sheets SET month = $2, paid_on = $3::date, paid_via = $4, note = $5 WHERE id = $1`,
+        [id, month, paidOn, paidVia, note]);
+      await hrAudit(qc, req, 'advance_sheet', id, 'edit', { month, paid_on: paidOn, paid_via: paidVia });
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+function readSheetLine(raw) {
+  const personId = personIdOf(raw?.person_id);
+  if (blank(raw?.amount) || (typeof raw.amount === 'string' && Number(raw.amount) === 0) || raw.amount === 0) return { personId, drop: true };
+  const kind = choiceOf(raw.kind, STAFF_KINDS, 'advance or loan', 'advance');
+  const amount = positiveOf(raw.amount, 'The amount');
+  const instalments = kind === 'loan' ? instalmentsOf(raw.instalments) : null;
+  return {
+    personId, kind, amount, instalments, drop: false,
+    purpose: kind === 'loan' ? textOf(raw.purpose, 'Why the loan is needed', 200, true) : null,
+    remarks: textOf(raw.remarks, 'The remarks', 300),
+  };
+}
+
+r.put('/hr/advance-sheets/:id/lines', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const body = bodyOf(req);
+    if (!Array.isArray(body.lines)) throw bad('Send { "lines": [...] }');
+    if (body.lines.length > 2000) throw bad('Too many lines');
+    const wanted = new Map();
+    for (const raw of body.lines) { const l = readSheetLine(raw); wanted.set(l.personId, l); }
+    assertPayVisible(req, [...wanted.keys()]);
+    await tx(async (qc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'changed');
+      const ids = [...wanted.keys()];
+      const known = new Set((await qc(`SELECT id FROM hr.people WHERE id = ANY($1::int[])`, [ids])).map((p) => p.id));
+      const absent = ids.filter((x) => !known.has(x));
+      if (absent.length) throw bad(`No such person: ${absent.slice(0, 5).join(', ')}`);
+      const before = new Map((await qc(`SELECT * FROM hr.advance_sheet_lines WHERE sheet_id = $1 FOR UPDATE`, [id])).map((l) => [l.person_id, l]));
+      let changed = 0;
+      for (const l of wanted.values()) {
+        const was = before.get(l.personId);
+        if (l.drop) {
+          if (was) { await qc(`DELETE FROM hr.advance_sheet_lines WHERE id = $1`, [was.id]); changed += 1; }
+          continue;
+        }
+        const same = was && was.kind === l.kind && money(was.amount) === money(l.amount) && (was.instalments ?? null) === l.instalments
+          && (was.purpose ?? null) === l.purpose && (was.remarks ?? null) === l.remarks;
+        if (same) continue;
+        // A changed line is decided again: its decision goes back to pending.
+        await qc(
+          `INSERT INTO hr.advance_sheet_lines (sheet_id, person_id, kind, amount, instalments, purpose, remarks)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (sheet_id, person_id) DO UPDATE SET kind = EXCLUDED.kind, amount = EXCLUDED.amount,
+             instalments = EXCLUDED.instalments, purpose = EXCLUDED.purpose, remarks = EXCLUDED.remarks,
+             decision = 'pending', decided_by = NULL, decided_at = NULL`,
+          [id, l.personId, l.kind, l.amount, l.instalments, l.purpose, l.remarks]);
+        changed += 1;
+      }
+      if (changed) await hrAudit(qc, req, 'advance_sheet', id, 'lines', { changed });
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+r.post('/hr/advance-sheets/:id/submit', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    await tx(async (qc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'submitted');
+      const [{ n }] = await qc(`SELECT count(*)::int AS n FROM hr.advance_sheet_lines WHERE sheet_id = $1`, [id]);
+      if (!n) throw bad('Put at least one advance on the sheet first');
+      await qc(`UPDATE hr.advance_sheets SET status = 'submitted', submitted_by = $2, submitted_at = now() WHERE id = $1`, [id, req.user.id]);
+      await hrAudit(qc, req, 'advance_sheet', id, 'submit', { lines: n });
+      const approvers = await qc(
+        `SELECT a.user_id FROM hr.access a JOIN public.users u ON u.id = a.user_id
+          WHERE a.level IN ('approver', 'admin') AND u.active = 1 ORDER BY a.user_id`);
+      // The words name the sheet and who; no amount (a notification can be seen on a locked phone).
+      await notify(approvers.map((a) => a.user_id), {
+        kind: 'hr_advance_sheet_submitted',
+        title: `Advances ${sheet.sheet_no} for ${sheet.month} need your approval`,
+        body: `${req.user?.name || 'Someone'} sent ${n} advance${n === 1 ? '' : 's'} for approval. Please check the advances and approve them.`,
+        link: `/hr?tab=loans&sub=bulk&sheet=${id}`,
+        refTable: 'hr.advance_sheets',
+        refId: id,
+      }, qc);
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+r.post('/hr/advance-sheets/:id/decide', requireHr('approver'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const body = bodyOf(req);
+    const decision = choiceOf(body.decision, DECISIONS, 'approved, rejected or pending');
+    const ids = Array.isArray(body.person_ids) ? body.person_ids.map((x) => personIdOf(x)) : [];
+    if (!ids.length) throw bad('Choose at least one person');
+    assertPayVisible(req, ids);
+    const remarks = Object.hasOwn(body, 'mgmt_remarks') ? textOf(body.mgmt_remarks, 'Management remarks', 300) : undefined;
+    await tx(async (qc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'submitted') throw sheetState(sheet, 'submitted', 'decided');
+      const rows = await qc(
+        `UPDATE hr.advance_sheet_lines SET decision = $3, decided_by = CASE WHEN $3 = 'pending' THEN NULL ELSE $4::int END,
+                decided_at = CASE WHEN $3 = 'pending' THEN NULL ELSE now() END,
+                mgmt_remarks = CASE WHEN $5::boolean THEN $6 ELSE mgmt_remarks END
+          WHERE sheet_id = $1 AND person_id = ANY($2::int[]) RETURNING person_id`,
+        [id, ids, decision, req.user.id, remarks !== undefined, remarks ?? null]);
+      for (const r0 of rows) await hrAudit(qc, req, 'advance_sheet_line', `${id}:${r0.person_id}`, decision === 'pending' ? 'undo' : decision, { sheet_no: sheet.sheet_no, person_id: r0.person_id, mgmt_remarks: remarks ?? null });
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+r.post('/hr/advance-sheets/:id/send-back', requireHr('approver'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const reason = textOf(bodyOf(req).reason, 'The reason', 500);
+    if (!reason) throw bad('Say why it is sent back');
+    await tx(async (qc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'submitted') throw sheetState(sheet, 'submitted', 'sent back');
+      await qc(`UPDATE hr.advance_sheets SET status = 'draft', sent_back_by = $2, sent_back_at = now(), sent_back_reason = $3 WHERE id = $1`,
+        [id, req.user.id, reason]);
+      await hrAudit(qc, req, 'advance_sheet', id, 'send_back', { reason });
+      if (sheet.submitted_by || sheet.created_by) {
+        await notify([sheet.submitted_by, sheet.created_by].filter(Boolean), {
+          kind: 'hr_advance_sheet_sent_back', title: `Advances ${sheet.sheet_no} sent back`,
+          body: `${req.user?.name || 'Management'} sent it back with a reason. Open HR & Payroll to see it.`,
+          link: `/hr?tab=loans&sub=bulk&sheet=${id}`, refTable: 'hr.advance_sheets', refId: id,
+        }, qc);
+      }
+    });
+    res.json(await sheetView(req, id));
+  } catch (e) { next(refusal(e)); }
+});
+
+r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    const result = await tx(async (qc, oc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'submitted') throw sheetState(sheet, 'submitted', 'posted');
+      const lines = (await qc(
+        `SELECT * FROM hr.advance_sheet_lines WHERE sheet_id = $1 AND decision = 'approved' AND posted_at IS NULL
+            AND person_id <> ALL($2::int[]) ORDER BY person_id`, [id, hiddenIds(req)]));
+      if (!lines.length) throw refuse(409, 'Nothing approved to post yet', { code: 'NOTHING_TO_POST' });
+      const [pending] = await qc(`SELECT count(*)::int AS n FROM hr.advance_sheet_lines WHERE sheet_id = $1 AND decision = 'pending'`, [id]);
+      // Loan numbers first, before any row lock (helpers.js document-number lock order).
+      const loanNos = new Map();
+      for (const l of lines) if (l.kind === 'loan') loanNos.set(l.id, await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc));
+      const paidOn = sheet.paid_on;
+      const warnings = [];
+      for (const l of lines) {
+        const pay = {
+          personId: l.person_id, kind: l.kind, amount: money(l.amount), paidOn, paidVia: sheet.paid_via,
+          note: [`${sheet.sheet_no} for ${sheet.month}`, l.remarks].filter(Boolean).join(' · '),
+          instalments: l.kind === 'loan' ? l.instalments : null,
+          firstDue: l.kind === 'loan' ? nextMonth(sheet.month) : null,
+          purpose: l.purpose ?? null,
+        };
+        const out = await postStaffPayment(qc, oc, req, pay, loanNos.get(l.id) ?? null, 'advance_sheet');
+        warnings.push(...out.warnings);
+        await qc(`UPDATE hr.advance_sheet_lines SET advance_txn_id = $2, loan_id = $3, posted_at = now() WHERE id = $1`,
+          [l.id, out.advanceId, out.loanId]);
+      }
+      const done = pending.n === 0;
+      if (done) await qc(`UPDATE hr.advance_sheets SET status = 'posted', posted_by = $2, posted_at = now() WHERE id = $1`, [id, req.user.id]);
+      await hrAudit(qc, req, 'advance_sheet', id, 'post', { posted: lines.length, closed: done });
+      return { posted: lines.length, closed: done, warnings: [...new Set(warnings)] };
+    });
+    res.json({ ...(await sheetView(req, id)), ...result });
+  } catch (e) { next(refusal(e)); }
+});
+
+r.delete('/hr/advance-sheets/:id', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Advance sheet');
+    await tx(async (qc) => {
+      const sheet = await lockSheet(qc, id);
+      if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'deleted');
+      const [{ n }] = await qc(`SELECT count(*)::int AS n FROM hr.advance_sheet_lines WHERE sheet_id = $1 AND posted_at IS NOT NULL`, [id]);
+      if (n) throw refuse(409, 'Advances were already posted from this sheet, so it stays', { code: 'SHEET_POSTED' });
+      await qc(`DELETE FROM hr.advance_sheets WHERE id = $1`, [id]);
+      await hrAudit(qc, req, 'advance_sheet', id, 'delete', { sheet_no: sheet.sheet_no });
+    });
+    res.json({ ok: true });
   } catch (e) { next(refusal(e)); }
 });
 

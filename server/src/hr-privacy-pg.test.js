@@ -229,6 +229,58 @@ describe('HR accounts level and hide list', {
     assert.ok(!(await call('accounts', 'GET', '/hr/runs/2026-10')).body.carried_forward.some((x) => x.person_id === C));
   });
 
+  test('bulk advance sheet: enter many, submit notifies management, approve / reject / undo, post makes real advances and loans', T, async () => {
+    const { plantDateStr } = await import('./plant-calendar.js');
+    const NOW = plantDateStr().slice(0, 7);
+    refused(await call('accounts', 'POST', '/hr/advance-sheets', { month: NOW, paid_on: '2001-01-01' }), 400);
+    const made = ok(await call('accounts', 'POST', '/hr/advance-sheets', { month: NOW }));
+    const id = made.body.sheet.id;
+    assert.match(made.body.sheet.sheet_no, /^CI-ADV-\d{4}$/);
+    const grid = ok(await call('accounts', 'GET', `/hr/advance-sheets/${id}`)).body;
+    assert.ok(grid.people.some((p) => p.id === S) && !grid.people.some((p) => p.code === 'T-304'), 'the roster leaves out a pay-hidden person');
+    assert.equal((await call('accounts', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [{ person_id: 99999, amount: 10 }] })).status, 400);
+    const C = (await db.one(`SELECT id FROM hr.people WHERE code = 'T-304'`)).id;
+    assert.equal((await call('accounts', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [{ person_id: C, amount: 10 }] })).status, 404);
+    refused(await call('accounts', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [{ person_id: G, kind: 'loan', amount: 6000 }] }), 400); // a loan needs its months
+    const lines = ok(await call('accounts', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [
+      { person_id: S, amount: 2500, remarks: 'Diwali' },
+      { person_id: G, kind: 'loan', amount: 6000, instalments: 3, purpose: 'Wedding' },
+    ] })).body;
+    assert.deepEqual([lines.totals.lines, lines.totals.amount, lines.totals.advance, lines.totals.loan], [2, '8500.00', '2500.00', '6000.00']);
+    // A sheet a hidden person is on still shows a restricted login only its visible people (and their totals).
+    ok(await call('operator', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [{ person_id: C, amount: 700 }] }));
+    assert.equal((await call('accounts', 'GET', `/hr/advance-sheets/${id}`)).body.totals.amount, '8500.00');
+    assert.equal((await call('operator', 'GET', `/hr/advance-sheets/${id}`)).body.totals.amount, '9200.00');
+
+    refused(await call('approver', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [S], decision: 'approved' }), 409, 'SHEET_STATE');
+    ok(await call('accounts', 'POST', `/hr/advance-sheets/${id}/submit`, {}));
+    const note = await db.one(`SELECT user_id, title, body FROM notifications WHERE kind = 'hr_advance_sheet_submitted' ORDER BY id DESC LIMIT 1`);
+    assert.ok(!/2500|6000|8500/.test(`${note.title} ${note.body}`), 'no amount in the words');
+    refused(await call('accounts', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [S], decision: 'approved' }), 403);
+    refused(await call('accounts', 'PUT', `/hr/advance-sheets/${id}/lines`, { lines: [{ person_id: S, amount: 1 }] }), 409, 'SHEET_STATE');
+    ok(await call('approver', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [S, G], decision: 'approved', mgmt_remarks: 'OK' }));
+    ok(await call('approver', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [G], decision: 'pending' }));     // undo
+    const d = ok(await call('approver', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [C], decision: 'rejected', mgmt_remarks: 'Not now' })).body;
+    assert.deepEqual(Object.fromEntries(d.lines.map((l) => [l.code, l.decision])), { 'T-301': 'approved', 'T-303': 'pending', 'T-304': 'rejected' });
+
+    const before = Number((await db.one(`SELECT count(*)::int AS n FROM hr.advance_txns WHERE person_id = $1`, [S])).n);
+    const post = ok(await call('accounts', 'POST', `/hr/advance-sheets/${id}/post`, {})).body;
+    assert.deepEqual([post.posted, post.closed], [1, false], 'G is still pending, so the sheet stays open');
+    const adv = await db.one(`SELECT amount::text AS amount, txn_date::text AS d, note FROM hr.advance_txns WHERE person_id = $1 ORDER BY id DESC LIMIT 1`, [S]);
+    assert.equal(Number((await db.one(`SELECT count(*)::int AS n FROM hr.advance_txns WHERE person_id = $1`, [S])).n), before + 1);
+    assert.equal(adv.amount, '2500.00');
+    assert.equal(adv.d.slice(0, 7), NOW);
+    ok(await call('approver', 'POST', `/hr/advance-sheets/${id}/decide`, { person_ids: [G], decision: 'approved' }));
+    const post2 = ok(await call('accounts', 'POST', `/hr/advance-sheets/${id}/post`, {})).body;
+    assert.deepEqual([post2.posted, post2.closed, post2.sheet.status], [1, true, 'posted']);
+    const loan = await db.one(`SELECT principal::text AS principal, instalment::text AS instalment, purpose FROM hr.loans WHERE person_id = $1 ORDER BY id DESC LIMIT 1`, [G]);
+    assert.deepEqual([loan.principal, loan.instalment, loan.purpose], ['6000.00', '2000.00', 'Wedding']);
+    refused(await call('accounts', 'POST', `/hr/advance-sheets/${id}/post`, {}), 409, 'SHEET_STATE');
+    refused(await call('accounts', 'DELETE', `/hr/advance-sheets/${id}`), 409, 'SHEET_STATE');
+    const list = ok(await call('accounts', 'GET', '/hr/advance-sheets')).body;
+    assert.equal(list[0].totals.approved, '8500.00');
+  });
+
   function refused(res, status, code) {
     assert.equal(res.status, status, res.text);
     if (code) assert.equal(res.body?.code, code, res.text);

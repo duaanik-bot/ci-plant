@@ -115,6 +115,10 @@ const OF_KIND = Object.freeze({
   // amount (push shows the title on a locked phone), and both link to /hr?tab=payroll&month=YYYY-MM.
   hr_run_submitted: 'decisions',
   hr_run_sent_back: 'decisions',
+  // A bulk advance sheet sent to management for approval, and management sending it back (routes/hr-ledgers.js).
+  // No amount in the words; both link to /hr?tab=loans&sub=bulk&sheet=<id>.
+  hr_advance_sheet_submitted: 'decisions',
+  hr_advance_sheet_sent_back: 'decisions',
 });
 
 // hasOwnProperty, not a bare lookup: `categoryOf('constructor')` must be `other`

@@ -178,6 +178,17 @@ export const hrApi = {
   // mode 'show' | 'pay' (name only) | 'all' (not there at all).
   // GET /hr/people/:id/salary-ledger — { person, months:[every payroll line of the person, oldest first] }.
   salaryLedger: personId => api.get(`/hr/people/${seg(personId)}/salary-ledger`),
+  // Bulk advance sheets (server routes/hr-ledgers.js). A sheet view is { sheet, lines, totals } (+ people on GET :id).
+  advanceSheets: () => api.get('/hr/advance-sheets'),
+  advanceSheet: id => api.get(`/hr/advance-sheets/${seg(id)}`),
+  createAdvanceSheet: body => api.post('/hr/advance-sheets', body),
+  editAdvanceSheet: (id, body) => api.put(`/hr/advance-sheets/${seg(id)}`, body),
+  setAdvanceSheetLines: (id, lines) => api.put(`/hr/advance-sheets/${seg(id)}/lines`, { lines }),
+  submitAdvanceSheet: id => api.post(`/hr/advance-sheets/${seg(id)}/submit`, {}),
+  decideAdvanceSheet: (id, body) => api.post(`/hr/advance-sheets/${seg(id)}/decide`, body),
+  sendBackAdvanceSheet: (id, reason) => api.post(`/hr/advance-sheets/${seg(id)}/send-back`, { reason }),
+  postAdvanceSheet: id => api.post(`/hr/advance-sheets/${seg(id)}/post`, {}),
+  deleteAdvanceSheet: id => api.del(`/hr/advance-sheets/${seg(id)}`),
   accessPeople: userId => api.get(`/hr/access/${seg(userId)}/people`),
   // PUT /hr/access/:userId/people — admin. changes: [{ person_id, mode }]; answers as accessPeople.
   setAccessPeople: (userId, changes) => api.put(`/hr/access/${seg(userId)}/people`, { changes }),

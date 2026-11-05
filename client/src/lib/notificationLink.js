@@ -24,6 +24,7 @@ const OF_REF = {
   // `/hr?tab=payroll&month=YYYY-MM` link, which rule 1 keeps; a run id alone cannot name its month, so a row
   // whose link was lost still lands on the Payroll tab rather than the HR overview.
   'hr.runs': () => '/hr?tab=payroll',
+  'hr.advance_sheets': id => `/hr?tab=loans&sub=bulk&sheet=${id}`,
 };
 
 export function notificationLink(n) {

@@ -23,7 +23,7 @@ const MIGRATION = fileURLToPath(new URL('../../supabase/migrations/2026101612000
 const HOLD = fileURLToPath(new URL('../../supabase/migrations/20261018120000_hr_payment_hold.sql', import.meta.url));
 
 // Every hr table, in catalogue (C collation) order.
-const TABLES = ['access', 'access_hidden', 'adjustments', 'advance_txns', 'audit_log', 'column_maps', 'import_batches', 'import_rows',
+const TABLES = ['access', 'access_hidden', 'adjustments', 'advance_sheet_lines', 'advance_sheets', 'advance_txns', 'audit_log', 'column_maps', 'import_batches', 'import_rows',
   'loan_holidays', 'loan_txns', 'loans', 'pay_channels', 'pay_setups', 'payment_batches', 'people', 'person_aliases',
   'run_inputs', 'run_lines', 'runs', 'settings'];
 
