@@ -1295,7 +1295,11 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
       if (!person) throw notFound('Person');
       await ensureRun(qc, month, userId);
       const run = await lockRunOf(qc, month);
-      if (run.status !== 'draft') throw runLocked(month, run.status);
+      // A draft or a SUBMITTED month (owner's request 2026-11-04: one person's inputs are fixed without sending the
+      // whole month back). In a submitted month only this person's line is worked out again, under the frozen
+      // policy, and their approval for payment — if given — is undone, since the amount it approved has moved.
+      const submitted = run.status === 'submitted';
+      if (run.status !== 'draft' && !submitted) throw runLocked(month, run.status);
       const [before] = await qc(
         `SELECT id, ${INPUT_EXACT} FROM hr.run_inputs WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
       const start = before ?? { ...blankInput(true) };
@@ -1304,10 +1308,27 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
         include: after.include !== false, remarks: after.remarks ?? null, paid_separately_note: after.paid_separately_note ?? null };
       for (const c of INPUT_NUMBERS) row[c] = after[c] ?? null;
       const [saved] = await qc(UPSERT_INPUTS, [run.id, 'manual', userId, jsonForPg([row])]);
-      await recalcRun(qc, run, { personIds: [personId] });
+      let undone = null;
+      if (submitted) {
+        [undone] = await qc(
+          `SELECT id, approved_by, approved_at, approval_note FROM hr.run_lines
+            WHERE run_id = $1 AND person_id = $2 AND approval_status = 'approved' FOR UPDATE`, [run.id, personId]);
+      }
+      await recalcRun(qc, run, { personIds: [personId], submitted });
       await hrAudit(qc, req, 'run_input', saved.id, before ? 'edit' : 'create', {
         month, run_id: run.id, person_id: personId, reason, was: before ? before.source : null, changes: inputChanges(before, row),
+        ...(submitted ? { run_status: 'submitted' } : {}),
       });
+      if (undone) {
+        const why = `Inputs changed after approval: ${reason}`.slice(0, 500);
+        await qc(
+          `UPDATE hr.run_lines SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
+            WHERE id = $1`, [undone.id, why]);
+        await hrAudit(qc, req, 'run_line', undone.id, 'unapprove', {
+          month, run_id: run.id, person_id: personId, from: 'approved', to: 'unapproved', reason: why, via: 'input-edit',
+          was: { approved_by: undone.approved_by, approved_at: undone.approved_at, approval_note: undone.approval_note },
+        });
+      }
       return run.id;
     });
 

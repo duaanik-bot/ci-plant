@@ -35,7 +35,8 @@ export default function LoanDeductionModal({ month, status, canApprove, person, 
     ? Number((after + (scope === 'emi' ? typed : emi) - 1n) / (scope === 'emi' ? typed : emi)) : 0;
   const next = shiftMonth(month, 1);
   const draft = status === 'draft';
-  const locked = !draft;
+  // "Only this month" in a submitted month is one person's input: it is saved in place (2026-11-04), no send-back.
+  const locked = !draft && !(status === 'submitted' && scope === 'month');
   const problems = [
     typed === null && 'Type the amount to deduct (₹, up to 2 decimals).',
     scope === 'emi' && typed !== null && typed <= 0n && 'A new EMI must be more than ₹0 — for one month off, use "Only this month" with ₹0, or hold the instalment.',

@@ -500,11 +500,30 @@ export async function ensureRun(qc, month, userId) {
 // recomputed (the totals still cover every line), unless the policy or the engine changed since the last
 // recalculation: then every line is, so a run's lines are always computed under runs.policy. A person left
 // out (include = false, or no inputs row) loses their line.
-export async function recalcRun(qc, run, { personIds } = {}) {
+//
+// submitted: true (owner's request 2026-11-04, "make the inputs editable"): one or more people of a SUBMITTED run
+// are recomputed after their inputs were typed again, under the run's frozen policy (submit froze it), and the run
+// stays submitted. Only with personIds; the caller undoes those people's line approvals. Finalise still recomputes
+// every line and compares it with the stored one, so a line stored here is exactly what finalise expects.
+export async function recalcRun(qc, run, { personIds, submitted = false } = {}) {
   const runId = runIdOf(run);
   let scope = personIds === undefined || personIds === null ? null : idsOf(personIds);
   const locked = await lockRun(qc, runId);
-  if (locked.status !== 'draft') throw fail(409, 'RUN_LOCKED', 'Run is not a draft');
+  const inSubmitted = submitted && locked.status === 'submitted' && scope !== null;
+  if (locked.status !== 'draft' && !inSubmitted) throw fail(409, 'RUN_LOCKED', 'Run is not a draft');
+
+  if (inSubmitted) {
+    const ctx = await loadContext(qc, locked, locked.policy ?? {}, scope);
+    const lines = ctx.ids.map((id) => computeOne(ctx, id));
+    await qc(
+      `DELETE FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[]) AND person_id = ANY($3::int[])`,
+      [locked.id, ctx.ids, scope],
+    );
+    const stored = lines.length ? await qc(UPSERT_LINES, [locked.id, JSON.stringify(lines)]) : [];
+    const totals = await totalsOf(qc, locked.id);
+    const [updated] = await qc(`UPDATE hr.runs SET totals = $2::jsonb WHERE id = $1 RETURNING *`, [locked.id, JSON.stringify(totals)]);
+    return { lines: stored.sort((a, b) => a.person_id - b.person_id), totals, run: updated };
+  }
 
   const policy = await currentPolicy(qc);
   if (canonical(policy) !== canonical(locked.policy ?? {}) || locked.engine_version !== ENGINE_VERSION) scope = null;

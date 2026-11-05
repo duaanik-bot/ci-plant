@@ -320,7 +320,6 @@ describe('HR payroll routes through the real app', {
 
     refused(await uploadAs('operator', await sheet([['Test Person Alpha', 'T-201', 7, 0]])), 409, 'RUN_LOCKED');
     refused(await call('operator', 'POST', `/hr/imports/${batch2}/apply`, {}), 409, 'RUN_LOCKED');
-    refused(await call('operator', 'PUT', `/hr/runs/${MONTH}/inputs/${A}`, { ot_hours: 1, reason: 'late' }), 409, 'RUN_LOCKED');
   });
 
   test('an upload of a month that is no longer a draft cannot be discarded (RUN_LOCKED)', T, async () => {
@@ -721,7 +720,25 @@ describe('HR payroll routes through the real app', {
     assert.deepEqual(early.body.changed, [A]);
     assert.equal((await novLine(A)).approval_status, 'approved');
     assert.equal((await approval('approver', { person_ids: [A], action: 'unapprove', reason: 'Test: undo' })).status, 200);
+
+    // Submitted: one person's inputs can still be typed again (2026-11-04). Only their line is worked out again, the
+    // month stays submitted, and their approval for payment is undone (audited, via input-edit).
+    const before = await novLine(A);
+    assert.equal((await approval('approver', { person_ids: [A], action: 'approve' })).status, 200);
+    const edit = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc' });
+    assert.equal(edit.status, 200, edit.text);
+    const after = await novLine(A);
+    assert.equal(Number(after.payable), Number(before.payable) + 100, 'the line is worked out again');
+    assert.deepEqual([after.approval_status, after.approved_by], ['unapproved', null], 'its approval is undone');
+    assert.equal((await db.one(`SELECT status FROM hr.runs WHERE month = $1`, [NOV])).status, 'submitted');
+    const undone = (await lineAudits(A, ['unapprove'])).at(-1);
+    assert.deepEqual([undone.detail.via, undone.detail.reason], ['input-edit', 'Inputs changed after approval: Test: late misc']);
+    assert.equal((await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: null, reason: 'Test: back' })).status, 200);
+    assert.equal((await novLine(A)).payable, before.payable);
+
     assert.equal((await call('approver', 'POST', `/hr/runs/${NOV}/approve`, {})).status, 200);
+    // Approved (and finalised) months stay locked: a change there needs the month sent back.
+    refused(await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { ot_hours: 1, reason: 'late' }), 409, 'RUN_LOCKED');
   });
 
   test('approve and unapprove on an approved run: audited, unchanged reported, the undo needs a reason', T, async () => {
@@ -732,13 +749,13 @@ describe('HR payroll routes through the real app', {
     const a = await novLine(A);
     assert.deepEqual([a.approval_status, a.approved_by, a.approval_note], ['approved', ids.approver, 'Test: checked against the register']);
     assert.ok(a.approved_at);
-    const [, audit] = await lineAudits(A, ['approve']); // the first is the approval while the run was submitted
+    const [, , audit] = await lineAudits(A, ['approve']); // the first two are approvals while the run was submitted
     assert.deepEqual([audit.user_id, audit.detail.from, audit.detail.to, audit.detail.reason, audit.detail.payable],
       [ids.approver, 'unapproved', 'approved', 'Test: checked against the register', a.payable]);
 
     const again = await approval('approver', { person_ids: [A], action: 'approve' });
     assert.deepEqual([again.body.changed, again.body.unchanged], [[], [A]], 'already approved: unchanged');
-    assert.equal((await lineAudits(A, ['approve'])).length, 2, 'and nothing audited');
+    assert.equal((await lineAudits(A, ['approve'])).length, 3, 'and nothing audited');
 
     refused(await approval('approver', { person_ids: [B], action: 'unapprove' }), 400, undefined);
     refused(await approval('approver', { person_ids: [B], action: 'unapprove', reason: '  ' }), 400, undefined);
@@ -819,18 +836,19 @@ describe('HR payroll routes through the real app', {
   test('a line\'s history lists every decision with who, when and why', T, async () => {
     const res = await call('viewer', 'GET', `/hr/runs/${NOV}/lines/${A}/history`);
     assert.equal(res.status, 200, res.text);
-    assert.deepEqual(res.body.map((h) => [h.action, h.to]).slice(2), [ // first two: approved and undone while submitted
+    assert.deepEqual(res.body.map((h) => [h.action, h.to]).slice(4), [ // first four: approved, undone, approved, undone by an input edit while submitted
       ['approve', 'approved'], ['unapprove', 'unapproved'], ['approve', 'approved'], ['payment_status', 'paid'],
       ['payment_status', 'pending'], ['unapprove', 'unapproved'], ['approve', 'approved'], ['payment_status', 'paid'],
     ]);
-    assert.deepEqual(res.body.slice(0, 2).map((h) => [h.action, h.reason]), [['approve', null], ['unapprove', 'Test: undo']]);
-    const first = res.body[2];
+    assert.deepEqual(res.body.slice(0, 4).map((h) => [h.action, h.reason]), [['approve', null], ['unapprove', 'Test: undo'],
+      ['approve', null], ['unapprove', 'Inputs changed after approval: Test: late misc']]);
+    const first = res.body[4];
     assert.equal(first.by, 'Test Approver');
     assert.ok(first.at);
     assert.equal(first.reason, 'Test: checked against the register');
-    assert.equal(res.body[5].batch_no, 'CI-PAY-0006');
-    assert.equal(res.body[5].reference, 'NOV-PAY');
-    assert.equal(res.body[6].reason, 'Test: cash not handed over');
+    assert.equal(res.body[7].batch_no, 'CI-PAY-0006');
+    assert.equal(res.body[7].reference, 'NOV-PAY');
+    assert.equal(res.body[8].reason, 'Test: cash not handed over');
 
     const h = await call('viewer', 'GET', `/hr/runs/${NOV}/lines/${H}/history`);
     assert.equal(h.status, 200, h.text);

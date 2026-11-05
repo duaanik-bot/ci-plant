@@ -876,7 +876,9 @@ export default function RunLineDrawer({
 }) {
   const toast = useToast();
   const status = run?.status || 'draft';
-  const canEdit = levelAtLeast(level, 'operator') && status === 'draft';
+  // A submitted month stays editable one person at a time (2026-11-04): the save works out only this line again and
+  // undoes this person's approval for payment. Approved and finalised months are locked.
+  const canEdit = levelAtLeast(level, 'operator') && (status === 'draft' || status === 'submitted');
   const canPay = levelAtLeast(level, 'operator');
   const [ledgerVersion, setLedgerVersion] = useState(0);
   const [ledger, setLedger] = useState(null);
@@ -937,7 +939,9 @@ export default function RunLineDrawer({
     setReason('');
     setTried(false);
     setLedgerVersion(v => v + 1);
-    toast.success(input ? 'Inputs saved — the line is recalculated' : 'Added to this month’s run');
+    toast.success(input
+      ? (status === 'submitted' && shown?.approval_status === 'approved' ? 'Inputs saved — the line is recalculated; approve it again' : 'Inputs saved — the line is recalculated')
+      : 'Added to this month’s run');
     onChanged?.();
   };
 
@@ -1034,9 +1038,15 @@ export default function RunLineDrawer({
             )}>
               {!canEdit && (
                 <p className="mb-2.5 rounded-2xl border border-[#1D1D1F]/[0.06] bg-white/55 px-3 py-2 text-xs font-medium text-[#6E6E73]">
-                  {status !== 'draft'
+                  {status !== 'draft' && status !== 'submitted'
                     ? `Inputs are frozen — the run is ${status}. A change needs the run sent back to draft.`
                     : 'View only — your HR access level can read the run but not change it.'}
+                </p>
+              )}
+              {canEdit && status === 'submitted' && (
+                <p className="mb-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  The month is submitted. Saving works out only this person’s pay again — the rest of the month is untouched
+                  {shown?.approval_status === 'approved' ? ', and their approval for payment is undone, to approve again' : ''}.
                 </p>
               )}
               <RecoveriesBox line={shown} ledger={ledger} form={form} errors={errors} tried={tried} canEdit={canEdit} set={set} />
