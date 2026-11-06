@@ -2,15 +2,24 @@
 import { num } from './costing.js';
 import { blankValue } from './costingUi.js';
 
-// The desk's tabs and the statuses each shows. "Costing completed" (costed) waits for a final price.
+// The desk's tabs and the stages each shows, left to right (5 Nov 2026). A row moves right when its work is
+// done — Send to costing, a costing saved for it, prices finalised — and "Send back" moves it one tab left,
+// keeping its costing and prices. "Costing completed" (costed) waits in Final price for a final price.
 export const DESK_TABS = [
-  { key: 'inbox', label: 'Inbox', stages: ['new', 'ready'] },
-  { key: 'costing', label: 'Costing', stages: ['costing'] },
+  { key: 'inbox', label: 'Inbox', stages: ['new'] },
+  { key: 'costing', label: 'Costing', stages: ['ready', 'costing'] },
   { key: 'price', label: 'Final price', stages: ['costed', 'price_pending'] },
   { key: 'quote', label: 'Quotations', stages: ['quote_ready'] },
   { key: 'sent', label: 'Sent', stages: ['sent'] },
   { key: 'dropped', label: 'Dropped', stages: ['dropped'] },
 ];
+export const tabOfStage = stage => DESK_TABS.find(t => t.stages.includes(stage))?.key || null;
+// What "Send back" says on each tab (server: BACK_TO in server/src/enquiry-desk.js).
+export const BACK_LABEL = { costing: 'Send back to Inbox', price: 'Send back to Costing', quote: 'Send back to Final price' };
+const TAB_LABEL = Object.fromEntries(DESK_TABS.map(t => [t.key, t.label]));
+// "CI-ENQ-0003 → Final price": where a stage sits on the desk, for the undo bar.
+export const whereText = stage => TAB_LABEL[tabOfStage(stage)] || stage;
+export const STAGE_BACKWARD = { ready: 'new', costing: 'new', costed: 'ready', price_pending: 'ready', quote_ready: 'price_pending' };
 
 export const STAGE_TONE = {
   new: 'bg-sky-100 text-sky-800',
@@ -71,11 +80,36 @@ export function costingValueFromEnquiry(e, defaults = {}) {
   return v;
 }
 
-// What a bulk costing row starts from, for each enquiry pushed.
+// A saved costing opened for an enquiry. `fresh` (copied from an earlier costing to cost this enquiry): the
+// enquiry's customer, product and first quantity, the copy's size, layout and rates. Either way the other
+// quantities asked show under "Price at other quantities" — the prices Final price will propose.
+export function withEnquiry(v, e, { fresh = false, copiedFrom = null } = {}) {
+  const out = { ...v, enquiry_id: e.id, enquiry_no: e.enquiry_no, sources: { ...(v.sources || {}) } };
+  const qs = (e.quantities || []).map(Number).filter(q => q > 0);
+  if (fresh) {
+    const from = { kind: 'manual', note: `from ${e.enquiry_no}` };
+    out.customer_id = e.customer_id ?? null;
+    out.customer_name = e.customer_name || '';
+    out.product_id = e.product_id ?? null;
+    out.product = null;
+    out.product_name = e.product_name || v.product_name || '';
+    if (qs[0]) { out.inputs = { ...out.inputs, qty: qs[0] }; out.sources.qty = from; }
+    out.remarks = [`From enquiry ${e.enquiry_no}`, copiedFrom && `started from ${copiedFrom}`].filter(Boolean).join(' — ');
+  }
+  const own = num(out.inputs?.qty);
+  const others = qs.filter(q => q !== own);
+  if (others.length) out.quantities = [...new Set([...(out.quantities || []), ...others])].sort((a, b) => a - b);
+  return out;
+}
+
+// What a bulk costing row starts from, for each enquiry costed together.
 export const bulkSeedFromEnquiry = e => ({
   product_name: e.product_name || '', size_text: e.size_key || e.size_text || '', qty: (e.quantities || [])[0] ?? null,
   style: e.style || null, gsm: e.gsm ?? null, colours: e.colours ?? null, enquiry_id: e.id, enquiry_no: e.enquiry_no,
 });
+// The quantities a bulk costing of these enquiries also prices at: every one asked beyond each row's own (up to six).
+export const extraQuantities = es => [...new Set(es.flatMap(e => (e.quantities || []).slice(1).map(Number)).filter(q => q > 0))]
+  .sort((a, b) => a - b).slice(0, 6);
 
 // Bulk price changes on ticked rows: from each row's final (or suggested) price.
 export function adjustPrice(base, { mode, amount }) {

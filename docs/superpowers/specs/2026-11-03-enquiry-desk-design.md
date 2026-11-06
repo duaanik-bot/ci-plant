@@ -64,12 +64,87 @@ Enquiries can also be added by hand (phone, WhatsApp).
 
 ### Costing
 
-- **Push to single costing** opens New costing filled from the enquiry (customer, product, size, pasting,
-  first quantity, GSM, colours) with the module's normal auto-fill; saving links the costing to the
-  enquiry (`enquiry_id` on the save).
-- **Push to bulk costing** opens Bulk costing with one row per ticked enquiry; saving the batch links each
-  row's costing to its enquiry.
-- The costing stays the Costing module's own: revisions, approval and the Size Library question as before.
+The first trial (5 Nov) showed the weakness. All seven enquiries were ticked and pushed to bulk costing.
+Push marked them all "Costing in progress" at once and sent the person away to the Bulk costing tab. The
+batch was never saved, and nothing on the desk could bring them back. The owner: "I should be able to
+bring the lines back … There should be an option to undo … I should be able to do the costings in the
+inquiry desk itself. The connections should be quite strong."
+
+**Costing happens on the desk itself (5 Nov).** "Cost it" opens the enquiry and its costing in place:
+
+- What the customer asked sits on top: the facts, and the mail on a click.
+- Below it is the same costing screen as Costing → New costing (`SingleCosting`, embedded). It starts
+  from what was asked, and the module's own auto-fill does the rest.
+- The other quantities asked show under "Price at other quantities", which are the prices Final price
+  will propose.
+
+There are three ways to cost several rows:
+
+- **One by one:** tick several, or start from any row. Previous / Next and "Save & next" walk through them.
+- **Together:** one bulk costing (`BatchEditor`, embedded) of the ticked rows. Each row shows its
+  enquiry number. An enquiry costed before starts from its costing. The enquiries' extra quantities
+  become the batch's "Also price at" quantities.
+- **Still from the Costing tabs:** a costing opened in New costing or Bulk costing that answers an
+  enquiry keeps that link.
+
+**The person controls which costing an enquiry carries:**
+
+- revise the one it has;
+- start a fresh one (the old one stays in Saved costings);
+- or start from an earlier costing, copied: its size, layout and rates; the enquiry's customer, product
+  and quantity. The earlier costing is not changed.
+
+The costing stays the Costing module's own: revisions, approval and the Size Library question as before.
+
+**Nothing moves until a costing is saved.** Saving links the costing to the enquiry in the costing's own
+transaction, from the desk or anywhere else. The enquiry then moves on: to Costing, and on to Final price
+once the costing is complete. Nothing is written when nothing changes, such as a revision of the same
+costing.
+
+### Moving rows: Send back and Undo (5 Nov)
+
+The tabs, left to right:
+
+- **Inbox:** new.
+- **Costing:** ready, costing.
+- **Final price:** costed, price_pending.
+- **Quotations:** quote_ready.
+- **Sent**, then **Dropped**.
+
+A row moves right when its work is done. "Send to costing" moves it from the Inbox. Saving a complete
+costing moves it to Final price; "Send to final price" does the same for a row sent back whose costing is
+complete. Finalise moves it to Quotations.
+
+**Send back** moves a row one tab left, keeping its costing and any final prices:
+
+- Costing → Inbox.
+- Final price → Costing.
+- Quotations → Final price, but only once its quotation is cancelled. The row is listed with that reason,
+  never forced.
+
+**Bring back** returns a dropped row to where it was dropped from.
+
+**Strong links:**
+
+- An enquiry "in costing" with no costing behind it (none saved, or the costing hidden) reads *Ready for
+  costing*. A costing screen left unsaved can never strand a row. The seven trial rows read that way with
+  no data change.
+- A row taken out of a bulk costing sends its enquiry back to wait in Costing.
+- A costing shows the enquiries it answers (Saved costings, the costing view) and opens them on the desk.
+- A cancelled quotation is written in each of its enquiries' histories.
+
+**Undo** works on every desk change: a move, final prices, finalise, a costing linked, what was asked:
+
+- Each change keeps the row's desk columns as they were (`enquiry_events.detail.undo`: one group per
+  press, the row before, the moment it changed).
+- Undo puts every row of that press back exactly as it was, but only when nothing has changed the row
+  since. A later change is never overwritten; that row is listed instead.
+- An undo is itself a change, so it can be redone.
+- The bar above the table offers Undo or Redo after each action, and an enquiry's history offers it on
+  its latest change.
+- A quotation is undone by cancelling it. A sent mail is never undone.
+- No schema change: the undo record lives in the existing events table. The client sees only the group
+  and whether it can still be undone, never the stored row.
 
 ### Final price (the person's decision)
 
@@ -155,3 +230,10 @@ it in 23 s: 77 mails since 3 Nov, none an enquiry. Nothing was refused, and Gmai
 - New tables carry no foreign key to plant tables (as Costing), and get the realtime ping triggers.
 - The robot runs every 15 minutes round the clock, with Bypass permissions, kept to its job by the guard hook
   (5 Nov). Narrow its hours if idle runs cost too much.
+- Costing on the desk (5 Nov):
+  - "Ready for costing" rows sit in the Costing tab, not the Inbox.
+  - Send back keeps the costing and the prices.
+  - Undo covers only a row's latest change.
+  - Send back from Quotations waits for the quotation to be cancelled.
+  - "Start from an earlier costing" copies the earlier costing's size and layout; the person changes them
+    if the enquiry's size differs.

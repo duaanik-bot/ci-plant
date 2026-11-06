@@ -25,7 +25,7 @@ import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { computeCosting, parseSize, normStyle, num, CURRENT_FORMULA, FORMULAS, INPUTS, STYLES } from '../costing-engine.js';
 import { possibleDuplicates, sizeEntryKey } from '../costing-sheet.js';
 import { matchDies, sizeRelation, mayCost, mayEditCostingRates, mayApproveCosting } from '../costing-match.js';
-import { linkEnquiry } from './enquiries.js';
+import { linkEnquiry, unlinkCosting, newGroup } from './enquiries.js';
 
 const r = Router();
 
@@ -364,6 +364,8 @@ async function costingById(id) {
                          FROM costings c LEFT JOIN costing_batches b ON b.id = c.batch_id
                         WHERE c.id = $1`, [id]);
   if (!c) return null;
+  // The enquiries this costing answers (Enquiry desk): saving it moves them on.
+  c.enquiries = await q(`SELECT id, enquiry_no, status, customer_name, product_name FROM enquiries WHERE costing_id = $1 ORDER BY id`, [id]);
   c.versions = await q(`SELECT version, formula, inputs, result, note, created_by_name, approved_by_name,
                                to_char(approved_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS approved_at,
                                to_char(created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS created_at
@@ -375,12 +377,13 @@ r.post('/costing/costings', async (req, res, next) => {
   try {
     const c = costingFrom(req.body);
     // Pushed from the enquiry desk: the costing is linked to its enquiry in the same transaction.
+    let desk = null;
     const row = await tx(async (qc, oc) => {
       const made = await insertCosting(c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser);
-      await linkEnquiry(qc, req.body?.enquiry_id, made, null, req.costingUser);
+      desk = await linkEnquiry(qc, req.body?.enquiry_id, made, null, req.costingUser);
       return made;
     });
-    res.status(201).json(await costingById(row.id));
+    res.status(201).json({ ...(await costingById(row.id)), desk });
   } catch (e) { next(e); }
 });
 
@@ -389,11 +392,12 @@ r.put('/costing/costings/:id', async (req, res, next) => {
     const id = intOrNull(req.params.id);
     if (!id) throw fail(404, 'No such costing.');
     const c = costingFrom(req.body);
+    let desk = null;
     await tx(async (qc, oc) => {
       const done = await reviseCosting(id, c, { note: text(req.body?.note, 300) }, qc, oc, req.costingUser);
-      await linkEnquiry(qc, req.body?.enquiry_id, done, null, req.costingUser);
+      desk = await linkEnquiry(qc, req.body?.enquiry_id, done, null, req.costingUser);
     });
-    res.json(await costingById(id));
+    res.json({ ...(await costingById(id)), desk });
   } catch (e) { next(e); }
 });
 
@@ -488,7 +492,8 @@ r.get('/costing/costings', async (req, res, next) => {
     const offset = Math.max(+req.query.offset || 0, 0);
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const [rows, total] = await Promise.all([
-      q(`SELECT ${COSTING_COLS}, b.batch_no FROM costings c LEFT JOIN costing_batches b ON b.id = c.batch_id
+      q(`SELECT ${COSTING_COLS}, b.batch_no, en.enquiry_no FROM costings c LEFT JOIN costing_batches b ON b.id = c.batch_id
+         LEFT JOIN LATERAL (SELECT enquiry_no FROM enquiries WHERE costing_id = c.id ORDER BY id LIMIT 1) en ON true
          ${w} ORDER BY c.costed_on DESC NULLS LAST, c.id DESC LIMIT ${limit} OFFSET ${offset}`, args),
       one(`SELECT count(*)::int AS n FROM costings c ${w}`, args),
     ]);
@@ -518,7 +523,8 @@ async function batchById(id) {
                               updated_by_name, to_char(updated_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI') AS updated_at
                          FROM costing_batches WHERE id = $1`, [id]);
   if (!b) return null;
-  b.rows = await q(`SELECT ${COSTING_COLS}, c.inputs, c.result FROM costings c
+  b.rows = await q(`SELECT ${COSTING_COLS}, c.inputs, c.result, en.enquiry_id, en.enquiry_no FROM costings c
+                     LEFT JOIN LATERAL (SELECT id AS enquiry_id, enquiry_no FROM enquiries WHERE costing_id = c.id ORDER BY id LIMIT 1) en ON true
                      WHERE c.batch_id = $1 AND NOT c.archived ORDER BY c.batch_pos NULLS LAST, c.id`, [id]);
   return b;
 }
@@ -548,6 +554,8 @@ r.post('/costing/batches', async (req, res, next) => {
   try {
     const b = batchFrom(req.body);
     const user = req.costingUser;
+    const group = newGroup();
+    let moved = 0;
     const id = await tx(async (qc, oc) => {
       const batchNo = await nextNumber('CI-CSB-', 'costing_batches', 'batch_no', oc);
       const row = await oc(`INSERT INTO costing_batches (batch_no, title, customer_id, customer_name, common, created_by, created_by_name, updated_by, updated_by_name)
@@ -555,12 +563,12 @@ r.post('/costing/batches', async (req, res, next) => {
       [batchNo, b.title, b.customer_id, b.customer_name, b.common, user.id, user.name]);
       for (const [i, { c, enquiryId }] of b.rows.entries()) {
         const made = await insertCosting(c, { batchId: row.id, batchPos: i + 1, note: `Bulk costing ${batchNo}` }, qc, oc, user);
-        await linkEnquiry(qc, enquiryId, made, row.id, user);
+        if (await linkEnquiry(qc, enquiryId, made, row.id, user, group)) moved++;
       }
       await audit('costing_batch', row.id, 'create', `${batchNo} — ${b.rows.length} products`, qc, user.name);
       return row.id;
     });
-    res.status(201).json(await batchById(id));
+    res.status(201).json({ ...(await batchById(id)), desk: moved ? { group, moved } : null });
   } catch (e) { next(e); }
 });
 
@@ -571,6 +579,8 @@ r.post('/costing/batches/:id/save', async (req, res, next) => {
     const id = intOrNull(req.params.id);
     const b = batchFrom(req.body);
     const user = req.costingUser;
+    const group = newGroup();
+    let moved = 0;
     await tx(async (qc, oc) => {
       // The number lock first, before any row is locked (nextNumber's lock order): new rows mint
       // CI-CST- numbers further down.
@@ -588,21 +598,23 @@ r.post('/costing/batches/:id/save', async (req, res, next) => {
         if (x.id) {
           kept.add(x.id);
           const done = await reviseCosting(x.id, x.c, { batchId: id, batchPos: i + 1, note: `Changed in bulk costing ${cur.batch_no}` }, qc, oc, user);
-          await linkEnquiry(qc, x.enquiryId, done, id, user);
+          if (await linkEnquiry(qc, x.enquiryId, done, id, user, group)) moved++;
         } else {
           const made = await insertCosting(x.c, { batchId: id, batchPos: i + 1, note: `Bulk costing ${cur.batch_no}` }, qc, oc, user);
-          await linkEnquiry(qc, x.enquiryId, made, id, user);
+          if (await linkEnquiry(qc, x.enquiryId, made, id, user, group)) moved++;
         }
       }
-      // A row taken out of the batch is kept as a costing, hidden, not deleted.
+      // A row taken out of the batch is kept as a costing, hidden, not deleted — and its enquiry (Enquiry
+      // desk) goes back to waiting in Costing, as the batch no longer costs it.
       for (const gone of owned) {
         if (kept.has(gone)) continue;
         await qc(`UPDATE costings SET archived = true, batch_pos = NULL, updated_at = now(), updated_by = $2, updated_by_name = $3 WHERE id = $1`,
           [gone, user.id, user.name]);
+        moved += await unlinkCosting(qc, gone, user, group, `Taken out of bulk costing ${cur.batch_no}`);
       }
       await audit('costing_batch', id, 'update', `${cur.batch_no} — ${b.rows.length} products${fresh ? `, ${fresh} new` : ''}`, qc, user.name);
     });
-    res.json(await batchById(id));
+    res.json({ ...(await batchById(id)), desk: moved ? { group, moved } : null });
   } catch (e) { next(e); }
 });
 

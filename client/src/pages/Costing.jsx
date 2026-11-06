@@ -1,7 +1,9 @@
 // Costing — new-product costing worked out the way the plant's cost sheet does it, simple enough for
 // anyone new to take out a costing. Tabs (?tab=): Enquiry desk · New costing · Bulk costing · Saved costings ·
-// Size library · Rates & method. The desk pushes an enquiry to New costing (?enquiry=) or several to
-// Bulk costing (?enquiries=). Open for admins and for logins given the Costing tick (it shows
+// Size library · Rates & method. The desk costs its enquiries in place (its own screen holds the New
+// costing and Bulk costing editors); a costing that answers an enquiry links back to it
+// (?tab=enquiries&enquiry=). Old links still open New costing for an enquiry (?tab=new&enquiry=) or Bulk
+// costing for several (?enquiries=). Open for admins and for logins given the Costing tick (it shows
 // quotation prices); the server holds the same rule.
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -66,16 +68,12 @@ export default function Costing() {
       )}
       {tab === 'bulk' && <BulkCosting key={`${params.get('enquiries') || ''}|${params.get('batch') || ''}`} boot={boot} customers={customers}
         enquiryIds={(params.get('enquiries') || '').split(',').map(Number).filter(n => n > 0)} batchId={Number(params.get('batch')) || null} />}
-      {tab === 'enquiries' && (
-        <EnquiryDesk
-          onPushSingle={e => go('new', { enquiry: String(e.id) })}
-          onPushBulk={ids => go('bulk', { enquiries: ids.join(',') })}
-          onOpenCosting={e => (e.batch_id ? go('bulk', { batch: String(e.batch_id) }) : e.costing_id ? go('new', { id: String(e.costing_id) }) : go('new', { enquiry: String(e.id) }))} />
-      )}
+      {tab === 'enquiries' && <EnquiryDesk boot={boot} customers={customers} focus={params.get('enquiry')} />}
       {tab === 'saved' && <CostingRegister onOpen={setViewing} reloadSignal={reload} />}
       {tab === 'sizes' && <SizeLibrary onCostSize={entry => { setStartSize(entry); go('new'); }} />}
       {tab === 'rates' && <CostingRates boot={boot} onSaved={loadBoot} />}
       <CostingView id={viewing} boot={boot} onClose={() => setViewing(null)}
+        onOpenEnquiry={enquiryId => { setViewing(null); go('enquiries', { enquiry: String(enquiryId) }); }}
         onRevise={id => { setViewing(null); go('new', { id: String(id) }); }}
         onCostAgain={id => { setViewing(null); go('new', { from: String(id) }); }}
         onChanged={() => setReload(n => n + 1)} />

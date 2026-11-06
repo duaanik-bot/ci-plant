@@ -14,8 +14,15 @@
 //   GET  /costing/enquiry-jobs/:id · POST /costing/enquiry-jobs/:id/cancel
 //   GET  /costing/enquiries?stage=&search=     the desk's rows     GET /costing/enquiries/:id  one, with its mail and history
 //   POST /costing/enquiries                    one typed in by hand        PUT /costing/enquiries/:id  its details
-//   POST /costing/enquiries/ready · /drop · /restore · /push   (ids)
+//   POST /costing/enquiries/ready              Inbox → Costing ("Send to costing")
+//   POST /costing/enquiries/to-price           Costing → Final price, for a row whose costing is complete
+//   POST /costing/enquiries/back               one tab back: Costing → Inbox, Final price → Costing, Quotations → Final price
+//   POST /costing/enquiries/drop · /restore    (Bring back: to where it was dropped from)    /push (old links)
+//   POST /costing/enquiries/undo               undo one press (its group), only on rows nothing has changed since
 //   PUT  /costing/enquiries/prices             final prices        POST /costing/enquiries/finalise · /reopen
+// Every change on the desk is kept with what the rows were before it (enquiry_events.detail.undo), and the
+// answer carries its undo group. A costing saved for an enquiry — on the desk or anywhere else — moves it
+// on in the costing's own transaction (linkEnquiry, called by routes/costing.js).
 //   POST /costing/quotations                   one quotation per customer from Quotation-ready enquiries
 //   GET  /costing/quotations · GET /costing/quotations/:id · PUT /costing/quotations/:id · GET /costing/quotations/:id/pdf
 //   POST /costing/quotations/:id/draft (a Gmail draft, never a send) · /mark-sent · /cancel
@@ -28,8 +35,8 @@ import { q, one, tx } from '../db.js';
 import { audit, nextNumber, lockDocNumber } from '../helpers.js';
 import { mayCost, mayApproveCosting } from '../costing-match.js';
 import {
-  STAGE_SQL, STATUS_LABEL, stageOf, cleanItem, priceRows, ceilPaise, quotationLines, groupByCustomer,
-  composeReply, replySubject, replyRecipient,
+  STAGE_SQL, STATUS_LABEL, stageOf, cleanItem, priceRows, quotationLines, groupByCustomer,
+  composeReply, replySubject, replyRecipient, BACK_TO, broughtBack, UNDO_COLS,
 } from '../enquiry-desk.js';
 import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
@@ -59,18 +66,95 @@ export async function enquiryEvent(qc, { enquiryId = null, quotationId = null, a
     [enquiryId, quotationId, action, detail, user?.name || null]);
 }
 
-// A costing saved from the desk (Push to costing) is linked to its enquiry here, in the costing's own
-// transaction (routes/costing.js). A finalised or quoted enquiry keeps its costing.
-export async function linkEnquiry(qc, enquiryId, costing, batchId, user) {
-  const id = intOrNull(enquiryId);
-  if (!id) return;
+// ── every change is kept, so it can be undone ────────────────────────────────────────────────────
+// One press is one group. Each row's event keeps the row's desk columns as they were and the moment it
+// was changed; Undo puts the row back exactly as it was, but only when nothing has changed it since — a
+// later change is never overwritten. An undo is itself a change, so it can be undone too (redo).
+export const newGroup = () => crypto.randomUUID();
+const GROUP_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const pickUndo = snap => Object.fromEntries(UNDO_COLS.map(k => [k, snap?.[k] ?? null]));
+const UNDO_SET = UNDO_COLS.map(k => `${k} = r.${k}`).join(', ');
+
+// Change one locked row (`cur` carries `snap`, its row as it was) and keep the change for Undo. `set` is
+// SQL assignments numbered from $3; `args` fill them.
+async function changeRow(qc, cur, set, args, user, { action, group, detail = null, logged = true }) {
+  const [row] = await qc(`UPDATE enquiries SET ${set}, updated_at = now(), updated_by_name = $2 WHERE id = $1
+                          RETURNING id, enquiry_no, status, updated_at::text AS stamp`, [cur.id, user.name, ...args]);
+  await enquiryEvent(qc, { enquiryId: cur.id, action, detail: { ...(detail || {}), undo: { group, before: pickUndo(cur.snap), after: row.stamp } } }, user);
+  if (logged) await audit('enquiry', cur.id, action, cur.enquiry_no, qc, user.name);
+  return row;
+}
+
+// The ticked rows, locked in id order, each with its stage read against its costing.
+async function lockRows(qc, list) {
+  if (!list.length) return [];
   const rows = await qc(`
-    UPDATE enquiries SET costing_id = $2, batch_id = COALESCE($3::int, batch_id),
-           status = CASE WHEN status IN ('new', 'ready', 'costing') THEN 'costing' ELSE status END,
-           updated_at = now(), updated_by_name = $4
-     WHERE id = $1 AND status NOT IN ('quote_ready', 'sent', 'dropped') RETURNING id, enquiry_no`,
-  [id, costing.id, batchId ?? null, user.name]);
-  if (rows[0]) await enquiryEvent(qc, { enquiryId: id, action: 'costing', detail: { costing_no: costing.costing_no } }, user);
+    SELECT e.id, e.enquiry_no, e.status, e.costing_id, e.batch_id, e.quotation_id, e.final_prices,
+           e.quantities::float8[] AS quantities, to_jsonb(e) AS snap,
+           c.id AS c_id, c.complete AS c_complete, c.archived AS c_archived, c.inputs AS costing_inputs, c.costing_no,
+           qt.status AS quotation_status, qt.quotation_no
+      FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN quotations qt ON qt.id = e.quotation_id
+     WHERE e.id = ANY($1::int[]) ORDER BY e.id FOR UPDATE OF e`, [list]);
+  return rows.map(e => {
+    const live = !!e.c_id && !e.c_archived;
+    const complete = live && !!e.c_complete;
+    return { ...e, live, complete, stage: stageOf(e.status, complete, live) };
+  });
+}
+const stageText = stage => (STATUS_LABEL[stage] || stage).toLowerCase();
+
+// A move on ticked rows. `decide(row)` answers { set, args, to } for a row that can move, or { why } for one
+// that cannot: those are listed with the reason, never forced. One press = one undo group.
+async function moveRows(list, user, action, decide) {
+  const group = newGroup();
+  const out = await tx(async (qc) => {
+    const moved = [], skipped = [];
+    const locked = await lockRows(qc, list);
+    for (const cur of locked) {
+      const d = await decide(cur, qc);
+      if (!d?.set) { skipped.push({ id: cur.id, enquiry_no: cur.enquiry_no, why: d?.why || 'cannot move from here' }); continue; }
+      const row = await changeRow(qc, cur, d.set, d.args || [], user, { action, group, detail: d.detail ?? null });
+      moved.push({ id: row.id, enquiry_no: row.enquiry_no, to: d.to || row.status });
+    }
+    for (const id of list) if (!locked.some(e => e.id === id)) skipped.push({ id, enquiry_no: `#${id}`, why: 'was not found' });
+    return { moved, skipped };
+  });
+  return { ...out, undo: out.moved.length ? group : null };
+}
+
+// A costing saved for an enquiry — from the desk, New costing or a bulk costing — is linked to it here, in
+// the costing's own transaction (routes/costing.js), and the enquiry moves on: to Costing, and on to Final
+// price once the costing is complete. A finalised, quoted, sent or dropped enquiry keeps the costing it has.
+// Nothing is written when nothing changes (a revision of the same costing). Returns { group, id, enquiry_no }
+// when the enquiry changed, so the desk can offer to undo it.
+export async function linkEnquiry(qc, enquiryId, costing, batchId, user, group = null) {
+  const id = intOrNull(enquiryId);
+  if (!id) return null;
+  const [cur] = await qc(`SELECT e.id, e.enquiry_no, e.status, e.costing_id, e.batch_id, to_jsonb(e) AS snap FROM enquiries e WHERE e.id = $1 FOR UPDATE`, [id]);
+  if (!cur || ['quote_ready', 'sent', 'dropped'].includes(cur.status)) return null;
+  // The batch is the costing's own (a single costing has none), so the enquiry always opens the right screen.
+  const [own] = await qc('SELECT batch_id FROM costings WHERE id = $1', [costing.id]);
+  const batch = own?.batch_id ?? batchId ?? null;
+  const status = ['new', 'ready', 'costing'].includes(cur.status) ? 'costing' : cur.status;
+  if (cur.costing_id === costing.id && cur.status === status && (cur.batch_id ?? null) === batch) return null;
+  const replaced = cur.costing_id && cur.costing_id !== costing.id
+    ? (await qc('SELECT costing_no FROM costings WHERE id = $1', [cur.costing_id]))[0]?.costing_no || null : null;
+  const g = group || newGroup();
+  await changeRow(qc, cur, 'costing_id = $3, batch_id = $4, status = $5', [costing.id, batch, status], user,
+    { action: 'costing', group: g, detail: { costing_no: costing.costing_no, ...(replaced ? { replaced } : {}) }, logged: false });
+  return { group: g, id, enquiry_no: cur.enquiry_no };
+}
+
+// A row taken out of a bulk costing: its enquiry loses that costing and waits in Costing again
+// (final prices kept). Returns how many enquiries changed.
+export async function unlinkCosting(qc, costingId, user, group, why) {
+  const rows = await qc(`SELECT e.id, e.enquiry_no, e.status, to_jsonb(e) AS snap FROM enquiries e
+                          WHERE e.costing_id = $1 AND e.status IN ('new', 'ready', 'costing', 'price_pending') ORDER BY e.id FOR UPDATE`, [costingId]);
+  for (const cur of rows) {
+    const to = ['costing', 'price_pending'].includes(cur.status) ? 'ready' : cur.status;
+    await changeRow(qc, cur, 'costing_id = NULL, batch_id = NULL, status = $3', [to], user, { action: 'unlink', group, detail: { why }, logged: false });
+  }
+  return rows.length;
 }
 
 // ── the desk ─────────────────────────────────────────────────────────────────────────────────────
@@ -188,15 +272,23 @@ const ENQ_COLS = `
   ${STAGE_SQL} AS stage, e.dropped_reason, e.costing_id, e.batch_id, e.final_prices, e.finalised_by_name, e.finalised_at,
   e.quotation_id, e.source, e.created_by_name, e.created_at, e.updated_by_name, e.updated_at,
   c.costing_no, c.complete AS costing_complete, c.status AS costing_status, c.inputs AS costing_inputs,
+  c.archived AS costing_archived, c.version AS costing_version, c.batch_id AS costing_batch_id, c.approved_by_name AS costing_approved_by,
+  c.qty::float8 AS costing_qty, c.quote_per_unit::float8 AS costing_quote, b.batch_no,
   m.subject AS mail_subject, m.from_name AS mail_from_name, m.from_email AS mail_from_email, m.received_at AS mail_received_at,
   m.view_url AS mail_view_url, jsonb_array_length(COALESCE(m.attachments, '[]')) AS mail_attachments,
   qt.quotation_no, qt.status AS quotation_status`;
-const ENQ_FROM = `enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN enquiry_mails m ON m.id = e.mail_id
-                  LEFT JOIN quotations qt ON qt.id = e.quotation_id`;
+const ENQ_FROM = `enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN costing_batches b ON b.id = c.batch_id
+                  LEFT JOIN enquiry_mails m ON m.id = e.mail_id LEFT JOIN quotations qt ON qt.id = e.quotation_id`;
 // A row as the desk shows it: the proposals are worked out here; the costing's inputs stay on the server.
+// A hidden costing counts as none (the row waits in Costing until it is costed again or the costing is shown).
 const present = row => {
-  const { costing_inputs, ...e } = row;
-  return { ...e, stage: stageOf(e.status, e.costing_complete), prices: priceRows(e, e.costing_complete ? costing_inputs : null) };
+  const { costing_inputs, costing_archived, ...e } = row;
+  const live = !!e.costing_no && !costing_archived;
+  const complete = live && !!e.costing_complete;
+  return {
+    ...e, costing_live: live, costing_hidden: !!e.costing_no && !!costing_archived, costing_complete: complete,
+    stage: stageOf(e.status, complete, live), prices: priceRows(e, complete ? costing_inputs : null),
+  };
 };
 
 r.get('/costing/enquiries', async (req, res, next) => {
@@ -230,7 +322,12 @@ async function enquiryById(id) {
   e.mail = e.mail_id ? await one(`SELECT id, mailbox, mailbox_email, gmail_message_id, gmail_thread_id, subject, from_name, from_email, to_text,
                                          received_at, body_text, attachments, view_url, summary FROM enquiry_mails WHERE id = $1`, [e.mail_id]) : null;
   e.siblings = e.mail_id ? await q(`SELECT id, enquiry_no, product_name, size_text, status FROM enquiries WHERE mail_id = $1 AND id <> $2 ORDER BY id`, [e.mail_id, id]) : [];
-  e.events = await q(`SELECT action, detail, by_name, at FROM enquiry_events WHERE enquiry_id = $1 ORDER BY id DESC LIMIT 100`, [id]);
+  // History: what was before each change stays on the server; a change can be undone while it is the
+  // row's latest one.
+  e.events = await q(`SELECT ev.id, ev.action, ev.detail - 'undo' AS detail, ev.by_name, ev.at, ev.detail->'undo'->>'group' AS undo_group,
+                             COALESCE((ev.detail->'undo'->>'after')::timestamptz = x.updated_at, false) AS undoable
+                        FROM enquiry_events ev JOIN enquiries x ON x.id = ev.enquiry_id
+                       WHERE ev.enquiry_id = $1 ORDER BY ev.id DESC LIMIT 100`, [id]);
   return e;
 }
 
@@ -310,90 +407,137 @@ r.put('/costing/enquiries/:id(\\d+)', async (req, res, next) => {
     const item = cleanItem(req.body);
     if (!item) throw fail(400, 'Give the product a name or a size.');
     const contactEmail = text(req.body?.contact_email, 200)?.toLowerCase() || null;
+    const group = newGroup();
     await tx(async (qc, oc) => {
-      const cur = await oc('SELECT id, enquiry_no, status, final_prices FROM enquiries WHERE id = $1 FOR UPDATE', [id]);
+      const [cur] = await lockRows(qc, [id]);
       if (!cur) throw fail(404, 'No such enquiry.');
-      if (['quote_ready', 'sent'].includes(cur.status)) throw fail(409, `${cur.enquiry_no} is ${STATUS_LABEL[cur.status].toLowerCase()} — reopen its prices before changing what was asked.`);
+      if (['quote_ready', 'sent'].includes(cur.status)) throw fail(409, `${cur.enquiry_no} is ${STATUS_LABEL[cur.status].toLowerCase()} — send it back to Final price before changing what was asked.`);
       const who = await resolveCustomer(oc, { customer_id: req.body?.customer_id, customer_name: text(req.body?.customer_name, 160), contact_email: contactEmail });
       // A quantity no longer asked about loses its final price.
       const finals = (cur.final_prices || []).filter(f => item.quantities.includes(Number(f.qty)));
-      await qc(`UPDATE enquiries SET customer_id = $2, customer_name = $3, contact_name = $4, contact_email = $5, product_id = $6, product_name = $7,
-                       size_text = $8, size_key = $9, style = $10, board = $11, gsm = $12, colours = $13, coating = $14, specs = $15,
-                       quantities = $16, target_price = $17, notes = $18, final_prices = $19, updated_at = now(), updated_by_name = $20
-                 WHERE id = $1`,
-      [id, who.customer_id, who.customer_name, text(req.body?.contact_name, 160), contactEmail,
+      await changeRow(qc, cur, `customer_id = $3, customer_name = $4, contact_name = $5, contact_email = $6, product_id = $7, product_name = $8,
+                       size_text = $9, size_key = $10, style = $11, board = $12, gsm = $13, colours = $14, coating = $15, specs = $16,
+                       quantities = $17, target_price = $18, notes = $19, final_prices = $20`,
+      [who.customer_id, who.customer_name, text(req.body?.contact_name, 160), contactEmail,
         intOrNull(req.body?.product_id) || await resolveProduct(qc, item.product_name, who.customer_id), item.product_name,
         item.size_text, item.size_key, item.style, item.board, item.gsm, item.colours, item.coating, item.specs, item.quantities,
-        item.target_price, item.notes, JSON.stringify(finals), u.name]);
+        item.target_price, item.notes, JSON.stringify(finals)], u, { action: 'details', group, logged: false });
       // The address is remembered against the customer master for the next mail from it.
       if (contactEmail && who.customer_id) {
         await qc(`INSERT INTO enquiry_contacts (email, customer_id, customer_name) VALUES ($1, $2, $3)
                   ON CONFLICT (email) DO UPDATE SET customer_id = EXCLUDED.customer_id, customer_name = EXCLUDED.customer_name, updated_at = now()`,
         [contactEmail, who.customer_id, who.customer_name]);
       }
-      await enquiryEvent(qc, { enquiryId: id, action: 'details' }, u);
     });
-    res.json(await enquiryById(id));
+    res.json({ ...(await enquiryById(id)), undo: group });
   } catch (e) { next(e); }
 });
 
-// A status change on ticked rows, each checked on its own: rows that cannot move are listed, never forced.
-async function move(list, user, { from, to, action, reason = null, extra = '' }) {
-  return tx(async (qc) => {
-    const moved = await qc(`UPDATE enquiries SET status = $2, dropped_reason = CASE WHEN $2 = 'dropped' THEN $4 ELSE dropped_reason END,
-                                   updated_at = now(), updated_by_name = $3 ${extra}
-                             WHERE id = ANY($1::int[]) AND status = ANY($5::text[]) RETURNING id, enquiry_no`,
-    [list, to, user.name, reason, from]);
-    for (const m of moved) {
-      await enquiryEvent(qc, { enquiryId: m.id, action, detail: reason ? { reason } : null }, user);
-      await audit('enquiry', m.id, action, m.enquiry_no, qc, user.name);
-    }
-    return moved;
-  });
-}
-const skippedOf = async (list, moved) => {
-  const done = new Set(moved.map(m => m.id));
-  const left = list.filter(id => !done.has(id));
-  return left.length ? q(`SELECT id, enquiry_no, status FROM enquiries WHERE id = ANY($1::int[]) ORDER BY id`, [left]) : [];
-};
+// ── moves ────────────────────────────────────────────────────────────────────────────────────────
+// Each ticked row is checked on its own: a row that cannot move is listed with the reason, never forced.
+const DROPPABLE = ['new', 'ready', 'costing', 'costed', 'price_pending'];
+const FINALISED_OFF = 'finalised_by = NULL, finalised_by_name = NULL, finalised_at = NULL';
 
+// Inbox → Costing.
 r.post('/costing/enquiries/ready', async (req, res, next) => {
   try {
-    const list = ids(req.body);
-    const moved = await move(list, req.costingUser, { from: ['new'], to: 'ready', action: 'ready' });
-    res.json({ moved, skipped: await skippedOf(list, moved) });
-  } catch (e) { next(e); }
-});
-r.post('/costing/enquiries/drop', async (req, res, next) => {
-  try {
-    const list = ids(req.body);
-    const moved = await move(list, req.costingUser, { from: ['new', 'ready', 'costing', 'price_pending'], to: 'dropped', action: 'drop', reason: text(req.body?.reason, 300) || 'Not to be quoted' });
-    res.json({ moved, skipped: await skippedOf(list, moved) });
-  } catch (e) { next(e); }
-});
-r.post('/costing/enquiries/restore', async (req, res, next) => {
-  try {
-    const list = ids(req.body);
-    const moved = await tx(async (qc) => {
-      const back = await qc(`UPDATE enquiries SET status = CASE WHEN costing_id IS NOT NULL THEN 'costing' ELSE 'new' END,
-                                    dropped_reason = NULL, updated_at = now(), updated_by_name = $2
-                              WHERE id = ANY($1::int[]) AND status = 'dropped' RETURNING id, enquiry_no`, [list, req.costingUser.name]);
-      for (const m of back) await enquiryEvent(qc, { enquiryId: m.id, action: 'restore' }, req.costingUser);
-      return back;
-    });
-    res.json({ moved, skipped: await skippedOf(list, moved) });
+    res.json(await moveRows(ids(req.body), req.costingUser, 'ready', e => (e.stage === 'new'
+      ? { set: "status = 'ready'", to: 'ready' } : { why: `is ${stageText(e.stage)}` })));
   } catch (e) { next(e); }
 });
 
-// Push to costing: the rows are marked Costing in progress and handed back for the costing screen to fill
-// itself from (New costing for one, Bulk costing for several). Saving there links each costing.
+// Costing → Final price, for a row whose costing is complete (a costing saved for it moves it by itself).
+r.post('/costing/enquiries/to-price', async (req, res, next) => {
+  try {
+    res.json(await moveRows(ids(req.body), req.costingUser, 'to_price', (e) => {
+      if (!['ready', 'costing'].includes(e.stage)) return { why: `is ${stageText(e.stage)}` };
+      if (!e.complete) return { why: e.live ? `its costing ${e.costing_no} is not finished` : 'has no costing yet' };
+      return { set: "status = 'costing'", to: 'costed' };
+    }));
+  } catch (e) { next(e); }
+});
+
+// Send back, one tab to the left. The costing and any final prices stay with the row.
+r.post('/costing/enquiries/back', async (req, res, next) => {
+  try {
+    res.json(await moveRows(ids(req.body), req.costingUser, 'back', (e) => {
+      const to = BACK_TO[e.stage];
+      if (!to) return { why: e.stage === 'new' ? 'is in the Inbox already' : `is ${stageText(e.stage)}` };
+      if (e.stage === 'quote_ready' && e.quotation_id && e.quotation_status !== 'cancelled') {
+        return { why: `is on quotation ${e.quotation_no} — cancel that quotation first` };
+      }
+      return { set: `status = $3${to === 'price_pending' ? `, ${FINALISED_OFF}` : ''}`, args: [to], to, detail: { from: e.stage, to } };
+    }));
+  } catch (e) { next(e); }
+});
+
+r.post('/costing/enquiries/drop', async (req, res, next) => {
+  try {
+    const reason = text(req.body?.reason, 300) || 'Not to be quoted';
+    res.json(await moveRows(ids(req.body), req.costingUser, 'drop', e => (DROPPABLE.includes(e.stage)
+      ? { set: "status = 'dropped', dropped_reason = $3", args: [reason], to: 'dropped', detail: { reason } }
+      : { why: `is ${stageText(e.stage)}` })));
+  } catch (e) { next(e); }
+});
+
+// Bring back: to where the row was when it was dropped.
+r.post('/costing/enquiries/restore', async (req, res, next) => {
+  try {
+    res.json(await moveRows(ids(req.body), req.costingUser, 'restore', async (e, qc) => {
+      if (e.status !== 'dropped') return { why: 'is not dropped' };
+      const [ev] = await qc(`SELECT detail->'undo'->'before'->>'status' AS was FROM enquiry_events
+                              WHERE enquiry_id = $1 AND action = 'drop' ORDER BY id DESC LIMIT 1`, [e.id]);
+      const to = broughtBack(ev?.was, e.costing_id);
+      return { set: 'status = $3, dropped_reason = NULL', args: [to], to };
+    }));
+  } catch (e) { next(e); }
+});
+
+// Old screens' "Push to costing" (the desk now costs in place): marks the rows as in costing. A row with no
+// costing saved still reads "Ready for costing", so nothing is stranded.
 r.post('/costing/enquiries/push', async (req, res, next) => {
   try {
     const list = ids(req.body);
     if (!list.length) throw fail(400, 'Tick the enquiries to push to costing.');
-    const moved = await move(list, req.costingUser, { from: ['new', 'ready', 'costing'], to: 'costing', action: 'push' });
-    const rows = moved.length ? await q(`SELECT ${ENQ_COLS} FROM ${ENQ_FROM} WHERE e.id = ANY($1::int[]) ORDER BY e.id`, [moved.map(m => m.id)]) : [];
-    res.json({ rows: rows.map(present), skipped: await skippedOf(list, moved) });
+    const out = await moveRows(list, req.costingUser, 'push', e => (['new', 'ready', 'costing'].includes(e.stage)
+      ? { set: "status = 'costing'" } : { why: `is ${stageText(e.stage)}` }));
+    const rows = out.moved.length ? await q(`SELECT ${ENQ_COLS} FROM ${ENQ_FROM} WHERE e.id = ANY($1::int[]) ORDER BY e.id`, [out.moved.map(m => m.id)]) : [];
+    res.json({ rows: rows.map(present), skipped: out.skipped, undo: out.undo });
+  } catch (e) { next(e); }
+});
+
+// Undo one press: every row of its group goes back to exactly how it was before, if nothing has changed
+// it since (that row is listed, not forced). `ids` undoes only those rows of the group. The answer's
+// `undo` is the group that redoes it.
+r.post('/costing/enquiries/undo', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    const group = String(req.body?.group || '');
+    if (!GROUP_RE.test(group)) throw fail(400, 'Nothing to undo.');
+    const only = ids(req.body);
+    const redo = newGroup();
+    const out = await tx(async (qc) => {
+      const evs = await qc(`SELECT DISTINCT ON (enquiry_id) id, enquiry_id, action, detail->'undo' AS undo FROM enquiry_events
+                             WHERE enquiry_id IS NOT NULL AND detail->'undo'->>'group' = $1 ORDER BY enquiry_id, id DESC`, [group]);
+      if (!evs.length) throw fail(404, 'Nothing to undo.');
+      const list = evs.map(ev => ev.enquiry_id).filter(id => !only.length || only.includes(id));
+      const moved = [], skipped = [];
+      for (const cur of await lockRows(qc, list)) {
+        const ev = evs.find(x => x.enquiry_id === cur.id);
+        const [row] = await qc(`UPDATE enquiries e SET ${UNDO_SET}, updated_at = now(), updated_by_name = $3
+                                  FROM jsonb_populate_record(NULL::enquiries, $2::jsonb) r
+                                 WHERE e.id = $1 AND e.updated_at = $4::timestamptz
+                             RETURNING e.id, e.enquiry_no, e.status, e.updated_at::text AS stamp`,
+        [cur.id, JSON.stringify(ev.undo.before), u.name, ev.undo.after]);
+        if (!row) { skipped.push({ id: cur.id, enquiry_no: cur.enquiry_no, why: 'was changed after that' }); continue; }
+        await enquiryEvent(qc, { enquiryId: cur.id, action: 'undo',
+          detail: { undid: ev.action, undo: { group: redo, before: pickUndo(cur.snap), after: row.stamp } } }, u);
+        await audit('enquiry', cur.id, 'undo', cur.enquiry_no, qc, u.name);
+        moved.push({ id: row.id, enquiry_no: row.enquiry_no, to: row.status, undid: ev.action });
+      }
+      return { moved, skipped };
+    });
+    res.json({ ...out, undo: out.moved.length ? redo : null });
   } catch (e) { next(e); }
 });
 
@@ -402,17 +546,16 @@ r.put('/costing/enquiries/prices', async (req, res, next) => {
   try {
     const u = req.costingUser;
     const items = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 200);
+    const group = newGroup();
     const saved = [];
-    await tx(async (qc, oc) => {
+    await tx(async (qc) => {
+      const locked = await lockRows(qc, [...new Set(items.map(it => intOrNull(it?.id)).filter(Boolean))]);
       for (const it of items) {
         const id = intOrNull(it?.id);
         if (!id) continue;
-        const e = await oc(`SELECT e.id, e.enquiry_no, e.status, e.quantities::float8[] AS quantities, e.final_prices, e.quotation_id,
-                                   c.complete AS costing_complete, c.inputs AS costing_inputs, qt.status AS quotation_status, qt.quotation_no
-                              FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN quotations qt ON qt.id = e.quotation_id
-                             WHERE e.id = $1 FOR UPDATE OF e`, [id]);
+        const e = locked.find(x => x.id === id);
         if (!e) throw fail(404, 'No such enquiry.');
-        if (!e.costing_complete) throw fail(409, `${e.enquiry_no} has no complete costing yet — finish its costing first.`);
+        if (!e.complete) throw fail(409, `${e.enquiry_no} has no complete costing yet — finish its costing first.`);
         if (e.quotation_id && e.quotation_status !== 'cancelled') throw fail(409, `${e.enquiry_no} is on quotation ${e.quotation_no} — cancel that quotation before changing its price.`);
         if (['sent', 'dropped'].includes(e.status)) throw fail(409, `${e.enquiry_no} is ${STATUS_LABEL[e.status].toLowerCase()}.`);
         const rows = priceRows(e, e.costing_inputs);
@@ -423,13 +566,12 @@ r.put('/costing/enquiries/prices', async (req, res, next) => {
           const changedNow = given && final !== row.final;
           return final > 0 ? { qty: row.qty, final: Math.round(final * 1000) / 1000, proposed: changedNow ? row.proposed : (row.set_against ?? row.proposed) } : null;
         }).filter(Boolean);
-        await qc(`UPDATE enquiries SET final_prices = $2, status = 'price_pending', finalised_by = NULL, finalised_by_name = NULL, finalised_at = NULL,
-                         updated_at = now(), updated_by_name = $3 WHERE id = $1`, [id, JSON.stringify(kept), u.name]);
-        await enquiryEvent(qc, { enquiryId: id, action: 'price', detail: { prices: kept } }, u);
+        await changeRow(qc, e, `final_prices = $3, status = 'price_pending', ${FINALISED_OFF}`, [JSON.stringify(kept)], u,
+          { action: 'price', group, detail: { prices: kept }, logged: false });
         saved.push(e.enquiry_no);
       }
     });
-    res.json({ saved });
+    res.json({ saved, undo: saved.length ? group : null });
   } catch (e) { next(e); }
 });
 
@@ -439,37 +581,33 @@ r.post('/costing/enquiries/finalise', async (req, res, next) => {
     const u = req.costingUser;
     needMgmt(u);
     const list = ids(req.body);
+    const group = newGroup();
     const out = await tx(async (qc) => {
-      const rows = await qc(`SELECT e.id, e.enquiry_no, e.status, e.quantities::float8[] AS quantities, e.final_prices, c.complete AS costing_complete, c.inputs AS costing_inputs
-                               FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id WHERE e.id = ANY($1::int[]) FOR UPDATE OF e`, [list]);
       const done = [], refused = [];
-      for (const e of rows) {
-        const prices = priceRows(e, e.costing_complete ? e.costing_inputs : null);
-        const why = e.status !== 'price_pending' ? `is ${STATUS_LABEL[stageOf(e.status, e.costing_complete)].toLowerCase()}`
-          : !e.costing_complete ? 'has no complete costing'
+      for (const e of await lockRows(qc, list)) {
+        const prices = priceRows(e, e.complete ? e.costing_inputs : null);
+        const why = e.status !== 'price_pending' ? `is ${stageText(e.stage)}`
+          : !e.complete ? 'has no complete costing'
             : !prices.length || prices.some(p => !(p.final > 0)) ? 'has a quantity without a final price' : null;
         if (why) { refused.push({ id: e.id, enquiry_no: e.enquiry_no, why }); continue; }
-        await qc(`UPDATE enquiries SET status = 'quote_ready', finalised_by = $2, finalised_by_name = $3, finalised_at = now(), updated_at = now(), updated_by_name = $3
-                   WHERE id = $1`, [e.id, u.id, u.name]);
-        await enquiryEvent(qc, { enquiryId: e.id, action: 'finalise', detail: { prices: prices.map(p => ({ qty: p.qty, final: p.final, proposed: p.proposed })) } }, u);
-        await audit('enquiry', e.id, 'finalise', e.enquiry_no, qc, u.name);
+        await changeRow(qc, e, "status = 'quote_ready', finalised_by = $3, finalised_by_name = $4, finalised_at = now()", [u.id, u.name], u,
+          { action: 'finalise', group, detail: { prices: prices.map(p => ({ qty: p.qty, final: p.final, proposed: p.proposed })) } });
         done.push(e.enquiry_no);
       }
       return { done, refused };
     });
-    res.json(out);
+    res.json({ ...out, undo: out.done.length ? group : null });
   } catch (e) { next(e); }
 });
 
+// Quotations → Final price (the same as Send back from the Quotations tab).
 r.post('/costing/enquiries/reopen', async (req, res, next) => {
   try {
-    const list = ids(req.body);
-    const moved = await move(list, req.costingUser, {
-      from: ['quote_ready'], to: 'price_pending', action: 'reopen',
-      extra: `, finalised_by = NULL, finalised_by_name = NULL, finalised_at = NULL`,
-    });
-    // A row on a live quotation is not reopened (the quotation is cancelled first).
-    res.json({ moved, skipped: await skippedOf(list, moved) });
+    res.json(await moveRows(ids(req.body), req.costingUser, 'reopen', (e) => {
+      if (e.status !== 'quote_ready') return { why: `is ${stageText(e.stage)}` };
+      if (e.quotation_id && e.quotation_status !== 'cancelled') return { why: `is on quotation ${e.quotation_no} — cancel that quotation first` };
+      return { set: `status = 'price_pending', ${FINALISED_OFF}`, to: 'price_pending' };
+    }));
   } catch (e) { next(e); }
 });
 
@@ -657,7 +795,9 @@ r.post('/costing/quotations/:id/cancel', async (req, res, next) => {
       const qt = await oc(`UPDATE quotations SET status = 'cancelled', updated_at = now(), updated_by_name = $2
                             WHERE id = $1 AND status IN ('ready', 'drafted') RETURNING id, quotation_no, gmail_draft_id`, [id, u.name]);
       if (!qt) throw fail(409, 'Only a quotation not yet sent (or queued to send) can be cancelled.');
-      await qc(`UPDATE enquiries SET quotation_id = NULL, updated_at = now(), updated_by_name = $2 WHERE quotation_id = $1`, [id, u.name]);
+      const freed = await qc(`UPDATE enquiries SET quotation_id = NULL, updated_at = now(), updated_by_name = $2 WHERE quotation_id = $1 RETURNING id`, [id, u.name]);
+      // Each enquiry's own history says so: they wait in Quotations, ready to quote again.
+      for (const e of freed) await enquiryEvent(qc, { enquiryId: e.id, quotationId: id, action: 'unquoted', detail: { quotation_no: qt.quotation_no } }, u);
       await enquiryEvent(qc, { quotationId: id, action: 'cancelled', detail: qt.gmail_draft_id ? { note: 'The draft left in Gmail can be discarded there.' } : null }, u);
       await audit('quotation', id, 'cancel', qt.quotation_no, qc, u.name);
     });

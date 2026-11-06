@@ -10,6 +10,9 @@
 //     spread over it. The quotation sheet carries a price per quantity.
 //   • Each row keeps its own complete inputs, and on save only a changed row gets a new revision.
 //     A login with the Management right approves every ready row at once.
+//   • A row costing an enquiry (Enquiry desk) shows its enquiry number; saving the batch links it and moves the
+//     enquiry on, and a row taken out sends its enquiry back to wait in Costing. The desk opens this same
+//     editor in place (`embedded`) for the enquiries ticked together.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, BadgeCheck, ClipboardPaste, Copy, FolderOpen, Plus, Save, Sparkles, Trash2, X } from 'lucide-react';
 import { api, fmt } from '../../api.js';
@@ -20,7 +23,7 @@ import {
   perUnit, plain, rupees, startingInputs,
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
-import { bulkSeedFromEnquiry } from '../../lib/enquiryUi.js';
+import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -63,6 +66,7 @@ const rowsFromServer = rows => rows.map(r => {
     key: rowKey(), id: r.id, costing_no: r.costing_no, version: r.version, status: r.status, approved_by_name: r.approved_by_name,
     complete: r.complete, product_id: r.product_id, product_name: r.product_name, size_text: r.size_text || r.size_key || '', style: r.style,
     inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false,
+    enquiry_id: r.enquiry_id ?? null, enquiry_no: r.enquiry_no ?? null,
   };
   return answeredNo(r) ? { ...row, skip_library: libraryKey(row) } : row;
 });
@@ -98,7 +102,7 @@ function BatchList({ onOpen }) {
   );
 }
 
-function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened }) {
+export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened, onSaved, embedded = false, backLabel = '← All bulk costings' }) {
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const typical = boot?.typical || {};
@@ -132,12 +136,29 @@ function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened
       // Once: a second run of this effect (React's development check) must not add the rows twice.
       if (seeded.current) return;
       seeded.current = true;
-      api.get(`/costing/enquiries?ids=${seedIds.join(',')}`).then(async es => {
+      api.get(`/costing/enquiries?ids=${seedIds.join(',')}`).then(async list => {
+        // In the order they were ticked.
+        const es = seedIds.map(id => list.find(e => e.id === id)).filter(Boolean);
         const names = [...new Set(es.map(e => e.customer_name).filter(Boolean))];
         const ids = [...new Set(es.map(e => e.customer_id).filter(Boolean))];
+        const also = extraQuantities(es);
         setBatch(b => ({ ...b, title: `Enquiries ${es.map(e => e.enquiry_no).join(', ')}`.slice(0, 200),
+          common: { ...b.common, quantities: also.length ? also : b.common.quantities },
           ...(names.length === 1 ? { customer_name: names[0], customer_id: ids.length === 1 ? ids[0] : null } : {}) }));
-        await addRows(es.map(bulkSeedFromEnquiry), 'from the enquiry desk');
+        // An enquiry costed before starts from its costing (nothing done is lost); the others from what was asked.
+        const costed = es.filter(e => e.costing_live && e.costing_id);
+        const fromCosting = await Promise.all(costed.map(e => api.get(`/costing/costings/${e.costing_id}`).catch(() => null)));
+        const seeds = es.map(e => {
+          const c = fromCosting[costed.indexOf(e)];
+          if (!c) return { seed: bulkSeedFromEnquiry(e) };
+          const [row] = rowsFromServer([{ ...c, id: null, costing_no: null, version: null, status: null, enquiry_id: e.id, enquiry_no: e.enquiry_no }]);
+          const qty = (e.quantities || [])[0];
+          return { row: { ...row, layout_note: `started from ${c.costing_no}`, inputs: { ...row.inputs, ...(qty ? { qty } : {}) } } };
+        });
+        const made = seeds.filter(x => x.row).map(x => x.row);
+        if (made.length) update(b => ({ ...b, rows: [...b.rows.filter(r => r.product_name.trim() || r.size_text.trim() || r.inputs.qty), ...made] }));
+        const asked = seeds.filter(x => x.seed).map(x => x.seed);
+        if (asked.length) await addRows(asked, 'from the enquiry desk');
       }).catch(() => {});
       return;
     }
@@ -256,6 +277,7 @@ function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened
     const b = batch.id ? await api.post(`/costing/batches/${batch.id}/save`, body) : await api.post('/costing/batches', body);
     toast.success(`${b.batch_no} saved — ${b.rows.length} products`);
     setDirty(false);
+    onSaved?.(b);
     if (!batch.id) onOpened(b.id);
     else setBatch(cur => ({ ...cur, batch_no: b.batch_no,
       rows: rowsFromServer(b.rows).map(r => ({ ...r, dp_auto: blank(cur.common.inputs.dp_rate) && String(r.inputs.dp_rate) === String(styleDp(typical, r.style)) })) }));
@@ -333,7 +355,7 @@ function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={onClose} className="text-sm font-semibold text-brand-600 hover:underline">← All bulk costings</button>
+        <button type="button" onClick={onClose} className="text-sm font-semibold text-brand-600 hover:underline">{backLabel}</button>
         <div className="mr-auto text-sm font-bold">{batch.batch_no || 'New bulk costing'}{dirty && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">Not saved</span>}</div>
         {boot?.can_approve && batch.id && toApprove > 0 && (
           <Button variant="success" onClick={approveAll} disabled={dirty} title={dirty ? 'Save the batch first' : 'Approve every complete row'}>
@@ -341,7 +363,8 @@ function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened
           </Button>
         )}
         <ExportMenu label="Export (internal)" build={() => batchExportSpec(batch, exportRows, { quantities: qs })} />
-        <ExportMenu label="Quotation sheet" build={() => batchExportSpec(batch, exportRows, { customer: true, quantities: qs, draft: !allApproved })} />
+        {/* On the desk the quotation is the desk's own (Quotations tab). */}
+        {!embedded && <ExportMenu label="Quotation sheet" build={() => batchExportSpec(batch, exportRows, { customer: true, quantities: qs, draft: !allApproved })} />}
         <Button onClick={save} disabled={!batch.rows.some(r => r.product_name.trim())}><Save size={15} className="mr-1.5 inline" />Save batch</Button>
       </div>
 
@@ -427,7 +450,8 @@ function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, onOpened
                     && String(x.inputs[c.key] ?? '') !== String(batch.common.inputs[c.key] ?? ''));
                   return (
                     <tr key={x.key} className="border-t border-slate-200/70 align-top">
-                      <td className="px-1.5 py-1.5 text-slate-400">{i + 1}{x.costing_no && <div className="text-[10px]">{x.costing_no}</div>}</td>
+                      <td className="px-1.5 py-1.5 text-slate-400">{i + 1}{x.costing_no && <div className="text-[10px]">{x.costing_no}</div>}
+                        {x.enquiry_no && <div className="whitespace-nowrap text-[10px] font-bold text-sky-700" title="Costs this enquiry: saving the batch moves it on">{x.enquiry_no}</div>}</td>
                       <td className="px-1.5 py-1"><Input className={`${cell} w-56`} value={x.product_name} onChange={e => setRow(x.key, { product_name: e.target.value })} placeholder="Product name" />
                         {x.product_id && <div className="mt-0.5 flex items-center gap-1 text-[10px] text-brand-700"><Sparkles size={10} />Product Master</div>}</td>
                       <td className="px-1.5 py-1"><Input className={`${cell} w-32`} value={x.size_text} onChange={e => setRow(x.key, { size_text: e.target.value, layout_note: null })} placeholder="165x58x73" />

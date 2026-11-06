@@ -4,6 +4,7 @@ import { computeCosting, quantityBreaks } from './costing-engine.js';
 import {
   parseQuantity, cleanQuantities, cleanItem, cleanMail, priceRows, ceilPaise, stageOf, customerLine, LINE_KEYS,
   quotationLines, groupByCustomer, customerKey, composeReply, replySubject, replyRecipient, customerSpecs, sizeText,
+  BACK_TO, broughtBack, UNDO_COLS,
 } from './enquiry-desk.js';
 import { quotationPdf, pdfSafe } from './quotation-pdf.js';
 import { loadPdfjs } from './poparse.js';
@@ -86,6 +87,26 @@ test('"Costing completed" is read from the costing, never stored', () => {
   assert.equal(stageOf('costing', true), 'costed');
   assert.equal(stageOf('costing', false), 'costing');
   assert.equal(stageOf('price_pending', true), 'price_pending');
+  // In costing with no costing behind it (none saved, or hidden): waiting to be costed, not "in progress".
+  assert.equal(stageOf('costing', false, false), 'ready');
+  assert.equal(stageOf('costing', true, false), 'ready');
+  assert.equal(stageOf('new', false, false), 'new');
+});
+
+test('Send back is one tab to the left; Bring back returns a row to where it was dropped', () => {
+  // Costing → Inbox, Final price → Costing, Quotations → Final price; the Inbox and Sent have no "back".
+  assert.deepEqual(BACK_TO, { ready: 'new', costing: 'new', costed: 'ready', price_pending: 'ready', quote_ready: 'price_pending' });
+  for (const s of ['new', 'sent', 'dropped']) assert.equal(BACK_TO[s], undefined);
+  assert.equal(broughtBack('price_pending', 4), 'price_pending');
+  assert.equal(broughtBack('ready', null), 'ready');
+  // An older drop kept no record of where it was: Costing when it has a costing, else the Inbox.
+  assert.equal(broughtBack(undefined, 4), 'costing');
+  assert.equal(broughtBack(null, null), 'new');
+  assert.equal(broughtBack('dropped', null), 'new');
+  // Undo keeps every column a desk change can touch — the status, the costing link, the prices, what was asked.
+  for (const k of ['status', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'quotation_id', 'quantities', 'product_name']) {
+    assert.ok(UNDO_COLS.includes(k), k);
+  }
 });
 
 test('one quotation per customer: master first, else the address, else the name', () => {

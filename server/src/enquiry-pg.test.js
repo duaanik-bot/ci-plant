@@ -181,35 +181,152 @@ describe('Enquiry desk — through the real app', {
     await robot('POST', `/enquiry-jobs/${f2.body.job.id}/done`, { ok: true, result: { filed: 0 } });
   });
 
-  test('push to single costing: saving the costing links it, and "Costing completed" follows the costing', async () => {
+  test('a costing saved for an enquiry links it and moves it on — no push first; the link can be undone and redone', async () => {
     const e = rows[0];
-    const push = await call('clerk', 'POST', '/costing/enquiries/push', { ids: [e.id] });
-    assert.equal(push.body.rows[0].status, 'costing');
     const c = await call('clerk', 'POST', '/costing/costings', {
       enquiry_id: e.id, customer_id: e.customer_id, customer_name: e.customer_name, product_name: e.product_name,
       size_text: e.size_text, style: e.style, inputs: JOB,
     });
     assert.equal(c.status, 201);
+    assert.equal(c.body.desk.enquiry_no, e.enquiry_no);
+    // The costing knows the enquiry it answers.
+    assert.deepEqual(c.body.enquiries.map(x => x.enquiry_no), [e.enquiry_no]);
     const back = await call('clerk', 'GET', `/costing/enquiries/${e.id}`);
     assert.equal(back.body.costing_no, c.body.costing_no);
     assert.equal(back.body.stage, 'costed');
     const breaks = quantityBreaks(JOB, [10000, 25000]);
     assert.deepEqual(back.body.prices.map(p => p.proposed), breaks.map(b => b.quote_per_unit));
     assert.equal(back.body.costing_inputs, undefined);
+    // A revision of the same costing changes nothing on the enquiry, so nothing is written.
+    const rev = await call('clerk', 'PUT', `/costing/costings/${c.body.id}`, { enquiry_id: e.id, product_name: e.product_name, size_text: e.size_text, style: e.style, inputs: JOB });
+    assert.equal(rev.body.desk, null);
+    // Undo takes the costing off the enquiry (the costing stays saved); redo puts it back.
+    const undo = await call('clerk', 'POST', '/costing/enquiries/undo', { group: c.body.desk.group });
+    assert.deepEqual(undo.body.moved.map(m => m.enquiry_no), [e.enquiry_no]);
+    const undone = (await call('clerk', 'GET', `/costing/enquiries/${e.id}`)).body;
+    assert.equal(undone.stage, 'new');
+    assert.equal(undone.costing_id, null);
+    assert.equal((await call('clerk', 'GET', `/costing/costings/${c.body.id}`)).status, 200);
+    const redo = await call('clerk', 'POST', '/costing/enquiries/undo', { group: undo.body.undo });
+    assert.equal(redo.body.moved.length, 1);
+    const again = (await call('clerk', 'GET', `/costing/enquiries/${e.id}`)).body;
+    assert.equal(again.stage, 'costed');
+    assert.equal(again.costing_no, c.body.costing_no);
   });
 
-  test('push to bulk costing: the batch links every row to its enquiry', async () => {
+  test('a bulk costing links every row to its enquiry; its rows carry the enquiry back', async () => {
     const [, a, b] = rows;
-    await call('clerk', 'POST', '/costing/enquiries/push', { ids: [a.id, b.id] });
     const batch = await call('clerk', 'POST', '/costing/batches', {
       title: 'From the desk', rows: [a, b].map(x => ({ enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: x.quantities[0] } })),
     });
     assert.equal(batch.status, 201);
+    assert.equal(batch.body.desk.moved, 2);
+    assert.deepEqual(batch.body.rows.map(r => r.enquiry_no), [a.enquiry_no, b.enquiry_no]);
     for (const x of [a, b]) {
       const back = await call('clerk', 'GET', `/costing/enquiries/${x.id}`);
       assert.equal(back.body.batch_id, batch.body.id);
+      assert.equal(back.body.batch_no, batch.body.batch_no);
       assert.equal(back.body.stage, 'costed');
     }
+    // Saving the batch again unchanged moves nothing.
+    const same = await call('clerk', 'POST', `/costing/batches/${batch.body.id}/save`, {
+      title: 'From the desk', rows: batch.body.rows.map(r => ({ id: r.id, enquiry_id: r.enquiry_id, product_name: r.product_name, size_text: r.size_text, inputs: r.inputs })),
+    });
+    assert.equal(same.status, 200);
+    assert.equal(same.body.desk, null);
+  });
+
+  const typed = async (name, extra = {}) => (await call('clerk', 'POST', '/costing/enquiries', {
+    customer_name: 'Hand Typed Co', contact_email: 'hand@typed.test', product_name: name, size_text: '100x40x40', quantities: '5000', ...extra,
+  })).body;
+  const enquiry = async id => (await call('clerk', 'GET', `/costing/enquiries/${id}`)).body;
+
+  test('a costing screen left without saving strands nothing: "in costing" with no costing waits in Costing', async () => {
+    const x = await typed('LEFT UNSAVED CARTON');
+    // The old Push marked a row "in costing" before any costing existed (the 5 Nov trial). With nothing saved,
+    // it reads Ready for costing, cannot go on to Final price, and goes back to the Inbox.
+    await call('clerk', 'POST', '/costing/enquiries/push', { ids: [x.id] });
+    assert.equal((await enquiry(x.id)).stage, 'ready');
+    const fwd = await call('clerk', 'POST', '/costing/enquiries/to-price', { ids: [x.id] });
+    assert.deepEqual(fwd.body.moved, []);
+    assert.match(fwd.body.skipped[0].why, /no costing yet/);
+    const back = await call('clerk', 'POST', '/costing/enquiries/back', { ids: [x.id] });
+    assert.deepEqual(back.body.moved.map(m => m.to), ['new']);
+    assert.equal((await enquiry(x.id)).stage, 'new');
+    const counts = (await call('clerk', 'GET', '/costing/enquiry-desk')).body.counts;
+    assert.ok(counts.new >= 1);
+  });
+
+  test('Send back walks one tab left; every move can be undone; a later change is never overwritten', async () => {
+    const x = await typed('SEND BACK CARTON', { quantities: [5000, 10000] });
+    // Inbox → Costing, and undo / redo of that.
+    const ready = await call('clerk', 'POST', '/costing/enquiries/ready', { ids: [x.id] });
+    assert.equal((await enquiry(x.id)).stage, 'ready');
+    const undo = await call('clerk', 'POST', '/costing/enquiries/undo', { group: ready.body.undo });
+    assert.equal((await enquiry(x.id)).stage, 'new');
+    await call('clerk', 'POST', '/costing/enquiries/undo', { group: undo.body.undo });
+    assert.equal((await enquiry(x.id)).stage, 'ready');
+    // Costed: Final price. Back to Costing keeps the costing; it goes forward again without a new costing.
+    const c = await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    assert.equal((await enquiry(x.id)).stage, 'costed');
+    const b1 = await call('clerk', 'POST', '/costing/enquiries/back', { ids: [x.id] });
+    assert.deepEqual(b1.body.moved.map(m => m.to), ['ready']);
+    let now = await enquiry(x.id);
+    assert.equal(now.stage, 'ready');
+    assert.equal(now.costing_no, c.body.costing_no);
+    await call('clerk', 'POST', '/costing/enquiries/to-price', { ids: [x.id] });
+    assert.equal((await enquiry(x.id)).stage, 'costed');
+    // Prices saved, then sent back to Costing: the prices stay with it.
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.3 }, { qty: 10000, final: 3 }] }] });
+    const b2 = await call('clerk', 'POST', '/costing/enquiries/back', { ids: [x.id] });
+    now = await enquiry(x.id);
+    assert.equal(now.stage, 'ready');
+    assert.deepEqual(now.prices.map(p => p.final), [3.3, 3]);
+    // A later change (the details) blocks undoing the send back; undoing the later change is fine.
+    const det = await call('clerk', 'PUT', `/costing/enquiries/${x.id}`, { ...now, quantities: [5000, 10000], notes: 'checked on the phone' });
+    assert.equal(det.status, 200);
+    const stale = await call('clerk', 'POST', '/costing/enquiries/undo', { group: b2.body.undo });
+    assert.deepEqual(stale.body.moved, []);
+    assert.match(stale.body.skipped[0].why, /changed after/);
+    assert.equal((await call('clerk', 'POST', '/costing/enquiries/undo', { group: det.body.undo })).body.moved.length, 1);
+    assert.equal((await enquiry(x.id)).notes, null);
+    // History: only the latest change can be undone from the row.
+    const events = (await enquiry(x.id)).events;
+    assert.equal(events[0].action, 'undo');
+    assert.equal(events[0].undoable, true);
+    assert.ok(events.slice(1).every(ev => !ev.undoable));
+    assert.ok(events.every(ev => ev.detail?.undo === undefined));
+    // Dropped from Costing, brought back to Costing (where it was), not to the Inbox.
+    await call('clerk', 'POST', '/costing/enquiries/drop', { ids: [x.id], reason: 'test' });
+    assert.equal((await enquiry(x.id)).stage, 'dropped');
+    const brought = await call('clerk', 'POST', '/costing/enquiries/restore', { ids: [x.id] });
+    assert.deepEqual(brought.body.moved.map(m => m.to), ['ready']);
+    // Nothing to undo for a made-up group; a bad group is refused.
+    assert.equal((await call('clerk', 'POST', '/costing/enquiries/undo', { group: '00000000-0000-4000-8000-000000000000' })).status, 404);
+    assert.equal((await call('clerk', 'POST', '/costing/enquiries/undo', { group: 'drop table' })).status, 400);
+  });
+
+  test('a row taken out of a bulk costing goes back to waiting in Costing', async () => {
+    const y = await typed('BATCH OUT CARTON');
+    const z = await typed('BATCH STAYS CARTON');
+    const made = await call('clerk', 'POST', '/costing/batches', {
+      title: 'Two typed', rows: [y, z].map(x => ({ enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } })),
+    });
+    assert.equal((await enquiry(y.id)).stage, 'costed');
+    const keep = made.body.rows.find(r => r.enquiry_id === z.id);
+    const saved = await call('clerk', 'POST', `/costing/batches/${made.body.id}/save`, {
+      title: 'Two typed', rows: [{ id: keep.id, enquiry_id: z.id, product_name: keep.product_name, size_text: keep.size_text, inputs: keep.inputs }],
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.desk.moved, 1);
+    const out = await enquiry(y.id);
+    assert.equal(out.stage, 'ready');
+    assert.equal(out.costing_id, null);
+    assert.equal(out.events[0].action, 'unlink');
+    assert.equal((await enquiry(z.id)).stage, 'costed');
+    // The register shows which enquiry a costing answers.
+    const reg = (await call('clerk', 'GET', `/costing/costings?search=${encodeURIComponent('BATCH STAYS')}`)).body.rows;
+    assert.equal(reg[0].enquiry_no, z.enquiry_no);
   });
 
   test('final prices: saved by anyone with the tick, finalised only with the Management right', async () => {
@@ -249,6 +366,13 @@ describe('Enquiry desk — through the real app', {
     const pdf = await fetch(`${base}/costing/quotations/${quotes[0].id}/pdf`, { headers: { authorization: `Bearer ${tokens.clerk}` } });
     assert.equal(pdf.headers.get('content-type'), 'application/pdf');
     assert.ok((await pdf.arrayBuffer()).byteLength > 1500);
+  });
+
+  test('Send back from Quotations waits for the quotation to be cancelled', async () => {
+    const r = await call('clerk', 'POST', '/costing/enquiries/back', { ids: [rows[0].id] });
+    assert.deepEqual(r.body.moved, []);
+    assert.match(r.body.skipped[0].why, /cancel that quotation first/);
+    assert.equal(r.body.undo, null);
   });
 
   test('a price cannot change under a live quotation', async () => {
@@ -318,6 +442,23 @@ describe('Enquiry desk — through the real app', {
     const other = quotes[1].id;
     assert.equal((await call('clerk', 'POST', `/costing/quotations/${other}/mark-sent`)).status, 403);
     assert.equal((await call('md', 'POST', `/costing/quotations/${other}/mark-sent`)).body.status, 'sent');
+  });
+
+  test('a cancelled quotation frees its enquiries: their history says so, and Send back works again', async () => {
+    const x = await typed('QUOTE THEN CANCEL CARTON');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.5 }] }] });
+    await call('md', 'POST', '/costing/enquiries/finalise', { ids: [x.id] });
+    const made = await call('clerk', 'POST', '/costing/quotations', { ids: [x.id] });
+    const qid = made.body.quotations[0].id;
+    assert.match((await call('clerk', 'POST', '/costing/enquiries/back', { ids: [x.id] })).body.skipped[0].why, /cancel that quotation first/);
+    assert.equal((await call('clerk', 'POST', `/costing/quotations/${qid}/cancel`, {})).status, 200);
+    const now = await enquiry(x.id);
+    assert.equal(now.events[0].action, 'unquoted');
+    assert.equal(now.events[0].detail.quotation_no, made.body.quotations[0].quotation_no);
+    const back = await call('clerk', 'POST', '/costing/enquiries/back', { ids: [x.id] });
+    assert.deepEqual(back.body.moved.map(m => m.to), ['price_pending']);
+    assert.equal((await enquiry(x.id)).finalised_by_name, null);
   });
 
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {

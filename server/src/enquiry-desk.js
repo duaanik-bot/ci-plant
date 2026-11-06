@@ -20,10 +20,33 @@ export const STATUS_LABEL = Object.freeze({
   sent: 'Quotation sent',
   dropped: 'Dropped',
 });
-// The stored status, except that a pushed enquiry whose costing is complete reads "Costing completed".
-export const stageOf = (status, costingComplete) => (status === 'costing' && costingComplete ? 'costed' : status);
+// The stored status, read against the linked costing (5 Nov 2026): an enquiry in costing whose costing is
+// complete reads "Costing completed"; one in costing with no costing behind it — none was saved, or it was
+// hidden — reads "Ready for costing". So a costing screen left without saving never strands a row as if
+// it were being costed. `hasCosting` = a costing is linked and not hidden.
+export const stageOf = (status, costingComplete, hasCosting = true) => {
+  if (status !== 'costing') return status;
+  if (!hasCosting) return 'ready';
+  return costingComplete ? 'costed' : 'costing';
+};
 // SQL twin of stageOf, for filters: e = enquiries, c = the linked costing.
-export const STAGE_SQL = `CASE WHEN e.status = 'costing' AND c.complete THEN 'costed' ELSE e.status END`;
+export const STAGE_SQL = `CASE WHEN e.status <> 'costing' THEN e.status
+  WHEN c.id IS NULL OR c.archived THEN 'ready' WHEN c.complete THEN 'costed' ELSE 'costing' END`;
+
+// The desk's tabs, left to right: Inbox (new) · Costing (ready, costing) · Final price (costed, price_pending) ·
+// Quotations (quote_ready) · Sent. "Send back" moves a row one tab to the left; the costing and any final
+// prices stay with it, so nothing is lost and it can go forward again.
+export const BACK_TO = Object.freeze({ ready: 'new', costing: 'new', costed: 'ready', price_pending: 'ready', quote_ready: 'price_pending' });
+// "Bring back" from Dropped: to where the row was when it was dropped (an older drop kept no record:
+// Costing if it has a costing, else the Inbox).
+export const broughtBack = (was, costingId) => (['new', 'ready', 'costing', 'price_pending'].includes(was) ? was : costingId ? 'costing' : 'new');
+
+// The columns a desk change can touch. Each change keeps them as they were, so it can be undone.
+export const UNDO_COLS = Object.freeze([
+  'status', 'dropped_reason', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'finalised_by_name', 'finalised_at',
+  'quotation_id', 'customer_id', 'customer_name', 'contact_name', 'contact_email', 'product_id', 'product_name', 'size_text',
+  'size_key', 'style', 'board', 'gsm', 'colours', 'coating', 'specs', 'quantities', 'target_price', 'notes',
+]);
 
 const MAX = { text: 300, specs: 1000, body: 20000, items: 30, attachments: 30, quantities: 6 };
 const text = (v, max = MAX.text) => {

@@ -10,7 +10,7 @@ import { costingExportSpec, perUnit, plain, rupees, valueFromSaved } from '../..
 import { ResultCard, SizeKnowledge, Working } from './CostingEditor.jsx';
 import { ApprovalChip } from './SingleCosting.jsx';
 
-export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, onChanged }) {
+export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, onChanged, onOpenEnquiry }) {
   const toast = useToast();
   const [c, setC] = useState(null);
   const load = () => api.get(`/costing/costings/${id}`).then(setC).catch(() => onClose());
@@ -60,6 +60,14 @@ export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, 
               <Item k="Quantity" v={plain(c.qty, 0)} />
               <Item k="Rules used" v={formula ? formula.label : c.formula} />
               {c.batch_no && <Item k="Bulk costing" v={`${c.batch_no}${c.batch_title ? ` · ${c.batch_title}` : ''}`} />}
+              {c.enquiries?.length > 0 && <Item k="For enquiry" v={(
+                <span className="flex flex-wrap gap-1.5">
+                  {c.enquiries.map(x => (
+                    <button key={x.id} type="button" onClick={() => onOpenEnquiry?.(x.id)} title="Open it on the Enquiry desk"
+                      className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800 hover:bg-sky-200">{x.enquiry_no}</button>
+                  ))}
+                </span>
+              )} />}
               <Item k="Made by" v={c.created_by_name || '—'} />
               {!sheet && <Item k="Approval" v={<ApprovalChip c={c} />} />}
               {c.remarks && <Item k="Remarks" v={c.remarks} wide />}
@@ -89,6 +97,11 @@ export default function CostingView({ id, boot, onClose, onRevise, onCostAgain, 
               </div>
             </div>
 
+            {c.enquiries?.length > 0 && c.archived && (
+              <div className="rounded-2xl bg-amber-50 p-3 text-xs font-semibold text-amber-900 ring-1 ring-amber-200">
+                Hidden: {c.enquiries.map(x => x.enquiry_no).join(', ')} wait{c.enquiries.length === 1 ? 's' : ''} in Costing on the Enquiry desk until this costing is shown again or the enquiry is costed again.
+              </div>
+            )}
             {c.versions?.length > 0 && (
               <div className="rounded-2xl bg-white/70 p-4">
                 <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">Revisions</div>

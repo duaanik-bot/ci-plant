@@ -1,11 +1,12 @@
 // One enquiry: what was asked (a person corrects what Claude read), the original mail, its costing, its
 // prices and its history. Also the form for an enquiry typed in by hand (phone, WhatsApp): id = 'new'.
+// From here: cost it (on the desk, in place), send it back one tab, and undo its latest change.
 import { useEffect, useState } from 'react';
-import { ExternalLink, Mail, Paperclip } from 'lucide-react';
+import { Calculator, ExternalLink, Mail, Paperclip, RotateCcw } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { STYLES, styleLabel } from '../../lib/costing.js';
-import { STAGE_TONE, dateText, parseQuantities, quantitiesText, qtyText, rupees } from '../../lib/enquiryUi.js';
+import { STAGE_BACKWARD, STAGE_TONE, dateText, parseQuantities, quantitiesText, qtyText, rupees, whereText } from '../../lib/enquiryUi.js';
 
 const STYLE_OPTIONS = Object.keys(STYLES);
 const EMPTY = {
@@ -19,12 +20,26 @@ const formOf = e => ({
   quantities: (e.quantities || []).join(', '), target_price: e.target_price ?? '', notes: e.notes || '',
 });
 const EVENT_TEXT = {
-  fetched: 'Read from the mailbox', added: 'Typed in by hand', details: 'Details changed', ready: 'Marked ready for costing',
+  fetched: 'Read from the mailbox', added: 'Typed in by hand', details: 'What was asked changed', ready: 'Sent to costing',
   push: 'Pushed to costing', costing: 'Costing linked', price: 'Final price saved', finalise: 'Prices finalised',
-  reopen: 'Prices reopened', quotation: 'Put on a quotation', sent: 'Quotation sent', drop: 'Dropped', restore: 'Brought back',
+  reopen: 'Sent back to Final price', quotation: 'Put on a quotation', sent: 'Quotation sent', drop: 'Dropped', restore: 'Brought back',
+  back: 'Sent back', to_price: 'Sent to final price', undo: 'Undone', unlink: 'Taken off its costing', unquoted: 'Its quotation was cancelled',
 };
+const STAGE_WORD = { new: 'Inbox', ready: 'Costing', costing: 'Costing', costed: 'Final price', price_pending: 'Final price', quote_ready: 'Quotations' };
+// The line under an event: what it did, in words.
+function eventDetail(ev) {
+  const d = ev.detail || {};
+  if (ev.action === 'price' && d.prices) return ` — ${d.prices.map(p => `${qtyText(p.qty)} at ${rupees(p.final)}`).join(', ')}`;
+  if (ev.action === 'costing' && d.costing_no) return ` — ${d.costing_no}${d.replaced ? ` in place of ${d.replaced}` : ''}`;
+  if ((ev.action === 'quotation' || ev.action === 'unquoted') && d.quotation_no) return ` — ${d.quotation_no}`;
+  if (ev.action === 'back' && d.to) return ` — from ${STAGE_WORD[d.from] || d.from} to ${STAGE_WORD[d.to] || d.to}`;
+  if (ev.action === 'undo' && d.undid) return ` — ${(EVENT_TEXT[d.undid] || d.undid).toLowerCase()}`;
+  if (d.reason) return ` — ${d.reason}`;
+  if (d.why) return ` — ${d.why}`;
+  return '';
+}
 
-export default function EnquiryDetail({ id, statuses, onClose, onChanged, onOpenCosting }) {
+export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSaved, onCost, onMove, onUndo }) {
   const toast = useToast();
   const [e, setE] = useState(null);
   const [form, setForm] = useState(EMPTY);
@@ -45,9 +60,14 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onOpen
     const saved = isNew ? await api.post('/costing/enquiries', body) : await api.put(`/costing/enquiries/${id}`, body);
     toast.success(isNew ? `${saved.enquiry_no} added to the Inbox` : `${saved.enquiry_no} saved`);
     setDirty(false);
+    if (!isNew) onSaved?.(saved);
     onChanged?.();
     if (isNew) onClose(); else { setE(saved); setForm(formOf(saved)); }
   };
+
+  const reread = () => api.get(`/costing/enquiries/${id}`).then(x => { setE(x); setForm(formOf(x)); setDirty(false); }).catch(() => {});
+  const canCost = e && ['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'sent'].includes(e.stage);
+  const backTo = e && STAGE_BACKWARD[e.stage];
 
   const field = (k, label, props = {}) => (
     <Field label={label}>
@@ -60,14 +80,20 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onOpen
       title={isNew ? 'Add an enquiry by hand' : e ? `${e.enquiry_no} — ${e.product_name || 'enquiry'}` : 'Opening…'}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Close</Button>
+        {backTo && onMove && <Button variant="secondary" onClick={() => onMove('back', e)}>Send back to {whereText(backTo)}</Button>}
+        {canCost && onCost && <Button variant="secondary" disabled={dirty} title={dirty ? 'Save what was asked first' : ''} onClick={() => onCost(e)}>
+          <Calculator size={14} className="mr-1 inline" />{e.costing_live ? 'Open costing' : 'Cost it'}
+        </Button>}
         {!locked && <Button onClick={save} disabled={!dirty || !(form.product_name.trim() || form.size_text.trim())}>{isNew ? 'Add to the Inbox' : 'Save details'}</Button>}
       </>}>
       {e && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <span className={`rounded-full px-2 py-0.5 font-bold ${STAGE_TONE[e.stage]}`}>{statuses?.[e.stage] || e.stage}</span>
-          {e.costing_no && <button type="button" className="font-bold text-brand-600 hover:underline" onClick={() => onOpenCosting?.(e)}>Costing {e.costing_no}{e.costing_complete ? '' : ' (not finished)'}</button>}
+          {e.costing_no && (onCost
+            ? <button type="button" className="font-bold text-brand-600 hover:underline" onClick={() => onCost(e)}>Costing {e.costing_no}{e.costing_hidden ? ' (hidden)' : e.costing_complete ? '' : ' (not finished)'}</button>
+            : <span className="font-bold text-slate-600">Costing {e.costing_no}</span>)}
           {e.quotation_no && <span className="font-semibold text-slate-600">Quotation {e.quotation_no}</span>}
-          {locked && <span className="text-amber-700">Prices are finalised — reopen them (Quotations tab) to change what was asked.</span>}
+          {locked && <span className="text-amber-700">Prices are finalised — send it back to Final price to change what was asked.</span>}
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -142,9 +168,14 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onOpen
               <div className="mb-1 text-xs font-bold text-slate-600">History</div>
               <ul className="space-y-0.5 text-xs text-slate-600">
                 {e.events.map((ev, i) => (
-                  <li key={i}><span className="font-semibold text-slate-800">{EVENT_TEXT[ev.action] || ev.action}</span> · {ev.by_name} · {dateText(ev.at)}
-                    {ev.action === 'price' && ev.detail?.prices && <span> — {ev.detail.prices.map(p => `${qtyText(p.qty)} at ${rupees(p.final)}`).join(', ')}</span>}
-                    {ev.detail?.reason && <span> — {ev.detail.reason}</span>}</li>
+                  <li key={ev.id || i}><span className="font-semibold text-slate-800">{EVENT_TEXT[ev.action] || ev.action}</span> · {ev.by_name} · {dateText(ev.at)}
+                    <span>{eventDetail(ev)}</span>
+                    {ev.undoable && ev.undo_group && onUndo && (
+                      <button type="button" className="ml-2 inline-flex items-center gap-0.5 font-bold text-brand-600 hover:underline"
+                        onClick={async () => { await onUndo(ev.undo_group, e); await reread(); }}>
+                        <RotateCcw size={11} />{ev.action === 'undo' ? 'Redo' : 'Undo'}
+                      </button>
+                    )}</li>
                 ))}
               </ul>
             </div>

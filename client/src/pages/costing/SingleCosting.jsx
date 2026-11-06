@@ -4,13 +4,16 @@
 // is approved by a login with the Management right; changing its figures sends it back to Draft, and the
 // quotation of a Draft costing is stamped DRAFT. A size + pasting + layout new to the Size Library joins
 // it only on a yes: the form asks, and saving asks if that went unanswered.
-import { useEffect, useState } from 'react';
+// The Enquiry desk opens this same screen in place (`embedded`) for one enquiry (`enquiry`): its costing to
+// revise, a fresh one, or a copy of an earlier costing — saving links it and moves the enquiry on. A costing
+// opened here that answers an enquiry keeps that link too, so saving it anywhere moves its enquiry.
+import { useEffect, useRef, useState } from 'react';
 import { BadgeCheck, FilePlus2, RotateCcw, Save } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, ExportMenu, Input, Modal, useToast } from '../../components/ui.jsx';
 import { computeCosting, num, parseSize } from '../../lib/costing.js';
 import { batchExportSpec, blankValue, costingExportSpec, libraryDeclined, newLibraryEntry, savePayload, stillNeeded, valueFromSaved } from '../../lib/costingUi.js';
-import { costingValueFromEnquiry } from '../../lib/enquiryUi.js';
+import { costingValueFromEnquiry, withEnquiry } from '../../lib/enquiryUi.js';
 import CostingEditor from './CostingEditor.jsx';
 
 // What the page remembers about a saved costing.
@@ -30,7 +33,7 @@ export function ApprovalChip({ c }) {
   return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">Draft — not approved</span>;
 }
 
-export default function SingleCosting({ boot, customers, openId, fromId, startSize, enquiryId, onSaved, onFresh }) {
+export default function SingleCosting({ boot, customers, openId, fromId, startSize, enquiryId, enquiry = null, embedded = false, saveNext = null, onSaved, onFresh }) {
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const [value, setValue] = useState(() => blankValue(defaults, startSize));
@@ -40,14 +43,15 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   const [dirty, setDirty] = useState(false);
   const [asking, setAsking] = useState(null);     // the library entry put to the user on saving
   const [saves, setSaves] = useState(0);          // the editor looks the size up again after each save
+  const afterSave = useRef(null);                 // "Save & next": what to do once the save went through
 
   useEffect(() => {
     const id = openId || fromId;
     let live = true;
-    // Pushed from the enquiry desk: what the customer asked, then the module's own auto-fill.
-    if (!id && enquiryId) {
+    // For an enquiry: what the customer asked, then the module's own auto-fill.
+    if (!id && (enquiryId || enquiry)) {
       setLoading(true);
-      api.get(`/costing/enquiries/${enquiryId}`).then(async e => {
+      (enquiry ? Promise.resolve(enquiry) : api.get(`/costing/enquiries/${enquiryId}`)).then(async e => {
         const v = costingValueFromEnquiry(e, defaults);
         if (e.product_id && e.product_name) {
           const hits = await api.get(`/costing/products?search=${encodeURIComponent(e.product_name)}`).catch(() => []);
@@ -64,14 +68,19 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
       if (!live) return;
       const editable = openId && c.source === 'erp';
       // As saved: nothing is re-suggested until the product or the size is changed.
-      setValue({ ...valueFromSaved(c, { asNew: !editable }), autofill: false });
+      let v = { ...valueFromSaved(c, { asNew: !editable }), autofill: false };
+      // The enquiry it is for: the desk's, else the one this costing answers — saving moves it on.
+      const answers = editable ? (c.enquiries || []).find(x => !['sent', 'dropped'].includes(x.status)) : null;
+      if (enquiry) v = withEnquiry(v, enquiry, { fresh: !editable, copiedFrom: editable ? null : c.costing_no });
+      else if (answers) v = { ...v, enquiry_id: answers.id, enquiry_no: answers.enquiry_no };
+      setValue(v);
       setSaved(editable ? meta(c) : null);
       setDirty(!editable);
       if (openId && !editable) toast.info(`${c.costing_no} is from the old cost sheet — opened as a new costing to cost again.`);
     }).catch(() => {}).finally(() => live && setLoading(false));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId, fromId, startSize, enquiryId]);
+  }, [openId, fromId, startSize, enquiryId, enquiry?.id]);
 
   const change = v => { setValue(v); setDirty(true); };
   const missing = stillNeeded(value);
@@ -91,6 +100,9 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
       : `Saved as ${c.costing_no}${c.complete ? '' : ' (incomplete — open it again to finish)'}`);
     setSaves(n => n + 1);
     onSaved?.(c);
+    const then = afterSave.current;
+    afterSave.current = null;
+    then?.(c);
   };
 
   // Only a complete costing can add to the library. The look-up failing never stops a save.
@@ -122,6 +134,12 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   };
 
   const fresh = () => { setValue(blankValue(defaults)); setSaved(null); setNote(''); setDirty(false); onFresh?.(); };
+  // "Save & next": save (when there is anything to save), then move on.
+  const saveThen = async () => {
+    if (saved && !dirty) { saveNext.onNext(); return; }
+    afterSave.current = saveNext.onNext;
+    try { await save(); } catch (e) { afterSave.current = null; throw e; }
+  };
   // The quotation prices the quantity entered, and any others chosen under "Price at other quantities".
   const quoteQuantities = [...new Set([num(value.inputs?.qty), ...(value.quantities || [])].filter(q => q > 0))];
   const approved = saved?.status === 'approved' && !dirty;
@@ -134,7 +152,9 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
         <div className="mr-auto min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-[#1D1D1F]">
             {saved ? <span>Editing <span className="text-brand-600">{saved.costing_no}</span> · revision {saved.version}</span> : 'New costing'}
-            {value.enquiry_no && !saved && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">For enquiry {value.enquiry_no}</span>}
+            {value.enquiry_no && (
+              <span title="Saving this costing links it to the enquiry and moves the enquiry on" className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">For enquiry {value.enquiry_no}</span>
+            )}
             {saved && <ApprovalChip c={saved} />}
             {dirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">Not saved</span>}
           </div>
@@ -144,6 +164,7 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
           <Input className="!h-9 w-64" value={note} onChange={e => setNote(e.target.value)} placeholder="What changed? (kept with the revision)" />
         )}
         <Button onClick={save} disabled={!canSave || (!dirty && !!saved)}><Save size={15} className="mr-1.5 inline" />{saved ? 'Save revision' : 'Save costing'}</Button>
+        {saveNext && <Button variant="secondary" onClick={saveThen} disabled={!canSave}>{saved && !dirty ? 'Next' : saveNext.label} →</Button>}
         {boot?.can_approve && saved && saved.status !== 'approved' && (
           <Button variant="success" onClick={approve} disabled={dirty || !saved.complete}
             title={dirty ? 'Save the changes first' : !saved.complete ? 'Fill it in completely first' : 'Approve these figures for quotation'}>
@@ -151,14 +172,15 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
           </Button>
         )}
         <ExportMenu label="Export (internal)" build={() => costingExportSpec({ ...value, ...(saved || {}), formula: boot?.current_formula, result })} />
-        {/* For the customer: product, size and the quote price at each quantity — no internal cost. */}
-        <ExportMenu label="Quotation" build={() => batchExportSpec({ batch_no: saved?.costing_no, customer_name: value.customer_name },
+        {/* For the customer: product, size and the quote price at each quantity — no internal cost. On the
+            desk the quotation is the desk's own (Quotations tab), so this sheet is left out there. */}
+        {!embedded && <ExportMenu label="Quotation" build={() => batchExportSpec({ batch_no: saved?.costing_no, customer_name: value.customer_name },
           [{ product_name: value.product_name, size_text: value.size_text, inputs: value.inputs }],
-          { customer: true, quantities: quoteQuantities.length > 1 ? quoteQuantities : [], draft: !approved })} />
-        <Button variant="secondary" onClick={fresh}>{saved ? <><FilePlus2 size={15} className="mr-1.5 inline" />New costing</> : <><RotateCcw size={15} className="mr-1.5 inline" />Start over</>}</Button>
+          { customer: true, quantities: quoteQuantities.length > 1 ? quoteQuantities : [], draft: !approved })} />}
+        {!embedded && <Button variant="secondary" onClick={fresh}>{saved ? <><FilePlus2 size={15} className="mr-1.5 inline" />New costing</> : <><RotateCcw size={15} className="mr-1.5 inline" />Start over</>}</Button>}
       </div>
       <CostingEditor boot={boot} customers={customers} value={value} onChange={change} excludeId={saved?.id} askLibrary recheck={saves} />
-      <Modal open={!!asking} onClose={() => setAsking(null)} title={asking?.new_size ? 'Save this new size to the Size Library?' : 'Save this new layout to the Size Library?'}
+      <Modal open={!!asking} onClose={() => { setAsking(null); afterSave.current = null; }} title={asking?.new_size ? 'Save this new size to the Size Library?' : 'Save this new layout to the Size Library?'}
         footer={<><Button variant="secondary" onClick={() => answer(false)}>No, only the costing</Button><Button onClick={() => answer(true)}>Yes, save it</Button></>}>
         <p className="text-sm font-bold text-[#1D1D1F]">{asking?.text}</p>
         <p className="mt-1 text-sm text-slate-600">The next costing of this size will offer this sheet and ups.</p>

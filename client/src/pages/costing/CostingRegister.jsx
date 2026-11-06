@@ -40,7 +40,7 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
     { key: 'costed_on', label: 'Date', render: r => <span className="whitespace-nowrap">{r.costed_on ? fmt.date(r.costed_on) : '—'}</span>, export: r => r.costed_on || '' },
     { key: 'customer_name', label: 'Customer', render: r => r.customer_name || '—' },
     { key: 'product_name', label: 'Product', width: 'min-w-[220px]',
-      render: r => <div>{r.product_name}{r.batch_no && <div className="text-[11px] text-slate-400">{r.batch_no}</div>}</div> },
+      render: r => <div>{r.product_name}{(r.batch_no || r.enquiry_no) && <div className="text-[11px] text-slate-400">{[r.batch_no, r.enquiry_no && <span key="e" className="font-semibold text-sky-700">for {r.enquiry_no}</span>].filter(Boolean).reduce((a, x, i) => (i ? [...a, ' · ', x] : [x]), [])}</div>}</div> },
     { key: 'size_text', label: 'Size (mm)', render: r => <span className="whitespace-nowrap">{r.size_text || '—'}</span> },
     { key: 'style', label: 'Pasting', render: r => (r.style ? styleLabel(r.style) : '—'), export: r => r.style || '' },
     { key: 'qty', label: 'Qty', align: 'right', render: r => plain(r.qty, 0), export: r => r.qty ?? '' },
