@@ -11,12 +11,12 @@
 //                  setup who are not in the run at all.
 //   register       one row per person, with a totals row, grouping by department or pay channel, and
 //                  PDF / Excel through the exporter. A row opens its line drawer (RunLineDrawer.jsx).
-//   payments       a finalised run, per pay channel: Mark paid with reference and date, line by line.
+//   payments       from submit on (2026-11-06; was finalised only), per pay channel: Mark paid with reference and date, line by line.
 //   paid / unpaid / on hold
 //                  every line has a payment status (Unpaid, Paid, On hold — plus failed / reversed). The register
 //                  has a tick column (operator): the header tick and the quick picks (All · None · Unpaid · On hold
 //                  · Paid · by channel) act on the rows shown; the selection bar says "N selected · ₹total" and offers
-//                  Mark paid (finalised runs only), Put on hold (reason), Mark unpaid (a paid line: approver, with a
+//                  Mark paid (approved people, from submit on), Put on hold (reason), Mark unpaid (a paid line: approver, with a
 //                  reason) and Clear selection — POST /hr/runs/:month/lines/status. Status chips filter the register
 //                  (several at once), and the strip under the KPIs is the server's payment_totals.
 //   payment approval
@@ -26,7 +26,7 @@
 //                  unpaid; the selection bar adds Approve and Unapprove (undo, with a reason) — approver and up, shown
 //                  disabled with a hint below that — POST /hr/runs/:month/lines/approval. Each row also carries its own
 //                  Approve (one click) and Undo (dialog, reason) in the Approval column; the Payments panel shows from
-//                  submit on, its Mark paid only once finalised. Only an approved line is marked
+//                  submit on, and so does its Mark paid (2026-11-06). Only an approved line is marked
 //                  paid. A step banner reads Salary approved → Approve people → Export payment advice → Mark paid.
 //
 //   register layout
@@ -333,7 +333,7 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   );
 }
 
-function PaymentsPanel({ lines, channelLabel, canOperate, final, nameOf, onPay, onOpen }) {
+function PaymentsPanel({ lines, channelLabel, canOperate, final, payOpen = final, nameOf, onPay, onOpen }) {
   const [open, setOpen] = useState(null);
   const groups = useMemo(() => {
     const by = new Map();
@@ -401,8 +401,8 @@ function PaymentsPanel({ lines, channelLabel, canOperate, final, nameOf, onPay, 
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.failed + g.reversed ? 'font-bold text-red-700' : ''}`}>{g.failed + g.reversed}</td>
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.unapproved ? 'font-bold text-[#515154]' : ''}`}>{g.unapproved}</td>
                   <td className="px-2.5 py-2 text-right">
-                    {canOperate && final && g.code && waiting > g.unapproved && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
-                    {!final && g.code && waiting > g.unapproved && <span className="text-[11px] text-[#515154]">Paid once the month is finalised</span>}
+                    {canOperate && payOpen && g.code && waiting > g.unapproved && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
+                    {!payOpen && g.code && waiting > g.unapproved && <span className="text-[11px] text-[#515154]">Paid once the month is submitted</span>}
                     {g.code && waiting > 0 && waiting === g.unapproved && <span className="text-[11px] text-[#515154]">Approve people to pay them</span>}
                     {!g.code && waiting > 0 && <span className="text-[11px] text-amber-700">Mark each person from their line</span>}
                     {waiting === 0 && g.held === 0 && g.due.length > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700"><Check size={12} /> All paid</span>}
@@ -1221,8 +1221,8 @@ export default function Payroll({ level }) {
       sub: approvable ? [`${approvedN} of ${plural(rows.length, 'person', 'people')} approved`, rec ? inr2(rec.approved.amount) : ''] : [] },
     { key: 'advice', label: 'Export payment advice', state: !approvable ? 'todo' : adviceN > 0 ? 'current' : approvedN > 0 ? 'done' : 'todo',
       sub: approvable ? [adviceN ? `${plural(adviceN, 'person', 'people')} to send` : 'nothing waiting'] : [] },
-    { key: 'paid', label: 'Mark paid', state: !final ? 'todo' : paidLines === dueLines.length ? 'done' : 'current',
-      sub: final ? [`${paidLines} of ${dueLines.length} paid`, rec?.approved_on_hold?.count ? `${rec.approved_on_hold.count} approved but on hold` : ''] : ['once finalised'] },
+    { key: 'paid', label: 'Mark paid', state: !approvable ? 'todo' : paidLines === dueLines.length ? 'done' : paidLines > 0 || approvedN > 0 ? 'current' : 'todo',
+      sub: approvable ? [`${paidLines} of ${dueLines.length} paid`, rec?.approved_on_hold?.count ? `${rec.approved_on_hold.count} approved but on hold` : ''] : ['once submitted'] },
   ];
 
   // ── Render ──
@@ -1390,7 +1390,7 @@ export default function Payroll({ level }) {
                   {label} · {plural(here.paymentTotals[k]?.count ?? 0, 'person', 'people')} · <span className="tabular-nums">{inr2(here.paymentTotals[k]?.amount)}</span>
                 </button>
               ))}
-              {!final && <span className="text-[11px] text-[#86868B]">Lines are marked paid once the month is finalised; a hold can be set now.</span>}
+              {!approvable && <span className="text-[11px] text-[#86868B]">Lines are marked paid once the month is submitted and people are approved; a hold can be set now.</span>}
             </div>
           )}
           {approvable && (
@@ -1469,7 +1469,7 @@ export default function Payroll({ level }) {
             </p>
           )}
           {approvable && (
-            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} nameOf={nameOf}
+            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} payOpen={approvable} nameOf={nameOf}
               onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer} />
           )}
 
@@ -1581,13 +1581,13 @@ export default function Payroll({ level }) {
                     </Button>
                   </>
                 )}
-                <Button size="sm" onClick={() => setDialog({ kind: 'status', status: 'paid' })} disabled={!final}
-                  title={final ? undefined : 'A line can be marked paid once the month is finalised'}>Mark paid</Button>
+                <Button size="sm" onClick={() => setDialog({ kind: 'status', status: 'paid' })} disabled={!approvable || !picked.some(r => r.approval === 'approved')}
+                  title={!approvable ? 'A line can be marked paid once the month is submitted' : picked.some(r => r.approval === 'approved') ? 'Mark the ticked approved people paid' : 'Only approved people can be marked paid'}>Mark paid</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'on_hold' })}>Put on hold</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'pending' })}>Mark unpaid</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
               </span>
-              {!final && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is finalised; a hold can be set now.{!approvable ? ' People are approved for payment once the month is submitted.' : ''}</span>}
+              {!approvable && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is submitted and people are approved; a hold can be set now.</span>}
               {approvable && !canApprove && <span className="w-full text-[11px] text-[#515154]">Approve and Unapprove need HR approver access; only approved people can be marked paid.</span>}
             </div>
           )}

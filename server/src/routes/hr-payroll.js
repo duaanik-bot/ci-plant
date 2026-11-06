@@ -1353,6 +1353,14 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
       // policy, and their approval for payment — if given — is undone, since the amount it approved has moved.
       const submitted = run.status === 'submitted';
       if (run.status !== 'draft' && !submitted) throw runLocked(month, run.status);
+      if (submitted) {
+        const [paidLine] = await qc(
+          `SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND person_id = $2 AND payment_status = 'paid'`, [run.id, personId]);
+        if (paidLine) {
+          throw fail(409, `Already marked paid in ${monthLabel(month)}: mark the line unpaid before changing the inputs, `
+            + 'so the amount paid and the amount worked out stay the same', 'LINE_PAID');
+        }
+      }
       const [before] = await qc(
         `SELECT id, ${INPUT_EXACT} FROM hr.run_inputs WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
       const start = before ?? { ...blankInput(true) };
@@ -1468,6 +1476,13 @@ r.post('/hr/runs/:month/send-back', requireHr('approver'), async (req, res, next
       if (locked.status !== 'submitted' && locked.status !== 'approved') {
         throw runState(locked, 'a submitted or approved', 'sent back');
       }
+      const paidLines = await qc(
+        `SELECT person_id FROM hr.run_lines WHERE run_id = $1 AND payment_status = 'paid' ORDER BY person_id`, [locked.id]);
+      if (paidLines.length) {
+        throw fail(409, `${paidLines.length === 1 ? '1 person is' : `${paidLines.length} people are`} already marked paid in `
+          + `${monthLabel(month)}: mark ${paidLines.length === 1 ? 'that line' : 'those lines'} unpaid before sending the month back`,
+          'RUN_HAS_PAID_LINES', { person_ids: paidLines.map((l) => l.person_id) });
+      }
       const [done] = await qc(
         `UPDATE hr.runs
             SET status = 'draft', sent_back_by = $2, sent_back_at = now(), sent_back_reason = $3,
@@ -1476,7 +1491,7 @@ r.post('/hr/runs/:month/send-back', requireHr('approver'), async (req, res, next
           RETURNING *`, [locked.id, userId, reason]);
       await hrAudit(qc, req, 'run', locked.id, 'send_back', { month, from: locked.status, reason });
       // Back in draft the amounts can change, so every line approval of the run is undone (each audited). No line of
-      // a run that is not finalised can be paid, so none of these is a paid line.
+      // a run with paid lines can be sent back (refused above), so none of these is a paid line.
       const undone = await qc(
         `UPDATE hr.run_lines o
             SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
@@ -1570,7 +1585,7 @@ r.post('/hr/runs/:month/payments', requireHr('accounts'), async (req, res, next)
     const batch = await tx(async (qc, oc) => {
       const batchNo = await nextBatchNo(oc);
       const run = await lockRunOf(qc, month);
-      if (run.status !== 'finalised') throw runState(run, 'a finalised', 'paid');
+      runPayable(run, month);
       const unpaid = await qc(
         `SELECT id, person_id, payment_status, approval_status, hold_reason FROM hr.run_lines
           WHERE run_id = $1 AND pay_channel = $2 AND payment_status <> 'paid' AND payable IS NOT NULL AND payable >= 0
@@ -1642,7 +1657,8 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (r
 
     await tx(async (qc) => {
       const run = await lockRunOf(qc, month);
-      if (run.status !== 'finalised') throw runState(run, 'a finalised', 'paid');
+      if (status === 'paid') runPayable(run, month);
+      else if (run.status !== 'finalised' && !PAYABLE_RUN.has(run.status)) throw runState(run, 'a submitted', 'paid');
       const [line] = await qc(
         `SELECT id, payment_status, approval_status, payable::text AS payable, paid_ref FROM hr.run_lines
           WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
@@ -1701,6 +1717,16 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (r
 //             keeps the old values. An operator asking for that gets 403 HR_LEVEL (and nothing changes).
 // A line already in the target status is `unchanged`, not an error; a person with no line, or a line that cannot take
 // the status, is in `skipped` with the reason. Nothing else refuses: warn, don't block.
+// A line can be paid once the month is SUBMITTED (owner's request 2026-11-06: "after approval, the next step is not
+// working"): from submit on, a person's amount changes only through their own input edit, which undoes their
+// approval first, so an approved line's payable is what they are paid. While a month has paid lines it cannot be sent
+// back to draft, and a paid person's inputs cannot be typed again, until the line is marked unpaid.
+const PAYABLE_RUN = new Set(['submitted', 'approved', 'finalised']);
+const runPayable = (run, month) => {
+  if (PAYABLE_RUN.has(run.status)) return;
+  throw fail(409, `${monthLabel(month)} is ${run.status}: a line can be marked paid once the month is submitted and the `
+    + 'person is approved for payment. A line can be put on hold at any time', 'RUN_NOT_FINAL');
+};
 const STATUS_TARGETS = ['paid', 'pending', 'on_hold'];
 
 r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, next) => {
@@ -1726,10 +1752,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
       // The first batch number comes FIRST (a mark-paid makes one batch per channel); unused, it is never written.
       let batchNo = target === 'paid' ? await nextBatchNo(oc) : null;
       const run = await lockRunOf(qc, month);
-      if (target === 'paid' && run.status !== 'finalised') {
-        throw fail(409, `${monthLabel(month)} is ${run.status}: a line can be marked paid only once the month is finalised, `
-          + 'because the amount payable is fixed only then. A line can be put on hold at any time', 'RUN_NOT_FINAL');
-      }
+      if (target === 'paid') runPayable(run, month);
       const lines = await qc(
         `SELECT id, person_id, pay_channel, payment_status, payable::text AS payable, paid_amount::text AS paid_amount,
                 paid_on::text AS paid_on, paid_ref, payment_batch_id, hold_reason, approval_status

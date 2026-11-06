@@ -637,7 +637,7 @@ function LastMonth({ prevMonth, loadPrevious, personId, line, input, variance })
   );
 }
 
-// ── Payment marks (a finalised line) ────────────────────────────────────────
+// ── Payment marks (a submitted, approved or finalised line) ────────────────────────────────────────
 
 function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
   const toast = useToast();
@@ -974,6 +974,7 @@ export default function RunLineDrawer({
   const notInRun = !input && !line;
   const final = status === 'finalised';
   const approvable = status === 'approved' || final;
+  const payOpen = status === 'submitted' || status === 'approved' || final;   // pay marks from submit on (2026-11-06)
   // The history is read again when the line's decisions change (a reload after an action) or after a mark here.
   const [historyBump, setHistoryBump] = useState(0);
   const historyVersion = [line?.approval_status, line?.approved_at, line?.payment_status, line?.paid_at, line?.held_at,
@@ -995,7 +996,7 @@ export default function RunLineDrawer({
                 {person?.status && person.status !== 'active' && <StatusPill status={person.status} />}
                 {leftOut && <span className="rounded-full bg-[#1D1D1F]/[0.07] px-2 py-0.5 text-[11px] font-bold text-[#515154]">Left out this month</span>}
                 {notInRun && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Not in this run</span>}
-                {(final || shown?.payment_status === 'on_hold') && shown && <PaymentPill status={shown.payment_status || 'pending'} reason={shown.hold_reason} />}
+                {(payOpen || shown?.payment_status === 'on_hold') && shown && <PaymentPill status={shown.payment_status || 'pending'} reason={shown.hold_reason} />}
                 {approvable && shown && <ApprovalPill line={shown} />}
               </div>
               <p className="truncate text-[11px] text-[#6E6E73]">{monthLabel(month)}{sub ? ` · ${sub}` : ''}</p>
@@ -1124,7 +1125,7 @@ export default function RunLineDrawer({
                 line={shown} input={input} variance={variance} />
             </Section>
 
-            {(final || shown?.payment_status === 'on_hold') && shown && (
+            {(payOpen || shown?.payment_status === 'on_hold') && shown && (
               <Section title="Payment" icon={CheckCircle2}>
                 <PaymentBox month={month} personId={personId} line={shown} level={level} onChanged={onChanged}
                   onDecided={() => setHistoryBump(v => v + 1)} />

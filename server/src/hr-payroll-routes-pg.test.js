@@ -354,7 +354,8 @@ describe('HR payroll routes through the real app', {
 
   test('finalise posts once; payments are separate from finalise', T, async () => {
     refused(await call('operator', 'POST', `/hr/runs/${MONTH}/finalise`, {}), 403, 'HR_LEVEL');
-    refused(await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH' }), 409, 'RUN_STATE');
+    // Paying is open from submit on (2026-11-06); nobody is approved yet, so the batch has nothing to pay.
+    refused(await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH' }), 409, 'NOTHING_TO_PAY');
     const before = await ledgerCounts();
     const fin = await call('approver', 'POST', `/hr/runs/${MONTH}/finalise`, {});
     assert.equal(fin.status, 200, fin.text);
@@ -567,10 +568,10 @@ describe('HR payroll routes through the real app', {
     addsUp(run.body.payment_totals, run.body.lines.length, run.body.run.totals.payable);
   });
 
-  test('paid is refused before the run is finalised (409 RUN_NOT_FINAL), and nothing changes', T, async () => {
+  test('paid is refused on a DRAFT run (409 RUN_NOT_FINAL), and nothing changes', T, async () => {
     const res = await setStatus('operator', { person_ids: [B, H], status: 'paid', reference: 'TOO-SOON' });
     refused(res, 409, 'RUN_NOT_FINAL');
-    assert.match(res.body.error, /finalised/);
+    assert.match(res.body.error, /submitted/);
     assert.equal((await octLine(H)).payment_status, 'pending');
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.payment_batches WHERE reference = 'TOO-SOON'`)).n, 0);
   });
@@ -785,7 +786,7 @@ describe('HR payroll routes through the real app', {
     // B on hold (any time, whatever the approval); H's approval undone again.
     assert.deepEqual((await novStatus('operator', { person_ids: [B], status: 'on_hold', reason: 'Test: bank details' })).body.changed, [B]);
     assert.equal((await approval('approver', { person_ids: [H], action: 'unapprove', reason: 'Test: account to confirm' })).status, 200);
-    refused(await novStatus('operator', { person_ids: [A], status: 'paid' }), 409, 'RUN_NOT_FINAL');
+    // (Paying before finalise is allowed from 2026-11-06 — see the SUBMITTED-run test below.)
     const fin = await call('approver', 'POST', `/hr/runs/${NOV}/finalise`, {});
     assert.equal(fin.status, 200, fin.text);
     assert.equal((await novLine(A)).approval_status, 'approved', 'finalising keeps the approvals');
@@ -896,6 +897,34 @@ describe('HR payroll routes through the real app', {
       assert.equal(cents(m.run.channels.cash.payable) + cents(m.run.channels.bank.payable) + cents(m.run.channels.none.payable),
         cents(m.run.payable), `${m.month} cash + bank + none = payable`);
     }
+  });
+
+  test('a SUBMITTED run: an approved line can be marked paid; while paid, send-back and an input edit are refused', T, async () => {
+    const DEC = '2026-12';
+    const decLine = (personId) => db.one(
+      `SELECT l.payable::text AS payable, l.payment_status, l.paid_amount::text AS paid_amount
+         FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [DEC, personId]);
+    const up = await uploadAs('operator', await sheet([
+      ['Test Person Alpha', 'T-201', 0, 0], ['Test Person Beta', 'T-202', null, 0], ['Test Person Eta', 'T-205', null, 0],
+    ]), DEC);
+    assert.equal(up.status, 200, up.text);
+    const applied = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, {});
+    assert.equal(applied.status, 200, applied.text);
+    const sub = await call('operator', 'POST', `/hr/runs/${DEC}/submit`, {});
+    assert.equal(sub.status, 200, sub.text);
+    await approveLines(DEC, [B]);
+    const paid = await call('operator', 'POST', `/hr/runs/${DEC}/lines/status`, { person_ids: [B], status: 'paid', reference: 'EARLY-DEC' });
+    assert.equal(paid.status, 200, paid.text);
+    const line = await decLine(B);
+    assert.equal(line.payment_status, 'paid');
+    assert.equal(line.paid_amount, line.payable, 'paid the approved payable');
+    refused(await call('approver', 'POST', `/hr/runs/${DEC}/send-back`, { reason: 'Test' }), 409, 'RUN_HAS_PAID_LINES');
+    refused(await call('operator', 'PUT', `/hr/runs/${DEC}/inputs/${B}`, { absent_days: 3, reason: 'Test' }), 409, 'LINE_PAID');
+    assert.equal((await decLine(B)).payable, line.payable, 'the paid amount did not move');
+    const back = await call('approver', 'POST', `/hr/runs/${DEC}/lines/status`, { person_ids: [B], status: 'pending', reason: 'Test: paid too early' });
+    assert.equal(back.status, 200, back.text);
+    assert.equal((await decLine(B)).payment_status, 'pending');
+    assert.equal((await call('approver', 'POST', `/hr/runs/${DEC}/send-back`, { reason: 'Test' })).status, 200, 'unpaid again, it can go back');
   });
 
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
