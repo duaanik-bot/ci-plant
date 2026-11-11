@@ -75,3 +75,12 @@ test('CI Plant never sends: no server file calls Gmail\'s send', () => {
   const writes = [...gm.matchAll(/gmailCall\(token, '(POST|PUT|DELETE|PATCH)', `?'?([^`',]+)/g)].map(m => `${m[1]} ${m[2]}`);
   assert.deepEqual(writes.sort(), ["POST /drafts", 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(), 'the only Gmail writes are draft create / update');
 });
+
+test('reply to everyone: Reply-To (else the sender) in To, everyone else in Cc, never the mailbox itself', () => {
+  const hdr = { from: 'Buyer J <buyer@customer.test>', to: 'box@plant.test', cc: 'a@customer.test, "B, Purchase" <b@customer.test>, Box <BOX@plant.test>, sales@plant.test' };
+  assert.deepEqual(g.replyAll(hdr, 'box@plant.test'), { to: ['buyer@customer.test'], cc: ['a@customer.test', 'b@customer.test', 'sales@plant.test'] });
+  assert.deepEqual(g.replyAll({ ...hdr, replyTo: 'orders@customer.test' }, 'box@plant.test').to, ['orders@customer.test']);
+  const mime = g.buildMime({ to: ['buyer@customer.test'], cc: ['a@customer.test', 'b@customer.test'], subject: 'Re: x', text: 'hi', boundary: 'B' });
+  assert.match(mime, /^Cc: a@customer\.test, b@customer\.test$/m);
+  assert.doesNotMatch(mime, /Content-Disposition: attachment/, 'no attachment unless one is given');
+});

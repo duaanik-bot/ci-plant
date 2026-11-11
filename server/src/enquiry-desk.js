@@ -176,10 +176,13 @@ export function customerSpecs(e) {
 // a proposed price or an internal note can never reach it, because nothing else is read here.
 // "120x62x70" → "120 × 62 × 70", as a customer reads a size.
 export const sizeText = s => String(s || '').replace(/(\d)\s*[x×*]\s*(?=\d)/gi, '$1 × ');
-export function customerLine(e, { qty, rate }, option = false) {
+export function customerLine(e, { qty, rate, first = null, counter = null }, option = false) {
   const q = Math.round(num(qty));
   const r = round2(num(rate));
   return {
+    // a revised quotation after the customer's counter: our first quote and their counter for this quantity, so the
+    // reader sees the whole history in one table (owner, 11 Nov 2026)
+    ...(num(counter) > 0 ? { first: num(first) > 0 ? round2(num(first)) : null, counter: round2(num(counter)) } : {}),
     enquiry_id: e.id,
     enquiry_no: e.enquiry_no,
     product: e.product_name || '',
@@ -192,6 +195,8 @@ export function customerLine(e, { qty, rate }, option = false) {
   };
 }
 export const LINE_KEYS = Object.freeze(['enquiry_id', 'enquiry_no', 'product', 'size', 'specs', 'qty', 'rate', 'amount', 'option']);
+// on a revised quotation's line only: our first quote and their counter (both customer-facing by the owner's choice)
+export const LINE_HISTORY_KEYS = Object.freeze(['first', 'counter']);
 
 // Quotation lines for one customer's enquiries: every quantity asked about, the first one counted in
 // the total and the others listed as options.
@@ -199,7 +204,11 @@ export function quotationLines(enquiries) {
   const lines = [];
   for (const e of enquiries) {
     const finals = (e.final_prices || []).filter(f => num(f.final) > 0).sort((a, b) => num(a.qty) - num(b.qty));
-    finals.forEach((f, i) => lines.push(customerLine(e, { qty: f.qty, rate: f.final }, i > 0)));
+    const counter = Number(e.counter_round) > 0 && Array.isArray(e.counter) ? e.counter : [];
+    finals.forEach((f, i) => {
+      const k = counter.find(c => num(c.qty) === num(f.qty));
+      lines.push(customerLine(e, { qty: f.qty, rate: f.final, first: k?.ours, counter: k?.theirs }, i > 0));
+    });
   }
   const total = round2(lines.filter(l => !l.option).reduce((s, l) => s + l.amount, 0));
   return { lines, total, has_options: lines.some(l => l.option) };
@@ -228,7 +237,9 @@ const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 
 export function replySubject(original, quotationNo, trial = false) {
   const base = original ? (/^re:/i.test(original.trim()) ? original.trim() : `Re: ${original.trim()}`) : `Quotation ${quotationNo} — Colour Impressions`;
-  return `${trial ? '[TRIAL] ' : ''}${base}`.slice(0, 300);
+  // No "[TRIAL]" tag (owner, 11 Nov 2026: replies went out to the customer from the trial mailbox with it): a trial
+  // mailbox is kept safe by WHO the draft is addressed to, never by words the customer could see.
+  return base.slice(0, 300);
 }
 
 // The reply: greeting, the person's opening words, the rates, the closing words, the signature. Made from
@@ -239,32 +250,40 @@ export function composeReply(qt, { sender = null, trialFor = null } = {}) {
   const signature = [...new Set([sender, 'Colour Impressions'].filter(Boolean))];
   const greet = 'Dear Sir/Madam,';
   const lines = qt.lines || [];
+  // After a counter: our first quote and their counter beside the revised rate, on every row that has them.
+  const history = lines.some(l => l.counter != null);
   const rows = lines.map((l, i) => ({
     n: i + 1,
     what: [l.product, l.size ? `${l.size} mm` : null].filter(Boolean).join(' — '),
     specs: l.specs,
     qty: qtyText(l.qty),
     rate: inr(l.rate),
+    first: l.first != null ? inr(l.first) : '—',
+    counter: l.counter != null ? inr(l.counter) : '—',
   }));
-  const trialNote = trialFor ? `TRIAL — in business use this reply would go to ${trialFor}.` : null;
+  // No trial line and no "attached" line in what the customer reads (owner, 11 Nov 2026); `trialFor` is kept in the
+  // signature for the callers but writes nothing.
+  void trialFor;
   const textBody = [
-    trialNote, trialNote ? '' : null,
     greet, '',
     qt.email_opening || '', '',
-    ...rows.map(r => `${r.n}. ${r.what}${r.specs ? ` (${r.specs})` : ''}\n   ${r.qty} cartons at ${r.rate} a carton`),
+    ...rows.map(r => `${r.n}. ${r.what}${r.specs ? ` (${r.specs})` : ''}\n   ${r.qty} cartons — ${history
+      ? `our first quote ${r.first} · your counter ${r.counter} · our revised rate ${r.rate} a carton`
+      : `at ${r.rate} a carton`}`.replace(' — at ', ' at ')),
     qt.terms ? `\n${qt.terms}` : null,
     '', qt.email_closing || '', '',
     'Regards,', ...signature,
-    '', `Quotation ${qt.quotation_no} is attached.`,
   ].filter(x => x != null).join('\n').replace(/\n{3,}/g, '\n\n');
   const td = 'style="border:1px solid #d0d5dd;padding:6px 8px;font-size:13px"';
   const th = 'style="border:1px solid #d0d5dd;padding:6px 8px;font-size:12px;background:#f2f4f7;text-align:left"';
   const html = [
-    trialNote ? `<p style="color:#b54708;font-weight:bold">${esc(trialNote)}</p>` : '',
     `<p>${esc(greet)}</p>`,
     qt.email_opening ? `<p>${esc(qt.email_opening).replace(/\n/g, '<br>')}</p>` : '',
-    `<table cellspacing="0" style="border-collapse:collapse"><thead><tr><th ${th}>#</th><th ${th}>Item</th><th ${th}>Specification</th><th ${th}>Quantity</th><th ${th}>Rate a carton</th></tr></thead><tbody>`,
-    ...rows.map(r => `<tr><td ${td}>${r.n}</td><td ${td}>${esc(r.what)}</td><td ${td}>${esc(r.specs)}</td><td ${td} align="right">${esc(r.qty)}</td><td ${td} align="right">${esc(r.rate)}</td></tr>`),
+    `<table cellspacing="0" style="border-collapse:collapse"><thead><tr><th ${th}>#</th><th ${th}>Item</th><th ${th}>Specification</th><th ${th}>Quantity</th>${history
+      ? `<th ${th}>Our first quote</th><th ${th}>Your counter</th><th ${th}>Our revised rate a carton</th>` : `<th ${th}>Rate a carton</th>`}</tr></thead><tbody>`,
+    ...rows.map(r => `<tr><td ${td}>${r.n}</td><td ${td}>${esc(r.what)}</td><td ${td}>${esc(r.specs)}</td><td ${td} align="right">${esc(r.qty)}</td>${history
+      ? `<td ${td} align="right">${esc(r.first)}</td><td ${td} align="right">${esc(r.counter)}</td><td ${td} align="right"><b>${esc(r.rate)}</b></td>`
+      : `<td ${td} align="right">${esc(r.rate)}</td>`}</tr>`),
     `</tbody></table>`,
     qt.terms ? `<p style="font-size:12px;color:#475467">${esc(qt.terms).replace(/\n/g, '<br>')}</p>` : '',
     qt.email_closing ? `<p>${esc(qt.email_closing).replace(/\n/g, '<br>')}</p>` : '',

@@ -126,11 +126,13 @@ const cleanLine = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
 const safeName = n => cleanLine(n).replace(/["\\]/g, '') || 'quotation.pdf';
 
 // RFC 822 message: text + HTML alternatives, the PDF attached, threaded under the customer's mail when given.
-export function buildMime({ from, to, subject, text, html, inReplyTo, references, attachment, boundary = crypto.randomBytes(12).toString('hex') }) {
+export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, references, attachment, boundary = crypto.randomBytes(12).toString('hex') }) {
   const mix = `mix_${boundary}`, alt = `alt_${boundary}`;
   const L = [];
   if (from) L.push(`From: ${cleanAddr(from)}`);
   L.push(`To: ${(Array.isArray(to) ? to : [to]).map(cleanAddr).filter(Boolean).join(', ')}`);
+  const ccs = (Array.isArray(cc) ? cc : [cc]).map(cleanAddr).filter(Boolean);
+  if (ccs.length) L.push(`Cc: ${ccs.join(', ')}`);
   L.push(`Subject: ${header(cleanLine(subject))}`);
   if (inReplyTo) L.push(`In-Reply-To: ${cleanLine(inReplyTo)}`);
   if (references || inReplyTo) L.push(`References: ${cleanLine([references, inReplyTo].filter(Boolean).join(' '))}`);
@@ -153,13 +155,27 @@ export const rawOf = mime => Buffer.from(mime, 'utf8').toString('base64url');
 export async function replyHeaders(token, gmailMessageId) {
   if (!gmailMessageId) return {};
   try {
-    const m = await gmailCall(token, 'GET', `/messages/${encodeURIComponent(gmailMessageId)}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`);
-    const h = name => (m.payload?.headers || []).find(x => String(x.name).toLowerCase() === name)?.value || null;
-    return { inReplyTo: h('message-id'), references: h('references'), threadId: m.threadId || null };
+    const want = ['Message-ID', 'References', 'From', 'Reply-To', 'To', 'Cc'].map(x => `metadataHeaders=${x}`).join('&');
+    const m = await gmailCall(token, 'GET', `/messages/${encodeURIComponent(gmailMessageId)}?format=metadata&${want}`);
+    const h = name => (m.payload?.headers || []).filter(x => String(x.name).toLowerCase() === name).map(x => x.value).join(', ') || null;
+    return { inReplyTo: h('message-id'), references: h('references'), threadId: m.threadId || null,
+      from: h('from'), replyTo: h('reply-to'), to: h('to'), cc: h('cc') };
   } catch (e) {
     if (e.gmailStatus === 404) return {}; // the customer's mail is gone: a fresh draft, not threaded
     throw e;
   }
+}
+
+// Every address in a header ("Vanitha J <v@x.com>, p@x.com") — lower-cased, once each.
+export const addressesOf = (...headers) => [...new Set(headers.filter(Boolean).join(',').match(/[^\s<>,;"'()]+@[^\s<>,;"'()]+\.[^\s<>,;"'()]+/g)?.map(a => a.toLowerCase()) || [])];
+
+// Reply to everyone (owner, 11 Nov 2026): To = whom the customer's mail asks replies to go (Reply-To, else its sender);
+// Cc = everyone else on it (To and Cc), never the mailbox itself. Still only a DRAFT.
+export function replyAll(hdr, own) {
+  const me = String(own || '').toLowerCase();
+  const to = addressesOf(hdr.replyTo || hdr.from).filter(a => a !== me);
+  const cc = addressesOf(hdr.to, hdr.cc).filter(a => a !== me && !to.includes(a));
+  return { to, cc };
 }
 
 export const draftViewUrl = (email, messageId) => `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#drafts?compose=${encodeURIComponent(messageId)}`;

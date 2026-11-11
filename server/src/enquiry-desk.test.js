@@ -124,7 +124,7 @@ test('the trial mailbox replies only to itself; the business one to the customer
   assert.deepEqual(replyRecipient({ email: 'biz@example.com', send_to: 'customers' }, 'Buyer@Example.com'), { to: 'buyer@example.com', trial: false });
   assert.match(replyRecipient({ email: 'biz@example.com', send_to: 'customers' }, '').error, /no e-mail address/);
   assert.equal(replySubject('Rate enquiry', 'CI-QTN-0001'), 'Re: Rate enquiry');
-  assert.equal(replySubject('RE: Rate enquiry', 'CI-QTN-0001', true), '[TRIAL] RE: Rate enquiry');
+  assert.equal(replySubject('RE: Rate enquiry', 'CI-QTN-0001', true), 'RE: Rate enquiry', 'no [TRIAL] tag a customer could see (11 Nov 2026)');
   assert.equal(replySubject(null, 'CI-QTN-0001'), 'Quotation CI-QTN-0001 — Colour Impressions');
 });
 
@@ -171,12 +171,30 @@ test('the reply carries the final prices and nothing internal', () => {
   assert.match(reply.text, /25,000 cartons at Rs\. 2\.20 a carton$/m);
   for (const out of [reply.text, reply.html]) assert.doesNotMatch(out, /Amount|Total|25,000\.00|option/);
   assert.match(reply.text, /Regards,\nSales desk\nColour Impressions/);
-  assert.match(composeReply(QT()).text, /Regards,\nColour Impressions\n\nQuotation/);
+  assert.match(composeReply(QT()).text, /Regards,\nColour Impressions$/, 'ends at the signature — no "attached" line (11 Nov 2026)');
   assert.match(reply.html, /<table/);
   assert.deepEqual(leaks(reply.text), []);
   assert.deepEqual(leaks(reply.html), []);
   const trial = composeReply(QT(), { trialFor: 'buyer@example.com' });
-  assert.match(trial.text, /^TRIAL — in business use this reply would go to buyer@example\.com\./);
+  assert.doesNotMatch(trial.text + trial.html, /TRIAL|would go to/, 'no trial words in what a customer may read');
+  // A revised quotation: our first quote and their counter beside the revised rate, on the row.
+  const rev = composeReply({ ...QT(), lines: QT().lines.map(l => ({ ...l, first: 2.8, counter: 2.1 })) });
+  assert.match(rev.text, /10,000 cartons — our first quote Rs\. 2\.80 · your counter Rs\. 2\.10 · our revised rate Rs\. 2\.50 a carton/);
+  assert.match(rev.html, /Our first quote<\/th><th [^>]+>Your counter<\/th><th [^>]+>Our revised rate a carton/);
+  assert.deepEqual(leaks(rev.text), []);
+});
+
+test('a revised quotation PDF lists our first quote and their counter beside the revised rate', async () => {
+  const bytes = await quotationPdf({ ...QT(), revision: 1, lines: QT().lines.map(l => ({ ...l, first: 2.8, counter: 2.1 })) }, { name: 'Colour Impressions' }, { trialFor: 'buyer@example.com' });
+  const { getDocument } = await loadPdfjs();
+  const doc = await getDocument({ data: new Uint8Array(bytes) }).promise;
+  const text = (await (await doc.getPage(1)).getTextContent()).items.map(i => i.str).join(' ');
+  assert.match(text, /REVISED QUOTATION/);
+  assert.match(text, /First quote/);
+  assert.match(text, /Your counter/);
+  assert.match(text, /2\.80/);
+  assert.match(text, /2\.10/);
+  assert.doesNotMatch(text, /TRIAL/);
 });
 
 test('the PDF says the final prices, in words the standard font can draw, and nothing internal', async () => {

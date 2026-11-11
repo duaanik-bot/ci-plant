@@ -47,7 +47,7 @@ import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
 import {
-  gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke,
+  gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
 } from '../gmail.js';
 import { redirectUri, signState } from './gmail-link.js';
 
@@ -973,15 +973,21 @@ async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u }) {
   try {
     const token = await accessToken(link);
     const hdr = await replyHeaders(token, mail?.gmail_message_id);
-    const raw = rawOf(buildMime({ from: link.email, to: brief.to, subject: brief.subject, text: brief.text, html: brief.html,
-      inReplyTo: hdr.inReplyTo, references: hdr.references, attachment: { name: `${qt.quotation_no}.pdf`, bytes: pdf } }));
+    // A mailbox that answers customers replies to EVERYONE on the customer's mail; a trial mailbox only to itself.
+    const all = !brief.trial && (hdr.from || hdr.replyTo) ? replyAll(hdr, link.email) : null;
+    if (all?.to.length) { brief.to = all.to; brief.cc = all.cc; }
+    // No PDF on the draft (owner, 11 Nov 2026: the rates are in the mail itself); the PDF stays in CI Plant.
+    void pdf;
+    const raw = rawOf(buildMime({ from: link.email, to: brief.to, cc: brief.cc || [], subject: brief.subject, text: brief.text, html: brief.html,
+      inReplyTo: hdr.inReplyTo, references: hdr.references }));
     d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || mail?.gmail_thread_id || null, draftId: qt.gmail_draft_id });
   } catch (e) {
     if (e.expired) forgetToken(box.key);
     await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [box.key, String(e.message).slice(0, 500)]);
     throw fail(e.status && e.status < 500 ? 409 : 502, `${qt.quotation_no}: ${e.message}`);
   }
-  const result = { by: 'server', draft_id: d.draft_id, message_id: d.message_id, thread_id: d.thread_id, view_url: d.view_url, replaced: d.replaced };
+  const result = { by: 'server', draft_id: d.draft_id, message_id: d.message_id, thread_id: d.thread_id, view_url: d.view_url, replaced: d.replaced,
+    to: brief.to, cc: brief.cc || [] };
   const job = await tx(async (qc, oc) => {
     const cur = await oc(`SELECT status FROM quotations WHERE id = $1 FOR UPDATE`, [qt.id]);
     if (!['ready', 'drafted'].includes(cur?.status)) throw fail(409, `${qt.quotation_no} changed meanwhile — the draft is in Gmail; open the quotation again.`);

@@ -358,7 +358,7 @@ describe('Enquiry desk — through the real app', {
     assert.equal(qt.lines.length, 3);
     for (const l of qt.lines) assert.deepEqual(Object.keys(l).sort(), ['amount', 'enquiry_id', 'enquiry_no', 'option', 'product', 'qty', 'rate', 'size', 'specs']);
     assert.equal(qt.total, 2.5 * 10000 + 3.1 * 5000);
-    assert.equal(qt.email_subject, '[TRIAL] Re: Rates for two cartons');
+    assert.equal(qt.email_subject, 'Re: Rates for two cartons', 'no [TRIAL] tag — the trial is kept safe by the address alone');
     assert.deepEqual(qt.recipient, { to: 'dua.anik@gmail.com', trial: true, would_go_to: 'buyer@example-pharma.test' });
     const raw = JSON.stringify(qt);
     for (const leak of ['98.7654', '4321.98', 'board_rate', 'cost_per_unit', 'proposed']) assert.ok(!raw.includes(leak), leak);
@@ -394,7 +394,8 @@ describe('Enquiry desk — through the real app', {
     assert.equal(claim.body.reply.trial, true);
     assert.equal(claim.body.reply.reply_to_message_id, 'm-001');
     assert.equal(claim.body.reply.thread_id, 't-001');
-    assert.match(claim.body.reply.text, /TRIAL — in business use this reply would go to buyer@example-pharma\.test/);
+    assert.doesNotMatch(claim.body.reply.text, /TRIAL/, 'no trial words in the mail');
+    assert.equal(claim.body.reply.would_go_to, 'buyer@example-pharma.test', 'the robot is still told whom it would go to');
     const pdf = await robot('GET', `/enquiry-jobs/${d.body.job.id}/attachment`);
     assert.equal(crypto.createHash('sha256').update(pdf.bytes).digest('hex'), claim.body.attachment.sha256);
     assert.equal(pdf.headers.get('x-attachment-sha256'), claim.body.attachment.sha256);
@@ -567,7 +568,7 @@ describe('Enquiry desk — through the real app', {
       // The e-mail itself: to the trial mailbox only, the approved words + PDF, nothing internal.
       const mime = Buffer.from(G.raws[0], 'base64url').toString('utf8');
       assert.match(mime, new RegExp(`^To: ${box.email.replace('.', '\\.')}$`, 'm'), 'the trial mailbox replies only to itself');
-      assert.match(mime, /filename="CI-QTN-\d+\.pdf"/);
+      assert.doesNotMatch(mime, /Content-Disposition: attachment/, 'no PDF on the draft — the rates are in the mail (11 Nov 2026)');
       const decoded = mime.split(/\r\n\r\n/).map(part => { try { return Buffer.from(part.replace(/\r\n/g, ''), 'base64').toString('utf8'); } catch { return ''; } }).join('\n');
       assert.match(decoded, /3\.75/);
       assert.doesNotMatch(decoded, /98\.7654|4321\.98|4,321/, 'no internal board rate or process cost');
@@ -667,7 +668,10 @@ describe('Enquiry desk — through the real app', {
     assert.equal(nq.supersedes_id, q1.id);
     assert.equal(nq.lines[0].rate, 3.5);
     assert.match(nq.reply.text, /revised rates/);
-    assert.doesNotMatch(nq.reply.text + nq.reply.html, /3\.20?\b|3\.75|cost|discount|loss/i, 'neither their price, our old price nor any internal word');
+    // The history the owner wants the buyer to see on the row: our first quote, their counter, the revised rate — and
+    // still nothing internal.
+    assert.match(nq.reply.text, /our first quote Rs\. 3\.75 · your counter Rs\. 3\.20 · our revised rate Rs\. 3\.50/);
+    assert.doesNotMatch(nq.reply.text + nq.reply.html, /cost|discount|loss|margin|TRIAL/i, 'no internal word, no trial word');
     const pdf = await fetch(`${base}/costing/quotations/${q2.id}/pdf`, { headers: { authorization: `Bearer ${tokens.clerk}` } });
     assert.equal(pdf.status, 200);
     e = await enquiry(x.id);

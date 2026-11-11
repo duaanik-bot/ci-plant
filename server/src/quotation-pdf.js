@@ -49,7 +49,7 @@ export async function quotationPdf(qt, entity = {}, { trialFor = null } = {}) {
   const right = (t, xr, size = 10, f = font) => { const s = pdfSafe(t); page.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color: ink }); };
   const newPage = () => { page = doc.addPage([W, H]); y = H - M; };
 
-  if (trialFor) {
+  if (trialFor && false) { // no trial words on what a customer may read (owner, 11 Nov 2026)
     draw(`TRIAL — in business use this would go to ${trialFor}`, M, 9, bold, rgb(0.71, 0.28, 0.03));
     y -= 16;
   }
@@ -77,12 +77,22 @@ export async function quotationPdf(qt, entity = {}, { trialFor = null } = {}) {
   y -= 10;
 
   // The table: each item's rate a carton at each quantity — no amount and no total (owner, 3 Nov 2026).
-  const cols = [
+  // After a counter: our first quote and their counter beside the revised rate (owner, 11 Nov 2026).
+  const history = (qt.lines || []).some(l => l.counter != null);
+  const cols = history ? [
+    { k: 'n', label: '#', x: M, w: 18 },
+    { k: 'item', label: 'Item and specification', x: M + 20, w: 225 },
+    { k: 'qty', label: 'Quantity', x: M + 250, w: 55, right: true },
+    { k: 'first', label: 'First quote', x: M + 310, w: 62, right: true },
+    { k: 'counter', label: 'Your counter', x: M + 377, w: 62, right: true },
+    { k: 'rate', label: 'Revised (Rs.)', x: M + 444, w: W - 2 * M - 444, right: true },
+  ] : [
     { k: 'n', label: '#', x: M, w: 18 },
     { k: 'item', label: 'Item and specification', x: M + 20, w: 330 },
     { k: 'qty', label: 'Quantity', x: M + 360, w: 70, right: true },
     { k: 'rate', label: 'Rate a carton (Rs.)', x: M + 435, w: W - 2 * M - 435, right: true },
   ];
+  const col = k => cols.find(c => c.k === k);
   const header = () => {
     page.drawRectangle({ x: M, y: y - 4, width: W - 2 * M, height: 16, color: rgb(0.95, 0.96, 0.97) });
     for (const c of cols) (c.right ? right(c.label, c.x + c.w, 8, bold) : draw(c.label, c.x, 8, bold));
@@ -95,8 +105,12 @@ export async function quotationPdf(qt, entity = {}, { trialFor = null } = {}) {
     const need = (item.length + specs.length) * 11 + 8;
     if (y - need < M + 120) { newPage(); header(); }
     draw(String(i + 1), cols[0].x, 9);
-    right(Number(l.qty).toLocaleString('en-IN'), cols[2].x + cols[2].w, 9);
-    right(money(l.rate), cols[3].x + cols[3].w, 9);
+    right(Number(l.qty).toLocaleString('en-IN'), col('qty').x + col('qty').w, 9);
+    if (history) {
+      right(l.first != null ? money(l.first) : '—', col('first').x + col('first').w, 9);
+      right(l.counter != null ? money(l.counter) : '—', col('counter').x + col('counter').w, 9);
+    }
+    right(money(l.rate), col('rate').x + col('rate').w, 9, history ? bold : undefined);
     for (const t of item) { draw(t, cols[1].x, 9, bold); y -= 11; }
     for (const t of specs) { draw(t, cols[1].x, 8, font, grey); y -= 11; }
     y -= 4;
