@@ -8,6 +8,7 @@ import { Button, Field, Input, useToast } from '../../components/ui.jsx';
 import { styleLabel } from '../../lib/costing.js';
 import { coatingRate, plain } from '../../lib/costingUi.js';
 import { NumField } from './CostingEditor.jsx';
+import { HOUSE_RULES } from '../../lib/costingRules.js';
 
 const DEFAULTS = [
   { key: 'wastage', label: 'Wastage sheets', unit: 'sheets' },
@@ -28,11 +29,11 @@ const METHOD = [
   ['Printing', 'sheets × colours × printing rate ÷ 1,000 — never less than the minimum printing charge'],
   ['Coating', 'sheets coated × sheet area (sq in) × coating rate ÷ 100 — the rate is ₹ per 100 sq in (the sheet writes it as a factor: rate = 1 ÷ factor, so factor 6 = ₹0.17)'],
   ['Die & pasting', 'quantity × ₹ per carton'],
-  ['Process', 'the fixed charge for the job'],
-  ['Subtotal', 'board + printing + coating + die & pasting + process'],
+  ['Process', 'the fixed charge for the job (plus the leafing set-up when a carton is leafed)'],
+  ['Subtotal', 'board + printing + coating + die & pasting + process (+ leafing set-up)'],
   ['P&F', 'P&F % of the subtotal'],
   ['Misc', 'misc % of (subtotal + P&F)'],
-  ['Cost per carton', '(subtotal + P&F + misc) ÷ quantity + embossing per carton'],
+  ['Cost per carton', '(subtotal + P&F + misc) ÷ quantity + embossing per carton + leafing (₹ a panel × panels)'],
   ['Quote price', 'cost per carton + quote margin'],
   ['Set-up and running', 'set-up = the wastage sheets\' board, printing and coating, the process charge and a minimum printing charge (plus their P&F and misc) — the same at any quantity; running = the rest, per carton'],
 ];
@@ -97,6 +98,17 @@ export default function CostingRates({ boot, onSaved }) {
             <li key={k} className="flex gap-2"><span className="w-5 shrink-0 text-right font-bold text-slate-400">{i + 1}.</span><span><b>{k}</b> = {v}</span></li>
           ))}
         </ol>
+        <h4 className="mt-4 text-sm font-bold">House rules for a new costing (11 Nov 2026)</h4>
+        <p className="mb-1 text-xs text-slate-500">Filled in ahead of past costings; a box anybody types over is kept. The Product Master's own grade rate and embossing still come first.</p>
+        <ul className="space-y-1 text-xs text-slate-600">
+          <li>Board: <b>₹{plain(HOUSE_RULES.board_rate)}</b> a kg (FBB) unless the product's grade has today's rate</li>
+          <li>Colours: as the enquiry says · Printing: the rate above</li>
+          <li>Coating from the enquiry's words: aqueous varnish factor <b>{HOUSE_RULES.coat.aqueous}</b> · UV <b>{HOUSE_RULES.coat.uv}</b> · drip-off with UV <b>{HOUSE_RULES.coat.drip_uv}</b> · spot UV + drip-off <b>{HOUSE_RULES.coat.spot_drip}</b></li>
+          <li>Embossing: <b>₹{plain(HOUSE_RULES.emb_rate, 2)}</b> a carton when asked</li>
+          <li>Leafing: <b>₹{plain(HOUSE_RULES.leaf_rate, 2)}</b> a carton per panel + <b>₹{plain(HOUSE_RULES.leaf_process)}</b> set-up for the job</li>
+          <li>Die & pasting: side <b>₹{plain(HOUSE_RULES.dp.SIDE, 2)}</b> · lock bottom <b>₹{plain(HOUSE_RULES.dp.LOCK, 2)}</b> · big box <b>₹{plain(HOUSE_RULES.dp_big, 2)}</b> (tick on the costing)</li>
+          <li>Process: <b>₹{plain(HOUSE_RULES.process)}</b> for the job, <b>₹{plain(HOUSE_RULES.process_new_die)}</b> with a new die (tick; on for a product not in the Product Master)</li>
+        </ul>
         <h4 className="mt-4 text-sm font-bold">Typical in your costings (last two years)</h4>
         <p className="mb-1 text-xs text-slate-500">Worked out live from the saved costings; a new costing is filled with these where nothing better is known.</p>
         <ul className="space-y-1 text-xs text-slate-600">

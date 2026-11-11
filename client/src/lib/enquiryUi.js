@@ -1,6 +1,7 @@
 // The enquiry desk's screen helpers (server rules: server/src/enquiry-desk.js).
 import { num } from './costing.js';
 import { blankValue } from './costingUi.js';
+import { finishFromEnquiry } from './costingRules.js';
 
 // The desk's tabs and the stages each shows, left to right (5 Nov 2026). A row moves right when its work is
 // done — Send to costing, a costing saved for it, prices finalised — and "Send back" moves it one tab left,
@@ -75,6 +76,8 @@ export function costingValueFromEnquiry(e, defaults = {}) {
   for (const k of ['size_text', 'style', 'customer_name']) if (v[k]) v.sources[k] = from;
   if (qs.length > 1) v.quantities = qs.slice(1);
   v.remarks = [`From enquiry ${e.enquiry_no}`, e.board && `board ${e.board}`, e.coating && `coating ${e.coating}`, e.specs].filter(Boolean).join(' — ');
+  // The finish the customer asked for (coating, embossing, leafing) — the house rules turn it into rates.
+  v.finish = finishFromEnquiry(e);
   v.enquiry_id = e.id;
   v.enquiry_no = e.enquiry_no;
   return v;
@@ -95,6 +98,7 @@ export function withEnquiry(v, e, { fresh = false, copiedFrom = null } = {}) {
     out.product_name = e.product_name || v.product_name || '';
     if (qs[0]) { out.inputs = { ...out.inputs, qty: qs[0] }; out.sources.qty = from; }
     out.remarks = [`From enquiry ${e.enquiry_no}`, copiedFrom && `started from ${copiedFrom}`].filter(Boolean).join(' — ');
+    out.finish = finishFromEnquiry(e);
   }
   const own = num(out.inputs?.qty);
   const others = qs.filter(q => q !== own);
@@ -106,6 +110,7 @@ export function withEnquiry(v, e, { fresh = false, copiedFrom = null } = {}) {
 export const bulkSeedFromEnquiry = e => ({
   product_name: e.product_name || '', size_text: e.size_key || e.size_text || '', qty: (e.quantities || [])[0] ?? null,
   style: e.style || null, gsm: e.gsm ?? null, colours: e.colours ?? null, enquiry_id: e.id, enquiry_no: e.enquiry_no,
+  finish: finishFromEnquiry(e),
 });
 // The quantities a bulk costing of these enquiries also prices at: every one asked beyond each row's own (up to six).
 export const extraQuantities = es => [...new Set(es.flatMap(e => (e.quantities || []).slice(1).map(Number)).filter(q => q > 0))]

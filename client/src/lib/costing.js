@@ -18,6 +18,10 @@
 //   cost per carton  = (subtotal + P&F + misc) ÷ quantity + embossing ₹ per carton
 //   quote per carton = cost per carton + ₹0.05
 //
+// Leafing (owner, 11 Nov 2026): ₹ per panel per carton × panels, added per carton like embossing, and a
+// leafing set-up ₹ for the job added to the subtotal like the process charge. All three are blank on every
+// costing before it, so those rework to the same figures — no new formula version.
+//
 // `L × W × GSM ÷ 3100 ÷ 5 ÷ 100` is the sheet's weight of one sheet in kg (÷ 15,50,000 — the exact
 // inch-to-metre figure is 15,50,003, so the sheet is 0.0002% light). Kept as the sheet has it, so a
 // costing here and on the sheet agree to the paisa.
@@ -68,6 +72,9 @@ export const INPUTS = Object.freeze([
   { key: 'coat_sheets',    label: 'Sheets to coat',           unit: 'blank = every sheet' },
   { key: 'dp_rate',        label: 'Die & pasting',            unit: '₹ per carton' },
   { key: 'emb_rate',       label: 'Embossing',                unit: '₹ per carton' },
+  { key: 'leaf_panels',    label: 'Leafing panels',           unit: 'panels' },
+  { key: 'leaf_rate',      label: 'Leafing',                  unit: '₹ per panel per carton' },
+  { key: 'leaf_process',   label: 'Leafing set-up',           unit: '₹ for the job' },
   { key: 'process',        label: 'Process charge',           unit: '₹ for the job' },
   { key: 'pf_pct',         label: 'P&F',                      unit: '%' },
   { key: 'misc_pct',       label: 'Misc',                     unit: '%' },
@@ -119,6 +126,9 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   const wastage = z(v.wastage), colours = z(v.colours), printRate = z(v.print_rate);
   const coatFactor = z(v.coat_factor), dpRate = z(v.dp_rate), embRate = z(v.emb_rate);
   const processCharge = z(v.process), pfPct = z(v.pf_pct), miscPct = z(v.misc_pct), margin = z(v.margin);
+  const leafPanels = z(v.leaf_panels), leafRate = z(v.leaf_rate);
+  const leafProcess = leafPanels > 0 ? z(v.leaf_process) : 0;
+  const leaf = leafPanels > 0 ? leafPanels * leafRate : 0;
 
   const sheets = qty / ups + wastage;
   const sheetKg = L * W * v.gsm / 3100 / 5 / 100;
@@ -139,12 +149,12 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   const coatSheets = v.coat_sheets > 0 ? v.coat_sheets : sheets;
   const coat = coatPerSheet * coatSheets;
   const dp = dpRate * qty;
-  const subtotal = board + print + coat + dp + processCharge;
+  const subtotal = board + print + coat + dp + processCharge + leafProcess;
   const pf = pfPct / 100 * subtotal;
   const misc = miscPct / 100 * (subtotal + pf);
   const net = subtotal + pf + misc;
   const emb = f.emb ? embRate : 0;
-  const costPerUnit = net / qty + emb;
+  const costPerUnit = net / qty + emb + leaf;
   const quotePerUnit = costPerUnit + margin;
 
   const per = x => x / qty;
@@ -167,8 +177,10 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
       how: `${fmt(qty)} cartons × ₹${fmtFlex(dpRate, 3)}` },
     { key: 'process', label: 'Process charge', amount: processCharge, per_unit: per(processCharge),
       how: `₹${fmt(processCharge)} for the job, spread over ${fmt(qty)} cartons` },
+    ...(leafProcess > 0 ? [{ key: 'leaf_process', label: 'Leafing set-up', amount: leafProcess, per_unit: per(leafProcess),
+      how: `₹${fmt(leafProcess)} for the job, spread over ${fmt(qty)} cartons` }] : []),
     { key: 'subtotal', label: 'Subtotal', amount: subtotal, per_unit: per(subtotal), total: true,
-      how: 'Board + printing + coating + die & pasting + process' },
+      how: leafProcess > 0 ? 'Board + printing + coating + die & pasting + process + leafing set-up' : 'Board + printing + coating + die & pasting + process' },
     { key: 'pf', label: 'P&F', amount: pf, per_unit: per(pf),
       how: `${fmtFlex(pfPct, 2)}% of the subtotal` },
     { key: 'misc', label: 'Misc', amount: misc, per_unit: per(misc),
@@ -176,9 +188,11 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   ];
   if (f.emb) lines.push({ key: 'emb', label: 'Embossing', amount: emb * qty, per_unit: emb,
     how: `₹${fmtFlex(embRate, 3)} a carton, added after P&F and misc` });
+  if (leaf > 0) lines.push({ key: 'leaf', label: 'Leafing', amount: leaf * qty, per_unit: leaf,
+    how: `${fmtFlex(leafPanels)} panel${leafPanels === 1 ? '' : 's'} × ₹${fmtFlex(leafRate, 3)} a carton, added after P&F and misc` });
   lines.push(
     { key: 'cost', label: 'Cost per carton', amount: costPerUnit * qty, per_unit: costPerUnit, total: true,
-      how: f.emb ? '(subtotal + P&F + misc) ÷ quantity + embossing' : '(subtotal + P&F + misc) ÷ quantity' },
+      how: `(subtotal + P&F + misc) ÷ quantity${f.emb ? ' + embossing' : ''}${leaf > 0 ? ' + leafing' : ''}` },
     { key: 'quote', label: 'Quote price', amount: quotePerUnit * qty, per_unit: quotePerUnit, total: true,
       how: `Cost per carton + ₹${fmtFlex(margin, 3)} margin` },
   );
@@ -188,11 +202,11 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
   // printing charge held at its minimum. P&F and misc follow each part in proportion.
   const wasteShare = sheets > 0 ? wastage / sheets : 0;
   const printFix = printFixed != null || printAtMin ? print : printRate * colours * wastage / 1000;
-  const subFix = sheetKg * v.board_rate * wastage + printFix + coat * wasteShare + processCharge;
+  const subFix = sheetKg * v.board_rate * wastage + printFix + coat * wasteShare + processCharge + leafProcess;
   const subVar = subtotal - subFix;
   const pfFix = pfPct / 100 * subFix;
   const fixed = subFix + pfFix + miscPct / 100 * (subFix + pfFix);
-  const variable = net - fixed + emb * qty;
+  const variable = net - fixed + (emb + leaf) * qty;
 
   const target = v.target_price > 0
     ? { price: v.target_price, margin_per_unit: v.target_price - costPerUnit,
@@ -211,7 +225,8 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
     formula, ok: true, missing: [], warnings, lines,
     qty, sheets, sheet_kg: sheetKg,
     parts: { board, print, print_calc: printCalc, print_at_min: printAtMin, coat, coat_sheets: coatSheets,
-             coat_per_sheet: coatPerSheet, dp, process: processCharge, subtotal, pf, misc, net, emb_total: emb * qty },
+             coat_per_sheet: coatPerSheet, dp, process: processCharge, subtotal, pf, misc, net, emb_total: emb * qty,
+             ...(leafPanels > 0 ? { leaf_total: leaf * qty, leaf_process: leafProcess } : {}) },
     split: { fixed, variable, running_per_unit: variable / qty, setup_per_unit: fixed / qty, sub_fixed: subFix, sub_variable: subVar },
     cost_per_unit: costPerUnit, quote_per_unit: quotePerUnit,
     cost_value: costPerUnit * qty, quote_value: quotePerUnit * qty,
@@ -320,14 +335,15 @@ const PARTS = [
   { key: 'process', label: 'Process charge', drivers: ['process', 'qty'] },
   { key: 'markup', label: 'P&F and misc', drivers: ['pf_pct', 'misc_pct'] },
   { key: 'emb', label: 'Embossing', drivers: ['emb_rate'] },
+  { key: 'leaf', label: 'Leafing', drivers: ['leaf_panels', 'leaf_rate', 'leaf_process'] },
 ];
-const MONEY_INPUTS = new Set(['board_rate', 'print_rate', 'print_min', 'dp_rate', 'emb_rate', 'process']);
+const MONEY_INPUTS = new Set(['board_rate', 'print_rate', 'print_min', 'dp_rate', 'emb_rate', 'process', 'leaf_rate', 'leaf_process']);
 
 function partsPerUnit(r) {
   const q = r.qty, p = r.parts;
   return {
     board: p.board / q, print: p.print / q, coat: p.coat / q, dp: p.dp / q, process: p.process / q,
-    markup: (p.pf + p.misc) / q, emb: p.emb_total / q,
+    markup: (p.pf + p.misc) / q, emb: p.emb_total / q, leaf: ((p.leaf_total || 0) + (p.leaf_process || 0)) / q,
   };
 }
 

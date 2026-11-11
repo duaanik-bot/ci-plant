@@ -24,6 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
+import { HOUSE_RULES, dpFor, ruleInputsForRow } from '../../lib/costingRules.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -45,8 +46,9 @@ const blank = v => v == null || String(v).trim() === '';
 
 let seq = 0;
 const rowKey = () => `r${++seq}`;
-// Die & pasting a row gets while the common box is blank: typical for its pasting style.
-const styleDp = (typical, style) => (style && typical?.dp_by_style?.[style]?.value) ?? '';
+// Die & pasting a row gets while the common box is blank: the house rule for its pasting style (side ₹0.20,
+// lock ₹0.30), else what the plant's costings usually charge for it.
+const styleDp = (typical, style) => dpFor(style) ?? (style && typical?.dp_by_style?.[style]?.value) ?? '';
 const newRow = (common, typical, extra = {}) => {
   const style = extra.style ?? common.style ?? null;
   const dpAuto = blank(common.inputs.dp_rate);
@@ -111,7 +113,8 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const [batch, setBatch] = useState(() => ({
     id: null, batch_no: null, title: '', customer_id: null, customer_name: '',
     // Die & pasting starts blank so it follows each row's pasting style.
-    common: { inputs: { ...startingInputs(defaults), dp_rate: '' }, coat_choice: '', style: null, board_grade: '', quantities: [] },
+    // Board starts at the house rate (₹120/kg FBB).
+    common: { inputs: { ...startingInputs(defaults), dp_rate: '', board_rate: HOUSE_RULES.board_rate }, coat_choice: '', style: null, board_grade: '', quantities: [] },
     rows: [],
   }));
   const [loading, setLoading] = useState(!!batchId);
@@ -315,20 +318,30 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         const m = matches[String(p.product_name || '').trim().toLowerCase().replace(/\s+/g, ' ')];
         const asked = { ...(num(p.gsm) > 0 ? { gsm: num(p.gsm) } : {}), ...(num(p.colours) > 0 ? { colours: num(p.colours) } : {}) };
         const desk = p.enquiry_id ? { enquiry_id: p.enquiry_id, enquiry_no: p.enquiry_no } : {};
+        // House rules: process (new die for a product not in the master), and from an enquiry's words the
+        // coating, embossing and leafing. Die & pasting keeps following the style; board follows common.
+        const rulesOf = (row, emboss = null) => {
+          const r = ruleInputsForRow({ style: row.style, product_id: row.product_id || null }, p.finish || null, emboss);
+          const { dp_rate: _dp, board_rate: _board, ...ins } = r.inputs;
+          return { inputs: ins, coat_choice: r.coat_choice };
+        };
         if (!m) {
           const row = newRow(common, typical, { product_name: p.product_name, size_text: p.size_text, ...(p.style ? { style: p.style } : {}), ...desk });
-          return { ...row, inputs: { ...row.inputs, qty: p.qty ?? '', ...asked } };
+          const rules = rulesOf(row);
+          return { ...row, ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}), inputs: { ...row.inputs, ...rules.inputs, qty: p.qty ?? '', ...asked } };
         }
         matched++;
         const style = p.style || pastingFromProduct(m.pasting_type) || common.style || null;
         const row = newRow(common, typical, { product_name: m.name, product_id: m.id, style, size_text: p.size_text || parseSize(m.size)?.key || '', ...desk });
         const g = gradeFor(m.board_grade, grades);
         const layout = num(m.sheet_l) > 0 && num(m.sheet_w) > 0 && num(m.ups) > 1;
+        const rules = rulesOf(row, +m.emboss);
         return {
           ...row,
+          ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}),
           layout_note: `from the Product Master (${m.code})`,
           inputs: {
-            ...row.inputs, qty: p.qty ?? '',
+            ...row.inputs, ...rules.inputs, qty: p.qty ?? '',
             ...(layout ? { sheet_l: num(m.sheet_l), sheet_w: num(m.sheet_w), ups: num(m.ups) } : {}),
             ...(num(m.gsm) > 0 ? { gsm: num(m.gsm) } : {}),
             ...(num(m.colours) > 0 ? { colours: num(m.colours) } : {}),

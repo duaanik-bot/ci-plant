@@ -185,8 +185,8 @@ test('recommend: a picked product fills the form, each value with its source', (
   assert.equal(v.customer_name, 'Test Pharma');
   assert.equal(v.inputs.emb_rate, 0, 'not embossed on the master');
   assert.equal(v.inputs.dp_rate, 0.3);
-  assert.equal(v.sources.dp_rate.kind, 'typical');
-  assert.equal(v.inputs.process, 2500, '₹500 a colour × 5');
+  assert.equal(v.sources.dp_rate.kind, 'rule', 'house rule (11 Nov 2026): lock bottom ₹0.30');
+  assert.equal(v.inputs.process, 2000, 'house rule: an existing product, its die exists — ₹2,000');
   assert.equal(v.sources.wastage.kind, 'default');
   assert.equal(v.coat_choice, '', 'no costing to take the coating from, so it is left to choose');
 });
@@ -206,9 +206,11 @@ test("recommend: coating and die & pasting come from the same product's last cos
   const v = recommend(blankValue(DEFAULTS), { product: PRODUCT, check: { library: { exact: [] }, history }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES });
   assert.equal(v.coat_choice, '6');
   assert.equal(v.inputs.coat_factor, 6);
-  assert.equal(v.inputs.dp_rate, 0.28);
-  assert.equal(v.sources.dp_rate.kind, 'history');
-  assert.match(v.sources.dp_rate.note, /^T-2, 2025-02-01/);
+  assert.equal(v.sources.coat_choice.kind, 'history');
+  assert.match(v.sources.coat_choice.note, /^T-2, 2025-02-01/);
+  // Die & pasting: the house rule comes before past costings (owner, 11 Nov 2026).
+  assert.equal(v.inputs.dp_rate, 0.3);
+  assert.equal(v.sources.dp_rate.kind, 'rule');
 });
 
 test('recommend: with no product, the newest comparable costing of the size fills the gaps', () => {
@@ -217,8 +219,8 @@ test('recommend: with no product, the newest comparable costing of the size fill
     { check: { library: { exact: [LAYOUT(1, 15, 25, 6, 9)] }, history }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES });
   assert.equal(v.coat_choice, '3', 'the SIDE costing is not comparable');
   assert.equal(v.inputs.gsm, 300);
-  assert.equal(v.inputs.board_rate, 92);
-  assert.match(v.sources.board_rate.note, /check today's rate/);
+  assert.equal(v.inputs.board_rate, 120, 'house rule ₹120/kg ahead of the last costing\'s ₹92');
+  assert.equal(v.sources.board_rate.kind, 'rule');
   assert.equal(v.inputs.ups, 6);
 });
 
@@ -229,11 +231,15 @@ test('recommend: from the size\'s history, the most used rate — one odd recent
     HIST(7, 'C', { ...JOB, dp_rate: 0.2, coat_factor: 6 }),
   ];
   const v = recommend({ ...blankValue(DEFAULTS), size_text: '120x40x90', style: 'LOCK' }, { check: { library: { exact: [] }, history }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES });
-  assert.equal(v.inputs.dp_rate, 0.2);
   assert.equal(v.coat_choice, '6');
-  assert.match(v.sources.dp_rate.note, /^2 of 3 recent costings of this size/);
-  assert.equal(v.inputs.board_rate, JOB.board_rate);
-  assert.match(v.sources.board_rate.note, /^T-9/, 'the board rate is the newest');
+  assert.match(v.sources.coat_choice.note, /^2 of 3 recent costings of this size/);
+  assert.equal(v.inputs.dp_rate, 0.3, 'house rule for lock bottom, not the history');
+  assert.equal(v.inputs.board_rate, 120, 'house rule');
+  // A pasting the rules do not price still follows the most used rate of the size.
+  const cup = recommend({ ...blankValue(DEFAULTS), size_text: '120x40x90', style: 'CUP' },
+    { check: { library: { exact: [] }, history: history.map(h => ({ ...h, style: 'CUP' })) }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES });
+  assert.equal(cup.inputs.dp_rate, 0.2);
+  assert.match(cup.sources.dp_rate.note, /^2 of 3 recent costings of this size/);
 });
 
 test('recommend: a typed value is never overwritten; a new product clears the old suggestions', () => {

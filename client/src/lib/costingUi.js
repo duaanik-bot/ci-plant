@@ -2,6 +2,7 @@
 // reading rows pasted from Excel, and the export layouts. No React, no fetch, so the server suite
 // tests it (server/src/costing-ui.test.js).
 import { computeCosting, compareCostings, parseSize, num, styleLabel, quantityBreaks, CURRENT_FORMULA, INPUTS } from './costing.js';
+import { houseRuleValues } from './costingRules.js';
 
 // ₹ per carton to three decimals (3.142, 0.618 — the trade quotes to a tenth of a paisa); totals whole.
 export const perUnit = n => (n == null || !Number.isFinite(+n) ? '—' : `₹${(+n).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`);
@@ -205,6 +206,9 @@ export function valueFromSaved(c, { asNew = false } = {}) {
     coat_choice: rate > 0 ? 'rate' : f > 0 ? String(f) : 'none',
     remarks: asNew ? '' : (c?.remarks || ''),
     sources: {},
+    // The house-rule ticks, read back from what was saved (process ₹3,000 = a new die, D&P ₹0.41 = a big box).
+    new_die: num(inputs.process) === 3000,
+    big_box: num(inputs.dp_rate) === 0.41,
   };
   return !asNew && answeredNo(c) ? { ...value, skip_library: libraryKey(value) } : value;
 }
@@ -274,6 +278,7 @@ export const SOURCES = Object.freeze({
   product: { label: 'Product Master', short: 'Product', tone: 'auto' },
   library: { label: 'Size Library', short: 'Size Library', tone: 'auto' },
   rates: { label: 'Board Rates', short: 'Board Rates', tone: 'auto' },
+  rule: { label: 'House rule', short: 'House rule', tone: 'auto' },
   history: { label: 'A past costing', short: 'Past costing', tone: 'auto' },
   typical: { label: 'Typical in your costings', short: 'Typical', tone: 'typical' },
   default: { label: 'Rates & method default', short: 'Default', tone: 'default' },
@@ -302,7 +307,7 @@ export function gradeFor(productGrade, grades = []) {
 const blank = x => x == null || String(x).trim() === '';
 const sameName = (a, b) => String(a ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === String(b ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const TOP_FIELDS = new Set(['customer_name', 'customer_id', 'size_text', 'style', 'board_grade', 'coat_choice']);
-const AUTO = new Set(['product', 'library', 'rates', 'history', 'typical', 'default']);
+const AUTO = new Set(['product', 'library', 'rates', 'rule', 'history', 'typical', 'default']);
 const when = h => `${h.costing_no}${h.costed_on ? `, ${h.costed_on}` : ''}`;
 
 // Fill a costing from what the ERP knows. `ctx`: the Product Master entry picked (product), the size
@@ -310,6 +315,8 @@ const when = h => `${h.costing_no}${h.costed_on ? `, ${h.costed_on}` : ''}`;
 // today's board grades. Each field takes the first source that has a value:
 //   size, pasting, sheet & ups, GSM, colours, board, embossing on/off ← Product Master
 //   sheet & ups, pasting                                             ← Size Library (most used)
+//   board ₹120, die & pasting by style / big box, process (new die), ← house rules (costingRules.js),
+//   embossing, coating and leafing from the enquiry's words            ahead of past costings
 //   coating, die & pasting, embossing (and GSM / board rate if no product) ← the same product's last
 //                                                                       costing, else the newest
 //                                                                       comparable one of the size
@@ -366,6 +373,9 @@ export function recommend(value, ctx = {}) {
     put('ups', top.ups, 'library', note);
     put('style', top.style, 'library', note);
   }
+
+  // House rules (owner, 11 Nov 2026): "by default take …" — ahead of what past costings did.
+  for (const [f, x, note] of houseRuleValues(v, { finish: v.finish || null, productEmboss: p ? +p.emboss : null, productGrade: p?.board_grade ?? null, hasProduct: !!p })) put(f, x, 'rule', note);
 
   // History: the same product's last costing says it all; otherwise what is MOST USED across the
   // recent comparable costings of the size (one odd costing does not set the rate), and for the board

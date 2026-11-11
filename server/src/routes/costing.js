@@ -461,6 +461,69 @@ r.post('/costing/costings/:id/archive', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Consolidate copies (owner, 11 Nov 2026: "button to be consolidation for revision … give option to undo").
+// Several costings of the same product made by mistake fold into ONE: the costing kept stays as it is (the
+// one an enquiry carries, else the oldest), and the copies are hidden with a note naming it. A copy linked
+// to an enquiry is refused — that link is the enquiry's costing. Undo shows the copies again.
+const MERGED = /^\[Merged into (CI-CST-\d+)\] ?/;
+r.post('/costing/costings/merge', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    const list = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(intOrNull).filter(Boolean))].slice(0, 100);
+    if (list.length < 2) throw fail(400, 'Tick two or more costings of the same product.');
+    const out = await tx(async (qc, oc) => {
+      const rows = await qc(`SELECT c.id, c.costing_no, c.source, c.archived, c.product_name, c.remarks, c.created_at,
+                                    (SELECT array_agg(e.enquiry_no ORDER BY e.id) FROM enquiries e WHERE e.costing_id = c.id
+                                       AND e.status NOT IN ('dropped')) AS enquiries
+                               FROM costings c WHERE c.id = ANY($1::int[]) ORDER BY c.id FOR UPDATE`, [list]);
+      if (rows.length !== list.length) throw fail(404, 'A costing ticked was not found — refresh and try again.');
+      if (rows.some(x => x.source !== 'erp')) throw fail(409, 'Old cost-sheet rows are kept as the sheet had them — tick costings made here only.');
+      const names = new Set(rows.map(x => String(x.product_name || '').trim().toLowerCase().replace(/\s+/g, ' ')));
+      if (names.size > 1) throw fail(409, 'These are different products — consolidate copies of ONE product at a time.');
+      const wanted = intOrNull(req.body?.keep_id);
+      const linked = rows.filter(x => x.enquiries?.length);
+      if (linked.length > 1) throw fail(409, `${linked.map(x => x.costing_no).join(' and ')} each answer an enquiry — keep one of them on its enquiry first.`);
+      const keep = rows.find(x => x.id === wanted) || linked[0] || rows.filter(x => !x.archived)[0] || rows[0];
+      if (linked.length && linked[0].id !== keep.id) throw fail(409, `${linked[0].costing_no} answers ${linked[0].enquiries.join(', ')} — keep that one.`);
+      const hidden = [];
+      for (const x of rows) {
+        if (x.id === keep.id) continue;
+        const remarks = `[Merged into ${keep.costing_no}] ${String(x.remarks || '').replace(MERGED, '')}`.trim().slice(0, 1000);
+        await qc(`UPDATE costings SET archived = true, remarks = $2, updated_at = now(), updated_by = $3, updated_by_name = $4 WHERE id = $1`,
+          [x.id, remarks, u.id, u.name]);
+        await audit('costing', x.id, 'merge', `${x.costing_no} into ${keep.costing_no}`, qc, u.name);
+        hidden.push({ id: x.id, costing_no: x.costing_no, was_hidden: x.archived });
+      }
+      if (keep.archived) await qc('UPDATE costings SET archived = false, updated_at = now(), updated_by = $2, updated_by_name = $3 WHERE id = $1', [keep.id, u.id, u.name]);
+      return { kept: { id: keep.id, costing_no: keep.costing_no }, hidden };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Undo a consolidation: each copy still carrying the note comes back as it was (shown again, note off).
+r.post('/costing/costings/unmerge', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    const items = (Array.isArray(req.body?.hidden) ? req.body.hidden : []).slice(0, 100);
+    const back = await tx(async (qc) => {
+      const done = [];
+      for (const it of items) {
+        const id = intOrNull(it?.id);
+        if (!id) continue;
+        const x = await qc('SELECT id, costing_no, remarks FROM costings WHERE id = $1 FOR UPDATE', [id]).then(rs => rs[0]);
+        if (!x || !MERGED.test(x.remarks || '')) continue;
+        await qc(`UPDATE costings SET archived = $2, remarks = NULLIF($3, ''), updated_at = now(), updated_by = $4, updated_by_name = $5 WHERE id = $1`,
+          [id, !!it.was_hidden, String(x.remarks).replace(MERGED, ''), u.id, u.name]);
+        await audit('costing', id, 'unmerge', x.costing_no, qc, u.name);
+        done.push(x.costing_no);
+      }
+      return done;
+    });
+    res.json({ back });
+  } catch (e) { next(e); }
+});
+
 // The register. Filters: search (number, product, customer, size), source (erp | sheet), from / to
 // (YYYY-MM-DD), flag (incomplete | not_reproduced | sheet_notes | no_size), archived=1 to see hidden.
 r.get('/costing/costings', async (req, res, next) => {

@@ -12,7 +12,7 @@
 // mail and file the enquiries here. A reply is only ever saved as a Gmail draft — CI Plant never sends; the
 // person sends it from Gmail. Finalise and Mark as sent need the Management right.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, Inbox, Layers, Mail, Plus, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Calculator, Inbox, Layers, Lock, LockOpen, Mail, Plus, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
@@ -50,6 +50,27 @@ function JobLine({ job }) {
 }
 
 // What was just done, with Undo (and, once undone, Redo). It stays until the next action or ✕.
+// One mail is one bucket of products (owner, 11 Nov 2026): every row carries its mail's tag — the same colour
+// for the same mail — and "3 of 13", so nothing in a mail is missed.
+const MAIL_TONES = ['bg-sky-100 text-sky-800 ring-sky-200', 'bg-violet-100 text-violet-800 ring-violet-200', 'bg-amber-100 text-amber-800 ring-amber-200',
+  'bg-emerald-100 text-emerald-800 ring-emerald-200', 'bg-rose-100 text-rose-800 ring-rose-200', 'bg-teal-100 text-teal-800 ring-teal-200'];
+export const mailTone = id => MAIL_TONES[(Number(id) || 0) % MAIL_TONES.length];
+function MailTag({ e }) {
+  if (!e.mail_id) return <span className="text-[11px] text-slate-400">typed in</span>;
+  return (
+    <span title={[e.mail_subject && `“${e.mail_subject}”`, e.mail_from_name || e.mail_from_email, dateText(e.mail_received_at)].filter(Boolean).join(' · ')}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${mailTone(e.mail_id)}`}>
+      <Mail size={11} />M{e.mail_id} · {e.mail_pos} of {e.mail_items}
+    </span>
+  );
+}
+// The mails a ticked set leaves products out of: [{ mail_id, picked, of }].
+export function mailGaps(pickedRows) {
+  const by = new Map();
+  for (const e of pickedRows) if (e.mail_id) by.set(e.mail_id, { mail_id: e.mail_id, picked: (by.get(e.mail_id)?.picked || 0) + 1, of: e.mail_items });
+  return [...by.values()].filter(g => g.picked < g.of);
+}
+
 function UndoBar({ last, onUndo, onClose }) {
   if (!last) return null;
   return (
@@ -77,6 +98,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
   const [openQuote, setOpenQuote] = useState(null);
   const [prices, setPrices] = useState({});       // `${id}|${qty}` → the box's text
+  const [unlocked, setUnlocked] = useState(() => new Set());   // locked rows opened again to change the price
   // Boxes the person typed in (or adjusted) keep their text; every other box follows the latest proposal —
   // a row costed in place arrives with its proposal, not the blank it had before it was costed.
   const typed = useRef(new Set());
@@ -207,7 +229,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     </button>
   );
   const baseCols = [
-    { key: 'enquiry_no', label: 'No.', render: e => <span className="font-bold text-brand-600">{e.enquiry_no}</span> },
+    { key: 'enquiry_no', label: 'No.', sortValue: e => `${String(e.mail_id || 0).padStart(6, '0')}|${String(e.mail_pos || 0).padStart(3, '0')}`,
+      render: e => <div className="space-y-1"><div className="font-bold text-brand-600">{e.enquiry_no}</div><MailTag e={e} /></div> },
     { key: 'received', label: 'Received', sortValue: e => e.mail_received_at || e.created_at, render: e => dateText(e.mail_received_at || e.created_at) },
     { key: 'customer_name', label: 'Customer', render: e => <div><div className="font-semibold">{e.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{e.contact_email || ''}</div></div> },
     { key: 'product_name', label: 'Product', render: e => <div><div className="font-semibold">{e.product_name || '—'}</div><div className="text-[11px] text-slate-500">{[e.size_text && `${e.size_text} mm`, e.mail_subject && `“${e.mail_subject}”`].filter(Boolean).join(' · ')}</div></div> },
@@ -229,24 +252,46 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     ),
   };
 
+  // Locked = every quantity has a saved final price, the boxes show it, and nobody opened it again.
+  const isLocked = e => (e.prices || []).length > 0 && !unlocked.has(e.id)
+    && (e.prices || []).every(p => p.final != null && String(p.final) === String(prices[`${e.id}|${p.qty}`]) && !p.changed);
+  const lockRow = async e => {
+    await savePrices([e]);
+    setUnlocked(u => { const n = new Set(u); n.delete(e.id); return n; });
+  };
   const priceCols = [
     baseCols[0], baseCols[2], baseCols[3], costingCol,
-    { key: 'prices', label: 'Quantity · costing proposes · your final price a carton', render: e => (
-      <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
-        {(e.prices || []).map(p => {
-          const k = `${e.id}|${p.qty}`;
-          return (
-            <div key={p.qty} className="flex items-center gap-2 text-xs">
-              <span className="w-16 text-right font-semibold">{qtyText(p.qty)}</span>
-              <span className="w-20 text-right text-slate-500" title="The costing's quote price a carton at this quantity">{rupees(p.proposed, 3)}</span>
-              <Input className="!h-8 w-24 text-right" inputMode="decimal" value={prices[k] ?? ''} onChange={ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); }} />
-              {p.changed && <span className="font-semibold text-amber-700" title={`Set against ${rupees(p.set_against, 3)}`}>costing changed</span>}
-              {p.final != null && String(p.final) === String(prices[k]) && <span className="text-emerald-700">saved</span>}
-            </div>
-          );
-        })}
-      </div>
-    ) },
+    { key: 'prices', label: 'Quantity · costing proposes · final price to quote a carton', render: e => {
+      const locked = isLocked(e);
+      return (
+        <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
+          {(e.prices || []).map(p => {
+            const k = `${e.id}|${p.qty}`;
+            return (
+              <div key={p.qty} className="flex items-center gap-2 text-xs">
+                <span className="w-16 text-right font-semibold">{qtyText(p.qty)}</span>
+                <span className="w-20 text-right text-slate-500" title="Worked out by the costing — the box starts at it">{rupees(p.proposed, 3)}</span>
+                <Input className={`!h-8 w-24 text-right ${locked ? '!bg-emerald-50 font-bold text-emerald-900' : ''}`} inputMode="decimal" value={prices[k] ?? ''} readOnly={locked}
+                  title={locked ? 'Locked — press Unlock to change it' : 'Type the price to quote'}
+                  onChange={ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); }} />
+                {p.changed && <span className="font-semibold text-amber-700" title={`Set against ${rupees(p.set_against, 3)}`}>costing changed</span>}
+              </div>
+            );
+          })}
+          {(e.prices || []).length > 0 && (locked ? (
+            <button type="button" onClick={() => setUnlocked(u => new Set(u).add(e.id))}
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-200">
+              <Lock size={11} />Locked · Unlock
+            </button>
+          ) : (
+            <button type="button" onClick={() => lockRow(e)}
+              className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100">
+              <LockOpen size={11} />Lock this price
+            </button>
+          ))}
+        </div>
+      );
+    } },
     baseCols[5],
   ];
   const columns = tab === 'price' ? priceCols
@@ -339,7 +384,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">Waiting to be costed, or with a costing not finished yet. <b>Cost it</b> opens the costing here; once it is complete the enquiry goes to Final price by itself. <b>Send back to Inbox</b> keeps any costing it has.</p>
       )}
       {stages && tab === 'price' && (
-        <p className="mb-2 text-xs text-slate-500">The costing proposes a price a carton for each quantity; the box starts at it, rounded up to the paisa. Type the price you want to quote, tick the rows and save. A Management login then finalises them. <b>Open costing</b> changes the costing without leaving the desk.</p>
+        <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Tick locked rows and <b>Push to Quotations</b> (Management). Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
       )}
       {stages && (
         <DataTable rows={shown} columns={columns} onRowClick={e => setOpen(e.id)}
@@ -357,7 +402,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       )}
 
       <SelectionDock open={pickedRows.length > 0} count={pickedRows.length} onClear={() => setPicked([])}
-        summary={[...new Set(pickedRows.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · ')}>
+        summary={[[...new Set(pickedRows.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · '),
+          ...mailGaps(pickedRows).map(g => `⚠ M${g.mail_id}: ${g.picked} of ${g.of} ticked`)].filter(Boolean).join(' · ')}>
         {(tab === 'inbox' || tab === 'costing') && <>
           {one && <Button size="sm" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />{one.costing_live ? 'Open costing' : 'Cost it'}</Button>}
           {several && <Button size="sm" onClick={() => startOne(pickedRows.map(e => e.id))}><Calculator size={13} className="mr-1 inline" />Cost one by one</Button>}
@@ -373,13 +419,18 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           </Select>
           {adjust.mode !== 'round' && <Input className="!h-8 w-20" inputMode="decimal" value={adjust.amount} onChange={e => setAdjust(a => ({ ...a, amount: e.target.value }))} placeholder={adjust.mode === 'pct' ? '5' : '0.10'} />}
           <Button size="sm" variant="secondary" onClick={applyAdjust}>Apply to ticked</Button>
-          <Button size="sm" onClick={() => savePrices(pickedRows)}>Save prices</Button>
+          <Button size="sm" variant="secondary" onClick={() => savePrices(pickedRows)}><Lock size={13} className="mr-1 inline" />Lock ticked prices</Button>
           {mgmt && <Button size="sm" variant="success" onClick={async () => {
-            const r = await api.post('/costing/enquiries/finalise', { ids: picked });
+            // Push only what is locked: a price still being typed never reaches a quotation.
+            const open = pickedRows.filter(e => !isLocked(e));
+            const go = pickedRows.filter(isLocked);
+            if (open.length) toast.info(`Not pushed — lock the price first: ${open.map(e => e.enquiry_no).join(', ')}`);
+            if (!go.length) return;
+            const r = await api.post('/costing/enquiries/finalise', { ids: go.map(e => e.id) });
             if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-            if (r.done?.length) setLast({ text: `${r.done.join(', ')} finalised — now in Quotations, ready to quote.`, undo: r.undo });
+            if (r.done?.length) setLast({ text: `${r.done.join(', ')} pushed — now in Quotations, ready to quote.`, undo: r.undo });
             setPicked([]); await reload();
-          }}>Finalise prices</Button>}
+          }}><Send size={13} className="mr-1 inline" />Push to Quotations</Button>}
         </>}
         {tab === 'quote' && <Button size="sm" onClick={async () => {
           const r = await api.post('/costing/quotations', { ids: picked });

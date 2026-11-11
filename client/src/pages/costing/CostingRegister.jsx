@@ -1,9 +1,12 @@
 // Saved costings — every costing made here and every row of the old cost sheet, newest first.
 // Search by product, customer, costing number or size (a size typed any way — 165x58x73,
 // 165 X 58 X 73 — finds that size). Chips narrow to where it was made and to the rows to look at.
+// Copies of one product saved by mistake are ticked and consolidated into one costing (the others hidden,
+// with a note), with Undo (owner, 11 Nov 2026).
 import { useEffect, useState } from 'react';
+import { Combine, RotateCcw, X } from 'lucide-react';
 import { api, fmt } from '../../api.js';
-import { Button, DataTable, SearchInput } from '../../components/ui.jsx';
+import { Button, DataTable, SearchInput, SelectionDock, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { styleLabel } from '../../lib/costing.js';
 import { perUnit, plain } from '../../lib/costingUi.js';
@@ -18,6 +21,10 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
   const [limit, setLimit] = useState(PAGE);
   const [data, setData] = useState({ rows: [], total: 0 });
   const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState([]);
+  const [last, setLast] = useState(null);         // the consolidation just made, for Undo
+  const [bump, setBump] = useState(0);
+  const toast = useToast();
 
   useEffect(() => {
     let live = true;
@@ -31,7 +38,22 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
       api.get(`/costing/costings?${p}`).then(d => live && setData(d)).catch(() => {}).finally(() => live && setLoading(false));
     }, 250);
     return () => { live = false; clearTimeout(t); };
-  }, [q, source, flag, hidden, limit, reloadSignal]);
+  }, [q, source, flag, hidden, limit, reloadSignal, bump]);
+
+  const pickedRows = data.rows.filter(r => picked.includes(r.id));
+  const consolidate = async () => {
+    const r = await api.post('/costing/costings/merge', { ids: picked });
+    setLast(r);
+    setPicked([]);
+    setBump(n => n + 1);
+    toast.success(`${r.hidden.map(x => x.costing_no).join(', ')} folded into ${r.kept.costing_no}`);
+  };
+  const undo = async () => {
+    const r = await api.post('/costing/costings/unmerge', { hidden: last.hidden });
+    toast.success(r.back.length ? `${r.back.join(', ')} back in the list` : 'Nothing to undo — they were changed since');
+    setLast(null);
+    setBump(n => n + 1);
+  };
 
   const chip = (label, on, onClick, title) => <FilterChip label={label} on={on} onClick={onClick} title={title} />;
 
@@ -85,7 +107,17 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
           {chip('Hidden', hidden, () => setHidden(!hidden))}
         </FilterGroup>
       </FilterRail>
+      {last && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#1D1D1F]/90 px-3 py-2 text-sm text-white shadow-lg" role="status">
+          <RotateCcw size={14} className="shrink-0 text-sky-300" />
+          <span className="min-w-0 flex-1">{last.hidden.map(x => x.costing_no).join(', ')} consolidated into {last.kept.costing_no} — hidden, with a note naming it.</span>
+          <button type="button" onClick={undo} className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-sky-200 hover:bg-white/25">Undo</button>
+          <button type="button" onClick={() => setLast(null)} aria-label="Close" className="rounded-full p-1 text-white/70 hover:bg-white/15 hover:text-white"><X size={14} /></button>
+        </div>
+      )}
       <DataTable rows={data.rows} columns={columns} onRowClick={r => onOpen(r.id)} defaultSort={{ key: 'costed_on', dir: 'desc' }}
+        selectable selectedIds={picked} onToggleRow={(r, on) => setPicked(p => (on ? [...new Set([...p, r.id])] : p.filter(x => x !== r.id)))}
+        onToggleAll={(rs, on) => setPicked(on ? rs.map(r => r.id) : [])}
         exportName="costings" exportSubtitle="Saved costings" empty={loading ? 'Loading…' : 'No costings match.'} />
       {data.total > data.rows.length && (
         <div className="mt-3 flex items-center gap-3 text-sm text-slate-500">
@@ -93,6 +125,13 @@ export default function CostingRegister({ onOpen, reloadSignal }) {
           <Button size="sm" variant="secondary" onClick={() => setLimit(5000)}>Show all</Button>
         </div>
       )}
+      <SelectionDock open={pickedRows.length > 0} count={pickedRows.length} onClear={() => setPicked([])}
+        summary={[...new Set(pickedRows.map(r => r.product_name))].slice(0, 2).join(' · ')}>
+        <Button size="sm" onClick={consolidate} disabled={pickedRows.length < 2}
+          title="Keep one costing (the one on an enquiry, else the oldest) and hide the copies — Undo brings them back">
+          <Combine size={13} className="mr-1 inline" />Consolidate into one
+        </Button>
+      </SelectionDock>
     </div>
   );
 }

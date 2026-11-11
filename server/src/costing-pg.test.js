@@ -278,4 +278,46 @@ describe('Costing — through the real app', {
     assert.equal(m.body[p.code.toLowerCase()]?.name, p.name);
     assert.equal(m.body['no such carton'], undefined);
   });
+
+  test('consolidate copies into one costing, refuse mixed products, and undo it', async () => {
+    const mk = async (name, over = {}) => (await call('clerk', 'POST', '/costing/costings', {
+      customer_name: 'Test Pharma', product_name: name, size_text: '85x37x50', style: 'SIDE', inputs: { ...JOB, ...over }, save_size: false })).body;
+    const a = await mk('Copy carton');
+    const b = await mk('Copy carton');
+    const typo = await mk('copy  carton', { board_rate: 100090 });
+    const other = await mk('Other carton');
+    const mixed = await call('clerk', 'POST', '/costing/costings/merge', { ids: [a.id, other.id] });
+    assert.equal(mixed.status, 409, 'two products are never folded together');
+    const old = await db.one(`SELECT id FROM costings WHERE source = 'sheet' LIMIT 1`).catch(() => null);
+    if (old) assert.equal((await call('clerk', 'POST', '/costing/costings/merge', { ids: [a.id, old.id] })).status, 409);
+
+    const m = await call('clerk', 'POST', '/costing/costings/merge', { ids: [typo.id, b.id, a.id] });
+    assert.equal(m.status, 200);
+    assert.equal(m.body.kept.id, a.id, 'the oldest is kept when none is on an enquiry');
+    assert.deepEqual(m.body.hidden.map(x => x.id).sort(), [b.id, typo.id].sort());
+    const after = await db.q('SELECT id, archived, remarks FROM costings WHERE id = ANY($1::int[]) ORDER BY id', [[a.id, b.id, typo.id]]);
+    assert.deepEqual(after.map(x => x.archived), [false, true, true]);
+    assert.match(after[1].remarks, new RegExp(`^\\[Merged into ${a.costing_no}\\]`));
+    const list = await call('clerk', 'GET', '/costing/costings?search=copy%20carton');
+    assert.deepEqual(list.body.rows.map(x => x.id), [a.id], 'only the kept one is in the list');
+
+    const u = await call('clerk', 'POST', '/costing/costings/unmerge', { hidden: m.body.hidden });
+    assert.equal(u.status, 200);
+    assert.equal(u.body.back.length, 2);
+    const back = await db.q('SELECT archived, remarks FROM costings WHERE id = ANY($1::int[]) ORDER BY id', [[b.id, typo.id]]);
+    assert.deepEqual(back.map(x => x.archived), [false, false]);
+    assert.ok(back.every(x => !/Merged into/.test(x.remarks || '')));
+    // A second undo finds nothing to do.
+    assert.equal((await call('clerk', 'POST', '/costing/costings/unmerge', { hidden: m.body.hidden })).body.back.length, 0);
+  });
+
+  test('leafing inputs are kept and priced on the server', async () => {
+    const r = await call('clerk', 'POST', '/costing/costings', {
+      product_name: 'Leafed carton', size_text: '85x37x50', style: 'SIDE', save_size: false,
+      inputs: { ...JOB, leaf_panels: 2, leaf_rate: 0.2, leaf_process: 5000 } });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.inputs.leaf_panels, 2);
+    const want = computeCosting({ ...JOB, leaf_panels: 2, leaf_rate: 0.2, leaf_process: 5000 }).cost_per_unit;
+    assert.ok(Math.abs(r.body.cost_per_unit - want) < 1e-4);
+  });
 });

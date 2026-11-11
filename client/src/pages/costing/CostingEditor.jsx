@@ -1,5 +1,5 @@
-// One costing, short and plain: Product & quantity → Carton → Print & finish, with the rates and
-// charges folded under "More settings". Picking a product fills the rest — from the Product Master, the
+// One costing, short and plain: Product & quantity → Carton → Print & finish → More settings (the rates
+// and charges — kept open, owner 11 Nov 2026: "the more settings not to be hidden"). Picking a product fills the rest — from the Product Master, the
 // Size Library, today's Board Rates, the last costing of that product or size, and the figures typical
 // in the plant's own costings (lib/costingUi.js recommend). Every box shows where its value came from;
 // anything typed is the user's and is never overwritten.
@@ -20,6 +20,7 @@ import {
   SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
   rankHistory, recommend, rupees, stillNeeded,
 } from '../../lib/costingUi.js';
+import { HOUSE_RULES, newDieDefault } from '../../lib/costingRules.js';
 
 // ── small pieces ─────────────────────────────────────────────────────────────────────────────────
 export function Card({ icon: Icon, title, hint, children, className = '' }) {
@@ -548,7 +549,8 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   // Fill (and refill) the suggestions whenever what they depend on changes: the product, the size check,
   // the pasting (die & pasting follows it), the colours (process follows them). A costing reopened from
   // the register is left as saved until its product or size is changed.
-  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}`;
+  const newDie = newDieDefault(value);
+  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}`;
   const lastCtx = useRef(null);
   useEffect(() => {
     if (value.autofill === false || !boot) return;
@@ -587,6 +589,13 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   const pickLayout = o => set({ style: o.style || value.style, inputs: { ...inputs, sheet_l: o.sheet_l ?? '', sheet_w: o.sheet_w ?? '', ups: o.ups ?? '' } },
     ['sheet_l', 'sheet_w', 'ups', ...(o.style ? ['style'] : [])]);
   const showEmb = num(inputs.emb_rate) > 0 || +value.product?.emboss === 1 || value.show_emb;
+  const showLeaf = num(inputs.leaf_panels) > 0 || value.show_leaf;
+  // A tick that a house rule follows: the rule's box is refilled, even over a typed value (the tick says why).
+  const tick = (flag, on, field) => {
+    const sources = { ...(value.sources || {}) };
+    delete sources[field];
+    onChange({ ...value, [flag]: on, sources, inputs: { ...inputs, [field]: '' }, autofill: true });
+  };
   const filled = Object.values(value.sources || {}).filter(s => s && s.kind !== 'manual' && s.kind !== 'default').length;
 
   return (
@@ -660,15 +669,39 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
             )}
             <CoatingField value={value} coatings={settings.coatings || []} set={set} src={src} />
           </div>
+          {showLeaf ? (
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <NumField label="Leafing panels" unit="panels" source={src('leaf_panels')} value={inputs.leaf_panels} onChange={x => setIn('leaf_panels', x)} placeholder="e.g. 2"
+                help="Panels carrying foil — each is charged per carton" />
+              <NumField label="Leafing" unit="₹ per panel per carton" source={src('leaf_rate')} value={inputs.leaf_rate} onChange={x => setIn('leaf_rate', x)} placeholder={String(HOUSE_RULES.leaf_rate)}
+                help="House rate ₹0.20 a panel, added per carton like embossing" />
+              <NumField label="Leafing set-up" unit="₹ for the job" source={src('leaf_process')} value={inputs.leaf_process} onChange={x => setIn('leaf_process', x)} placeholder={String(HOUSE_RULES.leaf_process)}
+                help="House rule ₹5,000 for the job, on top of the process charge" />
+            </div>
+          ) : (
+            <button type="button" onClick={() => onChange({ ...value, show_leaf: true, inputs: { ...inputs, leaf_panels: 1, leaf_rate: HOUSE_RULES.leaf_rate, leaf_process: HOUSE_RULES.leaf_process } })}
+              className="mt-3 rounded-xl px-3 py-2 text-left text-xs font-semibold text-brand-600 ring-1 ring-dashed ring-slate-300 hover:bg-brand-50">
+              <Plus size={13} className="mr-1 inline" />Add leafing (₹0.20 a panel + ₹5,000 set-up)
+            </button>
+          )}
+          <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={newDie} onChange={e => tick('new_die', e.target.checked, 'process')} />
+              <span><b>New die</b> <span className="text-slate-500">— process ₹{plain(HOUSE_RULES.process_new_die)} instead of ₹{plain(HOUSE_RULES.process)}</span></span>
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={!!value.big_box} onChange={e => tick('big_box', e.target.checked, 'dp_rate')} />
+              <span><b>Big box</b> <span className="text-slate-500">— die & pasting ₹{plain(HOUSE_RULES.dp_big)} a carton</span></span>
+            </label>
+          </div>
         </Card>
 
-        <details className="ci-form-panel glass group rounded-2xl p-4 sm:p-5">
-          <summary className="flex cursor-pointer list-none items-center gap-2.5">
+        <section className="ci-form-panel glass rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center gap-2.5">
             <SlidersHorizontal size={18} className="text-brand-600" />
             <span className="text-[15px] font-bold">More settings</span>
             <span className="text-xs text-slate-500">wastage, printing rate, die & pasting, process, P&F, margin — already filled in</span>
-            <ChevronDown size={16} className="ml-auto text-slate-400 transition group-open:rotate-180" />
-          </summary>
+          </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <NumField label="Wastage sheets" unit="sheets" source={src('wastage')} value={inputs.wastage} onChange={x => setIn('wastage', x)}
               help="Extra sheets for setting up — a fixed allowance, usually 250–300 whatever the run" />
@@ -676,9 +709,9 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
             <NumField label="Minimum printing" unit="₹" source={src('print_min')} value={inputs.print_min} onChange={x => setIn('print_min', x)}
               help="A small run pays at least this for printing" />
             <NumField label="Die & pasting" unit="₹ per carton" source={src('dp_rate')} value={inputs.dp_rate} onChange={x => setIn('dp_rate', x)}
-              help="Follows the pasting style in your costings: Lock bottom ₹0.30, Side ₹0.20" />
+              help="House rule: side pasting ₹0.20, lock bottom ₹0.30, big box ₹0.41" />
             <NumField label="Process charge" unit="₹ for the job" source={src('process')} value={inputs.process} onChange={x => setIn('process', x)}
-              help="Fixed per order — about ₹500 a colour in your costings" />
+              help="House rule: ₹2,000 for the job, ₹3,000 with a new die" />
             <NumField label="P&F" unit="%" source={src('pf_pct')} value={inputs.pf_pct} onChange={x => setIn('pf_pct', x)} />
             <NumField label="Misc" unit="%" source={src('misc_pct')} value={inputs.misc_pct} onChange={x => setIn('misc_pct', x)} />
             <NumField label="Quote margin" unit="₹ per carton" source={src('margin')} value={inputs.margin} onChange={x => setIn('margin', x)} />
@@ -690,7 +723,7 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
               <Textarea value={value.remarks || ''} onChange={e => set({ remarks: e.target.value }, [])} placeholder="Anything the next person should know" />
             </Field>
           )}
-        </details>
+        </section>
       </form>
 
       <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
