@@ -16,6 +16,8 @@
 
 const n = v => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
 const r2 = x => Math.round(x * 100) / 100;
+// Up to the paisa, ignoring float noise (9 × 1.05 = 9.450000000000001 must stay 9.45).
+const ceilP = x => Math.ceil(Math.round(x * 1e6) / 1e4) / 100;
 export const keyOf = (id, qty) => `${id}|${qty}`;
 export const BASES = Object.freeze([
   { key: 'ours', label: 'our quote' },
@@ -103,11 +105,13 @@ export function counterTotals(lines = []) {
   };
 }
 
-// Quick fills for the revised box: their price · halfway between · our cost plus ₹x · the should-cost · our quote.
+// Quick fills for the revised box: their price · halfway between · our cost plus ₹x or plus x% · the should-cost · our quote.
 export const FILLS = {
   theirs: l => (l.theirs != null ? r2(l.theirs) : null),
-  halfway: l => (l.theirs != null && l.ours != null ? Math.ceil(((l.ours + l.theirs) / 2) * 100) / 100 : null),
-  costPlus: (l, plus = 0) => (l.cost != null ? Math.ceil((l.cost + Number(plus || 0)) * 100) / 100 : null),
-  costed: l => (l.costed != null ? Math.ceil(l.costed * 100) / 100 : null),
+  halfway: l => (l.theirs != null && l.ours != null ? ceilP((l.ours + l.theirs) / 2) : null),
+  costPlus: (l, plus = 0) => (l.cost != null ? ceilP(l.cost + Number(plus || 0)) : null),
+  // cost plus a percentage of it (owner, 11 Nov 2026: "cost plus this much paisa or this much percentage")
+  costPct: (l, pct = 0) => (l.cost != null ? ceilP(l.cost * (1 + Number(pct || 0) / 100)) : null),
+  costed: l => (l.costed != null ? ceilP(l.costed) : null),
   ours: l => (l.ours != null ? r2(l.ours) : null),
 };

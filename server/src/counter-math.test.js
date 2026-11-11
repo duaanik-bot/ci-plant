@@ -73,3 +73,11 @@ test('every comparison: their price and our revised against our quote, the shoul
   assert.equal(gap(null, 1, 10), null);
   assert.equal(FILLS.costed(a), 9.4);
 });
+
+test('cost + paisa or cost + percent, rounded up to the paisa', () => {
+  const [a] = counterLines(E);
+  assert.equal(FILLS.costPlus(a, 0.1), 9.1);
+  assert.equal(FILLS.costPct(a, 5), 9.45, '9 × 1.05');
+  assert.equal(FILLS.costPct({ cost: 3.236 }, 10), 3.56, '3.5596 rounds UP to the paisa');
+  assert.equal(FILLS.costPct({ cost: null }, 10), null);
+});

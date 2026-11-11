@@ -117,7 +117,7 @@ function UndoBar({ last, onUndo, onClose }) {
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#1D1D1F]/90 px-3 py-2 text-sm text-white shadow-lg" role="status">
       <RotateCcw size={14} className="shrink-0 text-sky-300" />
       <span className="min-w-0 flex-1">{last.text}</span>
-      {(last.undo || last.quotations) && (
+      {(last.undo || last.quotations || last.run) && (
         <button type="button" onClick={onUndo} className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-sky-200 hover:bg-white/25">
           {last.redo ? 'Redo' : 'Undo'}
         </button>
@@ -241,8 +241,16 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const move = (path, say, body = {}) => after(api.post(`/costing/enquiries/${path}`, { ids: picked, ...body }), say);
 
   const undo = async () => {
+    // A counter action brings its own way back (CounterPanel: fill, their prices, lock, revised quotation).
+    if (last.run) {
+      const said = await last.run();
+      setLast(said ? { text: said } : null);
+      await reload();
+      return;
+    }
     if (last.quotations) {
-      for (const q of last.quotations) await api.post(`/costing/quotations/${q.id}/cancel`, {});
+      // A revised quotation goes back to the one it replaced (rows back on Counter); a first one is cancelled.
+      for (const q of last.quotations) await api.post(`/costing/quotations/${q.id}/${q.revision > 0 ? 'unrevise' : 'cancel'}`, {});
       setLast({ text: `${last.quotations.map(q => q.quotation_no).join(', ')} cancelled — the enquiries are back in Quotations, ready to quote again.` });
       await reload();
       return;
@@ -456,7 +464,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">The customer answered our quotation with their own prices. Each mail's counter is worked out below — the discount they ask and what the whole order makes or loses at their price. Type our <b>revised price</b> (or fill them all: their price · halfway · cost + ₹), then <b>Send revised quotation</b>: it goes as a reply in the same mail thread, as a revised quotation. A counter reaches this tab from the robot's mail fetch, or tick rows on Final price / Quotations / Sent and press <b>Customer counter</b>.</p>
       )}
       {stages && tab === 'counter' && rows && counterGroups(shown).map(g => (
-        <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
+        <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} onUndoable={setLast} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
       ))}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (

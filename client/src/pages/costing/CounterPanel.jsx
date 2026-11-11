@@ -5,7 +5,7 @@
 // Internal: cost, loss and discount never leave CI Plant — the revised quotation is the approved template (product,
 // details asked, rate) replying in the counter mail's thread.
 import { useEffect, useMemo, useState } from 'react';
-import { Calculator, Handshake, Lock, Mail, Send } from 'lucide-react';
+import { Calculator, Handshake, Lock, Mail, RotateCcw, Send, X } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Input, useToast } from '../../components/ui.jsx';
 import { qtyText, rupees, dateText } from '../../lib/enquiryUi.js';
@@ -39,12 +39,16 @@ function Tile({ label, value, sub, cls = '' }) {
   );
 }
 
-export default function CounterPanel({ rows = [], canSend = false, onChanged, title = 'Customer counter → revised quotation' }) {
+// onUndoable(entry): the screen around keeps the Undo (the desk's bar) — otherwise the panel shows its own.
+// entry = { text, run }: run() undoes it and answers what to say.
+export default function CounterPanel({ rows = [], canSend = false, onChanged, onUndoable, title = 'Customer counter → revised quotation' }) {
   const toast = useToast();
   const [boxes, setBoxes] = useState({});     // revised price typed
   const [theirsTyped, setTheirsTyped] = useState({}); // their price typed / corrected
   const [plus, setPlus] = useState('0.10');
+  const [plusMode, setPlusMode] = useState('rs');   // cost + ₹ (paisa) or cost + %
   const [busy, setBusy] = useState(false);
+  const [undoable, setUndoable] = useState(null);   // the last action, with its way back
   const stamp = rows.map(r => `${r.id}:${r.updated_at}`).join(',');
   useEffect(() => { setBoxes({}); setTheirsTyped({}); }, [stamp]);
 
@@ -62,15 +66,27 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
   const countered = rows.filter(e => e.status === 'countered');
   const mail = rows.find(e => e.counter_subject) || null;
   const batch = [...new Set(rows.map(e => e.batch_id).filter(Boolean))];
-  const fillAll = f => setBoxes(b => { const n = { ...b }; for (const l of lines) { const v = f(l); if (v != null) n[keyOf(l.id, l.qty)] = String(v); } return n; });
+  const offer = entry => { if (onUndoable) onUndoable(entry); else setUndoable(entry); };
+  const undoGroup = (group, what) => async () => {
+    const r = await api.post('/costing/enquiries/undo', { group });
+    if (r.skipped?.length) toast.info(`Not undone: ${r.skipped.map(x => `${x.enquiry_no} ${x.why}`).join('; ')}`);
+    onChanged?.();
+    return `${what} undone.`;
+  };
+  const fillAll = (f, label) => {
+    const before = boxes;
+    setBoxes(b => { const n = { ...b }; for (const l of lines) { const v = f(l); if (v != null) n[keyOf(l.id, l.qty)] = String(v); } return n; });
+    offer({ text: `Every revised price filled: ${label}.`, run: async () => { setBoxes(before); return 'Revised prices put back as they were.'; } });
+  };
   const theirsDirty = Object.keys(theirsTyped).length > 0;
 
   const saveTheirs = async () => {
-    if (!theirsDirty) return;
+    if (!theirsDirty) return null;
     const items = rows.map(e => ({ id: e.id, prices: (e.prices || []).filter(p => theirsTyped[keyOf(e.id, p.qty)] !== undefined)
       .map(p => ({ qty: p.qty, theirs: theirsTyped[keyOf(e.id, p.qty)] })) })).filter(it => it.prices.length);
     const r = await api.put('/costing/enquiries/counter', { items });
     if (r.skipped?.length) toast.error(r.skipped.map(s => `${s.enquiry_no} ${s.why}`).join('; '));
+    return r.undo || null;
   };
   const lockRevised = async () => {
     const items = countered.map(e => ({ id: e.id, prices: (e.prices || []).map(p => {
@@ -79,19 +95,41 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
     }) }));
     const bad = items.flatMap(it => it.prices.filter(p => !(p.final > 0)).map(() => rows.find(e => e.id === it.id)?.enquiry_no));
     if (bad.length) { toast.error(`Every revised price must be above zero (${[...new Set(bad)].join(', ')}).`); return false; }
-    await api.put('/costing/enquiries/prices', { items });
-    return true;
+    const r = await api.put('/costing/enquiries/prices', { items });
+    return r.undo || true;
   };
   const act = async fn => { setBusy(true); try { await fn(); onChanged?.(); } finally { setBusy(false); } };
-  const doRecord = () => act(async () => { await saveTheirs(); toast.success('Customer counter saved'); });
-  const doLock = () => act(async () => { await saveTheirs(); if (await lockRevised()) toast.success('Revised prices locked'); });
+  const doRecord = () => act(async () => {
+    const g = await saveTheirs();
+    toast.success('Customer counter saved');
+    if (g) offer({ text: 'Their prices saved.', run: undoGroup(g, 'Their prices') });
+  });
+  const doLock = () => act(async () => {
+    await saveTheirs();
+    const g = await lockRevised();
+    if (!g) return;
+    toast.success('Revised prices locked');
+    if (typeof g === 'string') offer({ text: 'Revised prices locked.', run: undoGroup(g, 'The lock') });
+  });
   const doSend = () => act(async () => {
     await saveTheirs();
     if (!(await lockRevised())) return;
     const r = await quoteAndDraft(api, countered.map(e => e.id));
     if (r.failed.length) toast.error(r.failed.join('; '));
     (r.drafted.length ? toast.success : toast.info)(sendSummary(r));
+    const made = r.quotations || [];
+    if (made.length) {
+      offer({
+        text: `${made.map(q => q.quotation_no).join(', ')} made${r.drafted.length ? ' and saved as a Gmail draft' : ''}.`,
+        run: async () => {
+          for (const q of made) await api.post(`/costing/quotations/${q.id}/${q.revision > 0 ? 'unrevise' : 'cancel'}`, {});
+          onChanged?.();
+          return `${made.map(q => q.quotation_no).join(', ')} undone — the rows are back on Counter with their prices${r.drafted.length ? '; delete its draft in Gmail' : ''}.`;
+        },
+      });
+    }
   });
+  const runUndo = async () => { const said = await undoable.run(); setUndoable(said ? { text: said } : null); };
 
   return (
     <section className="rounded-2xl border border-amber-200 bg-amber-50/40 p-3" aria-label={title}>
@@ -107,6 +145,14 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
         <span className="ml-auto text-[11px] text-slate-500">Internal — cost, loss and discount never go to the customer</span>
       </div>
 
+      {undoable && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-[#1D1D1F]/90 px-3 py-1.5 text-xs text-white" role="status">
+          <RotateCcw size={13} className="text-sky-300" />
+          <span className="min-w-0 flex-1">{undoable.text}</span>
+          {undoable.run && <button type="button" onClick={runUndo} className="rounded-full bg-white/15 px-3 py-0.5 font-bold text-sky-200 hover:bg-white/25">Undo</button>}
+          <button type="button" onClick={() => setUndoable(null)} aria-label="Close" className="rounded-full p-0.5 text-white/70 hover:bg-white/15"><X size={13} /></button>
+        </div>
+      )}
       <div className="mb-2 flex flex-wrap gap-2">
         <Tile label="Actual cost" value={inr0(t.value_cost)} sub={t.missing_cost ? `${t.missing_cost} without a costing` : 'the costing, before margin'} />
         <Tile label="Should-cost" value={inr0(t.value_costed)} sub={t.model_margin != null ? `model adds ${inr0(t.model_margin)}` : 'the costing\'s price'} />
@@ -146,14 +192,24 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
 
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         <span className="font-semibold text-slate-600">Fill every revised price:</span>
-        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.theirs)}>Their price</button>
-        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.halfway)}>Halfway</button>
-        <span className="inline-flex items-center gap-1">
-          <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(l => FILLS.costPlus(l, plus))}>Cost +</button>
-          <Input className="!h-7 !w-16 text-right text-xs" inputMode="decimal" value={plus} onChange={e => setPlus(e.target.value)} aria-label="Rupees over cost" />
+        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.theirs, 'their price')}>Their price</button>
+        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.halfway, 'halfway')}>Halfway</button>
+        <span className="inline-flex items-center gap-1 rounded-full bg-white py-0.5 pl-0.5 pr-1 ring-1 ring-slate-200">
+          <button type="button" className="rounded-full px-2 py-0.5 font-semibold hover:bg-slate-50"
+            onClick={() => (plusMode === 'pct'
+              ? fillAll(l => FILLS.costPct(l, plus), `cost + ${plus}%`)
+              : fillAll(l => FILLS.costPlus(l, plus), `cost + ₹${plus}`))}>Cost +</button>
+          <Input className="!h-6 !w-14 text-right text-xs" inputMode="decimal" value={plus} onChange={e => setPlus(e.target.value)}
+            aria-label={plusMode === 'pct' ? 'Percent over cost' : 'Rupees over cost'} />
+          <span className="inline-flex overflow-hidden rounded-full ring-1 ring-slate-200" role="group" aria-label="Over cost in rupees or percent">
+            {[['rs', '₹ / paisa'], ['pct', '%']].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => { setPlusMode(k); setPlus(k === 'pct' ? '5' : '0.10'); }}
+                className={`px-2 py-0.5 text-[11px] font-bold ${plusMode === k ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{label}</button>
+            ))}
+          </span>
         </span>
-        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.costed)}>Should-cost</button>
-        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.ours)}>Our quote</button>
+        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.costed, 'the should-cost')}>Should-cost</button>
+        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.ours, 'our quote')}>Our quote</button>
         {batch.length === 1 && (
           <a href={`/costing?tab=bulk&batch=${batch[0]}`} className="ml-auto inline-flex items-center gap-1 font-semibold text-brand-700 hover:underline">
             <Calculator size={12} />Re-cost the batch

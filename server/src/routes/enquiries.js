@@ -857,7 +857,7 @@ r.post('/costing/quotations/send', async (req, res, next) => {
     for (const e of rows) {
       if (e.quotation_id && ['queued', 'drafted', 'sent'].includes(e.q_status)) skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} (${e.q_status})` });
     }
-    res.status(201).json({ quotations: made, drafted, failed, skipped });
+    res.status(201).json({ quotations: made, drafted, failed, skipped, undo: group });
   } catch (e) { next(e); }
 });
 
@@ -1033,6 +1033,42 @@ export async function markEnquiriesSent(qc, quotationId, user) {
                           WHERE quotation_id = $1 AND status = 'quote_ready' RETURNING id`, [quotationId, user?.name || 'Claude']);
   for (const e of rows) await enquiryEvent(qc, { enquiryId: e.id, quotationId, action: 'sent' }, user);
 }
+
+// Undo a revised quotation (owner, 11 Nov 2026: "give an option to undo it"): the revision is cancelled (its waiting draft
+// job too), the quotation it replaced comes back as it was, and its enquiries go back to the Counter tab with their
+// counter and revised prices kept — ready to change and send again. A revision already sent cannot be taken back here.
+r.post('/costing/quotations/:id/unrevise', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const id = intOrNull(req.params.id) || 0;
+    const out = await tx(async (qc, oc) => {
+      const qt = await oc(`SELECT id, quotation_no, status, revision, supersedes_id, gmail_draft_id FROM quotations WHERE id = $1 FOR UPDATE`, [id]);
+      if (!qt) throw fail(404, 'No such quotation.');
+      if (!(qt.revision > 0)) throw fail(409, `${qt.quotation_no} is not a revised quotation.`);
+      if (!['ready', 'queued', 'drafted'].includes(qt.status)) throw fail(409, `${qt.quotation_no} is ${qt.status} — only a revision not yet sent can be undone.`);
+      await qc(`UPDATE quotations SET status = 'cancelled', updated_at = now(), updated_by_name = $2 WHERE id = $1`, [id, u.name]);
+      await qc(`UPDATE enquiry_jobs SET status = 'cancelled', finished_at = now(), error = 'Revision undone' WHERE quotation_id = $1 AND status = 'queued'`, [id]);
+      let back = null;
+      if (qt.supersedes_id) {
+        back = await oc(`UPDATE quotations SET status = CASE WHEN gmail_draft_id IS NOT NULL THEN 'drafted' ELSE 'ready' END, updated_at = now(), updated_by_name = $2
+                          WHERE id = $1 AND status = 'superseded' RETURNING id, quotation_no, status`, [qt.supersedes_id, u.name]);
+        if (back) await enquiryEvent(qc, { quotationId: back.id, action: 'restored', detail: { revision_undone: qt.quotation_no } }, u);
+      }
+      const rows = await qc(`SELECT e.id, e.enquiry_no, to_jsonb(e) AS snap FROM enquiries e WHERE e.quotation_id = $1 ORDER BY e.id FOR UPDATE`, [id]);
+      const group = newGroup();
+      for (const e of rows) {
+        await changeRow(qc, e, `status = 'countered', quotation_id = $3, ${FINALISED_OFF}`, [back?.id ?? null], u,
+          { action: 'revision_undone', group, detail: { quotation_no: qt.quotation_no, back_to: back?.quotation_no ?? null } });
+      }
+      await enquiryEvent(qc, { quotationId: id, action: 'revision_undone', detail: { restored: back?.quotation_no ?? null,
+        ...(qt.gmail_draft_id ? { note: 'Its Gmail draft can be discarded there.' } : {}) } }, u);
+      await audit('quotation', id, 'unrevise', qt.quotation_no, qc, u.name);
+      return { quotation_no: qt.quotation_no, restored: back?.quotation_no ?? null, enquiries: rows.map(e => e.enquiry_no), had_draft: !!qt.gmail_draft_id };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
 
 r.post('/costing/quotations/:id/cancel', async (req, res, next) => {
   try {

@@ -630,6 +630,11 @@ describe('Enquiry desk — through the real app', {
     // Their price: 3.20.
     const c = await call('clerk', 'PUT', '/costing/enquiries/counter', { items: [{ id: x.id, prices: [{ qty: 5000, theirs: 3.2 }] }] });
     assert.deepEqual(c.body.saved, [x.enquiry_no]);
+    // A counter recorded by mistake is undone at once: back to Quotations, then recorded again.
+    const oops = await call('clerk', 'POST', '/costing/enquiries/undo', { group: c.body.undo });
+    assert.deepEqual(oops.body.moved.map(m => m.to), ['quote_ready']);
+    const again = await call('clerk', 'PUT', '/costing/enquiries/counter', { items: [{ id: x.id, prices: [{ qty: 5000, theirs: 3.2 }] }] });
+    c.body.undo = again.body.undo;
     let e = await enquiry(x.id);
     assert.equal(e.status, 'countered');
     assert.equal(e.stage, 'countered');
@@ -659,7 +664,24 @@ describe('Enquiry desk — through the real app', {
     assert.equal(e.status, 'quote_ready');
     assert.equal(e.quotation_id, q2.id);
     assert.ok(e.events.some(ev => ev.action === 'counter' && ev.detail?.counter?.[0]?.theirs === 3.2));
-    await call('clerk', 'POST', `/costing/quotations/${q2.id}/cancel`, {});
+    assert.ok(rev.body.undo, 'the send answers its undo group');
+    // Undo the revised quotation: it is cancelled, the first comes back, the row is on Counter again with its prices.
+    assert.equal((await call('clerk', 'POST', `/costing/quotations/${q2.id}/unrevise`)).status, 403, 'needs the Management right');
+    assert.equal((await call('md', 'POST', `/costing/quotations/${q1.id}/unrevise`)).status, 409, 'the first quotation is not a revision');
+    const un = await call('md', 'POST', `/costing/quotations/${q2.id}/unrevise`);
+    assert.equal(un.status, 200);
+    assert.equal(un.body.restored, q1.quotation_no);
+    assert.equal((await call('clerk', 'GET', `/costing/quotations/${q2.id}`)).body.status, 'cancelled');
+    assert.equal((await call('clerk', 'GET', `/costing/quotations/${q1.id}`)).body.status, 'ready', 'back as it was (its draft job had been cancelled)');
+    e = await enquiry(x.id);
+    assert.deepEqual([e.status, e.quotation_id], ['countered', q1.id]);
+    assert.deepEqual([e.prices[0].theirs, e.prices[0].final], [3.2, 3.5], 'their price and our revised price kept');
+    // The counter itself undone (the desk's group undo): back to Quotations as before the counter.
+    assert.ok(c.body.undo, 'recording a counter answers its undo group');
+    const back = await call('clerk', 'POST', '/costing/enquiries/undo', { group: c.body.undo });
+    assert.equal(back.status, 200);
+    assert.match(back.body.skipped[0]?.why || '', /changed after/, 'a counter worked on since is not undone over that work');
+    await call('clerk', 'POST', `/costing/quotations/${q1.id}/cancel`, {});
   });
 
   test('the robot files a counter from mail: quoted rows in its brief, the mail kept, the row on Counter', async () => {
