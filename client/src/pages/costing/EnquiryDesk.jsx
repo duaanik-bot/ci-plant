@@ -55,13 +55,49 @@ function JobLine({ job }) {
 const MAIL_TONES = ['bg-sky-100 text-sky-800 ring-sky-200', 'bg-violet-100 text-violet-800 ring-violet-200', 'bg-amber-100 text-amber-800 ring-amber-200',
   'bg-emerald-100 text-emerald-800 ring-emerald-200', 'bg-rose-100 text-rose-800 ring-rose-200', 'bg-teal-100 text-teal-800 ring-teal-200'];
 export const mailTone = id => MAIL_TONES[(Number(id) || 0) % MAIL_TONES.length];
-function MailTag({ e }) {
+// Clicking the tag ticks every product of that mail (owner, 11 Nov 2026: "select the whole batch at once").
+function MailTag({ e, onPickMail }) {
   if (!e.mail_id) return <span className="text-[11px] text-slate-400">typed in</span>;
   return (
-    <span title={[e.mail_subject && `“${e.mail_subject}”`, e.mail_from_name || e.mail_from_email, dateText(e.mail_received_at)].filter(Boolean).join(' · ')}
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${mailTone(e.mail_id)}`}>
+    <button type="button" onClick={ev => { ev.stopPropagation(); onPickMail?.(e.mail_id); }}
+      title={`Tick every product of this mail — ${[e.mail_subject && `“${e.mail_subject}”`, e.mail_from_name || e.mail_from_email, dateText(e.mail_received_at)].filter(Boolean).join(' · ')}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 hover:brightness-95 ${mailTone(e.mail_id)}`}>
       <Mail size={11} />M{e.mail_id} · {e.mail_pos} of {e.mail_items}
-    </span>
+    </button>
+  );
+}
+
+// The mails on this tab, newest first: each a chip that ticks (or unticks) all its products here.
+export function mailBuckets(rows = []) {
+  const by = new Map();
+  for (const e of rows) {
+    if (!e.mail_id) continue;
+    const b = by.get(e.mail_id) || { mail_id: e.mail_id, ids: [], of: e.mail_items, customer: e.customer_name || e.contact_email || '',
+      subject: e.mail_subject || '', received: e.mail_received_at || e.created_at };
+    b.ids.push(e.id);
+    by.set(e.mail_id, b);
+  }
+  return [...by.values()].sort((a, b) => String(b.received).localeCompare(String(a.received)) || b.mail_id - a.mail_id);
+}
+function MailChips({ buckets, picked, onToggle, onClear }) {
+  if (!buckets.length) return null;
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tick a whole mail</span>
+      {buckets.map(b => {
+        const n = b.ids.filter(id => picked.includes(id)).length;
+        const all = n === b.ids.length;
+        return (
+          <button key={b.mail_id} type="button" onClick={() => onToggle(b)} title={`${b.subject ? `“${b.subject}” · ` : ''}${dateText(b.received)} — ${all ? 'untick' : 'tick'} all ${b.ids.length} here`}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ring-1 transition ${all ? 'bg-brand-600 text-white ring-brand-600' : mailTone(b.mail_id)}`}>
+            <Mail size={12} />M{b.mail_id}
+            <span className="max-w-[14rem] truncate font-semibold">{b.customer}</span>
+            <span className={`rounded-full px-1.5 text-[10px] ${all ? 'bg-white/25' : 'bg-white/70'}`}>{n ? `${n}/` : ''}{b.ids.length}{b.ids.length < b.of ? ` of ${b.of}` : ''}</span>
+          </button>
+        );
+      })}
+      {picked.length > 0 && <button type="button" onClick={onClear} className="text-xs font-semibold text-slate-500 hover:underline">Clear ticks</button>}
+    </div>
   );
 }
 // The mails a ticked set leaves products out of: [{ mail_id, picked, of }].
@@ -164,6 +200,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const pickedRows = shown.filter(e => picked.includes(e.id));
   const toggle = (r, on) => setPicked(p => (on ? [...new Set([...p, r.id])] : p.filter(x => x !== r.id)));
   const toggleAll = (rs, on) => setPicked(on ? rs.map(r => r.id) : []);
+  // A whole mail at once: ticks all its rows on this tab, or unticks them when all are ticked already.
+  const buckets = useMemo(() => mailBuckets(shown), [shown]);
+  const toggleMail = b => setPicked(p => (b.ids.every(id => p.includes(id)) ? p.filter(id => !b.ids.includes(id)) : [...new Set([...p, ...b.ids])]));
+  const pickMail = mailId => { const b = buckets.find(x => x.mail_id === mailId); if (b) toggleMail(b); };
 
   // A move's answer: { moved, skipped, undo }. What moved goes on the bar with Undo; what could not, in a note.
   const after = async (promise, say) => {
@@ -230,8 +270,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   );
   const baseCols = [
     { key: 'enquiry_no', label: 'No.', sortValue: e => `${String(e.mail_id || 0).padStart(6, '0')}|${String(e.mail_pos || 0).padStart(3, '0')}`,
-      render: e => <div className="space-y-1"><div className="font-bold text-brand-600">{e.enquiry_no}</div><MailTag e={e} /></div> },
-    { key: 'received', label: 'Received', sortValue: e => e.mail_received_at || e.created_at, render: e => dateText(e.mail_received_at || e.created_at) },
+      render: e => <div className="space-y-1"><div className="font-bold text-brand-600">{e.enquiry_no}</div><MailTag e={e} onPickMail={pickMail} /></div> },
+    // Newest first, and the products of one mail together in the mail's own order.
+    { key: 'received', label: 'Received', sortValue: e => `${new Date(e.mail_received_at || e.created_at).toISOString()}|${String(e.mail_id || 0).padStart(8, '0')}|${String(1000 - (e.mail_pos || 0)).padStart(4, '0')}`,
+      render: e => dateText(e.mail_received_at || e.created_at) },
     { key: 'customer_name', label: 'Customer', render: e => <div><div className="font-semibold">{e.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{e.contact_email || ''}</div></div> },
     { key: 'product_name', label: 'Product', render: e => <div><div className="font-semibold">{e.product_name || '—'}</div><div className="text-[11px] text-slate-500">{[e.size_text && `${e.size_text} mm`, e.mail_subject && `“${e.mail_subject}”`].filter(Boolean).join(' · ')}</div></div> },
     { key: 'quantities', label: 'Quantities', render: e => quantitiesText(e.quantities) },
@@ -386,6 +428,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {stages && tab === 'price' && (
         <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Tick locked rows and <b>Push to Quotations</b> (Management). Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
       )}
+      {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (
         <DataTable rows={shown} columns={columns} onRowClick={e => setOpen(e.id)}
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
