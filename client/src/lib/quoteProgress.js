@@ -12,7 +12,7 @@ export const QUOTE_STAGES = Object.freeze([
   { key: 'locked', label: 'Final prices locked' },
   { key: 'pushed', label: 'Pushed to Quotations' },
   { key: 'quoted', label: 'Quotation made' },
-  { key: 'queued', label: 'Sent to Claude for the Gmail draft' },
+  { key: 'queued', label: 'Gmail draft started' },
   { key: 'drafted', label: 'Draft ready in Gmail — check it and send' },
   { key: 'sent', label: 'Sent to the customer' },
 ]);

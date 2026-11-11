@@ -489,6 +489,132 @@ describe('Enquiry desk — through the real app', {
     await call('clerk', 'POST', `/costing/quotations/${qid}/cancel`, {});
   });
 
+  test('Gmail connected: CI Plant saves the draft itself in the press, updates it on a second press, shows a Gmail refusal, and notices a send', async () => {
+    // A fake Google on a free port: token, profile, message headers, drafts, threads.
+    const http = await import('node:http');
+    const G = { drafts: new Map(), threads: new Map(), n: 0, refuse: false, raws: [], calls: [] };
+    const google = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+        const u = new URL(req.url, 'http://x');
+        G.calls.push(`${req.method} ${u.pathname}`);
+        if (u.pathname === '/token') return G.refuse ? send(400, { error: 'invalid_grant' }) : send(200, { access_token: 'at-1', expires_in: 3600 });
+        if (req.headers.authorization !== 'Bearer at-1') return send(401, { error: { message: 'bad token' } });
+        const p = u.pathname.replace('/gmail/v1/users/me', '');
+        let m;
+        if ((m = /^\/messages\/([^/]+)$/.exec(p))) return send(200, { id: m[1], threadId: 't-hand', payload: { headers: [{ name: 'Message-Id', value: `<${m[1]}@customer.test>` }] } });
+        if (p === '/drafts' && req.method === 'POST') {
+          const id = `d-${++G.n}`; const raw = JSON.parse(body).message.raw; G.raws.push(raw);
+          G.drafts.set(id, { id, message: { id: `msg-${G.n}`, threadId: JSON.parse(body).message.threadId || `t-new-${G.n}` } });
+          return send(200, G.drafts.get(id));
+        }
+        if ((m = /^\/drafts\/([^/]+)$/.exec(p))) {
+          const d = G.drafts.get(m[1]);
+          if (!d) return send(404, { error: { message: 'Requested entity was not found.' } });
+          if (req.method === 'PUT') { G.raws.push(JSON.parse(body).message.raw); d.message = { ...d.message, id: `${d.message.id}-v2` }; }
+          return send(200, d);
+        }
+        if ((m = /^\/threads\/([^/]+)$/.exec(p))) return G.threads.has(m[1]) ? send(200, { id: m[1], messages: G.threads.get(m[1]) }) : send(404, { error: { message: 'not found' } });
+        return send(404, { error: { message: `no fake for ${req.method} ${p}` } });
+      });
+    });
+    await new Promise(res => google.listen(0, '127.0.0.1', res));
+    const gbase = `http://127.0.0.1:${google.address().port}`;
+    Object.assign(process.env, {
+      GOOGLE_CLIENT_ID: 'fake-client', GOOGLE_CLIENT_SECRET: 'fake-secret', GMAIL_TOKEN_KEY: 'ef'.repeat(32),
+      GMAIL_SENT_CHECK_MS: '0', GMAIL_API_BASE: `${gbase}/gmail/v1/users/me`, GOOGLE_TOKEN_URL: `${gbase}/token`, GOOGLE_REVOKE_URL: `${gbase}/revoke`,
+    });
+    const { sealToken } = await import('./gmail.js');
+    try {
+      const box = await db.one(`SELECT key, email FROM enquiry_mailboxes WHERE in_use`);
+      // Not connected yet: the desk says so; only an admin may start the connect.
+      let desk = await call('md', 'GET', '/costing/enquiry-desk');
+      assert.equal(desk.body.gmail_ready, true);
+      assert.equal(desk.body.mailboxes.find(b => b.key === box.key).gmail, null);
+      assert.equal((await call('md', 'POST', `/costing/enquiry-desk/gmail/${box.key}/connect`, {})).status, 403);
+      const start = await call('admin', 'POST', `/costing/enquiry-desk/gmail/${box.key}/connect`, {});
+      assert.equal(new URL(start.body.url).searchParams.get('login_hint'), box.email);
+      // A stale or forged state is sent back to the desk, never stored.
+      const bad = await fetch(`${base}/gmail/callback?code=x&state=forged`, { redirect: 'manual' });
+      assert.equal(bad.status, 303);
+      assert.match(bad.headers.get('location'), /gmail=expired/);
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ($1, $2, $3, 'Desk admin')`,
+        [box.key, box.email, sealToken('1//fake-refresh')]);
+      desk = await call('md', 'GET', '/costing/enquiry-desk');
+      const shown = desk.body.mailboxes.find(b => b.key === box.key).gmail;
+      assert.equal(shown.email, box.email);
+      assert.equal(shown.refresh_token_enc, undefined, 'the token never leaves the server');
+
+      // 1. Send quotation → the draft is in Gmail in the same press.
+      const x = await typed('GMAIL SERVER DRAFT CARTON');
+      await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+      await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.75 }] }] });
+      const sent = await call('md', 'POST', '/costing/quotations/send', { ids: [x.id] });
+      assert.equal(sent.status, 201);
+      assert.equal(sent.body.drafted.length, 1);
+      assert.equal(sent.body.drafted[0].now, true);
+      assert.match(sent.body.drafted[0].view_url, /^https:\/\/mail\.google\.com\/mail\/\?authuser=.+#drafts\?compose=msg-1$/);
+      const qid = sent.body.drafted[0].id;
+      let qt = (await call('clerk', 'GET', `/costing/quotations/${qid}`)).body;
+      assert.equal(qt.status, 'drafted');
+      assert.equal(qt.gmail_draft_id, 'd-1');
+      assert.equal(qt.mailbox, box.key);
+      const job = await db.one(`SELECT status, fire_status, claimed_by, result FROM enquiry_jobs WHERE id = $1`, [sent.body.drafted[0].job]);
+      assert.deepEqual([job.status, job.fire_status, job.claimed_by, job.result.by], ['done', 'server', 'CI Plant (server)', 'server']);
+      assert.equal((await robot('GET', '/enquiry-jobs')).body.jobs?.some?.(j => j.id === sent.body.drafted[0].job) ?? false, false, 'the robot is not given it');
+      // The e-mail itself: to the trial mailbox only, the approved words + PDF, nothing internal.
+      const mime = Buffer.from(G.raws[0], 'base64url').toString('utf8');
+      assert.match(mime, new RegExp(`^To: ${box.email.replace('.', '\\.')}$`, 'm'), 'the trial mailbox replies only to itself');
+      assert.match(mime, /filename="CI-QTN-\d+\.pdf"/);
+      const decoded = mime.split(/\r\n\r\n/).map(part => { try { return Buffer.from(part.replace(/\r\n/g, ''), 'base64').toString('utf8'); } catch { return ''; } }).join('\n');
+      assert.match(decoded, /3\.75/);
+      assert.doesNotMatch(decoded, /98\.7654|4321\.98|4,321/, 'no internal board rate or process cost');
+
+      // 2. Pressed again (Save as Gmail draft): the same draft changes; no second copy.
+      const again = await call('clerk', 'POST', `/costing/quotations/${qid}/draft`, {});
+      assert.equal(again.status, 201);
+      assert.equal(G.drafts.size, 1);
+      assert.ok(G.calls.includes('PUT /gmail/v1/users/me/drafts/d-1'));
+      qt = (await call('clerk', 'GET', `/costing/quotations/${qid}`)).body;
+      assert.equal(qt.gmail_draft_id, 'd-1');
+      assert.ok(qt.events.some(ev => ev.action === 'drafted' && ev.detail?.replaced === true));
+
+      // 3. Google refuses (connection withdrawn): the reason is shown, the quotation stays drafted, the link says so.
+      G.refuse = true;
+      const { forgetToken } = await import('./gmail.js');
+      forgetToken(box.key);
+      const refused = await call('clerk', 'POST', `/costing/quotations/${qid}/draft`, {});
+      assert.equal(refused.status, 409);
+      assert.match(refused.body.error, /Connect Gmail again/);
+      assert.equal((await call('clerk', 'GET', `/costing/quotations/${qid}`)).body.status, 'drafted');
+      assert.match((await db.one(`SELECT last_error FROM gmail_links WHERE mailbox = $1`, [box.key])).last_error, /Connect Gmail again/);
+      G.refuse = false;
+
+      // 4. The person sends it from Gmail: the draft is gone, a SENT message is in its thread → Sent on opening the desk.
+      const tid = G.drafts.get('d-1').message.threadId;
+      G.drafts.delete('d-1');
+      G.threads.set(tid, [{ id: 'cust-1', labelIds: ['INBOX'], internalDate: String(Date.now() - 86400000) },
+        { id: 'msg-1', labelIds: ['SENT'], internalDate: String(Date.now()) }]);
+      await call('md', 'GET', '/costing/enquiry-desk');
+      qt = (await call('clerk', 'GET', `/costing/quotations/${qid}`)).body;
+      assert.equal(qt.status, 'sent');
+      assert.equal(qt.sent_by_name, 'Sent from Gmail');
+      assert.equal((await enquiry(x.id)).status, 'sent');
+      assert.ok(!G.calls.some(c => /\/send$/.test(c)), 'CI Plant never called send');
+
+      // Disconnect: admin only; the link is gone.
+      assert.equal((await call('md', 'DELETE', `/costing/enquiry-desk/gmail/${box.key}`)).status, 403);
+      assert.equal((await call('admin', 'DELETE', `/costing/enquiry-desk/gmail/${box.key}`)).status, 200);
+      assert.equal(await db.one(`SELECT 1 AS x FROM gmail_links`), null);
+    } finally {
+      await db.q('DELETE FROM gmail_links');
+      for (const k of ['GMAIL_SENT_CHECK_MS', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_TOKEN_KEY', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL', 'GOOGLE_REVOKE_URL']) delete process.env[k];
+      google.close();
+    }
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });

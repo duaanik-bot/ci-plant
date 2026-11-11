@@ -2878,6 +2878,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261030130000_costing_coating_factors.sql'));
   // Enquiry desk — mailbox enquiries, final prices, quotations and the AVS robot's jobs. Idempotent. 2026-11-03
   await pool.query(migration('20261103130000_enquiry_desk.sql'));
+  // Enquiry desk — a mailbox's Gmail connected to CI Plant, so the server saves the reply draft itself. 2026-11-11
+  await pool.query(migration('20261111120000_gmail_link.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

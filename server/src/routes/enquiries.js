@@ -26,6 +26,9 @@
 //   POST /costing/quotations                   one quotation per customer from Quotation-ready enquiries
 //   GET  /costing/quotations · GET /costing/quotations/:id · PUT /costing/quotations/:id · GET /costing/quotations/:id/pdf
 //   POST /costing/quotations/:id/draft (a Gmail draft, never a send) · /mark-sent · /cancel
+//   POST /costing/enquiry-desk/gmail/:key/connect · DELETE /costing/enquiry-desk/gmail/:key   (admin)
+// A mailbox whose Gmail is connected (gmail_links, server/src/gmail.js) gets its draft from the SERVER, in the same
+// press — no robot. Not connected: the robot job, as before. Opening the desk notices drafts sent from Gmail.
 //
 // The plant-wide audit log (read by every login) gets numbers and actions only; prices and addresses go
 // to enquiry_events, read here only.
@@ -41,6 +44,10 @@ import {
 import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
+import {
+  gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke,
+} from '../gmail.js';
+import { redirectUri, signState } from './gmail-link.js';
 
 const r = Router();
 const fail = (status, error, extra = {}) => Object.assign(new Error(error), { status, body: extra });
@@ -166,13 +173,56 @@ const settings = () => one('SELECT terms, opening, closing, fetch_days FROM enqu
 const JOB_COLS = `j.id, j.kind, j.mailbox, j.mailbox_email, j.quotation_id, j.status, j.error, j.result, j.fire_status,
   j.queued_by_name, j.claimed_by, j.queued_at, j.claimed_at, j.finished_at`;
 
+// A mailbox's Gmail link as the desk shows it (never the token).
+const linkOf = key => one('SELECT * FROM gmail_links WHERE mailbox = $1', [key]);
+const LINK_VIEW = `mailbox, email, connected_at, connected_by_name, last_used_at, last_error, last_error_at`;
+
+// Drafts the person has since sent from Gmail → Sent. At most once a minute per server, a few seconds at most, and
+// never in the way of the desk: any trouble is only noted on the link.
+let sentCheckedAt = 0;
+export async function syncSentDrafts() {
+  const every = process.env.GMAIL_SENT_CHECK_MS != null ? Number(process.env.GMAIL_SENT_CHECK_MS) : 60_000; // the test sets 0
+  if (!gmailConfigured() || Date.now() - sentCheckedAt < every) return;
+  sentCheckedAt = Date.now();
+  const who = { name: 'Sent from Gmail' };
+  for (const link of await q('SELECT * FROM gmail_links ORDER BY mailbox')) {
+    try {
+      const rows = await q(`SELECT qt.id, qt.gmail_draft_id, j.finished_at, COALESCE(j.result->>'thread_id', m.gmail_thread_id) AS thread_id
+                              FROM quotations qt LEFT JOIN enquiry_jobs j ON j.id = qt.job_id LEFT JOIN enquiry_mails m ON m.id = qt.reply_mail_id
+                             WHERE qt.status = 'drafted' AND qt.mailbox = $1 AND qt.gmail_draft_id IS NOT NULL ORDER BY qt.id DESC LIMIT 25`, [link.mailbox]);
+      if (!rows.length) continue;
+      const token = await accessToken(link);
+      for (const r0 of rows) {
+        const s = await draftSent(token, { draftId: r0.gmail_draft_id, threadId: r0.thread_id, since: r0.finished_at });
+        if (!s.sent) continue;
+        await tx(async (qc, oc) => {
+          const qt = await oc(`UPDATE quotations SET status = 'sent', sent_to = contact_email, sent_at = $2, sent_by_name = 'Sent from Gmail', updated_at = now()
+                                WHERE id = $1 AND status = 'drafted' RETURNING id, quotation_no`, [r0.id, s.at]);
+          if (!qt) return;
+          await markEnquiriesSent(qc, qt.id, who);
+          await enquiryEvent(qc, { quotationId: qt.id, action: 'sent_from_gmail', detail: { by: 'server' } }, who);
+          await audit('quotation', qt.id, 'sent', `${qt.quotation_no} — sent from Gmail`, qc, who.name);
+        });
+      }
+      await q('UPDATE gmail_links SET sent_checked_at = now() WHERE mailbox = $1', [link.mailbox]);
+    } catch (e) {
+      if (e.expired) forgetToken(link.mailbox);
+      await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [link.mailbox, String(e.message).slice(0, 500)]).catch(() => {});
+    }
+  }
+}
+const withinSeconds = (p, s) => Promise.race([p, new Promise(res => setTimeout(res, s * 1000))]);
+
 r.get('/costing/enquiry-desk', async (req, res, next) => {
   try {
-    const [boxes, s, counts, jobs] = await Promise.all([
+    await withinSeconds(syncSentDrafts().catch(e => console.error('[gmail] sent check:', e.message)), 6);
+    const [boxes, s, counts, jobs, links] = await Promise.all([
       mailboxes(), settings(),
       q(`SELECT ${STAGE_SQL} AS stage, count(*)::int AS n FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id GROUP BY 1`),
       q(`SELECT ${JOB_COLS} FROM enquiry_jobs j ORDER BY j.id DESC LIMIT 10`),
+      q(`SELECT ${LINK_VIEW} FROM gmail_links`),
     ]);
+    for (const b of boxes) b.gmail = links.find(l => l.mailbox === b.key) || null;
     const quotes = await q(`SELECT status, count(*)::int AS n FROM quotations GROUP BY status`);
     res.json({
       mailboxes: boxes, in_use: boxes.find(b => b.in_use) || null, settings: s,
@@ -180,8 +230,34 @@ r.get('/costing/enquiry-desk', async (req, res, next) => {
       quotation_counts: Object.fromEntries(quotes.map(x => [x.status, x.n])),
       jobs,
       can_finalise: mayApproveCosting(req.costingUser), can_admin: req.costingUser.role === 'admin',
-      statuses: STATUS_LABEL,
+      statuses: STATUS_LABEL, gmail_ready: gmailConfigured(),
     });
+  } catch (e) { next(e); }
+});
+
+// Connect a mailbox's Gmail: Google's consent page (the browser goes there), back at /api/gmail/callback.
+r.post('/costing/enquiry-desk/gmail/:key/connect', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needAdmin(u);
+    const box = await one(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes WHERE key = $1`, [req.params.key]);
+    if (!box) throw fail(404, 'No such mailbox.');
+    if (!gmailConfigured()) throw fail(503, 'Gmail is not set up on the server yet.');
+    res.json({ url: consentUrl({ redirectUri: redirectUri(req), state: signState(box.key, u.id), loginHint: box.email }) });
+  } catch (e) { next(e); }
+});
+
+r.delete('/costing/enquiry-desk/gmail/:key', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needAdmin(u);
+    const gone = await one('DELETE FROM gmail_links WHERE mailbox = $1 RETURNING mailbox, refresh_token_enc', [req.params.key]);
+    if (gone) {
+      forgetToken(gone.mailbox);
+      try { if (gmailConfigured()) await revoke(openToken(gone.refresh_token_enc)); } catch { /* the row is gone either way */ }
+      await audit('enquiry_desk', 1, 'gmail_disconnect', `Gmail disconnected for the ${gone.mailbox} mailbox`, q, u.name);
+    }
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -699,7 +775,7 @@ r.post('/costing/quotations/send', async (req, res, next) => {
     const quoteIds = [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
     const drafted = [], failed = [];
     for (const id of quoteIds) {
-      try { const j = await queueDraft(id, u); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id }); }
+      try { const j = await queueDraft(id, u); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id, now: !!j.drafted_now, view_url: j.view_url || null }); }
       catch (e) { failed.push({ id, why: e.message }); }
     }
     for (const e of rows) {
@@ -796,6 +872,9 @@ async function queueDraft(id, u) {
       subject: qt.reply.subject, text: qt.reply.text, html: qt.reply.html,
       reply_to_message_id: mail?.gmail_message_id || null, thread_id: mail?.gmail_thread_id || null,
     };
+    // This mailbox's Gmail is connected: the server saves the draft now, no robot.
+    const link = gmailConfigured() ? await linkOf(box.key) : null;
+    if (link) return draftOnServer({ qt, box, link, brief, pdf, sha, mail, u });
     const job = await tx(async (qc, oc) => {
       const cur = await oc(`SELECT status FROM quotations WHERE id = $1 FOR UPDATE`, [id]);
       if (!['ready', 'drafted'].includes(cur?.status)) throw fail(409, `${qt.quotation_no} changed meanwhile — open it again.`);
@@ -808,6 +887,41 @@ async function queueDraft(id, u) {
       return j;
     });
     return { job_id: job.id, quotation_no: qt.quotation_no };
+}
+
+// The draft saved by CI Plant itself in the mailbox's Gmail — the same subject, words and PDF the robot would get.
+// Pressing again changes that same draft (a second copy is never left). Gmail trouble: the quotation stays as it was
+// and the reason is shown; nothing is half-done.
+async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u }) {
+  let d;
+  try {
+    const token = await accessToken(link);
+    const hdr = await replyHeaders(token, mail?.gmail_message_id);
+    const raw = rawOf(buildMime({ from: link.email, to: brief.to, subject: brief.subject, text: brief.text, html: brief.html,
+      inReplyTo: hdr.inReplyTo, references: hdr.references, attachment: { name: `${qt.quotation_no}.pdf`, bytes: pdf } }));
+    d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || mail?.gmail_thread_id || null, draftId: qt.gmail_draft_id });
+  } catch (e) {
+    if (e.expired) forgetToken(box.key);
+    await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [box.key, String(e.message).slice(0, 500)]);
+    throw fail(e.status && e.status < 500 ? 409 : 502, `${qt.quotation_no}: ${e.message}`);
+  }
+  const result = { by: 'server', draft_id: d.draft_id, message_id: d.message_id, thread_id: d.thread_id, view_url: d.view_url, replaced: d.replaced };
+  const job = await tx(async (qc, oc) => {
+    const cur = await oc(`SELECT status FROM quotations WHERE id = $1 FOR UPDATE`, [qt.id]);
+    if (!['ready', 'drafted'].includes(cur?.status)) throw fail(409, `${qt.quotation_no} changed meanwhile — the draft is in Gmail; open the quotation again.`);
+    const j = await oc(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, quotation_id, brief, attachment, attachment_name, attachment_sha256,
+                               queued_by, queued_by_name, fire_status, status, claimed_by, claimed_at, finished_at, result)
+                        VALUES ('draft', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'server', 'done', 'CI Plant (server)', now(), now(), $10) RETURNING id`,
+    [box.key, box.email, qt.id, brief, pdf, `${qt.quotation_no}.pdf`, sha, u.id, u.name, result]);
+    await qc(`UPDATE quotations SET status = 'drafted', job_id = $2, gmail_draft_id = $3, gmail_draft_url = $4, gmail_message_id = $5,
+                     mailbox = COALESCE(mailbox, $7), updated_at = now(), updated_by_name = $6 WHERE id = $1`,
+    [qt.id, j.id, d.draft_id, d.view_url, d.message_id, u.name, box.key]);
+    await enquiryEvent(qc, { quotationId: qt.id, action: 'drafted', detail: { job: j.id, by: 'server', to: brief.to, trial: brief.trial, replaced: d.replaced } }, u);
+    await audit('quotation', qt.id, 'draft', `${qt.quotation_no} — Gmail draft saved by CI Plant (job ${j.id})`, qc, u.name);
+    return j;
+  });
+  await q('UPDATE gmail_links SET last_used_at = now(), last_error = NULL, last_error_at = NULL WHERE mailbox = $1', [box.key]);
+  return { job_id: job.id, quotation_no: qt.quotation_no, drafted_now: true, view_url: d.view_url, replaced: d.replaced };
 }
 
 r.post('/costing/quotations/:id/draft', async (req, res, next) => {

@@ -35,6 +35,7 @@ import coaRegister from './routes/coa-register.js';
 import costing from './routes/costing.js';
 import enquiries from './routes/enquiries.js';
 import enquiryRobot from './routes/enquiry-robot.js';
+import gmailLink from './routes/gmail-link.js';
 import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
@@ -93,6 +94,8 @@ app.use('/api', authRouter);          // login is public
 app.use('/api', avsRobot);
 // The enquiry desk's jobs, for the same AVS robot with the same key (routes/enquiry-robot.js).
 app.use('/api', enquiryRobot);
+// Google's way back after an admin connects a desk mailbox's Gmail (signed state, no login token on that redirect).
+app.use('/api', gmailLink);
 app.use('/api', requireAuth);         // everything below needs a token
 app.use('/api', heartbeatMiddleware); // keeps the browsers' change feed provably alive
 // The modules ticked for a login in Masters → Users hold on the server too: a

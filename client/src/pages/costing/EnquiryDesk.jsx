@@ -10,7 +10,8 @@
 //
 // "Fetch enquiries from mail" asks the enquiry desk robot (Claude, with the mailbox's own Gmail) to read new
 // mail and file the enquiries here. A reply is only ever saved as a Gmail draft — CI Plant never sends; the
-// person sends it from Gmail. Finalise and Mark as sent need the Management right.
+// person sends it from Gmail. With the mailbox's Gmail connected (Settings › Connect Gmail, 11 Nov 2026) CI Plant's
+// server saves that draft itself the moment Send quotation is pressed — no robot for drafts. Finalise and Mark as sent need the Management right.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator, Inbox, Layers, Lock, LockOpen, Mail, Plus, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
 import { api } from '../../api.js';
@@ -33,6 +34,7 @@ function MailboxBadge({ box }) {
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${box.key === 'trial' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}
       title={trial ? 'Replies from this mailbox go only to its own address' : 'Replies go to the customer'}>
       <Mail size={13} />{box.label.toUpperCase()} · {box.email}{trial ? ' · replies go only to itself' : ''}
+      {box.gmail ? (box.gmail.last_error ? ' · Gmail needs connecting again' : ' · drafts saved by CI Plant') : ''}
     </span>
   );
 }
@@ -173,6 +175,25 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   }, [loadDesk, loadRows, loadQuotes]);
 
   useEffect(() => { loadDesk().catch(() => {}); }, [loadDesk]);
+  // Back from Google's Gmail page (routes/gmail-link.js): say how it went, open Settings, tidy the address.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const g = p.get('gmail');
+    if (!g) return;
+    const box = p.get('mb') === 'business' ? 'Business' : 'Trial';
+    const said = {
+      connected: [toast.success, `${box} mailbox: Gmail connected — CI Plant now saves quotation drafts itself`],
+      denied: [toast.info, 'Gmail was not connected — Google\'s page was closed or refused'],
+      wrong: [toast.error, `That Google account (${p.get('as') || '?'}) is not the ${box} mailbox's address — sign in to Google as the mailbox and connect again`],
+      refused: [toast.error, 'Only an admin connects Gmail'],
+      expired: [toast.error, 'The Connect Gmail link had expired — press Connect Gmail again'],
+      failed: [toast.error, `Gmail was not connected: ${p.get('why') || 'Google refused'}`],
+    }[g] || [toast.info, `Gmail: ${g}`];
+    said[0](said[1]);
+    setTab('settings');
+    window.history.replaceState(null, '', '/costing?tab=enquiries');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => { setRows(null); setPicked([]); loadRows().catch(() => setRows([])); loadQuotes().catch(() => {}); }, [loadRows, loadQuotes]);
   // Opened from a costing (Saved costings → its enquiry): that enquiry's card.
   useEffect(() => { if (focus) setOpen(Number(focus)); }, [focus]);
@@ -510,7 +531,7 @@ function DeskSettings({ desk, onSaved }) {
     <div className="glass max-w-4xl space-y-5 rounded-2xl p-4">
       <div>
         <div className="mb-1 text-sm font-bold">Mailboxes</div>
-        <p className="mb-3 text-xs text-slate-500">Claude reads and answers the mailbox in use through its own Gmail connection (the AVS robot). The trial mailbox replies only to itself unless you allow customers here.</p>
+        <p className="mb-3 text-xs text-slate-500">With a mailbox's Gmail connected, CI Plant saves each quotation reply as a draft in the customer's thread the moment Send quotation is pressed — it never sends; you send it from Gmail. New enquiry mails are still read by the Claude robot. The trial mailbox replies only to itself unless you allow customers here.</p>
         {boxes.map(b => (
           <div key={b.key} className="mb-2 grid items-end gap-3 sm:grid-cols-[120px_1fr_220px_110px]">
             <div className="text-sm font-bold">{b.label}</div>
@@ -521,6 +542,7 @@ function DeskSettings({ desk, onSaved }) {
               </Select>
             </Field>
             <Checkbox label="In use" checked={inUse === b.key} onChange={() => setInUse(b.key)} />
+            <div className="sm:col-span-4 -mt-1 mb-2"><GmailLink box={b} ready={desk.gmail_ready} onChanged={onSaved} /></div>
           </div>
         ))}
       </div>
@@ -532,6 +554,44 @@ function DeskSettings({ desk, onSaved }) {
       </div>
       <div className="text-xs text-slate-500">The robot that reads and drafts mail is Claude with the mailbox's own Gmail, running the enquiry desk skill — not the AVS photo-check routine.</div>
       <Button onClick={save}>Save settings</Button>
+    </div>
+  );
+}
+
+// One mailbox's Gmail line to CI Plant: Connect (Google's page, once) or Connected · Disconnect.
+function GmailLink({ box, ready, onChanged }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const g = box.gmail;
+  const connect = async () => {
+    setBusy(true);
+    try { const { url } = await api.post(`/costing/enquiry-desk/gmail/${box.key}/connect`, {}); window.location.assign(url); }
+    catch { setBusy(false); }
+  };
+  const disconnect = async () => {
+    if (!window.confirm(`Disconnect Gmail for ${box.email}? Drafts then wait for the Claude robot again.`)) return;
+    setBusy(true);
+    try { await api.del(`/costing/enquiry-desk/gmail/${box.key}`); toast.success('Gmail disconnected'); onChanged?.(); } finally { setBusy(false); }
+  };
+  if (!ready) return <span className="text-xs text-slate-500">Gmail drafts by CI Plant: not set up on the server yet.</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {g ? (
+        <>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-bold ring-1 ${g.last_error ? 'bg-red-50 text-red-800 ring-red-200' : 'bg-emerald-50 text-emerald-800 ring-emerald-200'}`}>
+            <Mail size={12} />{g.last_error ? 'Gmail needs connecting again' : `Gmail connected · ${g.email}`}
+          </span>
+          <span className="text-slate-500">by {g.connected_by_name || '—'} · {dateText(g.connected_at)}{g.last_used_at ? ` · last draft ${dateText(g.last_used_at)}` : ''}</span>
+          {g.last_error && <span className="text-red-700">{g.last_error}</span>}
+          {g.last_error && <Button size="sm" onClick={connect} disabled={busy}>Connect Gmail again</Button>}
+          <button type="button" onClick={disconnect} disabled={busy} className="font-semibold text-slate-500 underline hover:text-red-700">Disconnect</button>
+        </>
+      ) : (
+        <>
+          <Button size="sm" onClick={connect} disabled={busy}><Mail size={13} className="mr-1 inline" />Connect Gmail</Button>
+          <span className="text-slate-500">Sign in to Google as {box.email} and press Allow — then drafts are saved by CI Plant, no robot.</span>
+        </>
+      )}
     </div>
   );
 }
