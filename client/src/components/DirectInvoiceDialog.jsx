@@ -182,7 +182,7 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
         <section className="ci-data-panel">
           <div className="ci-form-panel-title m-0 border-b border-slate-100 px-4 py-3">
             <span>Items from stock</span>
-            <span>{trading.length} trading · {warehouse.length} board / RM · {items.cartons.length} cartons in stock</span>
+            <span>{trading.filter(b => +b.available > 0).length} trading · {warehouse.length} board / RM · {items.cartons.length} cartons in stock</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -209,7 +209,7 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                         {isMaterial(l.item_type)
                           ? (l.item_type === 'trading' ? trading : warehouse).map(b => (
                             <option key={b.material_id} value={b.material_id} data-search={searchText(b)}>
-                              {b.name} — {qtyText(b.available)} {b.unit}
+                              {b.name} — {+b.available > 0 ? `${qtyText(b.available)} ${b.unit}` : 'out of stock'}
                             </option>))
                           : items.cartons.map(c => (
                             <option key={c.product_id} value={c.product_id} data-search={searchText(c)}>
@@ -217,9 +217,13 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                             </option>))}
                       </Select>
                       {l.item_type === 'trading' && !trading.length && (
-                        <div className="mt-1 text-xs text-amber-600">No trading item has stock — add items and stock in Masters → Trading Items.</div>
+                        <div className="mt-1 text-xs text-amber-600">{customerId ? 'No trading item for this party' : 'No trading item yet'} — add one in Masters → Trading Items.</div>
                       )}
-                      {l.it && (
+                      {l.it && isMaterial(l.item_type) && !(+l.it.available > 0) ? (
+                        <div className="mt-1 text-xs font-semibold text-red-600">
+                          Out of stock — book its purchase bill in Accounts (trading items land in stock) before billing it.
+                        </div>
+                      ) : l.it && (
                         <div className={`mt-1 text-xs ${l.over ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
                           {l.over ? 'More than stock — ' : 'In stock: '}
                           {qtyText(l.it.available)} {isMaterial(l.item_type) ? l.it.unit : 'pcs'}

@@ -169,6 +169,13 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     const made = await call('POST', '/materials', { name: 'Ripple 200 ml jacket', category: 'trading', unit: 'pcs', gst_rate: 18, std_rate: 4.5 });
     assert.equal(made.status, 200, JSON.stringify(made.body));
     const id = made.body.id;
+    // At nil it is still offered — labelled out of stock, not hidden — and a
+    // bill against it is refused.
+    const bare = await call('GET', '/direct-invoices/items');
+    assert.equal(Number(bare.body.boards.find(b => b.material_id === id)?.available), 0);
+    const none = await call('POST', '/direct-invoices', {
+      customer_id: 1, lines: [{ item_type: 'board', material_id: id, qty: 1, rate: 4.5, gst_pct: 18 }] });
+    assert.equal(none.status, 409, JSON.stringify(none.body));
     assert.equal((await call('POST', '/inventory/adjust', { material_id: id, qty: 5000, note: 'Trading opening stock' })).status, 200);
     const master = await call('GET', '/direct-invoices/trading-items');
     assert.deepEqual(master.body.map(m => [m.name, m.in_stock]), [['Ripple 200 ml jacket', 5000]]);

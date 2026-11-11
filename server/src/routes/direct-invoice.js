@@ -26,17 +26,21 @@ const num = v => (Number.isFinite(+v) ? +v : NaN);
 const trim3 = n => +(+n).toFixed(3);
 
 // What can be sold right now: every board/material with available stock and
-// every carton with loose FG. Rate and GST are suggestions the dialog pre-fills;
-// the user types the selling rate.
+// every carton with loose FG — plus every active trading item, at nil too.
+// Rate and GST are suggestions the dialog pre-fills; the user types the
+// selling rate.
 r.get('/direct-invoices/items', async (_req, res, next) => {
   try {
     const boards = await q(`
       SELECT m.id AS material_id, m.name, m.code, m.category, m.unit,
-             av.q AS available, m.hsn_code AS hsn, m.customer_id,
+             COALESCE(av.q, 0) AS available, m.hsn_code AS hsn, m.customer_id,
              m.gst_rate AS gst_pct, COALESCE(m.std_rate, m.last_rate) AS rate
       FROM materials m
-      JOIN (SELECT material_id, SUM(qty) q FROM stock_batches
+      LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches
             WHERE status='available' AND qty > 0 GROUP BY material_id) av ON av.material_id = m.id
+      -- Board/RM only when on the shelf. Every active trading item is listed even
+      -- at nil, so the picker can say "out of stock" instead of "No results".
+      WHERE av.q IS NOT NULL OR (m.category = 'trading' AND COALESCE(m.active, 1) = 1)
       ORDER BY m.category, m.name, m.id`);
     const cartons = await q(`
       SELECT p.id AS product_id, p.name, p.code, p.party_item_code, c.name AS customer_name,
