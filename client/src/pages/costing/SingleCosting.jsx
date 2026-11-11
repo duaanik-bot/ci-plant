@@ -15,6 +15,7 @@ import { computeCosting, num, parseSize } from '../../lib/costing.js';
 import { batchExportSpec, blankValue, costingExportSpec, libraryDeclined, newLibraryEntry, savePayload, stillNeeded, valueFromSaved } from '../../lib/costingUi.js';
 import { costingValueFromEnquiry, withEnquiry } from '../../lib/enquiryUi.js';
 import CostingEditor from './CostingEditor.jsx';
+import SendQuotePanel from './SendQuotePanel.jsx';
 
 // What the page remembers about a saved costing.
 const meta = c => ({ id: c.id, costing_no: c.costing_no, version: c.version, complete: c.complete, status: c.status,
@@ -179,6 +180,10 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
           { customer: true, quantities: quoteQuantities.length > 1 ? quoteQuantities : [], draft: !approved })} />}
         {!embedded && <Button variant="secondary" onClick={fresh}>{saved ? <><FilePlus2 size={15} className="mr-1.5 inline" />New costing</> : <><RotateCcw size={15} className="mr-1.5 inline" />Start over</>}</Button>}
       </div>
+      {/* Saved for an enquiry: lock its price and send the quotation from right here. */}
+      {value.enquiry_id && saved && (
+        <div className="mb-4"><SendQuotePanel enquiryId={value.enquiry_id} canSend={!!boot?.can_approve} reloadSignal={saves} /></div>
+      )}
       <CostingEditor boot={boot} customers={customers} value={value} onChange={change} excludeId={saved?.id} askLibrary recheck={saves} />
       <Modal open={!!asking} onClose={() => { setAsking(null); afterSave.current = null; }} title={asking?.new_size ? 'Save this new size to the Size Library?' : 'Save this new layout to the Size Library?'}
         footer={<><Button variant="secondary" onClick={() => answer(false)}>No, only the costing</Button><Button onClick={() => answer(true)}>Yes, save it</Button></>}>

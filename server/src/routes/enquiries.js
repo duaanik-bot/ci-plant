@@ -278,7 +278,7 @@ const ENQ_COLS = `
   m.view_url AS mail_view_url, jsonb_array_length(COALESCE(m.attachments, '[]')) AS mail_attachments,
   (SELECT count(*) FROM enquiries x WHERE x.mail_id = e.mail_id)::int AS mail_items,
   (SELECT count(*) FROM enquiries x WHERE x.mail_id = e.mail_id AND x.id <= e.id)::int AS mail_pos,
-  qt.quotation_no, qt.status AS quotation_status`;
+  qt.quotation_no, qt.status AS quotation_status, qt.gmail_draft_url AS quotation_draft_url`;
 const ENQ_FROM = `enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN costing_batches b ON b.id = c.batch_id
                   LEFT JOIN enquiry_mails m ON m.id = e.mail_id LEFT JOIN quotations qt ON qt.id = e.quotation_id`;
 // A row as the desk shows it: the proposals are worked out here; the costing's inputs stay on the server.

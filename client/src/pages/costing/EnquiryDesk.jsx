@@ -342,13 +342,14 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       : tab === 'costing' ? [baseCols[0], baseCols[2], baseCols[3], baseCols[4], costingCol, baseCols[5]]
         : baseCols;
 
-  const savePrices = async list => {
+  const savePrices = async (list, { quiet = false } = {}) => {
     const items = list.map(e => ({ id: e.id, prices: (e.prices || []).map(p => ({ qty: p.qty, final: Number(prices[`${e.id}|${p.qty}`]) })) }));
     const bad = items.find(it => it.prices.some(p => !(p.final > 0)));
     if (bad) { toast.error('Every quantity needs a final price above zero.'); return; }
     const r = await api.put('/costing/enquiries/prices', { items });
     // Saved: the boxes show what is saved from now on.
     for (const e of list) for (const p of e.prices || []) typed.current.delete(`${e.id}|${p.qty}`);
+    if (quiet) return r;
     setLast({ text: `Final prices saved for ${r.saved.join(', ')}.`, undo: r.undo });
     setPicked([]);
     await reload();
@@ -379,7 +380,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const one = pickedRows.length === 1 ? pickedRows[0] : null;
   const several = pickedRows.length > 1;
   const detail = (
-    <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload}
+    <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload} canSend={!!desk.can_finalise}
       onSaved={x => x?.undo && setLast({ text: `${x.enquiry_no}: what was asked is saved.`, undo: x.undo })}
       onCost={e => (work?.mode === 'one' && work.ids[work.at] === e.id ? setOpen(null) : startOne([e.id]))}
       onMove={(path, e) => after(api.post(`/costing/enquiries/${path}`, { ids: [e.id] }), moved => `${nos(moved)} sent back to ${whereText(moved[0].to)}.`).then(() => setOpen(null))}
@@ -427,7 +428,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">Waiting to be costed, or with a costing not finished yet. <b>Cost it</b> opens the costing here; once it is complete the enquiry goes to Final price by itself. <b>Send back to Inbox</b> keeps any costing it has.</p>
       )}
       {stages && tab === 'price' && (
-        <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Tick locked rows and <b>Push & make Gmail draft</b> (Management) — the quotation is made and saved as a reply draft in the customer's mail thread. Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
+        <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Or tick rows and press <b>Send quotation</b> (Management): the prices shown are locked, the quotation is made and saved as a reply draft in the customer's mail thread — in one press. Clicking a row opens its card, which has the same Send quotation. Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
       )}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (
@@ -441,7 +442,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <div className="mt-6">
           <div className="mb-2 text-sm font-bold text-[#1D1D1F]">{tab === 'quote' ? 'Quotations' : 'Sent quotations'}</div>
           <DataTable rows={quotes} columns={quoteCols} onRowClick={x => setOpenQuote(x.id)} defaultSort={{ key: 'when', dir: 'desc' }} serialNumber={false}
-            empty={tab === 'quote' ? 'No quotation yet — tick finalised enquiries above and press Make quotation & Gmail draft.' : 'Nothing sent yet.'} />
+            empty={tab === 'quote' ? 'No quotation yet — tick finalised enquiries above and press Send quotation.' : 'Nothing sent yet.'} />
         </div>
       )}
 
@@ -465,17 +466,15 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           <Button size="sm" variant="secondary" onClick={applyAdjust}>Apply to ticked</Button>
           <Button size="sm" variant="secondary" onClick={() => savePrices(pickedRows)}><Lock size={13} className="mr-1 inline" />Lock ticked prices</Button>
           {mgmt && <Button size="sm" variant="success" onClick={async () => {
-            // Push only what is locked: a price still being typed never reaches a quotation.
+            // Seamless: the prices in the boxes are locked as shown, then ONE server step finalises, quotes and
+            // queues the reply draft in the customer's thread (owner, 11 Nov 2026).
             const open = pickedRows.filter(e => !isLocked(e));
-            const go = pickedRows.filter(isLocked);
-            if (open.length) toast.info(`Not pushed — lock the price first: ${open.map(e => e.enquiry_no).join(', ')}`);
-            if (!go.length) return;
-            // One server step: finalise, quotation, reply draft in the customer's thread.
-            const q = await quoteAndDraft(api, go.map(e => e.id));
+            if (open.length) await savePrices(open, { quiet: true });
+            const q = await quoteAndDraft(api, pickedRows.map(e => e.id));
             if (q.failed.length) toast.error(q.failed.join('; '));
             setLast({ text: sendSummary(q), quotations: q.quotations });
             setPicked([]); await reload();
-          }}><Send size={13} className="mr-1 inline" />Push & make Gmail draft</Button>}
+          }} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />Send quotation</Button>}
         </>}
         {tab === 'quote' && <Button size="sm" onClick={async () => {
           // The quotation and, straight on, its reply draft in the customer's thread.
@@ -483,7 +482,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           if (r.failed.length) toast.error(r.failed.join('; '));
           setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
-        }}><Send size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>}
+        }}><Send size={13} className="mr-1 inline" />Send quotation</Button>}
         {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}
         {['inbox', 'costing', 'price'].includes(tab) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
         {tab === 'dropped' && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => whereText(x.to)))].join(' and ')}.`)}>Bring back</Button>}

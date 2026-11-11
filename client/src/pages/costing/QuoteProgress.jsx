@@ -80,7 +80,7 @@ export default function QuoteProgress({ batchId, canFinalise = false, reloadSign
         <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs ring-1 ${p.next.kind === 'failed' ? 'bg-red-50 text-red-900 ring-red-200' : p.next.kind === 'wait' ? 'bg-violet-50 text-violet-900 ring-violet-200' : 'bg-amber-50 text-amber-900 ring-amber-200'}`}>
           <span className="min-w-0 flex-1 font-semibold">{p.next.kind === 'wait' ? '' : 'Next: '}{p.next.text}</span>
           {p.next.kind === 'quote' && canFinalise && p.to_quote.length > 0 && (
-            <Button size="sm" onClick={sendNow} disabled={busy}><Mail size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>
+            <Button size="sm" onClick={sendNow} disabled={busy}><Mail size={13} className="mr-1 inline" />Send quotation</Button>
           )}
           {(p.next.kind === 'draft' || p.next.kind === 'failed') && <Button size="sm" onClick={draftAgain} disabled={busy}><Mail size={13} className="mr-1 inline" />Save as Gmail draft</Button>}
           {p.quotations.filter(x => x.draft_url).map(x => (

@@ -7,6 +7,7 @@ import { api } from '../../api.js';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { STYLES, styleLabel } from '../../lib/costing.js';
 import { STAGE_BACKWARD, STAGE_TONE, dateText, parseQuantities, quantitiesText, qtyText, rupees, whereText } from '../../lib/enquiryUi.js';
+import SendQuotePanel from './SendQuotePanel.jsx';
 
 const STYLE_OPTIONS = Object.keys(STYLES);
 const EMPTY = {
@@ -39,7 +40,7 @@ function eventDetail(ev) {
   return '';
 }
 
-export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSaved, onCost, onMove, onUndo }) {
+export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSaved, onCost, onMove, onUndo, canSend = false }) {
   const toast = useToast();
   const [e, setE] = useState(null);
   const [form, setForm] = useState(EMPTY);
@@ -129,19 +130,8 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
           <Field label="Notes (inside only — never on the quotation)">
             <Textarea value={form.notes} onChange={ev => set('notes', ev.target.value)} disabled={locked} />
           </Field>
-          {e?.prices?.length > 0 && (
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="mb-1 text-xs font-bold text-slate-600">Prices a carton</div>
-              <table className="w-full text-sm">
-                <thead><tr className="text-left text-xs text-slate-500"><th>Quantity</th><th className="text-right">Costing proposes</th><th className="text-right">Final</th></tr></thead>
-                <tbody>
-                  {e.prices.map(p => (
-                    <tr key={p.qty}><td>{qtyText(p.qty)}</td><td className="text-right">{rupees(p.proposed, 3)}</td>
-                      <td className="text-right font-bold">{rupees(p.final)}{p.changed && <span className="ml-1 text-xs font-semibold text-amber-700" title={`Set against ${rupees(p.set_against, 3)}`}>costing changed</span>}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {e && !isNew && e.stage !== 'dropped' && (
+            <SendQuotePanel enquiryId={e.id} canSend={canSend} reloadSignal={e.updated_at} onChanged={() => { onChanged?.(); reread(); }} />
           )}
         </div>
         <div className="space-y-3">

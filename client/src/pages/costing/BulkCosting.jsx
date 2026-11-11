@@ -294,10 +294,13 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   };
   // Push = finalise the locked prices, make the quotation and queue its Gmail reply draft — one press.
   const pushLocked = async () => {
-    const locked = priced.filter(x => x.enquiry_id && lockedRow(x));
-    if (!locked.length) { toast.error('Lock the prices first.'); return; }
-    // One server step: finalise, quotation, reply draft — it says what it skipped and why.
-    const q = await quoteAndDraft(api, locked.map(x => x.enquiry_id));
+    // Seamless: unlocked prices are locked as shown in their boxes, then ONE server step finalises, quotes and
+    // queues the reply draft — it says what it skipped and why.
+    const open = priced.filter(x => x.enquiry_id && !lockedRow(x) && lockable(x));
+    if (open.length) await lockRows(open);
+    const rows = priced.filter(x => x.enquiry_id);
+    if (!rows.length) return;
+    const q = await quoteAndDraft(api, rows.map(x => x.enquiry_id));
     if (q.failed.length) toast.error(q.failed.join('; '));
     (q.drafted.length ? toast.success : toast.info)(sendSummary(q));
     await loadDesk();
@@ -439,7 +442,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
             <Lock size={15} className="mr-1.5 inline" />Lock all prices
           </Button>
           {boot?.can_approve && <Button variant="success" onClick={pushLocked} disabled={dirty} title="Finalise the locked rows, make the quotation and save the reply as a Gmail draft in the customer's thread">
-            <Send size={15} className="mr-1.5 inline" />Push & make Gmail draft
+            <Send size={15} className="mr-1.5 inline" />Send quotation
           </Button>}
         </>}
         <ExportMenu label="Export (internal)" build={() => batchExportSpec(batch, exportRows, { quantities: qs })} />

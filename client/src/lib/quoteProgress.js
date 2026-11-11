@@ -68,8 +68,8 @@ export function quoteProgress(p, now = Date.now()) {
   // What the person does next, and what is only waiting.
   let next = null;
   if (cur?.key === 'approved') next = { kind: 'approve', text: 'Approve the costings (Approve ready, top of the bulk costing)' };
-  else if (cur?.key === 'locked' || cur?.key === 'pushed') next = { kind: 'lock', text: 'Lock the final prices, then Push locked to Quotations' };
-  else if (cur?.key === 'quoted') next = { kind: 'quote', text: 'Make the quotation and its Gmail draft' };
+  else if (cur?.key === 'locked' || cur?.key === 'pushed') next = { kind: 'lock', text: 'Lock the final prices and press Send quotation' };
+  else if (cur?.key === 'quoted') next = { kind: 'quote', text: 'Send the quotation (it is made and saved as a Gmail reply draft)' };
   else if (cur?.key === 'queued') next = { kind: 'draft', text: 'Save the quotation as a Gmail draft' };
   else if (cur?.key === 'drafted') {
     next = failed
