@@ -9,7 +9,7 @@ import { Calculator, Handshake, Lock, Mail, Send } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Input, useToast } from '../../components/ui.jsx';
 import { qtyText, rupees, dateText } from '../../lib/enquiryUi.js';
-import { counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
+import { BASES, counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 
 const inr0 = v => (v == null ? '—' : `₹${Math.round(v).toLocaleString('en-IN')}`);
@@ -17,6 +17,17 @@ const signed = v => (v == null ? '—' : `${v < 0 ? '−' : '+'}₹${Math.abs(Ma
 const pct = v => (v == null ? '—' : `${v.toFixed(1)}%`);
 const unit = v => (v == null ? '—' : `${v < 0 ? '−' : '+'}${rupees(Math.abs(v), 3)}`);
 const tone = v => (v == null ? 'text-slate-500' : v < 0 ? 'text-red-700' : 'text-emerald-700');
+const pctSigned = v => (v == null ? '' : `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`);
+// One comparison cell: ₹ a carton, ₹ on the line, and the % of the base.
+function GapCell({ g }) {
+  if (!g) return <td className="px-2 py-1 text-right text-slate-400">—</td>;
+  return (
+    <td className={`px-2 py-1 text-right tabular-nums ${tone(g.unit)}`}>
+      {unit(g.unit)}<div className="text-[10px]">{signed(g.line)} · {pctSigned(g.pct)}</div>
+    </td>
+  );
+}
+const VS_HEAD = { ours: 'vs quoted', costed: 'vs should-cost', cost: 'vs actual cost' };
 
 function Tile({ label, value, sub, cls = '' }) {
   return (
@@ -96,13 +107,41 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
         <span className="ml-auto text-[11px] text-slate-500">Internal — cost, loss and discount never go to the customer</span>
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Tile label="Our quote" value={inr0(t.value_ours)} sub={`${t.items} line${t.items === 1 ? '' : 's'}`} />
-        <Tile label="Their counter" value={inr0(t.value_theirs)} sub={`${t.countered} with their price`} />
-        <Tile label="Discount asked" value={pct(t.disc_asked_pct)} sub={t.disc_asked_value != null ? `${inr0(t.disc_asked_value)} off our quote` : ''} cls="text-amber-800" />
-        <Tile label="Our cost" value={inr0(t.cost)} sub={t.missing_cost ? `${t.missing_cost} without a costing` : 'before margin'} />
-        <Tile label="At their price" value={signed(t.at_theirs)} sub={t.below_cost_theirs ? `${t.below_cost_theirs} line${t.below_cost_theirs === 1 ? '' : 's'} below cost` : 'no line below cost'} cls={tone(t.at_theirs)} />
-        <Tile label="At our revised" value={signed(t.at_revised)} sub={`${inr0(t.value_revised)} · ${pct(t.disc_given_pct)} off`} cls={tone(t.at_revised)} />
+      <div className="mb-2 flex flex-wrap gap-2">
+        <Tile label="Actual cost" value={inr0(t.value_cost)} sub={t.missing_cost ? `${t.missing_cost} without a costing` : 'the costing, before margin'} />
+        <Tile label="Should-cost" value={inr0(t.value_costed)} sub={t.model_margin != null ? `model adds ${inr0(t.model_margin)}` : 'the costing\'s price'} />
+        <Tile label="We quoted" value={inr0(t.value_ours)} sub={t.quote_over_model != null ? `${signed(t.quote_over_model)} over the model` : `${t.items} lines`} />
+        <Tile label="They ask" value={inr0(t.value_theirs)} sub={`${pct(t.disc_asked_pct)} off our quote · ${t.countered} lines`} cls="text-amber-800" />
+        <Tile label="Our revised" value={inr0(t.value_revised)} sub={`${pct(t.disc_given_pct)} off our quote`} cls="text-brand-700" />
+      </div>
+
+      <div className="mb-3 overflow-x-auto rounded-xl bg-white/80 ring-1 ring-slate-200">
+        <table className="w-full text-xs" aria-label="Every comparison, the whole order">
+          <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+            <tr><th className="px-3 py-1.5">Whole order</th>{BASES.map(b => <th key={b.key} className="px-3 py-1.5 text-right">vs {b.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {[['theirs', 'Their price', 'loss / short of'], ['revised', 'Our revised', '']].map(([k, label]) => (
+              <tr key={k} className="border-t border-slate-100">
+                <td className="px-3 py-1.5 font-semibold">{label}</td>
+                {BASES.map(b => {
+                  const g = t.matrix[k][b.key];
+                  return (
+                    <td key={b.key} className={`px-3 py-1.5 text-right tabular-nums ${tone(g?.line)}`}>
+                      {g ? <>
+                        <span className="text-sm font-bold">{signed(g.line)}</span> <span>{pctSigned(g.pct)}</span>
+                        <div className="text-[10px] text-slate-500">{g.below ? `${g.below} of ${g.lines} line${g.lines === 1 ? '' : 's'} below` : `all ${g.lines} at or above`}</div>
+                      </> : '—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="border-t border-slate-100 px-3 py-1 text-[11px] text-slate-500">
+          Their price vs our quote = what they want off (the discount asked) · vs should-cost = how far under the costing model's price · vs actual cost = the real loss or profit.
+        </div>
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -113,6 +152,7 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
           <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(l => FILLS.costPlus(l, plus))}>Cost +</button>
           <Input className="!h-7 !w-16 text-right text-xs" inputMode="decimal" value={plus} onChange={e => setPlus(e.target.value)} aria-label="Rupees over cost" />
         </span>
+        <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.costed)}>Should-cost</button>
         <button type="button" className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-slate-200 hover:bg-slate-50" onClick={() => fillAll(FILLS.ours)}>Our quote</button>
         {batch.length === 1 && (
           <a href={`/costing?tab=bulk&batch=${batch[0]}`} className="ml-auto inline-flex items-center gap-1 font-semibold text-brand-700 hover:underline">
@@ -124,13 +164,19 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
       <div className="overflow-x-auto rounded-xl bg-white/70 ring-1 ring-slate-200">
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+            <tr className="text-[10px] normal-case">
+              <th colSpan={6} />
+              <th colSpan={3} className="border-l border-slate-200 px-2 pt-1 text-center font-bold text-amber-800">Their price …</th>
+              <th />
+              <th colSpan={3} className="border-l border-slate-200 px-2 pt-1 text-center font-bold text-brand-700">Our revised …</th>
+            </tr>
             <tr>
               <th className="px-2 py-1.5">Item</th><th className="px-2 py-1.5 text-right">Qty</th>
-              <th className="px-2 py-1.5 text-right">Our quote</th><th className="px-2 py-1.5 text-right">Their price</th>
-              <th className="px-2 py-1.5 text-right">Our cost</th><th className="px-2 py-1.5 text-right">Asked</th>
-              <th className="px-2 py-1.5 text-right">At their price</th>
-              <th className="px-2 py-1.5 text-right">Revised ₹</th><th className="px-2 py-1.5 text-right">At revised</th>
-              <th className="px-2 py-1.5 text-right">Given</th>
+              <th className="px-2 py-1.5 text-right">Actual cost</th><th className="px-2 py-1.5 text-right">Should-cost</th>
+              <th className="px-2 py-1.5 text-right">Quoted</th><th className="px-2 py-1.5 text-right">They ask</th>
+              {BASES.map((b, i) => <th key={`t${b.key}`} className={`px-2 py-1.5 text-right ${i === 0 ? 'border-l border-slate-200' : ''}`}>{VS_HEAD[b.key]}</th>)}
+              <th className="px-2 py-1.5 text-right">Revised ₹</th>
+              {BASES.map((b, i) => <th key={`r${b.key}`} className={`px-2 py-1.5 text-right ${i === 0 ? 'border-l border-slate-200' : ''}`}>{VS_HEAD[b.key]}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -142,22 +188,21 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, ti
                 <tr key={k} className={`border-t border-slate-100 ${l.theirs_below_cost ? 'bg-red-50/40' : ''}`}>
                   <td className="px-2 py-1"><div className="font-semibold">{l.product}</div><div className="text-[10px] text-slate-500">{l.enquiry_no}</div></td>
                   <td className="px-2 py-1 text-right tabular-nums">{qtyText(l.qty)}</td>
+                  <td className="px-2 py-1 text-right tabular-nums text-slate-600">{l.cost != null ? rupees(l.cost, 3) : '—'}</td>
+                  <td className="px-2 py-1 text-right tabular-nums text-slate-600">{l.costed != null ? rupees(l.costed, 3) : '—'}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{l.ours != null ? rupees(l.ours, 2) : '—'}</td>
                   <td className="px-2 py-1 text-right">
                     <Input className="!h-7 !w-20 text-right text-xs" inputMode="decimal" disabled={!editable}
                       value={theirsTyped[k] ?? (l.theirs != null ? String(l.theirs) : '')} placeholder="—"
                       onChange={e => setTheirsTyped(s => ({ ...s, [k]: e.target.value }))} aria-label={`Their price, ${l.product}`} />
                   </td>
-                  <td className="px-2 py-1 text-right tabular-nums text-slate-600">{l.cost != null ? rupees(l.cost, 3) : '—'}</td>
-                  <td className="px-2 py-1 text-right tabular-nums">{l.disc_asked != null ? pct(l.disc_asked * 100) : '—'}</td>
-                  <td className={`px-2 py-1 text-right tabular-nums ${tone(l.at_theirs)}`}>{unit(l.at_theirs_unit)}<div className="text-[10px]">{signed(l.at_theirs)}</div></td>
+                  {BASES.map(b => <GapCell key={`t${b.key}`} g={l.theirs_vs[b.key]} />)}
                   <td className="px-2 py-1 text-right">
                     <Input className={`!h-7 !w-20 text-right text-xs font-bold ${l.revised_below_cost ? '!text-red-700' : ''}`} inputMode="decimal" disabled={!editable}
                       value={boxes[k] ?? (l.revised != null ? String(l.revised) : '')}
                       onChange={e => setBoxes(b => ({ ...b, [k]: e.target.value }))} aria-label={`Revised price, ${l.product}`} />
                   </td>
-                  <td className={`px-2 py-1 text-right tabular-nums ${tone(l.at_revised)}`}>{unit(l.at_revised_unit)}<div className="text-[10px]">{signed(l.at_revised)}</div></td>
-                  <td className="px-2 py-1 text-right tabular-nums">{l.disc_given != null ? pct(l.disc_given * 100) : '—'}</td>
+                  {BASES.map(b => <GapCell key={`r${b.key}`} g={l.revised_vs[b.key]} />)}
                 </tr>
               );
             })}

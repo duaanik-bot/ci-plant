@@ -1,12 +1,12 @@
 // The counter-offer maths (client/src/lib/counterMath.js). Invented products and figures.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { counterLines, counterTotals, FILLS, keyOf } from '../../client/src/lib/counterMath.js';
+import { counterLines, counterTotals, FILLS, keyOf, gap } from '../../client/src/lib/counterMath.js';
 
 const E = [
-  { id: 1, enquiry_no: 'CI-ENQ-9001', product_name: 'TEST A', prices: [{ qty: 1000, final: 10, ours: 10, theirs: 8, cost: 9 }] },
-  { id: 2, enquiry_no: 'CI-ENQ-9002', product_name: 'TEST B', prices: [{ qty: 2000, final: 5, ours: 5, theirs: 4.5, cost: 4 }] },
-  { id: 3, enquiry_no: 'CI-ENQ-9003', product_name: 'TEST C', prices: [{ qty: 500, final: 2, ours: 2, theirs: null, cost: 1.5 }] },
+  { id: 1, enquiry_no: 'CI-ENQ-9001', product_name: 'TEST A', prices: [{ qty: 1000, final: 10, ours: 10, theirs: 8, cost: 9, proposed: 9.4 }] },
+  { id: 2, enquiry_no: 'CI-ENQ-9002', product_name: 'TEST B', prices: [{ qty: 2000, final: 5, ours: 5, theirs: 4.5, cost: 4, proposed: 4.4 }] },
+  { id: 3, enquiry_no: 'CI-ENQ-9003', product_name: 'TEST C', prices: [{ qty: 500, final: 2, ours: 2, theirs: null, cost: 1.5, proposed: 1.8 }] },
 ];
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} ≠ ${b}`);
 
@@ -47,4 +47,29 @@ test('the revised box drives the margin and the discount given; quick fills', ()
   assert.equal(FILLS.costPlus(lines[0], 0.25), 9.25);
   assert.equal(FILLS.halfway(lines[2]), null, 'no counter, no halfway');
   assert.equal(counterLines(E, { [keyOf(1, 1000)]: '' })[0].revised, null, 'an emptied box is empty, not our price');
+});
+
+test('every comparison: their price and our revised against our quote, the should-cost and the actual cost', () => {
+  const lines = counterLines(E, { [keyOf(1, 1000)]: '9.5' });
+  const a = lines[0];
+  close(a.theirs_vs.ours.unit, -2, 'A: ₹2 a carton under our quote');
+  close(a.theirs_vs.ours.pct, -20, 'A: 20% under our quote');
+  close(a.theirs_vs.costed.line, -1400, 'A: (8 − 9.40) × 1,000 under the should-cost');
+  close(a.theirs_vs.cost.line, -1000, 'A: the loss on actual cost');
+  close(a.revised_vs.costed.unit, 0.1, 'A revised 9.50 is ₹0.10 over the should-cost');
+  assert.equal(a.theirs_below_costed, true);
+  assert.equal(lines[2].theirs_vs.ours, null, 'no counter → no comparison');
+  const t = counterTotals(lines);
+  // theirs vs quoted over the countered lines: 17,000 − 20,000
+  close(t.matrix.theirs.ours.line, -3000, 'order: their counter vs our quote');
+  close(t.matrix.theirs.ours.pct, -15, 'order: −15% = the discount asked');
+  close(t.matrix.theirs.costed.line, 17000 - (9400 + 8800), 'order: their counter vs the should-cost');
+  close(t.matrix.theirs.cost.line, 0, 'order: their counter vs actual cost');
+  assert.equal(t.matrix.theirs.cost.below, 1, 'one line under cost');
+  close(t.value_costed, 9400 + 8800 + 900, 'the should-cost of the whole order');
+  close(t.model_margin, (9400 + 8800 + 900) - (9000 + 8000 + 750), 'the margin the model builds in');
+  close(t.quote_over_model, 21000 - 19100, 'what our quote added over the model');
+  close(t.matrix.revised.cost.line, 500 + 2000 + 250, 'order: our revised vs actual cost');
+  assert.equal(gap(null, 1, 10), null);
+  assert.equal(FILLS.costed(a), 9.4);
 });
