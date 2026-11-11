@@ -14,7 +14,7 @@
 //     enquiry on, and a row taken out sends its enquiry back to wait in Costing. The desk opens this same
 //     editor in place (`embedded`) for the enquiries ticked together.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, BadgeCheck, ClipboardPaste, Copy, FolderOpen, Plus, Save, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, BadgeCheck, ClipboardPaste, Copy, FolderOpen, Lock, LockOpen, Plus, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { api, fmt } from '../../api.js';
 import { Button, DataTable, ExportMenu, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { computeCosting, parseSize, styleLabel, num, quantityBreaks } from '../../lib/costing.js';
@@ -248,6 +248,55 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const toApprove = batch.rows.filter(r => r.id && r.complete && r.status !== 'approved').length;
   const allApproved = ready.length > 0 && ready.every(x => x.status === 'approved') && !dirty;
 
+  // ── Final price to quote (owner, 11 Nov 2026: "one final box with the editable pre-filled rate … lock the price
+  // so that we can send the mail with a final locked price"). Rows costing an enquiry get a box, pre-filled with
+  // the quote rounded up to the paisa; Lock saves it as the enquiry's final price (the desk's Final price), and
+  // "Push locked to Quotations" finalises them. The customer's mail is the desk's approved template: product,
+  // its details as asked and the rate — never a cost, sheet or internal rate.
+  const deskIds = [...new Set(batch.rows.map(r => r.enquiry_id).filter(Boolean))];
+  const [desk, setDesk] = useState({});                // enquiry id → the enquiry as the desk shows it
+  const [finals, setFinals] = useState({});            // enquiry id → the box's text
+  const [opened, setOpened] = useState(() => new Set());   // locked rows opened again to change
+  const loadDesk = () => (deskIds.length
+    ? api.get(`/costing/enquiries?ids=${deskIds.join(',')}`).then(list => setDesk(Object.fromEntries(list.map(e => [e.id, e])))).catch(() => {})
+    : Promise.resolve());
+  useEffect(() => { loadDesk(); }, [deskIds.join(','), batch.batch_no]); // eslint-disable-line react-hooks/exhaustive-deps
+  const priceOf = (x, e) => (e?.prices || []).find(p => num(p.qty) === num(x.inputs.qty)) || (e?.prices || [])[0] || null;
+  const boxOf = x => {
+    const e = desk[x.enquiry_id];
+    const p = priceOf(x, e);
+    if (finals[x.enquiry_id] != null) return finals[x.enquiry_id];
+    if (p?.final != null) return String(p.final);
+    return x.r.ok ? String(Math.ceil(x.r.quote_per_unit * 100 - 1e-6) / 100) : '';
+  };
+  const lockedRow = x => {
+    const p = priceOf(x, desk[x.enquiry_id]);
+    return !!p && p.final != null && !p.changed && String(p.final) === String(boxOf(x)) && !opened.has(x.enquiry_id);
+  };
+  // A row can be locked once its costing is saved on its enquiry (save the batch first).
+  const lockable = x => !!x.enquiry_id && !!x.id && !dirty && x.r.ok && !!desk[x.enquiry_id]?.costing_complete;
+  const lockRows = async list => {
+    const items = list.filter(lockable).map(x => {
+      const p = priceOf(x, desk[x.enquiry_id]);
+      return { id: x.enquiry_id, prices: [{ qty: p?.qty ?? num(x.inputs.qty), final: Number(boxOf(x)) }] };
+    });
+    if (!items.length) { toast.error('Save the batch first — a price is locked on a saved costing.'); return; }
+    if (items.some(it => !(it.prices[0].final > 0))) { toast.error('Every final price must be more than zero.'); return; }
+    await api.put('/costing/enquiries/prices', { items });
+    setFinals(f => { const n = { ...f }; for (const it of items) delete n[it.id]; return n; });
+    setOpened(o => { const n = new Set(o); for (const it of items) n.delete(it.id); return n; });
+    await loadDesk();
+    toast.success(`${items.length} price${items.length === 1 ? '' : 's'} locked`);
+  };
+  const pushLocked = async () => {
+    const go = priced.filter(x => x.enquiry_id && lockedRow(x)).map(x => x.enquiry_id);
+    if (!go.length) { toast.error('Lock the prices first.'); return; }
+    const r = await api.post('/costing/enquiries/finalise', { ids: go });
+    if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
+    if (r.done?.length) toast.success(`${r.done.join(', ')} in Quotations — Enquiry desk → Quotations → Generate quotation, then Save as Gmail draft`);
+    await loadDesk();
+  };
+
   const save = async () => {
     const named = batch.rows.filter(r => r.product_name.trim());
     if (named.length < batch.rows.length) {
@@ -281,6 +330,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     toast.success(`${b.batch_no} saved — ${b.rows.length} products`);
     setDirty(false);
     onSaved?.(b);
+    loadDesk();
     if (!batch.id) onOpened(b.id);
     else setBatch(cur => ({ ...cur, batch_no: b.batch_no,
       rows: rowsFromServer(b.rows).map(r => ({ ...r, dp_auto: blank(cur.common.inputs.dp_rate) && String(r.inputs.dp_rate) === String(styleDp(typical, r.style)) })) }));
@@ -375,6 +425,14 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
             <BadgeCheck size={15} className="mr-1.5 inline" />Approve {toApprove} ready
           </Button>
         )}
+        {deskIds.length > 0 && <>
+          <Button variant="secondary" onClick={() => lockRows(priced.filter(x => !lockedRow(x)))} disabled={dirty} title={dirty ? 'Save the batch first' : 'Lock the final price of every saved row'}>
+            <Lock size={15} className="mr-1.5 inline" />Lock all prices
+          </Button>
+          {boot?.can_approve && <Button variant="success" onClick={pushLocked} disabled={dirty} title="Finalise the locked rows — they go to the desk's Quotations, ready for the customer's mail">
+            <Send size={15} className="mr-1.5 inline" />Push locked to Quotations
+          </Button>}
+        </>}
         <ExportMenu label="Export (internal)" build={() => batchExportSpec(batch, exportRows, { quantities: qs })} />
         {/* On the desk the quotation is the desk's own (Quotations tab). */}
         {!embedded && <ExportMenu label="Quotation sheet" build={() => batchExportSpec(batch, exportRows, { customer: true, quantities: qs, draft: !allApproved })} />}
@@ -446,12 +504,14 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
             <Button size="sm" variant="secondary" onClick={() => update(b => ({ ...b, rows: [...b.rows, newRow(b.common, typical)] }))}><Plus size={14} className="mr-1 inline" />Add a row</Button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]" style={{ minWidth: 1180 + qs.length * 96 }}>
+            <table className="w-full text-[13px]" style={{ minWidth: 1180 + qs.length * 96 + (deskIds.length ? 150 : 0) }}>
               <thead className="text-[11px] uppercase tracking-wide text-slate-500">
                 <tr className="text-left">
                   <th className="px-1.5 py-1">#</th><th className="px-1.5 py-1">Product</th><th className="px-1.5 py-1">Size (mm)</th><th className="px-1.5 py-1">Pasting</th>
                   <th className="px-1.5 py-1 text-right">Qty</th><th className="px-1.5 py-1">Sheet L × W (in)</th><th className="px-1.5 py-1 text-right">Ups</th>
-                  <th className="px-1.5 py-1 text-right">Cost / carton</th><th className="px-1.5 py-1 text-right">Quote</th><th className="px-1.5 py-1 text-right">Value</th>
+                  <th className="px-1.5 py-1 text-right">Cost / carton</th><th className="px-1.5 py-1 text-right">Quote</th>
+                  {deskIds.length > 0 && <th className="px-1.5 py-1 text-right text-emerald-700" title="The price the customer is quoted — pre-filled, change it, then Lock">Final ₹ to quote</th>}
+                  <th className="px-1.5 py-1 text-right">Value</th>
                   {qs.map(q => <th key={q} className="px-1.5 py-1 text-right text-brand-700">@ {plain(q, 0)}</th>)}
                   <th className="px-1.5 py-1">Before · Die</th><th className="px-1.5 py-1">Status</th><th className="px-1.5 py-1" />
                 </tr>
@@ -488,6 +548,29 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                       <td className="px-1.5 py-1"><Input inputMode="decimal" className={`${cell} !w-14 text-right`} value={x.inputs.ups ?? ''} onChange={e => setRowIn(x.key, 'ups', e.target.value)} /></td>
                       <td className="px-1.5 py-1.5 text-right font-bold tabular-nums">{x.r.ok ? perUnit(x.r.cost_per_unit) : '—'}</td>
                       <td className="px-1.5 py-1.5 text-right tabular-nums text-brand-700">{x.r.ok ? perUnit(x.r.quote_per_unit) : '—'}</td>
+                      {deskIds.length > 0 && (
+                        <td className="px-1.5 py-1 text-right">
+                          {!x.enquiry_id ? <span className="text-[11px] text-slate-400">no enquiry</span> : (() => {
+                            const locked = lockedRow(x);
+                            const e = desk[x.enquiry_id];
+                            const stage = e?.stage;
+                            return (
+                              <div className="flex flex-col items-end gap-1">
+                                <Input inputMode="decimal" readOnly={locked} value={boxOf(x)}
+                                  className={`${cell} !w-24 text-right ${locked ? '!bg-emerald-50 font-bold text-emerald-900' : ''}`}
+                                  onChange={ev => setFinals(f => ({ ...f, [x.enquiry_id]: ev.target.value }))} />
+                                {['quote_ready', 'sent'].includes(stage) ? <span className="text-[10px] font-bold text-emerald-700">{stage === 'sent' ? 'Sent' : 'In Quotations'}</span>
+                                  : locked ? (
+                                    <button type="button" onClick={() => setOpened(o => new Set(o).add(x.enquiry_id))} className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:underline"><Lock size={10} />Locked · unlock</button>
+                                  ) : (
+                                    <button type="button" disabled={!lockable(x)} onClick={() => lockRows([x])} title={lockable(x) ? 'Lock this price' : 'Save the batch first'}
+                                      className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-700 hover:underline disabled:text-slate-400 disabled:no-underline"><LockOpen size={10} />Lock</button>
+                                  )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                      )}
                       <td className="px-1.5 py-1.5 text-right tabular-nums">{x.r.ok ? rupees(x.r.cost_value) : '—'}
                         {x.r.ok && <div className="text-[10px] font-normal text-slate-500" title="Set-up: the same whatever the quantity">set-up {rupees(x.r.split.fixed)}</div>}</td>
                       {qs.map(q => {
