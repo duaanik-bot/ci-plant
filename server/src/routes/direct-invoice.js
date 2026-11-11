@@ -36,11 +36,15 @@ r.get('/direct-invoices/items', async (_req, res, next) => {
              COALESCE(av.q, 0) AS available, m.hsn_code AS hsn, m.customer_id,
              m.gst_rate AS gst_pct, COALESCE(m.std_rate, m.last_rate) AS rate
       FROM materials m
-      LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches
-            WHERE status='available' AND qty > 0 GROUP BY material_id) av ON av.material_id = m.id
+      -- Net of every available pile: a trading sale billed ahead of stock
+      -- leaves a negative one, and the next purchase brings the sum back up.
+      LEFT JOIN (SELECT b.material_id, SUM(b.qty) q FROM stock_batches b
+            JOIN materials bm ON bm.id = b.material_id
+            WHERE b.status='available' AND (b.qty > 0 OR bm.category = 'trading')
+            GROUP BY b.material_id) av ON av.material_id = m.id
       -- Board/RM only when on the shelf. Every active trading item is listed even
       -- at nil, so the picker can say "out of stock" instead of "No results".
-      WHERE av.q IS NOT NULL OR (m.category = 'trading' AND COALESCE(m.active, 1) = 1)
+      WHERE (av.q > 0 AND m.category <> 'trading') OR (m.category = 'trading' AND COALESCE(m.active, 1) = 1)
       ORDER BY m.category, m.name, m.id`);
     const cartons = await q(`
       SELECT p.id AS product_id, p.name, p.code, p.party_item_code, c.name AS customer_name,
@@ -74,9 +78,11 @@ r.get('/direct-invoices/next-number', async (_req, res, next) => {
   catch (e) { next(e); }
 });
 
-// Take board off the shelf, oldest pile first. Refuses rather than writing the
-// book past nil: a tax invoice for goods the book says are not there is a stock
-// problem to fix first (Inventory → Stock Adjustment), not one to bill through.
+// Take board off the shelf, oldest pile first. Board and RM refuse rather than
+// writing the book past nil — the plant plans on that stock. A TRADING item may
+// be sold ahead of its stock (Anik, 2026-11-11: "allow, with warning"): what is
+// on the shelf goes first, and the rest is booked as a negative pile named
+// after the invoice, so stock reads below zero until the purchase is booked.
 async function takeBoard(m, qty, invId, invNumber, qc, oc) {
   // Same lock a plan freeze and a GRN cover take on this board, so a sale and
   // a hold cannot both read the same free sheets.
@@ -85,7 +91,7 @@ async function takeBoard(m, qty, invId, invNumber, qc, oc) {
     `SELECT id, qty FROM stock_batches WHERE material_id=$1 AND status='available' AND qty > 0
      ORDER BY created_at, id FOR UPDATE`, [m.id]);
   const have = batches.reduce((s, b) => s + Number(b.qty || 0), 0);
-  if (have + 1e-6 < qty)
+  if (have + 1e-6 < qty && m.category !== 'trading')
     throw fail(409, `Only ${trim3(have)} ${m.unit} of ${m.name} in stock — cannot bill ${trim3(qty)}`);
   let left = qty;
   for (const b of batches) {
@@ -99,6 +105,18 @@ async function takeBoard(m, qty, invId, invNumber, qc, oc) {
       [m.id, b.id, -take, REF, invId, `Sold on direct invoice ${invNumber}`]);
     left -= take;
   }
+  if (left > 1e-9) {
+    const short = trim3(left);
+    const [b] = await qc(
+      `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
+       VALUES ($1,$2,$3,0,$4,'available') RETURNING id`,
+      [m.id, invNumber, -short, m.unit]);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'dispatch',$3,$4,$5,$6)`,
+      [m.id, b.id, -short, REF, invId, `Sold ahead of stock on direct invoice ${invNumber} — ${short} ${m.unit} not yet purchased`]);
+    return short;
+  }
+  return 0;
 }
 
 r.post('/direct-invoices', canBill, async (req, res, next) => {
@@ -107,7 +125,7 @@ r.post('/direct-invoices', canBill, async (req, res, next) => {
     const raw = Array.isArray(req.body.lines) ? req.body.lines : [];
     if (!customer_id || !raw.length) throw fail(400, 'A party and at least one item are required');
 
-    const invId = await tx(async (qc, oc) => {
+    const made = await tx(async (qc, oc) => {
       // The number first, then stock rows — one order for every direct invoice.
       await lockDocNumber(DIRECT_PREFIX, oc);
       const customer = await oc('SELECT * FROM customers WHERE id=$1', [customer_id]);
@@ -120,7 +138,7 @@ r.post('/direct-invoices', canBill, async (req, res, next) => {
         if (!(qty > 0)) throw fail(400, `${at}: enter a quantity`);
         if (!(rate >= 0)) throw fail(400, `${at}: enter a rate`);
         if (l.item_type === 'board') {
-          const m = await oc('SELECT id, name, unit, hsn_code, gst_rate, customer_id FROM materials WHERE id=$1', [l.material_id]);
+          const m = await oc('SELECT id, name, unit, category, hsn_code, gst_rate, customer_id FROM materials WHERE id=$1', [l.material_id]);
           if (!m) throw fail(404, `${at}: material not found`);
           // An item kept for one customer is billed to that customer only —
           // two parties' accounts must never share a line by a slip of the picker.
@@ -191,9 +209,11 @@ r.post('/direct-invoices', canBill, async (req, res, next) => {
       const stockOrder = [...lines].sort((a, b) =>
         (a.item_type === b.item_type ? 0 : a.item_type === 'board' ? -1 : 1)
         || (a.material_id ?? a.product_id) - (b.material_id ?? b.product_id));
+      const shortfalls = [];
       for (const l of stockOrder) {
         if (l.item_type === 'board') {
-          await takeBoard(l.master, l.qty, inv.id, invoice_number, qc, oc);
+          const short = await takeBoard(l.master, l.qty, inv.id, invoice_number, qc, oc);
+          if (short) shortfalls.push(`${l.master.name}: ${short} ${l.master.unit} sold ahead of stock — book its purchase bill`);
         } else {
           try { await fgIssue(l.product_id, l.qty, REF, inv.id, qc, oc); }
           catch (e) {
@@ -207,9 +227,9 @@ r.post('/direct-invoices', canBill, async (req, res, next) => {
       await audit('invoice', inv.id, 'create',
         `${invoice_number} ₹${total} — direct invoice, ${lines.length} item${lines.length > 1 ? 's' : ''} from stock`,
         qc, req.user.name);
-      return inv.id;
+      return { id: inv.id, shortfalls };
     });
-    res.json(await one('SELECT * FROM invoices WHERE id=$1', [invId]));
+    res.json({ ...(await one('SELECT * FROM invoices WHERE id=$1', [made.id])), warnings: made.shortfalls });
   } catch (e) {
     if (e?.code === '23505' && /invoice_number/.test(e.constraint || '')) {
       e.status = 409;

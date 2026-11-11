@@ -68,14 +68,17 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
       const qty = +l.qty || 0;
       used[k] = (used[k] || 0) + qty;
       const amount = +(qty * (+l.rate || 0)).toFixed(2);
-      return { ...l, it, amount, over: !!it && used[k] > +it.available + 1e-6,
+      const over = !!it && used[k] > +it.available + 1e-6;
+      // A trading item may be sold ahead of its stock — warned, not blocked.
+      return { ...l, it, amount, over, blocked: over && l.item_type !== 'trading',
+        short: over && l.item_type === 'trading' ? +(used[k] - Math.max(+it.available, 0)).toFixed(3) : 0,
         ready: !!it && qty > 0 && l.rate !== '' && +l.rate >= 0 };
     });
   }, [lines, items]);
 
   const subtotal = rows.reduce((s, l) => s + l.amount, 0);
   const tax = rows.reduce((s, l) => s + l.amount * (+l.gst_pct || 0) / 100, 0);
-  const canSave = !!customerId && rows.length > 0 && rows.every(l => l.ready && !l.over);
+  const canSave = !!customerId && rows.length > 0 && rows.every(l => l.ready && !l.blocked);
 
   const saveParty = async () => {
     try {
@@ -113,6 +116,7 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
       return;
     }
     toast.success(`Invoice ${inv.invoice_number} created — ₹${fmt.num(inv.total)}`);
+    (inv.warnings || []).forEach(w => toast.info(w));
     onCreated?.(inv);
     onClose();
   };
@@ -209,7 +213,8 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                         {isMaterial(l.item_type)
                           ? (l.item_type === 'trading' ? trading : warehouse).map(b => (
                             <option key={b.material_id} value={b.material_id} data-search={searchText(b)}>
-                              {b.name} — {+b.available > 0 ? `${qtyText(b.available)} ${b.unit}` : 'out of stock'}
+                              {b.name} — {+b.available > 0 ? `${qtyText(b.available)} ${b.unit}`
+                                : +b.available < 0 ? `out of stock (${qtyText(-b.available)} ${b.unit} sold ahead)` : 'out of stock'}
                             </option>))
                           : items.cartons.map(c => (
                             <option key={c.product_id} value={c.product_id} data-search={searchText(c)}>
@@ -219,9 +224,11 @@ export default function DirectInvoiceDialog({ open, onClose, onCreated }) {
                       {l.item_type === 'trading' && !trading.length && (
                         <div className="mt-1 text-xs text-amber-600">{customerId ? 'No trading item for this party' : 'No trading item yet'} — add one in Masters → Trading Items.</div>
                       )}
-                      {l.it && isMaterial(l.item_type) && !(+l.it.available > 0) ? (
-                        <div className="mt-1 text-xs font-semibold text-red-600">
-                          Out of stock — book its purchase bill in Accounts (trading items land in stock) before billing it.
+                      {l.item_type === 'trading' && l.it && (l.short > 0 || !(+l.it.available > 0)) ? (
+                        <div className="mt-1 text-xs font-semibold text-amber-600">
+                          {+l.it.available > 0 ? `Only ${qtyText(l.it.available)} ${l.it.unit} in stock` : 'Out of stock'}
+                          {l.short > 0 ? ` — ${qtyText(l.short)} ${l.it.unit} will be sold ahead of stock` : ''}.
+                          {' '}Stock goes below zero until its purchase bill is booked in Accounts.
                         </div>
                       ) : l.it && (
                         <div className={`mt-1 text-xs ${l.over ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
