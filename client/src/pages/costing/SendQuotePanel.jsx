@@ -9,6 +9,7 @@ import { api } from '../../api.js';
 import { Button, Input, useToast } from '../../components/ui.jsx';
 import { qtyText, rupees } from '../../lib/enquiryUi.js';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
+import CounterPanel from './CounterPanel.jsx';
 
 const WHERE = {
   queued: 'With Claude — the reply draft is made on the robot\'s next run',
@@ -26,6 +27,8 @@ export default function SendQuotePanel({ enquiryId, canSend = false, reloadSigna
   const load = () => (enquiryId ? api.get(`/costing/enquiries/${enquiryId}`).then(x => { setE(x); setBoxes({}); setOpen(false); }).catch(() => {}) : Promise.resolve());
   useEffect(() => { load(); }, [enquiryId, reloadSignal]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!e) return null;
+  // The customer answered with their own prices: the counter panel takes over (their price, our cost, the revised price).
+  if (e.status === 'countered') return <CounterPanel rows={[e]} canSend={canSend} onChanged={() => { load(); onChanged?.(); }} />;
 
   const prices = e.prices || [];
   const boxOf = p => boxes[p.qty] ?? (p.final != null ? String(p.final) : p.suggested != null ? String(p.suggested) : '');

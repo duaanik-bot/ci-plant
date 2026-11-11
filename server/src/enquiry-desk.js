@@ -19,6 +19,7 @@ export const STATUS_LABEL = Object.freeze({
   quote_ready: 'Quotation ready',
   sent: 'Quotation sent',
   dropped: 'Dropped',
+  countered: 'Counter received',
 });
 // The stored status, read against the linked costing (5 Nov 2026): an enquiry in costing whose costing is
 // complete reads "Costing completed"; one in costing with no costing behind it — none was saved, or it was
@@ -46,6 +47,7 @@ export const UNDO_COLS = Object.freeze([
   'status', 'dropped_reason', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'finalised_by_name', 'finalised_at',
   'quotation_id', 'customer_id', 'customer_name', 'contact_name', 'contact_email', 'product_id', 'product_name', 'size_text',
   'size_key', 'style', 'board', 'gsm', 'colours', 'coating', 'specs', 'quantities', 'target_price', 'notes',
+  'counter', 'counter_mail_id', 'counter_at', 'counter_by_name', 'counter_round',
 ]);
 
 const MAX = { text: 300, specs: 1000, body: 20000, items: 30, attachments: 30, quantities: 6 };
@@ -135,13 +137,20 @@ export function priceRows(enquiry, costingInputs) {
   const qs = asked.length ? asked : [num(costingInputs?.qty)].filter(q => q > 0);
   const breaks = costingInputs ? quantityBreaks(costingInputs, qs) : [];
   const finals = Array.isArray(enquiry.final_prices) ? enquiry.final_prices : [];
+  const counter = Array.isArray(enquiry.counter) ? enquiry.counter : [];
   return qs.map(qty => {
     const b = breaks.find(x => x.qty === qty);
     const proposed = b?.ok ? b.quote_per_unit : null;
     const f = finals.find(x => Number(x.qty) === qty);
     const final = num(f?.final) > 0 ? num(f.final) : null;
+    const k = counter.find(x => Number(x.qty) === qty);
     return {
       qty, proposed,
+      // our cost a carton (the costing, before its margin) — the line under which a price loses money
+      cost: b?.ok ? b.cost_per_unit : null,
+      // the customer's counter for this quantity, and our price it answered (11 Nov 2026)
+      theirs: num(k?.theirs) > 0 ? num(k.theirs) : null,
+      ours: num(k?.ours) > 0 ? num(k.ours) : null,
       final,
       suggested: ceilPaise(proposed),
       set_against: num(f?.proposed) ?? null,

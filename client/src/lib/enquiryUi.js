@@ -10,6 +10,8 @@ export const DESK_TABS = [
   { key: 'inbox', label: 'Inbox', stages: ['new'] },
   { key: 'costing', label: 'Costing', stages: ['ready', 'costing'] },
   { key: 'price', label: 'Final price', stages: ['costed', 'price_pending'] },
+  // the customer's counter-offer, waiting for our revised price (11 Nov 2026)
+  { key: 'counter', label: 'Counter', stages: ['countered'] },
   { key: 'quote', label: 'Quotations', stages: ['quote_ready'] },
   { key: 'sent', label: 'Sent', stages: ['sent'] },
   { key: 'dropped', label: 'Dropped', stages: ['dropped'] },
@@ -31,13 +33,14 @@ export const STAGE_TONE = {
   quote_ready: 'bg-emerald-100 text-emerald-800',
   sent: 'bg-slate-200 text-slate-700',
   dropped: 'bg-slate-100 text-slate-500',
+  countered: 'bg-amber-200 text-amber-900',
 };
 
 export const QUOTE_TONE = {
   ready: 'bg-emerald-100 text-emerald-800', queued: 'bg-sky-100 text-sky-800', drafted: 'bg-indigo-100 text-indigo-800',
-  sent: 'bg-slate-200 text-slate-700', cancelled: 'bg-slate-100 text-slate-500',
+  sent: 'bg-slate-200 text-slate-700', cancelled: 'bg-slate-100 text-slate-500', superseded: 'bg-slate-100 text-slate-500 line-through',
 };
-export const QUOTE_LABEL = { ready: 'Ready for a draft', queued: 'With Claude', drafted: 'Draft in Gmail — send it from Gmail', sent: 'Sent', cancelled: 'Cancelled' };
+export const QUOTE_LABEL = { ready: 'Ready for a draft', queued: 'With Claude', drafted: 'Draft in Gmail — send it from Gmail', sent: 'Sent', cancelled: 'Cancelled', superseded: 'Replaced by a revised quotation' };
 
 export const JOB_LABEL = { fetch: 'Fetch from mail', draft: 'Draft in Gmail' };
 

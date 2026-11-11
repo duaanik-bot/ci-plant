@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CI Plant enquiry desk helper: the robot's calls to CI Plant, with the AVS robot key.
 
-    python3 desk.py jobs | claim N | file N mails.json | attachment N out.pdf | sent-drafts N '<json>'
+    python3 desk.py jobs | claim N | file N mails.json | counters N counters.json | attachment N out.pdf | sent-drafts N '<json>'
                     | done N '<json>' | fail N "why"
 
 Settings, from the environment or ~/.config/ci-plant/enquiry-desk.env (KEY=VALUE lines):
@@ -91,6 +91,9 @@ def main(argv):
         with open(args[1], 'wb') as f:
             f.write(data)
         return out({'saved': args[1], 'bytes': len(data), 'sha256': got})
+    if cmd == 'counters' and len(args) == 2:
+        body = json.load(open(args[1], encoding='utf-8'))
+        return out(call('POST', f'/enquiry-jobs/{int(args[0])}/counters', body))
     if cmd == 'sent-drafts' and len(args) == 2:
         return out(call('POST', f'/enquiry-jobs/{int(args[0])}/sent-drafts', {'sent': json.loads(args[1])}))
     if cmd == 'done' and len(args) in (1, 2):

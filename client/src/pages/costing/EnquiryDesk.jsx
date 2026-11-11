@@ -23,6 +23,7 @@ import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
+import CounterPanel from './CounterPanel.jsx';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 const nos = list => list.map(m => m.enquiry_no).join(', ');
@@ -451,6 +452,12 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {stages && tab === 'price' && (
         <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Or tick rows and press <b>Send quotation</b> (Management): the prices shown are locked, the quotation is made and saved as a reply draft in the customer's mail thread — in one press. Clicking a row opens its card, which has the same Send quotation. Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
       )}
+      {stages && tab === 'counter' && (
+        <p className="mb-2 text-xs text-slate-500">The customer answered our quotation with their own prices. Each mail's counter is worked out below — the discount they ask and what the whole order makes or loses at their price. Type our <b>revised price</b> (or fill them all: their price · halfway · cost + ₹), then <b>Send revised quotation</b>: it goes as a reply in the same mail thread, as a revised quotation. A counter reaches this tab from the robot's mail fetch, or tick rows on Final price / Quotations / Sent and press <b>Customer counter</b>.</p>
+      )}
+      {stages && tab === 'counter' && rows && counterGroups(shown).map(g => (
+        <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
+      ))}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (
         <DataTable rows={shown} columns={columns} onRowClick={e => setOpen(e.id)}
@@ -504,6 +511,15 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
         }}><Send size={13} className="mr-1 inline" />Send quotation</Button>}
+        {['price', 'quote', 'sent'].includes(tab) && (
+          <Button size="sm" variant="secondary" title="The customer came back with their own prices: move these rows to the Counter tab to work out the revised quotation"
+            onClick={async () => {
+              await after(api.put('/costing/enquiries/counter', { items: picked.map(id => ({ id, prices: [] })) })
+                .then(r => ({ moved: (r.saved || []).map(no => ({ enquiry_no: no, to: 'countered' })), skipped: r.skipped, undo: r.undo })),
+              m => `${nos(m)} moved to Counter — type the customer's prices there.`);
+              setTab('counter');
+            }}>Customer counter</Button>
+        )}
         {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}
         {['inbox', 'costing', 'price'].includes(tab) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
         {tab === 'dropped' && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => whereText(x.to)))].join(' and ')}.`)}>Bring back</Button>}
@@ -594,4 +610,15 @@ function GmailLink({ box, ready, onChanged }) {
       )}
     </div>
   );
+}
+
+// The Counter tab: one panel per counter mail (else per enquiry mail), so a customer's whole answer is worked as one.
+function counterGroups(rows = []) {
+  const groups = new Map();
+  for (const e of rows) {
+    const key = e.counter_mail_id ? `c${e.counter_mail_id}` : e.mail_id ? `m${e.mail_id}` : `e${e.id}`;
+    if (!groups.has(key)) groups.set(key, { key, customer: e.customer_name || e.contact_email || 'Customer', rows: [] });
+    groups.get(key).rows.push(e);
+  }
+  return [...groups.values()];
 }

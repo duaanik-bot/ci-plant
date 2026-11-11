@@ -85,7 +85,8 @@ file, fetch it:
 ## 3. A fetch
 
 `brief.json` gives `since`, `gmail_query`, `known_message_ids` (already filed — skip them), `customers`
-(the names in our customer master) and `drafts_to_check` (quotation drafts waiting in this Gmail).
+(the names in our customer master), `drafts_to_check` (quotation drafts waiting in this Gmail) and
+`quoted_rows` (items we have priced or quoted: `enquiry_no`, product, quantities, `thread_id`, `our_prices`).
 
 1. A mailbox holds thousands of mails, so look in two passes, both with `search_threads`, page size 50,
    every page (stop at 300 threads):
@@ -99,6 +100,19 @@ file, fetch it:
 2. Read it: `get_message` with `PLAIN_TEXT`.
 3. **Is it an enquiry?** Someone asking us for a price, rate or quotation for printing or packaging work
    (cartons, boxes, labels, leaflets, inserts, shade cards …), a new item or a repeat at a new quantity.
+   **A counter-offer is not a new enquiry.** A reply in the thread of one of `quoted_rows` (or naming
+   their products) that gives the customer's OWN price per item — a column like "swiss rate", "target",
+   "your rate", "we can pay", "final rate" next to ours — is a COUNTER: do not file it as mails. Match each
+   item to its `enquiry_no` (same product and quantity) and write `counters.json`:
+
+       {"mail": {"gmail_message_id": "1a…", "gmail_thread_id": "1a…", "subject": "…", "from_email": "…",
+                 "received_at": "…", "body_text": "<the plain text>", "view_url": "…",
+                 "summary": "Counter: 13 items, their rates"},
+        "counters": [{"enquiry_no": "CI-ENQ-0008", "qty": 3050, "theirs": 5.5}, …]}
+
+   `python3 desk.py counters 12 counters.json` files it: those rows move to the desk's Counter tab, where a
+   person sets the revised price. Only the customer's figure goes in `theirs` (never ours); an item you cannot
+   match surely is left out and named in the run report.
    It is NOT an enquiry, so it is not filed: a purchase order (the order intake keys POs), an invoice or
    payment, an artwork approval, a delivery question, a newsletter or advertisement, our own sent mail, a
    reply that only thanks or acknowledges. Not sure → file it, and say so in `summary`.
@@ -140,7 +154,7 @@ file, fetch it:
    text names its `quotation_no`. Found → it was sent by the person; collect `{"quotation_id": …,
    "gmail_message_id": "<that message's id>"}`. Not found (deleted unsent) → leave it. Report them in one
    call: `python3 desk.py sent-drafts 12 '[{"quotation_id": 4, "gmail_message_id": "1a…"}]'`.
-8. Finish: `python3 desk.py done 12 '{"read": 40, "filed": 3, "skipped": 1, "not_enquiries": 36, "sent_seen": 1}'`.
+8. Finish: `python3 desk.py done 12 '{"read": 40, "filed": 3, "skipped": 1, "not_enquiries": 36, "sent_seen": 1, "counters": 13}'`.
 
 ## 4. A draft
 

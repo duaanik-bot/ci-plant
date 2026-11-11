@@ -65,7 +65,7 @@ export async function quotationPdf(qt, entity = {}, { trialFor = null } = {}) {
   y -= 6;
   page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: line });
   y -= 22;
-  draw('QUOTATION', M, 13, bold);
+  draw(qt.revision > 0 ? `REVISED QUOTATION${qt.revision > 1 ? ` (${qt.revision})` : ''}` : 'QUOTATION', M, 13, bold);
   right(`No. ${qt.quotation_no}`, W - M, 10, bold);
   y -= 14;
   right(`Date ${istDate(qt.created_at)}`, W - M, 9);

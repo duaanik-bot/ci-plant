@@ -24,6 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import QuoteProgress from './QuoteProgress.jsx';
+import CounterPanel from './CounterPanel.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
 import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
@@ -452,6 +453,13 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
       </div>
 
       {batch.id && deskIds.length > 0 && <QuoteProgress batchId={batch.id} canFinalise={!!boot?.can_approve} reloadSignal={progressSeen} />}
+      {/* The customer's counter on this batch's enquiries: discount asked, loss at their price, our revised price (11 Nov 2026). */}
+      {Object.values(desk).some(e => e.counter) && (
+        <div className="mb-4">
+          <CounterPanel rows={Object.values(desk).filter(e => e.counter)} canSend={!!boot?.can_approve}
+            onChanged={() => { loadDesk(); setProgressSeen(n => n + 1); }} title="Customer counter on this batch → revised quotation" />
+        </div>
+      )}
       <form data-ci-form onSubmit={e => e.preventDefault()} className="space-y-4">
         <section className="ci-form-panel glass rounded-2xl p-4">
           <div className="grid gap-3 sm:grid-cols-3">

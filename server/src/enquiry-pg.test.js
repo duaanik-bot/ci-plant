@@ -615,6 +615,75 @@ describe('Enquiry desk — through the real app', {
     }
   });
 
+  test('customer counter: the row goes to Counter with their price, ours and our cost; the revised quotation supersedes the first', async () => {
+    const x = await typed('COUNTER OFFER CARTON');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.75 }] }] });
+    const first = await call('md', 'POST', '/costing/quotations/send', { ids: [x.id] });
+    const q1 = first.body.quotations[0];
+    assert.equal(q1.revision, 0);
+    // An Inbox row has nothing to counter.
+    const fresh = await typed('NOT PRICED YET CARTON');
+    const refused = await call('clerk', 'PUT', '/costing/enquiries/counter', { items: [{ id: fresh.id, prices: [{ qty: 5000, theirs: 1 }] }] });
+    assert.deepEqual(refused.body.saved, []);
+    assert.match(refused.body.skipped[0].why, /a counter answers a priced or quoted row/);
+    // Their price: 3.20.
+    const c = await call('clerk', 'PUT', '/costing/enquiries/counter', { items: [{ id: x.id, prices: [{ qty: 5000, theirs: 3.2 }] }] });
+    assert.deepEqual(c.body.saved, [x.enquiry_no]);
+    let e = await enquiry(x.id);
+    assert.equal(e.status, 'countered');
+    assert.equal(e.stage, 'countered');
+    assert.equal(e.counter_round, 1);
+    assert.deepEqual([e.prices[0].theirs, e.prices[0].ours], [3.2, 3.75]);
+    assert.ok(e.prices[0].cost > 0 && e.prices[0].cost < e.prices[0].proposed, 'our cost a carton, under the quote');
+    assert.ok((await call('clerk', 'GET', '/costing/enquiries?stage=countered')).body.some(r => r.id === x.id), 'on the Counter tab');
+    // The revised price is typed over the live quotation (only a Counter row may), then sent: a revision in its place.
+    assert.equal((await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.5 }] }] })).status, 200);
+    assert.equal((await enquiry(x.id)).status, 'countered', 'still on Counter until sent');
+    const rev = await call('md', 'POST', '/costing/quotations/send', { ids: [x.id] });
+    assert.equal(rev.status, 201);
+    assert.equal(rev.body.quotations.length, 1);
+    const q2 = rev.body.quotations[0];
+    assert.equal(q2.revision, 1);
+    const old = (await call('clerk', 'GET', `/costing/quotations/${q1.id}`)).body;
+    assert.equal(old.status, 'superseded');
+    assert.equal(old.job?.status, 'cancelled', 'the first draft job, still waiting, is cancelled');
+    const nq = (await call('clerk', 'GET', `/costing/quotations/${q2.id}`)).body;
+    assert.equal(nq.supersedes_id, q1.id);
+    assert.equal(nq.lines[0].rate, 3.5);
+    assert.match(nq.reply.text, /revised rates/);
+    assert.doesNotMatch(nq.reply.text + nq.reply.html, /3\.20?\b|3\.75|cost|discount|loss/i, 'neither their price, our old price nor any internal word');
+    const pdf = await fetch(`${base}/costing/quotations/${q2.id}/pdf`, { headers: { authorization: `Bearer ${tokens.clerk}` } });
+    assert.equal(pdf.status, 200);
+    e = await enquiry(x.id);
+    assert.equal(e.status, 'quote_ready');
+    assert.equal(e.quotation_id, q2.id);
+    assert.ok(e.events.some(ev => ev.action === 'counter' && ev.detail?.counter?.[0]?.theirs === 3.2));
+    await call('clerk', 'POST', `/costing/quotations/${q2.id}/cancel`, {});
+  });
+
+  test('the robot files a counter from mail: quoted rows in its brief, the mail kept, the row on Counter', async () => {
+    const target = await db.one(`SELECT id, enquiry_no, quantities::float8[] AS quantities FROM enquiries WHERE status = 'sent' AND mail_id IS NOT NULL ORDER BY id LIMIT 1`);
+    assert.ok(target, 'an earlier test sent a quotation from a filed mail');
+    const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+    const claim = await robot('POST', `/enquiry-jobs/${f.body.job.id}/claim`, {});
+    assert.ok(claim.body.quoted_rows.some(r => r.enquiry_no === target.enquiry_no && r.thread_id), 'the brief names quoted rows and their thread');
+    assert.match(claim.body.counters_url, /\/counters$/);
+    const put = await robot('POST', `/enquiry-jobs/${f.body.job.id}/counters`, {
+      mail: { gmail_message_id: 'm-counter-1', gmail_thread_id: 't-001', subject: 'Re: Rates for two cartons', from_email: 'buyer@example-pharma.test',
+        received_at: '2026-11-11T11:35:00Z', body_text: 'Our rate …' },
+      counters: [{ enquiry_no: target.enquiry_no, qty: target.quantities[0], theirs: 1.11 }, { enquiry_no: 'CI-ENQ-NOPE', qty: 1, theirs: 1 }],
+    });
+    assert.equal(put.status, 200);
+    assert.deepEqual(put.body.filed, [target.enquiry_no]);
+    assert.equal(put.body.refused[0].enquiry_no, 'CI-ENQ-NOPE');
+    const e = await enquiry(target.id);
+    assert.equal(e.status, 'countered');
+    assert.equal(e.counter_subject, 'Re: Rates for two cartons', 'the counter mail is kept — the revised quotation replies in its thread');
+    assert.equal(e.prices.find(p => p.qty === target.quantities[0]).theirs, 1.11);
+    await robot('POST', `/enquiry-jobs/${f.body.job.id}/done`, { ok: true, result: { counters: 1 } });
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });

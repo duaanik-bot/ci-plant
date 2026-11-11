@@ -9,6 +9,7 @@
 //   POST /api/avs/robot/enquiry-jobs/:id/mails       a Fetch files mails and their items (a mail filed before is skipped)
 //   GET  /api/avs/robot/enquiry-jobs/:id/attachment  the PDF of a Draft job, as queued
 //   POST /api/avs/robot/enquiry-jobs/:id/sent-drafts a Fetch reports drafts the person has since sent from Gmail
+//   POST /api/avs/robot/enquiry-jobs/:id/counters    a Fetch files a customer's counter-offer (their prices) against quoted rows
 //   POST /api/avs/robot/enquiry-jobs/:id/done        { ok: true, result } or { ok: false, error }
 //
 // A job stopped half-way is handed out again after an hour. Mounted before requireAuth (app.js).
@@ -19,8 +20,9 @@ import { audit, lockDocNumber } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { keyOk } from './avs-robot.js';
 import { cleanMail } from '../enquiry-desk.js';
+import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
-import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent } from './enquiries.js';
+import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup } from './enquiries.js';
 
 const r = Router();
 const ROBOT = 'Claude (AVS robot)';
@@ -80,8 +82,17 @@ async function briefOf(job, base) {
     const drafts = await q(`SELECT qt.id AS quotation_id, qt.quotation_no, qt.gmail_draft_id AS draft_id, m.gmail_thread_id AS thread_id
                               FROM quotations qt LEFT JOIN enquiry_mails m ON m.id = qt.reply_mail_id
                              WHERE qt.status = 'drafted' AND qt.mailbox = $1 AND qt.gmail_draft_id IS NOT NULL ORDER BY qt.id LIMIT 200`, [job.mailbox]);
+    // Rows we have priced or quoted, by thread: a reply there with the customer's own prices is a COUNTER, not an enquiry.
+    const quoted = await q(`SELECT e.enquiry_no, e.product_name, e.quantities::float8[] AS quantities, e.final_prices, e.status,
+                                   m.gmail_thread_id AS thread_id, m.subject
+                              FROM enquiries e JOIN enquiry_mails m ON m.id = e.mail_id
+                             WHERE e.mailbox = $1 AND e.status IN ('price_pending', 'quote_ready', 'sent', 'countered')
+                               AND e.updated_at > now() - interval '120 days' ORDER BY e.id LIMIT 500`, [job.mailbox]);
     return {
       ...out, since,
+      quoted_rows: quoted.map(x => ({ enquiry_no: x.enquiry_no, product_name: x.product_name, quantities: x.quantities, thread_id: x.thread_id,
+        subject: x.subject, status: x.status, our_prices: (x.final_prices || []).map(p => ({ qty: p.qty, ours: p.final })) })),
+      counters_url: `${base}/api/avs/robot/enquiry-jobs/${job.id}/counters`,
       gmail_query: `in:inbox -from:me after:${since.replace(/-/g, '/')} -category:promotions -category:social`,
       known_message_ids: known.map(k => k.gmail_message_id),
       customers: customers.map(c => c.name),
@@ -158,6 +169,48 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
       }
       if (filed.length) await audit('enquiry_job', id, 'file', `Job ${id} — ${filed.length} mail${filed.length === 1 ? '' : 's'} filed`, qc, req.robotName);
       return { filed, skipped, refused };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// A customer's counter-offer, read by a Fetch: { mail: { gmail_message_id, gmail_thread_id, subject, from_email, received_at,
+// view_url, … }, counters: [{ enquiry_no, qty?, theirs }] }. The mail is kept (the revised quotation replies in its thread);
+// each row named moves to the desk's Counter tab with their price beside ours. Rows not priced or quoted are refused.
+r.post('/avs/robot/enquiry-jobs/:id/counters', async (req, res, next) => {
+  try {
+    const id = intOrNull(req.params.id) || 0;
+    const m = cleanMail(req.body?.mail || {});
+    const list = (Array.isArray(req.body?.counters) ? req.body.counters : []).slice(0, 100);
+    if (m.error) throw fail(400, `mail: ${m.error}`);
+    if (!list.length) throw fail(400, 'Send { mail, counters: [{ enquiry_no, qty, theirs }] }.');
+    const robot = { name: req.robotName };
+    const out = await tx(async (qc, oc) => {
+      const job = await oc(`SELECT id, kind, status, mailbox, mailbox_email FROM enquiry_jobs WHERE id = $1 FOR UPDATE`, [id]);
+      if (!job) throw fail(404, 'No such job.');
+      if (job.kind !== 'fetch' || job.status !== 'working') throw fail(409, `Job ${id} is not a Fetch being worked on.`);
+      const mail = (await oc(`
+          INSERT INTO enquiry_mails (mailbox, mailbox_email, gmail_message_id, gmail_thread_id, subject, from_name, from_email, to_text,
+                                     received_at, body_text, attachments, view_url, summary, job_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (mailbox_email, gmail_message_id) DO NOTHING RETURNING id`,
+      [job.mailbox, job.mailbox_email, m.gmail_message_id, m.gmail_thread_id, m.subject, m.from_name, m.from_email, m.to_text,
+        m.received_at, m.body_text, JSON.stringify(m.attachments), m.view_url, m.summary || 'Customer counter-offer', id]))
+        || await oc(`SELECT id FROM enquiry_mails WHERE mailbox_email = $1 AND gmail_message_id = $2`, [job.mailbox_email, m.gmail_message_id]);
+      const nos = [...new Set(list.map(c => String(c?.enquiry_no || '').trim()).filter(Boolean))];
+      const found = await oc(`SELECT array_agg(id) AS ids FROM enquiries WHERE enquiry_no = ANY($1::text[]) AND mailbox = $2`, [nos, job.mailbox]);
+      const rows = await lockRows(qc, found?.ids || []);
+      const group = newGroup();
+      const filed = [], refused = [];
+      for (const no of nos) {
+        const e = rows.find(x => x.enquiry_no === no);
+        if (!e) { refused.push({ enquiry_no: no, why: 'no such enquiry in this mailbox' }); continue; }
+        const prices = list.filter(c => String(c?.enquiry_no).trim() === no).map(c => ({ qty: num(c.qty), theirs: c.theirs }));
+        const r0 = await recordCounter(qc, e, prices, { mailId: mail.id, user: robot, group, source: 'robot' });
+        if (r0.why) refused.push({ enquiry_no: no, why: r0.why }); else filed.push(no);
+      }
+      if (filed.length) await audit('enquiry_job', id, 'counter', `Job ${id} — counter filed for ${filed.length} enquir${filed.length === 1 ? 'y' : 'ies'}`, qc, req.robotName);
+      return { mail_id: mail.id, filed, refused };
     });
     res.json(out);
   } catch (e) { next(e); }
