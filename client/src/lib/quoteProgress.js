@@ -76,7 +76,7 @@ export function quoteProgress(p, now = Date.now()) {
       ? { kind: 'failed', text: `Claude could not make the draft: ${failed.job_error || 'no reason given'} — press Save as Gmail draft again` }
       : { kind: 'wait', text: rows.some(r => r.claimed_at && !r.finished_at)
         ? 'Claude is making the draft in Gmail now'
-        : 'Waiting for Claude — the enquiry desk robot picks it up on its next run (every 15 minutes, while the Claude app is open on the office Mac)' };
+        : 'Waiting for Claude — the enquiry desk robot picks it up on its next run (11 am and 3 pm, while the Claude app is open on the office Mac — or press Run now on the task)' };
   } else if (cur?.key === 'sent') next = { kind: 'send', text: 'Open the draft in Gmail, check it and press Send — it shows here as sent once you do' };
   return {
     stages, current: cur?.key || null, complete: !cur && n > 0, live: !!cur && n > 0,

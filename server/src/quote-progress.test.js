@@ -36,7 +36,7 @@ test('queued for Claude: waiting; claimed: drafting; failed: shows why', () => {
   const waiting = quoteProgress({ batch_created_at: T(0), rows: [row(1, { ...base, q_status: 'queued', job_status: 'queued' })] });
   assert.equal(waiting.current, 'drafted');
   assert.equal(waiting.next.kind, 'wait');
-  assert.match(waiting.next.text, /every 15 minutes/);
+  assert.match(waiting.next.text, /11 am and 3 pm/);
   const drafting = quoteProgress({ batch_created_at: T(0), rows: [row(1, { ...base, q_status: 'queued', job_status: 'working', claimed_at: T(9) })] });
   assert.match(drafting.next.text, /making the draft/);
   const failed = quoteProgress({ batch_created_at: T(0), rows: [row(1, { ...base, q_status: 'ready', job_status: 'failed', job_error: 'Gmail refused' })] });
