@@ -24,7 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
-import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, ruleInputsForRow } from '../../lib/costingRules.js';
+import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -320,8 +320,8 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         const desk = p.enquiry_id ? { enquiry_id: p.enquiry_id, enquiry_no: p.enquiry_no } : {};
         // House rules: process (new die for a product not in the master), and from an enquiry's words the
         // coating, embossing and leafing. Die & pasting keeps following the style; board follows common.
-        const rulesOf = (row, emboss = null) => {
-          const r = ruleInputsForRow({ style: row.style, product_id: row.product_id || null }, p.finish || null, emboss);
+        const rulesOf = (row, emboss = null, grade = null) => {
+          const r = ruleInputsForRow({ style: row.style, product_id: row.product_id || null }, p.finish || null, emboss, grade);
           const { dp_rate: _dp, board_rate: _board, ...ins } = r.inputs;
           return { inputs: ins, coat_choice: r.coat_choice };
         };
@@ -335,7 +335,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         const row = newRow(common, typical, { product_name: m.name, product_id: m.id, style, size_text: p.size_text || parseSize(m.size)?.key || '', ...desk });
         const g = gradeFor(m.board_grade, grades);
         const layout = num(m.sheet_l) > 0 && num(m.sheet_w) > 0 && num(m.ups) > 1;
-        const rules = rulesOf(row, +m.emboss);
+        const rules = rulesOf(row, +m.emboss, g?.grade || m.board_grade);
         return {
           ...row,
           ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}),
@@ -398,6 +398,8 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                 const grade = e.target.value;
                 update(b => ({ ...b, common: { ...b.common, board_grade: grade } }));
                 if (g) setCommon('board_rate', g.rate_per_kg);
+                // Met Saffire is coated at factor 1 (owner, 11 Nov 2026).
+                if (isMetSaffire(grade)) { setCoat(String(HOUSE_RULES.coat.met_saffire)); applyCoatAll(); }
               }}>
                 <option value="">— type the rate —</option>
                 {grades.map(g => <option key={g.grade} value={g.grade}>{gradeLabel(g)}</option>)}

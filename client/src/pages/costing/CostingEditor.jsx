@@ -551,7 +551,7 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   // the pasting (die & pasting follows it), the colours (process follows them). A costing reopened from
   // the register is left as saved until its product or size is changed.
   const newDie = newDieDefault(value);
-  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}`;
+  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}|${value.board_grade ?? ''}`;
   const lastCtx = useRef(null);
   useEffect(() => {
     if (value.autofill === false || !boot) return;

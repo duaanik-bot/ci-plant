@@ -130,3 +130,24 @@ test('a costing charges FBB-type grades ₹120; the buying rate is kept beside i
   assert.equal(chargeRateOf({ grade: 'Cupstock', rate_per_kg: 110 }), 110);
   assert.deepEqual(chargeGrades(gs).map(g => g.rate_per_kg), [120, 44, 80, 130], 'mapping twice changes nothing');
 });
+
+test('Met Saffire: charged ₹120, coated at factor 1 whatever the finish words say', async () => {
+  const { isMetSaffire, chargeGrades } = await import('../../client/src/lib/costingRules.js');
+  assert.ok(isMetSaffire('Met Saffire'));
+  assert.ok(isMetSaffire('MET SAPPHIRE 300'));
+  assert.ok(isMetSaffire('metallic saffire'));
+  assert.ok(!isMetSaffire('Saffire'));
+  assert.ok(!isMetSaffire('ITC Cyber XL'));
+  assert.equal(chargeGrades([{ grade: 'Met Saffire', rate_per_kg: 100 }])[0].rate_per_kg, 120);
+  const asMap = xs => Object.fromEntries(xs.map(([k, v]) => [k, v]));
+  const byGrade = asMap(houseRuleValues({ style: 'LOCK', board_grade: 'Met Saffire' }, { finish: finishFromEnquiry({ coating: 'Spot UV + drip off' }) }));
+  assert.equal(byGrade.coat_factor, 1);
+  assert.equal(byGrade.coat_choice, '1');
+  assert.equal(asMap(houseRuleValues({}, { finish: finishFromEnquiry({ board: 'Met Saffire', coating: 'UV' }) })).coat_factor, 1);
+  assert.equal(asMap(houseRuleValues({}, { productGrade: 'MET' })).coat_factor, undefined, 'the master alias "MET" alone is not read as Met Saffire here');
+  assert.equal(ruleInputsForRow({ style: 'LOCK' }, null, null, 'Met Saffire').coat_choice, '1');
+  // recommend: picking the grade refills the coating from the rule.
+  const v = recommend({ product_name: 'X', size_text: '', style: 'LOCK', board_grade: 'Met Saffire', inputs: {}, sources: { board_grade: { kind: 'manual' } } }, {});
+  assert.equal(v.coat_choice, '1');
+  assert.equal(v.inputs.coat_factor, 1);
+});

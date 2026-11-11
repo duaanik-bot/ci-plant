@@ -6,7 +6,7 @@
 //   printing           ₹500 per 1,000 sheets per colour (Rates & method default)
 //   colours            as the enquiry says
 //   coating            from the enquiry's words: aqueous varnish → factor 6, UV → 3,
-//                      drip-off with UV → 2, spot UV + drip-off → 2
+//                      drip-off with UV → 2, spot UV + drip-off → 2; on Met Saffire board always factor 1
 //   embossing          ₹0.15 a carton when the enquiry or the Product Master says embossed
 //   leafing            ₹0.20 a carton per panel, plus ₹5,000 leafing set-up for the job
 //   die & pasting      side pasting ₹0.20, lock bottom ₹0.30, a big box ₹0.41 (ticked on the costing)
@@ -23,7 +23,7 @@ export const HOUSE_RULES = Object.freeze({
   dp_big: 0.41,
   process: 2000,
   process_new_die: 3000,
-  coat: Object.freeze({ aqueous: 6, uv: 3, drip_uv: 2, spot_drip: 2 }),
+  coat: Object.freeze({ aqueous: 6, uv: 3, drip_uv: 2, spot_drip: 2, met_saffire: 1 }),
 });
 
 const lower = x => String(x ?? '').toLowerCase();
@@ -75,6 +75,9 @@ export const chargeRateOf = g => (g && FBB_GRADE.test(g.grade) && takesFbbRate(g
 export const chargeGrades = (grades = []) => grades.map(g => ({ ...g, buy_rate: g.buy_rate ?? g.rate_per_kg, rate_per_kg: chargeRateOf(g) }));
 export const gradeLabel = g => `${g.grade} — ₹${g.rate_per_kg}/kg${g.buy_rate != null && g.buy_rate !== g.rate_per_kg ? ` charged (buy ₹${g.buy_rate})` : ''}`;
 
+// Met Saffire board (owner, 11 Nov 2026): charged ₹120 like FBB, coated at factor 1 whatever the finish words say.
+export const isMetSaffire = (...boards) => boards.some(b => /\bmet(alli[sz]ed|allic)?\b[\s.-]*(saff?ire|sapphire)|met[\s.-]*saff?ire|met[\s.-]*sapphire/i.test(String(b ?? '')));
+
 // A new product (not in the Product Master) needs a new die unless somebody said otherwise.
 export const newDieDefault = v => (v?.new_die != null ? !!v.new_die : !(v?.product_id || v?.product));
 
@@ -91,7 +94,10 @@ export function houseRuleValues(v, { finish = null, productEmboss = null, produc
   const embossed = finish?.emboss || productEmboss === 1;
   if (embossed) out.push(['emb_rate', HOUSE_RULES.emb_rate, finish?.emboss ? `embossed (${finish.from || 'enquiry'})` : 'embossed on the Product Master']);
   else if (finish) out.push(['emb_rate', 0, 'no embossing asked']);
-  if (finish?.coat) {
+  if (isMetSaffire(v?.board_grade, productGrade, finish?.board)) {
+    out.push(['coat_factor', HOUSE_RULES.coat.met_saffire, 'Met Saffire board → factor 1']);
+    out.push(['coat_choice', String(HOUSE_RULES.coat.met_saffire), 'Met Saffire board']);
+  } else if (finish?.coat) {
     out.push(['coat_factor', finish.coat.factor, `${finish.coat.label} → factor ${finish.coat.factor}`]);
     out.push(['coat_choice', String(finish.coat.factor), finish.coat.label]);
   }
@@ -104,10 +110,10 @@ export function houseRuleValues(v, { finish = null, productEmboss = null, produc
 }
 
 // The inputs a bulk-costing row from an enquiry takes from the rules (no Product Master / history there).
-export function ruleInputsForRow(row, finish, productEmboss = null) {
+export function ruleInputsForRow(row, finish, productEmboss = null, productGrade = null) {
   const inputs = {};
   let coatChoice = null;
-  for (const [k, x] of houseRuleValues(row, { finish, productEmboss })) {
+  for (const [k, x] of houseRuleValues(row, { finish, productEmboss, productGrade })) {
     if (k === 'coat_choice') coatChoice = x;
     else inputs[k] = x;
   }
