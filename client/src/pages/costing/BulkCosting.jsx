@@ -24,6 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import QuoteProgress from './QuoteProgress.jsx';
+import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
 import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
 
@@ -291,12 +292,19 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     setProgressSeen(n => n + 1);
     toast.success(`${items.length} price${items.length === 1 ? '' : 's'} locked`);
   };
+  // Push = finalise the locked prices, make the quotation and queue its Gmail reply draft — one press.
   const pushLocked = async () => {
-    const go = priced.filter(x => x.enquiry_id && lockedRow(x)).map(x => x.enquiry_id);
-    if (!go.length) { toast.error('Lock the prices first.'); return; }
-    const r = await api.post('/costing/enquiries/finalise', { ids: go });
-    if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-    if (r.done?.length) toast.success(`${r.done.join(', ')} in Quotations — next: Make quotation & Gmail draft (progress bar above)`);
+    const locked = priced.filter(x => x.enquiry_id && lockedRow(x));
+    const go = locked.filter(x => !['quote_ready', 'sent'].includes(desk[x.enquiry_id]?.stage)).map(x => x.enquiry_id);
+    if (!locked.length) { toast.error('Lock the prices first.'); return; }
+    if (go.length) {
+      const r = await api.post('/costing/enquiries/finalise', { ids: go });
+      if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
+    }
+    const q = await quoteAndDraft(api, locked.map(x => x.enquiry_id));
+    if (q.failed.length) toast.error(q.failed.join('; '));
+    if (q.drafted.length) toast.success(draftedText(q));
+    else if (!go.length) toast.info('Already on a quotation — see the progress bar above.');
     await loadDesk();
     setProgressSeen(n => n + 1);
   };
@@ -435,8 +443,8 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
           <Button variant="secondary" onClick={() => lockRows(priced.filter(x => !lockedRow(x)))} disabled={dirty} title={dirty ? 'Save the batch first' : 'Lock the final price of every saved row'}>
             <Lock size={15} className="mr-1.5 inline" />Lock all prices
           </Button>
-          {boot?.can_approve && <Button variant="success" onClick={pushLocked} disabled={dirty} title="Finalise the locked rows — they go to the desk's Quotations, ready for the customer's mail">
-            <Send size={15} className="mr-1.5 inline" />Push locked to Quotations
+          {boot?.can_approve && <Button variant="success" onClick={pushLocked} disabled={dirty} title="Finalise the locked rows, make the quotation and save the reply as a Gmail draft in the customer's thread">
+            <Send size={15} className="mr-1.5 inline" />Push & make Gmail draft
           </Button>}
         </>}
         <ExportMenu label="Export (internal)" build={() => batchExportSpec(batch, exportRows, { quantities: qs })} />

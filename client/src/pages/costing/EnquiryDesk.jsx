@@ -21,6 +21,7 @@ import {
 import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
+import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 const nos = list => list.map(m => m.enquiry_no).join(', ');
@@ -426,7 +427,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">Waiting to be costed, or with a costing not finished yet. <b>Cost it</b> opens the costing here; once it is complete the enquiry goes to Final price by itself. <b>Send back to Inbox</b> keeps any costing it has.</p>
       )}
       {stages && tab === 'price' && (
-        <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Tick locked rows and <b>Push to Quotations</b> (Management). Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
+        <p className="mb-2 text-xs text-slate-500">The box starts at the price the costing works out, rounded up to the paisa. Type the price to quote, then <b>Lock this price</b> (or tick rows and <b>Lock ticked prices</b>). Tick locked rows and <b>Push & make Gmail draft</b> (Management) — the quotation is made and saved as a reply draft in the customer's mail thread. Each row's mail tag shows which mail it came in and how many products that mail had — the bar warns when a mail is only partly ticked.</p>
       )}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (
@@ -440,7 +441,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <div className="mt-6">
           <div className="mb-2 text-sm font-bold text-[#1D1D1F]">{tab === 'quote' ? 'Quotations' : 'Sent quotations'}</div>
           <DataTable rows={quotes} columns={quoteCols} onRowClick={x => setOpenQuote(x.id)} defaultSort={{ key: 'when', dir: 'desc' }} serialNumber={false}
-            empty={tab === 'quote' ? 'No quotation yet — tick finalised enquiries above and press Generate quotation.' : 'Nothing sent yet.'} />
+            empty={tab === 'quote' ? 'No quotation yet — tick finalised enquiries above and press Make quotation & Gmail draft.' : 'Nothing sent yet.'} />
         </div>
       )}
 
@@ -471,16 +472,20 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             if (!go.length) return;
             const r = await api.post('/costing/enquiries/finalise', { ids: go.map(e => e.id) });
             if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-            if (r.done?.length) setLast({ text: `${r.done.join(', ')} pushed — now in Quotations, ready to quote.`, undo: r.undo });
+            // …and straight on: the quotation and its reply draft in the customer's thread.
+            const q = r.done?.length ? await quoteAndDraft(api, go.map(e => e.id)) : null;
+            if (q?.failed.length) toast.error(q.failed.join('; '));
+            if (r.done?.length) setLast({ text: q?.drafted.length ? draftedText(q) : `${r.done.join(', ')} pushed — now in Quotations.` });
             setPicked([]); await reload();
-          }}><Send size={13} className="mr-1 inline" />Push to Quotations</Button>}
+          }}><Send size={13} className="mr-1 inline" />Push & make Gmail draft</Button>}
         </>}
         {tab === 'quote' && <Button size="sm" onClick={async () => {
-          const r = await api.post('/costing/quotations', { ids: picked });
-          setLast({ text: r.quotations.length === 1 ? `${r.quotations[0].quotation_no} made.` : `${r.quotations.length} quotations made — one per customer: ${r.quotations.map(q => q.quotation_no).join(', ')}.`, quotations: r.quotations });
+          // The quotation and, straight on, its reply draft in the customer's thread.
+          const r = await quoteAndDraft(api, picked);
+          if (r.failed.length) toast.error(r.failed.join('; '));
+          setLast({ text: r.drafted.length ? draftedText(r) : `${r.quotations.map(q => q.quotation_no).join(', ') || 'Nothing'} made.`, quotations: r.quotations });
           setPicked([]); await reload();
-          if (r.quotations.length === 1) setOpenQuote(r.quotations[0].id);
-        }}>Generate quotation</Button>}
+        }}><Send size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>}
         {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}
         {['inbox', 'costing', 'price'].includes(tab) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
         {tab === 'dropped' && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => whereText(x.to)))].join(' and ')}.`)}>Bring back</Button>}

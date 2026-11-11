@@ -6,6 +6,7 @@ import { api } from '../../api.js';
 import { Button, useToast } from '../../components/ui.jsx';
 import { quoteProgress } from '../../lib/quoteProgress.js';
 import { elapsedText } from '../../lib/avs.js';
+import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
 
 const ICON = {
   done: <CheckCircle2 size={15} className="text-emerald-600" aria-label="done" />,
@@ -35,9 +36,9 @@ export default function QuoteProgress({ batchId, canFinalise = false, reloadSign
   const act = async fn => { setBusy(true); try { await fn(); await load(); } finally { setBusy(false); } };
   // One press: the quotation (the approved template — product, details asked, rate) and its Gmail draft job.
   const quoteAndDraft = () => act(async () => {
-    const r = await api.post('/costing/quotations', { ids: p.to_quote });
-    for (const qt of r.quotations) await api.post(`/costing/quotations/${qt.id}/draft`, {});
-    toast.success(`${r.quotations.map(x => x.quotation_no).join(', ')} made — Claude will save the Gmail draft`);
+    const r = await quoteAndDraft(api, p.to_quote);
+    if (r.failed.length) toast.error(r.failed.join('; '));
+    if (r.drafted.length) toast.success(draftedText(r));
   });
   const draftAgain = () => act(async () => {
     for (const qt of p.quotations.filter(x => ['ready', 'drafted'].includes(x.status))) await api.post(`/costing/quotations/${qt.id}/draft`, {});
