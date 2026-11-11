@@ -23,6 +23,7 @@ import {
   perUnit, plain, rupees, startingInputs,
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
+import QuoteProgress from './QuoteProgress.jsx';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
 import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
 
@@ -257,6 +258,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const [desk, setDesk] = useState({});                // enquiry id → the enquiry as the desk shows it
   const [finals, setFinals] = useState({});            // enquiry id → the box's text
   const [opened, setOpened] = useState(() => new Set());   // locked rows opened again to change
+  const [progressSeen, setProgressSeen] = useState(0);     // the progress bar reads the stages again
   const loadDesk = () => (deskIds.length
     ? api.get(`/costing/enquiries?ids=${deskIds.join(',')}`).then(list => setDesk(Object.fromEntries(list.map(e => [e.id, e])))).catch(() => {})
     : Promise.resolve());
@@ -286,6 +288,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     setFinals(f => { const n = { ...f }; for (const it of items) delete n[it.id]; return n; });
     setOpened(o => { const n = new Set(o); for (const it of items) n.delete(it.id); return n; });
     await loadDesk();
+    setProgressSeen(n => n + 1);
     toast.success(`${items.length} price${items.length === 1 ? '' : 's'} locked`);
   };
   const pushLocked = async () => {
@@ -293,8 +296,9 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     if (!go.length) { toast.error('Lock the prices first.'); return; }
     const r = await api.post('/costing/enquiries/finalise', { ids: go });
     if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-    if (r.done?.length) toast.success(`${r.done.join(', ')} in Quotations — Enquiry desk → Quotations → Generate quotation, then Save as Gmail draft`);
+    if (r.done?.length) toast.success(`${r.done.join(', ')} in Quotations — next: Make quotation & Gmail draft (progress bar above)`);
     await loadDesk();
+    setProgressSeen(n => n + 1);
   };
 
   const save = async () => {
@@ -331,6 +335,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     setDirty(false);
     onSaved?.(b);
     loadDesk();
+    setProgressSeen(n => n + 1);
     if (!batch.id) onOpened(b.id);
     else setBatch(cur => ({ ...cur, batch_no: b.batch_no,
       rows: rowsFromServer(b.rows).map(r => ({ ...r, dp_auto: blank(cur.common.inputs.dp_rate) && String(r.inputs.dp_rate) === String(styleDp(typical, r.style)) })) }));
@@ -348,6 +353,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     const r = await api.post(`/costing/batches/${batch.id}/approve`, {});
     toast.success(`${r.approved} costing${r.approved === 1 ? '' : 's'} approved`);
     await load(batch.id);
+    setProgressSeen(n => n + 1);
   };
 
   // Pasted rows: a name (or code) that is exactly one Product Master entry fills the row from it.
@@ -439,6 +445,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         <Button onClick={save} disabled={!batch.rows.some(r => r.product_name.trim())}><Save size={15} className="mr-1.5 inline" />Save batch</Button>
       </div>
 
+      {batch.id && deskIds.length > 0 && <QuoteProgress batchId={batch.id} canFinalise={!!boot?.can_approve} reloadSignal={progressSeen} />}
       <form data-ci-form onSubmit={e => e.preventDefault()} className="space-y-4">
         <section className="ci-form-panel glass rounded-2xl p-4">
           <div className="grid gap-3 sm:grid-cols-3">

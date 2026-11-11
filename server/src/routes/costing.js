@@ -689,6 +689,29 @@ r.get('/costing/batches/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Where a bulk costing's enquiries stand on the road to the customer's mail, with each stage's moment
+// (client/src/lib/quoteProgress.js turns these into the progress bar). Times only — no price, no address.
+r.get('/costing/batches/:id/progress', async (req, res, next) => {
+  try {
+    const id = intOrNull(req.params.id) || 0;
+    const b = await one('SELECT id, batch_no, created_at FROM costing_batches WHERE id = $1', [id]);
+    if (!b) throw fail(404, 'No such batch.');
+    const rows = await q(`
+      SELECT e.id, e.enquiry_no, e.status, e.finalised_at, qt.id AS quotation_id, c.approved_at,
+             (SELECT max(ev.at) FROM enquiry_events ev WHERE ev.enquiry_id = e.id AND ev.action = 'price') AS priced_at,
+             qt.quotation_no, qt.status AS q_status, qt.created_at AS q_created_at, qt.updated_at AS q_updated_at,
+             qt.sent_at, qt.gmail_draft_url AS draft_url,
+             j.queued_at, j.claimed_at, j.finished_at, j.status AS job_status, j.error AS job_error
+        FROM enquiries e
+        JOIN costings c ON c.id = e.costing_id
+        LEFT JOIN quotations qt ON qt.id = e.quotation_id AND qt.status <> 'cancelled'
+        LEFT JOIN enquiry_jobs j ON j.id = qt.job_id
+       WHERE c.batch_id = $1 AND NOT c.archived AND e.status <> 'dropped'
+       ORDER BY e.id`, [id]);
+    res.json({ batch_id: b.id, batch_no: b.batch_no, batch_created_at: b.created_at, rows });
+  } catch (e) { next(e); }
+});
+
 // ── Size Library ─────────────────────────────────────────────────────────────────────────────────
 r.get('/costing/sizes', async (req, res, next) => {
   try {
