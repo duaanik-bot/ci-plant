@@ -65,6 +65,16 @@ export const processFor = newDie => (newDie ? HOUSE_RULES.process_new_die : HOUS
 const NOT_FBB = /duplex|kraft|paper|maplitho|chromo|grey\s*back|\bgb\b|\bwb\b/i;
 export const takesFbbRate = (...boards) => !boards.some(b => NOT_FBB.test(String(b ?? '')));
 
+// What a costing CHARGES for a board grade (owner, 11 Nov 2026: "100 is our buying price, but we will charge
+// customers 120 … this should not affect my warehouse"). FBB-type grades are charged at the house rate, or the
+// buying rate if that is ever higher; other grades at their buying rate. Masters → Board Rates (the warehouse's
+// buying rate) is never changed — `buy_rate` keeps it beside the charge.
+const FBB_GRADE = /fbb|sbs|saff?ire|sapphire|cyber|ivory/i;
+export const chargeRateOf = g => (g && FBB_GRADE.test(g.grade) && takesFbbRate(g.grade)
+  ? Math.max(HOUSE_RULES.board_rate, Number(g.rate_per_kg) || 0) : Number(g?.rate_per_kg) || null);
+export const chargeGrades = (grades = []) => grades.map(g => ({ ...g, buy_rate: g.buy_rate ?? g.rate_per_kg, rate_per_kg: chargeRateOf(g) }));
+export const gradeLabel = g => `${g.grade} — ₹${g.rate_per_kg}/kg${g.buy_rate != null && g.buy_rate !== g.rate_per_kg ? ` charged (buy ₹${g.buy_rate})` : ''}`;
+
 // A new product (not in the Product Master) needs a new die unless somebody said otherwise.
 export const newDieDefault = v => (v?.new_die != null ? !!v.new_die : !(v?.product_id || v?.product));
 

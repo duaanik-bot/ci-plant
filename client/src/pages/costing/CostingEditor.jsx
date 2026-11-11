@@ -20,7 +20,7 @@ import {
   SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
   rankHistory, recommend, rupees, stillNeeded,
 } from '../../lib/costingUi.js';
-import { HOUSE_RULES, newDieDefault } from '../../lib/costingRules.js';
+import { HOUSE_RULES, chargeGrades, gradeLabel, newDieDefault } from '../../lib/costingRules.js';
 
 // ── small pieces ─────────────────────────────────────────────────────────────────────────────────
 export function Card({ icon: Icon, title, hint, children, className = '' }) {
@@ -528,7 +528,8 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   const toast = useToast();
   const inputs = value.inputs || {};
   const settings = boot?.settings || { coatings: [], alert_pct: 15, defaults: {} };
-  const grades = boot?.board_grades || [];
+  // Grades at what a costing charges (FBB ₹120), not the warehouse's buying rate.
+  const grades = useMemo(() => chargeGrades(boot?.board_grades || []), [boot?.board_grades]);
   const src = f => value.sources?.[f];
   // A change the user made: the values, and the boxes it touched marked as typed.
   const set = (patch, edited = []) => onChange(markEdited({ ...value, ...patch, autofill: true }, edited));
@@ -648,11 +649,11 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
                   set({ board_grade: e.target.value, inputs: { ...inputs, board_rate: g ? g.rate_per_kg : inputs.board_rate } }, ['board_grade', 'board_rate']);
                 }}>
                 <option value="">— type the rate instead —</option>
-                {grades.map(g => <option key={g.grade} value={g.grade}>{g.grade} — ₹{plain(g.rate_per_kg)}/kg</option>)}
+                {grades.map(g => <option key={g.grade} value={g.grade}>{gradeLabel(g)}</option>)}
               </Select>
             </Field>
             <NumField label="Board rate" unit="₹ per kg" source={src('board_rate')} value={inputs.board_rate} onChange={x => setIn('board_rate', x)} placeholder="e.g. 95"
-              help="Board is bought by weight. Picking a grade fills today's rate from Masters → Board Rates." />
+              help="What the costing charges a kg. Picking a grade fills it: FBB-type grades ₹120 (the buying rate in Masters → Board Rates is not changed)." />
           </div>
         </Card>
 

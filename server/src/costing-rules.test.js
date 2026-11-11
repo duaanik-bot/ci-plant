@@ -119,3 +119,14 @@ test('the New die / Big box ticks read back from a saved costing', () => {
   assert.equal(w.new_die, false);
   assert.equal(w.big_box, false);
 });
+
+test('a costing charges FBB-type grades ₹120; the buying rate is kept beside it, other grades unchanged', async () => {
+  const { chargeGrades, chargeRateOf, gradeLabel } = await import('../../client/src/lib/costingRules.js');
+  const gs = chargeGrades([{ grade: 'CFBB', rate_per_kg: 100 }, { grade: 'Duplex GB', rate_per_kg: 44 }, { grade: 'Chromo Paper', rate_per_kg: 80 }, { grade: 'Saffire', rate_per_kg: 130 }]);
+  assert.deepEqual(gs.map(g => g.rate_per_kg), [120, 44, 80, 130], 'a buying rate above ₹120 is charged as bought');
+  assert.equal(gs[0].buy_rate, 100);
+  assert.equal(gradeLabel(gs[0]), 'CFBB — ₹120/kg charged (buy ₹100)');
+  assert.equal(gradeLabel(gs[1]), 'Duplex GB — ₹44/kg');
+  assert.equal(chargeRateOf({ grade: 'Cupstock', rate_per_kg: 110 }), 110);
+  assert.deepEqual(chargeGrades(gs).map(g => g.rate_per_kg), [120, 44, 80, 130], 'mapping twice changes nothing');
+});

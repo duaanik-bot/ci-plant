@@ -362,7 +362,7 @@ export function recommend(value, ctx = {}) {
     const g = gradeFor(p.board_grade, grades);
     if (g) {
       put('board_grade', g.grade, 'product', p.board_grade);
-      put('board_rate', g.rate_per_kg, 'rates', `${g.grade}, today's rate`);
+      put('board_rate', g.rate_per_kg, 'rates', g.buy_rate != null && g.buy_rate !== g.rate_per_kg ? `${g.grade}, charged ₹${g.rate_per_kg} (buy ₹${g.buy_rate})` : `${g.grade}, today's rate`);
     }
     if (+p.emboss !== 1) put('emb_rate', 0, 'product', 'no embossing on the Product Master');
   }

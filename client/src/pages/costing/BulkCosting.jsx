@@ -24,7 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
-import { HOUSE_RULES, dpFor, ruleInputsForRow } from '../../lib/costingRules.js';
+import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, ruleInputsForRow } from '../../lib/costingRules.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -108,7 +108,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const typical = boot?.typical || {};
-  const grades = boot?.board_grades || [];
+  const grades = useMemo(() => chargeGrades(boot?.board_grades || []), [boot?.board_grades]);
   const coatings = boot?.settings?.coatings || [];
   const [batch, setBatch] = useState(() => ({
     id: null, batch_no: null, title: '', customer_id: null, customer_name: '',
@@ -400,7 +400,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                 if (g) setCommon('board_rate', g.rate_per_kg);
               }}>
                 <option value="">— type the rate —</option>
-                {grades.map(g => <option key={g.grade} value={g.grade}>{g.grade} — ₹{plain(g.rate_per_kg)}/kg</option>)}
+                {grades.map(g => <option key={g.grade} value={g.grade}>{gradeLabel(g)}</option>)}
               </Select>
             </Field>
             {COMMON.map(c => (
@@ -465,9 +465,9 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                     <tr key={x.key} className="border-t border-slate-200/70 align-top">
                       <td className="px-1.5 py-1.5 text-slate-400">{i + 1}{x.costing_no && <div className="text-[10px]">{x.costing_no}</div>}
                         {x.enquiry_no && <div className="whitespace-nowrap text-[10px] font-bold text-sky-700" title="Costs this enquiry: saving the batch moves it on">{x.enquiry_no}</div>}</td>
-                      <td className="px-1.5 py-1"><Input className={`${cell} w-56`} value={x.product_name} onChange={e => setRow(x.key, { product_name: e.target.value })} placeholder="Product name" />
+                      <td className="px-1.5 py-1"><Input className={`${cell} !w-56`} value={x.product_name} onChange={e => setRow(x.key, { product_name: e.target.value })} placeholder="Product name" />
                         {x.product_id && <div className="mt-0.5 flex items-center gap-1 text-[10px] text-brand-700"><Sparkles size={10} />Product Master</div>}</td>
-                      <td className="px-1.5 py-1"><Input className={`${cell} w-32`} value={x.size_text} onChange={e => setRow(x.key, { size_text: e.target.value, layout_note: null })} placeholder="165x58x73" />
+                      <td className="px-1.5 py-1"><Input className={`${cell} !w-32`} value={x.size_text} onChange={e => setRow(x.key, { size_text: e.target.value, layout_note: null })} placeholder="165x58x73" />
                         {x.layout_note && <div className="mt-0.5 text-[10px] text-emerald-700">{x.layout_note}</div>}</td>
                       <td className="px-1.5 py-1">
                         <select className={`${cell} w-28 rounded-lg border border-slate-200 bg-white/80`} value={x.style || ''} onChange={e => setRow(x.key, { style: e.target.value || null })}>
@@ -475,12 +475,15 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                         </select>
                         {x.dp_auto && num(x.inputs.dp_rate) > 0 && <div className="mt-0.5 text-[10px] text-teal-700">D&P ₹{plain(num(x.inputs.dp_rate))} typical</div>}
                       </td>
-                      <td className="px-1.5 py-1"><Input inputMode="decimal" className={`${cell} w-24 text-right`} value={x.inputs.qty ?? ''} onChange={e => setRowIn(x.key, 'qty', e.target.value)} /></td>
-                      <td className="px-1.5 py-1 whitespace-nowrap">
-                        <Input inputMode="decimal" className={`${cell} w-16`} value={x.inputs.sheet_l ?? ''} onChange={e => setRowIn(x.key, 'sheet_l', e.target.value)} /> ×{' '}
-                        <Input inputMode="decimal" className={`${cell} w-16`} value={x.inputs.sheet_w ?? ''} onChange={e => setRowIn(x.key, 'sheet_w', e.target.value)} />
+                      <td className="px-1.5 py-1"><Input inputMode="decimal" className={`${cell} !w-24 text-right`} value={x.inputs.qty ?? ''} onChange={e => setRowIn(x.key, 'qty', e.target.value)} /></td>
+                      <td className="px-1.5 py-1">
+                        <div className="flex items-center gap-1">
+                          <Input inputMode="decimal" className={`${cell} !w-[4.5rem] text-right`} value={x.inputs.sheet_l ?? ''} onChange={e => setRowIn(x.key, 'sheet_l', e.target.value)} />
+                          <span className="text-slate-400">×</span>
+                          <Input inputMode="decimal" className={`${cell} !w-[4.5rem] text-right`} value={x.inputs.sheet_w ?? ''} onChange={e => setRowIn(x.key, 'sheet_w', e.target.value)} />
+                        </div>
                       </td>
-                      <td className="px-1.5 py-1"><Input inputMode="decimal" className={`${cell} w-14 text-right`} value={x.inputs.ups ?? ''} onChange={e => setRowIn(x.key, 'ups', e.target.value)} /></td>
+                      <td className="px-1.5 py-1"><Input inputMode="decimal" className={`${cell} !w-14 text-right`} value={x.inputs.ups ?? ''} onChange={e => setRowIn(x.key, 'ups', e.target.value)} /></td>
                       <td className="px-1.5 py-1.5 text-right font-bold tabular-nums">{x.r.ok ? perUnit(x.r.cost_per_unit) : '—'}</td>
                       <td className="px-1.5 py-1.5 text-right tabular-nums text-brand-700">{x.r.ok ? perUnit(x.r.quote_per_unit) : '—'}</td>
                       <td className="px-1.5 py-1.5 text-right tabular-nums">{x.r.ok ? rupees(x.r.cost_value) : '—'}
