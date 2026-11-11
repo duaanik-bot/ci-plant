@@ -180,9 +180,18 @@ export async function saveDraft(token, { email, raw, threadId, draftId }) {
 
 // Has this draft been sent? The draft is gone AND a sent message sits in its thread from after it was made.
 // → { sent: true, at } | { sent: false, gone: bool }
+// Gmail's web app, sending a draft, can keep the draft's id and point it at the SENT message (seen live, 11 Nov 2026:
+// drafts.get answered the sent message, labels SENT, no DRAFT) — so a SENT message behind the draft id counts as sent.
 export async function draftSent(token, { draftId, threadId, since }) {
-  try { await gmailCall(token, 'GET', `/drafts/${encodeURIComponent(draftId)}?format=minimal`); return { sent: false, gone: false }; }
-  catch (e) { if (e.gmailStatus !== 404) throw e; }
+  try {
+    const d = await gmailCall(token, 'GET', `/drafts/${encodeURIComponent(draftId)}?format=minimal`);
+    const labels = d.message?.labelIds || [];
+    if (labels.includes('SENT') && !labels.includes('DRAFT')) {
+      const at = Number(d.message?.internalDate);
+      return { sent: true, at: new Date(at > 0 ? at : Date.now()).toISOString(), message_id: d.message?.id || null };
+    }
+    return { sent: false, gone: false };
+  } catch (e) { if (e.gmailStatus !== 404) throw e; }
   if (!threadId) return { sent: false, gone: true };
   let t;
   try { t = await gmailCall(token, 'GET', `/threads/${encodeURIComponent(threadId)}?format=metadata&metadataHeaders=Subject`); }

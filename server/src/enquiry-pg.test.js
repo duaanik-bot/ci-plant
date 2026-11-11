@@ -514,7 +514,7 @@ describe('Enquiry desk — through the real app', {
           const d = G.drafts.get(m[1]);
           if (!d) return send(404, { error: { message: 'Requested entity was not found.' } });
           if (req.method === 'PUT') { G.raws.push(JSON.parse(body).message.raw); d.message = { ...d.message, id: `${d.message.id}-v2` }; }
-          return send(200, d);
+          return send(200, { ...d, message: { labelIds: ['DRAFT'], ...d.message } });
         }
         if ((m = /^\/threads\/([^/]+)$/.exec(p))) return G.threads.has(m[1]) ? send(200, { id: m[1], messages: G.threads.get(m[1]) }) : send(404, { error: { message: 'not found' } });
         return send(404, { error: { message: `no fake for ${req.method} ${p}` } });
@@ -603,6 +603,16 @@ describe('Enquiry desk — through the real app', {
       assert.equal(qt.sent_by_name, 'Sent from Gmail');
       assert.equal((await enquiry(x.id)).status, 'sent');
       assert.ok(!G.calls.some(c => /\/send$/.test(c)), 'CI Plant never called send');
+
+      // Gmail's web app may keep the draft id and point it at the SENT message (seen live 11 Nov): that is sent too.
+      const y = await typed('GMAIL KEPT DRAFT ID CARTON');
+      await call('clerk', 'POST', '/costing/costings', { enquiry_id: y.id, product_name: y.product_name, size_text: y.size_text, inputs: { ...JOB, qty: 5000 } });
+      await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: y.id, prices: [{ qty: 5000, final: 3.9 }] }] });
+      const s2 = await call('md', 'POST', '/costing/quotations/send', { ids: [y.id] });
+      const d2 = (await call('clerk', 'GET', `/costing/quotations/${s2.body.drafted[0].id}`)).body.gmail_draft_id;
+      G.drafts.set(d2, { id: d2, message: { id: 'sent-77', threadId: 't-x', labelIds: ['SENT', 'INBOX'], internalDate: String(Date.now()) } });
+      await call('md', 'GET', '/costing/enquiry-desk');
+      assert.equal((await call('clerk', 'GET', `/costing/quotations/${s2.body.drafted[0].id}`)).body.status, 'sent', 'a SENT message behind the draft id = sent');
 
       // Disconnect: admin only; the link is gone.
       assert.equal((await call('md', 'DELETE', `/costing/enquiry-desk/gmail/${box.key}`)).status, 403);
