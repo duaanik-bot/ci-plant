@@ -21,7 +21,7 @@ import {
 import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
-import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
+import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 const nos = list => list.map(m => m.enquiry_no).join(', ');
@@ -470,12 +470,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             const go = pickedRows.filter(isLocked);
             if (open.length) toast.info(`Not pushed — lock the price first: ${open.map(e => e.enquiry_no).join(', ')}`);
             if (!go.length) return;
-            const r = await api.post('/costing/enquiries/finalise', { ids: go.map(e => e.id) });
-            if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-            // …and straight on: the quotation and its reply draft in the customer's thread.
-            const q = r.done?.length ? await quoteAndDraft(api, go.map(e => e.id)) : null;
-            if (q?.failed.length) toast.error(q.failed.join('; '));
-            if (r.done?.length) setLast({ text: q?.drafted.length ? draftedText(q) : `${r.done.join(', ')} pushed — now in Quotations.` });
+            // One server step: finalise, quotation, reply draft in the customer's thread.
+            const q = await quoteAndDraft(api, go.map(e => e.id));
+            if (q.failed.length) toast.error(q.failed.join('; '));
+            setLast({ text: sendSummary(q), quotations: q.quotations });
             setPicked([]); await reload();
           }}><Send size={13} className="mr-1 inline" />Push & make Gmail draft</Button>}
         </>}
@@ -483,7 +481,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           // The quotation and, straight on, its reply draft in the customer's thread.
           const r = await quoteAndDraft(api, picked);
           if (r.failed.length) toast.error(r.failed.join('; '));
-          setLast({ text: r.drafted.length ? draftedText(r) : `${r.quotations.map(q => q.quotation_no).join(', ') || 'Nothing'} made.`, quotations: r.quotations });
+          setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
         }}><Send size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>}
         {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}

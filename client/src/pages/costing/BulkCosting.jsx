@@ -24,7 +24,7 @@ import {
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import QuoteProgress from './QuoteProgress.jsx';
-import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
+import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
 import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
 
@@ -295,16 +295,11 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   // Push = finalise the locked prices, make the quotation and queue its Gmail reply draft — one press.
   const pushLocked = async () => {
     const locked = priced.filter(x => x.enquiry_id && lockedRow(x));
-    const go = locked.filter(x => !['quote_ready', 'sent'].includes(desk[x.enquiry_id]?.stage)).map(x => x.enquiry_id);
     if (!locked.length) { toast.error('Lock the prices first.'); return; }
-    if (go.length) {
-      const r = await api.post('/costing/enquiries/finalise', { ids: go });
-      if (r.refused?.length) toast.info(r.refused.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
-    }
+    // One server step: finalise, quotation, reply draft — it says what it skipped and why.
     const q = await quoteAndDraft(api, locked.map(x => x.enquiry_id));
     if (q.failed.length) toast.error(q.failed.join('; '));
-    if (q.drafted.length) toast.success(draftedText(q));
-    else if (!go.length) toast.info('Already on a quotation — see the progress bar above.');
+    (q.drafted.length ? toast.success : toast.info)(sendSummary(q));
     await loadDesk();
     setProgressSeen(n => n + 1);
   };

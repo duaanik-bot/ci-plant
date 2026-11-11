@@ -64,3 +64,12 @@ test('no enquiry rows: nothing to show', () => {
   assert.equal(p.pct, 0);
   assert.equal(p.stages.length, QUOTE_STAGES.length);
 });
+
+test('no screen names its own handler quoteAndDraft — that shadowed the import and looped forever (11 Nov 2026)', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const dir = new URL('../../client/src/pages/costing/', import.meta.url);
+  for (const f of readdirSync(dir).filter(x => x.endsWith('.jsx'))) {
+    const src = readFileSync(new URL(f, dir), 'utf8');
+    assert.ok(!/\b(const|let|function)\s+quoteAndDraft\b/.test(src), `${f} declares its own quoteAndDraft`);
+  }
+});

@@ -461,6 +461,34 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await enquiry(x.id)).finalised_by_name, null);
   });
 
+  test('send in one step: locked prices → finalised → quotation → reply draft queued; it names what it skipped', async () => {
+    const a = await typed('SEND ONE STEP CARTON A');
+    const b = await typed('SEND ONE STEP CARTON B');
+    const c = await typed('SEND ONE STEP CARTON C');
+    for (const x of [a, b, c]) await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: a.id, prices: [{ qty: 5000, final: 3.5 }] }, { id: b.id, prices: [{ qty: 5000, final: 3.6 }] }] });
+    // c has no locked price yet.
+    assert.equal((await call('clerk', 'POST', '/costing/quotations/send', { ids: [a.id] })).status, 403, 'needs the Management right');
+    const r = await call('md', 'POST', '/costing/quotations/send', { ids: [a.id, b.id, c.id] });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.quotations.length, 1, 'one quotation for the one customer');
+    assert.equal(r.body.drafted.length, 1);
+    assert.deepEqual(r.body.failed, []);
+    assert.deepEqual(r.body.skipped.map(s => s.enquiry_no), [c.enquiry_no]);
+    assert.match(r.body.skipped[0].why, /locked final price|no complete costing|is /);
+    const qid = r.body.quotations[0].id;
+    const job = await db.one(`SELECT kind, status, quotation_id FROM enquiry_jobs WHERE id = $1`, [r.body.drafted[0].job]);
+    assert.deepEqual([job.kind, job.status, job.quotation_id], ['draft', 'queued', qid]);
+    assert.equal((await enquiry(a.id)).status, 'quote_ready');
+    // Pressing again does nothing twice: both are on a queued quotation now.
+    const again = await call('md', 'POST', '/costing/quotations/send', { ids: [a.id, b.id] });
+    assert.equal(again.body.quotations.length, 0);
+    assert.equal(again.body.drafted.length, 0);
+    assert.equal(again.body.skipped.length, 2);
+    assert.match(again.body.skipped[0].why, /queued/);
+    await call('clerk', 'POST', `/costing/quotations/${qid}/cancel`, {});
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });

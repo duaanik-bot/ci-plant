@@ -620,12 +620,9 @@ const QT_COLS = `qt.id, qt.quotation_no, qt.mailbox, qt.customer_id, qt.customer
   qt.updated_by_name, qt.updated_at`;
 
 // One quotation per customer, from Quotation-ready rows not already on a live quotation.
-r.post('/costing/quotations', async (req, res, next) => {
-  try {
-    const u = req.costingUser;
-    const list = ids(req.body);
-    if (!list.length) throw fail(400, 'Tick the Quotation-ready enquiries to quote.');
-    const made = await tx(async (qc, oc) => {
+// One quotation per customer from Quotation-ready enquiries (used by the route below and by /send).
+async function makeQuotations(list, u) {
+    return tx(async (qc, oc) => {
       await lockDocNumber('CI-QTN-', oc);
       const rows = await qc(`SELECT e.*, e.quantities::float8[] AS quantities, m.subject AS mail_subject, m.received_at AS mail_received_at
                                FROM enquiries e LEFT JOIN enquiry_mails m ON m.id = e.mail_id
@@ -656,7 +653,59 @@ r.post('/costing/quotations', async (req, res, next) => {
       }
       return out;
     });
-    res.status(201).json({ quotations: made });
+}
+
+r.post('/costing/quotations', async (req, res, next) => {
+  try {
+    const list = ids(req.body);
+    if (!list.length) throw fail(400, 'Tick the Quotation-ready enquiries to quote.');
+    res.status(201).json({ quotations: await makeQuotations(list, req.costingUser) });
+  } catch (e) { next(e); }
+});
+
+// Send the quotation, in one step (owner, 11 Nov 2026: "once we push to the quotation, it has to be the reply to the same
+// mail saved in the drafts … make this whole process very seamless"). For the enquiries given: those with every final price
+// saved are finalised (Management), every finalised one not yet quoted gets its quotation (one per customer, the approved
+// template), and each quotation is queued to Claude as a Gmail reply draft in the customer's own thread. Never sends.
+// The answer says what happened to every enquiry — nothing is skipped silently.
+r.post('/costing/quotations/send', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const list = ids(req.body);
+    if (!list.length) throw fail(400, 'Choose the enquiries to send.');
+    const skipped = [];
+    // 1. Finalise what has its prices but is not finalised yet.
+    const group = newGroup();
+    await tx(async (qc) => {
+      for (const e of await lockRows(qc, list)) {
+        if (e.status === 'quote_ready' || e.status === 'sent') continue;
+        const prices = priceRows(e, e.complete ? e.costing_inputs : null);
+        const why = !['costed', 'price_pending'].includes(e.stage) ? `is ${stageText(e.stage)}`
+          : !e.complete ? 'has no complete costing'
+            : !prices.length || prices.some(p => !(p.final > 0)) ? 'has no locked final price' : null;
+        if (why) { skipped.push({ enquiry_no: e.enquiry_no, why }); continue; }
+        await changeRow(qc, e, "status = 'quote_ready', finalised_by = $3, finalised_by_name = $4, finalised_at = now()", [u.id, u.name], u,
+          { action: 'finalise', group, detail: { prices: prices.map(p => ({ qty: p.qty, final: p.final, proposed: p.proposed })) } });
+      }
+    });
+    // 2. Quotations for the finalised ones not yet on a live quotation.
+    const rows = await q(`SELECT e.id, e.enquiry_no, e.status, e.quotation_id, qt.status AS q_status, qt.quotation_no
+                            FROM enquiries e LEFT JOIN quotations qt ON qt.id = e.quotation_id
+                           WHERE e.id = ANY($1::int[]) ORDER BY e.id`, [list]);
+    const toQuote = rows.filter(e => e.status === 'quote_ready' && (!e.quotation_id || e.q_status === 'cancelled')).map(e => e.id);
+    const made = toQuote.length ? await makeQuotations(toQuote, u) : [];
+    // 3. A Gmail draft for each new quotation, and for an earlier quotation of these enquiries still without one.
+    const quoteIds = [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
+    const drafted = [], failed = [];
+    for (const id of quoteIds) {
+      try { const j = await queueDraft(id, u); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id }); }
+      catch (e) { failed.push({ id, why: e.message }); }
+    }
+    for (const e of rows) {
+      if (e.quotation_id && ['queued', 'drafted', 'sent'].includes(e.q_status)) skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} (${e.q_status})` });
+    }
+    res.status(201).json({ quotations: made, drafted, failed, skipped });
   } catch (e) { next(e); }
 });
 
@@ -730,10 +779,8 @@ r.get('/costing/quotations/:id/pdf', async (req, res, next) => {
 // draft in the customer's thread. Nothing is ever sent from here — the person sends the draft from Gmail.
 // Drafting again after a change makes a fresh draft; the old one is left in Gmail for the person to delete.
 // A trial mailbox's draft is addressed to its own address only.
-r.post('/costing/quotations/:id/draft', async (req, res, next) => {
-  try {
-    const u = req.costingUser;
-    const id = intOrNull(req.params.id) || 0;
+// Queue one quotation to Claude as a Gmail draft (a reply in the customer's thread). Returns { job_id, quotation_no }.
+async function queueDraft(id, u) {
     // Signed by the person who presses it.
     const qt = await quotationById(id, u.name);
     if (!qt) throw fail(404, 'No such quotation.');
@@ -760,7 +807,15 @@ r.post('/costing/quotations/:id/draft', async (req, res, next) => {
       await audit('quotation', id, 'draft', `${qt.quotation_no} — job ${j.id}`, qc, u.name);
       return j;
     });
-    res.status(201).json({ job: await jobById(job.id), quotation: await quotationById(id) });
+    return { job_id: job.id, quotation_no: qt.quotation_no };
+}
+
+r.post('/costing/quotations/:id/draft', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    const id = intOrNull(req.params.id) || 0;
+    const j = await queueDraft(id, u);
+    res.status(201).json({ job: await jobById(j.job_id), quotation: await quotationById(id) });
   } catch (e) { next(e); }
 });
 

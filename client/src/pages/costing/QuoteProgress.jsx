@@ -6,7 +6,7 @@ import { api } from '../../api.js';
 import { Button, useToast } from '../../components/ui.jsx';
 import { quoteProgress } from '../../lib/quoteProgress.js';
 import { elapsedText } from '../../lib/avs.js';
-import { draftedText, quoteAndDraft } from '../../lib/quoteFlow.js';
+import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 
 const ICON = {
   done: <CheckCircle2 size={15} className="text-emerald-600" aria-label="done" />,
@@ -35,10 +35,11 @@ export default function QuoteProgress({ batchId, canFinalise = false, reloadSign
 
   const act = async fn => { setBusy(true); try { await fn(); await load(); } finally { setBusy(false); } };
   // One press: the quotation (the approved template — product, details asked, rate) and its Gmail draft job.
-  const quoteAndDraft = () => act(async () => {
+  // (Named sendNow: a handler called quoteAndDraft shadowed the import and called itself forever — 11 Nov 2026.)
+  const sendNow = () => act(async () => {
     const r = await quoteAndDraft(api, p.to_quote);
     if (r.failed.length) toast.error(r.failed.join('; '));
-    if (r.drafted.length) toast.success(draftedText(r));
+    (r.drafted.length ? toast.success : toast.info)(sendSummary(r));
   });
   const draftAgain = () => act(async () => {
     for (const qt of p.quotations.filter(x => ['ready', 'drafted'].includes(x.status))) await api.post(`/costing/quotations/${qt.id}/draft`, {});
@@ -79,7 +80,7 @@ export default function QuoteProgress({ batchId, canFinalise = false, reloadSign
         <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs ring-1 ${p.next.kind === 'failed' ? 'bg-red-50 text-red-900 ring-red-200' : p.next.kind === 'wait' ? 'bg-violet-50 text-violet-900 ring-violet-200' : 'bg-amber-50 text-amber-900 ring-amber-200'}`}>
           <span className="min-w-0 flex-1 font-semibold">{p.next.kind === 'wait' ? '' : 'Next: '}{p.next.text}</span>
           {p.next.kind === 'quote' && canFinalise && p.to_quote.length > 0 && (
-            <Button size="sm" onClick={quoteAndDraft} disabled={busy}><Mail size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>
+            <Button size="sm" onClick={sendNow} disabled={busy}><Mail size={13} className="mr-1 inline" />Make quotation & Gmail draft</Button>
           )}
           {(p.next.kind === 'draft' || p.next.kind === 'failed') && <Button size="sm" onClick={draftAgain} disabled={busy}><Mail size={13} className="mr-1 inline" />Save as Gmail draft</Button>}
           {p.quotations.filter(x => x.draft_url).map(x => (
