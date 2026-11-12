@@ -14,10 +14,12 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { storage } from '../lib/safeStorage.js';
 import {
-  DELIVERY, DELIVERY_LABEL, OPEN_KEYS, VIEWS, WHERE_LABEL, WHERE_BEFORE,
-  enrichLine, filterLines, totalsOf, groupLines, buildReportExportSpec, sumRows, whereMix, whereOrder,
+  DELIVERY, DELIVERY_LABEL, OPEN_KEYS, VIEWS,
+  enrichLine, filterLines, totalsOf, groupLines, buildReportExportSpec, sumRows, whereMix, whereOrder, drawerCtx,
 } from '../lib/statusReport.js';
-import { SECTION_META, SECTION_ORDER } from '../sections.js';
+import { SECTION_ORDER } from '../sections.js';
+import { NameLink, Pill, WhereChip, whereLabel } from '../components/StatusReportBits.jsx';
+import StatusReportDrawer from '../components/StatusReportDrawer.jsx';
 import { DataTable, Input, KpiCard, SubTabs, rowMatches } from '../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { AlertTriangle, Building2, FileText, Package, Rows3, RotateCcw } from 'lucide-react';
@@ -47,29 +49,6 @@ const QUICK = [
 
 const VIEW_ICON = { company: Building2, po: FileText, product: Package, lines: Rows3 };
 
-const PILL = {
-  pending: 'bg-amber-50 text-amber-700',
-  part: 'bg-blue-50 text-blue-700',
-  delivered: 'bg-emerald-50 text-emerald-700',
-  cancelled: 'bg-slate-100 text-slate-500',
-};
-const Pill = ({ k }) => (
-  <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${PILL[k] || ''}`}>{DELIVERY_LABEL[k] || k}</span>
-);
-
-// Where a line is, as a word: plant stages are named by SECTION_META (the one
-// source for station names), the rest by WHERE_LABEL.
-const whereLabel = k => WHERE_LABEL[k] || SECTION_META[k]?.label || String(k || '').replace(/_/g, ' ');
-const whereTone = k => (WHERE_BEFORE.includes(k) ? 'bg-slate-100 text-slate-600'
-  : k === 'done' ? 'bg-teal-50 text-teal-700'
-  : k === 'delivered' ? 'bg-emerald-50 text-emerald-700'
-  : k === 'cancelled' ? 'bg-slate-100 text-slate-400'
-  : 'bg-sky-50 text-sky-700');
-const WhereChip = ({ k, count }) => (
-  <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${whereTone(k)}`}>
-    {whereLabel(k)}{count != null && <span className="tabular-nums opacity-70">{count}</span>}
-  </span>
-);
 // One line → one chip. A PO / product / company → its lines counted by stage.
 const stageCol = view => (view === 'lines'
   ? { key: 'where', label: 'Stage', card: 'face', sortValue: r => whereOrder(SECTION_ORDER).indexOf(r.where),
@@ -109,23 +88,35 @@ const pct = {
   export: r => `${r.fulfil_pct}%`,
 };
 const pendingQty = { ...numCell('pending_qty', { strong: true, tone: r => (r.pending_qty > 0 ? 'text-amber-700' : 'text-gray-400') }), label: 'Pending' };
-const company = { key: 'customer_name', label: 'Company', render: r => <span className="font-semibold">{r.customer_name}</span> };
+// Names open the details drawer (StatusReportDrawer). `open(kind, row)` is
+// supplied by the page; export still writes the plain name.
+const companyCol = open => ({
+  key: 'customer_name', label: 'Company',
+  render: r => <NameLink onOpen={() => open('company', r)} title="Orders, deliveries and production for this company">{r.customer_name}</NameLink>,
+  export: r => r.customer_name,
+});
+const poCol = open => ({
+  key: 'po_number', label: 'PO no.',
+  render: r => <NameLink onOpen={() => open('po', r)} title="Lines, deliveries and production for this PO" className="tabular-nums">{r.po_number}</NameLink>,
+  export: r => r.po_number,
+});
 // Phone / upright-tablet cards pick their status chip by key name, and
 // `delivery` / `where*` don't look like one — without explicit roles both
 // columns fell behind "Details" and the card never said where a job was.
 const status = { key: 'delivery', label: 'Status', card: 'status', render: r => <Pill k={r.delivery} />, export: r => DELIVERY_LABEL[r.delivery] || r.delivery };
-const product = {
+const productCol = (open, kind) => ({
   key: 'product_name', label: 'Product',
   render: r => (
     <div className="min-w-[180px]">
-      <div className="font-medium text-[#1D1D1F]">{r.product_name}</div>
+      <NameLink onOpen={() => open(kind, r)} title={kind === 'line' ? 'Details of this order line' : 'Every PO, delivery and job card for this product'}>{r.product_name}</NameLink>
       <div className="text-[11px] text-gray-500">{[r.product_code, r.party_item_code].filter(Boolean).join(' · ')}</div>
     </div>
   ),
   export: r => r.product_name,
-};
+});
 
-function columnsFor(view) {
+function columnsFor(view, open) {
+  const company = companyCol(open);
   if (view === 'company') return [
     company,
     { ...numCell('orders'), label: 'Orders' },
@@ -142,7 +133,7 @@ function columnsFor(view) {
   ];
   if (view === 'po') return [
     company,
-    { key: 'po_number', label: 'PO no.', render: r => <span className="font-semibold tabular-nums">{r.po_number}</span> },
+    poCol(open),
     dateCol('po_date', 'PO date'),
     dateCol('delivery_date', 'EDD'),
     status,
@@ -158,7 +149,7 @@ function columnsFor(view) {
   ];
   if (view === 'product') return [
     company,
-    product,
+    productCol(open, 'product'),
     { key: 'party_artwork_code', label: 'Artwork code', render: r => <span className="text-xs text-gray-600">{r.party_artwork_code || '—'}</span>, export: r => r.party_artwork_code || '' },
     { ...numCell('orders'), label: 'POs' },
     status,
@@ -171,9 +162,9 @@ function columnsFor(view) {
   ];
   return [
     company,
-    { key: 'po_number', label: 'PO no.', render: r => <span className="font-semibold tabular-nums">{r.po_number}</span> },
+    poCol(open),
     dateCol('po_date', 'PO date'),
-    product,
+    productCol(open, 'line'),
     { ...numCell('qty'), label: 'Ordered' },
     { ...numCell('dispatched_qty'), label: 'Delivered' },
     pendingQty,
@@ -249,7 +240,21 @@ export default function StatusReports() {
     q ? filtered.filter(l => rows.some(r => rowCovers(r, l, view))) : filtered,
   )), [rows, filtered, q, view]);
 
-  const columns = useMemo(() => columnsFor(view), [view]);
+  // The details drawer: a trail of clicks, so Back walks company → PO → line.
+  const [trail, setTrail] = useState([]);
+  const openDrawer = (kind, row) => setTrail([drawerCtx(kind, row)]);
+  const columns = useMemo(() => columnsFor(view, openDrawer), [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  // "Show in the report" — narrow the table to what the drawer is about.
+  const showInReport = ctx => {
+    if (ctx.kind === 'company') { set({ view: 'po', customers: [ctx.customer_id] }); setQ(''); }
+    else if (ctx.kind === 'po') {
+      const l = all.find(x => String(x.order_id) === String(ctx.order_id));
+      set({ view: 'lines', customers: l ? [l.customer_id] : [], delivery: [], stages: [] }); setQ(l ? String(l.po_number) : '');
+    } else if (ctx.kind === 'product') {
+      set({ view: 'lines', customers: [ctx.customer_id], delivery: [], stages: [] }); setQ(ctx.product_name || '');
+    }
+    setTrail([]);
+  };
   const toggle = (key, value) => set(p => {
     const cur = p[key].map(String);
     const v = String(value);
@@ -355,9 +360,6 @@ export default function StatusReports() {
           searchValue={q} onSearchChange={setQ}
           searchPlaceholder="Search company, PO, product, code…"
           getRowId={r => r.id}
-          // Company row → that company's POs. The fastest way from "who owes
-          // most" to "which POs".
-          onRowClick={view === 'company' ? r => { set({ view: 'po', customers: [r.customer_id] }); setQ(''); } : undefined}
           defaultSort={view === 'company' ? { key: 'pending_qty', dir: 'desc' }
             : view === 'lines' ? { key: 'po_date', dir: 'desc' }
             : view === 'po' ? { key: 'po_date', dir: 'desc' }
@@ -372,9 +374,14 @@ export default function StatusReports() {
           })}
         />
       </div>
-      {view === 'company' && rows.length > 0 && (
-        <p className="mt-2 text-xs text-gray-500">Click a company to see its POs.</p>
+      {rows.length > 0 && (
+        <p className="mt-2 text-xs text-gray-500">Click a company, PO or product name for its orders, deliveries and production.</p>
       )}
+      <StatusReportDrawer trail={trail} lines={all}
+        onOpen={ctx => setTrail(t => [...t, ctx])}
+        onBack={() => setTrail(t => t.slice(0, -1))}
+        onClose={() => setTrail([])}
+        onShowInReport={showInReport} />
     </div>
   );
 }

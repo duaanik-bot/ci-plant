@@ -266,3 +266,48 @@ export function summaryOf(t) {
     { label: 'Pending value (₹, ex-GST)', value: num(t.pending_value) },
   ].filter(Boolean);
 }
+
+// ── Drawer ──────────────────────────────────────────────────────────────────
+// What a click opens. `ctx` is { kind: 'company' | 'po' | 'product' | 'line', … }
+// built from a row by drawerCtx(). The drawer always shows the WHOLE history
+// of what was clicked — every line, owed or delivered — not just the slice the
+// report's filters happen to show, because "details of this PO" means all of it.
+export function drawerCtx(kind, row) {
+  if (kind === 'company') return { kind, customer_id: row.customer_id, customer_name: row.customer_name };
+  if (kind === 'po') return { kind, order_id: row.order_id, po_number: row.po_number, customer_name: row.customer_name };
+  if (kind === 'product') return { kind, customer_id: row.customer_id, product_id: row.product_id, product_name: row.product_name, customer_name: row.customer_name };
+  return { kind: 'line', line_id: row.line_id, product_name: row.product_name, po_number: row.po_number, customer_name: row.customer_name };
+}
+
+export function scopeLines(lines, ctx) {
+  if (!ctx) return [];
+  const eq = (a, b) => String(a) === String(b);
+  if (ctx.kind === 'company') return lines.filter(l => eq(l.customer_id, ctx.customer_id));
+  if (ctx.kind === 'po') return lines.filter(l => eq(l.order_id, ctx.order_id));
+  if (ctx.kind === 'product') return lines.filter(l => eq(l.customer_id, ctx.customer_id) && eq(l.product_id, ctx.product_id));
+  return lines.filter(l => eq(l.line_id, ctx.line_id));
+}
+
+// Challans as the drawer lists them: one row per challan, its lines' qty added
+// up, products named, newest first. A challan carrying three of a PO's cartons
+// is ONE delivery, not three.
+export function groupDispatches(dispatches, lineById = new Map()) {
+  const by = new Map();
+  for (const d of dispatches || []) {
+    let g = by.get(d.dispatch_id);
+    if (!g) {
+      g = {
+        dispatch_id: d.dispatch_id, challan_number: d.challan_number, dispatched_at: d.dispatched_at,
+        vehicle: d.vehicle, qty: 0, items: [], invoices: new Map(),
+      };
+      by.set(d.dispatch_id, g);
+    }
+    g.qty += n(d.qty);
+    const l = lineById.get(d.line_id) || lineById.get(String(d.line_id));
+    g.items.push({ line_id: d.line_id, qty: n(d.qty), product_name: l?.product_name, po_number: l?.po_number });
+    if (d.invoice_id) g.invoices.set(d.invoice_id, { id: d.invoice_id, number: d.invoice_number, date: d.invoice_date });
+  }
+  return [...by.values()]
+    .map(g => ({ ...g, invoices: [...g.invoices.values()] }))
+    .sort((a, b) => String(b.dispatched_at || '').localeCompare(String(a.dispatched_at || '')) || n(b.dispatch_id) - n(a.dispatch_id));
+}

@@ -1253,6 +1253,68 @@ r.get('/status-sheet/report', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Status Sheet › Reports drawer — deliveries and production for the lines of
+// whatever was clicked (a company, a PO, a product, a line). The client already
+// holds the lines themselves from /status-sheet/report, so this carries only
+// what that list does not: every challan (with its invoice) and every job card
+// with its stage-by-stage progress. Lines come as ?lines=1,2,3.
+r.get('/status-sheet/report/detail', async (req, res, next) => {
+  try {
+    const ids = [...new Set(String(req.query.lines || '').split(',')
+      .map(s => Number.parseInt(s, 10)).filter(n => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.json({ dispatches: [], job_cards: [] });
+    if (ids.length > 3000) return res.status(400).json({ error: 'Too many lines — narrow the selection.' });
+    const dispatches = await q(`
+      SELECT x.order_line_id AS line_id, d.id AS dispatch_id, d.challan_number, d.dispatched_at,
+             d.vehicle, x.qty,
+             inv.id AS invoice_id, inv.invoice_number, inv.invoice_date
+      FROM dispatch_lines x
+      JOIN dispatches d ON d.id = x.dispatch_id
+      LEFT JOIN LATERAL (
+        SELECT i.id, i.invoice_number, i.invoice_date
+        FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id
+        WHERE il.dispatch_line_id = x.id
+        ORDER BY i.id DESC LIMIT 1
+      ) inv ON true
+      WHERE x.order_line_id = ANY($1::int[])
+      ORDER BY d.dispatched_at DESC NULLS LAST, d.id DESC`, [ids]);
+    // A ganged line rides its gang's PARENT card until die cutting, then its
+    // own — the same join the live sheet's stage chips use.
+    const stageRows = await q(`
+      SELECT ol.id AS line_id, jc.id AS job_card_id, jc.jc_number, jc.status AS card_status,
+             jc.qty_planned, jc.qty_produced, jc.sheets_issued, jc.created_at, jc.closed_at,
+             (jc.order_line_id IS NULL) AS gang_shared,
+             js.stage, js.status, js.unit, js.qty_in, js.qty_out, js.qty_scrap,
+             js.started_at, js.completed_at, js.hold_reason, js.operator
+      FROM order_lines ol
+      JOIN job_cards jc ON (jc.order_line_id = ol.id
+           OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+               AND jc.order_line_id IS NULL))
+      LEFT JOIN job_stages js ON js.job_card_id = jc.id
+      WHERE ol.id = ANY($1::int[])
+      ORDER BY ol.id, (jc.order_line_id IS NULL) DESC, jc.id, js.seq`, [ids]);
+    const cards = new Map();
+    for (const s of stageRows) {
+      const k = `${s.line_id}:${s.job_card_id}`;
+      if (!cards.has(k)) {
+        cards.set(k, {
+          line_id: s.line_id, id: s.job_card_id, jc_number: s.jc_number, status: s.card_status,
+          qty_planned: s.qty_planned, qty_produced: s.qty_produced, sheets_issued: s.sheets_issued,
+          created_at: s.created_at, closed_at: s.closed_at, gang_shared: s.gang_shared, stages: [],
+        });
+      }
+      if (s.stage) {
+        cards.get(k).stages.push({
+          stage: s.stage, status: s.status, unit: s.unit, qty_in: s.qty_in, qty_out: s.qty_out,
+          qty_scrap: s.qty_scrap, started_at: s.started_at, completed_at: s.completed_at,
+          hold_reason: s.hold_reason, operator: s.operator,
+        });
+      }
+    }
+    res.json({ dispatches, job_cards: [...cards.values()] });
+  } catch (e) { next(e); }
+});
+
 // Line-level edits: Printed override (true/false/null=Auto), the customer WIP
 // record, the planner's Remarks, and the per-product P1 star (priority stays on
 // the starred line only).

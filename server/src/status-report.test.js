@@ -151,3 +151,35 @@ test('where: filter by stage, and groups count their lines per stage in plant or
   // A stage the plant list does not know is kept, never dropped.
   assert.deepEqual(whereOrder(order, ['qc']).slice(-4), ['qc', 'done', 'delivered', 'cancelled']);
 });
+
+// ── Drawer ──────────────────────────────────────────────────────────────────
+import { drawerCtx, scopeLines, groupDispatches } from '../../client/src/lib/statusReport.js';
+
+test('drawer: a click scopes to the whole history of what was clicked', () => {
+  const lines = [
+    L(1, { order_id: 1, product_id: 9 }),
+    L(2, { order_id: 1, product_id: 8, dispatched_qty: 250, status: 'dispatched' }),
+    L(3, { order_id: 2, product_id: 9 }),
+    L(4, { order_id: 3, product_id: 9, customer_id: 8, customer_name: 'Swiss' }),
+  ];
+  assert.deepEqual(scopeLines(lines, drawerCtx('company', lines[0])).map(l => l.line_id), [1, 2, 3]);
+  assert.deepEqual(scopeLines(lines, drawerCtx('po', lines[0])).map(l => l.line_id), [1, 2]);
+  // Same product, other company: not this product's history.
+  assert.deepEqual(scopeLines(lines, drawerCtx('product', lines[0])).map(l => l.line_id), [1, 3]);
+  assert.deepEqual(scopeLines(lines, drawerCtx('line', lines[2])).map(l => l.line_id), [3]);
+  assert.deepEqual(scopeLines(lines, null), []);
+});
+
+test('drawer: one row per challan, newest first, qty added up', () => {
+  const byId = new Map([[1, { product_name: 'A', po_number: '024' }], [2, { product_name: 'B', po_number: '024' }]]);
+  const g = groupDispatches([
+    { dispatch_id: 10, challan_number: 'CH-10', dispatched_at: '2026-10-01', line_id: 1, qty: 100, invoice_id: 5, invoice_number: 'INV-5' },
+    { dispatch_id: 10, challan_number: 'CH-10', dispatched_at: '2026-10-01', line_id: 2, qty: 50, invoice_id: 5, invoice_number: 'INV-5' },
+    { dispatch_id: 11, challan_number: 'CH-11', dispatched_at: '2026-11-01', line_id: 1, qty: 20 },
+  ], byId);
+  assert.deepEqual(g.map(x => x.challan_number), ['CH-11', 'CH-10']);
+  assert.equal(g[1].qty, 150);
+  assert.deepEqual(g[1].items.map(i => i.product_name), ['A', 'B']);
+  assert.equal(g[1].invoices.length, 1);
+  assert.equal(g[0].invoices.length, 0);
+});
