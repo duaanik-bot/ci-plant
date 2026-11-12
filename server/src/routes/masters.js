@@ -64,7 +64,7 @@ const MASTERS = {
   // form set it would throw a raw 23505 at the user.
   billing_entities: ['name', 'tagline', 'address', 'city', 'state', 'state_code', 'gstin', 'hsn', 'gst_rate', 'jurisdiction', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'gstin', 'address', 'state', 'state_code', 'email', 'active'],
-  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet', 'customer_id'],
+  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet', 'customer_id', 'grain'],
   machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active', 'is_default'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
   sections: ['code', 'name', 'sort_order', 'active'],
@@ -125,6 +125,16 @@ function checkOwnGstin(table, body) {
   const g = String(body.gstin ?? '').trim();
   if (g && !isValidGstin(g))
     throw Object.assign(new Error(`${g} is not a valid GSTIN — its check digit does not match. Check the registration certificate.`), { status: 400 });
+}
+
+// A board's grain (size proposals, 12 Nov 2026): the side of the sheet it runs along — 'long' or 'short' — or not
+// recorded. A blank choice clears it; anything else is refused rather than stored.
+function settleGrain(table, body) {
+  if (table !== 'materials' || !('grain' in body)) return;
+  const g = String(body.grain ?? '').trim().toLowerCase();
+  if (!g) { body.grain = null; return; }
+  if (g !== 'long' && g !== 'short') throw Object.assign(new Error('Grain runs along the long side or the short side of the sheet — or leave it blank.'), { status: 400 });
+  body.grain = g;
 }
 
 // ── The product master, as a dropdown ─────────────────────────────────────────
@@ -202,6 +212,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
     let minted = false;
     try {
       checkOwnGstin(table, req.body);
+      settleGrain(table, req.body);
       if (table === 'sections') await fillSectionDefaults(req.body);
       // Plant default: a new board carries 18% GST unless the buyer types another.
       if (table === 'materials' && String(req.body.category) === 'board'
@@ -274,6 +285,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
     let minted = false;
     try {
       checkOwnGstin(table, req.body);
+      settleGrain(table, req.body);
       // Before `sets` is taken — the sync adds board_name to the body, and a
       // column the body does not carry is not written.
       if (table === 'products') await syncProductBoardName(req.body, req.params.id);

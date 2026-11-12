@@ -8,11 +8,14 @@
 // A person checks the draft and presses Send in Gmail.
 // Permission: gmail.compose (make and change drafts) + gmail.metadata (headers and labels only — to reply in the right
 // thread and to notice a draft that has been sent). No mail body is ever read.
+// Since 12 Nov 2026 the consent also asks for drive.file, for KLDs (gdrive.js): files CI Plant makes, nothing else.
+// It is optional — a link without it keeps working for drafts; only Save to Drive asks for a new connection.
 //
 // Google's refresh token is stored ENCRYPTED (AES-256-GCM, key GMAIL_TOKEN_KEY in the server's environment — never in
 // the database). Env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_TOKEN_KEY (64 hex characters).
 // GMAIL_API_BASE / GOOGLE_OAUTH_BASE / GOOGLE_TOKEN_URL exist only so the tests can point at a fake Google.
 import crypto from 'node:crypto';
+import { DRIVE_SCOPE } from './gdrive.js';
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata'];
 const api = () => process.env.GMAIL_API_BASE || 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -55,7 +58,7 @@ export function consentUrl({ redirectUri, state, loginHint }) {
   need();
   const p = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code',
-    scope: GMAIL_SCOPES.join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', state,
+    scope: [...GMAIL_SCOPES, DRIVE_SCOPE].join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'false', state,
   });
   if (loginHint) p.set('login_hint', loginHint);
   return `${authBase()}?${p}`;

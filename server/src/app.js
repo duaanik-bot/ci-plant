@@ -34,6 +34,7 @@ import coa from './routes/coa.js';
 import coaRegister from './routes/coa-register.js';
 import costing from './routes/costing.js';
 import enquiries from './routes/enquiries.js';
+import sizing from './routes/sizing.js';
 import enquiryRobot from './routes/enquiry-robot.js';
 import gmailLink from './routes/gmail-link.js';
 import masterHistory from './routes/master-history.js';
@@ -132,6 +133,7 @@ app.use('/api', coa);
 app.use('/api', coaRegister);   // COA Register — the Drive register, mirrored in
 app.use('/api', costing);       // Costing — new-product costing, Size Library, bulk batches (tick-only)
 app.use('/api', enquiries);     // Enquiry desk — mailbox enquiries → costing → final price → quotation (Costing tick)
+app.use('/api', sizing);        // Size proposals and KLDs — die check, layouts, the KLD and its Drive copy (Costing tick)
 app.use('/api', masterHistory);
 app.use('/api', notifications);
 app.use('/api', chat);

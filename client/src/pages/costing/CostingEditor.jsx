@@ -10,12 +10,14 @@
 // size — the Size Library and the Die Master shown apart (one does not imply the other).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, BookmarkPlus, CheckCircle2, ChevronDown, CircleDashed, History, Info, Layers, Lightbulb, Plus, Ruler, Search,
+  AlertTriangle, BookmarkPlus, CheckCircle2, ChevronDown, CircleDashed, History, Info, Layers, Plus, Ruler, Search,
   SlidersHorizontal, Sparkles, TrendingDown, Wrench, X,
 } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Field, Input, Select, Textarea, useToast } from '../../components/ui.jsx';
-import { computeCosting, parseSize, sizerProposals, num, styleLabel, quantityBreaks, suggestQuantities } from '../../lib/costing.js';
+import { computeCosting, parseSize, num, styleLabel, quantityBreaks, suggestQuantities } from '../../lib/costing.js';
+import SizeProposals from './SizeProposals.jsx';
+import KldPanel from './KldPanel.jsx';
 import {
   SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
   rankHistory, recommend, rupees, stillNeeded,
@@ -380,26 +382,7 @@ function LayoutChooser({ value, entries, size, onPick, setIn, src }) {
             help="How many cartons fit on one print sheet" />
         </div>
       )}
-      {own && size?.kind === 'carton' && opts.length === 0 && <SizeHelper size={size} onUse={p => onPick({ sheet_l: +p.sheet_l.toFixed(2), sheet_w: +p.sheet_w.toFixed(2), ups: p.ups, style: null })} />}
-    </div>
-  );
-}
-
-// The cost sheet's Sizer tab: the smallest sheet for each layout of a brand-new carton.
-function SizeHelper({ size, onUse }) {
-  const rows = sizerProposals(size).slice(0, 6);
-  return (
-    <div className="mt-3 rounded-xl bg-slate-50/80 p-3">
-      <div className="mb-1 flex items-center gap-1.5 text-xs font-bold"><Lightbulb size={13} className="text-amber-500" />New size — the Sizer's smallest sheets</div>
-      <p className="mb-2 text-[11px] text-slate-500">A starting point only: pick the next board size you can buy, and check with planning.</p>
-      <div className="grid grid-cols-3 gap-1.5">
-        {rows.map(p => (
-          <button key={`${p.l_ups}x${p.w_ups}`} type="button" onClick={() => onUse(p)}
-            className="rounded-lg bg-white px-2 py-1 text-left text-[11px] ring-1 ring-slate-200 hover:ring-brand-400">
-            <b>{p.ups} ups</b> · {plain(p.sheet_l, 1)} × {plain(p.sheet_w, 1)} in
-          </button>
-        ))}
-      </div>
+      {own && size?.kind === 'carton' && opts.length === 0 && <SizeProposals value={value} size={size} onPick={onPick} />}
     </div>
   );
 }
@@ -587,8 +570,21 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
     const hit = customers.find(c => c.name.toLowerCase() === name.trim().toLowerCase());
     set({ customer_name: name, customer_id: hit ? hit.id : null }, ['customer_name', 'customer_id']);
   };
-  const pickLayout = o => set({ style: o.style || value.style, inputs: { ...inputs, sheet_l: o.sheet_l ?? '', sheet_w: o.sheet_w ?? '', ups: o.ups ?? '' } },
-    ['sheet_l', 'sheet_w', 'ups', ...(o.style ? ['style'] : [])]);
+  // A layout picked: from the Size Library, typed, a die's own layout (New die off) or a size proposal (New die on, and
+  // remembered so the KLD below is drawn from it).
+  const [pending, setPending] = useState(null);
+  const pickLayout = o => {
+    if (o.proposal) setPending(o.proposal);
+    const edited = ['sheet_l', 'sheet_w', 'ups', ...(o.style ? ['style'] : [])];
+    const layout = { sheet_l: o.sheet_l ?? '', sheet_w: o.sheet_w ?? '', ups: o.ups ?? '' };
+    if (o.new_die != null && o.new_die !== newDie) {
+      const sources = { ...(value.sources || {}) };
+      delete sources.process;
+      onChange(markEdited({ ...value, style: o.style || value.style, new_die: o.new_die, sources, inputs: { ...inputs, ...layout, process: '' }, autofill: true }, edited));
+      return;
+    }
+    set({ style: o.style || value.style, inputs: { ...inputs, ...layout } }, edited);
+  };
   const showEmb = num(inputs.emb_rate) > 0 || +value.product?.emboss === 1 || value.show_emb;
   const showLeaf = num(inputs.leaf_panels) > 0 || value.show_leaf;
   // A tick that a house rule follows: the rule's box is refilled, even over a typed value (the tick says why).
@@ -638,6 +634,8 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
               {(check.data?.library?.exact?.length || 0) > 1 && <span className="ml-1.5 text-slate-400">— the recommended layout is chosen; the others are priced for you</span>}
             </div>
             <LayoutChooser value={value} entries={check.key === size?.key ? check.data?.library?.exact || [] : []} size={size} onPick={pickLayout} setIn={setIn} src={src} />
+            <KldPanel value={value} size={size} entries={check.key === size?.key ? check.data?.library?.exact || [] : []} pending={pending}
+              onDrawn={() => setFiled(`kld-${Date.now()}`)} />
             {entry && entry.key !== filed && <SaveSizeAsk entry={entry} onYes={toLibrary} onNo={() => onChange({ ...value, skip_library: entry.key })} />}
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-4">

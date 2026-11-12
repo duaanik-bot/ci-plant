@@ -119,7 +119,7 @@ r.get('/costing/bootstrap', async (req, res, next) => {
 const ENTRY_COLS = `
   s.id, s.size_key, s.kind, s.l_mm::float8 AS l_mm, s.w_mm::float8 AS w_mm, s.h_mm::float8 AS h_mm,
   s.style, s.sheet_l::float8 AS sheet_l, s.sheet_w::float8 AS sheet_w, s.ups::float8 AS ups,
-  s.source, s.notes, s.active`;
+  s.source, s.notes, s.active, (s.kld->>'rev')::int AS kld_rev`;
 const USAGE = `
   (SELECT count(*)::int FROM costings c WHERE c.size_id = s.id AND NOT c.archived) AS times_costed,
   (SELECT to_char(max(c.costed_on), 'YYYY-MM-DD') FROM costings c WHERE c.size_id = s.id AND NOT c.archived) AS last_costed`;

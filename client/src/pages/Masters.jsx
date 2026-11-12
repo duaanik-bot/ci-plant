@@ -151,6 +151,9 @@ const CONFIGS = {
       { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, required: true },
       { key: 'sheet_w', label: 'Parent Sheet Width (in)', type: 'number', required: true },
       { key: 'sheets_per_packet', label: 'Sheets / Packet', type: 'number', newRow: true, hint: 'Auto-filled from the grade — Duplex 144, FBB/Saffire 100' },
+      { key: 'grain', label: 'Grain runs along', type: 'select', options: ['', 'long', 'short'],
+        render: v => (v === 'long' ? 'Long side' : v === 'short' ? 'Short side' : '—'),
+        hint: 'Which side of the sheet the board grain runs along (on the mill label). Size proposals check it; blank = not recorded' },
       { key: 'hsn_code', label: 'HSN Code' },
       { key: 'gst_rate', label: 'GST %', type: 'number', newRow: true, hint: 'Plant default 18 for board' },
       { key: 'reorder_level', label: 'Reorder Level', type: 'number', hint: 'Trigger point — below this the board reads SHORT' },
@@ -172,7 +175,7 @@ const CONFIGS = {
     // buyer's ₹/kg is the controlled price and lives in Board Rates, while this
     // is the reference figure procurement writes back on each PO. Read-only here
     // means it can't drift into being a second, competing price.
-    columns: ['name', 'grade', 'gsm', 'sheet_size', 'sheets_per_packet', 'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'active'],
+    columns: ['name', 'grade', 'gsm', 'sheet_size', 'grain', 'sheets_per_packet', 'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'active'],
     // The name is the plant's identity for a board and is matched on by name
     // elsewhere (products, PO import), so two boards may not share one. Caught
     // here with the composed name rather than left to a confusing server error.
@@ -701,6 +704,8 @@ export default function Masters() {
         render: r => {
           const v = r[k];
           if (k === 'sheet_size') return r.sheet_l ? <span className="font-mono text-xs">{r.sheet_l}×{r.sheet_w}"</span> : (v ? <span className="font-mono text-xs">{v}</span> : <span className="text-gray-300">—</span>);
+          // Boards — which side the grain runs along (size proposals check it); blank = not recorded.
+          if (tab === 'boards' && k === 'grain') return v === 'long' ? 'Long side' : v === 'short' ? 'Short side' : <span className="text-gray-300">—</span>;
           // Boards — weight and money, recomputed from the row's own GSM/size and
           // the grade's live ₹/kg. Nothing here is stored: change a rate in Board
           // Rates and every board in that grade reprices on the next load. A board

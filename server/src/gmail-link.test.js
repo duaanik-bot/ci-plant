@@ -23,12 +23,12 @@ test('the refresh token is sealed: it round-trips, is never stored in clear, and
   process.env.GMAIL_TOKEN_KEY = was;
 });
 
-test('consent: offline, both permissions and only those, the mailbox as the hint', () => {
+test('consent: offline, the two Gmail permissions plus Drive for KLDs (files CI Plant makes) and only those, the mailbox as the hint', () => {
   const u = new URL(g.consentUrl({ redirectUri: 'https://plant.test/api/gmail/callback', state: 's1', loginHint: 'box@plant.test' }));
   assert.equal(u.searchParams.get('access_type'), 'offline');
   assert.equal(u.searchParams.get('prompt'), 'consent');
   assert.deepEqual(u.searchParams.get('scope').split(' ').sort(),
-    ['https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata']);
+    ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata']);
   assert.equal(u.searchParams.get('login_hint'), 'box@plant.test');
   assert.equal(u.searchParams.get('state'), 's1');
 });
