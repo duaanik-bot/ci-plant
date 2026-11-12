@@ -284,7 +284,9 @@ export function scopeLines(lines, ctx) {
   const eq = (a, b) => String(a) === String(b);
   if (ctx.kind === 'company') return lines.filter(l => eq(l.customer_id, ctx.customer_id));
   if (ctx.kind === 'po') return lines.filter(l => eq(l.order_id, ctx.order_id));
-  if (ctx.kind === 'product') return lines.filter(l => eq(l.customer_id, ctx.customer_id) && eq(l.product_id, ctx.product_id));
+  // A product is its product id, whoever's PO it came on — a product's track
+  // must include an order keyed under another company.
+  if (ctx.kind === 'product') return lines.filter(l => eq(l.product_id, ctx.product_id));
   return lines.filter(l => eq(l.line_id, ctx.line_id));
 }
 

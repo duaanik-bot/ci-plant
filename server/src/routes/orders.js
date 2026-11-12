@@ -1315,6 +1315,62 @@ r.get('/status-sheet/report/detail', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Status Sheet › Product ledger — the product MASTER list (products table, no
+// copy of it), each with its leftover finished-goods stock. Order figures and
+// stages are folded in on the client from /status-sheet/report, so the list
+// and the Reports tab can never count the same order two ways. Draft products
+// (AVS intake, not yet confirmed) are left out, as Masters does.
+// Leftover stock = verified, un-retired fg_lots less what planning consumed —
+// the boxes the warehouse can actually hand over.
+const FG_AVAILABLE_SQL = `COALESCE((
+  SELECT SUM(GREATEST(0, fl.qty - COALESCE(fl.consumed_qty, 0)))
+  FROM fg_lots fl
+  WHERE fl.product_id = p.id AND fl.status = 'verified' AND COALESCE(fl.retired, 0) = 0
+), 0)::int`;
+
+r.get('/status-sheet/products', async (_req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             p.party_item_code, p.party_artwork_code, p.size, p.mrp, p.rate,
+             (COALESCE(p.active, 1) <> 0) AS active,
+             p.customer_id, c.name AS customer_name,
+             ${FG_AVAILABLE_SQL} AS stock_qty
+      FROM products p
+      LEFT JOIN customers c ON c.id = p.customer_id
+      WHERE COALESCE(p.is_draft, 0) = 0
+      ORDER BY c.name, p.name`);
+    res.json({ products: rows });
+  } catch (e) { next(e); }
+});
+
+// One product's ledger: its master facts and its finished-goods stock
+// movements. The order lines, challans and job cards come from the report and
+// /status-sheet/report/detail, which the drawer already loads.
+r.get('/status-sheet/products/:id/ledger', async (req, res, next) => {
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Bad product id' });
+    const product = await one(`
+      SELECT p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             p.internal_carton_code, p.party_item_code, p.party_artwork_code,
+             p.size, p.board_name, p.gsm, p.coating, p.colors, p.ups, p.mrp, p.rate, p.gst_pct,
+             p.product_type, p.die_number, p.pasting_type, (COALESCE(p.active, 1) <> 0) AS active,
+             p.customer_id, c.name AS customer_name,
+             ${FG_AVAILABLE_SQL} AS stock_qty
+      FROM products p LEFT JOIN customers c ON c.id = p.customer_id
+      WHERE p.id = $1`, [id]);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    const fg_moves = await q(`
+      SELECT m.id, m.ref_number, m.movement_type, m.source_module, m.qty_in, m.qty_out,
+             m.order_id, o.po_number, m.remarks, m.created_by, m.created_at
+      FROM fg_movements m LEFT JOIN orders o ON o.id = m.order_id
+      WHERE m.product_id = $1
+      ORDER BY m.created_at, m.id`, [id]);
+    res.json({ product, fg_moves });
+  } catch (e) { next(e); }
+});
+
 // Line-level edits: Printed override (true/false/null=Auto), the customer WIP
 // record, the planner's Remarks, and the per-product P1 star (priority stays on
 // the starred line only).

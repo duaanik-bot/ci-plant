@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CheckCircle2, CircleDot, Circle, ExternalLink, Factory, FileText, Loader2,
+  ArrowLeft, BookOpen, Building2, CheckCircle2, CircleDot, Circle, ExternalLink, Factory, FileText, Loader2,
   Package, PauseCircle, Rows3, Truck, X,
 } from 'lucide-react';
 import { api, fmt } from '../api.js';
@@ -28,6 +28,7 @@ import {
   OPEN_KEYS, drawerCtx, groupDispatches, groupLines, groupDelivery, scopeLines, totalsOf, whereMix,
 } from '../lib/statusReport.js';
 import { NameLink, Pill, WhereChip, whereLabel } from './StatusReportBits.jsx';
+import { buildProductLedger } from '../lib/productLedger.js';
 
 const KIND = {
   company: { label: 'Company', icon: Building2 },
@@ -142,7 +143,7 @@ function OrdersTab({ ctx, scoped, open }) {
                   <div className="text-[11px] text-[#86868B]">
                     {ctx.kind === 'po'
                       ? [l.product_code, l.party_item_code].filter(Boolean).join(' · ')
-                      : `${fmt.date(l.po_date)} · ₹${(+l.rate || 0).toFixed(2)}`}
+                      : `${fmt.date(l.po_date)} · ₹${(+l.rate || 0).toFixed(2)}${ctx.customer_name && l.customer_name !== ctx.customer_name ? ` · on ${l.customer_name}'s PO` : ''}`}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     <Pill k={l.delivery} /><WhereChip k={l.where} />
@@ -315,14 +316,128 @@ function ProductionTab({ ctx, scoped, cards, open }) {
   );
 }
 
+// ── Ledger tab (products) ────────────────────────────────────────────────────
+// The product's master facts, then every dated entry with two running
+// balances — still owed to the customer, and leftover stock on the shelf.
+const signed = v => (v > 0 ? `+${fmt.num(v)}` : v < 0 ? `−${fmt.num(-v)}` : '');
+function LedgerTab({ product, entries, error, loading }) {
+  const [newestFirst, setNewestFirst] = useState(true);
+  if (error) return <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-700">Couldn't load this product's ledger — try again in a moment.</p>;
+  if (loading || !product) return <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#6E6E73]"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+  const rows = newestFirst ? [...entries].reverse() : entries;
+  const p = product;
+  return (
+    <div className="space-y-3">
+      <Section title="Product master">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Fact label="Company">{p.customer_name}</Fact>
+          <Fact label="Internal code">{p.product_code}</Fact>
+          <Fact label="Item code">{p.party_item_code}</Fact>
+          <Fact label="Artwork code">{p.party_artwork_code}</Fact>
+          <Fact label="Size">{p.size}</Fact>
+          <Fact label="Board">{[p.board_name, p.gsm && !/gsm/i.test(p.board_name || '') ? `${p.gsm} gsm` : null].filter(Boolean).join(' · ') || '—'}</Fact>
+          <Fact label="Coating">{p.coating}</Fact>
+          <Fact label="Colours / ups">{[p.colors, p.ups ? `${p.ups} ups` : null].filter(Boolean).join(' · ') || '—'}</Fact>
+          <Fact label="Rate">{p.rate != null ? `₹${(+p.rate).toFixed(2)}` : '—'}</Fact>
+          <Fact label="MRP">{p.mrp != null ? `₹${fmt.num(+p.mrp)}` : '—'}</Fact>
+          <Fact label="Leftover stock">{fmt.num(p.stock_qty)}</Fact>
+          <Fact label="Master status">{p.active ? 'Active' : 'Inactive'}</Fact>
+        </div>
+      </Section>
+      <Section title={`Ledger · ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
+        right={entries.length > 1 && (
+          <button type="button" onClick={() => setNewestFirst(v => !v)} className="text-[11px] font-semibold text-[#0064D2] hover:underline">
+            {newestFirst ? 'Oldest first' : 'Newest first'}
+          </button>
+        )}>
+        {!entries.length ? <Empty>No orders, production or stock for this product yet.</Empty> : (
+          <div className="-mx-1 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-[#86868B]">
+                  <th className="px-1 py-1.5 font-bold">Date</th>
+                  <th className="px-1 py-1.5 font-bold">Entry</th>
+                  <th className="px-1 py-1.5 text-right font-bold">Order ±</th>
+                  <th className="px-1 py-1.5 text-right font-bold">Made</th>
+                  <th className="px-1 py-1.5 text-right font-bold">Sent</th>
+                  <th className="px-1 py-1.5 text-right font-bold" title="Still owed to the customer after this entry">Owed</th>
+                  <th className="px-1 py-1.5 text-right font-bold">Stock ±</th>
+                  <th className="px-1 py-1.5 text-right font-bold" title="Leftover cartons after this entry">Stock</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1D1D1F]/[0.06]">
+                {rows.map((x, i) => (
+                  <tr key={i} className="align-top">
+                    <td className="whitespace-nowrap px-1 py-1.5 text-[#6E6E73]">{fmt.date(x.date)}</td>
+                    <td className="px-1 py-1.5">
+                      <div className="font-semibold text-[#1D1D1F]">{x.label}</div>
+                      <div className="text-[11px] text-[#6E6E73]">
+                        {x.po_number && <span>PO {x.po_number}</span>}
+                        {(x.kind === 'dispatch' || x.kind === 'over') && (
+                          <>
+                            <Link to={`/dispatch/challan/${x.dispatch_id}`} target="_blank" rel="noopener" className="ml-1 font-semibold text-[#0064D2] hover:underline">{x.challan_number || 'Challan'}</Link>
+                            {x.kind === 'dispatch' && x.invoice_id && <Link to={`/invoices/${x.invoice_id}`} target="_blank" rel="noopener" className="ml-1 font-semibold text-[#0064D2] hover:underline">{x.invoice_number}</Link>}
+                          </>
+                        )}
+                        {x.kind === 'produced' && (
+                          <Link to={`/production/jobcard/${x.job_card_id}`} target="_blank" rel="noopener" className="font-semibold text-[#0064D2] hover:underline">{x.jc_number}</Link>
+                        )}
+                        {x.ref_number && <span className="ml-1">{x.ref_number}</span>}
+                        {x.note && <span className="ml-1">· {x.note}</span>}
+                      </div>
+                    </td>
+                    <td className={`px-1 py-1.5 text-right tabular-nums ${x.ordered < 0 ? 'text-slate-500' : ''}`}>{signed(x.ordered || 0)}</td>
+                    <td className="px-1 py-1.5 text-right tabular-nums text-sky-700">{x.produced ? fmt.num(x.produced) : ''}</td>
+                    <td className="px-1 py-1.5 text-right tabular-nums text-emerald-700">
+                      {x.dispatched ? fmt.num(x.dispatched) : ''}
+                      {x.kind === 'over' && <span className="font-semibold text-amber-700" title="Sent beyond what this line still owed">+{fmt.num(x.extra)} extra</span>}
+                    </td>
+                    <td className="px-1 py-1.5 text-right font-semibold tabular-nums">{fmt.num(x.order_balance)}</td>
+                    <td className="px-1 py-1.5 text-right tabular-nums">{signed((x.stock_in || 0) - (x.stock_out || 0))}</td>
+                    <td className="px-1 py-1.5 text-right tabular-nums text-[#515154]">{x.kind === 'stock' || i === 0 ? fmt.num(x.stock_balance) : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-[#86868B]">
+          Owed = ordered less dispatched, cancelled and closed short — it ends at this product's pending qty.
+          Cartons sent beyond a line's order show as "Sent over the order" and do not reduce what is owed on other lines.
+          Stock follows the leftover-stock records.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
 // ── The drawer ───────────────────────────────────────────────────────────────
 export default function StatusReportDrawer({ trail, lines, onOpen, onBack, onClose, onShowInReport }) {
   const ctx = trail[trail.length - 1] || null;
-  const [tab, setTab] = useState('orders');
+  const [tab, setTab] = useState(ctx?.kind === 'product' ? 'ledger' : 'orders');
   const [detail, setDetail] = useState({ key: null, dispatches: [], job_cards: [], error: false });
+  const [ledger, setLedger] = useState({ key: null, product: null, fg_moves: [], error: false });
+  // A product opens on its ledger; anything else on Orders (and never on a
+  // Ledger tab it does not have).
+  const ctxKey = ctx ? `${ctx.kind}:${ctx.product_id || ctx.order_id || ctx.customer_id || ctx.line_id}` : '';
+  useEffect(() => {
+    if (!ctx) return;
+    setTab(t => (ctx.kind === 'product' ? 'ledger' : t === 'ledger' ? 'orders' : t));
+  }, [ctxKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const productId = ctx?.kind === 'product' ? ctx.product_id : null;
+  useEffect(() => {
+    if (!productId) return undefined;
+    let live = true;
+    api.get(`/status-sheet/products/${productId}/ledger`)
+      .then(d => { if (live) setLedger({ key: productId, product: d.product, fg_moves: d.fg_moves || [], error: false }); })
+      .catch(() => { if (live) setLedger({ key: productId, product: null, fg_moves: [], error: true }); });
+    return () => { live = false; };
+  }, [productId]);
   const scoped = useMemo(() => scopeLines(lines, ctx), [lines, ctx]);
   const ids = useMemo(() => scoped.map(l => l.line_id).join(','), [scoped]);
-  const loading = !!ctx && detail.key !== ids;
+  // A product never ordered has no lines, so nothing to fetch — not "loading".
+  const loading = !!ctx && !!ids && detail.key !== ids;
+  const det = ids && detail.key === ids ? detail : { dispatches: [], job_cards: [], error: false };
 
   useEffect(() => {
     if (!ctx || !ids) return undefined;
@@ -341,7 +456,12 @@ export default function StatusReportDrawer({ trail, lines, onOpen, onBack, onClo
   }, [ctx, onClose]);
 
   const lineById = useMemo(() => new Map(scoped.map(l => [l.line_id, l])), [scoped]);
-  const challans = useMemo(() => groupDispatches(detail.dispatches, lineById), [detail.dispatches, lineById]);
+  const challans = useMemo(() => groupDispatches(det.dispatches, lineById), [det.dispatches, lineById]);
+  const ledgerLoading = !!productId && ledger.key !== productId;
+  const entries = useMemo(() => (productId ? buildProductLedger({
+    lines: scoped, dispatches: det.dispatches, jobCards: det.job_cards,
+    fgMoves: ledger.key === productId ? ledger.fg_moves : [],
+  }) : []), [productId, scoped, det.dispatches, det.job_cards, ledger]);
   const t = useMemo(() => totalsOf(scoped), [scoped]);
   if (!ctx) return null;
 
@@ -353,13 +473,14 @@ export default function StatusReportDrawer({ trail, lines, onOpen, onBack, onClo
     : (first.product_name || ctx.product_name);
   const sub = ctx.kind === 'company' ? `${fmt.num(t.orders)} POs · ${fmt.num(t.lines)} lines`
     : ctx.kind === 'po' ? `${first.customer_name || ctx.customer_name} · ${fmt.date(first.po_date)}`
-    : ctx.kind === 'product' ? (first.customer_name || ctx.customer_name)
+    : ctx.kind === 'product' ? (ctx.customer_name || first.customer_name)
     : `PO ${first.po_number ?? ctx.po_number} · ${first.customer_name || ctx.customer_name}`;
   // The badge counts what the tab shows: for a company, cards on lines still
   // owed (the tab hides delivered history there); otherwise every card.
   const prodLineIds = new Set((ctx.kind === 'company' ? scoped.filter(l => OPEN_KEYS.includes(l.delivery)) : scoped).map(l => l.line_id));
-  const openCards = detail.job_cards.filter(c => prodLineIds.has(c.line_id)).length;
+  const openCards = det.job_cards.filter(c => prodLineIds.has(c.line_id)).length;
   const tabs = [
+    ...(ctx.kind === 'product' ? [{ key: 'ledger', label: 'Ledger', icon: BookOpen }] : []),
     { key: 'orders', label: 'Orders', icon: FileText },
     { key: 'deliveries', label: 'Deliveries', icon: Truck, count: loading ? undefined : challans.length },
     { key: 'production', label: 'Production', icon: Factory, count: loading ? undefined : openCards },
@@ -412,15 +533,16 @@ export default function StatusReportDrawer({ trail, lines, onOpen, onBack, onClo
 
             <SubTabs views={tabs} active={tab} onChange={setTab} />
 
-            {detail.error && (
+            {tab !== 'ledger' && det.error && (
               <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-700">Couldn't load deliveries and production — try again in a moment.</p>
             )}
+            {tab === 'ledger' && <LedgerTab product={ledger.key === productId ? ledger.product : null} entries={entries} error={ledger.key === productId && ledger.error} loading={ledgerLoading || loading} />}
             {tab === 'orders' && <OrdersTab ctx={ctx} scoped={scoped} open={onOpen} />}
-            {tab !== 'orders' && loading && (
+            {tab !== 'orders' && tab !== 'ledger' && loading && (
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#6E6E73]"><Loader2 size={16} className="animate-spin" /> Loading…</div>
             )}
             {tab === 'deliveries' && !loading && <DeliveriesTab challans={challans} multiProduct={multiProduct} />}
-            {tab === 'production' && !loading && <ProductionTab key={ids} ctx={ctx} scoped={scoped} cards={detail.job_cards} open={onOpen} />}
+            {tab === 'production' && !loading && <ProductionTab key={ids} ctx={ctx} scoped={scoped} cards={det.job_cards} open={onOpen} />}
           </div>
         </div>
       </aside>

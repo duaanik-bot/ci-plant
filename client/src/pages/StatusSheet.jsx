@@ -175,15 +175,30 @@ const selCls =
 // delivered (StatusReports.jsx). The tab last used is remembered, so whoever
 // lives in Reports opens straight onto it.
 const StatusReports = lazy(() => import('./StatusReports.jsx'));
+const StatusProducts = lazy(() => import('./StatusProducts.jsx'));
 const SHEET_TAB_KEY = 'ci_status_sheet_tab';
-const SHEET_TABS = [{ key: 'live', label: 'Live sheet' }, { key: 'reports', label: 'Reports' }];
+const SHEET_TABS = [{ key: 'live', label: 'Live sheet' }, { key: 'reports', label: 'Reports' }, { key: 'products', label: 'Product ledger' }];
+const SHEET_TAB_KEYS = SHEET_TABS.map(t => t.key);
 
 export default function StatusSheet() {
   const [tab, setTabState] = useState(() => {
-    return storage.getItem(SHEET_TAB_KEY) === 'reports' ? 'reports' : 'live';
+    const saved = storage.getItem(SHEET_TAB_KEY);
+    return SHEET_TAB_KEYS.includes(saved) ? saved : 'live';
   });
   const setTab = t => { setTabState(t); storage.setItem(SHEET_TAB_KEY, t); };
   const tabs = <Tabs tabs={SHEET_TABS} active={tab} onChange={setTab} />;
+  if (tab === 'products') {
+    return (
+      <div>
+        <PageHeader title="Status Sheet"
+          subtitle="Product ledger — every product in Masters, tracked from order to delivery" />
+        {tabs}
+        <Suspense fallback={<div className="py-10 text-center text-sm text-gray-500">Loading products…</div>}>
+          <StatusProducts />
+        </Suspense>
+      </div>
+    );
+  }
   if (tab === 'reports') {
     return (
       <div>

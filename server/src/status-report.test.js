@@ -164,8 +164,9 @@ test('drawer: a click scopes to the whole history of what was clicked', () => {
   ];
   assert.deepEqual(scopeLines(lines, drawerCtx('company', lines[0])).map(l => l.line_id), [1, 2, 3]);
   assert.deepEqual(scopeLines(lines, drawerCtx('po', lines[0])).map(l => l.line_id), [1, 2]);
-  // Same product, other company: not this product's history.
-  assert.deepEqual(scopeLines(lines, drawerCtx('product', lines[0])).map(l => l.line_id), [1, 3]);
+  // A product is its product id: tracking it includes a PO keyed under
+  // another company (live data has NR-001 ordered on a Pureflix PO).
+  assert.deepEqual(scopeLines(lines, drawerCtx('product', lines[0])).map(l => l.line_id), [1, 3, 4]);
   assert.deepEqual(scopeLines(lines, drawerCtx('line', lines[2])).map(l => l.line_id), [3]);
   assert.deepEqual(scopeLines(lines, null), []);
 });
@@ -182,4 +183,79 @@ test('drawer: one row per challan, newest first, qty added up', () => {
   assert.deepEqual(g[1].items.map(i => i.product_name), ['A', 'B']);
   assert.equal(g[1].invoices.length, 1);
   assert.equal(g[0].invoices.length, 0);
+});
+
+// ── Product ledger ──────────────────────────────────────────────────────────
+import { buildProductLedger, productRows } from '../../client/src/lib/productLedger.js';
+
+test('ledger: order balance ends at the report\'s pending qty', () => {
+  const lines = [
+    L(1, { order_id: 1, po_number: '021', po_date: '2026-10-01', dispatched_qty: 100, status: 'in_production', last_dispatched_at: '2026-10-20T10:00:00Z' }),
+    L(2, { order_id: 2, po_number: '022', po_date: '2026-10-05', status: 'cancelled' }),
+    L(3, { order_id: 3, po_number: '023', po_date: '2026-10-06', dispatched_qty: 240, status: 'dispatched', last_dispatched_at: '2026-10-25T10:00:00Z' }),
+  ];
+  const dispatches = [
+    { line_id: 1, dispatch_id: 9, challan_number: 'CH-9', dispatched_at: '2026-10-20T10:00:00Z', qty: 100 },
+    { line_id: 3, dispatch_id: 10, challan_number: 'CH-10', dispatched_at: '2026-10-25T10:00:00Z', qty: 240 },
+    { line_id: 99, dispatch_id: 11, dispatched_at: '2026-10-25', qty: 5 }, // another product's line — ignored
+  ];
+  const jobCards = [
+    { line_id: 3, id: 7, jc_number: 'JC-7', qty_produced: 250, closed_at: '2026-10-24T10:00:00Z' },
+    { line_id: 3, id: 7, jc_number: 'JC-7', qty_produced: 250, closed_at: '2026-10-24T10:00:00Z' }, // same card twice (two lines' join)
+    { line_id: 3, id: 8, jc_number: 'GANG', qty_produced: 900, closed_at: '2026-10-23', gang_shared: true }, // gang parent — not output
+    { line_id: 1, id: 6, jc_number: 'JC-6', qty_produced: 0, closed_at: null }, // still running
+  ];
+  const fgMoves = [{ created_at: '2026-10-24T11:00:00Z', movement_type: 'excess_stock', qty_in: 10, qty_out: 0 }];
+  const led = buildProductLedger({ lines, dispatches, jobCards, fgMoves });
+  assert.deepEqual(led.map(x => x.kind), ['po', 'po', 'cancelled', 'po', 'dispatch', 'produced', 'stock', 'dispatch', 'short']);
+  const last = led[led.length - 1];
+  assert.equal(last.order_balance, lines.reduce((s, l) => s + l.pending_qty, 0)); // 150
+  assert.equal(last.order_balance, 150);
+  assert.equal(last.stock_balance, 10);
+  assert.equal(led.filter(x => x.kind === 'produced').length, 1);
+  assert.equal(led.find(x => x.kind === 'stock').label, 'Leftover added to stock');
+});
+
+test('product list: every master product, ordered or not', () => {
+  const products = [
+    { product_id: 9, product_name: 'A', stock_qty: 30 },
+    { product_id: 8, product_name: 'B', stock_qty: 0 },
+    { product_id: 7, product_name: 'C', stock_qty: 0 },
+  ];
+  const lines = [
+    L(1, { product_id: 9, order_id: 1 }),
+    L(2, { product_id: 9, order_id: 2, dispatched_qty: 250, status: 'dispatched', last_dispatched_at: '2026-11-01T00:00:00Z' }),
+    L(3, { product_id: 8, dispatched_qty: 250, status: 'dispatched' }),
+    L(4, { product_id: 8, status: 'cancelled' }),
+  ];
+  const rows = productRows(products, lines);
+  const a = rows.find(r => r.product_name === 'A');
+  assert.equal(a.orders, 2);
+  assert.equal(a.qty, 500);
+  assert.equal(a.dispatched_qty, 250);
+  assert.equal(a.pending_qty, 250);
+  assert.equal(a.track, 'pending');
+  assert.deepEqual(a.where_counts, { unplanned: 1 });
+  assert.equal(a.last_dispatched_at, '2026-11-01T00:00:00Z');
+  const b = rows.find(r => r.product_name === 'B');
+  assert.equal(b.track, 'delivered');
+  assert.equal(b.qty, 250); // cancelled line not counted as ordered
+  assert.equal(rows.find(r => r.product_name === 'C').track, 'never');
+});
+
+test('ledger: an over-delivered line shows the extra and never owes below zero', () => {
+  const lines = [
+    L(1, { qty: 9050, dispatched_qty: 9955, status: 'dispatched', po_date: '2026-08-01', last_dispatched_at: '2026-08-20T00:00:00Z' }),
+    L(2, { qty: 100, po_date: '2026-08-02' }),
+  ];
+  const dispatches = [
+    { line_id: 1, dispatch_id: 1, dispatched_at: '2026-08-10T00:00:00Z', qty: 5000 },
+    { line_id: 1, dispatch_id: 2, dispatched_at: '2026-08-20T00:00:00Z', qty: 4955 },
+  ];
+  const led = buildProductLedger({ lines, dispatches });
+  const over = led.find(x => x.kind === 'over');
+  assert.ok(over, 'an over-delivery entry');
+  assert.equal(over.extra, 905);
+  assert.equal(led[led.length - 1].order_balance, 100); // = pending of line 2
+  assert.ok(led.every(x => x.order_balance >= 0));
 });
