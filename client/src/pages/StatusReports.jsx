@@ -14,9 +14,10 @@ import { api, fmt } from '../api.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { storage } from '../lib/safeStorage.js';
 import {
-  DELIVERY, DELIVERY_LABEL, OPEN_KEYS, VIEWS,
-  enrichLine, filterLines, totalsOf, groupLines, buildReportExportSpec, sumRows,
+  DELIVERY, DELIVERY_LABEL, OPEN_KEYS, VIEWS, WHERE_LABEL, WHERE_BEFORE,
+  enrichLine, filterLines, totalsOf, groupLines, buildReportExportSpec, sumRows, whereMix, whereOrder,
 } from '../lib/statusReport.js';
+import { SECTION_META, SECTION_ORDER } from '../sections.js';
 import { DataTable, Input, KpiCard, SubTabs, rowMatches } from '../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { AlertTriangle, Building2, FileText, Package, Rows3, RotateCcw } from 'lucide-react';
@@ -24,7 +25,7 @@ import { AlertTriangle, Building2, FileText, Package, Rows3, RotateCcw } from 'l
 // The report setting is remembered per browser, so whoever opens this tab gets
 // back the report they last asked for.
 export const PREFS_KEY = 'ci_status_report_prefs';
-const DEFAULT_PREFS = { view: 'company', delivery: OPEN_KEYS, customers: [], from: '', to: '' };
+const DEFAULT_PREFS = { view: 'company', delivery: OPEN_KEYS, customers: [], stages: [], from: '', to: '' };
 function readPrefs() {
   try { return { ...DEFAULT_PREFS, ...JSON.parse(storage.getItem(PREFS_KEY) || '{}') }; }
   catch { return DEFAULT_PREFS; }
@@ -36,12 +37,12 @@ const firstOfMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 };
 const QUICK = [
-  { key: 'pending_company', label: 'Pending by company', set: { view: 'company', delivery: OPEN_KEYS, customers: [], from: '', to: '' } },
-  { key: 'pending_po', label: 'Pending POs', set: { view: 'po', delivery: OPEN_KEYS, from: '', to: '' } },
-  { key: 'pending_product', label: 'Pending products', set: { view: 'product', delivery: OPEN_KEYS, from: '', to: '' } },
-  { key: 'delivered_po', label: 'Delivered POs', set: { view: 'po', delivery: ['delivered'], from: '', to: '' } },
-  { key: 'month', label: 'This month — everything', set: () => ({ view: 'po', delivery: [], from: firstOfMonth(), to: '' }) },
-  { key: 'all', label: 'Whole book', set: { view: 'company', delivery: [], customers: [], from: '', to: '' } },
+  { key: 'pending_company', label: 'Pending by company', set: { view: 'company', delivery: OPEN_KEYS, customers: [], stages: [], from: '', to: '' } },
+  { key: 'pending_po', label: 'Pending POs', set: { view: 'po', delivery: OPEN_KEYS, stages: [], from: '', to: '' } },
+  { key: 'pending_product', label: 'Pending products', set: { view: 'product', delivery: OPEN_KEYS, stages: [], from: '', to: '' } },
+  { key: 'delivered_po', label: 'Delivered POs', set: { view: 'po', delivery: ['delivered'], stages: [], from: '', to: '' } },
+  { key: 'month', label: 'This month — everything', set: () => ({ view: 'po', delivery: [], stages: [], from: firstOfMonth(), to: '' }) },
+  { key: 'all', label: 'Whole book', set: { view: 'company', delivery: [], customers: [], stages: [], from: '', to: '' } },
 ];
 
 const VIEW_ICON = { company: Building2, po: FileText, product: Package, lines: Rows3 };
@@ -55,6 +56,31 @@ const PILL = {
 const Pill = ({ k }) => (
   <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${PILL[k] || ''}`}>{DELIVERY_LABEL[k] || k}</span>
 );
+
+// Where a line is, as a word: plant stages are named by SECTION_META (the one
+// source for station names), the rest by WHERE_LABEL.
+const whereLabel = k => WHERE_LABEL[k] || SECTION_META[k]?.label || String(k || '').replace(/_/g, ' ');
+const whereTone = k => (WHERE_BEFORE.includes(k) ? 'bg-slate-100 text-slate-600'
+  : k === 'done' ? 'bg-teal-50 text-teal-700'
+  : k === 'delivered' ? 'bg-emerald-50 text-emerald-700'
+  : k === 'cancelled' ? 'bg-slate-100 text-slate-400'
+  : 'bg-sky-50 text-sky-700');
+const WhereChip = ({ k, count }) => (
+  <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${whereTone(k)}`}>
+    {whereLabel(k)}{count != null && <span className="tabular-nums opacity-70">{count}</span>}
+  </span>
+);
+// One line → one chip. A PO / product / company → its lines counted by stage.
+const stageCol = view => (view === 'lines'
+  ? { key: 'where', label: 'Stage', sortValue: r => whereOrder(SECTION_ORDER).indexOf(r.where),
+      render: r => <WhereChip k={r.where} />, export: r => whereLabel(r.where) }
+  : { key: 'where_counts', label: 'Stage', sortable: false,
+      render: r => (
+        <div className="flex min-w-[150px] max-w-[320px] flex-wrap gap-1">
+          {whereMix(r.where_counts, SECTION_ORDER).map(m => <WhereChip key={m.key} k={m.key} count={m.count} />)}
+        </div>
+      ),
+      export: r => whereMix(r.where_counts, SECTION_ORDER).map(m => `${whereLabel(m.key)} ${m.count}`).join(', ') });
 
 const numCell = (key, { strong, tone } = {}) => ({
   key, align: 'right',
@@ -102,6 +128,7 @@ function columnsFor(view) {
     { ...numCell('orders'), label: 'Orders' },
     { ...numCell('lines'), label: 'Lines' },
     { ...numCell('open_lines', { tone: r => (r.open_lines ? 'text-amber-700' : 'text-gray-400') }), label: 'Open lines' },
+    stageCol(view),
     { ...numCell('qty'), label: 'Ordered' },
     { ...numCell('dispatched_qty'), label: 'Delivered' },
     pendingQty,
@@ -116,6 +143,7 @@ function columnsFor(view) {
     dateCol('po_date', 'PO date'),
     dateCol('delivery_date', 'EDD'),
     status,
+    stageCol(view),
     { ...numCell('lines'), label: 'Lines' },
     { ...numCell('qty'), label: 'Ordered' },
     { ...numCell('dispatched_qty'), label: 'Delivered' },
@@ -131,6 +159,7 @@ function columnsFor(view) {
     { key: 'party_artwork_code', label: 'Artwork code', render: r => <span className="text-xs text-gray-600">{r.party_artwork_code || '—'}</span>, export: r => r.party_artwork_code || '' },
     { ...numCell('orders'), label: 'POs' },
     status,
+    stageCol(view),
     { ...numCell('qty'), label: 'Ordered' },
     { ...numCell('dispatched_qty'), label: 'Delivered' },
     pendingQty,
@@ -148,7 +177,7 @@ function columnsFor(view) {
     { key: 'rate', label: 'Rate', align: 'right', render: r => <span className="tabular-nums text-gray-600">{fmt.inr2 ? fmt.inr2(r.rate) : `₹${(+r.rate || 0).toFixed(2)}`}</span>, export: r => +r.rate || 0 },
     money('pending_value', 'Pending value', true),
     status,
-    { key: 'stage', label: 'Production', render: r => <span className="whitespace-nowrap text-xs text-gray-600">{r.stage}</span> },
+    stageCol(view),
     dateCol('last_dispatched_at', 'Last dispatch'),
     { key: 'challans', label: 'Challans', render: r => <span className="text-xs text-gray-600">{r.challans || '—'}</span>, export: r => r.challans || '' },
     { key: 'line_remark', label: 'Remark', render: r => <span className="text-xs text-gray-600">{r.line_remark || r.remarks || ''}</span>, export: r => r.line_remark || r.remarks || '' },
@@ -160,7 +189,7 @@ export default function StatusReports() {
   const [loadError, setLoadError] = useState(false);
   const [prefs, setPrefs] = useState(readPrefs);
   const [q, setQ] = useState('');
-  const { view, delivery, customers, from, to } = prefs;
+  const { view, delivery, customers, stages = [], from, to } = prefs;
   const set = patch => setPrefs(p => ({ ...p, ...(typeof patch === 'function' ? patch(p) : patch) }));
   useEffect(() => { storage.setItem(PREFS_KEY, JSON.stringify(prefs)); }, [prefs]);
 
@@ -175,7 +204,7 @@ export default function StatusReports() {
   const all = lines || [];
   // Company chips count lines inside the OTHER filters, so a chip never
   // promises rows it cannot show.
-  const beforeCompany = useMemo(() => filterLines(all, { delivery, from, to }), [all, delivery, from, to]);
+  const beforeCompany = useMemo(() => filterLines(all, { delivery, stages, from, to }), [all, delivery, stages, from, to]);
   const companyChips = useMemo(() => {
     const m = new Map();
     for (const l of beforeCompany) {
@@ -192,13 +221,24 @@ export default function StatusReports() {
     return [...m.values()].sort((a, b) => b.n - a.n || String(a.name).localeCompare(String(b.name)));
   }, [beforeCompany, customers, all]);
   const deliveryCounts = useMemo(() => {
-    const base = filterLines(all, { customers, from, to });
+    const base = filterLines(all, { customers, stages, from, to });
     const c = Object.fromEntries(DELIVERY.map(d => [d.key, 0]));
     for (const l of base) c[l.delivery] += 1;
     return c;
-  }, [all, customers, from, to]);
+  }, [all, customers, stages, from, to]);
+  // "Where it is" chips: counted inside every other filter, in plant order.
+  // Delivered / cancelled are left off the rail — the Status chips own those.
+  const whereChips = useMemo(() => {
+    const base = filterLines(all, { customers, delivery, from, to });
+    const c = {};
+    for (const l of base) c[l.where] = (c[l.where] || 0) + 1;
+    return whereOrder(SECTION_ORDER, Object.keys(c))
+      .filter(k => k !== 'delivered' && k !== 'cancelled')
+      .filter(k => c[k] || stages.includes(k))
+      .map(k => ({ key: k, count: c[k] || 0 }));
+  }, [all, customers, delivery, stages, from, to]);
 
-  const filtered = useMemo(() => filterLines(all, { customers, delivery, from, to }), [all, customers, delivery, from, to]);
+  const filtered = useMemo(() => filterLines(all, { customers, delivery, stages, from, to }), [all, customers, delivery, stages, from, to]);
   const grouped = useMemo(() => groupLines(filtered, view), [filtered, view]);
   const rows = useMemo(() => (q ? grouped.filter(r => rowMatches(r, q)) : grouped), [grouped, q]);
   // KPIs answer for the rows on screen, search included.
@@ -220,6 +260,7 @@ export default function StatusReports() {
   const exportMeta = [
     `Status: ${delivery.length ? delivery.map(k => DELIVERY_LABEL[k]).join(', ') : 'All'}`,
     custNames.length ? `Companies: ${custNames.join(', ')}` : 'Companies: All',
+    stages.length ? `Stage: ${stages.map(whereLabel).join(', ')}` : null,
     from || to ? `PO date: ${from ? fmt.date(from) : 'start'} – ${to ? fmt.date(to) : 'today'}` : null,
     q ? `Search: "${q}"` : null,
     'Values are quantity × rate, before GST',
@@ -262,6 +303,16 @@ export default function StatusReports() {
           </button>
         )}
       </FilterRail>
+      {whereChips.length > 0 && (
+        <FilterRail className="mt-2">
+          <FilterGroup label="Where it is" divider={false}>
+            {whereChips.map(c => (
+              <FilterChip key={c.key} label={whereLabel(c.key)} count={c.count}
+                on={stages.includes(c.key)} onClick={() => toggle('stages', c.key)} />
+            ))}
+          </FilterGroup>
+        </FilterRail>
+      )}
       {companyChips.length > 0 && (
         <FilterRail className="mt-2">
           <FilterGroup label="Company" divider={false}>

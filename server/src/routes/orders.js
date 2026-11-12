@@ -1224,6 +1224,31 @@ r.get('/status-sheet/report', async (_req, res, next) => {
       WHERE ol.part_of_line_id IS NULL
         AND COALESCE(o.status, '') <> 'draft'
       ORDER BY o.po_date DESC NULLS LAST, o.id DESC, ol.id`);
+    // Where each still-owed line is on the floor: its route as {stage, status},
+    // read the same way the live sheet reads it (own card, or the gang parent's
+    // card first), so lib/lineStage.js gives both tabs the same answer.
+    // Delivered and cancelled lines are left out — they are not on the floor,
+    // and skipping them keeps this query and the payload small.
+    const openIds = rows
+      .filter(l => l.status !== 'dispatched' && l.status !== 'cancelled' && +l.dispatched_qty < +l.qty)
+      .map(l => l.line_id);
+    if (openIds.length) {
+      const stageRows = await q(`
+        SELECT ol.id AS line_id, js.stage, js.status
+        FROM order_lines ol
+        JOIN job_cards jc ON (jc.order_line_id = ol.id
+             OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+                 AND jc.order_line_id IS NULL))
+        JOIN job_stages js ON js.job_card_id = jc.id
+        WHERE ol.id = ANY($1::int[])
+        ORDER BY ol.id, (jc.order_line_id IS NULL) DESC, js.seq`, [openIds]);
+      const byLine = new Map();
+      for (const s of stageRows) {
+        if (!byLine.has(s.line_id)) byLine.set(s.line_id, []);
+        byLine.get(s.line_id).push({ stage: s.stage, status: s.status });
+      }
+      for (const l of rows) if (byLine.has(l.line_id)) l.stages = byLine.get(l.line_id);
+    }
     res.json({ lines: rows });
   } catch (e) { next(e); }
 });

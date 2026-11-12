@@ -115,3 +115,39 @@ test('export: one section per company outside the company view', () => {
   const one = buildReportExportSpec({ view: 'lines', rows: groupLines([L(1)], 'lines'), columns: cols, title: 'Status Report' });
   assert.equal(one.sections, undefined);
 });
+
+// ── Where it is ─────────────────────────────────────────────────────────────
+import { whereOf, whereMix, whereOrder } from '../../client/src/lib/statusReport.js';
+
+const route = (...pairs) => pairs.map(([stage, status]) => ({ stage, status }));
+
+test('where: off the floor once delivered or cancelled, else the live-sheet stage', () => {
+  assert.equal(L(1, { dispatched_qty: 250, status: 'dispatched' }).where, 'delivered');
+  assert.equal(L(2, { status: 'cancelled' }).where, 'cancelled');
+  assert.equal(L(3).where, 'unplanned');
+  assert.equal(L(4, { status: 'planned' }).where, 'planned');
+  // Printing done, die cutting running → die_cutting.
+  assert.equal(L(5, { status: 'in_production', stages: route(['printing', 'completed'], ['die_cutting', 'in_progress'], ['pasting', 'pending']) }).where, 'die_cutting');
+  // Card raised, nothing started → queued.
+  assert.equal(L(6, { status: 'in_production', stages: route(['printing', 'pending'], ['pasting', 'pending']) }).where, 'queued');
+  // Route complete, part dispatched → produced, waiting to go out.
+  assert.equal(L(7, { status: 'produced', dispatched_qty: 100, stages: route(['printing', 'completed']) }).where, 'done');
+  assert.equal(whereOf({ qty: 10, dispatched_qty: 0, status: 'pending' }), 'unplanned');
+});
+
+test('where: filter by stage, and groups count their lines per stage in plant order', () => {
+  const lines = [
+    L(1, { status: 'in_production', stages: route(['printing', 'in_progress']) }),
+    L(2, { status: 'in_production', stages: route(['printing', 'in_progress']) }),
+    L(3, { status: 'in_production', stages: route(['printing', 'completed'], ['die_cutting', 'in_progress']) }),
+    L(4),
+    L(5, { dispatched_qty: 250, status: 'dispatched' }),
+  ];
+  assert.deepEqual(filterLines(lines, { stages: ['printing'] }).map(l => l.line_id), [1, 2]);
+  const po = groupLines(lines, 'po')[0];
+  assert.deepEqual(po.where_counts, { printing: 2, die_cutting: 1, unplanned: 1, delivered: 1 });
+  const order = ['cutting', 'printing', 'die_cutting', 'pasting'];
+  assert.deepEqual(whereMix(po.where_counts, order).map(m => m.key), ['unplanned', 'printing', 'die_cutting', 'delivered']);
+  // A stage the plant list does not know is kept, never dropped.
+  assert.deepEqual(whereOrder(order, ['qc']).slice(-4), ['qc', 'done', 'delivered', 'cancelled']);
+});

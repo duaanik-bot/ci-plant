@@ -12,6 +12,15 @@
 //   part       — something has gone, more is still owed.
 //   pending    — nothing dispatched yet.
 // Pending qty is only ever owed on `part` and `pending` lines.
+//
+// "Where it is" (`where`), one key per line:
+//   cancelled / delivered — the delivery bucket says it all, the line is off
+//                the floor.
+//   otherwise  — lib/lineStage.js lineStageOf(): unplanned · planned · queued ·
+//                a plant stage (printing, die_cutting, …) · done (produced,
+//                waiting to go out). The SAME function the live sheet's
+//                "Where it is" rail uses, so the two tabs never disagree.
+import { lineStageOf } from './lineStage.js';
 
 export const DELIVERY = [
   { key: 'pending', label: 'Pending', tone: 'border-amber-200 bg-amber-50 text-amber-700' },
@@ -23,11 +32,35 @@ export const DELIVERY_LABEL = Object.fromEntries(DELIVERY.map(d => [d.key, d.lab
 // The book a planner means by "open": owed in full or in part.
 export const OPEN_KEYS = ['pending', 'part'];
 
-// Production status of the carton, in plain words.
-export const STAGE_LABEL = {
-  pending: 'Not planned', planned: 'Planned', in_production: 'In production',
-  ready: 'In production', produced: 'Produced', dispatched: 'Dispatched', cancelled: 'Cancelled',
+// The keys `where` can take that are not plant stages, in the order they are
+// shown: before the floor, then (plant stages go between), then after it.
+export const WHERE_BEFORE = ['unplanned', 'planned', 'queued'];
+export const WHERE_AFTER = ['done', 'delivered', 'cancelled'];
+export const WHERE_LABEL = {
+  unplanned: 'Not planned', planned: 'Planned', queued: 'Job card raised',
+  done: 'Produced — to dispatch', delivered: 'Delivered', cancelled: 'Cancelled',
 };
+
+export function whereOf(line, delivery = deliveryOf(line)) {
+  if (delivery === 'cancelled' || delivery === 'delivered') return delivery;
+  return lineStageOf(line).key;
+}
+
+// Every `where` key in display order: before → plant stages → anything else
+// seen in the data → after. `stageOrder` is the plant's own list (SECTION_ORDER),
+// passed in so this file stays free of React/lucide imports.
+export function whereOrder(stageOrder = [], seen = []) {
+  const known = new Set([...WHERE_BEFORE, ...stageOrder, ...WHERE_AFTER]);
+  const extra = seen.filter(k => !known.has(k));
+  return [...WHERE_BEFORE, ...stageOrder, ...extra, ...WHERE_AFTER];
+}
+
+// A group's stage mix as [{key, count}] in display order — what the Stage
+// column shows for a PO, a product or a company.
+export function whereMix(counts, stageOrder = []) {
+  const keys = Object.keys(counts || {});
+  return whereOrder(stageOrder, keys).filter(k => counts[k]).map(k => ({ key: k, count: counts[k] }));
+}
 
 // The report views — the "what kind of report" setting.
 export const VIEWS = [
@@ -60,7 +93,7 @@ export function enrichLine(line) {
   return {
     ...line,
     delivery,
-    stage: STAGE_LABEL[line.status] || line.status || '—',
+    where: whereOf(line, delivery),
     pending_qty,
     short_qty,
     value: live ? qty * rate : 0,
@@ -72,12 +105,14 @@ export function enrichLine(line) {
 // po_date is a plain 'YYYY-MM-DD' text column, so string compare is a date compare.
 const dayStr = d => (d ? String(d).slice(0, 10) : '');
 
-export function filterLines(lines, { customers = [], delivery = [], from = '', to = '' } = {}) {
+export function filterLines(lines, { customers = [], delivery = [], stages = [], from = '', to = '' } = {}) {
   const cust = new Set(customers.map(String));
   const del = new Set(delivery);
+  const wh = new Set(stages);
   return lines.filter(l => {
     if (cust.size && !cust.has(String(l.customer_id))) return false;
     if (del.size && !del.has(l.delivery)) return false;
+    if (wh.size && !wh.has(l.where)) return false;
     const d = dayStr(l.po_date);
     if (from && (!d || d < from)) return false;
     if (to && (!d || d > to)) return false;
@@ -91,11 +126,13 @@ function blankTotals() {
     value: 0, delivered_value: 0, pending_value: 0,
     pending: 0, part: 0, delivered: 0, cancelled: 0,
     oldest_open_po: '', last_dispatched_at: '',
+    where_counts: {},
   };
 }
 function addLine(t, l) {
   t.lines += 1;
   t[l.delivery] += 1;
+  if (l.where) t.where_counts[l.where] = (t.where_counts[l.where] || 0) + 1;
   if (l.delivery !== 'cancelled') {
     t.qty += n(l.qty);
     t.dispatched_qty += n(l.dispatched_qty);
