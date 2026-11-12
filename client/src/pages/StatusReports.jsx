@@ -72,9 +72,9 @@ const WhereChip = ({ k, count }) => (
 );
 // One line → one chip. A PO / product / company → its lines counted by stage.
 const stageCol = view => (view === 'lines'
-  ? { key: 'where', label: 'Stage', sortValue: r => whereOrder(SECTION_ORDER).indexOf(r.where),
+  ? { key: 'where', label: 'Stage', card: 'face', sortValue: r => whereOrder(SECTION_ORDER).indexOf(r.where),
       render: r => <WhereChip k={r.where} />, export: r => whereLabel(r.where) }
-  : { key: 'where_counts', label: 'Stage', sortable: false,
+  : { key: 'where_counts', label: 'Stage', sortable: false, card: 'face',
       render: r => (
         <div className="flex min-w-[150px] max-w-[320px] flex-wrap gap-1">
           {whereMix(r.where_counts, SECTION_ORDER).map(m => <WhereChip key={m.key} k={m.key} count={m.count} />)}
@@ -110,7 +110,10 @@ const pct = {
 };
 const pendingQty = { ...numCell('pending_qty', { strong: true, tone: r => (r.pending_qty > 0 ? 'text-amber-700' : 'text-gray-400') }), label: 'Pending' };
 const company = { key: 'customer_name', label: 'Company', render: r => <span className="font-semibold">{r.customer_name}</span> };
-const status = { key: 'delivery', label: 'Status', render: r => <Pill k={r.delivery} />, export: r => DELIVERY_LABEL[r.delivery] || r.delivery };
+// Phone / upright-tablet cards pick their status chip by key name, and
+// `delivery` / `where*` don't look like one — without explicit roles both
+// columns fell behind "Details" and the card never said where a job was.
+const status = { key: 'delivery', label: 'Status', card: 'status', render: r => <Pill k={r.delivery} />, export: r => DELIVERY_LABEL[r.delivery] || r.delivery };
 const product = {
   key: 'product_name', label: 'Product',
   render: r => (
