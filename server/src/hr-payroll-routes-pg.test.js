@@ -927,6 +927,32 @@ describe('HR payroll routes through the real app', {
     assert.equal((await call('approver', 'POST', `/hr/runs/${DEC}/send-back`, { reason: 'Test' })).status, 200, 'unpaid again, it can go back');
   });
 
+  test('pending salary: unpaid lines of submitted months over the last N months, per person, months counted', T, async () => {
+    const res = await call('viewer', 'GET', '/hr/reports/pending-pay?months=2&to=2026-12');
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.body.from, '2026-11');
+    assert.equal(res.body.to, '2026-12');
+    for (const l of res.body.lines) {
+      assert.ok(['2026-11', '2026-12'].includes(l.month), 'only the two months asked for');
+      assert.notEqual(l.payment_status, 'paid');
+      assert.ok(Number(l.payable) > 0);
+    }
+    assert.ok(!res.body.lines.some((l) => l.month === '2026-12'), 'December went back to draft: its amounts are not fixed, so it is left out');
+    const want = await db.one(
+      `SELECT count(*)::int AS n, coalesce(sum(l.payable), 0)::text AS total FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+        WHERE r.month BETWEEN '2026-11' AND '2026-12' AND r.status <> 'draft' AND l.payment_status <> 'paid' AND l.payable > 0`);
+    assert.equal(res.body.lines.length, want.n, 'every unpaid line of those months, none other');
+    assert.equal(Math.round(Number(res.body.total) * 100), Math.round(Number(want.total) * 100));
+    for (const p of res.body.people) assert.equal(p.month_count, p.months.length);
+    const sum = res.body.people.reduce((t, p) => t + Math.round(Number(p.total) * 100), 0);
+    assert.equal(sum, Math.round(Number(res.body.total) * 100), 'the people add up to the total');
+    refused(await call('viewer', 'GET', '/hr/reports/pending-pay?months=0'), 400, undefined);
+    const every = await call('viewer', 'GET', '/hr/reports/pending-pay?months=all&to=2026-12');
+    assert.equal(every.status, 200, every.text);
+    assert.equal(every.body.from, null);
+    assert.ok(every.body.lines.length >= res.body.lines.length);
+  });
+
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
     const actions = new Set((await db.q(`SELECT entity || ':' || action AS a FROM hr.audit_log`)).map((x) => x.a));
     for (const a of ['import:upload', 'import:map', 'import_row:decide', 'import:apply', 'import:discard', 'run_input:edit', 'run:submit',

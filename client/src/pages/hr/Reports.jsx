@@ -42,6 +42,7 @@ import { downloadBankList, downloadPaymentAdvice } from './bankFile.js';
 
 const REPORTS = [
   { key: 'schedule', label: 'Monthly schedule' },
+  { key: 'pending', label: 'Pending salary' },
   { key: 'advice', label: 'Payment advice' },
   { key: 'payment', label: 'Payment sheet' },
   { key: 'paid', label: 'Payment register' },
@@ -53,7 +54,7 @@ const REPORTS = [
   { key: 'loans', label: 'Loan register' },
   { key: 'advances', label: 'Advance register' },
 ];
-const MONTHLESS = new Set(['schedule', 'loans', 'advances']);
+const MONTHLESS = new Set(['schedule', 'pending', 'loans', 'advances']);
 // A restricted login (lib/hr.js hrRestricted) cannot open the variance (it compares everyone).
 const reportsFor = () => (hrRestricted() ? REPORTS.filter(x => x.key !== 'variance') : REPORTS);
 
@@ -429,7 +430,7 @@ export default function Reports({ level }) {
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[#86868B] hover:bg-[#1D1D1F]/[0.05]"><RefreshCw size={14} /></button>
             </>
           )}
-          {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">{report === 'schedule' ? 'Every month, as it stands today' : 'As of today'}</h2>}
+          {!needsRun && <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">{report === 'schedule' ? 'Every month, as it stands today' : report === 'pending' ? 'Salary not yet paid' : 'As of today'}</h2>}
         </div>
         <div className="mt-3"><SubTabs views={reportsFor()} active={report} onChange={k => {
           setReport(k);
@@ -476,6 +477,7 @@ export default function Reports({ level }) {
       {needsRun && run && report === 'register' && <RegisterReport month={month} run={run} rows={rows} />}
       {needsRun && run && report === 'variance' && <VarianceReport month={month} rows={rows} />}
       {report === 'schedule' && <MonthlySchedule />}
+      {report === 'pending' && <PendingSalary />}
       {report === 'loans' && <LoanRegister />}
       {report === 'advances' && <AdvanceRegister />}
     </div>
@@ -1020,6 +1022,78 @@ function LoanRegister() {
         exportSummary={rs => [{ label: 'Loans', value: String(rs.length) }, { label: 'Principal', value: inr2(sumPaise(rs.map(l => l.principal))) },
           { label: 'Outstanding', value: inr2(sumPaise(rs.map(l => l.outstanding))) }]}
         empty="No loans match." />
+    </>
+  );
+}
+
+// ── Pending salary (owner's request 2026-11-12) ─────────────────────────────
+// Salary not yet marked paid over the last 1, 2, 3, 6 or 12 months (or every month): one row per person with how many
+// months are pending, the oldest one, the total and the month-by-month split. A submitted, approved or finalised month
+// counts (a draft's amounts are not fixed yet); unpaid, on hold, failed and reversed lines all count as pending.
+const PENDING_SPANS = [['1', 'This month'], ['2', '2 months'], ['3', '3 months'], ['6', '6 months'], ['12', '12 months'], ['all', 'All months']];
+const PAY_WORD = { pending: 'Unpaid', on_hold: 'On hold', failed: 'Failed', reversed: 'Reversed' };
+function PendingSalary() {
+  const [span, setSpan] = useState('3');
+  const [state, setState] = useState({ data: null, error: '' });
+  const [q, setQ] = useState('');
+  const [minMonths, setMinMonths] = useState(1);
+  const load = useCallback(() => {
+    setState(s => ({ ...s, error: '' }));
+    hrApi.pendingPay(span).then(data => setState({ data, error: '' }), e => setState({ data: null, error: e?.message || 'Could not read pending salary' }));
+  }, [span]);
+  useEffect(() => { load(); }, [load]);
+  const data = state.data;
+  const all = data?.people || [];
+  const shown = useMemo(() => all.filter(p => p.month_count >= minMonths), [all, minMonths]);
+  const split = p => p.months.map(m => `${monthLabel(m.month)} ${inr2(m.payable)}${m.payment_status !== 'pending' ? ` (${PAY_WORD[m.payment_status] || m.payment_status})` : ''}`).join(' · ');
+  const columns = useMemo(() => [
+    text('code', 'Code', p => p.code), text('name', 'Name', p => p.name), text('department', 'Department', p => p.department),
+    { key: 'month_count', label: 'Months pending', align: 'right', sortValue: p => p.month_count, export: p => String(p.month_count),
+      render: p => <span className={`tabular-nums font-bold ${p.month_count >= 2 ? 'text-red-700' : 'text-[#1D1D1F]'}`}>{p.month_count}</span> },
+    text('oldest', 'Oldest month', p => monthLabel(p.oldest)),
+    money('total', 'Pending total', p => p.total),
+    money('on_hold', 'Of which on hold', p => p.on_hold),
+    { key: 'split', label: 'Month by month', sortValue: p => p.oldest, export: p => split(p),
+      render: p => (
+        <span className="flex flex-wrap gap-1">
+          {p.months.map(m => (
+            <span key={m.month} title={m.hold_reason || undefined}
+              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${m.payment_status === 'on_hold' ? 'bg-amber-50 text-amber-800' : m.payment_status === 'pending' ? 'bg-gray-100 text-gray-700' : 'bg-red-50 text-red-700'}`}>
+              {monthLabel(m.month)} · <span className="tabular-nums">{inr2(m.payable)}</span>{m.payment_status !== 'pending' ? ` · ${PAY_WORD[m.payment_status] || m.payment_status}` : ''}{m.approval_status !== 'approved' ? ' · not approved' : ''}
+            </span>
+          ))}
+        </span>
+      ) },
+  ], []);
+  const spanLabel = (PENDING_SPANS.find(([k]) => k === span) || [])[1] || span;
+  return (
+    <>
+      <FilterRail className="mb-2">
+        <FilterGroup label="Over the last" divider={false}>
+          {PENDING_SPANS.map(([k, label]) => <FilterChip key={k} label={label} on={span === k} onClick={() => setSpan(k)} />)}
+        </FilterGroup>
+        <FilterGroup label="Pending for">
+          {[[1, 'Any'], [2, '2+ months'], [3, '3+ months']].map(([n, label]) => (
+            <FilterChip key={n} label={label} count={all.filter(p => p.month_count >= n).length} on={minMonths === n} onClick={() => setMinMonths(n)} />
+          ))}
+        </FilterGroup>
+      </FilterRail>
+      {state.error && <div role="alert" className="mb-2 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{state.error}<Button size="sm" variant="secondary" onClick={load}>Try again</Button></div>}
+      {!data && !state.error && <div className="p-8 text-sm text-slate-400">Reading pending salary…</div>}
+      {data && (
+        <>
+          <MiniTotals items={[['People', String(shown.length)], ['Pending', inr2(sumPaise(shown.map(p => p.total)))],
+            ['Of which on hold', inr2(sumPaise(shown.map(p => p.on_hold)))],
+            ['From', data.from ? monthLabel(data.from) : 'the first month'], ['To', monthLabel(data.to)]]} />
+          <p className="mb-2 text-[11px] text-[#86868B]">Counts every submitted, approved or finalised month whose line is not marked paid (unpaid, on hold, failed or reversed). A draft month is left out until it is submitted. Mark paid from Payroll › Payments.</p>
+          <DataTable columns={columns} rows={shown} getRowId={p => p.person_id} dense serialNumber={false}
+            searchValue={q} onSearchChange={setQ} searchPlaceholder="Search name, code or department…" defaultSort={{ key: 'total', dir: 'desc' }}
+            exportName="HR Pending salary" exportSubtitle={`HR & Payroll · Pending salary · ${spanLabel}`}
+            exportMeta={() => [`Over the last: ${spanLabel}`, minMonths > 1 && `Pending for ${minMonths}+ months`]}
+            exportSummary={rs => [{ label: 'People', value: String(rs.length) }, { label: 'Pending', value: inr2(sumPaise(rs.map(p => p.total))) }]}
+            empty="Nothing pending — everyone is paid for these months." />
+        </>
+      )}
     </>
   );
 }

@@ -1141,6 +1141,60 @@ r.get('/hr/reports/monthly', requireHr('viewer'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── GET /hr/reports/pending-pay?months=3 — salary still unpaid, person by person, over the last N months ──
+// Owner's request 2026-11-12: "look at an employee's pending salary from the past 2 or 3 months". Every line of a
+// submitted, approved or finalised month (a draft's amounts are not fixed yet) with something to pay that is not
+// marked paid — unpaid, on hold, failed or reversed — in the N calendar months up to this month (months=all: every
+// month). One row per line, with the person's own totals alongside so the screen can show either view. Viewer and
+// up; a restricted login does not see its hidden people.
+r.get('/hr/reports/pending-pay', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const raw = String(req.query?.months ?? '3').trim().toLowerCase();
+    const all = raw === 'all';
+    const n = all ? null : Number(raw);
+    if (!all && (!Number.isInteger(n) || n < 1 || n > 60)) throw bad('months is a whole number from 1 to 60, or all');
+    const askedTo = req.query?.to ? monthOf(String(req.query.to)) : null;   // ?to=YYYY-MM: N months up to that one
+    const now = askedTo ?? plantDateStr().slice(0, 7);
+    let from = null;
+    if (!all) {
+      const [y, m] = now.split('-').map(Number);
+      const k = y * 12 + (m - 1) - (n - 1);
+      from = `${Math.floor(k / 12)}-${String((k % 12) + 1).padStart(2, '0')}`;
+    }
+    const ex = hiddenIds(req);
+    const rows = await q(
+      `SELECT l.person_id, r.month, r.status AS run_status, l.pay_channel, l.payable::text AS payable,
+              l.payment_status, l.approval_status, l.hold_reason,
+              p.code, coalesce(p.display_name, p.name) AS name, p.department, p.status AS person_status
+         FROM hr.run_lines l
+         JOIN hr.runs r ON r.id = l.run_id
+         JOIN hr.people p ON p.id = l.person_id
+        WHERE r.status IN ('submitted', 'approved', 'finalised')
+          AND l.payment_status <> 'paid' AND l.payable > 0
+          AND ($1::text IS NULL OR r.month >= $1) AND r.month <= $2
+          AND l.person_id <> ALL($3::int[])
+        ORDER BY p.name, r.month`, [from, now, ex]);
+    const byPerson = new Map();
+    for (const l of rows) {
+      const k = l.person_id;
+      if (!byPerson.has(k)) {
+        byPerson.set(k, { person_id: k, code: l.code, name: l.name, department: l.department, person_status: l.person_status,
+          pay_channel: l.pay_channel, months: [], total: 0n, oldest: l.month, on_hold: 0n });
+      }
+      const p = byPerson.get(k);
+      const due = paiseOf(l.payable) ?? 0n;
+      p.months.push({ month: l.month, run_status: l.run_status, payable: l.payable, payment_status: l.payment_status,
+        approval_status: l.approval_status, hold_reason: l.hold_reason });
+      p.total += due;
+      if (l.payment_status === 'on_hold') p.on_hold += due;
+      p.pay_channel = l.pay_channel ?? p.pay_channel;
+    }
+    const people = [...byPerson.values()].map((p) => ({ ...p, total: fmtPaise(p.total), on_hold: fmtPaise(p.on_hold), month_count: p.months.length }));
+    const total = rows.reduce((t, l) => t + (paiseOf(l.payable) ?? 0n), 0n);
+    res.json({ from, to: now, months: all ? 'all' : n, people, lines: rows, total: fmtPaise(total) });
+  } catch (e) { next(e); }
+});
+
 // Counts of the run's flags: lines with at least one flag of each level, and each code with its level and count.
 function flagsSummary(lines) {
   const out = { lines: lines.length, block: 0, warn: 0, info: 0, codes: [] };

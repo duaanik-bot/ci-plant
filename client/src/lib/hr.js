@@ -266,6 +266,8 @@ export const hrApi = {
   loan: id => api.get(`/hr/loans/${seg(id)}`),
   // GET /hr/reports/monthly — viewer. Month-wise payment schedule, newest first (server/src/hr/monthly-report.js).
   monthlySchedule: () => api.get('/hr/reports/monthly'),
+  // GET /hr/reports/pending-pay?months=N|all — viewer. Salary not yet paid, person by person, over the last N months.
+  pendingPay: (months = 3) => api.get(`/hr/reports/pending-pay?months=${encodeURIComponent(months)}`),
   // POST /hr/loans — operator. { person_id, principal, issued_on, purpose, instalment, first_due_month, paid_via, is_opening }; mints CI-LN-####.
   createLoan: loan => api.post('/hr/loans', loan),
   // POST /hr/loans/:id/prepay — operator. { amount, date }.

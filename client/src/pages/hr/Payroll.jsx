@@ -333,7 +333,7 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   );
 }
 
-function PaymentsPanel({ lines, channelLabel, canOperate, final, payOpen = final, nameOf, onPay, onOpen }) {
+function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, final, payOpen = final, nameOf, onPay, onOpen, onStatus, onPending }) {
   const [open, setOpen] = useState(null);
   const groups = useMemo(() => {
     const by = new Map();
@@ -364,7 +364,8 @@ function PaymentsPanel({ lines, channelLabel, canOperate, final, payOpen = final
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${paid === due ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
           {paid} of {plural(due, 'person', 'people')} paid
         </span>
-        <span className="text-[11px] text-[#86868B]">Finalising is not proof of payment — mark each channel when the money has gone.</span>
+        <span className="text-[11px] text-[#86868B]">Mark a whole channel, or one person, when the money has gone; Mark unpaid takes it back.</span>
+        {onPending && <Button size="sm" variant="secondary" className="ml-auto" onClick={onPending}>Pending salary (past months)</Button>}
       </div>
       <div className="overflow-x-auto rounded-2xl border border-white/75 bg-white/55">
         <table className="w-full text-xs">
@@ -401,12 +402,18 @@ function PaymentsPanel({ lines, channelLabel, canOperate, final, payOpen = final
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.failed + g.reversed ? 'font-bold text-red-700' : ''}`}>{g.failed + g.reversed}</td>
                   <td className={`px-2.5 py-2 text-right tabular-nums ${g.unapproved ? 'font-bold text-[#515154]' : ''}`}>{g.unapproved}</td>
                   <td className="px-2.5 py-2 text-right">
+                    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
                     {canOperate && payOpen && g.code && waiting > g.unapproved && <Button size="sm" onClick={() => onPay(g)}>Mark paid</Button>}
+                    {canOperate && canApprove && onStatus && g.paid > 0 && (
+                      <Button size="sm" variant="secondary" title="Take back the paid marks of this channel (needs a reason)"
+                        onClick={() => onStatus(g.lines.filter(l => payStatus(l) === 'paid').map(l => l.person_id), 'pending')}>Mark unpaid</Button>
+                    )}
                     {!payOpen && g.code && waiting > g.unapproved && <span className="text-[11px] text-[#515154]">Paid once the month is submitted</span>}
                     {g.code && waiting > 0 && waiting === g.unapproved && <span className="text-[11px] text-[#515154]">Approve people to pay them</span>}
                     {!g.code && waiting > 0 && <span className="text-[11px] text-amber-700">Mark each person from their line</span>}
                     {waiting === 0 && g.held === 0 && g.due.length > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700"><Check size={12} /> All paid</span>}
                     {waiting === 0 && g.held > 0 && <span className="text-[11px] font-bold text-amber-800">{g.held} on hold</span>}
+                    </span>
                   </td>
                 </tr>,
                 isOpen && (
@@ -425,6 +432,22 @@ function PaymentsPanel({ lines, channelLabel, canOperate, final, payOpen = final
                             <ApprovalPill line={l} />
                             {l.paid_on && <span className="text-[11px] text-[#6E6E73]">{whenText(l.paid_on)}</span>}
                             {l.paid_ref && <span className="font-mono text-[11px] text-[#6E6E73]">{l.paid_ref}</span>}
+                            {canOperate && onStatus && (
+                              <span className="ml-auto inline-flex gap-1.5">
+                                {payOpen && payStatus(l) !== 'paid' && payStatus(l) !== 'on_hold' && approvalOf(l) === 'approved' && owes(l) && (
+                                  <Button size="sm" onClick={() => onStatus([l.person_id], 'paid')}>Mark paid</Button>
+                                )}
+                                {payStatus(l) === 'paid' && canApprove && (
+                                  <Button size="sm" variant="secondary" onClick={() => onStatus([l.person_id], 'pending')}>Mark unpaid</Button>
+                                )}
+                                {payStatus(l) === 'on_hold' && (
+                                  <Button size="sm" variant="secondary" onClick={() => onStatus([l.person_id], 'pending')}>Release hold</Button>
+                                )}
+                                {payStatus(l) !== 'paid' && payStatus(l) !== 'on_hold' && owes(l) && (
+                                  <Button size="sm" variant="ghost" onClick={() => onStatus([l.person_id], 'on_hold')}>Hold</Button>
+                                )}
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -1470,6 +1493,12 @@ export default function Payroll({ level }) {
           )}
           {approvable && (
             <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} payOpen={approvable} nameOf={nameOf}
+              canApprove={canApprove}
+              onStatus={(ids, status) => {
+                const want = new Set(ids.map(String));
+                setDialog({ kind: 'status', status, only: rows.filter(r => want.has(String(toId(r.id)))) });
+              }}
+              onPending={() => setParams(p => { const n = new URLSearchParams(p); n.set('tab', 'reports'); n.set('report', 'pending'); return n; })}
               onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer} />
           )}
 
@@ -1727,7 +1756,7 @@ export default function Payroll({ level }) {
         </ActionDialog>
       )}
       {dialog?.kind === 'status' && (
-        <StatusDialog month={month} status={dialog.status} picked={picked} canApprove={canApprove}
+        <StatusDialog month={month} status={dialog.status} picked={dialog.only ?? picked} canApprove={canApprove}
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
       )}
       {master && (
