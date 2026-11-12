@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""CI Plant enquiry desk helper: the robot's calls to CI Plant, with the AVS robot key.
+"""CI Plant enquiry desk helper: the robot's calls to CI Plant, with the AVS robot key — or, in the desk's cloud
+routine, with the one-time pass CI Plant gave that run for its one fetch job.
 
     python3 desk.py jobs | claim N | file N mails.json | counters N counters.json | attachment N out.pdf | sent-drafts N '<json>'
                     | done N '<json>' | fail N "why"
@@ -7,7 +8,8 @@
 Settings, from the environment or ~/.config/ci-plant/enquiry-desk.env (KEY=VALUE lines):
     CI_PLANT_URL   default https://motionci.in
     CI_ROBOT_KEY   the AVS robot key (AVS_ROBOT_KEY is read too)
-Standard library only. Never prints the key.
+    CI_JOB_TOKEN   the cloud routine's one-time pass for its job (used instead of the key when set)
+Standard library only. Never prints the key or the pass.
 """
 import hashlib
 import json
@@ -28,18 +30,21 @@ def settings():
                 k, v = line.split('=', 1)
                 vals[k.strip().removeprefix('export ').strip()] = v.strip().strip('"').strip("'")
     url = os.environ.get('CI_PLANT_URL') or vals.get('CI_PLANT_URL') or 'https://motionci.in'
+    token = os.environ.get('CI_JOB_TOKEN')
+    if token:
+        return url.rstrip('/'), {'x-enquiry-job-token': token}
     key = (os.environ.get('CI_ROBOT_KEY') or os.environ.get('AVS_ROBOT_KEY')
            or vals.get('CI_ROBOT_KEY') or vals.get('AVS_ROBOT_KEY'))
     if not key:
         sys.exit('No robot key: set CI_ROBOT_KEY (the AVS robot key) or put it in ' + CONF)
-    return url.rstrip('/'), key
+    return url.rstrip('/'), {'x-avs-robot-key': key}
 
 
 def call(method, path, body=None, raw=False):
-    url, key = settings()
+    url, auth = settings()
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url + '/api/avs/robot' + path, data=data, method=method, headers={
-        'x-avs-robot-key': key, 'x-avs-runner': os.environ.get('CI_RUNNER_NAME', 'Claude (enquiry desk)'),
+        **auth, 'x-avs-runner': os.environ.get('CI_RUNNER_NAME', 'Claude (enquiry desk)'),
         'Content-Type': 'application/json', 'Accept': 'application/json',
     })
     try:

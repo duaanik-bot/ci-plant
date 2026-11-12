@@ -40,17 +40,31 @@ function MailboxBadge({ box }) {
   );
 }
 
-function JobLine({ job }) {
-  if (!job) return <span className="text-xs text-slate-500">No fetch yet.</span>;
+// The last fetch, in words. A fetch is started in the cloud when the desk is linked (Settings → Claude in the cloud),
+// on Fetch and at 11 am / 3 pm; else it waits for the Claude robot on the owner's Mac.
+function JobLine({ job, cloud }) {
+  if (!job) return <span className="text-xs text-slate-500">No fetch yet.{cloud?.linked ? ' Claude in the cloud also fetches at 11 am and 3 pm.' : ''}</span>;
   const r = job.result || {};
+  const queued = job.fire_status === 'cloud'
+    ? `Claude was started in the cloud ${dateText(job.fired_at)} — the enquiries land here in a few minutes.`
+    : job.fire_status === 'cloud_failed'
+      ? `Claude in the cloud did not start: ${job.fire_error || 'no answer'}. Press Fetch again${cloud?.linked ? '' : ', or link Claude in Settings'}.`
+      : 'Waiting for Claude — the robot on the Mac picks it up at its next run (link Claude in the cloud in Settings to fetch at once).';
   const text = {
-    queued: 'Waiting for Claude — the enquiry desk robot (Claude with this mailbox\'s Gmail) picks it up when it next runs.',
+    queued,
     working: `${job.claimed_by || 'Claude'} is reading the mailbox…`,
     done: `Done ${dateText(job.finished_at)}${r.filed != null ? ` — ${plural(r.filed, 'mail')} filed${r.skipped ? `, ${r.skipped} filed before` : ''}` : ''}.`,
     failed: `Failed: ${job.error}`,
     cancelled: 'Cancelled.',
   }[job.status];
-  return <span className={`text-xs ${job.status === 'failed' ? 'text-red-700' : 'text-slate-600'}`}>Last fetch (job {job.id}, {job.mailbox_email}): {text}</span>;
+  return (
+    <span className={`text-xs ${job.status === 'failed' || job.fire_status === 'cloud_failed' ? 'text-red-700' : 'text-slate-600'}`}>
+      Last fetch (job {job.id}, {job.mailbox_email}{job.queued_by_name ? `, by ${job.queued_by_name}` : ''}): {text}
+      {job.session_url && ['queued', 'working'].includes(job.status) && (
+        <a href={job.session_url} target="_blank" rel="noreferrer" className="ml-1 font-bold text-brand-600 hover:underline">Watch the run</a>
+      )}
+    </span>
+  );
 }
 
 // What was just done, with Undo (and, once undone, Redo). It stays until the next action or ✕.
@@ -210,7 +224,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const fetchMail = async () => {
     const r = await api.post('/costing/enquiry-desk/fetch', {});
-    toast.success(r.already ? `Job ${r.job.id} is already waiting for Claude` : `Fetch queued (job ${r.job.id}) — Claude reads the mailbox when the enquiry desk robot next runs`);
+    const c = r.cloud;
+    if (c?.ok) toast.success(`Fetch started (job ${r.job.id}) — Claude is reading the mailbox in the cloud; the enquiries land here in a few minutes`);
+    else if (c && c.status !== 'not_linked') toast.error(`Job ${r.job.id} is queued, but Claude in the cloud did not start: ${c.error}`);
+    else if (r.already) toast.success(`Job ${r.job.id} is already ${r.job.status === 'working' ? 'being worked by Claude' : 'waiting for Claude'}`);
+    else toast.success(`Fetch queued (job ${r.job.id}) — the Claude robot on the Mac reads the mailbox at its next run`);
     await loadDesk();
   };
 
@@ -438,7 +456,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     <div>
       <div className="glass mb-4 flex flex-wrap items-center gap-3 rounded-2xl p-3">
         <MailboxBadge box={desk.in_use} />
-        <div className="min-w-0 flex-1"><JobLine job={lastFetch} /></div>
+        <div className="min-w-0 flex-1"><JobLine job={lastFetch} cloud={desk.cloud} /></div>
         <Button variant="secondary" size="sm" onClick={() => setOpen('new')}><Plus size={14} className="mr-1 inline" />Add an enquiry</Button>
         <Button onClick={fetchMail} disabled={!desk.in_use}><Inbox size={15} className="mr-1.5 inline" />Fetch enquiries from mail</Button>
       </div>
@@ -578,6 +596,45 @@ function DeskSettings({ desk, onSaved }) {
       </div>
       <div className="text-xs text-slate-500">The robot that reads and drafts mail is Claude with the mailbox's own Gmail, running the enquiry desk skill — not the AVS photo-check routine.</div>
       <Button onClick={save}>Save settings</Button>
+      <CloudLink cloud={desk.cloud} onSaved={onSaved} />
+    </div>
+  );
+}
+
+// Claude in the cloud (admin): the desk's cloud routine on claude.ai, started by CI Plant on Fetch and at 11 am and
+// 3 pm — with this computer and the Claude app off (server/src/enquiry-cloud.js). Its API URL and token come from the
+// routine's Edit → Trigger → API on claude.ai; the token is shown there once, and never comes back here.
+function CloudLink({ cloud, onSaved }) {
+  const toast = useToast();
+  const [url, setUrl] = useState(cloud?.fire_url || '');
+  const [token, setToken] = useState('');
+  const save = async () => {
+    await api.put('/costing/enquiry-desk/cloud', { fire_url: url.trim(), token: token.trim() });
+    setToken('');
+    toast.success('Claude in the cloud is linked — press Fetch enquiries from mail to try it');
+    onSaved?.();
+  };
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/60 p-3">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <div className="text-sm font-bold">Claude in the cloud</div>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${cloud?.linked ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}`}>
+          {cloud?.linked ? `Linked${cloud.token_hint ? ` · token ${cloud.token_hint}` : ''}` : 'Not linked'}
+        </span>
+      </div>
+      <p className="mb-2 text-xs text-slate-500">
+        Fetch enquiries from mail starts Claude in the cloud at once, and CI Plant starts it again at 11 am and 3 pm every day —
+        with this computer and the Claude app off. On claude.ai/code/routines open the enquiry desk routine → Edit → Trigger → + → API,
+        copy the Fire URL, press Generate token, and paste both here. In the same dialog allow <b>motionci.in</b> under
+        Advanced settings → Cloud environment → Allowed domains.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-[1fr_260px_auto] sm:items-end">
+        <Field label="Fire URL"><Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://api.anthropic.com/v1/claude_code/routines/trig_…/fire" /></Field>
+        <Field label={cloud?.linked ? 'Token (blank keeps the saved one)' : 'Token'}>
+          <Input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} placeholder="sk-ant-…" />
+        </Field>
+        <Button onClick={save} disabled={!url.trim() || (!cloud?.linked && !token.trim())}>Save the link</Button>
+      </div>
     </div>
   );
 }

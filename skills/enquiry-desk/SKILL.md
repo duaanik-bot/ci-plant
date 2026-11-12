@@ -46,10 +46,22 @@ mppchd@gmail.com only in Chrome on the office computer.
 | trial    | dua.anik@gmail.com | Claude on the owner's Mac, whose Gmail connector is this mailbox |
 | business | mppchd@gmail.com   | a Claude whose Gmail connector is mppchd@gmail.com               |
 
-**On a schedule:** on the owner's Mac a Claude scheduled task, `enquiry-desk-robot`, works the trial mailbox's
-jobs every 15 minutes. A guard hook lets each run read Gmail and save one draft, and never send. The setup,
-the guard and the task's prompt are in `robot/` (`robot/scheduled-task.md`). Set up the business mailbox the
-same way, on the Claude that has it.
+**In the cloud (since 12 Nov 2026):** the desk's cloud routine — a claude.ai scheduled task on the owner's Claude
+plan, with this mailbox's Gmail connector limited to its read tools — is started by CI Plant itself: when Fetch is
+pressed, and at 11:00 and 15:00 India time, with the owner's Mac off. Each start's routine-fire-payload block holds
+`JOB=<n>` and `CI_JOB_TOKEN=<pass>`: a one-time pass for that one fetch job, good for a few hours. The run has no
+robot key and needs none — set the pass and fetch the helper with it:
+
+    export CI_PLANT_URL=https://motionci.in CI_JOB_TOKEN=<the pass> CI_RUNNER_NAME="Claude (cloud)"
+    curl -fsS -H "x-enquiry-job-token: $CI_JOB_TOKEN" "$CI_PLANT_URL/api/avs/robot/enquiry-desk/desk.py" -o desk.py
+
+The pass opens its own job only (`desk.py jobs` lists just that one) and works fetch jobs only: a cloud run never
+saves a draft — CI Plant saves quotation drafts itself through the mailbox's Gmail link. The routine's prompt is
+in `robot/cloud-routine.md`.
+
+**On the owner's Mac (until the cloud is linked):** a Claude scheduled task, `enquiry-desk-robot`, works the trial
+mailbox's jobs at 11:00 and 15:00. A guard hook lets each run read Gmail and save one draft, and never send. The
+setup, the guard and the task's prompt are in `robot/` (`robot/scheduled-task.md`).
 
 You need the CI Plant address and the AVS robot key (the same key the AVS check uses). Read the key with the
 Supabase connector (project `ylbfeptgefzimcqnwphy`): `select value from avs.settings where key = 'robot_key'`,

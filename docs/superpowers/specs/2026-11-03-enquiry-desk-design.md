@@ -207,6 +207,34 @@ The setup, the guard and its tests, and the prompt are in `skills/enquiry-desk/r
 **Live test, 5 Nov:** fetch job 2 was queued like the Fetch button. The 15-minute run picked it up and finished
 it in 23 s: 77 mails since 3 Nov, none an enquiry. Nothing was refused, and Gmail works in scheduled runs.
 
+## Fetch in the cloud: on click, and at 11 am and 3 pm (12 Nov)
+
+On 12 Nov a Fetch pressed at 11:16 sat waiting until 3 pm. The Mac robot had been narrowed to 11 am and 3 pm on 11 Nov.
+The owner: "this system needs to work in back end once we click on fetch enquiries from mail, and auto robot, to fetch
+at 11 am and 3 pm all the pending enquiries — even if desktop and claude are off". Offered a paid API key on the server
+or his own Claude plan, he chose his plan.
+
+- **The routine:** a claude.ai scheduled task on the owner's account, "CI Plant enquiry desk — fetch (cloud)"
+  (`trig_01Y8TMUEtBcoMSWBECmChAGg`). It has only the trial mailbox's Gmail connector, limited to its read tools:
+  search, get thread or message, get or list drafts, list labels. The send, draft, delete and label tools are refused
+  too. Its cloud environment allows `motionci.in` and the package managers only. It runs on Claude Sonnet 5.5.
+- **Who starts it:** CI Plant, through the routine's API trigger, the same way AVS starts its own routine. It starts
+  it when Fetch is pressed, and from Vercel Cron at 05:30 and 09:30 UTC (11:00 and 15:00 India; `vercel.json` →
+  `GET /api/cron/enquiry-fetch`). The routine's own schedule is a placeholder for 2030 and does nothing without CI
+  Plant's start note.
+- **The pass:** each start note carries `JOB=` and `CI_JOB_TOKEN=`, a one-time pass for that one fetch job, good for 3
+  hours. The robot routes take it in place of the robot key, for that job only, plus the procedure and helper. The job
+  keeps only its sha256, and the desk never shows it. The routine never holds the robot key.
+- **On the desk:** the fetch line shows when Claude was started, links to the run, and shows a start that failed.
+  Pressing Fetch again starts a waiting fetch again after 10 minutes, or at once after a failed start. The timer starts
+  nothing within 30 minutes of a fetch. It answers only Vercel's cron agent, or `CRON_SECRET` when one is set.
+- **Never the AVS routine:** the desk's link lives under its own keys (`enquiry_routine_fire_url` / `_token` in
+  `avs.settings`). A test proves that with only the AVS link saved, Fetch starts nothing.
+- **The Mac robot** still works a fetch nobody started in the cloud: until the link is saved, or after a failed start.
+  Drafts are CI Plant's own work, through the Gmail link.
+
+Code: `server/src/enquiry-cloud.js`, `routes/enquiry-robot.js` (pass + timer), `skills/enquiry-desk/robot/cloud-routine.md`.
+
 ## Owner's one-time steps (none needs a developer)
 
 1. Trial: done. Claude on the owner's Mac has dua.anik@gmail.com connected and the skill installed, with the
@@ -230,6 +258,13 @@ it in 23 s: 77 mails since 3 Nov, none an enquiry. Nothing was refused, and Gmai
 - New tables carry no foreign key to plant tables (as Costing), and get the realtime ping triggers.
 - The robot runs every 15 minutes round the clock, with Bypass permissions, kept to its job by the guard hook
   (5 Nov). Narrow its hours if idle runs cost too much.
+- The cloud routine (12 Nov):
+  - runs on Claude Sonnet 5.5, the default for routines (the owner may move it to Opus 5.5);
+  - is started by CI Plant's timer rather than its own schedule, so every run carries a pass and the robot key stays
+    in CI Plant;
+  - works only a pass that is good for 3 hours;
+  - is started again by a press after 10 minutes of waiting;
+  - is never started by the timer within 30 minutes of a fetch.
 - Costing on the desk (5 Nov):
   - "Ready for costing" rows sit in the Costing tab, not the Inbox.
   - Send back keeps the costing and the prices.

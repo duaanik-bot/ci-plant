@@ -11,6 +11,9 @@
       "excludeFiles": "{backups/**,*BACKUP*.json,*-FLAGGED-*.csv,docs/**,scripts/**,supabase/**,server/.pgdata/**}"
     }
   },
+  "crons": [
+    { "path": "/api/cron/enquiry-fetch", "schedule": "30 5,9 * * *" }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }

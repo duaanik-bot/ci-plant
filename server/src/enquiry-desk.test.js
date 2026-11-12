@@ -214,10 +214,17 @@ test('the PDF says the final prices, in words the standard font can draw, and no
 
 // Found in the live trial (4 Nov 2026): the AVS cloud routine must never be started for an enquiry job — the
 // owner's AVS mailbox rule keeps it off dua.anik@gmail.com, and it reads mppchd@gmail.com only in Chrome.
+// Since 12 Nov the desk has a cloud routine of its own (enquiry-cloud.js): it is started through its OWN link, kept
+// under its own keys — never the AVS link's keys (routine_fire_url / routine_token). enquiry-pg.test.js proves it in
+// use: with only the AVS link saved, Fetch starts nothing.
 test('the desk never starts the AVS cloud routine, and the routine prompt has no enquiry branch', async () => {
   const { readFileSync } = await import('node:fs');
   const desk = readFileSync(new URL('./routes/enquiries.js', import.meta.url), 'utf8');
   assert.doesNotMatch(desk, /fireRoutine|routine_fire_url|avs-intake\.js/);
+  const cloud = readFileSync(new URL('./enquiry-cloud.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(cloud, /'routine_fire_url'|'routine_token'|avsSettings/);
+  const { CLOUD_KEYS } = await import('./enquiry-cloud.js');
+  assert.deepEqual({ ...CLOUD_KEYS }, { url: 'enquiry_routine_fire_url', token: 'enquiry_routine_token' });
   const prompt = readFileSync(new URL('../../client/src/lib/avs-robot/routine-prompt.md', import.meta.url), 'utf8');
   assert.doesNotMatch(prompt, /enquiry/i);
 });

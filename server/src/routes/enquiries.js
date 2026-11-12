@@ -45,11 +45,11 @@ import {
 } from '../enquiry-desk.js';
 import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
-import { plantDateStr } from '../plant-calendar.js';
 import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
 } from '../gmail.js';
 import { redirectUri, signState } from './gmail-link.js';
+import { startFetch, cloudLink, cloudView, saveCloudLink } from '../enquiry-cloud.js';
 
 const r = Router();
 const fail = (status, error, extra = {}) => Object.assign(new Error(error), { status, body: extra });
@@ -172,8 +172,10 @@ const mailboxes = () => q(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes ORDER B
 const inUse = async () => (await one(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes WHERE in_use`)) || null;
 const settings = () => one('SELECT terms, opening, closing, fetch_days FROM enquiry_settings WHERE id = 1');
 
+// The cloud start as the desk shows it — never the pass (brief.pass_sha256 stays on the server).
 const JOB_COLS = `j.id, j.kind, j.mailbox, j.mailbox_email, j.quotation_id, j.status, j.error, j.result, j.fire_status,
-  j.queued_by_name, j.claimed_by, j.queued_at, j.claimed_at, j.finished_at`;
+  j.queued_by_name, j.claimed_by, j.queued_at, j.claimed_at, j.finished_at,
+  j.brief->>'fired_at' AS fired_at, j.brief->>'session_url' AS session_url, j.brief->>'fire_error' AS fire_error`;
 
 // A mailbox's Gmail link as the desk shows it (never the token).
 const linkOf = key => one('SELECT * FROM gmail_links WHERE mailbox = $1', [key]);
@@ -218,11 +220,12 @@ const withinSeconds = (p, s) => Promise.race([p, new Promise(res => setTimeout(r
 r.get('/costing/enquiry-desk', async (req, res, next) => {
   try {
     await withinSeconds(syncSentDrafts().catch(e => console.error('[gmail] sent check:', e.message)), 6);
-    const [boxes, s, counts, jobs, links] = await Promise.all([
+    const [boxes, s, counts, jobs, links, cloud] = await Promise.all([
       mailboxes(), settings(),
       q(`SELECT ${STAGE_SQL} AS stage, count(*)::int AS n FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id GROUP BY 1`),
       q(`SELECT ${JOB_COLS} FROM enquiry_jobs j ORDER BY j.id DESC LIMIT 10`),
       q(`SELECT ${LINK_VIEW} FROM gmail_links`),
+      cloudLink(),
     ]);
     for (const b of boxes) b.gmail = links.find(l => l.mailbox === b.key) || null;
     const quotes = await q(`SELECT status, count(*)::int AS n FROM quotations GROUP BY status`);
@@ -233,6 +236,8 @@ r.get('/costing/enquiry-desk', async (req, res, next) => {
       jobs,
       can_finalise: mayApproveCosting(req.costingUser), can_admin: req.costingUser.role === 'admin',
       statuses: STATUS_LABEL, gmail_ready: gmailConfigured(),
+      // Claude in the cloud: Fetch and the 11 am / 3 pm timer start it (enquiry-cloud.js).
+      cloud: cloudView(cloud, req.costingUser.role === 'admin'),
     });
   } catch (e) { next(e); }
 });
@@ -297,23 +302,27 @@ r.put('/costing/enquiry-desk/settings', async (req, res, next) => {
 // A job waits for the enquiry desk robot — Claude with this mailbox's Gmail — to claim it with the robot key.
 const jobById = id => one(`SELECT ${JOB_COLS} FROM enquiry_jobs j WHERE j.id = $1`, [id]);
 
+// Fetch: one open fetch per mailbox (pressing again while Claude has it does not queue a second), and Claude is started
+// in the cloud at once when the desk is linked — a fetch still waiting is started again (enquiry-cloud.js startFetch).
 r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
   try {
     const u = req.costingUser;
-    const box = await inUse();
-    if (!box) throw fail(409, 'No mailbox is in use — an admin chooses one in the desk settings.');
-    // One open fetch per mailbox: pressing again while Claude has it does not queue a second.
-    const open = await one(`SELECT id FROM enquiry_jobs WHERE kind = 'fetch' AND mailbox_email = $1 AND status IN ('queued', 'working') ORDER BY id LIMIT 1`, [box.email]);
-    if (open) return res.json({ job: await jobById(open.id), already: true });
-    const s = await settings();
-    // From the last finished fetch of this mailbox (a day's overlap; a mail filed twice is refused), else fetch_days back.
-    const last = await one(`SELECT finished_at FROM enquiry_jobs WHERE kind = 'fetch' AND mailbox_email = $1 AND status = 'done' ORDER BY id DESC LIMIT 1`, [box.email]);
-    const since = new Date((last?.finished_at ? new Date(last.finished_at).getTime() : Date.now() - (s?.fetch_days || 7) * 864e5) - 864e5);
-    const job = await one(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, brief, queued_by, queued_by_name, fire_status)
-                           VALUES ('fetch', $1, $2, $3, $4, $5, 'waiting') RETURNING id`,
-    [box.key, box.email, { since: plantDateStr(since) }, u.id, u.name]);
-    await audit('enquiry_job', job.id, 'fetch', `Fetch enquiries — job ${job.id}`, q, u.name);
-    res.status(201).json({ job: await jobById(job.id) });
+    const out = await startFetch({ user: u, by: u.name });
+    if (out.error) throw fail(out.status || 409, out.error);
+    res.status(out.already ? 200 : 201).json({ job: await jobById(out.job.id), already: out.already, cloud: out.cloud });
+  } catch (e) { next(e); }
+});
+
+// Claude in the cloud (admin): the desk routine's API URL and token, as claude.ai shows them once. An empty token keeps
+// the one saved; the token never comes back.
+r.put('/costing/enquiry-desk/cloud', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needAdmin(u);
+    const out = await saveCloudLink({ fire_url: req.body?.fire_url, token: req.body?.token }, u);
+    if (out.problem) throw fail(400, out.problem);
+    await audit('enquiry_desk', 1, 'cloud_link', 'Claude in the cloud linked to the enquiry desk', q, u.name);
+    res.json({ cloud: cloudView(out.cfg, true) });
   } catch (e) { next(e); }
 });
 

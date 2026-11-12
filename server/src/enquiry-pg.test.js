@@ -1,6 +1,7 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -718,6 +719,136 @@ describe('Enquiry desk — through the real app', {
     assert.equal(e.counter_subject, 'Re: Rates for two cartons', 'the counter mail is kept — the revised quotation replies in its thread');
     assert.equal(e.prices.find(p => p.qty === target.quantities[0]).theirs, 1.11);
     await robot('POST', `/enquiry-jobs/${f.body.job.id}/done`, { ok: true, result: { counters: 1 } });
+  });
+
+  test('Claude in the cloud: Fetch starts the routine with a one-time pass for its own job; the timer starts it at 11 and 3', async () => {
+    // A stand-in for claude.ai's routine API: it records each start.
+    const fires = [];
+    let answer = { status: 200, body: { type: 'routine_fire', claude_code_session_id: 'session_test', claude_code_session_url: 'https://claude.ai/code/session_test' } };
+    const fake = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', d => { b += d; });
+      req.on('end', () => {
+        fires.push({ url: req.url, headers: req.headers, body: JSON.parse(b || '{}') });
+        res.writeHead(answer.status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(answer.body));
+      });
+    });
+    await new Promise(r => fake.listen(0, '127.0.0.1', r));
+    const fireUrl = `http://127.0.0.1:${fake.address().port}/v1/claude_code/routines/trig_test01/fire`;
+    const done = id => db.q(`UPDATE enquiry_jobs SET status = 'done', finished_at = now() WHERE id = $1`, [id]);
+    try {
+      await db.q(`UPDATE enquiry_jobs SET status = 'done', finished_at = now() WHERE status IN ('queued', 'working')`);
+      // The AVS routine's link is never the desk's: with only that one saved, Fetch starts nothing (AVS mailbox rule).
+      await db.q(`INSERT INTO avs.settings (key, value) VALUES ('routine_fire_url', $1), ('routine_token', 'sk-ant-oat01-avsroutine99')`,
+        [fireUrl.replace('trig_test01', 'trig_avs01')]);
+      // Not linked: Fetch queues for the robot on the Mac, as before.
+      const plain = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+      assert.equal(plain.status, 201);
+      assert.equal(plain.body.cloud.status, 'not_linked');
+      assert.equal(plain.body.job.fire_status, 'waiting');
+      assert.equal(fires.length, 0);
+      await done(plain.body.job.id);
+
+      // The link: an admin saves it; only claude.ai's routine API is taken; the token never comes back.
+      const link = { fire_url: 'https://api.anthropic.com/v1/claude_code/routines/trig_x1y2z3/fire', token: 'sk-ant-oat01-testtoken123' };
+      assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/cloud', link)).status, 403);
+      assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, fire_url: 'https://evil.example/fire' })).status, 400);
+      const saved = await call('admin', 'PUT', '/costing/enquiry-desk/cloud', link);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.deepEqual(saved.body.cloud, { linked: true, fire_url: link.fire_url, token_hint: '…n123' });
+      assert.ok(!JSON.stringify((await call('admin', 'GET', '/costing/enquiry-desk')).body).includes('testtoken'));
+      assert.deepEqual((await call('clerk', 'GET', '/costing/enquiry-desk')).body.cloud, { linked: true });
+      // A blank token keeps the saved one.
+      assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, token: '' })).body.cloud.token_hint, '…n123');
+      // The test points the saved link at the stand-in (the route takes claude.ai's address only).
+      await db.q(`UPDATE avs.settings SET value = $1 WHERE key = 'enquiry_routine_fire_url'`, [fireUrl]);
+
+      // Fetch: queued and started at once; the start note carries the job and its pass.
+      const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+      assert.equal(f.status, 201);
+      assert.equal(f.body.cloud.ok, true);
+      assert.equal(f.body.job.fire_status, 'cloud');
+      assert.equal(f.body.job.session_url, 'https://claude.ai/code/session_test');
+      assert.equal(fires.length, 1);
+      assert.equal(fires[0].headers.authorization, 'Bearer sk-ant-oat01-testtoken123');
+      assert.equal(fires[0].headers['anthropic-beta'], 'experimental-cc-routine-2026-04-01');
+      const note = fires[0].body.text;
+      assert.match(note, new RegExp(`^JOB=${f.body.job.id}$`, 'm'));
+      const pass = note.match(/^CI_JOB_TOKEN=(\S+)$/m)[1];
+      // The job keeps only the pass's hash, and the desk never shows even that.
+      const kept = (await db.one(`SELECT brief FROM enquiry_jobs WHERE id = $1`, [f.body.job.id])).brief;
+      assert.ok(kept.pass_sha256 && !JSON.stringify(kept).includes(pass));
+      assert.ok(!JSON.stringify((await call('clerk', 'GET', '/costing/enquiry-desk')).body).includes('pass_sha256'));
+
+      // The pass opens its own job — no robot key — and nothing else.
+      const cloud = async (method, url, body, token = pass) => {
+        const res = await fetch(base + '/avs/robot' + url, {
+          method, headers: { 'content-type': 'application/json', 'x-enquiry-job-token': token }, body: body ? JSON.stringify(body) : undefined,
+        });
+        const type = res.headers.get('content-type') || '';
+        return { status: res.status, body: /json/.test(type) ? await res.json() : await res.text() };
+      };
+      const other = await db.one(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, status) VALUES ('fetch', 'trial', 'other@example.test', 'queued') RETURNING id`);
+      assert.deepEqual((await cloud('GET', '/enquiry-jobs')).body.map(j => j.id), [f.body.job.id]);
+      assert.equal((await cloud('POST', `/enquiry-jobs/${other.id}/claim`, {})).status, 403);
+      assert.match((await cloud('GET', '/enquiry-desk/procedure')).body, /Rules that never change/);
+      assert.match((await cloud('GET', '/enquiry-desk/desk.py')).body, /CI_JOB_TOKEN/);
+      const claim = await cloud('POST', `/enquiry-jobs/${f.body.job.id}/claim`, {});
+      assert.equal(claim.status, 200);
+      assert.equal(claim.body.job.kind, 'fetch');
+      assert.ok(!JSON.stringify(claim.body).includes('pass_sha256'));
+      const filed = await cloud('POST', `/enquiry-jobs/${f.body.job.id}/mails`, { mails: [{
+        gmail_message_id: 'cloud-001', gmail_thread_id: 'tc-1', subject: 'Rate for a carton', from_email: 'buyer@cloud.test',
+        received_at: '2026-11-12T05:00:00Z', items: [{ product_name: 'CLOUD TEST CARTON', size_text: '100x50x50', quantities: [5000] }],
+      }] });
+      assert.equal(filed.status, 200, JSON.stringify(filed.body));
+      assert.equal(filed.body.filed.length, 1);
+      assert.equal((await cloud('POST', `/enquiry-jobs/${f.body.job.id}/done`, { ok: true, result: { read: 1, filed: 1 } })).status, 200);
+      const job = (await call('clerk', 'GET', `/costing/enquiry-jobs/${f.body.job.id}`)).body;
+      assert.equal(job.status, 'done');
+      assert.equal(job.claimed_by, 'Claude (cloud)');
+      // A wrong pass, or one that has run out, opens nothing.
+      assert.equal((await cloud('GET', '/enquiry-jobs', null, 'x'.repeat(32))).status, 401);
+      await db.q(`UPDATE enquiry_jobs SET brief = brief || '{"pass_until": "2020-01-01T00:00:00Z"}'::jsonb WHERE id = $1`, [f.body.job.id]);
+      assert.equal((await cloud('GET', '/enquiry-desk/procedure')).status, 401);
+      await db.q(`DELETE FROM enquiry_jobs WHERE id = $1`, [other.id]);
+
+      // A start that fails is shown, and the next press starts it again; a fresh start is not repeated.
+      answer = { status: 429, body: { error: { message: 'rate limited' } } };
+      const g = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+      assert.equal(g.body.cloud.ok, false);
+      assert.equal(g.body.job.fire_status, 'cloud_failed');
+      assert.match(g.body.job.fire_error, /rate limited/);
+      answer = { status: 200, body: { type: 'routine_fire', claude_code_session_url: 'https://claude.ai/code/session_2' } };
+      const again = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+      assert.equal(again.body.already, true);
+      assert.equal(again.body.job.id, g.body.job.id);
+      assert.equal(again.body.job.fire_status, 'cloud');
+      const n = fires.length;
+      await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+      assert.equal(fires.length, n);
+      await done(g.body.job.id);
+
+      // The timer (Vercel Cron at 11:00 and 15:00 India): only Vercel's cron agent, and nothing within half an hour of a fetch.
+      const timer = async ua => {
+        const res = await fetch(base + '/cron/enquiry-fetch', { headers: ua ? { 'user-agent': ua } : {} });
+        return { status: res.status, body: await res.json() };
+      };
+      assert.equal((await timer()).status, 401);
+      assert.equal((await timer('curl/8.4')).status, 401);
+      assert.match((await timer('vercel-cron/1.0')).body.skipped, /last 30 minutes/);
+      await db.q(`UPDATE enquiry_jobs SET queued_at = now() - interval '2 hours' WHERE kind = 'fetch'`);
+      const auto = await timer('vercel-cron/1.0');
+      assert.equal(auto.status, 200, JSON.stringify(auto.body));
+      assert.equal(auto.body.cloud.ok, true);
+      assert.equal((await call('clerk', 'GET', `/costing/enquiry-jobs/${auto.body.job.id}`)).body.queued_by_name, 'CI Plant timer (11 am / 3 pm)');
+      await done(auto.body.job.id);
+      assert.ok(fires.every(x => x.url.includes('trig_test01') && x.headers.authorization === 'Bearer sk-ant-oat01-testtoken123'));
+    } finally {
+      fake.close();
+      await db.q(`DELETE FROM avs.settings WHERE key LIKE 'enquiry_routine_%' OR key IN ('routine_fire_url', 'routine_token')`);
+    }
   });
 
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {

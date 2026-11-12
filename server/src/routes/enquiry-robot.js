@@ -11,8 +11,11 @@
 //   POST /api/avs/robot/enquiry-jobs/:id/sent-drafts a Fetch reports drafts the person has since sent from Gmail
 //   POST /api/avs/robot/enquiry-jobs/:id/counters    a Fetch files a customer's counter-offer (their prices) against quoted rows
 //   POST /api/avs/robot/enquiry-jobs/:id/done        { ok: true, result } or { ok: false, error }
+//   GET  /api/cron/enquiry-fetch                     Vercel Cron, 11:00 and 15:00 India: a Fetch, started in the cloud
 //
 // A job stopped half-way is handed out again after an hour. Mounted before requireAuth (app.js).
+// The desk's cloud routine (enquiry-cloud.js) comes in with a one-time pass (x-enquiry-job-token) instead of the robot
+// key: it opens its own fetch job only, and the procedure and helper to work it.
 import { Router } from 'express';
 import { readFileSync } from 'node:fs';
 import { q, one, tx } from '../db.js';
@@ -23,6 +26,7 @@ import { cleanMail } from '../enquiry-desk.js';
 import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup } from './enquiries.js';
+import { jobOfPass, startFetch, CLOUD_RUNNER, TIMER_NAME } from '../enquiry-cloud.js';
 
 const r = Router();
 const ROBOT = 'Claude (AVS robot)';
@@ -37,6 +41,14 @@ r.use(['/avs/robot/enquiry-jobs', '/avs/robot/enquiry-desk'], async (req, res, n
   try {
     markUncacheable();
     res.set('Cache-Control', 'no-store');
+    const pass = req.get('x-enquiry-job-token');
+    if (pass) {
+      // The cloud routine: its one fetch job, for a few hours (enquiry-cloud.js).
+      req.passJob = await jobOfPass(pass);
+      if (!req.passJob) return res.status(401).json({ error: 'This pass is wrong or has run out — press Fetch again in CI Plant.' });
+      req.robotName = String(req.get('x-avs-runner') || CLOUD_RUNNER).replace(/[^\w .@()-]/g, '').slice(0, 60) || CLOUD_RUNNER;
+      return next();
+    }
     if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
     req.robotName = String(req.get('x-avs-runner') || ROBOT).replace(/[^\w .@()-]/g, '').slice(0, 60) || ROBOT;
     next();
@@ -61,18 +73,26 @@ r.get('/avs/robot/enquiry-desk/desk.py', (_req, res, next) => {
 });
 
 const OPEN = `status = 'queued' OR (status = 'working' AND claimed_at < now() - interval '1 hour')`;
+// A pass opens its own job and no other.
+const ownJob = (req, id) => {
+  if (req.passJob && req.passJob !== id) throw fail(403, `This pass is for job ${req.passJob} only.`);
+};
 
-r.get('/avs/robot/enquiry-jobs', async (_req, res, next) => {
+r.get('/avs/robot/enquiry-jobs', async (req, res, next) => {
   try {
-    res.json(await q(`SELECT id, kind, mailbox, mailbox_email, status, queued_at FROM enquiry_jobs WHERE ${OPEN} ORDER BY id`));
+    res.json(await q(`SELECT id, kind, mailbox, mailbox_email, status, queued_at FROM enquiry_jobs
+                       WHERE (${OPEN}) AND ($1::int IS NULL OR id = $1) ORDER BY id`, [req.passJob ?? null]));
   } catch (e) { next(e); }
 });
 
 // What Claude needs for one job. A Fetch: the mailbox, since when, the Gmail ids already filed, the customer
 // masters' names (to write a company as we know it) and the drafts waiting in Gmail (has the person sent any?).
 // A Draft: the exact reply.
-async function briefOf(job, base) {
+async function briefOf(jobRow, base) {
+  let job = jobRow;
   const mailbox = await one(`SELECT key, email, label, send_to FROM enquiry_mailboxes WHERE key = $1`, [job.mailbox]);
+  const { pass_sha256: _p, pass_until: _u, ...brief } = job.brief || {};
+  job = { ...job, brief };
   const out = { job: { id: job.id, kind: job.kind, status: job.status }, mailbox: mailbox || { key: job.mailbox, email: job.mailbox_email } };
   if (job.kind === 'fetch') {
     const since = job.brief?.since || plantDateStr(new Date(), -7);
@@ -114,6 +134,7 @@ const baseOf = req => `${req.protocol}://${req.get('host')}`;
 r.post('/avs/robot/enquiry-jobs/:id/claim', async (req, res, next) => {
   try {
     const id = intOrNull(req.params.id) || 0;
+    ownJob(req, id);
     const job = await one(`UPDATE enquiry_jobs SET status = 'working', claimed_by = $2, claimed_at = now()
                             WHERE id = $1 AND (${OPEN}) RETURNING id, kind, mailbox, mailbox_email, status, brief, quotation_id,
                                   attachment_name, attachment_sha256`, [id, req.robotName]);
@@ -132,6 +153,7 @@ r.post('/avs/robot/enquiry-jobs/:id/claim', async (req, res, next) => {
 r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
   try {
     const id = intOrNull(req.params.id) || 0;
+    ownJob(req, id);
     const raw = Array.isArray(req.body?.mails) ? req.body.mails : [];
     if (!raw.length) throw fail(400, 'Send { mails: [...] } — at least one.');
     if (raw.length > 25) throw fail(400, 'Up to 25 mails a call — send the rest in another.');
@@ -180,6 +202,7 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
 r.post('/avs/robot/enquiry-jobs/:id/counters', async (req, res, next) => {
   try {
     const id = intOrNull(req.params.id) || 0;
+    ownJob(req, id);
     const m = cleanMail(req.body?.mail || {});
     const list = (Array.isArray(req.body?.counters) ? req.body.counters : []).slice(0, 100);
     if (m.error) throw fail(400, `mail: ${m.error}`);
@@ -218,6 +241,7 @@ r.post('/avs/robot/enquiry-jobs/:id/counters', async (req, res, next) => {
 
 r.get('/avs/robot/enquiry-jobs/:id/attachment', async (req, res, next) => {
   try {
+    ownJob(req, intOrNull(req.params.id) || 0);
     const job = await one(`SELECT kind, status, attachment, attachment_name, attachment_sha256 FROM enquiry_jobs WHERE id = $1`, [intOrNull(req.params.id) || 0]);
     if (!job || !job.attachment) throw fail(404, 'This job has no attachment.');
     if (job.status !== 'working') throw fail(409, 'Claim the job first.');
@@ -231,6 +255,7 @@ r.get('/avs/robot/enquiry-jobs/:id/attachment', async (req, res, next) => {
 r.post('/avs/robot/enquiry-jobs/:id/sent-drafts', async (req, res, next) => {
   try {
     const id = intOrNull(req.params.id) || 0;
+    ownJob(req, id);
     const list = (Array.isArray(req.body?.sent) ? req.body.sent : []).slice(0, 200);
     const robot = { name: req.robotName };
     const marked = await tx(async (qc, oc) => {
@@ -259,6 +284,7 @@ r.post('/avs/robot/enquiry-jobs/:id/sent-drafts', async (req, res, next) => {
 r.post('/avs/robot/enquiry-jobs/:id/done', async (req, res, next) => {
   try {
     const id = intOrNull(req.params.id) || 0;
+    ownJob(req, id);
     const ok = req.body?.ok !== false;
     const result = req.body?.result && typeof req.body.result === 'object' ? req.body.result : {};
     const error = ok ? null : String(req.body?.error || 'Claude reported a failure').slice(0, 1000);
@@ -284,6 +310,26 @@ r.post('/avs/robot/enquiry-jobs/:id/done', async (req, res, next) => {
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// Vercel Cron (vercel.json), 05:30 and 09:30 UTC = 11:00 and 15:00 India: the desk's auto robot. A Fetch for the mailbox
+// in use, started in the cloud, with the owner's Mac and Claude app off. Vercel sends CRON_SECRET as a bearer token
+// when the project has one; without it only Vercel's cron agent is answered. Either way a timer start within
+// TIMER_QUIET_MIN of the last fetch does nothing, so a repeated call costs nothing.
+r.get('/cron/enquiry-fetch', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    const secret = process.env.CRON_SECRET;
+    const ok = secret ? req.get('authorization') === `Bearer ${secret}` : /^vercel-cron\//i.test(req.get('user-agent') || '');
+    if (!ok) return res.status(401).json({ error: 'Only the timer starts this.' });
+    const out = await startFetch({ by: TIMER_NAME, auto: true });
+    if (out.error) return res.status(out.status || 409).json({ error: out.error });
+    res.json(out);
+  } catch (e) {
+    if (MISSING.has(e?.code)) return res.status(404).json({ error: 'The enquiry desk is not set up on this database.' });
+    next(e);
+  }
 });
 
 export default r;
