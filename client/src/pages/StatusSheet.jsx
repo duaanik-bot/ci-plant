@@ -20,16 +20,17 @@
 // are how the finished ones are filtered back out of view.
 //
 // Edits post to /status-sheet/* and update optimistically; realtime/fallback refresh reconciles.
-import { useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { createThreadSummary } from '../lib/threadSummary.js';
 import useFallbackRefresh from '../lib/useFallbackRefresh.js';
+import { storage } from '../lib/safeStorage.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { dayOf } from '../lib/dayOf.js';
 import { buildWipExportSpec, EXPORT_EXCLUDED_KEYS } from '../lib/wipExport.js';
 import { lineStageOf, lineStageRail, LINE_STAGE_LABEL, PRE_STAGE_KEYS } from '../lib/lineStage.js';
-import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, ConfirmDialog, DataTable, Input, KpiCard, KpiFilterNotice, Modal, odDays, odExport, OverdueDays, PageHeader, ResetFilters, rowMatches, SelectionDock, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../components/FilterChip.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap, ZapOff, X, Eraser, CalendarDays, CalendarCheck } from 'lucide-react';
@@ -169,7 +170,36 @@ const selCls =
   'h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 ' +
   'focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
 
+// Status Sheet has two tabs: the live, editable sheet of what is owed, and
+// Reports — company / PO / product roll-ups of the whole book, owed or
+// delivered (StatusReports.jsx). The tab last used is remembered, so whoever
+// lives in Reports opens straight onto it.
+const StatusReports = lazy(() => import('./StatusReports.jsx'));
+const SHEET_TAB_KEY = 'ci_status_sheet_tab';
+const SHEET_TABS = [{ key: 'live', label: 'Live sheet' }, { key: 'reports', label: 'Reports' }];
+
 export default function StatusSheet() {
+  const [tab, setTabState] = useState(() => {
+    return storage.getItem(SHEET_TAB_KEY) === 'reports' ? 'reports' : 'live';
+  });
+  const setTab = t => { setTabState(t); storage.setItem(SHEET_TAB_KEY, t); };
+  const tabs = <Tabs tabs={SHEET_TABS} active={tab} onChange={setTab} />;
+  if (tab === 'reports') {
+    return (
+      <div>
+        <PageHeader title="Status Sheet"
+          subtitle="Reports — company-wise, PO-wise and product-wise status of every order, pending or delivered" />
+        {tabs}
+        <Suspense fallback={<div className="py-10 text-center text-sm text-gray-500">Loading reports…</div>}>
+          <StatusReports />
+        </Suspense>
+      </div>
+    );
+  }
+  return <LiveStatusSheet tabs={tabs} />;
+}
+
+function LiveStatusSheet({ tabs }) {
   const [rows, setRows] = useState([]);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
@@ -850,6 +880,7 @@ export default function StatusSheet() {
             <FileUp size={15} /> Import WIP List
           </Button>
         </>} />
+      {tabs}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <KpiCard icon={ClipboardList} label="Pending lines" value={fmt.num(kpis.lines)} />
         <KpiCard label="Pending qty" value={fmt.num(kpis.pendingQty)} />

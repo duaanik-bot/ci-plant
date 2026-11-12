@@ -1190,6 +1190,44 @@ r.get('/status-sheet', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Status Sheet › Reports — every order line ever booked (not just the ones
+// still owed), lean, so the Reports tab can roll it up company-wise, PO-wise or
+// product-wise and filter by delivery state. The roll-up and the delivery
+// buckets live in client/src/lib/statusReport.js (pure, tested), so this route
+// only carries facts. Draft orders are left out: they are not confirmed orders
+// yet and would inflate "pending". Part lines are internal (carton-parts.js) —
+// the customer ordered the carton, so the carton is the row.
+r.get('/status-sheet/report', async (_req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date,
+             o.status AS order_status,
+             ${LINE_EDD_SQL} AS delivery_date,
+             c.id AS customer_id, c.name AS customer_name,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             p.party_item_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             ol.qty, COALESCE(ol.rate, 0) AS rate, COALESCE(ol.dispatched_qty, 0) AS dispatched_qty,
+             ${CARTON_STATUS_SQL} AS status,
+             ol.line_remark, ol.remarks,
+             dl.last_dispatched_at, dl.challans
+      FROM order_lines ol
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN products p ON p.id = ol.product_id
+      LEFT JOIN (
+        SELECT x.order_line_id, MAX(d.dispatched_at) AS last_dispatched_at,
+               STRING_AGG(DISTINCT d.challan_number, ', ') AS challans
+        FROM dispatch_lines x JOIN dispatches d ON d.id = x.dispatch_id
+        GROUP BY x.order_line_id
+      ) dl ON dl.order_line_id = ol.id
+      WHERE ol.part_of_line_id IS NULL
+        AND COALESCE(o.status, '') <> 'draft'
+      ORDER BY o.po_date DESC NULLS LAST, o.id DESC, ol.id`);
+    res.json({ lines: rows });
+  } catch (e) { next(e); }
+});
+
 // Line-level edits: Printed override (true/false/null=Auto), the customer WIP
 // record, the planner's Remarks, and the per-product P1 star (priority stays on
 // the starred line only).
