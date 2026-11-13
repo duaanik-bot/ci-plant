@@ -118,6 +118,24 @@ test('one quotation per customer: master first, else the address, else the name'
   assert.deepEqual(groupByCustomer(rows).map(g => g.map(e => e.id)), [[1, 2], [3, 4], [5]]);
 });
 
+test('one customer who wrote to both mailboxes gets one quotation per mailbox, each a reply in its own thread', () => {
+  const rows = [
+    { id: 1, customer_id: 5, mailbox: 'trial' }, { id: 2, customer_id: 5, mailbox: 'business' },
+    { id: 3, customer_id: 5, mailbox: 'trial' }, { id: 4, customer_id: 6, mailbox: 'business' },
+  ];
+  assert.deepEqual(groupByCustomer(rows).map(g => g.map(e => e.id)), [[1, 3], [2], [4]]);
+});
+
+test('a row typed in by hand (no mailbox) joins its customer\'s mailed rows, as before', () => {
+  const rows = [
+    { id: 1, customer_id: 5, mailbox: 'trial' }, { id: 2, customer_id: 5, mailbox: null },
+    { id: 3, customer_id: 7, mailbox: null }, { id: 4, customer_id: 5, mailbox: 'trial' },
+  ];
+  assert.deepEqual(groupByCustomer(rows).map(g => g.map(e => e.id)), [[1, 2, 4], [3]]);
+  // A hand row first, the mailed rows after: still one quotation.
+  assert.deepEqual(groupByCustomer([{ id: 9, customer_id: 5 }, { id: 10, customer_id: 5, mailbox: 'business' }]).map(g => g.map(e => e.id)), [[9, 10]]);
+});
+
 test('the trial mailbox replies only to itself; the business one to the customer', () => {
   assert.deepEqual(replyRecipient({ email: 'trial@example.com', send_to: 'own' }, 'buyer@example.com'),
     { to: 'trial@example.com', trial: true, would_go_to: 'buyer@example.com' });

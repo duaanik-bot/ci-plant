@@ -60,6 +60,14 @@ export function mailboxTag(box) {
   };
 }
 
+// A row whose mail came to a mailbox other than the one in use (13 Nov 2026: the office AVS files the business
+// mailbox) names that mailbox, so a person knows where its reply goes from. A row typed in by hand has none.
+export function mailboxNote(e, desk) {
+  if (!e?.mailbox || !desk || e.mailbox === desk.in_use?.key) return null;
+  const box = (desk.mailboxes || []).find(b => b.key === e.mailbox);
+  return box?.email ? `to ${box.email}` : null;
+}
+
 export const rupees = (n, dp = 2) => (n == null || Number.isNaN(Number(n)) ? '—'
   : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`);
 export const qtyText = n => (n == null ? '—' : Number(n).toLocaleString('en-IN'));

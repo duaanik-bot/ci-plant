@@ -17,7 +17,7 @@ import { Calculator, Inbox, Layers, Lock, LockOpen, Mail, PackageCheck, Plus, Re
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BACK_LABEL, DESK_TABS, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, dateText, mailboxTag, quantitiesText, qtyText, rupees, whereText,
+  BACK_LABEL, DESK_TABS, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, dateText, mailboxNote, mailboxTag, quantitiesText, qtyText, rupees, whereText,
 } from '../../lib/enquiryUi.js';
 import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
@@ -328,7 +328,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     // Newest first, and the products of one mail together in the mail's own order.
     { key: 'received', label: 'Received', sortValue: e => `${new Date(e.mail_received_at || e.created_at).toISOString()}|${String(e.mail_id || 0).padStart(8, '0')}|${String(1000 - (e.mail_pos || 0)).padStart(4, '0')}`,
       render: e => dateText(e.mail_received_at || e.created_at) },
-    { key: 'customer_name', label: 'Customer', render: e => <div><div className="font-semibold">{e.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{e.contact_email || ''}</div></div> },
+    { key: 'customer_name', label: 'Customer', render: e => <div><div className="font-semibold">{e.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{e.contact_email || ''}</div><MailboxNote e={e} desk={desk} /></div> },
     { key: 'product_name', label: 'Product', render: e => <div><div className="font-semibold">{e.product_name || '—'}</div><div className="text-[11px] text-slate-500">{[e.size_text && `${e.size_text} mm`, e.mail_subject && `“${e.mail_subject}”`].filter(Boolean).join(' · ')}</div></div> },
     { key: 'quantities', label: 'Quantities', render: e => quantitiesText(e.quantities) },
     { key: 'stage', label: 'Status', render: stageChip },
@@ -431,7 +431,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const quoteCols = [
     { key: 'quotation_no', label: 'No.', render: x => <span className="font-bold text-brand-600">{x.quotation_no}</span> },
-    { key: 'customer_name', label: 'Customer', render: x => <div><div className="font-semibold">{x.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{x.contact_email || ''}</div></div> },
+    { key: 'customer_name', label: 'Customer', render: x => <div><div className="font-semibold">{x.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{x.contact_email || ''}</div><MailboxNote e={x} desk={desk} /></div> },
     { key: 'items', label: 'Items', render: x => `${new Set(x.lines.map(l => l.enquiry_no)).size}` },
     { key: 'total', label: 'Total', align: 'right', render: x => rupees(x.total) },
     { key: 'status', label: 'Status', render: x => <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${QUOTE_TONE[x.status]}`}>{QUOTE_LABEL[x.status]}</span> },
@@ -594,6 +594,13 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 }
 
 // Admin: which mailbox is in use, who each replies to, and the quotation's standard words.
+// Under the customer: the mailbox a row's mail came to, when it is not the desk's mailbox in use (the office AVS files
+// the business mailbox) — its reply is drafted there.
+function MailboxNote({ e, desk }) {
+  const note = mailboxNote(e, desk);
+  return note ? <div className="text-[11px] font-semibold text-sky-700" title="This mail came to this mailbox; its reply is drafted there">{note}</div> : null;
+}
+
 function DeskSettings({ desk, onSaved }) {
   const toast = useToast();
   const [boxes, setBoxes] = useState(desk.mailboxes);

@@ -36,6 +36,7 @@ import { customerInitials } from '../../../client/src/lib/customerCode.js';
 import { requireRole } from '../auth.js';
 import { syncPartLines } from '../carton-parts-db.js';
 import { markUncacheable } from '../data-tables.js';
+import { syncIntakeEnquiriesSoft } from '../enquiry-intake.js';
 
 const r = Router();
 const canPlan = requireRole('planner'); // admin implied — the same people who key orders
@@ -274,6 +275,8 @@ r.get('/drafts/summary', async (_req, res, next) => {
   try {
     markUncacheable();
     await notifyNewDraftOrdersSoft();
+    // The same fallback for the office AVS's enquiries (enquiry-intake.js): a lost database call is filed here.
+    await syncIntakeEnquiriesSoft();
     res.json(await draftSummary());
   } catch (e) { next(e); }
 });

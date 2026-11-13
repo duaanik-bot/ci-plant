@@ -5,8 +5,10 @@
 // thread, and a person checks it and sends it from Gmail.
 // The mailbox itself is read and written by Claude — the enquiry-desk skill, run by the Claude that has the
 // mailbox's Gmail — through the robot routes (routes/enquiry-robot.js). CI Plant only queues the job and waits: it
-// never starts the AVS cloud routine, which by AVS's own mailbox rule never reads dua.anik@gmail.com and reads
-// mppchd@gmail.com only in Chrome on the office computer (owner's rule, 30 Sep 2026).
+// never starts the AVS cloud routine, which by AVS's own mailbox rule never reads dua.anik@gmail.com (owner's rule,
+// 30 Sep 2026). The business mailbox is read by the office AVS through its own Gmail connector (13 Nov 2026): it files
+// into avs.enquiry_intake and enquiry-intake.js copies that onto the desk; it never drafts, so a business reply needs
+// that mailbox's Gmail link (queueDraft).
 //
 //   GET  /costing/enquiry-desk                 mailboxes, settings, rights, counts, the latest jobs
 //   PUT  /costing/enquiry-desk/settings        mailbox in use, who a mailbox replies to, terms, words (admin)
@@ -1146,6 +1148,12 @@ async function queueDraft(id, u) {
     // This mailbox's Gmail is connected: the server saves the draft now, no robot.
     const link = gmailConfigured() ? await linkOf(box.key) : null;
     if (link) return draftOnServer({ qt, box, link, brief, pdf, sha, mail, u });
+    // The business mailbox is read by the office AVS, which never drafts (13 Nov 2026): its replies are drafted by CI
+    // Plant's own Gmail link, so without that link a robot job would wait for ever. (Lift this if a Claude that may
+    // draft in the business mailbox is ever set up.)
+    if (box?.key === 'business') {
+      throw fail(409, `Connect the business mailbox's Gmail in the desk Settings first (signed in as ${box.email}) — the office AVS reads it but never drafts.`);
+    }
     const job = await tx(async (qc, oc) => {
       const cur = await oc(`SELECT status FROM quotations WHERE id = $1 FOR UPDATE`, [id]);
       if (!['ready', 'drafted'].includes(cur?.status)) throw fail(409, `${qt.quotation_no} changed meanwhile — open it again.`);

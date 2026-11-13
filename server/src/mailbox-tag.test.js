@@ -23,3 +23,16 @@ test('a mailbox that replies only to itself still says so, in amber', () => {
 test('no mailbox in use says that', () => {
   assert.equal(mailboxTag(null).text, 'No mailbox in use');
 });
+
+// A row from a mailbox other than the one in use (13 Nov 2026: the office AVS files the business mailbox) says where
+// its mail came — so a person knows which mailbox its reply goes from.
+test('a row from the other mailbox names it; a row from the mailbox in use says nothing', async () => {
+  const { mailboxNote } = await import('../../client/src/lib/enquiryUi.js');
+  const desk = { in_use: { key: 'trial', email: 'owner@plant.test' },
+    mailboxes: [{ key: 'trial', email: 'owner@plant.test' }, { key: 'business', email: 'office@plant.test' }] };
+  assert.equal(mailboxNote({ mailbox: 'business' }, desk), 'to office@plant.test');
+  assert.equal(mailboxNote({ mailbox: 'trial' }, desk), null);
+  assert.equal(mailboxNote({ mailbox: null }, desk), null, 'a row typed in by hand has no mailbox');
+  assert.equal(mailboxNote({ mailbox: 'business' }, { in_use: null, mailboxes: desk.mailboxes }), 'to office@plant.test');
+  assert.equal(mailboxNote({ mailbox: 'business' }, null), null);
+});

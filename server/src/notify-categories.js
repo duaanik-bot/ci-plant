@@ -43,6 +43,9 @@ const OF_KIND = Object.freeze({
   // A new customer PO the order intake keyed in as a draft: somebody has to
   // check it against the PO and confirm it before Planning can see it.
   new_po: 'approvals',
+  // A customer's price request or counter-offer filed on the Enquiry desk from mail (enquiry-intake.js): somebody with
+  // Costing has to cost it or revise the price.
+  new_enquiry: 'approvals',
   // A Finance entry waiting for one of its book's Approvers to decide it.
   fin_approval: 'approvals',
   // Addressed at a person by name. Loud enough to pierce mute (see chat.js),

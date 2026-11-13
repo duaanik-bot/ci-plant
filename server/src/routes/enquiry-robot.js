@@ -12,6 +12,8 @@
 //   POST /api/avs/robot/enquiry-jobs/:id/counters    a Fetch files a customer's counter-offer (their prices) against quoted rows
 //   POST /api/avs/robot/enquiry-jobs/:id/done        { ok: true, result } or { ok: false, error }
 //   GET  /api/cron/enquiry-fetch                     Vercel Cron, 11:00 and 15:00 India: a Fetch, started in the cloud
+//   POST /api/avs/robot/enquiries-notify             the database, when the office AVS has filed mails into avs.enquiry_intake:
+//                                                    copy them onto the desk and tell the desk (enquiry-intake.js)
 //
 // A job stopped half-way is handed out again after an hour. Mounted before requireAuth (app.js).
 // The desk's cloud routine (enquiry-cloud.js) comes in with a one-time pass (x-enquiry-job-token) instead of the robot
@@ -22,11 +24,12 @@ import { q, one, tx } from '../db.js';
 import { audit, lockDocNumber } from '../helpers.js';
 import { markUncacheable } from '../data-tables.js';
 import { keyOk } from './avs-robot.js';
-import { cleanMail } from '../enquiry-desk.js';
+import { cleanMail, unreadItem } from '../enquiry-desk.js';
 import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
 import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup } from './enquiries.js';
 import { jobOfPass, startFetch, CLOUD_RUNNER, TIMER_NAME } from '../enquiry-cloud.js';
+import { syncIntakeEnquiries, notifyNewEnquiriesSoft, sameMailOnDesk } from '../enquiry-intake.js';
 
 const r = Router();
 const ROBOT = 'Claude (AVS robot)';
@@ -162,9 +165,16 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
       if (!job) throw fail(404, 'No such job.');
       if (job.kind !== 'fetch' || job.status !== 'working') throw fail(409, `Job ${id} is a ${job.kind} job, ${job.status} — mails are filed only by a Fetch being worked on.`);
       await lockDocNumber('CI-ENQ-', oc);
-      const filed = [], skipped = [], refused = [];
+      const filed = [], skipped = [], refused = [], sameMail = [];
       for (const m of raw.map(cleanMail)) {
         if (m.error) { refused.push(m.error); continue; }
+        // The same mail already on the desk from the other mailbox (a customer who writes to both): filed once.
+        const same = await sameMailOnDesk(qc, m, job.mailbox_email);
+        if (same) {
+          skipped.push(m.gmail_message_id);
+          sameMail.push({ gmail_message_id: m.gmail_message_id, mailbox: same.mailbox_email, enquiries: same.enquiry_nos });
+          continue;
+        }
         const mail = await oc(`
           INSERT INTO enquiry_mails (mailbox, mailbox_email, gmail_message_id, gmail_thread_id, subject, from_name, from_email, to_text,
                                      received_at, body_text, attachments, view_url, summary, job_id)
@@ -178,9 +188,7 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
           mail_id: mail.id, mailbox: job.mailbox, contact_name: m.contact_name, contact_email: m.contact_email, source: 'robot', by: req.robotName,
         };
         // A mail read as an enquiry with no item made out still lands on the desk, to be read by a person.
-        const items = m.items.length ? m.items : [{ product_name: m.subject || '(read the mail)', size_text: null, size_key: null, style: null,
-          board: null, gsm: null, colours: null, coating: null, specs: null, quantities: [], target_price: null,
-          notes: 'Claude found no item in this mail — read it and fill in what is asked.' }];
+        const items = m.items.length ? m.items : [unreadItem(m.subject)];
         const made = [];
         for (const item of items) {
           const e = await insertEnquiry(qc, oc, item, who, null);
@@ -190,8 +198,10 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
         filed.push({ gmail_message_id: m.gmail_message_id, enquiries: made });
       }
       if (filed.length) await audit('enquiry_job', id, 'file', `Job ${id} — ${filed.length} mail${filed.length === 1 ? '' : 's'} filed`, qc, req.robotName);
-      return { filed, skipped, refused };
+      return { filed, skipped, refused, same_mail: sameMail };
     });
+    // The desk hears of it at once (bell + phone, the Costing logins) — never failing the filing.
+    if (out.filed.length) await notifyNewEnquiriesSoft();
     res.json(out);
   } catch (e) { next(e); }
 });
@@ -235,6 +245,7 @@ r.post('/avs/robot/enquiry-jobs/:id/counters', async (req, res, next) => {
       if (filed.length) await audit('enquiry_job', id, 'counter', `Job ${id} — counter filed for ${filed.length} enquir${filed.length === 1 ? 'y' : 'ies'}`, qc, req.robotName);
       return { mail_id: mail.id, filed, refused };
     });
+    if (out.filed.length) await notifyNewEnquiriesSoft();
     res.json(out);
   } catch (e) { next(e); }
 });
@@ -310,6 +321,22 @@ r.post('/avs/robot/enquiry-jobs/:id/done', async (req, res, next) => {
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
+});
+
+// The office AVS has filed mails into avs.enquiry_intake (owner, 13 Nov 2026): copy them onto the desk and tell the desk.
+// Called by the database (pg_net, migration 20261113180100_avs_enquiry_intake.sql) once per AVS call; safe to call any
+// number of times — each row is filed once, each mail announced once.
+r.post('/avs/robot/enquiries-notify', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    const out = await syncIntakeEnquiries();
+    res.json({ ...out, alert: await notifyNewEnquiriesSoft() });
+  } catch (e) {
+    if (MISSING.has(e?.code)) return res.status(404).json({ error: 'The enquiry intake is not set up on this database.' });
+    next(e);
+  }
 });
 
 // Vercel Cron (vercel.json), 05:30 and 09:30 UTC = 11:00 and 15:00 India: the desk's auto robot. A Fetch for the mailbox

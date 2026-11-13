@@ -994,12 +994,205 @@ describe('Enquiry desk — through the real app', {
     }
   });
 
+  // ── The office AVS files the business mailbox (owner, 13 Nov 2026: "take the costings in its run from mppchd mail,
+  // put them into the ERP system, and also give the notification" — "Both, each mail once"). The avs schema lives only
+  // on production: here the table is built from its own migration, and the database's pg_net call is made by hand.
+  const BIZ = 'mppchd@gmail.com';
+  const intakeSql = fs.readFileSync(new URL('../../supabase/migrations/20261113180100_avs_enquiry_intake.sql', import.meta.url), 'utf8');
+  const fileMails = async list => (await db.one('SELECT avs.file_enquiry_mails($1::jsonb) AS out', [JSON.stringify(list)])).out;
+  const intake = id => db.one('SELECT * FROM avs.enquiry_intake WHERE gmail_message_id = $1', [id]);
+  const deskRows = id => db.q(`SELECT e.id, e.enquiry_no, e.mailbox, e.source, e.created_by_name, e.contact_email, e.product_name,
+                                      e.quantities::float8[] AS quantities, m.mailbox AS mail_box, m.job_id
+                                 FROM enquiries e JOIN enquiry_mails m ON m.id = e.mail_id
+                                WHERE m.gmail_message_id = $1 ORDER BY e.id`, [id]);
+  const alertsSince = t => db.q(`SELECT n.user_id, u.name, n.title, n.body, n.link FROM notifications n JOIN users u ON u.id = n.user_id
+                                  WHERE n.kind = 'new_enquiry' AND n.created_at >= $1 ORDER BY n.id`, [t]);
+  const nowIs = async () => (await db.one('SELECT now() AS t')).t;
+
+  test('AVS intake: each business mail filed once by AVS (office); a mail from the other mailbox, a stray mailbox and odd items handled', async () => {
+    await db.q(intakeSql);
+    await db.q(intakeSql); // a replay changes nothing
+    const prior = await deskRows('m-001'); // filed from the trial mailbox by the robot, earlier in this file
+    assert.ok(prior.length >= 1);
+    const out = await fileMails([
+      { mailbox_email: 'MPPCHD@gmail.com', gmail_message_id: 'avs-001', gmail_thread_id: 'avs-t1', subject: 'Best rate please',
+        from_name: 'Asha', from_email: 'Buyer@Sample-Labs.test', received_at: '2026-11-13T05:00:00Z',
+        body_text: 'Kindly share your best rate for the two cartons below.', customer_name: 'Sample Labs', summary: 'Rates for 2 cartons',
+        view_url: 'https://mail.google.com/mail/u/?authuser=mppchd@gmail.com#all/avs-001',
+        items: [{ product_name: 'SAMPLE TAB 10 CARTON', size_text: '100 x 30 x 80', style: 'side', quantities: [5000] },
+          { product_name: 'SAMPLE TAB 20 CARTON', quantities: ['10k', 'lots'] }] },
+      // The very mail the trial mailbox already put on the desk: the same sender and words, only case and spacing differ.
+      { mailbox_email: BIZ, gmail_message_id: 'avs-002', subject: 'Rates for two cartons', from_email: 'buyer@example-pharma.test',
+        received_at: '2026-11-02T09:01:10Z', body_text: 'Please    QUOTE …', attachments: [{ name: 'spec.pdf', mime: 'application/pdf', size: 1200 }],
+        items: [{ product_name: 'TEST TAB 10 CARTON' }] },
+      // The same short words to the same sender but another subject: another request, filed.
+      { mailbox_email: BIZ, gmail_message_id: 'avs-002b', subject: 'Rates for a label', from_email: 'buyer@example-pharma.test',
+        received_at: '2026-11-02T09:02:00Z', body_text: 'Please quote …', attachments: [{ name: 'spec.pdf' }],
+        customer_name: 'Example Pharma Ltd', items: [{ product_name: 'TEST LABEL' }] },
+      // Not the business mailbox: refused, never filed.
+      { mailbox_email: 'dua.anik@gmail.com', gmail_message_id: 'avs-003', from_email: 'x@stray.test', body_text: 'Rate?', items: [] },
+      // Two attachment-only mails from one sender are two mails, each a row for a person to read.
+      { mailbox_email: BIZ, gmail_message_id: 'avs-004', subject: 'Rates', from_email: 'buyer@sample-labs.test', received_at: '2026-11-13T05:10:00Z' },
+      { mailbox_email: BIZ, gmail_message_id: 'avs-005', subject: 'Rates', from_email: 'buyer@sample-labs.test', received_at: '2026-11-13T05:11:00Z' },
+    ]);
+    assert.deepEqual(out.map(x => x.filed), [true, true, true, true, true, true]);
+    assert.deepEqual((await fileMails({ mailbox_email: BIZ, gmail_message_id: 'avs-001' })).map(x => x.filed), [false], 'filed before: left alone');
+
+    assert.equal((await robot('POST', '/enquiries-notify', {}, null)).status, 401);
+    assert.equal((await robot('POST', '/enquiries-notify', {}, 'wrong')).status, 401);
+    const since = await nowIs();
+    const run = await robot('POST', '/enquiries-notify', {});
+    assert.equal(run.status, 200, JSON.stringify(run.body));
+
+    const a = await intake('avs-001');
+    assert.equal(a.status, 'filed');
+    const rows = await deskRows('avs-001');
+    assert.deepEqual(a.result.enquiries, rows.map(r => r.enquiry_no));
+    assert.deepEqual(rows.map(r => [r.mailbox, r.mail_box, r.source, r.created_by_name, r.job_id]),
+      [['business', 'business', 'robot', 'AVS (office)', null], ['business', 'business', 'robot', 'AVS (office)', null]]);
+    assert.equal(rows[0].contact_email, 'buyer@sample-labs.test');
+    assert.deepEqual(rows.map(r => r.quantities), [[5000], [10000]], '"10k" read as 10,000; "lots" is no quantity');
+
+    const b = await intake('avs-002');
+    assert.equal(b.status, 'skipped');
+    assert.match(b.result.why, new RegExp(prior[0].enquiry_no), 'it names the row the trial mailbox filed');
+    assert.equal((await deskRows('avs-002')).length, 0);
+    assert.equal((await intake('avs-003')).status, 'refused');
+    assert.match((await intake('avs-003')).result.why, /business mailbox/);
+    for (const id of ['avs-004', 'avs-005']) {
+      const r = await deskRows(id);
+      assert.equal(r.length, 1, `${id}: one row for a person to read`);
+      assert.equal(r[0].product_name, 'Rates');
+    }
+    // The run's own words come back to the run.
+    assert.deepEqual(run.body.filed.map(f => f.gmail_message_id).sort(), ['avs-001', 'avs-002b', 'avs-004', 'avs-005']);
+    assert.equal((await deskRows('avs-002b')).length, 1, 'the same short words under another subject is another request');
+
+    // The desk is told once, in one alert for the batch, and only the logins that can open the desk hear it.
+    const alerts = await alertsSince(since);
+    const costing = (await db.q(`SELECT id, name, role, modules FROM users WHERE active = 1`))
+      .filter(u => u.role === 'admin' || (Array.isArray(u.modules) && u.modules.includes('costing')));
+    assert.deepEqual([...new Set(alerts.map(x => x.user_id))].sort(), costing.map(u => u.id).sort());
+    assert.equal(alerts.length, costing.length, 'one alert each, for the whole batch');
+    assert.ok(!alerts.some(x => x.name === 'Desk plain'), 'no Costing tick, no alert');
+    assert.equal(alerts[0].title, '4 mails on the Enquiry desk');
+    // The two attachment-only mails name no company: "a customer", never the sender's address.
+    assert.match(alerts[0].body, /New: Sample Labs \(2 items\), Example Pharma Ltd \(1 item\), a customer \(1 item\), a customer \(1 item\)\./);
+    for (const x of alerts) assert.doesNotMatch(`${x.title} ${x.body}`, /sample-labs\.test|Rs\.|₹|\d\.\d/);
+    // A second start finds nothing: nothing filed twice, nobody told twice.
+    const again = await robot('POST', '/enquiries-notify', {});
+    assert.deepEqual([again.body.filed.length, again.body.skipped.length, again.body.refused.length], [0, 0, 0]);
+    assert.equal((await alertsSince(since)).length, costing.length);
+  });
+
+  test('AVS intake: a burst in one statement and two starts at once — every mail filed exactly once', async () => {
+    await db.q(`INSERT INTO avs.enquiry_intake (mailbox_email, gmail_message_id, from_email, body_text, received_at, customer_name, items) VALUES
+      ($1, 'avs-006', 'one@bulk.test', 'first', now(), 'Bulk One', '[{"product_name":"BULK A"}]'),
+      ($1, 'avs-007', 'two@bulk.test', 'second', now(), 'Bulk Two', '[{"product_name":"BULK B"}]'),
+      ($1, 'avs-008', 'three@bulk.test', 'third', now(), 'Bulk Three', '[{"product_name":"BULK C"}]')`, [BIZ]);
+    const both = await Promise.all([robot('POST', '/enquiries-notify', {}), robot('POST', '/enquiries-notify', {})]);
+    assert.deepEqual(both.map(r => r.status), [200, 200]);
+    assert.equal(both[0].body.filed.length + both[1].body.filed.length, 3);
+    for (const id of ['avs-006', 'avs-007', 'avs-008']) {
+      assert.equal((await deskRows(id)).length, 1, `${id} once`);
+      assert.equal((await intake(id)).status, 'filed');
+    }
+  });
+
+  test('AVS intake: a mail the Mac robot is filing at that very moment is not filed again (the numbering lock comes first)', async () => {
+    const { default: pg } = await import('pg');
+    const robotTx = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await robotTx.connect();
+    try {
+      const mail = { from_email: 'race@both.test', subject: 'Rate for race carton', body_text: 'Please quote the race carton.', received_at: '2026-11-13T06:00:00Z' };
+      await fileMails([{ mailbox_email: BIZ, gmail_message_id: 'avs-race', ...mail, customer_name: 'Race Co', items: [{ product_name: 'RACE CARTON' }] }]);
+      // The Mac robot's filing, as routes/enquiry-robot.js does it: the numbering lock, then its copy — not committed yet.
+      await robotTx.query('BEGIN');
+      await robotTx.query('SELECT pg_advisory_xact_lock(764002, hashtext($1))', ['CI-ENQ-']);
+      await robotTx.query(`INSERT INTO enquiry_mails (mailbox, mailbox_email, gmail_message_id, subject, from_email, received_at, body_text, attachments)
+                           VALUES ('trial', 'dua.anik@gmail.com', 'm-race', $1, $2, $3, $4, '[]')`, [mail.subject, mail.from_email, mail.received_at, mail.body_text]);
+      const started = robot('POST', '/enquiries-notify', {});
+      await new Promise(r => setTimeout(r, 700));
+      await robotTx.query('COMMIT');
+      assert.equal((await started).status, 200);
+      const r = await intake('avs-race');
+      assert.equal(r.status, 'skipped', JSON.stringify(r.result));
+      assert.match(r.result.why, /already on the desk from dua\.anik@gmail\.com/);
+      assert.equal((await deskRows('avs-race')).length, 0);
+    } finally {
+      await robotTx.query('ROLLBACK').catch(() => {});
+      await robotTx.end();
+    }
+  });
+
+  test('AVS intake: an open CI Plant files what the database call missed (the two-minute poll)', async () => {
+    await fileMails([{ mailbox_email: BIZ, gmail_message_id: 'avs-009', from_email: 'late@poll.test', body_text: 'Rate for labels?',
+      customer_name: 'Poll Co', items: [{ product_name: 'POLL LABEL' }] }]);
+    assert.equal((await intake('avs-009')).status, 'new');
+    assert.equal((await call('clerk', 'GET', '/drafts/summary')).status, 200);
+    assert.equal((await intake('avs-009')).status, 'filed');
+    assert.equal((await deskRows('avs-009')).length, 1);
+  });
+
+  test('AVS intake: a counter-offer on a business row goes to Counter; the robot never files a mail AVS already filed', async () => {
+    const [x] = await deskRows('avs-001');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: '100 x 30 x 80', inputs: { ...JOB, qty: 5000 } });
+    assert.equal((await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.75 }] }] })).status, 200);
+    const [t] = await deskRows('m-001'); // a trial-mailbox row: its number is refused in a business counter
+    const since = await nowIs();
+    await fileMails([{ kind: 'counter', mailbox_email: BIZ, gmail_message_id: 'avs-c1', gmail_thread_id: 'avs-t1', subject: 'Re: Best rate please',
+      from_email: 'buyer@sample-labs.test', received_at: '2026-11-13T09:00:00Z', body_text: 'We can pay as below.', customer_name: 'Sample Labs',
+      counters: [{ enquiry_no: x.enquiry_no, qty: 5000, theirs: 3.2 }, { enquiry_no: t.enquiry_no, qty: 10000, theirs: 1 }, { enquiry_no: 'CI-ENQ-NOPE', qty: 1, theirs: 1 }] }]);
+    const run = await robot('POST', '/enquiries-notify', {});
+    assert.equal(run.status, 200);
+    const c = await intake('avs-c1');
+    assert.equal(c.status, 'filed');
+    assert.deepEqual(c.result.counters, [x.enquiry_no]);
+    assert.deepEqual(c.result.refused.map(r => r.enquiry_no).sort(), ['CI-ENQ-NOPE', t.enquiry_no].sort());
+    const e = await enquiry(x.id);
+    assert.equal(e.status, 'countered');
+    assert.equal(e.prices.find(p => p.qty === 5000).theirs, 3.2);
+    const told = await alertsSince(since);
+    assert.ok(told.length > 0);
+    assert.equal(told[0].title, 'Counter-offer: Sample Labs — 1 item');
+    assert.doesNotMatch(told[0].body, /3\.2|3\.75/, 'their figures stay on the desk');
+
+    // The Mac robot reads the trial mailbox; a Bcc copy of a mail AVS already filed is skipped, and the answer says so.
+    const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+    await robot('POST', `/enquiry-jobs/${f.body.job.id}/claim`, {});
+    const dup = await robot('POST', `/enquiry-jobs/${f.body.job.id}/mails`, { mails: [
+      { gmail_message_id: 'm-bcc-1', gmail_thread_id: 't-bcc', subject: 'Best rate please', from_email: 'buyer@sample-labs.test',
+        received_at: '2026-11-13T05:00:30Z', body_text: 'Kindly share your best rate for the two   cartons below.',
+        items: [{ product_name: 'SAMPLE TAB 10 CARTON' }] }] });
+    assert.equal(dup.status, 200);
+    assert.deepEqual(dup.body.filed, []);
+    assert.deepEqual(dup.body.skipped, ['m-bcc-1']);
+    assert.equal(dup.body.same_mail[0].gmail_message_id, 'm-bcc-1');
+    assert.deepEqual(dup.body.same_mail[0].enquiries, (await deskRows('avs-001')).map(r => r.enquiry_no));
+    assert.equal((await deskRows('m-bcc-1')).length, 0);
+    await robot('POST', `/enquiry-jobs/${f.body.job.id}/done`, { ok: true, result: {} });
+  });
+
+  test('a business-mailbox reply with no Gmail link says what to do, and queues no job no robot takes', async () => {
+    const [, y] = await deskRows('avs-001');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: y.id, product_name: y.product_name, size_text: '100 x 30 x 80', inputs: { ...JOB, qty: 10000 } });
+    assert.equal((await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: y.id, prices: [{ qty: 10000, final: 3.1 }] }] })).status, 200);
+    const jobsBefore = (await db.one(`SELECT count(*)::int AS n FROM enquiry_jobs WHERE kind = 'draft' AND mailbox = 'business'`)).n;
+    const sent = await call('md', 'POST', '/costing/quotations/send', { ids: [y.id] });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    assert.equal(sent.body.quotations.length, 1);
+    assert.equal(sent.body.drafted.length, 0);
+    assert.match(sent.body.failed[0].why, /Connect the business mailbox's Gmail in the desk Settings/);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM enquiry_jobs WHERE kind = 'draft' AND mailbox = 'business'`)).n, jobsBefore);
+    assert.equal((await db.one(`SELECT status FROM quotations WHERE id = $1`, [sent.body.quotations[0].id])).status, 'ready');
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });
     assert.equal(s.status, 200);
     assert.equal(s.body.mailboxes.find(m => m.in_use).key, 'business');
-    const lines = await db.q(`SELECT detail FROM audit_log WHERE entity IN ('enquiry', 'quotation', 'enquiry_job', 'enquiry_desk')`);
+    const lines = await db.q(`SELECT detail FROM audit_log WHERE entity IN ('enquiry', 'quotation', 'enquiry_job', 'enquiry_desk', 'enquiry_intake')`);
     assert.ok(lines.length >= 8);
     for (const { detail } of lines) assert.doesNotMatch(String(detail), /@|2\.5|3\.1|Rs\.|₹/);
   });

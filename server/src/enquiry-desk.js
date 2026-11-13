@@ -100,6 +100,13 @@ export function cleanItem(raw = {}) {
 }
 
 // A mail the robot files: the Gmail ids are required; everything else is kept as given, trimmed.
+// A mail read as an enquiry with no item made out still lands on the desk, as one row for a person to read.
+export const unreadItem = (subject, reader = 'Claude') => ({
+  product_name: subject || '(read the mail)', size_text: null, size_key: null, style: null, board: null, gsm: null,
+  colours: null, coating: null, specs: null, quantities: [], target_price: null,
+  notes: `${reader} found no item in this mail — read it and fill in what is asked.`,
+});
+
 export function cleanMail(raw = {}) {
   const id = text(raw.gmail_message_id, 100);
   if (!id) return { error: 'gmail_message_id is missing' };
@@ -222,10 +229,15 @@ export function customerKey(e) {
   if (e.contact_email) return `e:${e.contact_email.toLowerCase()}`;
   return `n:${(e.customer_name || '').trim().toLowerCase() || `enquiry-${e.id}`}`;
 }
+// One quotation per customer AND mailbox (13 Nov 2026): a customer who wrote to both mailboxes gets a reply in each
+// mailbox's own thread. A row typed in by hand (no mailbox) joins its customer's first mailbox, so it rides in that
+// customer's reply as it always has.
 export function groupByCustomer(enquiries) {
+  const firstBox = new Map();
+  for (const e of enquiries) if (e.mailbox && !firstBox.has(customerKey(e))) firstBox.set(customerKey(e), e.mailbox);
   const groups = new Map();
   for (const e of enquiries) {
-    const k = customerKey(e);
+    const k = `${customerKey(e)}|${e.mailbox || firstBox.get(customerKey(e)) || ''}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(e);
   }
