@@ -135,3 +135,97 @@ test('an existing layout is read back: which reading, how many across and along,
   assert.equal(fewer.option.m * fewer.option.n, 2, 'a die with fewer ups than the sheet takes');
   assert.equal(inferLayout({ style: 'LOCK', size: { l: 92, w: 80, h: 66 }, sheet_l: 10, sheet_w: 12, ups: 4 }), null);
 });
+
+// Owner, 12 Nov 2026 ("FIX THIS BLOCKER"): Make KLD refused 100 × 15 × 80 side pasting at 10 up on 16 × 25 — a die in
+// the factory runs exactly that, while the measured rules fit 9. No hard blocker: the layout still comes back, with
+// how far it runs past the rules, and the KLD says so.
+test('a layout the house rules cannot place still comes back, with how far it runs over', async () => {
+  const { inferLayout, closestLayout } = await import('../../client/src/lib/sizing.js');
+  const args = { style: 'SIDE', size: { l: 100, w: 15, h: 80 }, sheet_l: 16, sheet_w: 25, ups: 10 };
+  assert.equal(inferLayout(args), null);
+  const x = closestLayout(args);
+  assert.equal(x.reading.key, 'side-open');
+  assert.deepEqual([x.option.m, x.option.n, x.option.acrossOn, x.option.ups, x.option.sheet.long, x.option.sheet.short], [2, 5, 'short', 10, 25, 16]);
+  assert.deepEqual(x.over, { mm: 15, axis: 'along', rules_ups: 9 });
+  // a sheet far too small still gives a grid to draw, with the overrun in full
+  const tiny = closestLayout({ style: 'LOCK', size: { l: 92, w: 80, h: 66 }, sheet_l: 10, sheet_w: 12, ups: 4 });
+  assert.equal(tiny.option.m * tiny.option.n, 4);
+  assert.equal(tiny.over.axis, 'both');
+  assert.ok(tiny.over.mm > 0);
+  assert.equal(tiny.over.rules_ups, 0);
+  assert.equal(closestLayout({ ...args, ups: 0 }), null);
+  assert.equal(closestLayout({ ...args, style: 'LIT' }), null);
+});
+
+test('a saved layout is checked against the house rules, in words for the panel and the PDF', async () => {
+  const { overRules, overRulesText } = await import('../../client/src/lib/sizing.js');
+  const [sideOpen] = readings('SIDE', { l: 100, w: 15, h: 80 });
+  const lay = { sheet_long: 25, sheet_short: 16, ups: 10, m: 2, n: 5, across_on: 'short' };
+  assert.deepEqual(overRules(sideOpen, lay), { mm: 15, axis: 'along', rules_ups: 9 });
+  assert.equal(overRules(sideOpen, { ...lay, ups: 8, n: 4 }), null);
+  assert.equal(overRulesText({ ...lay, over_rules: overRules(sideOpen, lay) }),
+    'By the house rules, 10 up (2 × 5) needs 15 mm more than the 25 in side; they fit 9 up on this sheet. Check the die maker\'s layout.');
+  assert.equal(overRulesText({ ...lay, ups: 8, n: 4, over_rules: null }), '');
+  assert.equal(overRulesText({ ...lay, ups: 4, m: 1, n: 4, over_rules: { mm: 378, axis: 'both', rules_ups: 0 } }),
+    'By the house rules, 4 up (1 × 4) needs up to 378 mm more than the sheet; not one fits this sheet. Check the die maker\'s layout.');
+});
+
+// Output layout options (owner, 13 Nov 2026: "key line u are making is good but we need proper layout options also for
+// output setting"). The output = the print sheet with every up; its settings (gripper, edges, gap between ups) default
+// to the house rules' edge to edge, and every way to place the ups is offered.
+const OUT = { style: 'SIDE', size: { l: 100, w: 15, h: 80 }, sheet_l: 16, sheet_w: 25 };
+const SET = { gripper: 10, edge: 5, gap: 3 };
+
+test('layout options: every reading, side and grid that makes the ups — the ones that fit first', async () => {
+  const { layoutOptions } = await import('../../client/src/lib/sizing.js');
+  const nine = layoutOptions({ ...OUT, ups: 9 });
+  assert.equal(nine[0].fits, true);
+  assert.deepEqual([nine[0].reading.key, nine[0].option.acrossOn, nine[0].option.m, nine[0].option.n], ['side-open', 'long', 3, 3]);
+  assert.deepEqual(nine[0].spare, { across: 41, along: 6.4 });
+  assert.equal(nine.filter(o => o.fits).length, 1);
+  assert.ok(nine.slice(1).every(o => !o.fits && o.over.mm > 0 && o.over.mm <= 150), 'the rest run over, by no more than 150 mm');
+  const ten = layoutOptions({ ...OUT, ups: 10 });
+  assert.ok(ten.every(o => !o.fits), 'no 10-up fits by the rules');
+  assert.deepEqual([ten[0].reading.key, ten[0].option.acrossOn, ten[0].option.m, ten[0].option.n, ten[0].over.mm, ten[0].over.axis],
+    ['side-open', 'short', 2, 5, 15, 'along']);
+  for (let i = 1; i < ten.length; i++) assert.ok(ten[i].over.mm >= ten[i - 1].over.mm, 'least over first');
+  assert.deepEqual(layoutOptions({ ...OUT, ups: 0 }), []);
+  assert.deepEqual(layoutOptions({ ...OUT, style: 'LIT', ups: 9 }), []);
+});
+
+test('output settings: a gripper and edges take room off the sheet, a gap goes between every two ups', async () => {
+  const { layoutOptions, maxUps, overRules, rulesWith, settingsProblem, outputText } = await import('../../client/src/lib/sizing.js');
+  assert.equal(maxUps(OUT), 9);
+  assert.equal(maxUps({ ...OUT, settings: SET }), 6);
+  const nine = layoutOptions({ ...OUT, ups: 9, settings: SET });
+  assert.ok(nine.every(o => !o.fits), 'the 3 × 3 that fits edge to edge runs over with a gripper');
+  const [sideOpen] = readings('SIDE', OUT.size);
+  const lay = { sheet_long: 25, sheet_short: 16, ups: 9, m: 3, n: 3, across_on: 'long', settings: SET };
+  assert.deepEqual(overRules(sideOpen, lay), { mm: 14.6, axis: 'along', rules_ups: 6 });
+  assert.equal(overRules(sideOpen, { ...lay, settings: null }), null);
+  assert.deepEqual(rulesWith(SET).margin, { gripper: 10, other: 5 });
+  assert.equal(rulesWith(SET).gutter, 3);
+  assert.equal(rulesWith(null).gutter, 0);
+  // what a person can type
+  assert.equal(settingsProblem(SET), null);
+  assert.equal(settingsProblem({ gripper: 80 }), 'Gripper, edges and gap are millimetres from 0 to 50.');
+  assert.equal(settingsProblem({ gap: 'x' }), 'Gripper, edges and gap are millimetres from 0 to 50.');
+  assert.equal(outputText({ settings: SET }), 'Gripper 10 mm · edges 5 mm · gap between ups 3 mm');
+  assert.equal(outputText({ settings: null }), 'Edge to edge: no gripper, edges or gap');
+});
+
+test('the layout picture keeps every up inside the gripper, the edges and the gaps', async () => {
+  const { layoutOptions } = await import('../../client/src/lib/sizing.js');
+  const six = layoutOptions({ ...OUT, ups: 6, settings: SET }).find(o => o.fits);
+  assert.ok(six, 'a 6-up fits with the settings');
+  const blocks = layoutBlocks(null, six.reading, six.option);
+  const L = six.option.sheet.long * 25.4, S = six.option.sheet.short * 25.4;
+  for (const b of blocks) {
+    assert.ok(b.x >= 5 - 1e-6 && b.x + b.w <= L - 5 + 1e-6, `x ${b.x}..${b.x + b.w} inside the edges`);
+    assert.ok(b.y >= 10 - 1e-6 && b.y + b.h <= S - 5 + 1e-6, `y ${b.y}..${b.y + b.h} below the gripper, inside the edge`);
+  }
+  // two neighbouring bodies are at least the gap apart
+  const bodies = blocks.filter(b => b.kind === 'body');
+  const apart = (a, b) => Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
+  for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) assert.ok(apart(bodies[i], bodies[j]) >= 3 - 1e-6);
+});

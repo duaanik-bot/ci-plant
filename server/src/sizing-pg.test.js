@@ -191,4 +191,34 @@ describe('Size proposals and KLDs — through the real app', { skip: ENABLED ? f
     assert.deepEqual(kld.drive.map(d => d.file_id), ['file-1', 'file-2']);
     assert.equal((await call('plain', 'POST', `/costing/sizes/${sizeId}/kld/drive`)).status, 403);
   });
+
+  test('Make KLD draws a layout the house rules cannot place, and the KLD notes how far it runs over', async () => {
+    const body = { size_text: '100 x 15 x 80', style: 'SIDE', reading: 'side-open', option: { sheet: { long: 25, short: 16 }, ups: 10, m: 2, n: 5, acrossOn: 'short' } };
+    const a = await call('clerk', 'PUT', '/costing/sizing/kld', body);
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.deepEqual(a.body.kld.layout.over_rules, { mm: 15, axis: 'along', rules_ups: 9 });
+    const fits = await call('clerk', 'PUT', '/costing/sizing/kld', { ...body, option: { ...body.option, ups: 8, n: 4 } });
+    assert.equal(fits.status, 200, JSON.stringify(fits.body));
+    assert.equal(fits.body.kld.layout.over_rules, null);
+    const pdf = await call('clerk', 'GET', `/costing/sizes/${a.body.size_id}/kld.pdf`);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
+  });
+
+  test('the output settings go with the KLD: kept on its layout, and its fit worked out with them', async () => {
+    const body = { size_text: '100 x 15 x 80', style: 'SIDE', reading: 'side-open', option: { sheet: { long: 25, short: 16 }, ups: 9, m: 3, n: 3, acrossOn: 'long' },
+      settings: { gripper: 10, edge: 5, gap: 3 } };
+    const a = await call('clerk', 'PUT', '/costing/sizing/kld', body);
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.deepEqual(a.body.kld.layout.settings, { gripper: 10, edge: 5, gap: 3 });
+    assert.deepEqual(a.body.kld.layout.over_rules, { mm: 14.6, axis: 'along', rules_ups: 6 });
+    const plain = await call('clerk', 'PUT', '/costing/sizing/kld', { ...body, settings: undefined });
+    assert.deepEqual(plain.body.kld.layout.settings, { gripper: 0, edge: 0, gap: 0 });
+    assert.equal(plain.body.kld.layout.over_rules, null, 'edge to edge, 3 × 3 fits');
+    const bad = await call('clerk', 'PUT', '/costing/sizing/kld', { ...body, settings: { gripper: 80 } });
+    assert.equal(bad.status, 400);
+    const pdf = await call('clerk', 'GET', `/costing/sizes/${a.body.size_id}/kld.pdf`);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
+  });
 });

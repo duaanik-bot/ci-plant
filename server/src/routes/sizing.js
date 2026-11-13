@@ -15,7 +15,7 @@ import { q, one } from '../db.js';
 import { audit } from '../helpers.js';
 import { parseSize, normStyle } from '../costing-engine.js';
 import { matchDies, mayCost } from '../costing-match.js';
-import { proposals, readings, cartonPlan } from '../../../client/src/lib/sizing.js';
+import { proposals, readings, cartonPlan, overRules, settingsProblem, cleanSettings } from '../../../client/src/lib/sizing.js';
 import { kldPdf } from '../kld-pdf.js';
 import { accessToken, gmailConfigured } from '../gmail.js';
 import { driveAllowed, saveKldToDrive } from '../gdrive.js';
@@ -103,6 +103,13 @@ r.put('/costing/sizing/kld', guard, async (req, res, next) => {
     if (!reading) throw fail(400, 'KLDs are drawn for side pasting (side-open or top-open) and lock bottom — pick one of the proposals.');
     const layout = cleanLayout(req.body?.option);
     if (!layout) throw fail(400, 'Pick a layout first: the sheet, the ups and how they sit on it.');
+    // the output's own settings — gripper, edges, gap between ups (13 Nov 2026) — kept with the layout they shaped
+    const settingsIn = req.body?.settings ?? req.body?.option?.settings ?? null;
+    const sp = settingsProblem(settingsIn);
+    if (sp) throw fail(400, sp);
+    layout.settings = cleanSettings(settingsIn);
+    // a die may run tighter than the house rules: drawn all the same, with how far it runs past them (no hard blocker)
+    layout.over_rules = overRules(reading, layout);
     const sizeId = await entryFor(size, style, layout, u);
     const plan = cartonPlan(reading);
     const kld = {

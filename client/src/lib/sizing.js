@@ -21,6 +21,8 @@ export const HOUSE_RULES = Object.freeze({
   lock: w => w / 2 + 5,
   // the plant's output sheets run edge to edge (0–10 mm spare); a margin here is taken off the print sheet
   margin: Object.freeze({ gripper: 0, other: 0 }),
+  // mm between two ups on the output, both ways (0: neighbouring ups share a cut)
+  gutter: 0,
   // inches, the print sheet's long side × short side
   press: Object.freeze({ maxLong: 28, maxShort: 20, minLong: 12, minShort: 10 }),
   // a layout this close to one more row or up is reported as a near miss
@@ -55,32 +57,42 @@ export function cartonPlan(reading, rules = HOUSE_RULES) {
   const { construction, tube, face, w } = reading;
   const glue = rules.glue(w), tuck = rules.tuck(w), dust = rules.dust(w, tuck);
   const across = 2 * face + 2 * w + glue;
+  // the output's gap between every two ups (rulesWith), in both directions
+  const gutter = Number(rules.gutter) > 0 ? Number(rules.gutter) : 0;
+  const acrossFor = m => (m > 0 ? m * across + (m - 1) * gutter : 0);
   if (construction === 'RTE') {
     // reverse tuck: the closures sit on opposite faces, so one carton's tuck fits beside the next one's
-    const along = n => (n > 0 ? n * (tube + w + tuck) + (w + tuck) : 0);
-    return { construction, across, glue, tuck, dust, lock: null, along, blank: { across, along: along(1) } };
+    const along = n => (n > 0 ? n * (tube + w + tuck) + (w + tuck) + (n - 1) * gutter : 0);
+    return { construction, across, glue, tuck, dust, lock: null, gutter, acrossFor, along, blank: { across, along: along(1) } };
   }
   const lock = rules.lock(w);
   const single = lock + tube + w + tuck, pair = 2 * lock + 2 * tube + w + tuck;
   // two lock bottoms go head to head and share one W + tuck gap; pairs butt foot to foot
-  const along = n => (n > 0 ? Math.floor(n / 2) * pair + (n % 2) * single : 0);
-  return { construction, across, glue, tuck, dust, lock, along, blank: { across, along: single } };
+  const along = n => (n > 0 ? Math.floor(n / 2) * pair + (n % 2) * single + (n - 1) * gutter : 0);
+  return { construction, across, glue, tuck, dust, lock, gutter, acrossFor, along, blank: { across, along: single } };
 }
 
-// The best grid of one carton on a print sheet, its across direction on the sheet's `acrossOn` side.
-export function layoutOn(plan, sheetLong, sheetShort, acrossOn, rules = HOUSE_RULES) {
+// A print sheet's usable sides in mm: [the side the cartons' across direction lies on, the other one].
+const sheetSides = (sheetLong, sheetShort, acrossOn, rules) => {
   const { gripper, other } = rules.margin;
   // the gripper bites a long edge, so it is taken off the short side
   const longMm = sheetLong * IN - 2 * other, shortMm = sheetShort * IN - gripper - other;
-  const [A, B] = acrossOn === 'long' ? [longMm, shortMm] : [shortMm, longMm];
-  const m = Math.max(0, Math.floor(A / plan.across + EPS));
+  return acrossOn === 'long' ? [longMm, shortMm] : [shortMm, longMm];
+};
+
+// The best grid of one carton on a print sheet, its across direction on the sheet's `acrossOn` side.
+export function layoutOn(plan, sheetLong, sheetShort, acrossOn, rules = HOUSE_RULES) {
+  const [A, B] = sheetSides(sheetLong, sheetShort, acrossOn, rules);
+  const g = plan.gutter || 0;
+  const acrossFor = plan.acrossFor || (k => k * plan.across + Math.max(0, k - 1) * g);
+  const m = Math.max(0, Math.floor((A + g) / (plan.across + g) + EPS));
   let n = 0;
   while (plan.along(n + 1) <= B + EPS && n < 200) n++;
   const ups = m * n;
   return {
     ups, m, n, acrossOn,
-    spareAcross: A - m * plan.across, spareAlong: B - plan.along(n),
-    needRow: (m + 1) * plan.across - A, needUp: plan.along(n + 1) - B,
+    spareAcross: A - acrossFor(m), spareAlong: B - plan.along(n),
+    needRow: acrossFor(m + 1) - A, needUp: plan.along(n + 1) - B,
   };
 }
 
@@ -161,7 +173,7 @@ export function proposals({ style, size, boards, gsm = null, rules = HOUSE_RULES
       if (keys.has(k)) continue; keys.add(k); nearMisses.push(m);
       if (nearMisses.length >= 3) break;
     }
-    const { along, ...shown } = plan;
+    const { along, acrossFor, ...shown } = plan;
     return { reading, plan: shown, options, nearMisses };
   });
   const res = { readings: out };
@@ -175,31 +187,35 @@ export function proposals({ style, size, boards, gsm = null, rules = HOUSE_RULES
 // The picture of an option: rectangles in mm on the print sheet (x along its long side, y along its short side) —
 // each up's body, glue flap and flaps (the tuck closures, and the lock band of a lock bottom).
 export function layoutBlocks(planIn, reading, option, rules = HOUSE_RULES) {
-  const plan = typeof planIn?.along === 'function' ? planIn : cartonPlan(reading, rules);
+  // the output's settings (option.settings: gripper, edges, gap between ups) on top of the house rules
+  const r = rulesWith(option?.settings, rules);
+  const plan = typeof planIn?.along === 'function' ? planIn : cartonPlan(reading, r);
   const { tube, face, w } = reading;
-  const { across, glue, tuck } = plan, gap = w + tuck;
+  const { across, glue, tuck } = plan, gap = w + tuck, g = plan.gutter || 0;
+  // the gripper bites a long edge (y = 0 here); the edges come off the rest
+  const { gripper, other } = r.margin;
   const blocks = [];
   const put = (ox, oy, turned, local) => {
     for (const [x, y, bw, bh, kind] of local) {
       // turned 180°: (x, y) → (across − x, tube − y)
       const lx = turned ? across - (x + bw) : x, ly = turned ? tube - (y + bh) : y;
       const u = ox + lx, v = oy + ly;
-      blocks.push(option.acrossOn === 'long' ? { x: u, y: v, w: bw, h: bh, kind } : { x: v, y: u, w: bh, h: bw, kind });
+      blocks.push(option.acrossOn === 'long' ? { x: other + u, y: gripper + v, w: bw, h: bh, kind } : { x: other + v, y: gripper + u, w: bh, h: bw, kind });
     }
   };
   for (let i = 0; i < option.m; i++) {
     for (let j = 0; j < option.n; j++) {
-      const ox = i * across;
+      const ox = i * (across + g);
       if (plan.construction === 'RTE') {
-        put(ox, gap + j * (tube + gap), false, [
+        put(ox, gap + j * (tube + gap + g), false, [
           [0, 0, across, tube, 'body'], [0, 0, glue, tube, 'glue'],
           [glue + face + w, tube, face, gap, 'flap'], [glue, -gap, face, gap, 'flap'],
         ]);
       } else {
         const lk = plan.lock, pair = 2 * lk + 2 * tube + gap, k = Math.floor(j / 2);
         const local = [[0, 0, across, tube, 'body'], [0, 0, glue, tube, 'glue'], [glue, tube, face, gap, 'flap'], [glue, -lk, across - glue, lk, 'flap']];
-        if (j % 2 === 0) put(ox, k * pair + lk, false, local);
-        else put(ox, k * pair + lk + tube + gap, true, local);
+        if (j % 2 === 0) put(ox, k * pair + lk + j * g, false, local);
+        else put(ox, k * pair + lk + tube + gap + j * g, true, local);
       }
     }
   }
@@ -229,3 +245,147 @@ export function inferLayout({ style, size, sheet_l, sheet_w, ups, rules = HOUSE_
   }
   return fallback;
 }
+
+const r1 = x => Math.round(x * 10) / 10;
+
+// How far a saved layout (a KLD's: sheet_long, sheet_short, m across, n along, across_on) runs past the house rules,
+// or null when it fits. A die can run tighter than the measured rules (owner, 12 Nov 2026: a factory die runs
+// 100 × 15 × 80 side pasting 10 up on 16 × 25, where the rules fit 9), so this is a note on the KLD, never a refusal.
+export function overRules(reading, lay, base = HOUSE_RULES) {
+  const long = pos(lay?.sheet_long), short = pos(lay?.sheet_short);
+  const m = Math.round(Number(lay?.m)), n = Math.round(Number(lay?.n));
+  if (!reading || !long || !short || !(m > 0) || !(n > 0)) return null;
+  // with the output's own settings when the layout carries them
+  const rules = rulesWith(lay.settings, base);
+  const plan = cartonPlan(reading, rules);
+  const [A, B] = sheetSides(long, short, lay.across_on === 'long' ? 'long' : 'short', rules);
+  const across = plan.acrossFor(m) - A, along = plan.along(n) - B;
+  if (across <= EPS && along <= EPS) return null;
+  const axis = across > EPS && along > EPS ? 'both' : along > EPS ? 'along' : 'across';
+  const fits = Math.max(...['long', 'short'].map(on => layoutOn(plan, long, short, on, rules).ups));
+  return { mm: r1(Math.max(across, along)), axis, rules_ups: fits };
+}
+
+// The grid to draw when the house rules cannot place a die's sheet and ups (inferLayout gives null): of every reading,
+// sheet side and m × n that makes the ups, the one that runs least past the rules, and how far it runs.
+export function closestLayout({ style, size, sheet_l, sheet_w, ups, settings = null, rules: base = HOUSE_RULES }) {
+  const a = pos(sheet_l), b = pos(sheet_w), want = Math.round(Number(ups));
+  if (!a || !b || !(want > 0)) return null;
+  const rules = rulesWith(settings, base);
+  const long = Math.max(a, b), short = Math.min(a, b);
+  let best = null;
+  for (const reading of readings(style, size)) {
+    const plan = cartonPlan(reading, rules);
+    for (const acrossOn of ['long', 'short']) {
+      const [A, B] = sheetSides(long, short, acrossOn, rules);
+      for (let m = 1; m <= want; m++) {
+        if (want % m) continue;
+        const n = want / m;
+        const run = Math.max(0, plan.acrossFor(m) - A) + Math.max(0, plan.along(n) - B);
+        if (!best || run < best.run - EPS) best = { run, reading, option: { sheet: { long, short }, ups: want, m, n, acrossOn } };
+      }
+    }
+  }
+  if (!best) return null;
+  const { reading, option } = best;
+  return { reading, option, over: overRules(reading, { sheet_long: long, sheet_short: short, m: option.m, n: option.n, across_on: option.acrossOn, settings }, base) };
+}
+
+// The KLD's note when its layout runs past the house rules ('' when it fits), for the costing screen and the PDF.
+export function overRulesText(lay) {
+  const o = lay?.over_rules;
+  if (!o) return '';
+  const acrossSide = lay.across_on === 'long' ? lay.sheet_long : lay.sheet_short;
+  const alongSide = lay.across_on === 'long' ? lay.sheet_short : lay.sheet_long;
+  const need = o.axis === 'both' ? `up to ${o.mm} mm more than the sheet`
+    : `${o.mm} mm more than the ${o.axis === 'along' ? alongSide : acrossSide} in side`;
+  const fit = o.rules_ups > 0 ? `they fit ${o.rules_ups} up on this sheet` : 'not one fits this sheet';
+  return `By the house rules, ${lay.ups} up (${lay.m} × ${lay.n}) needs ${need}; ${fit}. Check the die maker's layout.`;
+}
+
+// ── the output: its own settings, and every way to place the ups (owner, 13 Nov 2026: "key line u are making is good
+// but we need proper layout options also for output setting") ───────────────────────────────────────────────────────
+// docs/superpowers/specs/2026-11-13-output-layout-options-design.md. The house rules run edge to edge (all 0); a person
+// may set a gripper (off one long edge), edges (off the rest) and a gap between ups, in mm.
+const num0 = x => (Number(x) > 0 ? Number(x) : 0);
+const SETTINGS_KEYS = ['gripper', 'edge', 'gap'];
+export function cleanSettings(raw) {
+  const v = k => { const n = Number(raw?.[k]); return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0; };
+  return { gripper: v('gripper'), edge: v('edge'), gap: v('gap') };
+}
+export function settingsProblem(raw) {
+  if (raw == null) return null;
+  for (const k of SETTINGS_KEYS) {
+    const x = raw[k];
+    if (x == null || x === '') continue;
+    const n = Number(x);
+    if (!Number.isFinite(n) || n < 0 || n > 50) return 'Gripper, edges and gap are millimetres from 0 to 50.';
+  }
+  return null;
+}
+// The house rules with the output's settings on top.
+export function rulesWith(settings, rules = HOUSE_RULES) {
+  const s = cleanSettings(settings);
+  return {
+    ...rules,
+    margin: { gripper: s.gripper + num0(rules.margin?.gripper), other: s.edge + num0(rules.margin?.other) },
+    gutter: s.gap + num0(rules.gutter),
+  };
+}
+export function outputText(lay) {
+  const s = cleanSettings(lay?.settings);
+  if (!s.gripper && !s.edge && !s.gap) return 'Edge to edge: no gripper, edges or gap';
+  return `Gripper ${s.gripper} mm · edges ${s.edge} mm · gap between ups ${s.gap} mm`;
+}
+
+// The most ups the sheet takes by the house rules (with the settings), any reading, either side.
+export function maxUps({ style, size, sheet_l, sheet_w, settings = null, rules: base = HOUSE_RULES }) {
+  const a = pos(sheet_l), b = pos(sheet_w);
+  if (!a || !b) return 0;
+  const rules = rulesWith(settings, base);
+  const long = Math.max(a, b), short = Math.min(a, b);
+  let best = 0;
+  for (const reading of readings(style, size)) {
+    const plan = cartonPlan(reading, rules);
+    for (const on of ['long', 'short']) best = Math.max(best, layoutOn(plan, long, short, on, rules).ups);
+  }
+  return best;
+}
+
+// Every way to place exactly `ups` on the sheet: each reading, either sheet side, each rows × columns grid. The ones that
+// fit come first (the roomiest first), then the ones over the house rules (least over first); one more than
+// OVER_MAX_MM over is no layout. → [{ key, reading, fits, spare: {across, along} | null, over: {mm, axis} | null, option }]
+const OVER_MAX_MM = 150;
+export function layoutOptions({ style, size, sheet_l, sheet_w, ups, settings = null, rules: base = HOUSE_RULES, limit = 8 }) {
+  const a = pos(sheet_l), b = pos(sheet_w), want = Math.round(Number(ups));
+  if (!a || !b || !(want > 0)) return [];
+  const rules = rulesWith(settings, base);
+  const kept = cleanSettings(settings);
+  const long = Math.max(a, b), short = Math.min(a, b);
+  const out = [];
+  for (const reading of readings(style, size)) {
+    const plan = cartonPlan(reading, rules);
+    for (const acrossOn of ['long', 'short']) {
+      const [A, B] = sheetSides(long, short, acrossOn, rules);
+      for (let m = 1; m <= want; m++) {
+        if (want % m) continue;
+        const n = want / m;
+        const overA = plan.acrossFor(m) - A, overB = plan.along(n) - B;
+        const fits = overA <= EPS && overB <= EPS;
+        const over = fits ? null : {
+          mm: r1(Math.max(overA, overB)), axis: overA > EPS && overB > EPS ? 'both' : overB > EPS ? 'along' : 'across',
+        };
+        if (over && over.mm > OVER_MAX_MM) continue;
+        out.push({
+          key: `${reading.key}|${acrossOn}|${m}x${n}`, reading, fits, over,
+          spare: fits ? { across: r1(-overA), along: r1(-overB) } : null,
+          option: { sheet: { long, short }, ups: want, m, n, acrossOn, settings: kept },
+        });
+      }
+    }
+  }
+  const room = o => Math.min(o.spare.across, o.spare.along);
+  out.sort((x, y) => (Number(y.fits) - Number(x.fits)) || (x.fits ? room(y) - room(x) : x.over.mm - y.over.mm));
+  return out.slice(0, limit);
+}
+

@@ -25,10 +25,14 @@ export function LayoutPicture({ reading, option, className = '' }) {
   const blocks = useMemo(() => layoutBlocks(null, reading, option), [reading, option]);
   const tone = { body: ['#e6ecf6', '#2a5598'], glue: ['#f6e7b4', '#2a5598'], flap: ['#fde3dc', '#b8362a'] };
   const along = option.acrossOn === 'long';
+  // the output's settings (13 Nov 2026): the gripper band on the top long edge, the edges dashed
+  const g = Number(option.settings?.gripper) || 0, e = Number(option.settings?.edge) || 0;
   return (
     <svg viewBox={`-4 -4 ${W + 34} ${H + 30}`} className={className} role="img"
       aria-label={`${option.ups} up on ${option.sheet.short} × ${option.sheet.long} in; board grain along the ${along ? option.sheet.long : option.sheet.short} in side`}>
       <rect x="0" y="0" width={W} height={H} fill="#fff" stroke="#334155" strokeWidth="2" />
+      {g > 0 && <rect x="0" y="0" width={W} height={g} fill="#e2e8f0" />}
+      {(g > 0 || e > 0) && <rect x={e} y={g} width={W - 2 * e} height={H - g - e} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="6 4" />}
       {blocks.map((b, i) => <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={tone[b.kind][0]} stroke={tone[b.kind][1]} strokeWidth="1" />)}
       {along
         ? <line x1={W * 0.3} y1={H + 16} x2={W * 0.7} y2={H + 16} stroke="#15803d" strokeWidth="5" strokeLinecap="round" />

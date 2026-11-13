@@ -8,7 +8,10 @@ import { Download, ExternalLink, FileText, PenLine, UploadCloud } from 'lucide-r
 import { api, auth } from '../../api.js';
 import { useToast } from '../../components/ui.jsx';
 import { kldBlank, kldSvg } from '../../lib/kld.js';
-import { READING_LABEL, inferLayout } from '../../lib/sizing.js';
+import {
+  READING_LABEL, cleanSettings, closestLayout, inferLayout, layoutOptions, maxUps, outputText, overRulesText, settingsProblem,
+} from '../../lib/sizing.js';
+import { LayoutPicture } from './SizeProposals.jsx';
 import { num } from '../../lib/costing.js';
 
 const dateText = iso => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
@@ -22,6 +25,10 @@ export default function KldPanel({ value, size, entries = [], pending = null, on
   const entry = entries.find(same) || null;
   const [shown, setShown] = useState(null);          // { size_id, kld, title }
   const [busy, setBusy] = useState('');
+  // The output (owner, 13 Nov 2026: "proper layout options also for output setting"): its settings in mm, as typed,
+  // and the layout picked from the options (null = the saved KLD's, else the proposal's, else the first).
+  const [settings, setSettings] = useState({ gripper: '', edge: '', gap: '' });
+  const [pickKey, setPickKey] = useState(null);
   useEffect(() => {
     let live = true;
     if (entry?.kld_rev) api.get(`/costing/sizes/${entry.id}/kld`).then(d => { if (live) setShown(d); }).catch(() => {});
@@ -36,18 +43,45 @@ export default function KldPanel({ value, size, entries = [], pending = null, on
     if (!k) return '';
     return kldSvg(kldBlank({ construction: k.construction, tube: k.tube, face: k.face, w: k.w }), { title: `KLD ${shown.title || ''} · rev ${k.rev}` });
   }, [shown]);
+  // a saved KLD opens with its own output settings
+  useEffect(() => {
+    const st = shown?.kld?.layout?.settings;
+    setSettings({ gripper: st?.gripper || '', edge: st?.edge || '', gap: st?.gap || '' });
+    setPickKey(null);
+  }, [shown?.size_id, shown?.kld?.rev]); // eslint-disable-line react-hooks/exhaustive-deps
+  const problem = settingsProblem(settings);
+  const sheetArgs = { style, size, sheet_l: inputs.sheet_l, sheet_w: inputs.sheet_w };
+  const options = useMemo(() => (supported && !problem ? layoutOptions({ ...sheetArgs, ups: inputs.ups, settings }) : []),
+    [supported, problem, style, size?.key, inputs.sheet_l, inputs.sheet_w, inputs.ups, settings.gripper, settings.edge, settings.gap]); // eslint-disable-line react-hooks/exhaustive-deps
+  const most = supported && !problem ? maxUps({ ...sheetArgs, settings }) : 0;
+  const keyOf = (reading, o) => `${reading}|${o.across_on || o.acrossOn}|${o.m}x${o.n}`;
+  const savedKey = shown?.kld?.layout ? keyOf(shown.kld.reading, shown.kld.layout) : null;
+  const proposalKey = proposal ? keyOf(proposal.reading, proposal.option) : null;
+  const picked = options.find(o => o.key === pickKey) || options.find(o => o.key === savedKey) || options.find(o => o.key === proposalKey) || options[0] || null;
+  const savedSettings = JSON.stringify(cleanSettings(shown?.kld?.layout?.settings));
+  const notDrawn = !!shown?.kld && !!picked && (picked.key !== savedKey || JSON.stringify(cleanSettings(settings)) !== savedSettings);
   if (!supported && !shown) return null;
 
   const draw = async () => {
-    const pick = proposal ? { reading: proposal.reading, option: proposal.option }
-      : (() => { const x = inferLayout({ style, size, sheet_l: inputs.sheet_l, sheet_w: inputs.sheet_w, ups: inputs.ups }); return x && { reading: x.reading.key, option: x.option }; })();
-    if (!pick) { toast.error('This sheet and ups do not fit the house rules — pick one of the proposals, or check the size and pasting.'); return; }
+    // the sheet and ups as typed (a die in the factory may run tighter than the house rules): drawn all the same, and
+    // the KLD says how far it runs past the rules (owner, 12 Nov 2026: "FIX THIS BLOCKER" — warn, never refuse)
+    if (problem) { toast.error(problem); return; }
+    // the layout picked in Output; with no option within reach of the sheet, the closest grid (no hard blocker)
+    const pick = picked ? { reading: picked.reading.key, option: picked.option }
+      : (() => {
+        const args = { style, size, sheet_l: inputs.sheet_l, sheet_w: inputs.sheet_w, ups: inputs.ups };
+        const x = inferLayout(args) || closestLayout(args);
+        return x && { reading: x.reading.key, option: x.option };
+      })();
+    if (!pick) { toast.error('This carton cannot be drawn — check the size and the pasting.'); return; }
     setBusy('draw');
     try {
-      const res = await api.put('/costing/sizing/kld', { size_text: value.size_text, style, ...pick });
+      const res = await api.put('/costing/sizing/kld', { size_text: value.size_text, style, ...pick, settings: cleanSettings(settings) });
       const got = await api.get(`/costing/sizes/${res.size_id}/kld`);
       setShown(got);
       toast.success(`KLD rev ${res.kld.rev} saved with this size in the Size Library`);
+      const note = overRulesText(res.kld?.layout);
+      if (note) toast.info(note);
       onDrawn?.();
     } catch { /* the error is already shown */ } finally { setBusy(''); }
   };
@@ -75,6 +109,7 @@ export default function KldPanel({ value, size, entries = [], pending = null, on
 
   const k = shown?.kld;
   const drive = Array.isArray(k?.drive) ? [...k.drive].reverse() : [];
+  const over = overRulesText(k?.layout);
   return (
     <div className="mt-3 rounded-xl bg-white/80 p-3 ring-1 ring-slate-200">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -100,6 +135,39 @@ export default function KldPanel({ value, size, entries = [], pending = null, on
           )}
         </span>
       </div>
+      {supported && (
+        <div className="mb-2 rounded-lg bg-slate-50/80 p-2 ring-1 ring-slate-200">
+          <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+            <b className="text-[#1D1D1F]">Output</b>
+            <span className="text-slate-500">{num(inputs.sheet_l)} × {num(inputs.sheet_w)} in · {num(inputs.ups)} up · the sheet takes up to {most} up by the house rules</span>
+            {[['gripper', 'Gripper'], ['edge', 'Edges'], ['gap', 'Gap between ups']].map(([k, label]) => (
+              <label key={k} className="flex items-center gap-1 text-slate-600">{label}
+                <input inputMode="decimal" value={settings[k]} placeholder="0" onChange={e => setSettings(s => ({ ...s, [k]: e.target.value }))}
+                  className="h-6 w-12 rounded-md border border-slate-300 bg-white px-1 text-right text-[11px]" /> mm</label>
+            ))}
+          </div>
+          {problem && <div className="mb-1 text-[11px] font-semibold text-red-700">{problem}</div>}
+          <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            {options.map(o => {
+              const on = picked?.key === o.key;
+              const side = o.option.acrossOn === 'long' ? o.option.sheet.long : o.option.sheet.short;
+              return (
+                <button key={o.key} type="button" onClick={() => setPickKey(o.key)}
+                  className={`flex flex-col gap-1 rounded-lg bg-white p-1.5 text-left text-[11px] ring-1 ${on ? 'ring-2 ring-brand-500' : 'ring-slate-200 hover:ring-slate-300'}`}>
+                  <LayoutPicture reading={o.reading} option={o.option} className="h-24 w-full rounded bg-slate-50" />
+                  <span className="font-bold text-[#1D1D1F]">{o.option.m} × {o.option.n} · {o.reading.key === 'lock' ? 'lock bottom' : o.reading.key}</span>
+                  <span className="text-slate-500">carton width along the {side} in side</span>
+                  {o.fits ? <span className="font-semibold text-emerald-700">Fits · spare {o.spare.across} / {o.spare.along} mm</span>
+                    : <span className="font-semibold text-amber-700">{o.over.mm} mm over the house rules</span>}
+                </button>
+              );
+            })}
+          </div>
+          {!options.length && !problem && <div className="text-[11px] text-slate-500">No layout of {num(inputs.ups)} up comes within 150 mm of this sheet — Make KLD draws the closest one.</div>}
+          <div className="mt-1 text-[11px] text-slate-500">{outputText({ settings })}{notDrawn ? <b className="ml-2 text-amber-700">Not drawn yet — press Redraw to keep this output.</b> : ''}</div>
+        </div>
+      )}
+      {over && <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">{over}</p>}
       {svg && <div className="overflow-x-auto rounded-lg bg-white ring-1 ring-slate-100" dangerouslySetInnerHTML={{ __html: svg.replace('<svg ', '<svg style="width:100%;min-width:520px;height:auto" ') }} />}
       {drive.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-[11px] text-slate-600">

@@ -3,7 +3,7 @@
 // screen draws (client/src/lib/kld.js), so the two never disagree. Standard fonts: text goes through pdfSafe.
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { kldBlank } from '../../client/src/lib/kld.js';
-import { layoutBlocks, READING_LABEL, IN } from '../../client/src/lib/sizing.js';
+import { layoutBlocks, overRulesText, cleanSettings, outputText, READING_LABEL, IN } from '../../client/src/lib/sizing.js';
 import { pdfSafe } from './quotation-pdf.js';
 
 const PT = 72 / 25.4;
@@ -49,39 +49,63 @@ export async function kldPdf({ kld, title = '' }) {
   }
   // title block
   const lay = kld.layout;
+  const over = overRulesText(lay);
   const rules = `Glue ${mm(blank.glueWidth)} · tuck ${mm(blank.tuck)} · dust ${mm(blank.dust)}${blank.lock != null ? ` · lock ${mm(blank.lock)}` : ''} mm`;
   const lines = [
     [bold, 12, `KLD  ${title || kld.size_key || ''}`],
     [font, 9, `${READING_LABEL[kld.reading] || kld.construction} · ${mm(blank.width)} × ${mm(blank.height)} mm blank · ${rules}`],
     ...(lay ? [[font, 9, `Print sheet ${lay.sheet_short} × ${lay.sheet_long} in · ${lay.ups} up (${lay.m} × ${lay.n}) · board grain along the ${lay.across_on === 'long' ? lay.sheet_long : lay.sheet_short} in side`]] : []),
+    ...(over ? [[bold, 8, over, RED]] : []),
     [font, 9, `Rev ${kld.rev || 1} · drawn ${istDate(kld.drawn_at)}${kld.drawn_by ? ` by ${kld.drawn_by}` : ''} · CI Plant`],
     [font, 8, `Inner sizes at 1:1. Red = cut, blue dashed = crease, yellow = glue, green arrow = board grain.${kld.construction === 'LOCK' ? ' Lock flaps follow the standard pattern: check against the die maker\'s.' : ''}`],
   ];
   let ty = ph - M - block + 4;
   page.drawLine({ start: { x: M * PT, y: (M + block) * PT }, end: { x: (pw - M) * PT, y: (M + block) * PT }, thickness: 0.6, color: INK });
-  for (const [f, size, text] of lines) {
-    page.drawText(pdfSafe(text), { x: M * PT, y: (ph - ty) * PT - size, size, font: f, color: f === bold ? INK : MUTED });
+  for (const [f, size, text, color] of lines) {
+    page.drawText(pdfSafe(text), { x: M * PT, y: (ph - ty) * PT - size, size, font: f, color: color || (f === bold ? INK : MUTED) });
     ty += size * 0.48;
   }
 
-  // ── page two: the print sheet ─────────────────────────────────────────────────────────────────────
+  // ── page two: the output — the print sheet with every up (owner, 13 Nov 2026: "proper layout options also for output
+  // setting"): the gripper band, the edges, each up numbered at its place with the gaps, and the settings it was drawn with.
   if (lay && lay.m > 0 && lay.n > 0) {
     const p2 = doc.addPage([297 * PT, 210 * PT]);
     const SL = lay.sheet_long * IN, SS = lay.sheet_short * IN;
-    const s = Math.min((297 - 2 * M) / SL, (210 - 2 * M - 22) / SS);
+    const s = Math.min((297 - 2 * M) / SL, (210 - 2 * M - 30) / SS);
     const ox = M, oy = 210 - M - 14;           // top-left of the sheet, mm on the page (y up)
     const P = (x, y) => ({ x: (ox + x * s) * PT, y: (oy - y * s) * PT });
-    p2.drawText(pdfSafe(`Sheet layout · ${lay.sheet_short} × ${lay.sheet_long} in · ${lay.ups} up · ${title || kld.size_key || ''}`),
+    const mm0 = x => String(Math.round(x));
+    p2.drawText(pdfSafe(`Output · ${lay.sheet_short} × ${lay.sheet_long} in (${mm0(SS)} × ${mm0(SL)} mm) · ${lay.ups} up (${lay.m} × ${lay.n}) · ${title || kld.size_key || ''}`),
       { x: M * PT, y: (210 - M) * PT - 4, size: 11, font: bold, color: INK });
     p2.drawRectangle({ x: P(0, SS).x, y: P(0, SS).y, width: SL * s * PT, height: SS * s * PT, borderColor: INK, borderWidth: 1, color: rgb(1, 1, 1) });
+    const st = cleanSettings(lay.settings);
+    if (st.gripper > 0) {
+      // the gripper bites the long edge drawn at the top
+      p2.drawRectangle({ x: P(0, st.gripper).x, y: P(0, st.gripper).y, width: SL * s * PT, height: st.gripper * s * PT, color: rgb(0.88, 0.9, 0.93) });
+      p2.drawText(pdfSafe(`GRIPPER ${st.gripper} mm`), { x: P(4, 0).x, y: P(0, st.gripper).y + 1.5, size: 6.5, font: bold, color: MUTED });
+    }
+    if (st.gripper > 0 || st.edge > 0) {
+      p2.drawRectangle({ x: P(st.edge, SS - st.edge).x, y: P(st.edge, SS - st.edge).y, width: (SL - 2 * st.edge) * s * PT,
+        height: (SS - st.gripper - st.edge) * s * PT, borderColor: MUTED, borderWidth: 0.4, borderDashArray: [2, 1.5] });
+    }
     const reading = { construction: kld.construction, tube: kld.tube, face: kld.face, w: kld.w };
-    for (const b of layoutBlocks(null, reading, { acrossOn: lay.across_on, m: lay.m, n: lay.n })) {
+    const blocks = layoutBlocks(null, reading, { acrossOn: lay.across_on, m: lay.m, n: lay.n, settings: lay.settings });
+    for (const b of blocks) {
       const at = P(b.x, b.y + b.h);
       p2.drawRectangle({ x: at.x, y: at.y, width: b.w * s * PT, height: b.h * s * PT,
         color: b.kind === 'body' ? BODY : b.kind === 'glue' ? GLUE : FLAP, borderColor: b.kind === 'flap' ? RED : BLUE, borderWidth: 0.5 });
     }
+    // each up numbered at the middle of its body
+    blocks.filter(b => b.kind === 'body').forEach((b, i) => {
+      const label = String(i + 1), w = bold.widthOfTextAtSize(label, 9);
+      const c = P(b.x + b.w / 2, b.y + b.h / 2);
+      p2.drawText(label, { x: c.x - w / 2, y: c.y - 3, size: 9, font: bold, color: INK });
+    });
+    const below = (oy - SS * s) * PT;
     const grainText = `Board grain must run along the ${lay.across_on === 'long' ? lay.sheet_long : lay.sheet_short} in side (round the carton).`;
-    p2.drawText(pdfSafe(grainText), { x: M * PT, y: (oy - SS * s - 8) * PT, size: 9, font, color: GREEN });
+    p2.drawText(pdfSafe(grainText), { x: M * PT, y: below - 8 * PT, size: 9, font, color: GREEN });
+    p2.drawText(pdfSafe(`Output settings: ${outputText(lay)}.`), { x: M * PT, y: below - 13 * PT, size: 9, font, color: MUTED });
+    if (over) p2.drawText(pdfSafe(over), { x: M * PT, y: below - 18 * PT, size: 9, font: bold, color: RED });
   }
   return doc.save();
 }
