@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, FileText, Mail } from 'lucide-react';
 import { api, auth } from '../../api.js';
 import { Button, ConfirmDialog, Field, Input, Modal, Textarea, useToast } from '../../components/ui.jsx';
-import { JOB_LABEL, QUOTE_LABEL, QUOTE_TONE, dateText, qtyText, rupees } from '../../lib/enquiryUi.js';
+import { JOB_LABEL, QUOTE_LABEL, QUOTE_TONE, dateText, mailboxTag, qtyText, rupees } from '../../lib/enquiryUi.js';
 
 const EDITABLE = ['ready', 'drafted'];
 
@@ -92,8 +92,8 @@ export default function QuotationPanel({ id, canMarkSent, onClose, onChanged }) 
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className={`rounded-full px-2 py-0.5 font-bold ${QUOTE_TONE[qt.status]}`}>{QUOTE_LABEL[qt.status]}</span>
             {qt.mailbox_row && (
-              <span className={`rounded-full px-2 py-0.5 font-bold ${r.trial ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                {r.trial ? 'TRIAL' : 'BUSINESS'} mailbox · {qt.mailbox_row.email}
+              <span className={`rounded-full px-2 py-0.5 font-bold ${mailboxTag(qt.mailbox_row).tone}`} title={mailboxTag(qt.mailbox_row).title}>
+                From {mailboxTag(qt.mailbox_row).text}
               </span>
             )}
             {r.to && <span className="font-semibold text-slate-700">Draft addressed to {r.to}{r.trial ? ` — in business use it would go to ${r.would_go_to || '(no address yet)'}` : ''}</span>}

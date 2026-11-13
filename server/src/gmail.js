@@ -3,9 +3,11 @@
 // then on the server saves a quotation's reply as a Gmail DRAFT in the customer's thread the moment Send quotation is
 // pressed — no robot, no Mac, no schedule.
 //
-// It NEVER SENDS. Google's compose permission would allow a send, so the rule lives in the code: the only writes here
-// are drafts.create and drafts.update — nothing calls /send (gmail-link.test.js fails the build if anything does).
-// A person checks the draft and presses Send in Gmail.
+// It never sends to a customer. Google's compose permission would allow a send, so the rule lives in the code: the
+// writes here are drafts.create and drafts.update, and ONE send — sendToCompany, the order sheet for the company's own
+// mailbox (owner, 12 Nov 2026: it "will directly shoot to mppchd@gmail.com", not a draft). It builds that mail itself,
+// to that one address only (no Cc, no Bcc). gmail-link.test.js fails the build on any other send.
+// A person checks every customer draft and presses Send in Gmail.
 // Permission: gmail.compose (make and change drafts) + gmail.metadata (headers and labels only — to reply in the right
 // thread and to notice a draft that has been sent). No mail body is ever read.
 // Since 12 Nov 2026 the consent also asks for drive.file, for KLDs (gdrive.js): files CI Plant makes, nothing else.
@@ -129,7 +131,7 @@ const cleanLine = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
 const safeName = n => cleanLine(n).replace(/["\\]/g, '') || 'quotation.pdf';
 
 // RFC 822 message: text + HTML alternatives, the PDF attached, threaded under the customer's mail when given.
-export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, references, attachment, boundary = crypto.randomBytes(12).toString('hex') }) {
+export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, references, attachment, attachments = [], boundary = crypto.randomBytes(12).toString('hex') }) {
   const mix = `mix_${boundary}`, alt = `alt_${boundary}`;
   const L = [];
   if (from) L.push(`From: ${cleanAddr(from)}`);
@@ -144,10 +146,11 @@ export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, r
   L.push(`--${alt}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(text || ''));
   if (html) L.push(`--${alt}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(html));
   L.push(`--${alt}--`, '');
-  if (attachment?.bytes) {
-    const n = safeName(attachment.name);
-    L.push(`--${mix}`, `Content-Type: ${attachment.mime || 'application/pdf'}; name="${n}"`, `Content-Disposition: attachment; filename="${n}"`,
-      'Content-Transfer-Encoding: base64', '', b64(attachment.bytes));
+  for (const a of [attachment, ...(Array.isArray(attachments) ? attachments : [])]) {
+    if (!a?.bytes) continue;
+    const n = safeName(a.name);
+    L.push(`--${mix}`, `Content-Type: ${a.mime || 'application/pdf'}; name="${n}"`, `Content-Disposition: attachment; filename="${n}"`,
+      'Content-Transfer-Encoding: base64', '', b64(a.bytes));
   }
   L.push(`--${mix}--`, '');
   return L.join('\r\n');
@@ -219,4 +222,16 @@ export async function draftSent(token, { draftId, threadId, since }) {
   const sent = (t.messages || []).filter(m => (m.labelIds || []).includes('SENT') && Number(m.internalDate) >= from)
     .sort((a, b) => Number(a.internalDate) - Number(b.internalDate))[0];
   return sent ? { sent: true, at: new Date(Number(sent.internalDate)).toISOString() } : { sent: false, gone: true };
+}
+
+// The ONE send: the order sheet to the company's own mailbox (owner, 12 Nov 2026). The mail is built here, addressed to
+// `company` alone — the desk's business mailbox address, read from the database by the caller, never from a request —
+// so no caller can add a customer, a Cc or a Bcc. → { message_id, thread_id }
+const COMPANY_ADDRESS = /^[^\s@<>,;"']+@[^\s@<>,;"']+\.[^\s@<>,;"']+$/;
+export async function sendToCompany(token, { from, company, subject, text, html, attachments = [] }) {
+  const to = String(company ?? '').trim().toLowerCase();
+  if (!COMPANY_ADDRESS.test(to)) throw gmailError('No company mailbox address to send the order sheet to — set the business mailbox in the desk settings.', 409);
+  const raw = rawOf(buildMime({ from, to: [to], subject, text, html, attachments }));
+  const m = await gmailCall(token, 'POST', '/messages/send', { raw });
+  return { message_id: m.id || null, thread_id: m.threadId || null };
 }

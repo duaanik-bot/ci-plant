@@ -2884,6 +2884,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261111150000_enquiry_counter.sql'));
   // Size proposals and KLDs — the KLD on a Size Library entry, a board's grain, the 2024 die register. 2026-11-12
   await pool.query(migration('20261112160000_size_kld.sql'));
+  // Order finalised on the enquiry desk (13 Nov 2026): enquiry_orders, enquiries.order_id, status 'ordered'.
+  await pool.query(migration('20261113120000_enquiry_orders.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

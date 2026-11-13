@@ -1,5 +1,6 @@
 // CI Plant's own Gmail line (server/src/gmail.js): the token sealed at rest, the e-mail built right, the consent asked
-// for exactly two permissions — and NOTHING anywhere calls Gmail's send. Invented addresses and figures.
+// for exactly two permissions — and Gmail's send is called from ONE place only, sendToCompany, which can address nobody
+// but the company's own mailbox (the order sheet, owner 12 Nov 2026). Invented addresses and figures.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -63,17 +64,52 @@ test('the e-mail: threaded headers, text + HTML, the PDF attached, Unicode subje
   assert.equal(Buffer.from(g.rawOf(mime), 'base64url').toString('utf8'), mime);
 });
 
-test('CI Plant never sends: no server file calls Gmail\'s send', () => {
+test('CI Plant sends to nobody but the company: the only Gmail send is sendToCompany, used only by the order sheet', () => {
+  const SEND = /(messages|drafts)\/send|\/send['"`]\s*,\s*\{\s*raw|users\/me\/messages\/send/g;
   const dirs = [new URL('./', import.meta.url), new URL('./routes/', import.meta.url)];
+  const importers = [];
   for (const dir of dirs) {
     for (const f of readdirSync(dir).filter(x => x.endsWith('.js') && !x.endsWith('.test.js'))) {
       const src = readFileSync(new URL(f, dir), 'utf8');
-      assert.doesNotMatch(src, /(messages|drafts)\/send|\/send['"`]\s*,\s*\{\s*raw|users\/me\/messages\/send/, `${f} calls Gmail send`);
+      if (/\bsendToCompany\b/.test(src) && f !== 'gmail.js') importers.push(f);
+      if (f === 'gmail.js') continue;
+      assert.doesNotMatch(src, SEND, `${f} calls Gmail send`);
     }
   }
+  assert.deepEqual(importers, ['enquiries.js'], 'only the enquiry desk (its order sheet) uses sendToCompany');
   const gm = readFileSync(new URL('./gmail.js', import.meta.url), 'utf8');
+  const hits = [...gm.matchAll(SEND)];
+  assert.equal(hits.length, 1, 'one send in gmail.js');
+  const from = gm.indexOf('export async function sendToCompany');
+  const to = gm.indexOf('\n}\n', from);
+  assert.ok(from > 0 && hits[0].index > from && hits[0].index < to, 'and it is inside sendToCompany');
   const writes = [...gm.matchAll(/gmailCall\(token, '(POST|PUT|DELETE|PATCH)', `?'?([^`',]+)/g)].map(m => `${m[1]} ${m[2]}`);
-  assert.deepEqual(writes.sort(), ["POST /drafts", 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(), 'the only Gmail writes are draft create / update');
+  assert.deepEqual(writes.sort(), ['POST /drafts', 'POST /messages/send', 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(),
+    'the only Gmail writes are draft create / update and the company send');
+});
+
+test('sendToCompany addresses only the company mailbox: one recipient, no Cc, and refuses a bad address', async () => {
+  const seen = [];
+  const was = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    seen.push({ url: String(url), body: JSON.parse(opts.body) });
+    return { status: 200, ok: true, statusText: 'OK', json: async () => ({ id: 'm-1', threadId: 't-1' }) };
+  };
+  try {
+    const out = await g.sendToCompany('tok', { from: 'box@plant.test', company: 'Office@Plant.test', subject: 'Order finalised — X',
+      text: 'hello', html: '<p>hello</p>', attachments: [{ name: 'KLD 1.pdf', bytes: Buffer.from('%PDF-1.7 a'), mime: 'application/pdf' }] });
+    assert.deepEqual(out, { message_id: 'm-1', thread_id: 't-1' });
+    assert.equal(seen.length, 1);
+    assert.match(seen[0].url, /\/messages\/send$/);
+    const mime = Buffer.from(seen[0].body.raw, 'base64url').toString('utf8');
+    assert.match(mime, /^To: office@plant\.test$/m);
+    assert.doesNotMatch(mime, /^(Cc|Bcc):/mi);
+    assert.match(mime, /filename="KLD 1\.pdf"/);
+    for (const bad of ['', 'not-an-address', 'a@b.test, c@d.test', 'x@y.test\r\nBcc: z@w.test', null]) {
+      await assert.rejects(g.sendToCompany('tok', { from: 'box@plant.test', company: bad, subject: 's', text: 't' }), /company mailbox/);
+    }
+    assert.equal(seen.length, 1, 'nothing sent for a bad address');
+  } finally { globalThis.fetch = was; }
 });
 
 test('reply to everyone: Reply-To (else the sender) in To, everyone else in Cc, never the mailbox itself', () => {

@@ -13,28 +13,29 @@
 // person sends it from Gmail. With the mailbox's Gmail connected (Settings › Connect Gmail, 11 Nov 2026) CI Plant's
 // server saves that draft itself the moment Send quotation is pressed — no robot for drafts. Finalise and Mark as sent need the Management right.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, Inbox, Layers, Lock, LockOpen, Mail, Plus, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
+import { Calculator, Inbox, Layers, Lock, LockOpen, Mail, PackageCheck, Plus, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BACK_LABEL, DESK_TABS, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, dateText, quantitiesText, qtyText, rupees, whereText,
+  BACK_LABEL, DESK_TABS, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, dateText, mailboxTag, quantitiesText, qtyText, rupees, whereText,
 } from '../../lib/enquiryUi.js';
 import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import CounterPanel from './CounterPanel.jsx';
+import OrderPanel, { OrdersList } from './OrderPanel.jsx';
+import { canOrder } from '../../lib/orderUi.js';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 const nos = list => list.map(m => m.enquiry_no).join(', ');
 
 function MailboxBadge({ box }) {
-  if (!box) return <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">No mailbox in use</span>;
-  const trial = box.send_to !== 'customers';
+  const tag = mailboxTag(box);
+  if (!box) return <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${tag.tone}`}>{tag.text}</span>;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${box.key === 'trial' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}
-      title={trial ? 'Replies from this mailbox go only to its own address' : 'Replies go to the customer'}>
-      <Mail size={13} />{box.label.toUpperCase()} · {box.email}{trial ? ' · replies go only to itself' : ''}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${tag.tone}`} title={tag.title}>
+      <Mail size={13} />{tag.text}
       {box.gmail ? (box.gmail.last_error ? ' · Gmail needs connecting again' : ' · drafts saved by CI Plant') : ''}
     </span>
   );
@@ -147,6 +148,9 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [tab, setTab] = useState('inbox');
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState([]);
+  // Order finalised (13 Nov 2026): the rows in the panel, and a nudge for the Orders list to load again
+  const [ordering, setOrdering] = useState(null);
+  const [ordersSignal, setOrdersSignal] = useState(0);
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState([]);
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
@@ -195,7 +199,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     const p = new URLSearchParams(window.location.search);
     const g = p.get('gmail');
     if (!g) return;
-    const box = p.get('mb') === 'business' ? 'Business' : 'Trial';
+    // named by role, never "Trial" (owner, 13 Nov 2026)
+    const box = p.get('mb') === 'business' ? 'Business' : 'Desk';
     const said = {
       connected: [toast.success, `${box} mailbox: Gmail connected — CI Plant now saves quotation drafts itself`],
       denied: [toast.info, 'Gmail was not connected — Google\'s page was closed or refused'],
@@ -385,10 +390,20 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     } },
     baseCols[5],
   ];
-  const columns = tab === 'price' ? priceCols
+  // Order finalised, on the row (Management): from Final price on, a row with a complete costing (13 Nov 2026).
+  const orderButton = e => (desk?.can_finalise && canOrder(e) ? (
+    <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([e.id]); }}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
+      <PackageCheck size={12} />Order finalised
+    </button>
+  ) : null);
+  const orderCol = { key: 'order', label: '', render: orderButton };
+  const orderNoCol = { key: 'order_no', label: 'Order', render: e => <span className="font-bold text-emerald-800">{e.order_no || '—'}</span> };
+  const columns = tab === 'price' ? [...priceCols, orderCol]
     : tab === 'inbox' ? [...baseCols.slice(0, 5), { ...costingCol, label: 'Cost', render: costButton }, baseCols[5]]
       : tab === 'costing' ? [baseCols[0], baseCols[2], baseCols[3], baseCols[4], costingCol, baseCols[5]]
-        : baseCols;
+        : tab === 'orders' ? [...baseCols, orderNoCol]
+          : ['quote', 'sent', 'counter'].includes(tab) ? [...baseCols, orderCol] : baseCols;
 
   const savePrices = async (list, { quiet = false } = {}) => {
     const items = list.map(e => ({ id: e.id, prices: (e.prices || []).map(p => ({ qty: p.qty, final: Number(prices[`${e.id}|${p.qty}`]) })) }));
@@ -421,6 +436,13 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     { key: 'total', label: 'Total', align: 'right', render: x => rupees(x.total) },
     { key: 'status', label: 'Status', render: x => <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${QUOTE_TONE[x.status]}`}>{QUOTE_LABEL[x.status]}</span> },
     { key: 'when', label: tab === 'sent' ? 'Sent' : 'Made', sortValue: x => x.sent_at || x.created_at, render: x => `${dateText(x.sent_at || x.created_at)} · ${x.sent_by_name || x.created_by_name || ''}` },
+    // a sent quotation the customer has agreed: all its items in one Order finalised panel
+    ...(tab === 'sent' && desk?.can_finalise ? [{ key: 'order', label: '', render: x => (
+      <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([...new Set((x.lines || []).map(l => l.enquiry_id).filter(Boolean))]); }}
+        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
+        <PackageCheck size={12} />Order finalised
+      </button>
+    ) }] : []),
   ];
 
   if (!desk) return <div className="p-8 text-sm text-slate-400">Loading the enquiry desk…</div>;
@@ -481,6 +503,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {stages && tab === 'counter' && (
         <p className="mb-2 text-xs text-slate-500">The customer answered our quotation with their own prices. Each mail's counter is worked out below — the discount they ask and what the whole order makes or loses at their price. Type our <b>revised price</b> (or fill them all: their price · halfway · cost + ₹), then <b>Send revised quotation</b>: it goes as a reply in the same mail thread, as a revised quotation. A counter reaches this tab from the robot's mail fetch, or tick rows on Final price / Quotations / Sent and press <b>Customer counter</b>.</p>
       )}
+      {tab === 'orders' && (
+        <p className="mb-2 text-xs text-slate-500">Orders the customer agreed. <b>Order finalised</b> (on a row from Final price on, or on a sent quotation) keeps the order with the rate agreed and the loss where it was booked below our cost, and sends the order sheet — the table of items, rates, output sheets, ups, boards and dies, with the KLDs — to the company mailbox. Click an order to see it line by line.</p>
+      )}
+      {tab === 'orders' && <OrdersList canSend={!!mgmt} signal={ordersSignal} />}
       {stages && tab === 'counter' && rows && counterGroups(shown).map(g => (
         <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} onUndoable={setLast} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
       ))}
@@ -546,6 +572,14 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
               setTab('counter');
             }}>Customer counter</Button>
         )}
+        {['price', 'quote', 'sent', 'counter'].includes(tab) && mgmt && (
+          <Button size="sm" variant="success" title="The customer agreed: keep the order with its rates and any loss, and send the order sheet to the team"
+            onClick={() => {
+              const list = pickedRows.filter(canOrder).map(e => e.id);
+              if (!list.length) { toast.info('None of the ticked rows can go on an order — each needs a complete costing.'); return; }
+              setOrdering(list);
+            }}><PackageCheck size={13} className="mr-1 inline" />Order finalised</Button>
+        )}
         {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}
         {['inbox', 'costing', 'price'].includes(tab) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
         {tab === 'dropped' && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => whereText(x.to)))].join(' and ')}.`)}>Bring back</Button>}
@@ -553,6 +587,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
       {detail}
       <QuotationPanel id={openQuote} canMarkSent={mgmt} onClose={() => setOpenQuote(null)} onChanged={reload} />
+      <OrderPanel ids={ordering} onClose={() => setOrdering(null)}
+        onDone={() => { setOrdering(null); setPicked([]); setOrdersSignal(s => s + 1); setTab('orders'); reload(); }} />
     </div>
   );
 }
@@ -573,10 +609,10 @@ function DeskSettings({ desk, onSaved }) {
     <div className="glass max-w-4xl space-y-5 rounded-2xl p-4">
       <div>
         <div className="mb-1 text-sm font-bold">Mailboxes</div>
-        <p className="mb-3 text-xs text-slate-500">With a mailbox's Gmail connected, CI Plant saves each quotation reply as a draft in the customer's thread the moment Send quotation is pressed — it never sends; you send it from Gmail. New enquiry mails are still read by the Claude robot. The trial mailbox replies only to itself unless you allow customers here.</p>
+        <p className="mb-3 text-xs text-slate-500">With a mailbox's Gmail connected, CI Plant saves each quotation reply as a draft in the customer's thread the moment Send quotation is pressed — it never sends; you send it from Gmail. New enquiry mails are still read by the Claude robot. A mailbox set to reply only to itself is a trial: its drafts are addressed back to it.</p>
         {boxes.map(b => (
           <div key={b.key} className="mb-2 grid items-end gap-3 sm:grid-cols-[120px_1fr_220px_110px]">
-            <div className="text-sm font-bold">{b.label}</div>
+            <div className="text-sm font-bold">{b.email || b.label}{b.send_to !== 'customers' && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-900">trial — replies go only to itself</span>}</div>
             <Field label="Gmail address"><Input value={b.email} onChange={e => setBox(b.key, { email: e.target.value })} /></Field>
             <Field label="Replies go to">
               <Select value={b.send_to} onChange={e => setBox(b.key, { send_to: e.target.value })}>

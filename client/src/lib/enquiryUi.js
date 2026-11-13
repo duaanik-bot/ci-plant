@@ -14,6 +14,8 @@ export const DESK_TABS = [
   { key: 'counter', label: 'Counter', stages: ['countered'] },
   { key: 'quote', label: 'Quotations', stages: ['quote_ready'] },
   { key: 'sent', label: 'Sent', stages: ['sent'] },
+  // the customer agreed: the order is kept with its rate and any loss, and the team is told (13 Nov 2026)
+  { key: 'orders', label: 'Orders', stages: ['ordered'] },
   { key: 'dropped', label: 'Dropped', stages: ['dropped'] },
 ];
 export const tabOfStage = stage => DESK_TABS.find(t => t.stages.includes(stage))?.key || null;
@@ -34,6 +36,7 @@ export const STAGE_TONE = {
   sent: 'bg-slate-200 text-slate-700',
   dropped: 'bg-slate-100 text-slate-500',
   countered: 'bg-amber-200 text-amber-900',
+  ordered: 'bg-emerald-200 text-emerald-900',
 };
 
 export const QUOTE_TONE = {
@@ -43,6 +46,19 @@ export const QUOTE_TONE = {
 export const QUOTE_LABEL = { ready: 'Ready for a draft', queued: 'With Claude', drafted: 'Draft in Gmail — send it from Gmail', sent: 'Sent', cancelled: 'Cancelled', superseded: 'Replaced by a revised quotation' };
 
 export const JOB_LABEL = { fetch: 'Fetch from mail', draft: 'Draft in Gmail' };
+
+// A mailbox as the desk shows it (owner, 12–13 Nov 2026: "Get rid of this also: this trial thing" → "Address customers
+// too"): by its address. "Trial" only describes a mailbox whose replies go back to itself (send_to 'own'), never the
+// mailbox's name — the desk's mailbox in use answers customers and is not a trial.
+export function mailboxTag(box) {
+  if (!box) return { text: 'No mailbox in use', tone: 'bg-red-100 text-red-800', title: '' };
+  const own = box.send_to !== 'customers';
+  return {
+    text: own ? `TRIAL · ${box.email} · replies go only to itself` : box.email,
+    tone: own ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900',
+    title: own ? 'Replies from this mailbox go only to its own address' : 'Replies go to the customer',
+  };
+}
 
 export const rupees = (n, dp = 2) => (n == null || Number.isNaN(Number(n)) ? '—'
   : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`);

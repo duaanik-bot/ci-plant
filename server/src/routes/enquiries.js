@@ -29,6 +29,10 @@
 //   GET  /costing/quotations · GET /costing/quotations/:id · PUT /costing/quotations/:id · GET /costing/quotations/:id/pdf
 //   POST /costing/quotations/:id/draft (a Gmail draft, never a send) · /mark-sent · /cancel
 //   POST /costing/enquiry-desk/gmail/:key/connect · DELETE /costing/enquiry-desk/gmail/:key   (admin)
+//   POST /costing/enquiries/order-preview      the Order finalised panel: each line pre-filled (or with the person's edits)
+//   POST /costing/enquiries/order              Order finalised (Management): the order kept, rows → 'ordered', the order
+//                                              sheet sent to the COMPANY mailbox (the one send — gmail.js sendToCompany)
+//   GET  /costing/enquiry-orders · POST /costing/enquiry-orders/:id/mail (Management: Send again)
 // A mailbox whose Gmail is connected (gmail_links, server/src/gmail.js) gets its draft from the SERVER, in the same
 // press — no robot. Not connected: the robot job, as before. Opening the desk notices drafts sent from Gmail.
 //
@@ -47,7 +51,10 @@ import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
 import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
+  sendToCompany,
 } from '../gmail.js';
+import { orderLine, orderTotals, orderMail } from '../order-finalise.js';
+import { kldPdf } from '../kld-pdf.js';
 import { redirectUri, signState } from './gmail-link.js';
 import { startFetch, cloudLink, cloudView, saveCloudLink } from '../enquiry-cloud.js';
 
@@ -59,7 +66,7 @@ const text = (v, max = 300) => { const s = v == null ? '' : String(v).trim(); re
 
 // The Costing tick, read fresh (the costing router does the same for its own routes).
 const loginOf = id => one('SELECT id, name, role, active, modules, is_management FROM users WHERE id = $1 AND active = 1', [id]);
-r.use(['/costing/enquiry-desk', '/costing/enquiries', '/costing/enquiry-jobs', '/costing/quotations'], async (req, res, next) => {
+r.use(['/costing/enquiry-desk', '/costing/enquiries', '/costing/enquiry-jobs', '/costing/quotations', '/costing/enquiry-orders'], async (req, res, next) => {
   try {
     const u = req.costingUser || await loginOf(req.user?.id);
     if (!mayCost(u)) return res.status(403).json({ error: 'Costing is not ticked for this login — ask an admin to tick it in Masters → Users.', code: 'COSTING_REFUSED' });
@@ -367,10 +374,11 @@ const ENQ_COLS = `
   (SELECT count(*) FROM enquiries x WHERE x.mail_id = e.mail_id AND x.id <= e.id)::int AS mail_pos,
   qt.quotation_no, qt.status AS quotation_status, qt.gmail_draft_url AS quotation_draft_url, qt.revision AS quotation_revision,
   e.counter, e.counter_mail_id, e.counter_at, e.counter_by_name, e.counter_round,
-  cm.subject AS counter_subject, cm.received_at AS counter_received_at, cm.view_url AS counter_view_url`;
+  cm.subject AS counter_subject, cm.received_at AS counter_received_at, cm.view_url AS counter_view_url,
+  e.order_id, eo.order_no, eo.mail_status AS order_mail_status`;
 const ENQ_FROM = `enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN costing_batches b ON b.id = c.batch_id
                   LEFT JOIN enquiry_mails m ON m.id = e.mail_id LEFT JOIN quotations qt ON qt.id = e.quotation_id
-                  LEFT JOIN enquiry_mails cm ON cm.id = e.counter_mail_id`;
+                  LEFT JOIN enquiry_mails cm ON cm.id = e.counter_mail_id LEFT JOIN enquiry_orders eo ON eo.id = e.order_id`;
 // A row as the desk shows it: the proposals are worked out here; the costing's inputs stay on the server.
 // A hidden costing counts as none (the row waits in Costing until it is costed again or the costing is shown).
 const present = row => {
@@ -746,6 +754,184 @@ r.post('/costing/enquiries/reopen', async (req, res, next) => {
       if (e.quotation_id && e.quotation_status !== 'cancelled') return { why: `is on quotation ${e.quotation_no} — cancel that quotation first` };
       return { set: `status = 'price_pending', ${FINALISED_OFF}`, to: 'price_pending' };
     }));
+  } catch (e) { next(e); }
+});
+
+// ── order finalised (owner, 12 Nov 2026) ─────────────────────────────────────────────────────────
+// docs/superpowers/specs/2026-11-13-order-finalised-design.md. The button sits on a row with a complete costing, from Final
+// price on; the panel pre-fills each line (orderLine) and the person edits quantity, rate and New die. Finalise
+// (Management right) keeps ONE order for one customer — every line as finalised, with its margin or loss — and moves the
+// rows to 'ordered'. Then the order sheet goes to the company mailbox (sendToCompany): mail trouble never undoes the
+// order, it is kept with the reason and Send again retries. Cost and loss stay in CI Plant; the mail carries rates only.
+const ORDER_FROM = new Set(['costed', 'price_pending', 'quote_ready', 'sent', 'countered']);
+const ORDER_PREFIX = 'CI-OF-';
+
+// The rows as an order needs them: the stage, the costing's inputs, the line the item was quoted on, a drawn KLD.
+// `why` says why a row cannot go on an order. Locked (FOR UPDATE) when finalising.
+async function orderRows(qc, list, lock = false) {
+  if (!list.length) return [];
+  const rows = await qc(`
+    SELECT e.id, e.enquiry_no, e.status, e.mailbox, e.customer_id, e.customer_name, e.product_name, e.size_text, e.size_key, e.style,
+           e.board, e.gsm::float8 AS gsm, e.colours::float8 AS colours, e.coating, e.specs, e.quantities::float8[] AS quantities,
+           e.final_prices, e.counter, e.quotation_id, e.order_id,
+           c.id AS c_id, c.complete AS c_complete, c.archived AS c_archived, c.inputs AS costing_inputs, c.size_id,
+           qt.quotation_no, qt.status AS quotation_status, qt.lines AS quotation_lines, cs.kld->>'rev' AS kld_rev
+      FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN quotations qt ON qt.id = e.quotation_id
+      LEFT JOIN costing_sizes cs ON cs.id = c.size_id AND cs.kld IS NOT NULL
+     WHERE e.id = ANY($1::int[]) ORDER BY e.id${lock ? ' FOR UPDATE OF e' : ''}`, [list]);
+  return rows.map(e => {
+    const live = !!e.c_id && !e.c_archived;
+    const complete = live && !!e.c_complete;
+    const stage = stageOf(e.status, complete, live);
+    const why = e.order_id || e.status === 'ordered' ? 'is on an order already'
+      : !complete ? 'has no complete costing'
+        : !ORDER_FROM.has(stage) ? `is ${stageText(stage)}` : null;
+    const quoted = Array.isArray(e.quotation_lines) && !['cancelled', 'superseded'].includes(e.quotation_status) ? e.quotation_lines : [];
+    const ql = quoted.find(l => l.enquiry_id === e.id && !l.option) || quoted.find(l => l.enquiry_id === e.id) || null;
+    return { ...e, stage, why, quotationLine: ql, kld: e.kld_rev ? { rev: Number(e.kld_rev), size_id: e.size_id } : null };
+  });
+}
+const editsOf = it => (it ? { qty: it.qty, rate: it.rate, new_die: typeof it.new_die === 'boolean' ? it.new_die : undefined } : null);
+const lineFor = (e, edits) => ({
+  ...orderLine(e, { inputs: e.costing_inputs, quotationLine: e.quotationLine, kld: e.kld, edits }),
+  quotation_no: e.quotationLine ? e.quotation_no : null,
+});
+
+// Who the order sheet goes to (the business mailbox's address) and from (the mailbox in use, through its Gmail link).
+async function orderMailState() {
+  const box = await one('SELECT key, email FROM enquiry_mailboxes WHERE in_use');
+  const biz = await one(`SELECT email FROM enquiry_mailboxes WHERE key = 'business'`);
+  const link = box && gmailConfigured() ? await linkOf(box.key) : null;
+  const company = biz?.email ? String(biz.email).trim().toLowerCase() : null;
+  return { box, link, company, sender: link?.email || box?.email || null, can_send: !!(link && company) };
+}
+
+const ORDER_COLS = `o.id, o.order_no, o.mailbox, o.customer_id, o.customer_name, o.quotation_id, qt.quotation_no, o.lines, o.total::float8 AS total,
+  o.loss::float8 AS loss, o.items_at_loss, o.new_dies, o.mail_wanted, o.mail_status, o.mail_to, o.mail_subject, o.mail_error, o.mail_sent_at,
+  o.created_by_name, o.created_at`;
+const orderById = id => one(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id WHERE o.id = $1`, [id]);
+
+// Send the order sheet (the table, and each drawn KLD as its PDF) to the company mailbox. Never throws: the answer and
+// the order say 'sent', or 'failed' with the reason.
+async function mailOrder(id, u) {
+  const o = await one('SELECT * FROM enquiry_orders WHERE id = $1', [id]);
+  const st = await orderMailState();
+  try {
+    if (!st.company) throw fail(409, 'No company mailbox address — set the business mailbox in the desk settings, then Send again.');
+    if (!st.link) throw fail(409, `The mailbox in use (${st.sender || '—'}) has no Gmail connected — an admin presses Connect Gmail in the desk settings, then Send again.`);
+    const qtNo = o.quotation_id ? (await one('SELECT quotation_no FROM quotations WHERE id = $1', [o.quotation_id]))?.quotation_no : null;
+    const mail = orderMail({ order_no: o.order_no, customer: o.customer_name, quotation_no: qtNo, lines: o.lines, by: u.name, at: o.created_at });
+    const attachments = [];
+    for (const l of o.lines.filter(x => x.kld?.size_id)) {
+      const row = await one('SELECT id, size_key, style, kld FROM costing_sizes WHERE id = $1 AND kld IS NOT NULL', [l.kld.size_id]);
+      if (!row) continue;
+      const bytes = await kldPdf({ kld: row.kld, title: [l.product, l.size].filter(Boolean).join(' ') });
+      attachments.push({ name: `KLD ${row.size_key} ${row.style || ''} rev ${row.kld.rev || 1}.pdf`.replace(/\s+/g, ' '), mime: 'application/pdf', bytes: Buffer.from(bytes) });
+    }
+    const token = await accessToken(st.link);
+    const sent = await sendToCompany(token, { from: st.link.email, company: st.company, subject: mail.subject, text: mail.text, html: mail.html, attachments });
+    await q(`UPDATE enquiry_orders SET mail_status = 'sent', mail_to = $2, mail_subject = $3, mail_message_id = $4, mail_error = NULL, mail_sent_at = now()
+              WHERE id = $1`, [id, st.company, mail.subject, sent.message_id]);
+    await q('UPDATE gmail_links SET last_used_at = now(), last_error = NULL, last_error_at = NULL WHERE mailbox = $1', [st.box.key]);
+    await enquiryEvent(q, { action: 'order_mail', detail: { order_no: o.order_no, to: st.company, klds: attachments.length } }, u);
+    await audit('enquiry_order', id, 'mail', `${o.order_no} — order sheet sent to the company mailbox`, q, u.name);
+    return { status: 'sent', to: st.company };
+  } catch (e) {
+    const why = String(e?.message || e).slice(0, 500);
+    const fromGmail = e?.gmailStatus != null || e?.expired;
+    if (e?.expired && st.box) forgetToken(st.box.key);
+    if (fromGmail && st.box) await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [st.box.key, why]);
+    await q(`UPDATE enquiry_orders SET mail_status = 'failed', mail_error = $2 WHERE id = $1`, [id, why]);
+    await audit('enquiry_order', id, 'mail_failed', `${o.order_no} — order sheet not sent`, q, u.name);
+    return { status: 'failed', error: why };
+  }
+}
+
+r.post('/costing/enquiries/order-preview', async (req, res, next) => {
+  try {
+    const list = ids(req.body);
+    if (!list.length) throw fail(400, 'Tick the enquiries the customer has ordered.');
+    const edits = new Map((Array.isArray(req.body?.items) ? req.body.items : []).map(it => [intOrNull(it?.id), it]));
+    const lines = [], refused = [];
+    for (const e of await orderRows(q, list)) {
+      if (e.why) { refused.push({ id: e.id, enquiry_no: e.enquiry_no, why: e.why }); continue; }
+      let line;
+      try { line = lineFor(e, editsOf(edits.get(e.id))); } catch (x) { line = { ...lineFor(e, null), error: x.why || x.message }; }
+      lines.push({ ...line, customer_name: e.customer_name });
+    }
+    const st = await orderMailState();
+    res.json({
+      lines, refused, totals: orderTotals(lines), mail_default: lines.some(l => l.new_die),
+      company: st.company, sender: st.sender, can_send: st.can_send, can_finalise: mayApproveCosting(req.costingUser),
+    });
+  } catch (e) { next(e); }
+});
+
+r.post('/costing/enquiries/order', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const items = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 60);
+    const list = [...new Set(items.map(it => intOrNull(it?.id)).filter(Boolean))];
+    if (!list.length) throw fail(400, 'Tick the enquiries the customer has ordered.');
+    const byId = new Map(items.map(it => [intOrNull(it?.id), it]));
+    const mailWanted = req.body?.mail === true;
+    const out = await tx(async (qc, oc) => {
+      const rows = await orderRows(qc, list, true);
+      const ok = rows.filter(e => !e.why);
+      const refused = rows.filter(e => e.why).map(e => ({ id: e.id, enquiry_no: e.enquiry_no, why: e.why }));
+      for (const id of list) if (!rows.some(e => e.id === id)) refused.push({ id, enquiry_no: `#${id}`, why: 'was not found' });
+      if (!ok.length) throw fail(409, `Nothing to finalise: ${refused.map(x => `${x.enquiry_no} ${x.why}`).join('; ')}.`, { refused });
+      if (new Set(ok.map(e => String(e.customer_name || '').trim().toLowerCase())).size > 1) {
+        throw fail(409, 'One order is for one customer — finalise each customer\'s items on their own.');
+      }
+      const lines = ok.map(e => {
+        try { return lineFor(e, editsOf(byId.get(e.id)) || {}); } catch (x) { throw fail(400, `${e.enquiry_no}: ${x.why || x.message}.`); }
+      });
+      for (const [i, l] of lines.entries()) if (!(l.rate > 0) || !(l.qty > 0)) throw fail(400, `${ok[i].enquiry_no}: a quantity and a rate a carton are needed.`);
+      const totals = orderTotals(lines);
+      const quoted = [...new Set(ok.map(e => (e.quotationLine ? e.quotation_id : null)).filter(Boolean))];
+      const no = await nextNumber(ORDER_PREFIX, 'enquiry_orders', 'order_no', oc);
+      const order = await oc(`INSERT INTO enquiry_orders (order_no, mailbox, customer_id, customer_name, quotation_id, lines, total, loss, items_at_loss,
+                                     new_dies, mail_wanted, created_by, created_by_name)
+                              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, order_no`,
+      [no, ok[0].mailbox, ok[0].customer_id, ok[0].customer_name, quoted.length === 1 ? quoted[0] : null, JSON.stringify(lines),
+        totals.total, totals.loss, totals.items_at_loss, totals.new_dies, mailWanted, u.id, u.name]);
+      for (const [i, e] of ok.entries()) {
+        const l = lines[i];
+        await qc(`UPDATE enquiries SET status = 'ordered', order_id = $2, updated_at = now(), updated_by_name = $3 WHERE id = $1`, [e.id, order.id, u.name]);
+        await enquiryEvent(qc, { enquiryId: e.id, quotationId: e.quotation_id || null, action: 'order',
+          detail: { order_no: no, qty: l.qty, rate: l.rate, cost: l.cost, margin_total: l.margin_total, new_die: l.new_die } }, u);
+        await audit('enquiry', e.id, 'order', `${e.enquiry_no} — ${no}`, qc, u.name);
+      }
+      const n = ok.length;
+      await audit('enquiry_order', order.id, 'finalise',
+        `${no} — ${n} item${n === 1 ? '' : 's'}${totals.new_dies ? `, ${totals.new_dies} new die${totals.new_dies === 1 ? '' : 's'}` : ''}`, qc, u.name);
+      return { order, done: ok.map(e => e.enquiry_no), refused };
+    });
+    const mail = mailWanted ? await mailOrder(out.order.id, u) : { status: 'none' };
+    res.status(201).json({ order: await orderById(out.order.id), done: out.done, refused: out.refused, mail });
+  } catch (e) { next(e); }
+});
+
+r.get('/costing/enquiry-orders', async (req, res, next) => {
+  try {
+    res.json(await q(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id
+                       ORDER BY o.created_at DESC, o.id DESC LIMIT 200`));
+  } catch (e) { next(e); }
+});
+
+// Send again (Management): an order sheet not sent yet. Once sent it is never sent twice.
+r.post('/costing/enquiry-orders/:id(\\d+)/mail', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const id = intOrNull(req.params.id) || 0;
+    const o = await orderById(id);
+    if (!o) throw fail(404, 'No such order.');
+    if (o.mail_status === 'sent') throw fail(409, `${o.order_no}: the order sheet went to ${o.mail_to} already.`);
+    const mail = await mailOrder(id, u);
+    res.json({ ...(await orderById(id)), mail });
   } catch (e) { next(e); }
 });
 

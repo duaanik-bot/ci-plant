@@ -41,6 +41,7 @@ export const MINTING_POSTS = Object.freeze([
   '/costing/batches/:id/save',
   '/costing/costings',
   '/costing/enquiries',
+  '/costing/enquiries/order',
   '/costing/quotations',
   '/costing/quotations/send',
   '/dispatches',

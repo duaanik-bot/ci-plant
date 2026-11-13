@@ -851,6 +851,149 @@ describe('Enquiry desk — through the real app', {
     }
   });
 
+  test('order finalised: Management only; every line kept with its loss; the order sheet goes to the company mailbox alone', async () => {
+    // A fake Google: token and messages/send only (a draft is never part of this). `refuse` makes Gmail say no.
+    const http = await import('node:http');
+    const G = { sends: [], refuse: false };
+    const google = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+        const u = new URL(req.url, 'http://x');
+        if (u.pathname === '/token') return G.refuse ? send(400, { error: 'invalid_grant' }) : send(200, { access_token: 'at-1', expires_in: 3600 });
+        if (req.headers.authorization !== 'Bearer at-1') return send(401, { error: { message: 'bad token' } });
+        const p = u.pathname.replace('/gmail/v1/users/me', '');
+        if (p === '/messages/send' && req.method === 'POST') {
+          if (G.refuse) return send(403, { error: { message: 'Insufficient Permission' } });
+          G.sends.push(JSON.parse(body).raw);
+          return send(200, { id: `sent-${G.sends.length}`, threadId: `t-sent-${G.sends.length}` });
+        }
+        return send(404, { error: { message: `no fake for ${req.method} ${p}` } });
+      });
+    });
+    await new Promise(res => google.listen(0, '127.0.0.1', res));
+    const gbase = `http://127.0.0.1:${google.address().port}`;
+    Object.assign(process.env, {
+      GOOGLE_CLIENT_ID: 'fake-client', GOOGLE_CLIENT_SECRET: 'fake-secret', GMAIL_TOKEN_KEY: 'ef'.repeat(32),
+      GMAIL_API_BASE: `${gbase}/gmail/v1/users/me`, GOOGLE_TOKEN_URL: `${gbase}/token`, GOOGLE_REVOKE_URL: `${gbase}/revoke`,
+    });
+    const { sealToken } = await import('./gmail.js');
+    const mimeText = raw => {
+      const mime = Buffer.from(raw, 'base64url').toString('utf8');
+      const parts = [...mime.matchAll(/Content-Type: text\/(plain|html); charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([A-Za-z0-9+/=\r\n]+)/g)]
+        .map(m => Buffer.from(m[2].replace(/\r\n/g, ''), 'base64').toString('utf8'));
+      return { mime, body: parts.join('\n') };
+    };
+    try {
+      const box = await db.one(`SELECT key, email FROM enquiry_mailboxes WHERE in_use`);
+      const company = (await db.one(`SELECT email FROM enquiry_mailboxes WHERE key = 'business'`)).email;
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ($1, $2, $3, 'Desk admin')`,
+        [box.key, box.email, sealToken('1//fake-refresh')]);
+
+      // Two items of one customer, priced, finalised and on one quotation; A costed with the new-die process charge.
+      const a = await typed('ORDER NEW DIE CARTON');
+      // its own size: a KLD lives on the Size Library entry (size + style + sheet + ups), so a shared layout shares it
+      const b = await typed('ORDER OLD DIE CARTON', { size_text: '90x30x60' });
+      const ca = await call('clerk', 'POST', '/costing/costings', { enquiry_id: a.id, product_name: a.product_name, size_text: a.size_text, inputs: { ...JOB, qty: 5000, process: 3000 } });
+      await call('clerk', 'POST', '/costing/costings', { enquiry_id: b.id, product_name: b.product_name, size_text: b.size_text, inputs: { ...JOB, qty: 5000, process: 2000 } });
+      await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: a.id, prices: [{ qty: 5000, final: 3.75 }] }, { id: b.id, prices: [{ qty: 5000, final: 3.6 }] }] });
+      assert.equal((await call('md', 'POST', '/costing/enquiries/finalise', { ids: [a.id, b.id] })).status, 200);
+      const qt = await call('clerk', 'POST', '/costing/quotations', { ids: [a.id, b.id] });
+      assert.equal(qt.status, 201);
+      // A's KLD is drawn (on its costing's Size Library entry): the die lines go with the mail.
+      const sizeId = (await db.one('SELECT size_id FROM costings WHERE id = $1', [ca.body.id ?? ca.body.costing?.id])).size_id;
+      await db.q(`UPDATE costing_sizes SET kld = $2 WHERE id = $1`, [sizeId, JSON.stringify({ v: 1, rev: 1, construction: 'RTE', reading: 'side-open', tube: 100, face: 40, w: 40,
+        layout: { sheet_long: 30, sheet_short: 20, ups: 6, m: 2, n: 3, across_on: 'short' }, drawn_at: '2026-11-13T05:00:00Z', drawn_by: 'Desk clerk', drive: [] })]);
+
+      // The panel: pre-filled from the quotation; the Costing tick may look.
+      const pv = await call('clerk', 'POST', '/costing/enquiries/order-preview', { ids: [a.id, b.id] });
+      assert.equal(pv.status, 200, JSON.stringify(pv.body));
+      const la = pv.body.lines.find(l => l.enquiry_id === a.id), lb = pv.body.lines.find(l => l.enquiry_id === b.id);
+      assert.deepEqual([la.qty, la.rate, la.new_die, !!la.kld], [5000, 3.75, true, true]);
+      assert.deepEqual([lb.qty, lb.rate, lb.new_die, !!lb.kld], [5000, 3.6, false, false]);
+      assert.ok(lb.cost > 0);
+      assert.equal(pv.body.company, company);
+      assert.equal(pv.body.mail_default, true, 'a new die: the sheet goes to the team by default');
+      assert.equal(pv.body.can_send, true);
+      // the preview recosts an edited quantity
+      const pv2 = await call('clerk', 'POST', '/costing/enquiries/order-preview', { ids: [b.id], items: [{ id: b.id, qty: 6000, rate: 3.1 }] });
+      assert.equal(pv2.body.lines[0].qty, 6000);
+      assert.equal(pv2.body.lines[0].rate, 3.1);
+
+      // The Costing tick alone cannot finalise; a line without a rate is refused and nothing is written.
+      assert.equal((await call('clerk', 'POST', '/costing/enquiries/order', { items: [{ id: a.id, qty: 5000, rate: 3.75 }], mail: true })).status, 403);
+      const noRate = await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: a.id, qty: 5000, rate: 0 }], mail: true });
+      assert.equal(noRate.status, 400);
+      assert.equal((await db.one('SELECT count(*)::int AS n FROM enquiry_orders')).n, 0);
+
+      // Finalise: B at 6,000 below our cost.
+      const rateA = Math.ceil((la.cost + 0.5) * 100) / 100;   // A above our cost
+      const rateB = Math.floor((lb.cost - 0.2) * 100) / 100;  // B below it
+      const r = await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: a.id, qty: 5000, rate: rateA }, { id: b.id, qty: 6000, rate: rateB, new_die: false }], mail: true });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.match(r.body.order.order_no, /^CI-OF-\d{4}$/);
+      assert.deepEqual(r.body.done.sort(), [a.enquiry_no, b.enquiry_no].sort());
+      assert.equal(r.body.mail.status, 'sent');
+      const o = await db.one('SELECT * FROM enquiry_orders WHERE id = $1', [r.body.order.id]);
+      const ob = o.lines.find(l => l.enquiry_id === b.id);
+      assert.equal(ob.qty, 6000);
+      assert.equal(ob.rate, rateB);
+      assert.ok(ob.margin_total < 0, 'B is booked below cost');
+      assert.equal(Number(o.loss), Math.round(-ob.margin_total * 100) / 100);
+      assert.deepEqual([o.items_at_loss, o.new_dies, o.mail_status, o.mail_to], [1, 1, 'sent', company]);
+      assert.equal(o.quotation_id, qt.body.quotations[0].id);
+      for (const x of [a, b]) {
+        const e = await enquiry(x.id);
+        assert.equal(e.status, 'ordered');
+        assert.equal(e.order_no, o.order_no);
+      }
+      // exactly one mail, to the company alone, with the table and the KLD, and no cost
+      assert.equal(G.sends.length, 1);
+      const m1 = mimeText(G.sends[0]);
+      assert.match(m1.mime, new RegExp(`^To: ${company.replace(/[.]/g, '\\.')}$`, 'm'));
+      assert.doesNotMatch(m1.mime, /^(Cc|Bcc):/mi);
+      assert.match(m1.mime, /filename="KLD [^"]+\.pdf"/);
+      for (const s of ['ORDER NEW DIE CARTON', 'ORDER OLD DIE CARTON', '6,000', `₹${rateB.toFixed(2)}`, '20 × 30 in', 'NEW DIE', o.order_no]) assert.ok(m1.body.includes(s), `mail has ${s}`);
+      assert.doesNotMatch(m1.body, /loss|margin|cost/i);
+      assert.ok(!m1.body.includes(lb.cost.toFixed(2)), 'no cost figure in the mail');
+
+      // A second press on the same rows is refused (they are on an order now).
+      assert.equal((await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: a.id, qty: 5000, rate: rateA }], mail: false })).status, 409);
+
+      // Gmail saying no never undoes the order: it is kept, the mail marked failed; Send again sends it once.
+      const c = await typed('ORDER MAIL FAILS CARTON');
+      await call('clerk', 'POST', '/costing/costings', { enquiry_id: c.id, product_name: c.product_name, size_text: c.size_text, inputs: { ...JOB, qty: 5000 } });
+      G.refuse = true;
+      const f = await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: c.id, qty: 5000, rate: 4.2 }], mail: true });
+      assert.equal(f.status, 201, JSON.stringify(f.body));
+      assert.equal(f.body.mail.status, 'failed');
+      assert.ok(f.body.mail.error);
+      assert.equal((await enquiry(c.id)).status, 'ordered');
+      G.refuse = false;
+      const again = await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`);
+      assert.equal(again.status, 200, JSON.stringify(again.body));
+      assert.equal(again.body.mail_status, 'sent');
+      assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`)).status, 409, 'sent once, never twice');
+      assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`)).status, 403);
+      assert.equal(G.sends.length, 2);
+
+      // The Orders list, under the Costing tick.
+      const list = await call('clerk', 'GET', '/costing/enquiry-orders');
+      assert.equal(list.status, 200);
+      assert.deepEqual(list.body.map(x => x.order_no).sort(), [o.order_no, f.body.order.order_no].sort());
+      assert.equal((await call('plain', 'GET', '/costing/enquiry-orders')).status, 403);
+      // The plant-wide audit log: the order number, no rate.
+      const aud = await db.q(`SELECT detail FROM audit_log WHERE entity = 'enquiry_order'`);
+      assert.ok(aud.length >= 2);
+      for (const x of aud) assert.ok(!String(x.detail).includes(String(rateB)) && !/₹/.test(String(x.detail)), x.detail);
+    } finally {
+      await db.q('DELETE FROM gmail_links');
+      for (const k of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_TOKEN_KEY', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL', 'GOOGLE_REVOKE_URL']) delete process.env[k];
+      google.close();
+    }
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });
