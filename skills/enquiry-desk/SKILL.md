@@ -107,8 +107,10 @@ file, fetch it:
    - then `gmail_query` alone, view `THREAD_VIEW_MINIMAL`: run your eye over subject, sender and snippet
      only, and keep the few that look like a request for a price the first pass missed.
    In each kept thread, take each message received on or after `since` that is not from the mailbox itself
-   and not in `known_message_ids`. POs, invoices, bank and shop mail are recognisable from the subject:
-   do not open them.
+   and not in `known_message_ids`. A search shows at most five messages of a thread, and `THREAD_VIEW_SUMMARY`
+   only its newest: open each kept thread with `get_thread`, so a new mail never hides behind a newer one
+   (12 Nov 2026: a "rate not received" reply, two minutes before a counter in the same thread, was missed).
+   POs, invoices, bank and shop mail are recognisable from the subject: do not open them.
 2. Read it: `get_message` with `PLAIN_TEXT`.
 3. **Is it an enquiry?** Someone asking us for a price, rate or quotation for printing or packaging work
    (cartons, boxes, labels, leaflets, inserts, shade cards …), a new item or a repeat at a new quantity.
