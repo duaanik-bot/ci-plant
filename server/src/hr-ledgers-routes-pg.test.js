@@ -509,14 +509,14 @@ describe('HR ledger routes through the real app', {
       [MAY_END, '1000.00', '0.00']);
     assert.equal(await count('hr.loan_holidays', `loan_id = ${loanC}`), 0, 'nothing was kept');
     assert.equal((await lineOf()).loan_recovery, '1000.00', 'the line is as it was');
-    const ok = await audited('operator', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END, impact_remark: 'Test: medical' });
+    const ok = await audited('approver', 'POST', `/hr/loans/${loanC}/holiday`, { month: MAY_END, impact_remark: 'Test: medical' });
     assert.equal(ok.body.warning, undefined);
     assert.equal((await lineOf()).loan_recovery, '0.00', 'the submitted line is worked out again');
     assert.equal((await lastAudit('loan', loanC, 'holiday')).detail.recalculated, true);
     const imp = await db.one(`SELECT detail FROM hr.audit_log WHERE action = 'impact_approved' ORDER BY id DESC LIMIT 1`);
     assert.equal(imp.detail.remark, 'Test: medical');
     refused(await call('operator', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`), 409, 'IMPACT_NEEDS_APPROVAL');
-    await audited('operator', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`, { impact_remark: 'Test: deduct after all' });
+    await audited('approver', 'DELETE', `/hr/loans/${loanC}/holiday/${MAY_END}`, { impact_remark: 'Test: deduct after all' });
     assert.equal((await lineOf()).loan_recovery, '1000.00');
 
     // A month with no run yet is kept without any warning.

@@ -55,6 +55,7 @@ import { rat, sub, neg, cmp, toPaise, fmtPaise, fmtDecimal } from './money.js';
 import { advanceBalances, loanPositions, inAppAdvancesInMonth } from './ledger.js';
 import { loanOutstanding } from './loans.js';
 import { hrAudit } from './audit.js';
+import { levelAtLeast } from './access.js';
 import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 
 const ZERO = rat(0);
@@ -883,10 +884,18 @@ export async function applyWithImpact(qc, req, { personIds, month, remark = null
     const names = new Map((await qc(`SELECT id, code, coalesce(display_name, name) AS name FROM hr.people WHERE id = ANY($1::int[])`,
       [ids])).map((p) => [p.id, p]));
     const named = (x) => ({ ...x, name: names.get(x.person_id)?.name ?? null, code: names.get(x.person_id)?.code ?? null });
+    // Only an HR approver (or admin) can approve it (owner, 2026-11-14: "yes" to restricting it to approvers). Anyone
+    // else sees the same list, with can_approve false, and the change is not made; a remark from them is refused.
+    const canApprove = levelAtLeast(req.hr?.level, 'approver');
+    if (remark && !canApprove) {
+      throw fail(403, 'IMPACT_NEEDS_APPROVER', `${what} changes payroll already worked out for ${label(month)}: `
+        + 'only an HR approver can approve that, so nothing was changed. Ask an approver to make this change',
+      { what, month, impact: needs.map(named), paid_unchanged: paid.map(named), can_approve: false });
+    }
     if (!remark) {
       throw fail(409, 'IMPACT_NEEDS_APPROVAL', `${what} changes payroll already worked out for ${label(month)}`
         + `${needs.some((x) => x.month > month) ? ' and the months after it' : ''}: check what moves, give a remark and approve it to go ahead`,
-      { what, month, impact: needs.map(named), paid_unchanged: paid.map(named) });
+      { what, month, impact: needs.map(named), paid_unchanged: paid.map(named), can_approve: canApprove });
     }
     for (const run of runs.filter((r) => needs.some((x) => x.month === r.month))) {
       await hrAudit(qc, req, 'run', run.id, 'impact_approved', {

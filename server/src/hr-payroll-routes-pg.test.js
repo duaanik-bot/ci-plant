@@ -731,7 +731,15 @@ describe('HR payroll routes through the real app', {
     refused(ask, 409, 'IMPACT_NEEDS_APPROVAL');
     assert.deepEqual([ask.body.impact[0].person_id, ask.body.impact[0].approval_undone], [A, true]);
     assert.equal((await novLine(A)).approval_status, 'approved', 'refused: nothing changed');
-    const edit = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc', impact_remark: 'Test: ok' });
+    // Only an approver can approve it (2026-11-14): an operator is told so, and a remark from them is refused.
+    assert.equal(ask.body.can_approve, false);
+    const notTheirs = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc', impact_remark: 'Test: ok' });
+    refused(notTheirs, 403, 'IMPACT_NEEDS_APPROVER');
+    assert.deepEqual([(await novLine(A)).approval_status, (await novLine(A)).payable], ['approved', before.payable], 'refused: nothing changed');
+    const asked = await call('approver', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc' });
+    refused(asked, 409, 'IMPACT_NEEDS_APPROVAL');
+    assert.equal(asked.body.can_approve, true);
+    const edit = await call('approver', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc', impact_remark: 'Test: ok' });
     assert.equal(edit.status, 200, edit.text);
     const after = await novLine(A);
     assert.equal(Number(after.payable), Number(before.payable) + 100, 'the line is worked out again');
@@ -739,7 +747,7 @@ describe('HR payroll routes through the real app', {
     assert.equal((await db.one(`SELECT status FROM hr.runs WHERE month = $1`, [NOV])).status, 'submitted');
     const undone = (await lineAudits(A, ['unapprove'])).at(-1);
     assert.deepEqual([undone.detail.via, undone.detail.reason], ['input-edit', 'Inputs changed after approval: Test: late misc']);
-    assert.equal((await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: null, reason: 'Test: back', impact_remark: 'Test: back' })).status, 200);
+    assert.equal((await call('approver', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: null, reason: 'Test: back', impact_remark: 'Test: back' })).status, 200);
     assert.equal((await novLine(A)).payable, before.payable);
 
     assert.equal((await call('approver', 'POST', `/hr/runs/${NOV}/approve`, {})).status, 200);
@@ -1014,7 +1022,7 @@ describe('HR payroll routes through the real app', {
     assert.ok(ask.body.impact.some((x) => x.month === JAN && x.person_id === A), "January's line is listed as moving");
     assert.deepEqual(await jan(), was, 'refused: nothing changed');
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.advance_txns WHERE person_id = $1 AND amount = 70`, [A])).n, 0);
-    const ok = await call('operator', 'POST', '/hr/advances', { person_id: A, amount: 70, date: '2027-01-02', for_month: DEC, impact_remark: 'Test: paid late' });
+    const ok = await call('approver', 'POST', '/hr/advances', { person_id: A, amount: 70, date: '2027-01-02', for_month: DEC, impact_remark: 'Test: paid late' });
     assert.equal(ok.status, 200, ok.text);
     assert.notDeepEqual(await jan(), was, 'January was worked out again with it');
     const audit = await db.one(`SELECT detail FROM hr.audit_log WHERE action = 'impact_approved' ORDER BY id DESC LIMIT 1`);
