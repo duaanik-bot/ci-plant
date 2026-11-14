@@ -3,8 +3,7 @@
 // provision to save and lock it as is, and unlock it."
 //
 // One row per person — everyone active, plus anyone already in the month — and one column per input a sheet would
-// carry (absent days, paid leave, OT hours, extra earning, deduction, bonus, the sheet's advance, remarks, in this
-// month). Type straight into the cells; Enter or ↓ moves down the column, ↑ up. Save sends only what changed
+// carry, as September's payroll used them (absent days, OT hours, misc, advance, contractors' bill, remarks, in month). Type straight into the cells; Enter or ↓ moves down the column, ↑ up. Save sends only what changed
 // (PUT /hr/runs/:month/inputs); in a month with no payroll yet it saves everyone listed, which starts the month.
 // Lock keeps the entries as they are (input edits, imports and recalculation wait) until someone unlocks them.
 // Editable by an operator in a draft month that is not locked; otherwise read-only, with the reason shown.
@@ -14,14 +13,15 @@ import { Button, Input, useToast } from '../../components/ui.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { refusalText } from './PersonDrawer.jsx';
 
+// The columns September 2026's payroll actually used (owner's request 2026-11-14: "keep only relevant columns").
+// Paid leave, deduction, bonus and the overrides were never used, so they are not here; one person's
+// "paid separately" stays on their line in the drawer.
 const COLS = [
   { key: 'absent_days', label: 'Absent days', num: true },
-  { key: 'paid_leave_days', label: 'Paid leave', num: true },
   { key: 'ot_hours', label: 'OT hours', num: true },
-  { key: 'misc_earning', label: 'Extra earning ₹', num: true },
-  { key: 'misc_deduction', label: 'Deduction ₹', num: true },
-  { key: 'bonus', label: 'Bonus ₹', num: true },
-  { key: 'advance_given', label: 'Advance (sheet) ₹', num: true },
+  { key: 'misc_earning', label: 'Misc ₹', num: true },
+  { key: 'advance_given', label: 'Advance ₹', num: true },
+  { key: 'bill_amount', label: 'Bill ₹ (contractors)', num: true },
   { key: 'remarks', label: 'Remarks', num: false, wide: true },
 ];
 const NUM_RE = /^\d*(\.\d{0,4})?$/;
@@ -184,7 +184,7 @@ export default function EntrySheet({ month, run, people, inputs, lines, canOpera
                       <input data-cell={`${ri}:${ci}`} value={valueOf(r.id, c.key)} disabled={!canEdit}
                         inputMode={c.num ? 'decimal' : 'text'} autoComplete="off"
                         onChange={e => setCell(r.id, c.key, e.target.value)} onKeyDown={e => move(e, ri, ci)}
-                        className={`h-7 rounded-lg border bg-white/80 px-1.5 outline-none focus:border-[#007AFF] disabled:bg-transparent disabled:text-[#515154] ${c.wide ? 'w-[160px] text-left' : 'w-[78px] text-right tabular-nums'} ${bad.has(`${r.id}:${c.key}`) ? 'border-red-400' : 'border-[#1D1D1F]/10'}`} />
+                        className={`h-7 rounded-lg border bg-white/80 px-1.5 outline-none focus:border-[#007AFF] disabled:bg-transparent disabled:text-[#515154] ${c.wide ? 'w-full min-w-[220px] text-left' : 'w-[90px] text-right tabular-nums'} ${bad.has(`${r.id}:${c.key}`) ? 'border-red-400' : 'border-[#1D1D1F]/10'}`} />
                     </td>
                   ))}
                   <td className="px-1 py-1 text-center">
