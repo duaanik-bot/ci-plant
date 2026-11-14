@@ -51,6 +51,8 @@ const ALLOW = [
   // Paying (accounts; a viewer is stopped by requireHr): batches, one line, paid / unpaid / hold, staff advances.
   ['POST', `/hr/runs/${M}/payments`], ['PUT', `/hr/runs/${M}/lines/\\d+/payment`], ['POST', `/hr/runs/${M}/lines/status`],
   ['POST', '/hr/staff-payments'], ['POST', '/hr/advances'],
+  // Activate / deactivate a person it can see (2026-11-14).
+  ['POST', '/hr/people/\\d+/deactivate'], ['POST', '/hr/people/\\d+/activate'],
   // A loan's instalment for a month, or from a month on (2026-11-14): only for a person the login can see.
   ['PUT', '/hr/loans/\\d+/month-instalment'],
   // Bulk advance sheets: the restricted login sees and enters only its visible people (routes/hr-ledgers.js).

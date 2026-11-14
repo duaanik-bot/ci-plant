@@ -594,9 +594,11 @@ async function openRunsOf(qc, personId) {
   return rows.map((x) => x.month);
 }
 
-r.post('/hr/people/:id/deactivate', requireHr('operator'), async (req, res, next) => {
+// Activate / deactivate are open to accounts too (owner, 2026-11-14), never for a person hidden from the login.
+r.post('/hr/people/:id/deactivate', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, id)) throw notThere('Person');
     const body = optBody(req);
     const reason = textOf(body.reason, 'The reason', 500);
     const given = dateOf(body.exited_on, 'The exit date');
@@ -639,9 +641,10 @@ r.post('/hr/people/:id/deactivate', requireHr('operator'), async (req, res, next
   } catch (e) { next(refusal(e)); }
 });
 
-r.post('/hr/people/:id/activate', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/people/:id/activate', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, id)) throw notThere('Person');
     await tx(async (qc, oc) => {
       const was = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
       if (!was) throw missing('Person');

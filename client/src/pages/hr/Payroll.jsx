@@ -1629,7 +1629,7 @@ export default function Payroll({ level }) {
                   title={!approvable ? 'A line can be marked paid once the month is submitted' : picked.some(r => r.approval === 'approved') ? 'Mark the ticked approved people paid' : 'Only approved people can be marked paid'}>Mark paid</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'on_hold' })}>Put on hold</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'pending' })}>Mark unpaid</Button>
-                {canOperate && (
+                {canPay && (
                   <>
                     <Button size="sm" variant="secondary" onClick={() => setStatusFor({ action: 'deactivate', people: picked.map(personOf) })}>Deactivate</Button>
                     {picked.some(r => r.person?.status === 'exited') && (
@@ -1656,7 +1656,7 @@ export default function Payroll({ level }) {
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
               onMaster={(r, tab) => setMaster({ id: toId(r.id), tab, key: ++masterKey.current, changed: false })}
               onPayStaff={canPay ? r => setPayFor(toId(r.id)) : undefined}
-              onPersonStatus={canOperate ? Object.assign((r, action) => setStatusFor({ action, people: [personOf(r)] }), { canDelete: canAdmin }) : undefined}
+              onPersonStatus={canPay ? Object.assign((r, action) => setStatusFor({ action, people: [personOf(r)] }), { canDelete: canAdmin }) : undefined}
               onSwitched={async (res, change) => {
                 const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
                 const later = list(res?.not_recalculated).map(x => monthLabel(x.month));

@@ -324,6 +324,18 @@ describe('HR accounts level and hide list', {
     assert.equal((await call('viewer', 'POST', `/hr/imports/${id}/discard`, {})).status, 403);
   });
 
+  test('accounts activates and deactivates people it can see; a hidden person is not there', T, async () => {
+    const off = ok(await call('accounts', 'POST', `/hr/people/${S}/deactivate`, { reason: 'Test: left' }));
+    assert.equal(off.body.status, 'exited');
+    ok(await call('accounts', 'POST', `/hr/people/${S}/activate`, {}));
+    for (const id of [G, P]) {
+      assert.equal((await call('accounts', 'POST', `/hr/people/${id}/deactivate`, {})).status, 404);
+      assert.equal((await call('accounts', 'POST', `/hr/people/${id}/activate`, {})).status, 404);
+    }
+    assert.equal((await call('accounts', 'DELETE', `/hr/people/${S}`)).status, 403, 'delete stays with admin');
+    assert.equal((await call('viewer', 'POST', `/hr/people/${S}/deactivate`, {})).status, 403);
+  });
+
   function refused(res, status, code) {
     assert.equal(res.status, status, res.text);
     if (code) assert.equal(res.body?.code, code, res.text);
