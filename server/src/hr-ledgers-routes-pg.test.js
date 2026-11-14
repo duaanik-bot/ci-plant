@@ -534,17 +534,20 @@ describe('HR ledger routes through the real app', {
     const audit = await lastAudit('advance', p1, 'give');
     assert.equal(audit.detail.txn_id, first.body.id);
 
-    const second = await audited('operator', 'POST', '/hr/advances', { person_id: p1, amount: 1500.5 });
+    // No payroll month chosen: the month before the date it is paid (2026-11-14), or the first open one after it.
+    assert.ok(first.body.for_month < NOW, `deducted from an earlier payroll month by default, got ${first.body.for_month}`);
+    const second = await audited('operator', 'POST', '/hr/advances', { person_id: p1, amount: 1500.5, for_month: NOW });
     assert.equal(second.body.balance, '4500.50');
     assert.equal(second.body.txn_date, plantDateStr(), 'no date means the plant\'s today');
-    const other = await audited('operator', 'POST', '/hr/advances', { person_id: String(p2), amount: '800' });
+    const other = await audited('operator', 'POST', '/hr/advances', { person_id: String(p2), amount: '800', for_month: NOW });
     assert.equal(other.body.balance, '800.00');
 
     // What payroll counts as given in the app this month: exactly the 'manual' rows.
     const { inAppAdvancesInMonth } = await import('./hr/ledger.js');
     const inApp = await inAppAdvancesInMonth(db.q, [p1, p2], NOW);
-    assert.equal(inApp.get(p1), '4500.50');
+    assert.equal(inApp.get(p1), '1500.50', 'the first was for an earlier payroll month, so not this one');
     assert.equal(inApp.get(p2), '800.00');
+    assert.equal((await inAppAdvancesInMonth(db.q, [p1], first.body.for_month)).get(p1), '3000.00', 'it counts in the month chosen');
 
     for (const [body, why] of [
       [{ person_id: p1, amount: 0 }, 'zero'], [{ person_id: p1, amount: -5 }, 'negative'], [{ person_id: p1 }, 'no amount'],
@@ -925,7 +928,7 @@ describe('HR ledger routes through the real app', {
     refused(await call('viewer', 'POST', '/hr/staff-payments', { person_id: pS, kind: 'advance', amount: 10 }), 403, 'HR_LEVEL');
 
     const res = await audited('operator', 'POST', '/hr/staff-payments',
-      { person_id: pS, kind: 'advance', amount: 2500, paid_on: `${NOW}-03`, paid_via: 'Cash', note: 'Test advance' });
+      { person_id: pS, kind: 'advance', amount: 2500, paid_on: `${NOW}-03`, paid_via: 'Cash', note: 'Test advance', for_month: NOW });
     assert.equal(res.body.kind, 'advance');
     assert.equal(res.body.loan, null);
     assert.deepEqual(res.body.warnings, []);
@@ -947,7 +950,9 @@ describe('HR ledger routes through the real app', {
     const late = await audited('operator', 'POST', '/hr/staff-payments',
       { person_id: pS, kind: 'advance', amount: 400, paid_on: '2026-06-10', paid_via: 'TPAY' });
     assert.equal(late.body.warnings.length, 1);
-    assert.match(late.body.warnings[0], new RegExp(`recovered from ${nextMonth(closed)}`));
+    assert.match(late.body.warnings[0], /deducted from/);
+    assert.equal((await db.one(`SELECT for_month FROM hr.advance_txns WHERE person_id = $1 ORDER BY id DESC LIMIT 1`, [pS])).for_month,
+      nextMonth(closed), 'the first open payroll month after the closed one');
   });
 
   test('pay staff: a loan mints the next CI-LN number, rounds the instalment UP to the rupee, and defaults the first due month', T, async () => {

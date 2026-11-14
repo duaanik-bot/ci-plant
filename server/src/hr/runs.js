@@ -725,3 +725,100 @@ export async function finaliseRun(qc, run, req) {
   }
   return done;
 }
+
+// ── The payroll month an advance is deducted in (owner's request 2026-11-14) ──────────────────────────────
+// "If we pay an advance today, ask which payroll month it is deducted from, and choose the previous month by
+// default: in November we pay October's salary." The date it is paid stays the day it is paid; this is only the
+// month whose payroll takes it up. Chosen: that month, unless its payroll is already approved or finalised (or a
+// later month is finalised), which is refused with ADVANCE_MONTH_CLOSED — or, for this person, already marked paid
+// (ADVANCE_MONTH_PAID). Not chosen: the month before the paid date, or the first open month after it.
+// Locks the month's run row (FOR UPDATE) when there is one, so call it BEFORE any person or loan lock: the lock
+// order every run write keeps (finalise: run, then people, then loans).
+const prevMonthOf = (m) => {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+};
+const nextMonthOf = (m) => {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`;
+};
+const label = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+async function monthState(qc, month, personIds) {
+  const [run] = await qc(`SELECT id, month, status FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+  const later = await laterFinalised(qc, month);
+  const closed = Boolean(later) || (run && (run.status === 'approved' || run.status === 'finalised'));
+  let paid = [];
+  if (run && !closed && personIds.length) {
+    paid = (await qc(`SELECT person_id FROM hr.run_lines WHERE run_id = $1 AND person_id = ANY($2::int[]) AND payment_status = 'paid'`,
+      [run.id, personIds])).map((r) => r.person_id);
+  }
+  return { run: run ?? null, closed, later, paid };
+}
+
+// fallback: true (a bulk sheet, whose month was set when it was made): a chosen month that is closed, or paid for this
+// person, moves to the first open month after it instead of being refused.
+export async function advanceMonthFor(qc, chosen, paidOn, personIds = [], { fallback = false } = {}) {
+  const ids = [].concat(personIds ?? []).map(Number).filter(Number.isInteger);
+  if (chosen && fallback) {
+    if (typeof chosen !== 'string' || !MONTH.test(chosen)) throw fail(400, 'BAD_MONTH', `Bad payroll month ${JSON.stringify(chosen)}`);
+    let m = chosen;
+    for (let i = 0; i < 24; i += 1) {
+      const st = await monthState(qc, m, ids);
+      if (!st.closed && !st.paid.length) return m;
+      m = nextMonthOf(m);
+    }
+    return m;
+  }
+  if (chosen) {
+    if (typeof chosen !== 'string' || !MONTH.test(chosen)) {
+      throw fail(400, 'BAD_MONTH', `The payroll month looks like 2026-10, got ${JSON.stringify(chosen)}`);
+    }
+    const st = await monthState(qc, chosen, ids);
+    if (st.closed) {
+      throw fail(409, 'ADVANCE_MONTH_CLOSED', `Payroll for ${label(chosen)} is already ${st.later ? 'closed (a later month is finalised)' : st.run.status}: `
+        + 'deduct this advance from a later month', { month: chosen });
+    }
+    if (st.paid.length) {
+      throw fail(409, 'ADVANCE_MONTH_PAID', `${st.paid.length === 1 ? 'This person is' : `${st.paid.length} people are`} already marked paid for `
+        + `${label(chosen)}: deduct the advance from a later month, or mark the salary unpaid first`, { month: chosen, person_ids: st.paid });
+    }
+    return chosen;
+  }
+  let m = prevMonthOf(String(paidOn).slice(0, 7));
+  for (let i = 0; i < 24; i += 1) {
+    const st = await monthState(qc, m, ids);
+    if (!st.closed && !st.paid.length) return m;
+    m = nextMonthOf(m);
+  }
+  return m;
+}
+
+// After an advance is given for `month`: that person's line in the month is worked out again, so the screen and
+// the payslip show it at once. A draft line is recalculated; a SUBMITTED line too, under the frozen policy, and its
+// approval for payment is undone (audited), as an input edit does. No run, no line for the person, or an approved
+// or finalised month: nothing to do (advanceMonthFor never picks those).
+export async function refreshPersonLine(qc, req, month, personId, why) {
+  const [run] = await qc(`SELECT * FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+  if (!run || (run.status !== 'draft' && run.status !== 'submitted')) return null;
+  const [has] = await qc(`SELECT 1 FROM hr.run_inputs WHERE run_id = $1 AND person_id = $2`, [run.id, personId]);
+  if (!has) return null;
+  const submitted = run.status === 'submitted';
+  let undone = null;
+  if (submitted) {
+    [undone] = await qc(
+      `SELECT id, approved_by, approved_at, approval_note FROM hr.run_lines
+        WHERE run_id = $1 AND person_id = $2 AND approval_status = 'approved' FOR UPDATE`, [run.id, personId]);
+  }
+  await recalcRun(qc, run, { personIds: [personId], submitted });
+  if (undone) {
+    const note = `${why}`.slice(0, 500);
+    await qc(`UPDATE hr.run_lines SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
+               WHERE id = $1`, [undone.id, note]);
+    await hrAudit(qc, req, 'run_line', undone.id, 'unapprove', {
+      month, run_id: run.id, person_id: personId, from: 'approved', to: 'unapproved', reason: note, via: 'advance',
+      was: { approved_by: undone.approved_by, approved_at: undone.approved_at, approval_note: undone.approval_note },
+    });
+  }
+  return run.status;
+}

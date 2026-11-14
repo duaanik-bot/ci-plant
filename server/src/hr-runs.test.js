@@ -182,7 +182,8 @@ test('ledger reads: as at month end, manual increases dated after the month are 
   const adv = fakeQc([[/hr\.advance_txns/, []]]);
   await advanceBalances(adv, [4], '2026-12');
   assert.deepEqual(adv.calls[0].params, [[4], '2027-01-01'], 'the first day after the month, the year rolling over');
-  assert.match(adv.calls[0].sql, /run_id IS NULL\s+AND kind IN \('opening', 'given', 'adjustment'\) AND txn_date >= \$2::date/);
+  assert.match(adv.calls[0].sql, /run_id IS NULL\s+AND kind IN \('opening', 'given', 'adjustment'\)\s+AND coalesce\(for_month, to_char\(txn_date, 'YYYY-MM'\)\) >= to_char\(\$2::date, 'YYYY-MM'\)/,
+    "an advance's month is its for_month (2026-11-14), else the month it is dated in");
   const loans = fakeQc([[/FROM hr\.loans/, [
     { id: 11, loan_no: 'CI-LN-0011', person_id: 4, instalment: '1000.00', first_due_month: '2026-07', status: 'active' },
   ]], [/FROM hr\.loan_txns/, []], [/FROM hr\.loan_holidays/, []]]);
@@ -204,13 +205,14 @@ test('ledger reads: an advance kind nobody knows throws instead of counting as n
   }
 });
 
-test('ledger reads: in-app advances of a month are manual given rows dated inside it', async () => {
+test('ledger reads: in-app advances of a month are manual given rows for that payroll month', async () => {
   const qc = fakeQc([[/hr\.advance_txns/, [{ person_id: 4, amount: '1500.00' }]]]);
   assert.deepEqual(await inAppAdvancesInMonth(qc, [4], '2026-12'), new Map([[4, '1500.00']]));
   const { sql, params } = qc.calls[0];
   assert.match(sql, /kind = 'given'/);
   assert.match(sql, /source = 'manual'/);
-  assert.deepEqual(params, [[4], '2026-12-01', '2027-01-01'], 'a half-open month, the year rolling over');
+  assert.match(sql, /coalesce\(for_month, to_char\(txn_date, 'YYYY-MM'\)\) = \$2/, 'the payroll month chosen, else the month it is dated in');
+  assert.deepEqual(params, [[4], '2026-12']);
 });
 
 test('ledger reads: loan positions are active loans oldest first, with dueForMonth over their txns and holidays', async () => {

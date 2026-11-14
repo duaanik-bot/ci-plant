@@ -470,14 +470,15 @@ const ADV_OUT = new Set(['recovered', 'waived']);
 
 function GiveAdvanceDialog({ people, personId = '', onClose, onDone }) {
   const toast = useToast();
-  const [f, setF] = useState({ person_id: personId ? String(personId) : '', amount: '', txn_date: plantToday(), note: '' });
+  const [f, setF] = useState({ person_id: personId ? String(personId) : '', amount: '', txn_date: plantToday(), note: '',
+    for_month: shiftMonth(plantMonth(), -1) });
   const set = (k, v) => setF(c => ({ ...c, [k]: v }));
   const submit = async () => {
     if (!f.person_id) return 'Choose the person.';
     const a = amountCheck(f.amount, 'the advance');
     if (a.error) return a.error;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.txn_date)) return 'Enter the date it was given.';
-    await hrApi.giveAdvance({ person_id: Number(f.person_id), amount: a.value, txn_date: f.txn_date, note: f.note.trim() || null });
+    if (!MONTH_RE.test(f.for_month || '')) return 'Choose the payroll month it is deducted from.';
+    await hrApi.giveAdvance({ person_id: Number(f.person_id), amount: a.value, txn_date: plantToday(), for_month: f.for_month, note: f.note.trim() || null });
     toast.success('Advance recorded');
     onDone();
     return undefined;
@@ -487,10 +488,13 @@ function GiveAdvanceDialog({ people, personId = '', onClose, onDone }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2"><PersonSelect people={people} value={f.person_id} onChange={v => set('person_id', v)} /></div>
         <Field label="Amount (₹)" required><Input inputMode="decimal" autoComplete="off" value={f.amount} onChange={e => set('amount', e.target.value)} /></Field>
-        <Field label="Given on" required><Input type="date" value={f.txn_date} onChange={e => set('txn_date', e.target.value)} /></Field>
+        <Field label="Given on" hint="Today: an advance is recorded the day it is paid."><Input type="date" value={f.txn_date} disabled readOnly /></Field>
+        <Field label="Deduct from the payroll of" required hint="Last month by default: in November, October's salary is paid." className="sm:col-span-2">
+          <Input type="month" value={f.for_month} onChange={e => set('for_month', e.target.value)} />
+        </Field>
         <Field label="Note" className="sm:col-span-2"><Input autoComplete="off" value={f.note} onChange={e => set('note', e.target.value)} /></Field>
       </div>
-      <p className="text-[11px] text-[#86868B]">It counts in the balance straight away and is recovered from the payroll of the month it is dated in (the next open month if that one is already finalised); an earlier month’s payroll does not take it.</p>
+      <p className="text-[11px] text-[#86868B]">It counts in the balance straight away and is recovered from the payroll of the month chosen. A month already approved, finalised or paid for this person is refused — choose a later one.</p>
     </Dialog>
   );
 }

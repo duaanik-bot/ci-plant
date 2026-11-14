@@ -2864,6 +2864,7 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261105120000_hr_access_privacy.sql'));
   // HR bulk advance sheets (hr.advance_sheets, hr.advance_sheet_lines) — 2026-11-05
   await pool.query(migration('20261105150000_hr_advance_sheets.sql'));
+  await pool.query(migration('20261114120000_hr_entry_lock_advance_month.sql'));
 
   // COA Register — the Drive COA register mirrored in (no link to plant data),
   // and users.coa_download. Idempotent. 2026-10-17

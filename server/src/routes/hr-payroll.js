@@ -284,7 +284,7 @@ async function userNames(qx, ids) {
 
 // ── Runs: shared pieces ─────────────────────────────────────────────────────
 
-const RUN_BY = ['prepared_by', 'submitted_by', 'approved_by', 'finalised_by', 'sent_back_by'];
+const RUN_BY = ['prepared_by', 'submitted_by', 'approved_by', 'finalised_by', 'sent_back_by', 'inputs_locked_by'];
 
 function runWithNames(run, names) {
   if (!run) return null;
@@ -306,6 +306,13 @@ function runLocked(month, status) {
     ? `Payroll for ${monthLabel(month)} is finalised and can no longer change: put corrections into the next month as adjustments`
     : `Payroll for ${monthLabel(month)} is ${status}: imports and input changes are refused until an approver sends it back`,
   'RUN_LOCKED');
+}
+
+// A draft month's entries locked as they are (2026-11-14): input edits, bulk entry, sheet imports and recalculation
+// wait until someone unlocks them. Submitting still works.
+function refuseLockedInputs(run, month) {
+  if (!run.inputs_locked_at) return;
+  throw fail(409, `${monthLabel(month)}'s entries are locked as they are: unlock them to change anything`, 'INPUTS_LOCKED');
 }
 
 const runState = (run, wanted, action) =>
@@ -522,9 +529,10 @@ async function rowContext(qx, month, rows) {
     const later = await qx(
       `SELECT person_id, amount::text AS amount, txn_date::text AS txn_date
          FROM hr.advance_txns
-        WHERE person_id = ANY($1::int[]) AND kind = 'given' AND source = 'manual' AND txn_date >= $2::date
+        WHERE person_id = ANY($1::int[]) AND kind = 'given' AND source = 'manual'
+          AND coalesce(for_month, to_char(txn_date, 'YYYY-MM')) > $2
         ORDER BY person_id, txn_date, id`,
-      [ids, `${nextMonth(month)}-01`]);
+      [ids, month]);
     for (const t of later) {
       if (!after.has(t.person_id)) after.set(t.person_id, []);
       after.get(t.person_id).push(t);
@@ -1053,6 +1061,7 @@ r.post('/hr/imports/:id/apply', requireHr('operator'), async (req, res, next) =>
       await ensureRun(qc, month, userId);
       const run = await lockRunOf(qc, month);
       if (run.status !== 'draft') throw runLocked(month, run.status);
+      refuseLockedInputs(run, month);
       const batch = await lockBatch(qc, id);
       if (batch.status === 'discarded') throw fail(409, 'This upload was discarded', 'IMPORT_STATE');
 
@@ -1293,7 +1302,8 @@ async function carriedInto(qx, month, exclude = []) {
   }));
 }
 
-r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
+// The month as GET /hr/runs/:month answers it (also the answer of bulk entry, lock and unlock).
+async function runResponse(req, res, next) {
   try {
     const month = monthOf(req.params.month);
     const [run] = await q(`SELECT * FROM hr.runs WHERE month = $1`, [month]);
@@ -1346,7 +1356,8 @@ r.get('/hr/runs/:month', requireHr('viewer'), async (req, res, next) => {
       carried_forward: await carriedInto(q, month, ex),
     });
   } catch (e) { next(e); }
-});
+}
+r.get('/hr/runs/:month', requireHr('viewer'), runResponse);
 
 // ── PUT /hr/runs/:month/inputs/:personId — inputs typed by hand ─────────────
 
@@ -1407,6 +1418,7 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
       // policy, and their approval for payment — if given — is undone, since the amount it approved has moved.
       const submitted = run.status === 'submitted';
       if (run.status !== 'draft' && !submitted) throw runLocked(month, run.status);
+      refuseLockedInputs(run, month);
       if (submitted) {
         const [paidLine] = await qc(
           `SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND person_id = $2 AND payment_status = 'paid'`, [run.id, personId]);
@@ -1453,6 +1465,94 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
   } catch (e) { next(e); }
 });
 
+// ── PUT /hr/runs/:month/inputs — many people's inputs typed by hand at once (2026-11-14) ──────────────────────
+// "When we come to a new payroll month we should have the list of employees, so that if there is no sheet we can take
+// manual entries in bulk, or edit them." { rows: [{ person_id, …fields }], reason? }. Operator, a DRAFT month (the
+// month is started here when it has no run yet), not locked. Each row changes only the fields it sends, as the
+// one-person route does; a person with no inputs yet starts from a blank row and joins the month. One recalculation
+// for the people sent; one audit row per input that changed. Answers the month as GET /hr/runs/:month does.
+r.put('/hr/runs/:month/inputs', requireHr('operator'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const body = bodyOf(req);
+    const reason = textOf(body.reason, 'The reason', 500) || 'Entered by hand';
+    if (!Array.isArray(body.rows) || !body.rows.length) throw bad('Send at least one person\'s inputs');
+    if (body.rows.length > 2000) throw bad('Too many rows at once');
+    const wanted = new Map();
+    for (const raw of body.rows) {
+      const personId = personIdOf(raw?.person_id, 'person_id');
+      if (wanted.has(personId)) throw bad('A person appears twice in the rows');
+      const { person_id: _ignored, ...fields } = raw;
+      wanted.set(personId, inputPatchOf(fields));
+    }
+    const ids = [...wanted.keys()].sort((a, b) => a - b);
+    assertPayVisible(req, ids);
+    const userId = userIdOf(req);
+
+    await tx(async (qc) => {
+      const found = await qc(`SELECT id FROM hr.people WHERE id = ANY($1::int[])`, [ids]);
+      if (found.length !== ids.length) throw notFound('Person');
+      await ensureRun(qc, month, userId);
+      const run = await lockRunOf(qc, month);
+      if (run.status !== 'draft') throw runLocked(month, run.status);
+      refuseLockedInputs(run, month);
+      const before = new Map((await qc(
+        `SELECT id, person_id, ${INPUT_EXACT} FROM hr.run_inputs WHERE run_id = $1 AND person_id = ANY($2::int[])
+          ORDER BY person_id FOR UPDATE`, [run.id, ids])).map((b) => [b.person_id, b]));
+      const rows = [];
+      for (const personId of ids) {
+        const was = before.get(personId);
+        const after = { ...(was ?? blankInput(true)), ...wanted.get(personId) };
+        const row = { person_id: personId, source_row_id: was?.source_row_id ?? null, advance_mode: after.advance_mode ?? 'total',
+          include: after.include !== false, remarks: after.remarks ?? null, paid_separately_note: after.paid_separately_note ?? null };
+        for (const c of INPUT_NUMBERS) row[c] = after[c] ?? null;
+        const changes = inputChanges(was, row);
+        if (was && !Object.keys(changes).length) continue;
+        rows.push({ row, was, changes });
+      }
+      if (!rows.length) return;
+      const saved = await qc(UPSERT_INPUTS, [run.id, 'manual', userId, jsonForPg(rows.map((x) => x.row))]);
+      const savedId = new Map(saved.map((x) => [x.person_id, x.id]));
+      await recalcRun(qc, run, { personIds: rows.map((x) => x.row.person_id) });
+      for (const x of rows) {
+        await hrAudit(qc, req, 'run_input', savedId.get(x.row.person_id), x.was ? 'edit' : 'create', {
+          month, run_id: run.id, person_id: x.row.person_id, reason, was: x.was ? x.was.source : null, changes: x.changes, via: 'bulk-entry',
+        });
+      }
+    });
+    req.params.month = month;
+    return runResponse(req, res, next);
+  } catch (e) { next(e); }
+});
+
+// ── POST /hr/runs/:month/inputs/lock · /unlock — keep a draft month's entries as they are (2026-11-14) ──────────
+// "Give the provision to save and lock it as is, and unlock it." Operator; a draft month only. While locked, input
+// edits, bulk entry, sheet imports and recalculation are refused (INPUTS_LOCKED); submit still works, and sending a
+// month back leaves the lock as it was. Each is audited.
+const inputsLockRoute = (action) => async (req, res, next) => {
+    try {
+      const month = monthOf(req.params.month);
+      const reason = textOf(bodyOf(req).reason, 'The reason', 500);
+      const userId = userIdOf(req);
+      await tx(async (qc) => {
+        const run = await lockRunOf(qc, month);
+        if (run.status !== 'draft') throw runLocked(month, run.status);
+        const locked = Boolean(run.inputs_locked_at);
+        if (locked === (action === 'lock')) return;
+        await qc(action === 'lock'
+          ? `UPDATE hr.runs SET inputs_locked_by = $2, inputs_locked_at = now() WHERE id = $1`
+          : `UPDATE hr.runs SET inputs_locked_by = NULL, inputs_locked_at = NULL WHERE id = $1`,
+        action === 'lock' ? [run.id, userId] : [run.id]);
+        await hrAudit(qc, req, 'run', run.id, action === 'lock' ? 'lock_inputs' : 'unlock_inputs', {
+          month, reason: reason ?? null, ...(locked ? { was: { by: run.inputs_locked_by, at: run.inputs_locked_at } } : {}),
+        });
+      });
+      return runResponse(req, res, next);
+    } catch (e) { next(e); }
+};
+r.post('/hr/runs/:month/inputs/lock', requireHr('operator'), inputsLockRoute('lock'));
+r.post('/hr/runs/:month/inputs/unlock', requireHr('operator'), inputsLockRoute('unlock'));
+
 // ── POST /hr/runs/:month/recalc ─────────────────────────────────────────────
 
 r.post('/hr/runs/:month/recalc', requireHr('operator'), async (req, res, next) => {
@@ -1461,6 +1561,7 @@ r.post('/hr/runs/:month/recalc', requireHr('operator'), async (req, res, next) =
     const run = await tx(async (qc) => {
       const locked = await lockRunOf(qc, month);
       if (locked.status !== 'draft') throw runLocked(month, locked.status);
+      refuseLockedInputs(locked, month);
       const { run: updated, lines } = await recalcRun(qc, locked);
       await hrAudit(qc, req, 'run', locked.id, 'recalc', { month, lines: lines.length });
       return updated;

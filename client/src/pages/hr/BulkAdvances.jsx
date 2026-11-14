@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, CornerUpLeft, Plus, Send, Trash2, X } from 'lucide-react';
 import { Button, DataTable, Field, Input, Modal, Select, useToast } from '../../components/ui.jsx';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
-import { list, paiseOf, plantMonth } from './RunLineDrawer.jsx';
+import { list, paiseOf, plantMonth, plantToday, shiftMonth } from './RunLineDrawer.jsx';
 import { InlineError, refusalText } from './PersonDrawer.jsx';
 
 const STATUS = {
@@ -38,8 +38,9 @@ function Tile({ label, value, sub, tone = '' }) {
 }
 
 function NewSheet({ channels, onClose, onMade }) {
-  const [month, setMonth] = useState(plantMonth());
-  const [paidOn, setPaidOn] = useState('');
+  // Last month by default (2026-11-14): advances paid in November are deducted from October's payroll.
+  const [month, setMonth] = useState(shiftMonth(plantMonth(), -1));
+  const [paidOn, setPaidOn] = useState(plantToday());
   const [via, setVia] = useState('cash');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -51,8 +52,8 @@ function NewSheet({ channels, onClose, onMade }) {
     <Modal open onClose={onClose} title="New bulk advance sheet"
       footer={<div className="flex w-full justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={make} disabled={busy || !month}>{busy ? 'Making…' : 'Make the sheet'}</Button></div>}>
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="For the payroll month" hint="The advances are recovered from this month's pay."><Input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
-        <Field label="Paid on" hint="Blank: today, or a date inside that month."><Input type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /></Field>
+        <Field label="Deduct from the payroll of" hint="Last month by default: in November, October's salary is paid."><Input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
+        <Field label="Paid on" hint="Today by default; not before that payroll month starts."><Input type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /></Field>
         <Field label="Paid via">
           <Select value={via} onChange={e => setVia(e.target.value || 'cash')}
             options={[{ value: 'cash', label: 'Cash' }, ...list(channels).map(c => ({ value: c.code, label: c.label || c.code }))]} />

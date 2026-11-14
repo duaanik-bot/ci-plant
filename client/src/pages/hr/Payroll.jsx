@@ -64,6 +64,7 @@ import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/h
 import { storage } from '../../lib/safeStorage.js';
 import ImportWizard, { batchSummary } from './ImportWizard.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
+import EntrySheet from './EntrySheet.jsx';
 import PersonCards from './PersonCards.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
@@ -91,7 +92,7 @@ const payBucket = l => { const s = payStatus(l); return s === 'paid' ? 'paid' : 
 const PAY_FILTERS = ['pending', 'paid', 'on_hold', 'failed', 'reversed'];
 const APPROVAL_FILTERS = ['approved', 'unapproved'];
 const LAYOUT_KEY = 'hr.payroll.layout';
-const readLayout = () => { try { return storage.getItem(LAYOUT_KEY) === 'table' ? 'table' : 'cards'; } catch { return 'cards'; } };
+const readLayout = () => { try { const v = storage.getItem(LAYOUT_KEY); return v === 'table' || v === 'entry' ? v : 'cards'; } catch { return 'cards'; } };
 
 // ── The upload this browser left unapplied, per month ───────────────────────
 // A fallback only. GET /hr/runs/:month carries pending_import (the month's latest parsed upload, made
@@ -1381,13 +1382,20 @@ export default function Payroll({ level }) {
           ) : canOperate ? (
             <>
               <p className="mt-1 text-xs text-[#6E6E73]">
-                Import the month’s sheet: its rows are matched to people and checked, and nothing is applied until you say so.
+                Import the month’s sheet — its rows are matched to people and checked, and nothing is applied until you say so —
+                or type the month by hand in the entry sheet below.
               </p>
               <Button className="mt-4" onClick={() => openWizard(null)}><FileUp size={14} /> Import the sheet</Button>
             </>
           ) : (
             <p className="mt-1 text-xs text-[#6E6E73]">Nothing has been prepared for this month yet.</p>
           )}
+        </div>
+      )}
+      {here && !run && !monthClosed && (
+        <div className="mt-3">
+          <EntrySheet month={month} run={null} people={people} inputs={[]} lines={[]} canOperate={canOperate}
+            monthClosed={monthClosed} onSaved={load} />
         </div>
       )}
 
@@ -1547,7 +1555,7 @@ export default function Payroll({ level }) {
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">View</span>
               <SubTabs active={layout} onChange={setLayout}
-                views={[{ key: 'cards', label: 'People' }, { key: 'table', label: 'Full table' }]} />
+                views={[{ key: 'cards', label: 'People' }, { key: 'table', label: 'Full table' }, { key: 'entry', label: run?.inputs_locked_at ? 'Entry sheet 🔒' : 'Entry sheet' }]} />
               {layout === 'table' && (
                 <>
                   <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Group</span>
@@ -1620,7 +1628,10 @@ export default function Payroll({ level }) {
               {approvable && !canApprove && <span className="w-full text-[11px] text-[#515154]">Approve and Unapprove need HR approver access; only approved people can be marked paid.</span>}
             </div>
           )}
-          {layout === 'cards' ? (
+          {layout === 'entry' ? (
+            <EntrySheet month={month} run={run} people={people} inputs={inputs} lines={lines} canOperate={canOperate}
+              monthClosed={false} onSaved={load} />
+          ) : layout === 'cards' ? (
             <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate} canSelect={canPay}
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}

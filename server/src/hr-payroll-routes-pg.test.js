@@ -953,6 +953,51 @@ describe('HR payroll routes through the real app', {
     assert.ok(every.body.lines.length >= res.body.lines.length);
   });
 
+  test('a month with no sheet: bulk entry by hand, lock it as it is, unlock it', T, async () => {
+    const JAN = '2027-01';
+    refused(await call('viewer', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: 1 }] }), 403, 'HR_LEVEL');
+    const first = await call('operator', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: 1, ot_hours: 2 }, { person_id: B, absent_days: 0 }] });
+    assert.equal(first.status, 200, first.text);
+    assert.equal(first.body.run.status, 'draft', 'the month was started by the entry');
+    assert.deepEqual(first.body.inputs.map((i) => i.person_id).sort((x, y) => x - y), [A, B].sort((x, y) => x - y));
+    assert.equal(first.body.lines.length, 2, 'each person has a line worked out');
+    const again = await call('operator', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: 3 }] });
+    assert.equal(again.status, 200, again.text);
+    const a = again.body.inputs.find((i) => i.person_id === A);
+    assert.equal(Number(a.absent_days), 3);
+    assert.equal(Number(a.ot_hours), 2, 'a field not sent stays as it was');
+    refused(await call('operator', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: -1 }] }), 400, undefined);
+
+    const lock = await call('operator', 'POST', `/hr/runs/${JAN}/inputs/lock`, {});
+    assert.equal(lock.status, 200, lock.text);
+    assert.ok(lock.body.run.inputs_locked_at, 'locked');
+    refused(await call('operator', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: 4 }] }), 409, 'INPUTS_LOCKED');
+    refused(await call('operator', 'PUT', `/hr/runs/${JAN}/inputs/${A}`, { absent_days: 4, reason: 'Test' }), 409, 'INPUTS_LOCKED');
+    refused(await call('operator', 'POST', `/hr/runs/${JAN}/recalc`, {}), 409, 'INPUTS_LOCKED');
+    const unlock = await call('operator', 'POST', `/hr/runs/${JAN}/inputs/unlock`, {});
+    assert.equal(unlock.status, 200, unlock.text);
+    assert.equal(unlock.body.run.inputs_locked_at, null);
+    assert.equal((await call('operator', 'PUT', `/hr/runs/${JAN}/inputs`, { rows: [{ person_id: A, absent_days: 4 }] })).status, 200);
+  });
+
+  test('an advance is deducted in the payroll month chosen; by default the month before it is paid', T, async () => {
+    const JAN = '2027-01';
+    const before = await db.one(`SELECT l.advance_recovery::text AS r FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [JAN, A]);
+    const given = await call('operator', 'POST', '/hr/advances', { person_id: A, amount: 100, date: '2027-02-05', for_month: JAN });
+    assert.equal(given.status, 200, given.text);
+    assert.equal(given.body.for_month, JAN);
+    assert.equal(given.body.txn_date, '2027-02-05', 'the day it is paid is kept');
+    const after = await db.one(`SELECT l.advance_recovery::text AS r FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [JAN, A]);
+    assert.notEqual(after.r, before.r, "January's line was worked out again with the advance in it");
+    const dflt = await call('operator', 'POST', '/hr/advances', { person_id: B, amount: 50, date: '2027-02-10' });
+    assert.equal(dflt.status, 200, dflt.text);
+    assert.equal(dflt.body.for_month, JAN, 'paid in February: deducted from January by default');
+    refused(await call('operator', 'POST', '/hr/advances', { person_id: A, amount: 10, for_month: '2026-11' }), 409, 'ADVANCE_MONTH_CLOSED');
+    const staff = await call('operator', 'POST', '/hr/staff-payments', { person_id: B, kind: 'advance', amount: 25, paid_on: '2027-02-11', for_month: JAN });
+    assert.equal(staff.status, 200, staff.text);
+    assert.equal((await db.one(`SELECT for_month FROM hr.advance_txns WHERE person_id = $1 ORDER BY id DESC LIMIT 1`, [B])).for_month, JAN);
+  });
+
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {
     const actions = new Set((await db.q(`SELECT entity || ':' || action AS a FROM hr.audit_log`)).map((x) => x.a));
     for (const a of ['import:upload', 'import:map', 'import_row:decide', 'import:apply', 'import:discard', 'run_input:edit', 'run:submit',

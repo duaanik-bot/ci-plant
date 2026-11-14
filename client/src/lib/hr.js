@@ -227,6 +227,12 @@ export const hrApi = {
   run: month => api.get(`/hr/runs/${seg(month)}`),
   // PUT /hr/runs/:month/inputs/:personId — operator. The input fields plus a `reason`.
   saveRunInput: (month, personId, input) => api.put(`/hr/runs/${seg(month)}/inputs/${seg(personId)}`, input),
+  // PUT /hr/runs/:month/inputs — operator. Many people's inputs at once ({ rows: [{ person_id, …fields }], reason? });
+  // starts the month when it has no run. Answers the month as runMonth does.
+  saveRunInputs: (month, rows, reason) => api.put(`/hr/runs/${seg(month)}/inputs`, { rows, ...(reason ? { reason } : {}) }),
+  // POST /hr/runs/:month/inputs/lock · unlock — operator, a draft month: keep its entries as they are, or open them again.
+  lockRunInputs: (month, reason) => api.post(`/hr/runs/${seg(month)}/inputs/lock`, reason ? { reason } : {}),
+  unlockRunInputs: (month, reason) => api.post(`/hr/runs/${seg(month)}/inputs/unlock`, reason ? { reason } : {}),
   // POST /hr/runs/:month/recalc — operator.
   recalcRun: month => api.post(`/hr/runs/${seg(month)}/recalc`, {}),
   // POST /hr/runs/:month/submit — operator.

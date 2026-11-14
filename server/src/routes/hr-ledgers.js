@@ -80,7 +80,7 @@ import { hrGuard, requireHr } from '../hr/access.js';
 import { assertPayVisible, canSeePay, hiddenIds } from '../hr/privacy.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
-import { recalcRun } from '../hr/runs.js';
+import { advanceMonthFor, recalcRun, refreshPersonLine } from '../hr/runs.js';
 import { advanceBalances } from '../hr/ledger.js';
 import { dueForMonth, loanOutstanding, nextMonth, projectSchedule } from '../hr/loans.js';
 import { normCode, normName } from '../hr/match.js';
@@ -680,11 +680,18 @@ function runningBalances(rows) {
 }
 
 // One row in the advance ledger. `txnType` is the ledger's kind column: given, waived or opening here.
-const postAdvance = (oc, req, personId, txnType, amount, date, source, note) => oc(
-  `INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note, created_by)
-   VALUES ($1, $2::date, $3, $4, $5, $6, $7)
-   RETURNING id, person_id, txn_date::text AS txn_date, kind, amount::text AS amount, source, note, created_by, created_at`,
-  [personId, date, txnType, amount, source, note, req.user.id]);
+// forMonth (a 'given' advance, 2026-11-14): the payroll month it is deducted in; null keeps the month of `date`.
+const postAdvance = (oc, req, personId, txnType, amount, date, source, note, forMonth = null) => oc(
+  `INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note, created_by, for_month)
+   VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)
+   RETURNING id, person_id, txn_date::text AS txn_date, kind, amount::text AS amount, source, note, created_by, created_at, for_month`,
+  [personId, date, txnType, amount, source, note, req.user.id, forMonth]);
+const prevMonthOf = (m) => {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+};
+const forMonthOf = (raw) => (blank(raw) ? null : monthOf(raw, 'The payroll month it is deducted in'));
+const monthWord = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 // Everyone with an advance history, with what they owe now.
 r.get('/hr/advances', requireHr('viewer'), async (req, res, next) => {
@@ -722,11 +729,15 @@ r.post('/hr/advances', requireHr('accounts'), async (req, res, next) => {
     const amount = positiveOf(body.amount, 'The advance');
     const date = dateOf(body.txn_date ?? body.date, 'The date') ?? plantDateStr();
     const note = textOf(body.note, 'The note', 500);
+    const wanted = forMonthOf(body.for_month);
     const out = await tx(async (qc, oc) => {
+      // The payroll month first: it locks that month's run, before any person row (the run → people order).
+      const forMonth = await advanceMonthFor(qc, wanted, date, [personId]);
       if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw bad('That person does not exist');
-      const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note);
+      const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note, forMonth);
+      await refreshPersonLine(qc, req, forMonth, personId, `Advance of ${money(amount)} given for ${monthWord(forMonth)}`);
       const balance = (await advanceBalances(qc, [personId])).get(personId);
-      await hrAudit(qc, req, 'advance', personId, 'give', { txn_id: row.id, amount: money(amount), date, balance_after: balance });
+      await hrAudit(qc, req, 'advance', personId, 'give', { txn_id: row.id, amount: money(amount), date, for_month: forMonth, balance_after: balance });
       return { ...row, balance };
     });
     res.json(out);
@@ -816,6 +827,7 @@ function readStaffPayment(body) {
     note: textOf(body.note, 'The note', 500),
     instalments: null,
     firstDue: null,
+    forMonth: forMonthOf(body.for_month),
   };
   if (out.paidVia.toLowerCase() === CASH) out.paidVia = CASH;
   if (kind === 'loan') {
@@ -937,14 +949,16 @@ async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payme
 
     if (pay.kind === 'advance') {
       const note = pay.note ? `Paid via ${via} · ${pay.note}` : `Paid via ${via}`;
-      const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note);
+      const forMonth = pay.forMonth ?? open;
+      const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note, forMonth);
+      await refreshPersonLine(qc, req, forMonth, pay.personId, `Advance of ${money(pay.amount)} given for ${monthWord(forMonth)}`);
       const balance = (await advanceBalances(qc, [pay.personId])).get(pay.personId);
-      if (open !== paidMonth) {
-        warnings.push(`Payroll for ${paidMonth}, the month this advance was given in, is already finalised, so it is `
-          + `recovered from ${open}, the next open payroll month`);
+      if (pay.wantedMonth && pay.wantedMonth !== forMonth) {
+        warnings.push(`${person.name}: payroll for ${monthWord(pay.wantedMonth)} is closed or already paid, so the advance is `
+          + `deducted from ${monthWord(forMonth)}`);
       }
       await hrAudit(qc, req, 'advance', pay.personId, 'give', {
-        via: viaDoor, txn_id: row.id, amount: money(pay.amount), date: pay.paidOn, paid_via: pay.paidVia,
+        via: viaDoor, txn_id: row.id, amount: money(pay.amount), date: pay.paidOn, paid_via: pay.paidVia, for_month: forMonth,
         balance_after: balance,
       });
       return { type: 'advance', advanceId: row.id, loanId: null, warnings };
@@ -981,6 +995,12 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       // The loan number FIRST, before any row lock (helpers.js document-number lock order).
       const loanNo = pay.kind === 'loan' ? await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc) : null;
+      // An advance's payroll month next: it locks that month's run before the person row (the run → people order).
+      if (pay.kind === 'advance') {
+        const natural = pay.forMonth ?? prevMonthOf(pay.paidOn.slice(0, 7));
+        pay.forMonth = await advanceMonthFor(qc, pay.forMonth, pay.paidOn, [pay.personId]);
+        if (pay.forMonth !== natural) pay.wantedMonth = natural;   // the default month was closed: say where it went
+      }
       return postStaffPayment(qc, oc, req, pay, loanNo);
     });
 
@@ -1065,14 +1085,14 @@ async function sheetView(req, id) {
 // The date a sheet's advances are paid must fall inside its payroll month: payroll takes an advance up in the month
 // it is given. Left blank: today when the month is this one, else the month's last day (an earlier month) or its
 // first (a later one).
+// The sheet's month is the payroll month the advances are deducted in (2026-11-14: October's payroll is paid in
+// November, so an advance paid on 25 Nov can be for October). The date it is paid defaults to today; it cannot be in
+// the future, nor before the payroll month starts.
 function sheetPaidOn(month, raw) {
   const today = plantDateStr();
-  const last = `${month}-${String(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()).padStart(2, '0')}`;
-  const paidOn = dateOf(raw, 'The date it is paid')
-    ?? (today.slice(0, 7) === month ? today : month < today.slice(0, 7) ? last : `${month}-01`);
-  if (paidOn.slice(0, 7) !== month) {
-    throw bad(`The date it is paid must fall in ${month}: payroll takes an advance up in the month it is given`);
-  }
+  const paidOn = dateOf(raw, 'The date it is paid') ?? (today >= `${month}-01` ? today : `${month}-01`);
+  if (paidOn < `${month}-01`) throw bad(`The date it is paid cannot be before ${monthWord(month)} starts`);
+  if (paidOn > today && paidOn.slice(0, 7) !== month) throw bad('The date it is paid cannot be in the future');
   return paidOn;
 }
 
@@ -1142,7 +1162,7 @@ r.put('/hr/advance-sheets/:id', requireHr('accounts'), async (req, res, next) =>
       if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'changed');
       const month = blank(body.month) ? sheet.month : monthOf(body.month, 'The payroll month');
       const kept = sheet.paid_on;
-      const paidOn = sheetPaidOn(month, blank(body.paid_on) ? (kept.slice(0, 7) === month ? kept : null) : body.paid_on);
+      const paidOn = sheetPaidOn(month, blank(body.paid_on) ? (kept >= `${month}-01` ? kept : null) : body.paid_on);
       let paidVia = blank(body.paid_via) ? sheet.paid_via : textOf(body.paid_via, 'Paid via', 60, true);
       if (paidVia.toLowerCase() === CASH) paidVia = CASH;
       if (paidVia !== CASH && !(await oc(`SELECT code FROM hr.pay_channels WHERE code = $1`, [paidVia]))) {
@@ -1303,6 +1323,11 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
       for (const l of lines) if (l.kind === 'loan') loanNos.set(l.id, await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc));
       const paidOn = sheet.paid_on;
       const warnings = [];
+      // Every advance's payroll month BEFORE any person row is locked (the run → people order finalise keeps).
+      const forMonths = new Map();
+      for (const l of lines) {
+        if (l.kind === 'advance') forMonths.set(l.id, await advanceMonthFor(qc, sheet.month, paidOn, [l.person_id], { fallback: true }));
+      }
       for (const l of lines) {
         const pay = {
           personId: l.person_id, kind: l.kind, amount: money(l.amount), paidOn, paidVia: sheet.paid_via,
@@ -1310,6 +1335,9 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
           instalments: l.kind === 'loan' ? l.instalments : null,
           firstDue: l.kind === 'loan' ? nextMonth(sheet.month) : null,
           purpose: l.purpose ?? null,
+          // The sheet's month is the payroll month it is deducted in; closed or already paid → the next open one.
+          wantedMonth: l.kind === 'advance' ? sheet.month : null,
+          forMonth: forMonths.get(l.id) ?? null,
         };
         const out = await postStaffPayment(qc, oc, req, pay, loanNos.get(l.id) ?? null, 'advance_sheet');
         warnings.push(...out.warnings);

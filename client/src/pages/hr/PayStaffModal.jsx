@@ -196,6 +196,9 @@ function Choice({ on, onClick, children, disabled }) {
 const blankForm = personId => ({
   staff: personId != null ? 'yes' : null, person: personId != null ? String(personId) : '', kind: 'advance',
   amount: '', date: plantToday(), via: 'cash', instalments: '', firstDue: '', note: '',
+  // The payroll month an advance is deducted in (2026-11-14): the month before by default — in November, October's
+  // salary is paid.
+  forMonth: shiftMonth(plantToday().slice(0, 7), -1),
 });
 
 export default function PayStaffModal({ personId = null, people: givenPeople = null, channels: givenChannels = null, onClose, onDone }) {
@@ -264,6 +267,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
       person_id: Number(form.person), kind: form.kind, amount: String(form.amount).trim(), paid_on: form.date,
       paid_via: form.via || 'cash', note: form.note.trim() || null,
     };
+    if (form.kind === 'advance') body.for_month = form.forMonth || null;
     if (form.kind === 'loan') {
       body.instalments = n;
       if (form.firstDue) body.first_due_month = form.firstDue;
@@ -344,7 +348,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
               </Field>
               <Field label="Advance or loan" required>
                 <div className="flex gap-2">
-                  <Choice on={form.kind === 'advance'} onClick={() => set('kind', 'advance')} disabled={Boolean(done)}>Advance</Choice>
+                  <Choice on={form.kind === 'advance'} onClick={() => { set('kind', 'advance'); set('date', plantToday()); }} disabled={Boolean(done)}>Advance</Choice>
                   <Choice on={form.kind === 'loan'} onClick={() => set('kind', 'loan')} disabled={Boolean(done)}>Loan</Choice>
                 </div>
               </Field>
@@ -353,10 +357,21 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
                   <Input inputMode="decimal" autoComplete="off" value={form.amount} disabled={Boolean(done)}
                     onChange={e => set('amount', e.target.value)} />
                 </Field>
-                <Field label="Date given" required hint={err('date')}>
-                  <Input type="date" value={form.date} disabled={Boolean(done)} onChange={e => set('date', e.target.value)} />
-                </Field>
+                {form.kind === 'advance' ? (
+                  <Field label="Date given" hint="Today: an advance is recorded the day it is paid.">
+                    <Input type="date" value={form.date} disabled readOnly />
+                  </Field>
+                ) : (
+                  <Field label="Date given" required hint={err('date')}>
+                    <Input type="date" value={form.date} disabled={Boolean(done)} onChange={e => set('date', e.target.value)} />
+                  </Field>
+                )}
               </div>
+              {form.kind === 'advance' && (
+                <Field label="Deduct from the payroll of" required hint="Last month by default: in November, October's salary is paid.">
+                  <Input type="month" value={form.forMonth} disabled={Boolean(done)} onChange={e => set('forMonth', e.target.value)} />
+                </Field>
+              )}
               <Field label="Paid via">
                 <Select value={form.via} options={viaOptions} disabled={Boolean(done)} onChange={e => set('via', e.target.value || 'cash')} />
               </Field>
@@ -382,10 +397,9 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
               )}
               {form.kind === 'advance' && open && (
                 <p className="rounded-xl bg-[#1D1D1F]/[0.04] px-3 py-2 text-xs text-[#515154]">
-                  Goes into the advance balance straight away. It is recovered from the payroll of the month it was given
-                  — {monthLabel(open)}{open !== String(form.date || '').slice(0, 7) ? ', the next open month, as that one is already finalised' : ''} —
-                  with the rest of the balance; an earlier month’s payroll does not take it. The recovery can be changed on
-                  that month’s payroll line.
+                  Goes into the advance balance straight away and is recovered from the payroll of {form.forMonth ? monthLabel(form.forMonth) : 'the month chosen'},
+                  with the rest of the balance. If that month is already approved, finalised or paid for this person, it is refused —
+                  choose a later month. The recovery can be changed on that month’s payroll line.
                 </p>
               )}
               <Field label="Note">

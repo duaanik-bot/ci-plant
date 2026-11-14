@@ -8,6 +8,8 @@
 // its txns), and a loan txn with no run_id of kind disbursed, opening or a positive adjustment. Every
 // REDUCTION is kept whatever its date (recoveries posted by runs, waivers, prepayments, negative
 // adjustments): dropping a later recovery would let a late-finalised earlier month recover it again.
+// An advance's month is its for_month when set (2026-11-14: the payroll month it is deducted in, chosen when it
+// is given — paid on 14 Nov for October's payroll counts in October), else the month of its txn_date.
 // Without asAtMonth nothing is filtered: the balance as it stands now (person detail, dashboard, Pay staff).
 //
 // Reads only. Nothing here writes, so nothing here can move a balance: the one place a payroll posts to
@@ -77,7 +79,8 @@ export async function advanceBalances(qc, personIds, asAtMonth) {
          FROM hr.advance_txns
         WHERE person_id = ANY($1::int[])
           AND NOT ($2::date IS NOT NULL AND run_id IS NULL
-                   AND kind IN ('opening', 'given', 'adjustment') AND txn_date >= $2::date)
+                   AND kind IN ('opening', 'given', 'adjustment')
+                   AND coalesce(for_month, to_char(txn_date, 'YYYY-MM')) >= to_char($2::date, 'YYYY-MM'))
         GROUP BY person_id, kind`,
       [ids, cutoff],
     );
@@ -156,9 +159,9 @@ export async function inAppAdvancesInMonth(qc, personIds, month) {
        FROM hr.advance_txns
       WHERE person_id = ANY($1::int[])
         AND kind = 'given' AND source = 'manual'
-        AND txn_date >= $2::date AND txn_date < $3::date
+        AND coalesce(for_month, to_char(txn_date, 'YYYY-MM')) = $2
       GROUP BY person_id`,
-    [ids, `${when}-01`, `${nextMonth(when)}-01`],
+    [ids, when],
   );
   for (const r of rows) out.set(r.person_id, text(rat(r.amount)));
   return out;
