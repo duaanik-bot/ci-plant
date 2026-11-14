@@ -24,7 +24,7 @@ out=$(cd "$DIR" && claude -p "$(cat "$DIR/run-prompt.txt")" --permission-mode by
 code=$?
 printf '%s\n' "$out" | tail -n 40 >> "$LOG"
 if printf '%s' "$out" | grep -qiE 'not logged in|please run /login'; then
-  [ -f "$NOLOGIN" ] || echo "$(date '+%F %T') Claude is not signed in on this computer. Open Terminal, run: claude   then type: /login" >> "$LOG"
+  [ -f "$NOLOGIN" ] || echo "$(date '+%F %T') Claude is not signed in on this computer. Open Terminal and run: claude auth login   (a browser page opens - sign in there)" >> "$LOG"
   touch "$NOLOGIN"
 else
   rm -f "$NOLOGIN"

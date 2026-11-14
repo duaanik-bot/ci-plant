@@ -33,9 +33,9 @@ launchctl load -w "$PLIST"
 echo "Installed: the office computer now answers \"Fetch from mail\" within a minute."
 export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 if ! command -v claude >/dev/null 2>&1; then
-  echo "BUT the Claude command line is not on this computer. Install it (https://claude.com/download - Claude Code), then run: claude   and type: /login"
+  echo "BUT the Claude command line is not on this computer. Install it (https://claude.com/download - Claude Code), then in Terminal run: claude auth login   (a browser page opens - sign in there)"
 elif claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
   echo "Claude is signed in. Nothing else to do."
 else
-  echo "ONE MORE STEP: Claude is not signed in on this computer. In Terminal run: claude   then type: /login"
+  echo "ONE MORE STEP: Claude is not signed in on this computer. In Terminal run: claude auth login   (a browser page opens - sign in there)"
 fi

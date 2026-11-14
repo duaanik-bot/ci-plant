@@ -73,5 +73,15 @@ class Sql(unittest.TestCase):
         self.assertEqual(self.ok("select $x$ ; $x$; update enquiries set notes = 'x'"), 'deny')
 
 
+class SignInWords(unittest.TestCase):
+    # 14 Nov 2026: "/login" typed straight into Terminal answered "zsh: no such file or directory: /login" — it only
+    # works inside Claude. The kit names the one command that signs in from Terminal.
+    def test_the_kit_names_the_terminal_command_that_signs_in(self):
+        for name, lines in (('install.sh', 2), ('watch.sh', 1)):
+            text = (GUARD.parent / name).read_text()
+            self.assertNotRegex(text, r'type:?\s+/login', name)
+            self.assertGreaterEqual(text.count('claude auth login'), lines, name)
+
+
 if __name__ == '__main__':
     unittest.main()

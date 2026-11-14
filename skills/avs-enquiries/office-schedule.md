@@ -35,7 +35,8 @@ In Terminal on the office computer:
 It installs `~/.config/ci-plant/avs-enquiry-watch/` (the watcher, its run prompt, and a guard that lets the run only
 read the company mailbox and file through the avs functions) and a launchd job that asks CI Plant every minute whether
 a Fetch is waiting — a yes or no, with no key. Claude starts only on a yes. The command line Claude must be signed in
-once on that computer (`claude`, then `/login`); the installer says whether it is.
+once on that computer (in Terminal: `claude auth login` — `/login` works only inside Claude); the installer says
+whether it is.
 
 Its log: `~/.config/ci-plant/avs-enquiry-watch/watch.log`. To stop it:
 `launchctl unload -w ~/Library/LaunchAgents/in.motionci.avs-enquiry-watch.plist`.
