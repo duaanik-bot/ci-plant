@@ -1049,6 +1049,40 @@ describe('HR ledger routes through the real app', {
 
   // ── The trail ──
 
+  test('a loan\'s instalment for one month, or from a month on: the schedule and the loan move together', T, async () => {
+    const { nextMonth } = await import('./hr/loans.js');
+    const made = await audited('operator', 'POST', '/hr/staff-payments',
+      { person_id: pS, kind: 'loan', amount: 12000, instalments: 4, paid_on: `${NOW}-04`, paid_via: 'TPAY', note: 'Test loan for month instalments' });
+    const id = made.body.loan.id;
+    const M1 = made.body.loan.first_due_month;
+    const M2 = nextMonth(M1);
+    const M3 = nextMonth(M2);
+    const dues = async () => (await call('viewer', 'GET', `/hr/loans/${id}`)).body.schedule.map((s) => [s.month, s.due]);
+    refused(await call('operator', 'PUT', `/hr/loans/${id}/month-instalment`, { month: M2, amount: 1000 }), 400);
+    // Only this month.
+    const one = await audited('operator', 'PUT', `/hr/loans/${id}/month-instalment`, { month: M2, amount: 1000, scope: 'month', note: 'Test: short month' });
+    assert.equal(one.body.change.scope, 'month');
+    assert.deepEqual((await dues()).slice(0, 4), [[M1, '3000.00'], [M2, '1000.00'], [M3, '3000.00'], [nextMonth(M3), '3000.00']]);
+    const detail = (await call('viewer', 'GET', `/hr/loans/${id}`)).body;
+    assert.deepEqual(detail.month_instalments.map((x) => [x.month, x.amount]), [[M2, '1000.00']]);
+    assert.equal(detail.loan.instalment, 3000, 'the loan itself is unchanged');
+    // Every month from M3 on: M1 keeps 3000 (pinned), M2 keeps its own 1000, the loan's instalment becomes 2000.
+    const onward = await audited('operator', 'PUT', `/hr/loans/${id}/month-instalment`, { month: M3, amount: 2000, scope: 'onward' });
+    assert.deepEqual(onward.body.change.kept_before, [M1]);
+    assert.deepEqual((await dues()).slice(0, 4), [[M1, '3000.00'], [M2, '1000.00'], [M3, '2000.00'], [nextMonth(M3), '2000.00']]);
+    assert.equal((await call('viewer', 'GET', `/hr/loans/${id}`)).body.loan.instalment, 2000);
+    // Back to the loan's instalment for M2 clears its own row.
+    await audited('operator', 'PUT', `/hr/loans/${id}/month-instalment`, { month: M2, amount: 2000, scope: 'month' });
+    assert.equal(await count('hr.loan_holidays', `loan_id = ${id} AND month = '${M2}'`), 0);
+    // A hold then replaces a month's own amount, and releasing it leaves the plain instalment.
+    await audited('operator', 'POST', `/hr/loans/${id}/holiday`, { month: M1 });
+    assert.equal((await dues())[0][1], '0.00');
+    await audited('operator', 'DELETE', `/hr/loans/${id}/holiday/${M1}`);
+    assert.equal((await dues())[0][1], '2000.00');
+    assert.equal((await lastAudit('loan', id, 'month_instalment')).detail.to, '2000.00');
+    refused(await call('viewer', 'PUT', `/hr/loans/${id}/month-instalment`, { month: M2, amount: 5, scope: 'month' }), 403, 'HR_LEVEL');
+  });
+
   test('every write left audit rows in hr.audit_log, and none in the plant\'s audit_log', T, async () => {
     const seen = new Set((await db.q(`SELECT DISTINCT entity || ':' || action AS k FROM hr.audit_log`)).map((r) => r.k));
     for (const key of ['loan:create', 'loan:prepay', 'loan:close', 'loan:holiday', 'loan:instalment', 'loan:cancel',

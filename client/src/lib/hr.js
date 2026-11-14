@@ -292,6 +292,9 @@ export const hrApi = {
   cancelLoan: id => withImpact(x => api.post(`/hr/loans/${seg(id)}/cancel`, { ...x })),
   // PUT /hr/loans/:id/instalment — operator. { instalment, from_month }.
   setLoanInstalment: (id, change) => withImpact(x => api.put(`/hr/loans/${seg(id)}/instalment`, { ...change, ...x })),
+  // PUT /hr/loans/:id/month-instalment — accounts and up. { month, amount, scope: 'month'|'onward', note? }: one month's
+  // own instalment (0 holds it), or the loan's instalment from that month on (earlier open months keep the old one).
+  setMonthInstalment: (id, change) => withImpact(x => api.put(`/hr/loans/${seg(id)}/month-instalment`, { ...change, ...x })),
 
   // ── Advances ──
   // GET /hr/advances — viewer. A balance per person.

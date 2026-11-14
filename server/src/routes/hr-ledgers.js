@@ -310,7 +310,9 @@ const LOAN_TXNS = `SELECT t.id, t.loan_id, t.txn_date::text AS txn_date, t.kind,
   FROM hr.loan_txns t LEFT JOIN hr.runs r ON r.id = t.run_id
  WHERE t.loan_id = ANY($1::int[])
  ORDER BY t.loan_id, t.txn_date, t.id`;
-const LOAN_HOLIDAYS = `SELECT loan_id, month FROM hr.loan_holidays WHERE loan_id = ANY($1::int[]) ORDER BY loan_id, month`;
+const LOAN_HOLIDAYS = `SELECT loan_id, month, amount::text AS amount, note FROM hr.loan_holidays WHERE loan_id = ANY($1::int[]) ORDER BY loan_id, month`;
+// A loan_holidays row as loans.js reads it: a held month (amount null) or a month with its own instalment.
+const ruleOf = (h) => ({ month: h.month, amount: h.amount ?? null });
 
 // The month and amount of the next instalment: the first month of the loan's own timeline still to be taken.
 // A row that makes loans.js throw must not take the register down, so it just has none.
@@ -333,7 +335,7 @@ async function loanViews(read, rows) {
   const month = plantMonth();
   return rows.map((loan) => {
     const mine = txns.get(loan.id) ?? [];
-    const skip = (holidays.get(loan.id) ?? []).map((h) => h.month);
+    const skip = (holidays.get(loan.id) ?? []).map(ruleOf);
     const now = dueForMonth(loan, mine, skip, month);
     return { ...loan, outstanding: now.outstanding, due_this_month: now.due, ...nextDue(loan, mine, skip) };
   });
@@ -383,13 +385,15 @@ r.get('/hr/loans/:id', requireHr('viewer'), async (req, res, next) => {
     const [row] = await q(`SELECT ${LOAN_COLS} ${LOAN_FROM} WHERE l.id = $1`, [id]);
     if (!row || !canSeePay(req, row.person_id)) throw missing('Loan');
     const txns = await q(LOAN_TXNS, [[id]]);
-    const holidays = (await q(LOAN_HOLIDAYS, [[id]])).map((h) => h.month);
+    const rows = await q(LOAN_HOLIDAYS, [[id]]);
     const [loan] = await loanViews(q, [row]);
     res.json({
       loan,
       txns: withBalances(row, txns),
-      holidays,
-      schedule: projectSchedule(row, txns, holidays, row.first_due_month),
+      holidays: rows.filter((h) => h.amount === null).map((h) => h.month),
+      // Months given their own instalment (2026-11-14): [{month, amount, note}].
+      month_instalments: rows.filter((h) => h.amount !== null).map((h) => ({ month: h.month, amount: h.amount, note: h.note })),
+      schedule: projectSchedule(row, txns, rows.map(ruleOf), row.first_due_month),
     });
   } catch (e) { next(e); }
 });
@@ -558,9 +562,11 @@ async function changeHold(req, hold) {
     const changed = hold
       ? await oc(
         `INSERT INTO hr.loan_holidays (loan_id, month, note, created_by) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (loan_id, month) DO NOTHING RETURNING id`,
+         ON CONFLICT (loan_id, month) DO UPDATE SET amount = NULL, note = EXCLUDED.note, created_by = EXCLUDED.created_by
+           WHERE hr.loan_holidays.amount IS NOT NULL
+         RETURNING id`,
         [id, month, note, req.user.id])
-      : await oc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2 RETURNING id`, [id, month]);
+      : await oc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2 AND amount IS NULL RETURNING id`, [id, month]);
     if (!changed) return;                                  // the same hold twice, or nothing to release: no change
     // Every open payroll from this month on is worked out again for the person (applyWithImpact, around this);
     // an approved month cannot take it.
@@ -597,7 +603,7 @@ r.get('/hr/loan-holds', requireHr('viewer'), async (req, res, next) => {
       res.json(await q(
         `SELECT h.loan_id, l.loan_no, l.person_id, h.note
            FROM hr.loan_holidays h JOIN hr.loans l ON l.id = h.loan_id
-          WHERE h.month = $1 AND l.status = 'active'
+          WHERE h.month = $1 AND l.status = 'active' AND h.amount IS NULL
           ORDER BY l.person_id, l.id`, [month]));
       return;
     }
@@ -607,13 +613,16 @@ r.get('/hr/loan-holds', requireHr('viewer'), async (req, res, next) => {
     if (!loans.length) { res.json([]); return; }
     const ids = loans.map((l) => l.id);
     const txns = groupBy(await q(LOAN_TXNS, [ids]), 'loan_id');
-    const held = new Map((await q(`SELECT loan_id, note FROM hr.loan_holidays WHERE month = $1 AND loan_id = ANY($2::int[])`,
-      [month, ids])).map((h) => [h.loan_id, h.note]));
+    const rows = await q(`SELECT loan_id, note, amount::text AS amount FROM hr.loan_holidays WHERE month = $1 AND loan_id = ANY($2::int[])`,
+      [month, ids]);
+    const held = new Map(rows.filter((h) => h.amount === null).map((h) => [h.loan_id, h.note]));
+    const own = new Map(rows.filter((h) => h.amount !== null).map((h) => [h.loan_id, h]));
     res.json(loans.map((loan) => {
       const { due, outstanding } = dueForMonth(loan, txns.get(loan.id) ?? [], [], month);
       return {
         loan_id: loan.id, loan_no: loan.loan_no, person_id: loan.person_id, instalment: loan.instalment,
-        due, outstanding, held: held.has(loan.id), note: held.get(loan.id) ?? null,
+        due, outstanding, held: held.has(loan.id), note: held.get(loan.id) ?? own.get(loan.id)?.note ?? null,
+        month_instalment: own.get(loan.id)?.amount ?? null,     // this month's own instalment, when one is set
       };
     }));
   } catch (e) { next(e); }
@@ -649,6 +658,90 @@ r.put('/hr/loans/:id/instalment', requireHr('operator'), async (req, res, next) 
     });
     const view = await loanView(id);
     res.json(warning ? { ...view, warning } : view);
+  } catch (e) { next(refusal(e)); }
+});
+
+// ── One month's instalment, or the instalment from a month on (owner's request 2026-11-14) ─────────────────
+// "An easy way to edit the instalment amount for the selected month, keeping the wires intact with the loan; the
+// rights to edit given to my accounts person; ask whether to keep the instalment for all the upcoming months or only
+// this time."
+//
+// PUT /hr/loans/:id/month-instalment { month, amount, scope: 'month'|'onward', note?, impact_remark? }, accounts and up
+//   month    a payroll month not yet finalised (409 RUN_FINALISED otherwise)
+//   'month'  only that month takes `amount` (0 holds it): a loan_holidays row with the amount. The same amount as
+//            the loan's instalment clears the row. Later months keep the loan's instalment.
+//   'onward' the loan's instalment becomes `amount` (more than 0) from `month`: every open month before it keeps the
+//            old instalment (pinned as that month's own amount, unless it already has one or is held), the month's
+//            own row goes, and later months' own amounts go too (holds stay).
+// The loan stays the one record: payroll reads these, finalise posts what the line took to the loan's ledger. The
+// person's open payroll months are worked out again (withImpact): a submitted or later month needs an approver's
+// remark. A person hidden from the login is answered 404.
+r.put('/hr/loans/:id/month-instalment', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const id = idOf(req.params.id, 'Loan');
+    const body = bodyOf(req);
+    const month = monthOf(body.month, 'The month');
+    const scope = body.scope === 'onward' ? 'onward' : body.scope === 'month' ? 'month' : null;
+    if (!scope) throw bad("Say whether it is for this month only (scope 'month') or for every month from it on (scope 'onward')");
+    const amount = scope === 'onward' ? positiveOf(body.amount, 'The instalment') : amountOf(body.amount, 'The instalment', 2);
+    if (amount === null) throw bad('The instalment is required');
+    const note = textOf(body.note, 'The note', 200);
+    const person = await loanPersonOf(q, id);
+    if (person === null) throw missing('Loan');
+    assertPayVisible(req, person, 'Loan');
+    let summary = null;
+    await tx(async (qc, oc) => withImpact(qc, req, [person], month,
+      scope === 'month' ? `${monthName(month)}'s loan instalment` : `The loan instalment from ${monthName(month)} on`, async () => {
+      const run = await oc(`SELECT id, status FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+      const latest = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+      if (run?.status === 'finalised' || (latest?.month && month <= latest.month)) {
+        throw refuse(409, `Payroll for ${monthName(month)} is finalised: its instalment was taken as it stood. `
+          + 'Change a later month instead', RUN_FINALISED);
+      }
+      const loan = await lockedLoan(qc, oc, id);
+      mustBeActive(loan);
+      const was = money(loan.instalment);
+      const now = money(amount);
+      if (scope === 'month') {
+        if (cmp(rat(now), rat(was)) === 0) {
+          await qc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2`, [id, month]);
+        } else {
+          await qc(
+            `INSERT INTO hr.loan_holidays (loan_id, month, amount, note, created_by) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (loan_id, month) DO UPDATE SET amount = EXCLUDED.amount, note = EXCLUDED.note, created_by = EXCLUDED.created_by`,
+            [id, month, now, note, req.user.id]);
+        }
+        summary = { scope, month, from: was, to: now };
+      } else {
+        // Open months before `month` keep what they had.
+        const first = [latest?.month ? nextMonth(latest.month) : plantMonth(), loan.first_due_month].sort().at(-1);
+        const pinned = [];
+        if (cmp(rat(now), rat(was)) !== 0) {
+          for (let m = first; m < month && pinned.length < 60; m = nextMonth(m)) {
+            const got = await qc(
+              `INSERT INTO hr.loan_holidays (loan_id, month, amount, note, created_by) VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (loan_id, month) DO NOTHING RETURNING month`,
+              [id, m, was, `Kept at ${was} when the instalment changed from ${monthName(month)}`, req.user.id]);
+            if (got.length) pinned.push(m);
+          }
+        }
+        const cleared = await qc(
+          `DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month >= $2 AND (month = $2 OR amount IS NOT NULL) RETURNING month`,
+          [id, month]);
+        await qc(`UPDATE hr.loans SET instalment = $2 WHERE id = $1`, [id, now]);
+        summary = { scope, month, from: was, to: now, kept_before: pinned, cleared: cleared.map((c) => c.month).sort() };
+      }
+      // A loan total typed for the person in that month (run input loan_recovery_override, the old way) would
+      // stand over this: it is cleared, so the loan's own month amount is what the line takes.
+      const typed = run ? await qc(
+        `UPDATE hr.run_inputs SET loan_recovery_override = NULL, updated_by = $3, updated_at = now()
+          WHERE run_id = $1 AND person_id = $2 AND loan_recovery_override IS NOT NULL RETURNING id`,
+        [run.id, person, req.user.id]) : [];
+      if (typed.length) summary.cleared_typed_total = true;
+      await hrAudit(qc, req, 'loan', id, 'month_instalment', { loan_no: loan.loan_no, note, ...summary });
+    }));
+    const view = await loanView(id);
+    res.json({ ...view, change: summary });
   } catch (e) { next(refusal(e)); }
 });
 

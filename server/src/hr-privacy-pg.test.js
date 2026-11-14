@@ -177,6 +177,8 @@ describe('HR accounts level and hide list', {
     assert.equal((await call('accounts', 'PUT', `/hr/runs/${MONTH}/lines/${P}/payment`, { status: 'paid' })).status, 404);
     assert.equal((await call('accounts', 'POST', `/hr/runs/${MONTH}/lines/status`, { person_ids: [S, G], status: 'on_hold', reason: 'x' })).status, 404);
     assert.equal((await call('accounts', 'POST', '/hr/staff-payments', { person_id: G, kind: 'advance', amount: 10 })).status, 404);
+    const gLoan = await db.one(`SELECT id FROM hr.loans WHERE person_id = $1`, [G]);
+    assert.equal((await call('accounts', 'PUT', `/hr/loans/${gLoan.id}/month-instalment`, { month: '2026-10', amount: 1, scope: 'month' })).status, 404);
     const batch = ok(await call('accounts', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH', reference: 'AUG-CASH' }));
     clean(batch, 'payments');
     assert.deepEqual(batch.body.person_ids, [S]);

@@ -34,8 +34,9 @@
 // Holiday pay / Overtime switches (2026-11-03): at the top of the details (PaySwitches.jsx), on the person's
 // pay setup; the open month is worked out again at once.
 //
-// Change deduction (2026-11-03): each loan panel offers it (operator, month not finalised) — LoanDeductionModal asks
-// for the amount and "only this time" or "change the EMI", and the line is worked out again at once.
+// Edit instalment (2026-11-03, reworked 2026-11-14): each loan panel offers it to accounts and up — LoanDeductionModal
+// asks for the amount and "only this time" or "all upcoming months", and saves it on the loan itself
+// (PUT /hr/loans/:id/month-instalment). A finalised month offers the next month instead.
 //
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
@@ -104,6 +105,7 @@ function LoanFigure({ pos }) {
 }
 
 const STATUS_WORD = { recovered: 'Deducted', partial: 'Part deducted', holiday: 'Held', projected: 'Expected' };
+const statusWord = x => (x.custom && x.status === 'projected' ? 'Expected · own amount' : STATUS_WORD[x.status] || x.status);
 
 function LoanPanel({ pos, month, final, change }) {
   const { ln, rec, before, after, held, closes } = pos;
@@ -121,6 +123,11 @@ function LoanPanel({ pos, month, final, change }) {
   const past = rowsShown.filter(x => x.month <= month);
   const ahead = rowsShown.filter(x => x.month > month);
   const next = shiftMonth(month, 1);
+  // The month the edit is for: this one, or — once it is finalised — the next (its deduction is already posted).
+  const editMonth = final ? next : month;
+  const nextRow = schedule.find(x => x.month === next);
+  const editBefore = final ? (after < 0n ? 0n : after) : before;
+  const editPlanned = final ? (paiseOf(nextRow?.due) ?? 0n) : rec;
   const opened = list(detail?.txns).find(t => t.kind === 'disbursed' || t.kind === 'opening');
   return (
     <div className="rounded-xl border border-violet-200 bg-violet-50/50 px-3 py-2.5">
@@ -129,14 +136,21 @@ function LoanPanel({ pos, month, final, change }) {
         <span className="text-xs text-[#3A3A3C]">{ln.is_opening ? 'Opening balance' : 'Loan amount'} <b className="tabular-nums">{inr2(ln.principal)}</b></span>
         <span className="text-xs text-[#3A3A3C]">Instalment <b className="tabular-nums">{inr2(ln.instalment)}</b>/month</span>
         {opened && <span className="text-[11px] text-[#86868B]">{ln.is_opening ? 'Loaded' : 'Given'} {String(opened.txn_date).slice(0, 10).split('-').reverse().join('-')}</span>}
-        {change && !final && ln.status === 'active' && (
-          <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setEditing(true)}>Change deduction</Button>
+        {change && ln.status === 'active' && (!final || after > 0n) && (
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setEditing(true)}
+            title={final ? `${monthLabel(month)} is finalised: its instalment is posted. Change ${monthLabel(next)} or every month from it` : undefined}>
+            <Pencil size={12} /> Edit {monthLabel(editMonth)} instalment
+          </Button>
         )}
       </div>
       {editing && change && (
-        <LoanDeductionModal month={month} status={change.status} canApprove={change.canApprove} person={change.person} pos={pos}
-          otherRec={change.otherRec(ln.id)} approvedCount={change.approvedCount}
-          onClose={() => setEditing(false)} onDone={async msg => { setEditing(false); await change.onDone(msg); }} />
+        <LoanDeductionModal month={editMonth} person={change.person} ln={ln} before={editBefore} planned={editPlanned}
+          onClose={() => setEditing(false)}
+          onDone={async msg => {
+            setEditing(false);
+            hrApi.loan(ln.id).then(d => setDetail(d), () => {});
+            await change.onDone(msg);
+          }} />
       )}
       <div className="mt-2 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg bg-white/80 px-2 py-1.5"><div className="text-[10px] font-bold uppercase text-[#86868B]">Before {monthLabel(month)}</div><div className="text-sm font-bold tabular-nums">{inr2(fromP(before))}</div></div>
@@ -161,7 +175,7 @@ function LoanPanel({ pos, month, final, change }) {
                 <td className="py-0.5">{monthLabel(x.month)}</td>
                 <td className="py-0.5 text-right tabular-nums">{x.status === 'projected' ? inr2(x.due) : inr2(x.recovered)}</td>
                 <td className="py-0.5 text-right tabular-nums">{inr2(x.closing)}</td>
-                <td className="py-0.5 pl-2">{x.status === 'this' ? (final ? 'Deducted' : 'This month') : STATUS_WORD[x.status] || x.status}</td>
+                <td className="py-0.5 pl-2">{x.status === 'this' ? (final ? 'Deducted' : 'This month') : statusWord(x)}</td>
               </tr>
             ))}
             {ahead.length > 6 && <tr><td colSpan={4} className="py-1 text-[#86868B]">and {ahead.length - 6} more months expected</td></tr>}
@@ -307,7 +321,8 @@ export default function PersonCards({
   month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff,
 }) {
   const approvedCount = rows.filter(x => x.approval === 'approved').length;
-  const change = canOperate && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
+  // Editing a loan's instalment is open to accounts and up (2026-11-14): canSelect is the paying level.
+  const change = canSelect && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
   const switches = { canEdit: canOperate && !final && Boolean(onSwitched), month, status, canApprove, approvedCount, onChanged: onSwitched };
   const [open, setOpen] = useState(() => new Set());
   const anchor = useRef(null);

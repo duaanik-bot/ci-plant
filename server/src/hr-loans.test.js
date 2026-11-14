@@ -312,3 +312,17 @@ test('nothing the caller passes in is changed', () => {
   assert.equal(dueForMonth(frozenLoan, frozenTxns, frozenHolidays, '2026-12').due, '5000.00');
   assert.equal(projectSchedule(frozenLoan, frozenTxns, frozenHolidays, '2026-08').length, 7);   // Aug, Sep, two holidays, Dec, Jan, Feb
 });
+
+// One month's own instalment (2026-11-14): {month, amount} takes that amount instead; amount null still holds.
+test('a month given its own instalment takes it, the schedule follows, and the end moves', () => {
+  const rules = [{ month: '2026-10', amount: '1000' }, { month: '2026-11', amount: null }];
+  assert.equal(dueForMonth(loan, tx1, rules, '2026-10').due, '1000.00');
+  assert.equal(dueForMonth(loan, tx1, rules, '2026-11').due, '0.00');
+  assert.equal(dueForMonth(loan, tx1, rules, '2026-12').due, '5000.00');
+  const sch = projectSchedule(loan, tx1, rules, '2026-10');
+  assert.deepEqual(sch.map((r) => [r.month, r.due, r.status, Boolean(r.custom)]), [
+    ['2026-10', '1000.00', 'projected', true], ['2026-11', '0.00', 'holiday', false],
+    ['2026-12', '5000.00', 'projected', false], ['2027-01', '5000.00', 'projected', false], ['2027-02', '2000.00', 'projected', false]]);
+  // Never more than is outstanding.
+  assert.equal(dueForMonth(loan, tx1, [{ month: '2026-10', amount: '99999' }], '2026-10').due, '13000.00');
+});

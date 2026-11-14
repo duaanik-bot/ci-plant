@@ -79,18 +79,27 @@ export function loanOutstanding(loan, txns) {
 // instalment of zero or less takes nothing.
 const instalmentDue = (instalment, outstanding) => maxRat(ZERO, minRat(instalment, outstanding));
 
-const holidaySet = (holidays) => new Set([...holidays].map((h) => monthOf(h, 'holiday month')));
+// The months a loan does not take its plain instalment: a held month (a month string, or {month, amount: null})
+// takes nothing; {month, amount} takes that amount instead (owner's request 2026-11-14: one month's instalment).
+// Map<month, Rat|null>.
+const monthRules = (holidays) => new Map([...(holidays ?? [])].map((h) => (h && typeof h === 'object'
+  ? [monthOf(h.month, 'holiday month'), h.amount === null || h.amount === undefined || h.amount === '' ? null : rat(h.amount)]
+  : [monthOf(h, 'holiday month'), null])));
+const holidaySet = (holidays) => new Set([...monthRules(holidays)].filter(([, a]) => a === null).map(([m]) => m));
+// The instalment `month` asks of the loan: its own amount for that month when one is set, else the loan's.
+const instalmentFor = (rules, month, instalment) => (rules.has(month) && rules.get(month) !== null ? rules.get(month) : instalment);
 
 // What payroll takes from this loan in `month`, and the balance it is worked out from. Nothing is due
 // unless the loan is active, its first due month has come, and the month is not a repayment holiday.
 export function dueForMonth(loan, txns, holidays, month) {
   const when = monthOf(month, 'month');
   const first = monthOf(loan.first_due_month, 'first_due_month');
+  const rules = monthRules(holidays);
   const skip = holidaySet(holidays);
   const outstanding = balanceOf(txns);
   const owing = loan.status === 'active' && when >= first && !skip.has(when);
   return {
-    due: text(owing ? instalmentDue(rat(loan.instalment), outstanding) : ZERO),
+    due: text(owing ? instalmentDue(instalmentFor(rules, when, rat(loan.instalment)), outstanding) : ZERO),
     outstanding: text(outstanding),
   };
 }
@@ -121,6 +130,7 @@ export function dueForMonth(loan, txns, holidays, month) {
 export function projectSchedule(loan, txns, holidays, fromMonth, max = 120) {
   const first = monthOf(loan.first_due_month, 'first_due_month');
   const from = monthOf(fromMonth, 'fromMonth');
+  const rules = monthRules(holidays);
   const skip = holidaySet(holidays);
   const instalment = rat(loan.instalment);
   const active = loan.status === 'active';
@@ -145,7 +155,8 @@ export function projectSchedule(loan, txns, holidays, fromMonth, max = 120) {
     if (!history && !(active && cmp(opening, ZERO) > 0)) break;
 
     const holiday = skip.has(month);
-    const due = holiday ? ZERO : instalmentDue(instalment, opening);
+    const custom = !holiday && rules.has(month);         // a month given its own instalment
+    const due = holiday ? ZERO : instalmentDue(instalmentFor(rules, month, instalment), opening);
     const got = taken.get(month);                      // undefined: no payroll_recovery in this month
     let status;
     let moved;                                         // what comes off the balance in this row
@@ -166,6 +177,7 @@ export function projectSchedule(loan, txns, holidays, fromMonth, max = 120) {
     const closing = sub(opening, moved);
     rows.push({
       month, opening: text(opening), due: text(due), recovered: text(got ?? ZERO), closing: text(closing), status,
+      ...(custom ? { custom: true } : {}),
     });
     opening = closing;
     month = nextMonth(month);

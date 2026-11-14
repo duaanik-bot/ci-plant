@@ -128,7 +128,7 @@ export async function loanPositions(qc, personIds, month, asAtMonth) {
     [loanIds, cutoff],
   );
   const holidays = await qc(
-    `SELECT loan_id, month FROM hr.loan_holidays WHERE loan_id = ANY($1::int[]) ORDER BY loan_id, month`,
+    `SELECT loan_id, month, amount::text AS amount FROM hr.loan_holidays WHERE loan_id = ANY($1::int[]) ORDER BY loan_id, month`,
     [loanIds],
   );
 
@@ -138,7 +138,7 @@ export async function loanPositions(qc, personIds, month, asAtMonth) {
     return by;
   };
   const txnsOf = group(txns, (t) => t);
-  const holidaysOf = group(holidays, (h) => h.month);
+  const holidaysOf = group(holidays, (h) => ({ month: h.month, amount: h.amount ?? null }));
   for (const loan of loans) {
     const { due, outstanding } = dueForMonth(loan, txnsOf.get(loan.id), holidaysOf.get(loan.id), when);
     out.get(loan.person_id).push({ loan_id: loan.id, loan_no: loan.loan_no, due, outstanding });
