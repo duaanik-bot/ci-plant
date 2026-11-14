@@ -203,7 +203,7 @@ export const hrApi = {
   erpOperators: () => api.get('/hr/erp-operators'),
 
   // ── Monthly import ──
-  // POST /hr/imports — operator. Multipart: the file, plus the month ('YYYY-MM'). 409 DUPLICATE_FILE carries batch_id.
+  // POST /hr/imports — accounts and up (hidden people left out for a restricted login). Multipart: the file, plus the month ('YYYY-MM'). 409 DUPLICATE_FILE carries batch_id.
   uploadImport: (file, month) => api.upload('/hr/imports', file, { month }),
   // GET /hr/column-maps — viewer. The column maps the import remembers by header signature:
   // [{ id, signature, map, blank_zero, last_used }].
@@ -212,13 +212,13 @@ export const hrApi = {
   removeColumnMap: id => api.del(`/hr/column-maps/${seg(id)}`),
   // GET /hr/imports/:id — viewer. { batch, rows, missing, duplicates }.
   importBatch: id => api.get(`/hr/imports/${seg(id)}`),
-  // PUT /hr/imports/:id/map — operator. { column_map, blank_as_zero }; answers the re-extracted batch.
+  // PUT /hr/imports/:id/map — accounts and up. { column_map, blank_as_zero }; answers the re-extracted batch.
   saveImportMap: (id, map) => api.put(`/hr/imports/${seg(id)}/map`, map),
-  // PUT /hr/imports/:id/rows/:rowId — operator. { person_id?, decision?, save_alias?, advance_mode? }.
+  // PUT /hr/imports/:id/rows/:rowId — accounts and up. { person_id?, decision?, save_alias?, advance_mode? }.
   saveImportRow: (id, rowId, decision) => api.put(`/hr/imports/${seg(id)}/rows/${seg(rowId)}`, decision),
-  // POST /hr/imports/:id/apply — operator. { missing:[{ person_id, choice:'include'|'exclude' }], overwrite_manual:[person_id] }.
+  // POST /hr/imports/:id/apply — accounts and up. { missing:[{ person_id, choice:'include'|'exclude' }], overwrite_manual:[person_id] }.
   applyImport: (id, choices = {}) => api.post(`/hr/imports/${seg(id)}/apply`, choices),
-  // POST /hr/imports/:id/discard — operator, open months only. Sets a parsed upload aside; answers the batch.
+  // POST /hr/imports/:id/discard — accounts and up, open months only. Sets a parsed upload aside; answers the batch.
   discardImport: (id, reason) => api.post(`/hr/imports/${seg(id)}/discard`, reason ? { reason } : {}),
 
   // ── Payroll runs ──

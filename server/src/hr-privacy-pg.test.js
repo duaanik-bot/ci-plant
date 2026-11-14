@@ -281,6 +281,47 @@ describe('HR accounts level and hide list', {
     assert.equal(list[0].totals.approved, '8500.00');
   });
 
+  test('accounts imports the month\'s sheet: hidden people never shown, their rows still applied', T, async () => {
+    const NOV = '2026-12';
+    // Gone is hidden completely again ('show again' above brought them back).
+    ok(await call('admin', 'PUT', `/hr/access/${ids.accounts}/people`, { changes: [{ person_id: G, mode: 'all' }] }));
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('New data');
+    ws.addRow(['NAME', 'CODE NO', 'OT', 'AB', 'MISC', 'ADVANCE', 'REMARKS']);
+    ws.addRow(['Test Shown Person', 'T-301', 3, 0]);
+    ws.addRow(['Test Gone Zebedee', 'T-303', 7, 1]);       // Gone: hidden completely from accounts
+    // Payhidden (mode 'pay') is not on the sheet: missing, and hidden from accounts.
+    const fd = new FormData();
+    fd.append('file', new Blob([Buffer.from(await wb.xlsx.writeBuffer())]), 'november.xlsx');
+    fd.append('month', NOV);
+    const res = await fetch(`${base}/hr/imports`, { method: 'POST', headers: { authorization: `Bearer ${tokens.accounts}` }, body: fd });
+    const up = { status: res.status, text: await res.text() };
+    up.body = JSON.parse(up.text);
+    assert.equal(up.status, 200, up.text);
+    clean(up, 'upload');
+    assert.ok(!up.text.includes('Payhidden') && !up.text.includes('T-302'), 'the pay-hidden person is not listed as missing');
+    assert.deepEqual(up.body.rows.map((r) => r.person_id), [S]);
+    assert.deepEqual([up.body.counts.rows, up.body.missing.length], [1, 0]);
+    const id = up.body.batch.id;
+    clean(ok(await call('accounts', 'GET', `/hr/imports/${id}`)), 'batch');
+    // A hidden person's row cannot be touched, nor a hidden person picked for a row.
+    const gRow = await db.one(`SELECT id FROM hr.import_rows WHERE batch_id = $1 AND person_id = $2`, [id, G]);
+    assert.equal((await call('accounts', 'PUT', `/hr/imports/${id}/rows/${gRow.id}`, { decision: 'ignore' })).status, 404);
+    const sRow = await db.one(`SELECT id FROM hr.import_rows WHERE batch_id = $1 AND person_id = $2`, [id, S]);
+    assert.equal((await call('accounts', 'PUT', `/hr/imports/${id}/rows/${sRow.id}`, { person_id: P })).status, 404);
+    // Apply: nobody to decide on the accounts screen; the hidden missing person is included with nothing typed.
+    const applied = ok(await call('accounts', 'POST', `/hr/imports/${id}/apply`, {}));
+    clean(applied, 'apply');
+    assert.equal(applied.body.applied, 1, 'the count covers only what accounts sees');
+    const inputs = Object.fromEntries((await db.q(
+      `SELECT i.person_id, i.include, i.ot_hours::text AS ot FROM hr.run_inputs i JOIN hr.runs r ON r.id = i.run_id WHERE r.month = $1`, [NOV]))
+      .map((i) => [i.person_id, [i.include, i.ot]]));
+    assert.deepEqual([inputs[S], inputs[G], inputs[P]], [[true, '3.0000'], [true, '7.0000'], [true, null]]);
+    // A plain viewer still cannot import.
+    assert.equal((await call('viewer', 'POST', `/hr/imports/${id}/discard`, {})).status, 403);
+  });
+
   function refused(res, status, code) {
     assert.equal(res.status, status, res.text);
     if (code) assert.equal(res.body?.code, code, res.text);

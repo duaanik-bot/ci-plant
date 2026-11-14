@@ -471,6 +471,8 @@ export default function Payroll({ level }) {
   const canOperate = levelAtLeast(level, 'operator');
   // Accounts and up pay: mark paid / on hold, payment batches, Pay staff (server: requireHr('accounts')).
   const canPay = levelAtLeast(level, 'accounts');
+  // Importing the month's sheet is open to accounts too (owner, 2026-11-14); the server leaves hidden people out.
+  const canImport = levelAtLeast(level, 'accounts');
   const limited = hrRestricted();
   const canApprove = levelAtLeast(level, 'approver');
   const [params, setParams] = useSearchParams();
@@ -1153,7 +1155,7 @@ export default function Payroll({ level }) {
           ? `The sheet uploaded${when ? ` ${when}` : ''} has ${plural(pend.summary.todo, 'row')} still to resolve.`
           : `The sheet uploaded${when ? ` ${when}` : ''} is not applied yet.`} Apply it, or discard it if it is not being used.${pend.earlier
           ? ` ${plural(pend.earlier, 'earlier upload')} of this month ${pend.earlier === 1 ? 'is' : 'are'} not applied either; each shows here in turn.` : ''}`,
-        actions: canOperate && (
+        actions: canImport && (
           <span className="flex flex-wrap gap-1.5">
             {pend.id != null && <Button size="sm" onClick={() => openWizard(pend.id)}>Resume import</Button>}
             {pend.id != null && <Button size="sm" variant="ghost" onClick={() => setForget(true)}>Discard this upload</Button>}
@@ -1285,7 +1287,7 @@ export default function Payroll({ level }) {
             <RefreshCw size={14} />
           </button>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {(status === 'none' || status === 'draft') && canOperate && !monthClosed && (
+            {(status === 'none' || status === 'draft') && canImport && !monthClosed && (
               <Button variant="secondary" onClick={() => openWizard(null)}><FileUp size={14} /> {pend ? 'Import a new sheet' : 'Import sheet'}</Button>
             )}
             {canPay && <Button variant="secondary" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button>}
@@ -1379,7 +1381,7 @@ export default function Payroll({ level }) {
             <p className="mt-1 text-xs text-[#6E6E73]">
               A later month is already finalised, so this month cannot be started. Corrections go into the next open month as adjustments.
             </p>
-          ) : canOperate ? (
+          ) : canImport ? (
             <>
               <p className="mt-1 text-xs text-[#6E6E73]">
                 Import the month’s sheet — its rows are matched to people and checked, and nothing is applied until you say so —
@@ -1809,7 +1811,7 @@ export default function Payroll({ level }) {
 
       {wizard && (
         <ImportWizard key={wizard.key} month={month} run={run} inputs={inputs} people={people} channelLabel={channelLabel}
-          canEdit={canOperate} resumeBatchId={wizard.resume}
+          canEdit={canImport} resumeBatchId={wizard.resume}
           onClose={() => { setWizard(null); checkPending(); load(); }}
           onPending={onPending}
           onApplied={() => { load(); }} />

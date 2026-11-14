@@ -117,7 +117,7 @@ import { add, cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/m
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
 import { applyWithImpact, ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
-import { assertPayVisible, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
+import { assertPayVisible, canSeePay, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
 import { monthlySchedule } from '../hr/monthly-report.js';
 
 const r = Router();
@@ -647,16 +647,23 @@ function batchView(batch, names, run) {
 }
 
 // {batch, rows, missing, duplicates, counts, fields}: the whole batch as the review screen needs it.
-async function importPayload(qx, id) {
+// For a restricted login (accounts, owner's request 2026-11-14: "my accounts person to have access to import the
+// sheet") every person hidden from it is left out at the source — their rows, their name among a row's candidates,
+// the missing list, duplicates and every count — so the review never shows them. Their rows still apply as the sheet
+// has them; a hidden person missing from the sheet is included with nothing typed (see apply).
+async function importPayload(qx, id, req = null) {
   const [batch] = await qx(`SELECT ${BATCH_COLS} FROM hr.import_batches WHERE id = $1`, [id]);
   if (!batch) throw notFound('Import');
-  const rows = await qx(`SELECT ${ROW_COLS} FROM hr.import_rows WHERE batch_id = $1 ORDER BY row_no`, [id]);
+  const seen = (pid) => !given(pid) || !req || canSeePay(req, pid);
+  const rows = (await qx(`SELECT ${ROW_COLS} FROM hr.import_rows WHERE batch_id = $1 ORDER BY row_no`, [id]))
+    .map((row) => (req && restricted(req) && Array.isArray(row.candidates) ? { ...row, candidates: row.candidates.filter(seen) } : row))
+    .filter((row) => seen(row.person_id));
   const ctx = await rowContext(qx, batch.month, rows);
   const [run] = await qx(`SELECT id, status FROM hr.runs WHERE month = $1`, [batch.month]);
   const names = await userNames(qx, [batch.uploaded_by, batch.applied_by]);
   const views = rows.map((row) => rowView(row, ctx));
   const duplicates = duplicatesOf(rows);
-  const missing = missingOf(rows, ctx.people, batch.month).map(missingView);
+  const missing = missingOf(rows, ctx.people, batch.month).filter((p) => seen(p.id)).map(missingView);
   const live = liveRows(rows);
   return {
     batch: batchView(batch, names, run),
@@ -708,7 +715,7 @@ const sameFile = (qx, month, sha) => qx(
   `SELECT id, uploaded_at, status FROM hr.import_batches
     WHERE month = $1 AND file_sha256 = $2 AND status <> 'discarded' ORDER BY id LIMIT 1`, [month, sha]);
 
-r.post('/hr/imports', requireHr('operator'), uploadOne, async (req, res, next) => {
+r.post('/hr/imports', requireHr('accounts'), uploadOne, async (req, res, next) => {
   try {
     if (!req.file) throw bad('No file received: attach the month\'s Excel sheet as "file"');
     const month = monthOf(optionalText(req.body?.month) ?? '');
@@ -773,7 +780,7 @@ r.post('/hr/imports', requireHr('operator'), uploadOne, async (req, res, next) =
       }
       throw e;
     }
-    res.json(await importPayload(q, batchId));
+    res.json(await importPayload(q, batchId, req));
   } catch (e) { next(e); }
 });
 
@@ -806,13 +813,13 @@ r.delete('/hr/column-maps/:id', requireHr('admin'), async (req, res, next) => {
 
 r.get('/hr/imports/:id', requireHr('viewer'), async (req, res, next) => {
   try {
-    res.json(await importPayload(q, idOf(req.params.id, 'Import')));
+    res.json(await importPayload(q, idOf(req.params.id, 'Import'), req));
   } catch (e) { next(e); }
 });
 
 // ── PUT /hr/imports/:id/map — map the columns again ─────────────────────────
 
-r.put('/hr/imports/:id/map', requireHr('operator'), async (req, res, next) => {
+r.put('/hr/imports/:id/map', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Import');
     const body = bodyOf(req);
@@ -846,13 +853,13 @@ r.put('/hr/imports/:id/map', requireHr('operator'), async (req, res, next) => {
         column_map: map, blank_zero: blankZero, rows: rows.length, column_map_id: remembered.id,
       });
     });
-    res.json(await importPayload(q, id));
+    res.json(await importPayload(q, id, req));
   } catch (e) { next(e); }
 });
 
 // ── PUT /hr/imports/:id/rows/:rowId — decide one row ────────────────────────
 
-r.put('/hr/imports/:id/rows/:rowId', requireHr('operator'), async (req, res, next) => {
+r.put('/hr/imports/:id/rows/:rowId', requireHr('accounts'), async (req, res, next) => {
   try {
     const batchId = idOf(req.params.id, 'Import');
     const rowId = idOf(req.params.rowId, 'Import row');
@@ -867,6 +874,7 @@ r.put('/hr/imports/:id/rows/:rowId', requireHr('operator'), async (req, res, nex
       throw bad('Send person_id, decision, save_alias or advance_mode');
     }
     if (typeof pick === 'number' && decision === 'ignore') throw bad('Pick a person or ignore the row, not both');
+    if (typeof pick === 'number') assertPayVisible(req, pick);
     const userId = userIdOf(req);
 
     await tx(async (qc) => {
@@ -874,6 +882,7 @@ r.put('/hr/imports/:id/rows/:rowId', requireHr('operator'), async (req, res, nex
       await lockBatch(qc, batchId);
       const [row] = await qc(`SELECT ${ROW_COLS} FROM hr.import_rows WHERE id = $1 AND batch_id = $2 FOR UPDATE`, [rowId, batchId]);
       if (!row) throw notFound('Import row');
+      if (given(row.person_id) && !canSeePay(req, row.person_id)) throw notFound('Import row');
       const next = {
         match: row.match, person_id: row.person_id, candidates: row.candidates, decision: row.decision,
         advance_mode: row.advance_mode,
@@ -946,7 +955,7 @@ r.put('/hr/imports/:id/rows/:rowId', requireHr('operator'), async (req, res, nex
 // It then no longer counts as the month's pending upload, its undecided rows stop counting, and the same file can be
 // uploaded again (the duplicate-file index skips discarded batches). An applied or superseded upload is history and
 // stays. Discarding a discarded upload again changes nothing.
-r.post('/hr/imports/:id/discard', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/imports/:id/discard', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Import');
     const body = bodyOf(req);
@@ -968,7 +977,7 @@ r.post('/hr/imports/:id/discard', requireHr('operator'), async (req, res, next) 
       await qc(`UPDATE hr.import_batches SET status = 'discarded' WHERE id = $1`, [id]);
       await hrAudit(qc, req, 'import', id, 'discard', { month: batch.month, file_name: batch.file_name, reason });
     });
-    res.json(await importPayload(q, id));
+    res.json(await importPayload(q, id, req));
   } catch (e) { next(e); }
 });
 
@@ -1045,7 +1054,7 @@ function unresolvedRefusal(open, groups, rowsById, unchosen) {
   });
 }
 
-r.post('/hr/imports/:id/apply', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Import');
     const body = bodyOf(req);
@@ -1071,6 +1080,8 @@ r.post('/hr/imports/:id/apply', requireHr('operator'), async (req, res, next) =>
       const open = live.filter(needsDecision);
       const groups = findDuplicates(live.map((row) => ({ row_id: row.id, person_id: row.person_id })));
       const absent = missingOf(rows, people, month);
+      // A person hidden from this login is not on its screen to decide: included with nothing typed.
+      for (const p of absent) if (!choices.has(p.id) && !canSeePay(req, p.id)) choices.set(p.id, 'include');
       const unchosen = absent.filter((p) => !choices.has(p.id));
       if (open.length || groups.length || unchosen.length) {
         throw unresolvedRefusal(open, groups, new Map(rows.map((row) => [row.id, row])), unchosen);
@@ -1110,11 +1121,17 @@ r.post('/hr/imports/:id/apply', requireHr('operator'), async (req, res, next) =>
         manual_kept: [...keptIds], manual_overwritten: overwritten, superseded: superseded.map((b) => b.id),
         lines: lines.length,
       });
-      return { run: recalced, applied: included, excluded: write.length - included, removed: stale.length, kept };
+      // The counts a restricted login gets cover only the people it can see.
+      const shown = write.filter((w) => canSeePay(req, w.person_id));
+      const shownIn = shown.filter((w) => w.include).length;
+      return {
+        run: recalced, applied: shownIn, excluded: shown.length - shownIn,
+        removed: stale.filter((pid) => canSeePay(req, pid)).length, kept,
+      };
     });
 
     res.json({
-      run: await runView(q, out.run),
+      run: await runView(q, out.run, req),
       applied: out.applied,
       excluded: out.excluded,
       removed: out.removed,

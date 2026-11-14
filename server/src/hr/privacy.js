@@ -55,6 +55,10 @@ const ALLOW = [
   ['GET', '/hr/advance-sheets'], ['GET', '/hr/advance-sheets/\\d+'], ['POST', '/hr/advance-sheets'], ['PUT', '/hr/advance-sheets/\\d+'],
   ['PUT', '/hr/advance-sheets/\\d+/lines'], ['POST', '/hr/advance-sheets/\\d+/submit'], ['POST', '/hr/advance-sheets/\\d+/post'],
   ['DELETE', '/hr/advance-sheets/\\d+'],
+  // Importing the month's sheet (owner's request 2026-11-14): a restricted login reviews only the rows of people it
+  // can see; the hidden people's rows apply as the sheet has them (routes/hr-payroll.js importPayload / apply).
+  ['POST', '/hr/imports'], ['GET', '/hr/imports/\\d+'], ['PUT', '/hr/imports/\\d+/map'],
+  ['PUT', '/hr/imports/\\d+/rows/\\d+'], ['POST', '/hr/imports/\\d+/discard'], ['POST', '/hr/imports/\\d+/apply'],
 ].map(([method, path]) => [method, new RegExp(`^${path}/?$`)]);
 
 const pathOf = (req) => {
