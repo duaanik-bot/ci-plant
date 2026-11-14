@@ -5,7 +5,7 @@
 //               "Also leave them out of <month>" (on while the month is a draft) takes them off this month's payroll
 //               in the same step; otherwise they stay on it and the answer says so.
 //   Activate    (operator and up) back to active; they are on the next months again.
-//   Delete      (admin) the master goes for good, with their entries in months not finalised and their import matches.
+//   Delete      (accounts and up, 2026-11-14) the master goes for good, with their entries in months not finalised and their import matches.
 //               Someone already paid, or with a loan or advances, cannot be deleted: the dialog lists them and offers
 //               to deactivate them instead.
 // Each person is done on their own; what worked and what was refused are both shown.

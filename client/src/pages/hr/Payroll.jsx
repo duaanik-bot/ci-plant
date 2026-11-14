@@ -472,8 +472,7 @@ export default function Payroll({ level }) {
   const canOperate = levelAtLeast(level, 'operator');
   // Accounts and up pay: mark paid / on hold, payment batches, Pay staff (server: requireHr('accounts')).
   const canPay = levelAtLeast(level, 'accounts');
-  // Activate / deactivate (operator) and delete (admin) people from the payroll itself (owner, 2026-11-14).
-  const canAdmin = levelAtLeast(level, 'admin');
+  // Activate / deactivate / delete people from the payroll itself, accounts and up (owner, 2026-11-14).
   const [statusFor, setStatusFor] = useState(null);      // { action, people: [{ id, name, code }] }
   // Importing the month's sheet is open to accounts too (owner, 2026-11-14); the server leaves hidden people out.
   const canImport = levelAtLeast(level, 'accounts');
@@ -1635,7 +1634,7 @@ export default function Payroll({ level }) {
                     {picked.some(r => r.person?.status === 'exited') && (
                       <Button size="sm" variant="secondary" onClick={() => setStatusFor({ action: 'activate', people: picked.filter(r => r.person?.status === 'exited').map(personOf) })}>Activate</Button>
                     )}
-                    {canAdmin && <Button size="sm" variant="danger" onClick={() => setStatusFor({ action: 'delete', people: picked.map(personOf) })}>Delete</Button>}
+                    <Button size="sm" variant="danger" onClick={() => setStatusFor({ action: 'delete', people: picked.map(personOf) })}>Delete</Button>
                   </>
                 )}
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
@@ -1656,7 +1655,7 @@ export default function Payroll({ level }) {
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
               onMaster={(r, tab) => setMaster({ id: toId(r.id), tab, key: ++masterKey.current, changed: false })}
               onPayStaff={canPay ? r => setPayFor(toId(r.id)) : undefined}
-              onPersonStatus={canPay ? Object.assign((r, action) => setStatusFor({ action, people: [personOf(r)] }), { canDelete: canAdmin }) : undefined}
+              onPersonStatus={canPay ? Object.assign((r, action) => setStatusFor({ action, people: [personOf(r)] }), { canDelete: canPay }) : undefined}
               onSwitched={async (res, change) => {
                 const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
                 const later = list(res?.not_recalculated).map(x => monthLabel(x.month));

@@ -664,9 +664,11 @@ r.post('/hr/people/:id/activate', requireHr('accounts'), async (req, res, next) 
 // back to unmatched).
 const HISTORY_TABLES = ['advance_txns', 'loans', 'adjustments'];
 
-r.delete('/hr/people/:id', requireHr('admin'), async (req, res, next) => {
+// Accounts and up (owner, 2026-11-14: "deletion also allow him"), never a person hidden from the login.
+r.delete('/hr/people/:id', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, id)) throw notThere('Person');
     await tx(async (qc, oc) => {
       await lockNames(qc);
       const was = await oc(`SELECT ${PERSON_COLS}, ${SECRETS_FULL} FROM hr.people p WHERE p.id = $1 FOR UPDATE OF p`, [id]);

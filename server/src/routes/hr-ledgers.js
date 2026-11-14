@@ -81,6 +81,7 @@ import { assertPayVisible, canSeePay, hiddenIds } from '../hr/privacy.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
 import { advanceMonthFor, applyWithImpact, firstOpenMonth, recalcRun, refreshPersonLine } from '../hr/runs.js';
+import { correctFinalisedInstalment } from '../hr/correction.js';
 import { advanceBalances } from '../hr/ledger.js';
 import { dueForMonth, loanOutstanding, nextMonth, projectSchedule } from '../hr/loans.js';
 import { normCode, normName } from '../hr/match.js';
@@ -689,6 +690,43 @@ r.put('/hr/loans/:id/month-instalment', requireHr('accounts'), async (req, res, 
     const person = await loanPersonOf(q, id);
     if (person === null) throw missing('Loan');
     assertPayVisible(req, person, 'Loan');
+
+    // A FINALISED month (owner, 2026-11-14: "even if it's finalised I should be able to edit it, but ask me for a
+    // confirmation pop-up"). Without confirm_finalised: 409 FINALISED_NEEDS_CONFIRM with the preview of what moves
+    // (hr/correction.js), nothing changed. With it: the month's posted loan and advance recoveries and its line are
+    // corrected; 'onward' also makes the amount the loan's instalment from the first open month on. The open months
+    // after it are worked out again (withImpact, from the first open month).
+    const [fin] = await q(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+    if (fin?.month && month <= fin.month) {
+      const firstOpen = nextMonth(fin.month);
+      let correction = null;
+      await tx(async (qc, oc) => withImpact(qc, req, [person], firstOpen, `Correcting ${monthName(month)}'s loan instalment`, async () => {
+        const run = await oc(`SELECT * FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+        if (!run || run.status !== 'finalised') {
+          throw refuse(409, `There is no finalised payroll for ${monthName(month)}, so there is nothing posted to correct`, RUN_FINALISED);
+        }
+        const loan = await lockedLoan(qc, oc, id);
+        if (loan.status === 'cancelled') throw refuse(409, `${loan.loan_no} is cancelled, so it cannot be changed`, LOAN_NOT_ACTIVE);
+        const dry = body.confirm_finalised !== true;
+        const out = await correctFinalisedInstalment(qc, req, { run, loanId: id, personId: person, amount, note, firstOpen, dry });
+        if (dry) {
+          throw refuse(409, `${monthName(month)} is finalised: confirm to correct what was deducted and posted`,
+            { code: 'FINALISED_NEEDS_CONFIRM', preview: { ...out, loan_no: loan.loan_no, scope } });
+        }
+        if (scope === 'onward') {
+          const was = money(loan.instalment);
+          await qc(`UPDATE hr.loans SET instalment = $2 WHERE id = $1`, [id, money(amount)]);
+          await qc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month >= $2 AND amount IS NOT NULL`, [id, firstOpen]);
+          await hrAudit(qc, req, 'loan', id, 'month_instalment', {
+            loan_no: loan.loan_no, note, scope, month: firstOpen, from: was, to: money(amount), via: 'finalised_correction',
+          });
+        }
+        correction = { ...out, scope };
+      }));
+      res.json({ ...(await loanView(id)), change: correction });
+      return;
+    }
+
     let summary = null;
     await tx(async (qc, oc) => withImpact(qc, req, [person], month,
       scope === 'month' ? `${monthName(month)}'s loan instalment` : `The loan instalment from ${monthName(month)} on`, async () => {

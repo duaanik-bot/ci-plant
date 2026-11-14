@@ -332,7 +332,12 @@ describe('HR accounts level and hide list', {
       assert.equal((await call('accounts', 'POST', `/hr/people/${id}/deactivate`, {})).status, 404);
       assert.equal((await call('accounts', 'POST', `/hr/people/${id}/activate`, {})).status, 404);
     }
-    assert.equal((await call('accounts', 'DELETE', `/hr/people/${S}`)).status, 403, 'delete stays with admin');
+    // Delete (2026-11-14): accounts may, for people it can see; S was paid, so S stays.
+    assert.equal((await call('accounts', 'DELETE', `/hr/people/${S}`)).status, 409);
+    for (const id of [G, P]) assert.equal((await call('accounts', 'DELETE', `/hr/people/${id}`)).status, 404);
+    const fresh = (await db.one(`INSERT INTO hr.people (code, name, pay_channel) VALUES ('T-399', 'Test Deletable Person', 'TCASH') RETURNING id`)).id;
+    ok(await call('accounts', 'DELETE', `/hr/people/${fresh}`));
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people WHERE id = $1`, [fresh])).n, 0);
     assert.equal((await call('viewer', 'POST', `/hr/people/${S}/deactivate`, {})).status, 403);
   });
 

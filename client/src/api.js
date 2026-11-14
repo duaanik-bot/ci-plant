@@ -86,6 +86,7 @@ export const HANDLED_BY = {
   // HR: a loan / advance / input change that moves payroll already worked out. withImpact catches it, the HR page's
   // pop-up shows what moves and takes a remark, and the change is sent again with it.
   IMPACT_NEEDS_APPROVAL: { at: ['lib/impact.js'], says: 'IMPACT_NEEDS_APPROVAL' },
+  FINALISED_NEEDS_CONFIRM: { at: ['pages/hr/LoanDeductionModal.jsx'], says: 'FINALISED_NEEDS_CONFIRM' },
 };
 
 export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));

@@ -36,7 +36,7 @@
 //
 // Edit instalment (2026-11-03, reworked 2026-11-14): each loan panel offers it to accounts and up — LoanDeductionModal
 // asks for the amount and "only this time" or "all upcoming months", and saves it on the loan itself
-// (PUT /hr/loans/:id/month-instalment). A finalised month offers the next month instead.
+// (PUT /hr/loans/:id/month-instalment). A finalised month can be corrected too, after a confirmation pop-up.
 //
 // Keyboard (as the table): Tab to a card, Space ticks it, ↑ ↓ move, Shift + ↑ ↓ tick as they move, Shift + Space or a
 // Shift-click on a tick box ticks every card from the last one ticked, Enter opens / closes the details.
@@ -123,11 +123,10 @@ function LoanPanel({ pos, month, final, change }) {
   const past = rowsShown.filter(x => x.month <= month);
   const ahead = rowsShown.filter(x => x.month > month);
   const next = shiftMonth(month, 1);
-  // The month the edit is for: this one, or — once it is finalised — the next (its deduction is already posted).
-  const editMonth = final ? next : month;
-  const nextRow = schedule.find(x => x.month === next);
-  const editBefore = final ? (after < 0n ? 0n : after) : before;
-  const editPlanned = final ? (paiseOf(nextRow?.due) ?? 0n) : rec;
+  // The edit is for the month shown, finalised or not (2026-11-14): a finalised one asks for confirmation first.
+  const editMonth = month;
+  const editBefore = before;
+  const editPlanned = rec;
   const opened = list(detail?.txns).find(t => t.kind === 'disbursed' || t.kind === 'opening');
   return (
     <div className="rounded-xl border border-violet-200 bg-violet-50/50 px-3 py-2.5">
@@ -136,15 +135,15 @@ function LoanPanel({ pos, month, final, change }) {
         <span className="text-xs text-[#3A3A3C]">{ln.is_opening ? 'Opening balance' : 'Loan amount'} <b className="tabular-nums">{inr2(ln.principal)}</b></span>
         <span className="text-xs text-[#3A3A3C]">Instalment <b className="tabular-nums">{inr2(ln.instalment)}</b>/month</span>
         {opened && <span className="text-[11px] text-[#86868B]">{ln.is_opening ? 'Loaded' : 'Given'} {String(opened.txn_date).slice(0, 10).split('-').reverse().join('-')}</span>}
-        {change && ln.status === 'active' && (!final || after > 0n) && (
+        {change && ln.status !== 'cancelled' && (
           <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setEditing(true)}
-            title={final ? `${monthLabel(month)} is finalised: its instalment is posted. Change ${monthLabel(next)} or every month from it` : undefined}>
+            title={final ? `${monthLabel(month)} is finalised: you will be asked to confirm before what was posted is corrected` : undefined}>
             <Pencil size={12} /> Edit {monthLabel(editMonth)} instalment
           </Button>
         )}
       </div>
       {editing && change && (
-        <LoanDeductionModal month={editMonth} person={change.person} ln={ln} before={editBefore} planned={editPlanned}
+        <LoanDeductionModal month={editMonth} final={final} person={change.person} ln={ln} before={editBefore} planned={editPlanned}
           onClose={() => setEditing(false)}
           onDone={async msg => {
             setEditing(false);

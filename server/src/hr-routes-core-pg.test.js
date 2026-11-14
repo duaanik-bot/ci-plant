@@ -534,8 +534,8 @@ describe('HR core routes through the real app', {
     assert.deepEqual(two.body.map((p) => p.id), [p3]);
     assert.equal((await call('viewer', 'GET', '/hr/people?status=')).body.length, 3, 'an empty status is every status');
     refused(await call('viewer', 'GET', '/hr/people?status=bogus'), 400);
-    // Deleting a person is the admin's alone (the delete tests below); an operator's try changes nothing.
-    assert.equal((await call('operator', 'DELETE', `/hr/people/${p3}`)).status, 403);
+    // Deleting a person needs accounts or above (2026-11-14); a viewer's try changes nothing.
+    assert.equal((await call('viewer', 'DELETE', `/hr/people/${p3}`)).status, 403);
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people`)).n, 3);
   });
 
@@ -1010,7 +1010,7 @@ describe('HR core routes through the real app', {
     assert.equal(dated.body.warning, undefined);
   });
 
-  test('delete: admin only; allowed with no history (setups and aliases go too, audit has no bank number); 409 HAS_PAY_HISTORY otherwise', T, async () => {
+  test('delete: accounts and up (not a viewer); allowed with no history (setups and aliases go too, audit has no bank number); 409 HAS_PAY_HISTORY otherwise', T, async () => {
     const mk = async (code, name, extra = {}) => {
       const res = await call('operator', 'POST', '/hr/people', { code, name, bank_account: '555566667777', pan: PAN_2, ...extra });
       assert.equal(res.status, 200, res.text);
@@ -1020,7 +1020,6 @@ describe('HR core routes through the real app', {
     await call('operator', 'POST', `/hr/people/${clean}/setups`, { effective_from: '2026-08-01', pay_basis: 'monthly', base: '9000' });
     await call('operator', 'POST', `/hr/people/${clean}/aliases`, { alias: 'Deletable P' });
 
-    await refusedWrite('operator', 'DELETE', `/hr/people/${clean}`, undefined, 403, 'HR_LEVEL');
     await refusedWrite('viewer', 'DELETE', `/hr/people/${clean}`, undefined, 403, 'HR_LEVEL');
     await refusedWrite('admin', 'DELETE', '/hr/people/999999', undefined, 404);
 
