@@ -1425,10 +1425,12 @@ function inputChanges(before, after) {
   return changes;
 }
 
-r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res, next) => {
+// The entry sheet's routes are open to accounts too (owner, 2026-11-14), never for a person hidden from the login.
+r.put('/hr/runs/:month/inputs/:personId', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const personId = idOf(req.params.personId, 'Person');
+    assertPayVisible(req, personId);
     const body = bodyOf(req);
     const reason = textOf(body.reason, 'The reason', 500);
     if (!reason) throw bad('Say why the inputs are being changed: the reason is kept with the change');
@@ -1502,7 +1504,7 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
 // month is started here when it has no run yet), not locked. Each row changes only the fields it sends, as the
 // one-person route does; a person with no inputs yet starts from a blank row and joins the month. One recalculation
 // for the people sent; one audit row per input that changed. Answers the month as GET /hr/runs/:month does.
-r.put('/hr/runs/:month/inputs', requireHr('operator'), async (req, res, next) => {
+r.put('/hr/runs/:month/inputs', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const body = bodyOf(req);
@@ -1581,8 +1583,8 @@ const inputsLockRoute = (action) => async (req, res, next) => {
       return runResponse(req, res, next);
     } catch (e) { next(e); }
 };
-r.post('/hr/runs/:month/inputs/lock', requireHr('operator'), inputsLockRoute('lock'));
-r.post('/hr/runs/:month/inputs/unlock', requireHr('operator'), inputsLockRoute('unlock'));
+r.post('/hr/runs/:month/inputs/lock', requireHr('accounts'), inputsLockRoute('lock'));
+r.post('/hr/runs/:month/inputs/unlock', requireHr('accounts'), inputsLockRoute('unlock'));
 
 // ── POST /hr/runs/:month/recalc ─────────────────────────────────────────────
 

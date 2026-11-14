@@ -1414,7 +1414,7 @@ export default function Payroll({ level }) {
       )}
       {here && !run && !monthClosed && (
         <div className="mt-3">
-          <EntrySheet month={month} run={null} people={people} inputs={[]} lines={[]} canOperate={canOperate}
+          <EntrySheet month={month} run={null} people={people} inputs={[]} lines={[]} canOperate={canPay}
             monthClosed={monthClosed} onSaved={load} />
         </div>
       )}
@@ -1658,7 +1658,7 @@ export default function Payroll({ level }) {
             </div>
           )}
           {layout === 'entry' ? (
-            <EntrySheet month={month} run={run} people={people} inputs={inputs} lines={lines} canOperate={canOperate}
+            <EntrySheet month={month} run={run} people={people} inputs={inputs} lines={lines} canOperate={canPay}
               monthClosed={false} onSaved={load} />
           ) : layout === 'cards' ? (
             <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate} canSelect={canPay}

@@ -52,6 +52,8 @@ const ALLOW = [
   ['POST', `/hr/runs/${M}/payments`], ['PUT', `/hr/runs/${M}/lines/\\d+/payment`], ['POST', `/hr/runs/${M}/lines/status`],
   ['POST', '/hr/staff-payments'], ['POST', '/hr/advances'],
   // Activate / deactivate a person it can see (2026-11-14).
+  // The month's entry sheet (2026-11-14): only people it can see.
+  ['PUT', `/hr/runs/${M}/inputs`], ['PUT', `/hr/runs/${M}/inputs/\\d+`], ['POST', `/hr/runs/${M}/inputs/lock`], ['POST', `/hr/runs/${M}/inputs/unlock`],
   ['POST', '/hr/people/for-month'], ['POST', '/hr/people/\\d+/deactivate'], ['POST', '/hr/people/\\d+/activate'], ['DELETE', '/hr/people/\\d+'],
   // A loan's instalment for a month, or from a month on (2026-11-14): only for a person the login can see.
   ['PUT', '/hr/loans/\\d+/month-instalment'],

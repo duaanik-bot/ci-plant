@@ -168,7 +168,7 @@ describe('HR accounts level and hide list', {
     const loan = await db.one(`SELECT id FROM hr.loans WHERE person_id = $1`, [G]);
     assert.equal((await call('accounts', 'GET', `/hr/loans/${loan.id}`)).status, 404);
     for (const [m, url] of [['GET', `/hr/runs/${MONTH}/variance`], ['GET', '/hr/audit'], ['GET', '/hr/column-maps'], ['GET', '/hr/loan-holds'],
-      ['GET', '/hr/adjustments'], ['PUT', `/hr/runs/${MONTH}/inputs/${S}`], ['POST', '/hr/people'], ['GET', '/hr/anything-new']]) {
+      ['GET', '/hr/adjustments'], ['POST', '/hr/people'], ['GET', '/hr/anything-new']]) {
       refused(await call('accounts', m, url, m === 'GET' ? undefined : {}), 403, 'HR_RESTRICTED');
     }
   });
@@ -343,6 +343,16 @@ describe('HR accounts level and hide list', {
     ok(await call('accounts', 'DELETE', `/hr/people/${fresh}`));
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people WHERE id = $1`, [fresh])).n, 0);
     assert.equal((await call('viewer', 'POST', `/hr/people/${S}/deactivate`, {})).status, 403);
+    // The entry sheet (2026-11-14): accounts types for people it can see; a hidden person is not there.
+    const ent = ok(await call('accounts', 'PUT', '/hr/runs/2027-02/inputs', { rows: [{ person_id: S, absent_days: 2, ot_hours: 5 }] }));
+    clean(ent, 'bulk entry');
+    ok(await call('accounts', 'PUT', `/hr/runs/2027-02/inputs/${S}`, { absent_days: 1, reason: 'Test: fix' }));
+    for (const id of [G, P]) {
+      assert.equal((await call('accounts', 'PUT', '/hr/runs/2027-02/inputs', { rows: [{ person_id: id, absent_days: 1 }] })).status, 404);
+      assert.equal((await call('accounts', 'PUT', `/hr/runs/2027-02/inputs/${id}`, { absent_days: 1, reason: 'x' })).status, 404);
+    }
+    ok(await call('accounts', 'POST', '/hr/runs/2027-02/inputs/lock', {}));
+    ok(await call('accounts', 'POST', '/hr/runs/2027-02/inputs/unlock', {}));
     // A new person from a payroll month (2026-11-14): on that month's list and after, not before.
     const made = ok(await call('accounts', 'POST', '/hr/people/for-month', {
       month: '2027-04', person: { code: 'T-398', name: 'Test Month Newcomer', department: 'PASTING', pay_channel: 'TCASH' },

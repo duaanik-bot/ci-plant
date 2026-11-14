@@ -44,7 +44,7 @@ export default function EntrySheet({ month, run, people, inputs, lines, canOpera
   const locked = Boolean(run?.inputs_locked_at);
   const draft = !run || run.status === 'draft';
   const canEdit = canOperate && draft && !locked && !monthClosed;
-  const why = !canOperate ? 'Entering inputs needs HR operator access.'
+  const why = !canOperate ? 'Entering inputs needs HR accounts access or above.'
     : monthClosed ? 'A later month is already finalised, so this month cannot change.'
       : !draft ? `${monthLabel(month)} is ${run.status}: change one person from their line, or send the month back to change many.`
         : locked ? `Locked${run.inputs_locked_by_name ? ` by ${run.inputs_locked_by_name}` : ''}${run.inputs_locked_at ? ` on ${String(run.inputs_locked_at).slice(0, 10)}` : ''}: unlock to change the entries.`
