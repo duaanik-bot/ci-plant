@@ -14,6 +14,7 @@
 //   PUT  /costing/enquiry-desk/settings        mailbox in use, who a mailbox replies to, terms, words (admin)
 //   POST /costing/enquiry-desk/fetch           queue a Fetch { mailbox: business | trial, else the one in use }
 //   GET  /costing/enquiry-desk/summary         the side menu's count: new enquiries, asked again this week
+//   POST /costing/enquiries/delete             { ids, reason }: off the desk, kept, undoable (not on a quotation or order)
 //   GET  /costing/enquiry-jobs/:id · POST /costing/enquiry-jobs/:id/cancel
 //   GET  /costing/enquiries?stage=&search=     the desk's rows     GET /costing/enquiries/:id  one, with its mail and history
 //   POST /costing/enquiries                    one typed in by hand        PUT /costing/enquiries/:id  its details
@@ -423,6 +424,8 @@ r.get('/costing/enquiries', async (req, res, next) => {
       where.push(`(e.enquiry_no ILIKE ${p} OR e.product_name ILIKE ${p} OR e.customer_name ILIKE ${p} OR e.contact_email ILIKE ${p}
                    OR e.size_text ILIKE ${p} OR m.subject ILIKE ${p} OR qt.quotation_no ILIKE ${p})`);
     }
+    // A deleted row is in no list unless asked for by number (14 Nov 2026).
+    if (!stages.length && !only.length) where.push(`e.status <> 'deleted'`);
     if (/^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '')) add(`COALESCE(m.received_at, e.created_at) >= ?::date`, req.query.from);
     if (/^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '')) add(`COALESCE(m.received_at, e.created_at) < (?::date + 1)`, req.query.to);
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -492,7 +495,7 @@ export async function askedAgain(qc, item, who, mailId, by) {
       : who.customer_name ? ['lower(trim(e.customer_name)) = lower(trim($1))', who.customer_name] : null;
   if (!cust || !productKey(item?.product_name)) return null;
   const open = await qc(`SELECT e.id, e.enquiry_no, e.product_name, e.quantities::float8[] AS quantities FROM enquiries e
-                          WHERE ${cust[0]} AND e.status NOT IN ('dropped', 'ordered')
+                          WHERE ${cust[0]} AND e.status NOT IN ('dropped', 'ordered', 'deleted')
                             AND COALESCE(e.updated_at, e.created_at) > now() - make_interval(days => $2)
                           ORDER BY e.id DESC LIMIT 200`, [cust[1], ASKED_AGAIN_DAYS]);
   const hit = open.find(e => isRepeat(e, item));
@@ -629,6 +632,24 @@ r.post('/costing/enquiries/restore', async (req, res, next) => {
                               WHERE enquiry_id = $1 AND action = 'drop' ORDER BY id DESC LIMIT 1`, [e.id]);
       const to = broughtBack(ev?.was, e.costing_id);
       return { set: 'status = $3, dropped_reason = NULL', args: [to], to };
+    }));
+  } catch (e) { next(e); }
+});
+
+// Delete (owner, 14 Nov 2026: "also give option to delete the enquiry"): a duplicate, or a mail that was no enquiry.
+// The row leaves every list and count on the desk but stays in the database with its reason, and Undo brings it back.
+// A row on a live quotation or an order is refused: cancel the quotation first (or drop it).
+const DELETABLE = ['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped'];
+r.post('/costing/enquiries/delete', async (req, res, next) => {
+  try {
+    const reason = text(req.body?.reason, 300) || 'Deleted from the desk';
+    res.json(await moveRows(ids(req.body), req.costingUser, 'delete', e => {
+      if (e.snap?.order_id) return { why: 'is on an order' };
+      if (e.quotation_id && e.quotation_status && e.quotation_status !== 'cancelled') {
+        return { why: `is on ${e.quotation_no || 'a quotation'} — cancel the quotation first` };
+      }
+      if (!DELETABLE.includes(e.stage)) return { why: `is ${stageText(e.stage)}` };
+      return { set: "status = 'deleted', dropped_reason = $3", args: [reason], to: 'deleted', detail: { reason } };
     }));
   } catch (e) { next(e); }
 });

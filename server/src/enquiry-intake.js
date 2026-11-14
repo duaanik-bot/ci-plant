@@ -70,37 +70,44 @@ export function newEnquiryAlert(mails) {
 }
 
 // ── the same mail through the other mailbox ──────────────────────────────────────────────────────────────────────
-// A customer who writes to both mailboxes sends one mail to each. AVS leaves such a mail to the trial mailbox's robot
-// (it sees the address in To/Cc); a Bcc it cannot see, so CI Plant checks both ways. The same mail = the same sender,
-// subject, words and attachments, arriving within two hours of each other. Anything less is two mails: a short "PFA,
-// kindly quote" sent twice with other files is two requests, and a mail lost is worse than one shown twice (review,
-// 13 Nov 2026). Compared here in JavaScript, not in SQL: the plant database's SQL_ASCII encoding lower-cases and splits
-// spaces byte by byte.
-export const SAME_MAIL_HOURS = 2;
+// A customer who writes to both mailboxes sends one mail to each; CI Plant files it once. The same mail = the same
+// sender and subject, and either the very same second, or within SAME_MAIL_MINUTES with the same files or the same
+// words. Not the words alone: two Claudes copy a mail's words differently (14 Nov 2026 — one 824 characters, the other
+// 892, of one mail), so a copy was missed that way. Anything less is two mails: a mail lost is worse than one shown
+// twice. Compared here in JavaScript, not in SQL: the plant database's SQL_ASCII encoding lower-cases and splits spaces
+// byte by byte.
+export const SAME_MAIL_MINUTES = 2;
 const flat = v => String(v ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-const fileNames = list => (Array.isArray(list) ? list : []).map(a => flat(a?.name ?? a)).filter(Boolean).sort().join('|');
+const fileNames = list => (Array.isArray(list) ? list : []).map(a => flat(a?.name ?? a)).filter(Boolean).sort();
 const timeOf = v => (v ? new Date(v).getTime() : NaN);
 export function sameMail(a, b) {
-  const print = bodyPrint(a?.body_text);
-  if (!print || print !== bodyPrint(b?.body_text)) return false;
-  if (!flat(a.from_email) || flat(a.from_email) !== flat(b.from_email)) return false;
-  if (flat(a.subject) !== flat(b.subject) || fileNames(a.attachments) !== fileNames(b.attachments)) return false;
+  if (!flat(a?.from_email) || flat(a.from_email) !== flat(b?.from_email)) return false;
+  if (flat(a.subject) !== flat(b.subject)) return false;
   const ta = timeOf(a.received_at), tb = timeOf(b.received_at);
-  return Number.isFinite(ta) && Number.isFinite(tb) && Math.abs(ta - tb) <= SAME_MAIL_HOURS * 3600e3;
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return false;
+  const gap = Math.abs(ta - tb);
+  if (gap < 1000) return true;
+  if (gap > SAME_MAIL_MINUTES * 60e3) return false;
+  const fa = fileNames(a.attachments), fb = fileNames(b.attachments);
+  // the same files: one Claude may also list an inline image (a logo) the other left out
+  const real = list => list.filter(n => !/^image\d+\.(png|jpe?g|gif)$/.test(n));
+  if (real(fa).length && real(fa).join('|') === real(fb).join('|')) return true;
+  const print = bodyPrint(a.body_text);
+  return !!print && print === bodyPrint(b.body_text);
 }
 
 // The mail already on the desk from ANOTHER mailbox that is this one, or null. Run it under the CI-ENQ- numbering lock
 // (both filers take it first), so a copy being filed at that moment is seen once it is committed.
 export async function sameMailOnDesk(qc, m, mailboxEmail) {
   const at = timeOf(m.received_at);
-  if (!bodyPrint(m.body_text) || !m.from_email || !Number.isFinite(at)) return null;
+  if (!m.from_email || !Number.isFinite(at)) return null;
   const near = await qc(`
     SELECT m.id, m.mailbox, m.mailbox_email, m.subject, m.from_email, m.received_at, m.body_text, m.attachments,
            (SELECT array_agg(e.enquiry_no ORDER BY e.id) FROM enquiries e WHERE e.mail_id = m.id) AS nos
       FROM enquiry_mails m
      WHERE m.mailbox_email <> $1 AND lower(m.from_email) = lower($2)
-       AND m.received_at BETWEEN $3::timestamptz - make_interval(hours => $4) AND $3::timestamptz + make_interval(hours => $4)
-     ORDER BY m.id DESC LIMIT 50`, [mailboxEmail, m.from_email, new Date(at).toISOString(), SAME_MAIL_HOURS]);
+       AND m.received_at BETWEEN $3::timestamptz - make_interval(mins => $4) AND $3::timestamptz + make_interval(mins => $4)
+     ORDER BY m.id DESC LIMIT 50`, [mailboxEmail, m.from_email, new Date(at).toISOString(), SAME_MAIL_MINUTES]);
   const hit = near.find(x => sameMail(x, m));
   return hit ? { mail_id: hit.id, mailbox: hit.mailbox, mailbox_email: hit.mailbox_email, enquiry_nos: hit.nos || [] } : null;
 }

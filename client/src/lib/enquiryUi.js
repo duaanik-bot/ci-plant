@@ -7,20 +7,22 @@ import { finishFromEnquiry } from './costingRules.js';
 // done — Send to costing, a costing saved for it, prices finalised — and "Send back" moves it one tab left,
 // keeping its costing and prices. "Costing completed" (costed) waits in Final price for a final price.
 export const DESK_TABS = [
-  { key: 'inbox', label: 'Inbox', stages: ['new'] },
-  { key: 'costing', label: 'Costing', stages: ['ready', 'costing'] },
-  { key: 'price', label: 'Final price', stages: ['costed', 'price_pending'] },
-  // the customer's counter-offer, waiting for our revised price (11 Nov 2026)
-  { key: 'counter', label: 'Counter', stages: ['countered'] },
-  { key: 'quote', label: 'Quotations', stages: ['quote_ready'] },
-  { key: 'sent', label: 'Sent', stages: ['sent'] },
+  // Four working tabs instead of eight (owner, 14 Nov 2026: "consolidation required here also").
+  // Everything still to be costed: new enquiries — orange until someone starts on them — and those ready for or in
+  // costing.
+  { key: 'cost', label: 'To cost', stages: ['new', 'ready', 'costing'] },
+  // Costed, waiting for the final price; and a customer's counter-offer, waiting for our revised price (11 Nov 2026).
+  { key: 'price', label: 'To price', stages: ['costed', 'price_pending', 'countered'] },
+  // Finalised (the quotation to make) and sent (waiting for the customer).
+  { key: 'quoted', label: 'Quoted', stages: ['quote_ready', 'sent'] },
   // the customer agreed: the order is kept with its rate and any loss, and the team is told (13 Nov 2026)
   { key: 'orders', label: 'Orders', stages: ['ordered'] },
-  { key: 'dropped', label: 'Dropped', stages: ['dropped'] },
+  // off to the side, with Settings
+  { key: 'dropped', label: 'Dropped', stages: ['dropped'], side: true },
 ];
 export const tabOfStage = stage => DESK_TABS.find(t => t.stages.includes(stage))?.key || null;
 // What "Send back" says on each tab (server: BACK_TO in server/src/enquiry-desk.js).
-export const BACK_LABEL = { costing: 'Send back to Inbox', price: 'Send back to Costing', quote: 'Send back to Final price' };
+export const BACK_LABEL = { price: 'Send back to To cost', quoted: 'Send back to To price' };
 const TAB_LABEL = Object.fromEntries(DESK_TABS.map(t => [t.key, t.label]));
 // "CI-ENQ-0003 → Final price": where a stage sits on the desk, for the undo bar.
 export const whereText = stage => TAB_LABEL[tabOfStage(stage)] || stage;

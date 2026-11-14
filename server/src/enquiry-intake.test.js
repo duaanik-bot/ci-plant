@@ -68,8 +68,10 @@ test('the robot name AVS rows carry', () => {
   assert.equal(AVS_RUNNER, 'AVS (office)');
 });
 
-// The same mail through two mailboxes (a Bcc copy): the same sender, subject, words and attachments, arriving within two
-// hours. Anything less is two mails — a mail lost is worse than one shown twice (review, 13 Nov 2026).
+// The same mail through two mailboxes: the same sender and subject, and either the very same second, or within two
+// minutes with the same files or the same words. Two Claudes copy a mail's words differently (14 Nov 2026: one 824
+// characters, the other 892, of the same mail), so the words alone can never decide it. A mail lost is worse than one
+// shown twice, so anything less is two mails.
 const copy = (over = {}) => ({
   from_email: 'Buyer@Sample-Labs.test', subject: 'RFQ  for cartons', body_text: 'PFA, kindly quote.\nRegards',
   attachments: [{ name: 'RFQ.pdf' }, { name: 'spec.xlsx' }], received_at: '2026-11-13T10:00:00Z', ...over,
@@ -77,19 +79,32 @@ const copy = (over = {}) => ({
 
 test('a copy of the same mail in the other mailbox is the same mail', () => {
   assert.equal(sameMail(copy(), copy({ from_email: 'buyer@sample-labs.test', subject: 'rfq for  cartons', body_text: 'PFA,  kindly QUOTE. Regards',
-    attachments: [{ name: 'spec.xlsx' }, { name: 'RFQ.pdf' }], received_at: '2026-11-13T10:03:00Z' })), true);
+    attachments: [{ name: 'spec.xlsx' }, { name: 'RFQ.pdf' }], received_at: '2026-11-13T10:00:30Z' })), true);
 });
 
-test('two RFQs with the same short words but another subject or other attachments are two mails', () => {
-  assert.equal(sameMail(copy(), copy({ subject: 'RFQ for labels' })), false);
-  assert.equal(sameMail(copy(), copy({ attachments: [{ name: 'RFQ-B.pdf' }] })), false);
-  assert.equal(sameMail(copy(), copy({ attachments: [] })), false);
+test('the same mail copied differently by two Claudes is still one mail: the same second, or the same files', () => {
+  const longer = 'PFA, kindly quote.\nRegards\nAsha K | Purchase | +91 00000 00000 | sent from the office';
+  assert.equal(sameMail(copy(), copy({ body_text: longer })), true, 'the same second');
+  assert.equal(sameMail(copy(), copy({ body_text: longer, attachments: [{ name: 'image001.png' }, { name: 'RFQ.pdf' }, { name: 'spec.xlsx' }] })), true,
+    'one Claude also listed the logo image');
+  assert.equal(sameMail(copy(), copy({ body_text: longer, received_at: '2026-11-13T10:01:30Z' })), true, '90 seconds apart, the same files');
 });
 
-test('a mail is never matched across a long gap, without a time, without words, or from someone else', () => {
+test('two mails from one sender under one subject are two mails: other words and no files, or minutes apart', () => {
+  const a = copy({ subject: 'RE: NEED BEST RATE', attachments: [], body_text: 'Rate not received for the carton below.', received_at: '2026-11-12T14:33:44Z' });
+  const b = copy({ subject: 'RE: NEED BEST RATE', attachments: [], body_text: 'We can pay as below, final.', received_at: '2026-11-12T14:35:22Z' });
+  assert.equal(sameMail(a, b), false, 'two replies 98 seconds apart');
+  assert.equal(sameMail(copy(), copy({ subject: 'RFQ for labels' })), false, 'another subject');
+  assert.equal(sameMail(copy(), copy({ attachments: [{ name: 'RFQ-B.pdf' }], body_text: 'Please quote the B carton.', received_at: '2026-11-13T10:01:00Z' })), false,
+    'other files and other words, a minute apart');
+});
+
+test('a mail is never matched across a long gap, without a time, or from someone else', () => {
   assert.equal(sameMail(copy(), copy({ received_at: '2026-11-13T15:00:00Z' })), false, 'five hours apart');
+  assert.equal(sameMail(copy(), copy({ received_at: '2026-11-13T10:03:00Z' })), false, 'three minutes apart, even with the same files');
   assert.equal(sameMail(copy(), copy({ received_at: null })), false, 'no time: cannot tell');
-  assert.equal(sameMail(copy({ body_text: '' }), copy({ body_text: '' })), false, 'no words: cannot tell');
+  assert.equal(sameMail(copy({ attachments: [], body_text: '' }), copy({ attachments: [], body_text: '', received_at: '2026-11-13T10:01:00Z' })), false,
+    'no words and no files, a minute apart: cannot tell');
   assert.equal(sameMail(copy(), copy({ from_email: 'other@sample-labs.test' })), false);
 });
 

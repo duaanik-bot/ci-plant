@@ -22,6 +22,8 @@ export const STATUS_LABEL = Object.freeze({
   countered: 'Counter received',
   // the customer agreed: the order is recorded with its rate and any loss, and the team is told (13 Nov 2026)
   ordered: 'Order finalised',
+  // taken off the desk (14 Nov 2026: "give option to delete the enquiry") — kept with its reason, out of every list
+  deleted: 'Deleted',
 });
 // The stored status, read against the linked costing (5 Nov 2026): an enquiry in costing whose costing is
 // complete reads "Costing completed"; one in costing with no costing behind it — none was saved, or it was

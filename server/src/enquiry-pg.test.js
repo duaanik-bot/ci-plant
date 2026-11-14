@@ -1306,6 +1306,37 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await call('plain', 'GET', '/costing/enquiry-desk/summary')).status, 403);
   });
 
+  test('Delete: a row not on a quotation or order leaves every list, keeps its reason, and Undo brings it back', async () => {
+    const x = await typed('DELETE ME CARTON');
+    const quoted = await db.one(`SELECT id, enquiry_no FROM enquiries WHERE status = 'sent' ORDER BY id LIMIT 1`);
+    assert.ok(quoted, 'an earlier test sent a quotation');
+    const r = await call('clerk', 'POST', '/costing/enquiries/delete', { ids: [x.id, quoted.id], reason: 'Duplicate of an earlier enquiry' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.moved.map(m => m.enquiry_no), [x.enquiry_no]);
+    assert.equal(r.body.skipped[0].enquiry_no, quoted.enquiry_no);
+    assert.match(r.body.skipped[0].why, /cancel the quotation first/);
+    assert.ok(r.body.undo);
+    const row = await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [x.id]);
+    assert.deepEqual([row.status, row.dropped_reason], ['deleted', 'Duplicate of an earlier enquiry']);
+    for (const stage of ['new', 'ready', 'costing', 'dropped']) {
+      assert.ok(!(await call('clerk', 'GET', `/costing/enquiries?stage=${stage}`)).body.some(e => e.id === x.id), stage);
+    }
+    assert.ok(!(await call('clerk', 'GET', '/costing/enquiries')).body.some(e => e.id === x.id), 'nor in the whole list');
+    assert.equal((await call('clerk', 'GET', '/costing/enquiry-desk/summary')).body.new,
+      (await db.one(`SELECT count(*)::int AS n FROM enquiries WHERE status = 'new'`)).n);
+    // A blank reason still deletes, with a plain one.
+    const y = await typed('DELETE ME TOO CARTON');
+    const r2 = await call('clerk', 'POST', '/costing/enquiries/delete', { ids: [y.id], reason: '  ' });
+    assert.equal(r2.body.moved.length, 1);
+    assert.equal((await db.one('SELECT dropped_reason FROM enquiries WHERE id = $1', [y.id])).dropped_reason, 'Deleted from the desk');
+    // Undo puts it back as it was.
+    const u = await call('clerk', 'POST', '/costing/enquiries/undo', { group: r.body.undo });
+    assert.deepEqual(u.body.moved.map(m => m.enquiry_no), [x.enquiry_no]);
+    assert.deepEqual(Object.values(await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [x.id])), ['new', null]);
+    // No Costing tick, no delete.
+    assert.equal((await call('plain', 'POST', '/costing/enquiries/delete', { ids: [x.id] })).status, 403);
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });
