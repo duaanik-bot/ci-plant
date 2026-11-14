@@ -229,3 +229,48 @@ test('the layout picture keeps every up inside the gripper, the edges and the ga
   const apart = (a, b) => Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
   for (let i = 0; i < bodies.length; i++) for (let j = i + 1; j < bodies.length; j++) assert.ok(apart(bodies[i], bodies[j]) >= 3 - 1e-6);
 });
+
+// The press margins (owner, 14 Nov 2026: the presses want a 10 mm gripper and 5 mm edges; then "Warn, don't drop ups" —
+// 9 of the 11 real dies above run their full ups with less). Ups are still counted edge to edge; a layout that leaves
+// less is flagged, and on the same sheet with the same ups the one that keeps the margins comes first.
+test('press margins: a real die that runs with less still gets its ups, with a warning; a roomy one gets none', async () => {
+  const { marginShortfall, HOUSE_RULES } = await import('../../client/src/lib/sizing.js');
+  assert.deepEqual({ ...HOUSE_RULES.pressMargin }, { gripper: 10, other: 5 });
+  assert.deepEqual({ ...HOUSE_RULES.margin }, { gripper: 0, other: 0 }, 'ups are counted edge to edge, as the dies run');
+  // 85 × 37 × 50 side pasting runs 9 up on 18 × 23 (a half of 23 × 36)
+  const side = proposals({ style: 'SIDE', size: { l: 85, w: 37, h: 50 }, boards: [{ id: 1, sheet_l: 36, sheet_w: 23 }] });
+  const nine = side.readings.flatMap(r => r.options).find(o => o.ups === 9 && o.sheet.long === 23 && o.sheet.short === 18);
+  assert.ok(nine, 'still 9 up on 18 × 23');
+  assert.ok(nine.margins && nine.margins.short + nine.margins.long > 0);
+  assert.match(nine.marginNote, /10 mm gripper/);
+  // 131 × 70 × 57 lock runs 4 up on 18 × 23 with room to spare: no warning
+  const lock = proposals({ style: 'LOCK', size: { l: 131, w: 70, h: 57 }, boards: [{ id: 1, sheet_l: 36, sheet_w: 23 }] });
+  const four = lock.readings[0].options.find(o => o.ups === 4 && o.sheet.long === 23 && o.sheet.short === 18);
+  assert.equal(four.margins, null);
+  assert.equal(four.marginNote, null);
+  // the gripper bites a long edge: the short side needs 10 + 5 free, the long side 5 + 5; margins typed for the output count
+  assert.equal(marginShortfall({ acrossOn: 'long', spareAcross: 40, spareAlong: 20 }), null);
+  assert.deepEqual(marginShortfall({ acrossOn: 'long', spareAcross: 6, spareAlong: 12 }), { short: 3, long: 4 });
+  assert.deepEqual(marginShortfall({ acrossOn: 'short', spareAcross: 12, spareAlong: 6 }), { short: 3, long: 4 });
+  assert.equal(marginShortfall({ acrossOn: 'long', spareAcross: 0, spareAlong: 0, settings: { gripper: 10, edge: 5 } }), null);
+});
+
+test('press margins: with the same ups on the same sheet, the layout that keeps them comes first', () => {
+  // 40 × 15 × 100 lock on 15.75 × 20.75 (a quarter of 31.5 × 41.5) takes 12 up either way round; only one way leaves
+  // 10 mm gripper + 5 mm edges. No grain recorded here, so nothing else tells the two apart.
+  const p = proposals({ style: 'LOCK', size: { l: 40, w: 15, h: 100 }, boards: [{ id: 1, sheet_l: 41.5, sheet_w: 31.5 }] });
+  const first = p.readings[0].options.find(o => o.sheet.long === 20.75 && o.sheet.short === 15.75);
+  assert.equal(first.ups, 12);
+  assert.equal(first.margins, null, 'the 12-up layout shown keeps the press margins');
+});
+
+test('press margins: an output layout that fits but leaves less says so', async () => {
+  const { layoutOptions } = await import('../../client/src/lib/sizing.js');
+  const opts = layoutOptions({ style: 'SIDE', size: { l: 85, w: 37, h: 50 }, sheet_l: 18, sheet_w: 23, ups: 9 });
+  const fit = opts.find(o => o.fits);
+  assert.ok(fit, 'it fits edge to edge');
+  assert.ok(fit.margins && fit.margins.short + fit.margins.long > 0);
+  assert.match(fit.marginNote, /gripper/);
+  const roomy = layoutOptions({ style: 'LOCK', size: { l: 131, w: 70, h: 57 }, sheet_l: 18, sheet_w: 23, ups: 4 }).find(o => o.fits);
+  assert.equal(roomy.margins, null);
+});

@@ -159,6 +159,7 @@ export default function KldPanel({ value, size, entries = [], pending = null, on
                   <span className="text-slate-500">carton width along the {side} in side</span>
                   {o.fits ? <span className="font-semibold text-emerald-700">Fits · spare {o.spare.across} / {o.spare.along} mm</span>
                     : <span className="font-semibold text-amber-700">{o.over.mm} mm over the house rules</span>}
+                  {o.marginNote && <span className="text-amber-700">{o.marginNote}</span>}
                 </button>
               );
             })}

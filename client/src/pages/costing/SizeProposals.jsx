@@ -95,6 +95,7 @@ function OptionCard({ reading, option, onUse }) {
       <div><span className={`rounded-full px-1.5 py-px font-bold ${tone}`} title={`The board grain must run along the ${side} in side`}>{label}</span>
         <span className="ml-1 text-slate-500">along {side} in</span></div>
       {option.note && <div className="text-amber-700">{option.note}</div>}
+      {option.marginNote && <div className="text-amber-700">{option.marginNote}</div>}
       <button type="button" onClick={onUse}
         className="mt-auto rounded-lg bg-brand-600 px-2 py-1 text-xs font-bold text-white hover:bg-brand-700">Use this layout</button>
     </div>
@@ -155,7 +156,7 @@ export default function SizeProposals({ value, size, onPick }) {
           )}
         </div>
       ))}
-      <p className="text-[11px] text-slate-500">House rules measured from your own dies and outputs (12 Nov 2026), not yet confirmed: panels at the inner size, no sheet margin. Check the die maker agrees before ordering a die.</p>
+      <p className="text-[11px] text-slate-500">House rules from your own dies and outputs, confirmed 14 Nov 2026: panels at the inner size, ups counted edge to edge, with a warning when a layout leaves less than the press margins (10 mm gripper + 5 mm edges). Check the die maker agrees before ordering a die.</p>
     </div>
   );
 }

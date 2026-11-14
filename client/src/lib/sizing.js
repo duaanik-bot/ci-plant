@@ -4,7 +4,8 @@
 // Pure: no database, no clock. Shared by the costing screen and the server (routes/sizing.js), like costing.js.
 // The rules are the plant's own, measured on 12 Nov 2026 from its dies, output sheets and Size Library (see
 // docs/superpowers/specs/2026-11-12-size-proposals-kld-design.md); with them this model gives the same ups as the
-// real dies it was checked on (sizing.test.js). The owner has not confirmed them yet, so they are defaults.
+// real dies it was checked on (sizing.test.js). The owner confirmed them on 14 Nov 2026 (the tube by the opening, inner
+// sizes, dust flaps sharing a cut with the next tuck) and asked for the press margins to be warned about, not taken off.
 //
 // Carton size L × W × H in mm; sheets in inches. Two constructions are drawn:
 //   RTE  — reverse tuck, side pasted. Read two ways, both tried: side-open (the tube runs along L, faces H and W) and
@@ -21,6 +22,9 @@ export const HOUSE_RULES = Object.freeze({
   lock: w => w / 2 + 5,
   // the plant's output sheets run edge to edge (0–10 mm spare); a margin here is taken off the print sheet
   margin: Object.freeze({ gripper: 0, other: 0 }),
+  // what the presses want free (owner, 14 Nov 2026: 10 mm gripper, 5 mm edges). Not taken off the sheet — "Warn, don't
+  // drop ups": 9 of 11 real dies run with less — a layout that leaves less is flagged (marginShortfall).
+  pressMargin: Object.freeze({ gripper: 10, other: 5 }),
   // mm between two ups on the output, both ways (0: neighbouring ups share a cut)
   gutter: 0,
   // inches, the print sheet's long side × short side
@@ -67,7 +71,8 @@ export function cartonPlan(reading, rules = HOUSE_RULES) {
   }
   const lock = rules.lock(w);
   const single = lock + tube + w + tuck, pair = 2 * lock + 2 * tube + w + tuck;
-  // two lock bottoms go head to head and share one W + tuck gap; pairs butt foot to foot
+  // two lock bottoms go head to head and share one W + tuck gap (owner, 14 Nov 2026: the tuck and the other carton's
+  // dust flaps share one cut line); pairs butt foot to foot
   const along = n => (n > 0 ? Math.floor(n / 2) * pair + (n % 2) * single + (n - 1) * gutter : 0);
   return { construction, across, glue, tuck, dust, lock, gutter, acrossFor, along, blank: { across, along: single } };
 }
@@ -79,6 +84,29 @@ const sheetSides = (sheetLong, sheetShort, acrossOn, rules) => {
   const longMm = sheetLong * IN - 2 * other, shortMm = sheetShort * IN - gripper - other;
   return acrossOn === 'long' ? [longMm, shortMm] : [shortMm, longMm];
 };
+
+// How far a layout falls short of the press margins, or null when it leaves them. The gripper bites a long edge, so the
+// short side needs gripper + edge free and the long side an edge at each end; margins typed for the output are free
+// too. → null | { short, long } in mm.
+export function marginShortfall({ acrossOn, spareAcross, spareAlong, settings = null }, rules = HOUSE_RULES) {
+  const pm = rules.pressMargin;
+  if (!pm) return null;
+  const s = cleanSettings(settings);
+  const spareLong = acrossOn === 'long' ? spareAcross : spareAlong;
+  const spareShort = acrossOn === 'long' ? spareAlong : spareAcross;
+  const short = r1(pm.gripper + pm.other - (spareShort + s.gripper + s.edge));
+  const long = r1(2 * pm.other - (spareLong + 2 * s.edge));
+  return short > EPS || long > EPS ? { short: Math.max(0, short), long: Math.max(0, long) } : null;
+}
+// The warning for a layout under the press margins, or null.
+export function marginText(shortfall, sheet, rules = HOUSE_RULES) {
+  if (!shortfall) return null;
+  const pm = rules.pressMargin;
+  const parts = [];
+  if (shortfall.short > 0) parts.push(`${shortfall.short} mm short on the ${sheet.short} in side`);
+  if (shortfall.long > 0) parts.push(`${shortfall.long} mm short on the ${sheet.long} in side`);
+  return `Under the press margins (${pm.gripper} mm gripper + ${pm.other} mm edges): ${parts.join(', ')}`;
+}
 
 // The best grid of one carton on a print sheet, its across direction on the sheet's `acrossOn` side.
 export function layoutOn(plan, sheetLong, sheetShort, acrossOn, rules = HOUSE_RULES) {
@@ -153,9 +181,11 @@ export function proposals({ style, size, boards, gsm = null, rules = HOUSE_RULES
         const grain = s.grainSide == null ? 'unknown' : s.grainSide === acrossOn ? 'ok' : 'wrong';
         if (r.ups > 0) {
           const sq = sqIn(s.long, s.short, r.ups), tight = Math.min(r.spareAcross, r.spareAlong);
+          const margins = marginShortfall({ acrossOn, spareAcross: r.spareAcross, spareAlong: r.spareAlong }, rules);
           all.push({ ...base, ups: r.ups, m: r.m, n: r.n, sqInPerCarton: +sq.toFixed(1), gramsPerCarton: gramsOf(sq),
             spareAcross: +r.spareAcross.toFixed(1), spareAlong: +r.spareAlong.toFixed(1), grain,
-            note: tight < 2 ? `Tight: ${tight.toFixed(1)} mm spare` : null });
+            note: tight < 2 ? `Tight: ${tight.toFixed(1)} mm spare` : null,
+            margins, marginNote: marginText(margins, base.sheet, rules) });
         }
         const near = [];
         if (r.m >= 1 && r.needUp <= rules.nearMissMm) near.push({ ups: r.m * (r.n + 1), needMm: r.needUp, axis: 'along' });
@@ -163,7 +193,9 @@ export function proposals({ style, size, boards, gsm = null, rules = HOUSE_RULES
         for (const x of near) misses.push({ ...base, ...x, needMm: +x.needMm.toFixed(1), grain, sqInPerCarton: +sqIn(s.long, s.short, x.ups).toFixed(1) });
       }
     }
-    all.sort((a, b) => a.sqInPerCarton - b.sqInPerCarton || b.ups - a.ups || (a.grain === 'ok' ? -1 : 0) - (b.grain === 'ok' ? -1 : 0));
+    // least board a carton, then more ups, then the grain that fits, then the press margins kept
+    all.sort((a, b) => a.sqInPerCarton - b.sqInPerCarton || b.ups - a.ups || (a.grain === 'ok' ? -1 : 0) - (b.grain === 'ok' ? -1 : 0)
+      || Number(!!a.margins) - Number(!!b.margins));
     const options = [], seen = new Set();
     for (const o of all) { if (seen.has(o.ups)) continue; seen.add(o.ups); options.push(o); if (options.length >= maxOptions) break; }
     const bar = options[0]?.sqInPerCarton ?? Infinity;
@@ -376,16 +408,20 @@ export function layoutOptions({ style, size, sheet_l, sheet_w, ups, settings = n
           mm: r1(Math.max(overA, overB)), axis: overA > EPS && overB > EPS ? 'both' : overB > EPS ? 'along' : 'across',
         };
         if (over && over.mm > OVER_MAX_MM) continue;
+        const margins = fits ? marginShortfall({ acrossOn, spareAcross: -overA, spareAlong: -overB, settings: kept }, base) : null;
         out.push({
           key: `${reading.key}|${acrossOn}|${m}x${n}`, reading, fits, over,
           spare: fits ? { across: r1(-overA), along: r1(-overB) } : null,
+          margins, marginNote: marginText(margins, { long, short }, base),
           option: { sheet: { long, short }, ups: want, m, n, acrossOn, settings: kept },
         });
       }
     }
   }
   const room = o => Math.min(o.spare.across, o.spare.along);
-  out.sort((x, y) => (Number(y.fits) - Number(x.fits)) || (x.fits ? room(y) - room(x) : x.over.mm - y.over.mm));
+  // the ones that fit first — those keeping the press margins before those that don't — the roomiest first
+  out.sort((x, y) => (Number(y.fits) - Number(x.fits))
+    || (x.fits ? Number(!!x.margins) - Number(!!y.margins) || room(y) - room(x) : x.over.mm - y.over.mm));
   return out.slice(0, limit);
 }
 
