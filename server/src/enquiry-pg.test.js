@@ -758,7 +758,7 @@ describe('Enquiry desk — through the real app', {
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
       assert.deepEqual(saved.body.cloud, { linked: true, fire_url: link.fire_url, token_hint: '…n123' });
       assert.ok(!JSON.stringify((await call('admin', 'GET', '/costing/enquiry-desk')).body).includes('testtoken'));
-      assert.deepEqual((await call('clerk', 'GET', '/costing/enquiry-desk')).body.cloud, { linked: true });
+      assert.deepEqual((await call('clerk', 'GET', '/costing/enquiry-desk')).body.cloud.trial, { linked: true });
       // A blank token keeps the saved one.
       assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, token: '' })).body.cloud.token_hint, '…n123');
       // The test points the saved link at the stand-in (the route takes claude.ai's address only).
@@ -1250,6 +1250,113 @@ describe('Enquiry desk — through the real app', {
     } finally {
       await closeOpenFetches();
       await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'trial' });
+    }
+  });
+
+  // The company mailbox in the cloud (owner, 14 Nov 2026, "Cloud trigger instead": the office computer is Windows and
+  // takes a Fetch only at its AVS hours). Its routine lives on the company Claude account — whose Gmail is the company
+  // mailbox — beside the AVS check routine, and is linked under keys of its own.
+  test('Fetch from mail starts the company routine once it is linked; the trial mailbox never uses that link; the office AVS still takes what the cloud did not', async () => {
+    await db.q(fetchSql);
+    await closeOpenFetches();
+    const fires = [];
+    let answer = { status: 200, body: { type: 'routine_fire', claude_code_session_url: 'https://claude.ai/code/session_biz' } };
+    const fake = http.createServer((req, res) => {
+      let b = '';
+      req.on('data', d => { b += d; });
+      req.on('end', () => {
+        fires.push({ url: req.url, headers: req.headers, body: JSON.parse(b || '{}') });
+        res.writeHead(answer.status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(answer.body));
+      });
+    });
+    await new Promise(r => fake.listen(0, '127.0.0.1', r));
+    const fireUrl = `http://127.0.0.1:${fake.address().port}/v1/claude_code/routines/trig_biz01/fire`;
+    const passOf = fire => fire.body.text.match(/^CI_JOB_TOKEN=(\S+)$/m)[1];
+    const claimWith = (id, pass) => fetch(`${base}/avs/robot/enquiry-jobs/${id}/claim`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-enquiry-job-token': pass }, body: '{}' });
+    const take = async () => (await db.one('SELECT avs.take_enquiry_fetch() AS t')).t;
+    try {
+      // The AVS check routine's link, on the same company account.
+      const AVS_URL = 'https://api.anthropic.com/v1/claude_code/routines/trig_avscheck1/fire';
+      await db.q(`INSERT INTO avs.settings (key, value) VALUES ('routine_fire_url', $1), ('routine_token', 'sk-ant-oat01-avsroutine99')`, [AVS_URL]);
+
+      // Not linked: Fetch from mail waits for the office AVS, as before.
+      const first = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' });
+      assert.equal(first.status, 201, JSON.stringify(first.body));
+      assert.equal(first.body.job.fire_status, 'office');
+      assert.equal(first.body.cloud, null);
+      assert.equal(fires.length, 0);
+
+      // An admin links the company routine. Not the AVS check routine's link, and not one routine for both mailboxes.
+      const link = { mailbox: 'business', fire_url: 'https://api.anthropic.com/v1/claude_code/routines/trig_biz9k2/fire', token: 'sk-ant-oat01-biztoken777' };
+      assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/cloud', link)).status, 403);
+      assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, mailbox: 'nonsense' })).status, 400);
+      const avsPaste = await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, fire_url: AVS_URL });
+      assert.equal(avsPaste.status, 400);
+      assert.match(avsPaste.body.error, /AVS check/);
+      const saved = await call('admin', 'PUT', '/costing/enquiry-desk/cloud', link);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.deepEqual(saved.body.cloud, { linked: true, fire_url: link.fire_url, token_hint: '…n777' });
+      const adminView = (await call('admin', 'GET', '/costing/enquiry-desk')).body.cloud;
+      assert.deepEqual(adminView.business, { linked: true, fire_url: link.fire_url, token_hint: '…n777' });
+      assert.equal(adminView.trial.linked, false);
+      assert.deepEqual((await call('clerk', 'GET', '/costing/enquiry-desk')).body.cloud, { trial: { linked: false }, business: { linked: true } });
+      const twice = await call('admin', 'PUT', '/costing/enquiry-desk/cloud', { ...link, mailbox: 'trial' });
+      assert.equal(twice.status, 400);
+      assert.match(twice.body.error, /company mailbox/);
+      // The test points the saved link at the stand-in.
+      await db.q(`UPDATE avs.settings SET value = $1 WHERE key = 'enquiry_business_routine_fire_url'`, [fireUrl]);
+
+      // The job that was waiting for the office is started in the cloud at the next press, with the company token.
+      const again = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' });
+      assert.equal(again.body.already, true);
+      assert.equal(again.body.job.id, first.body.job.id);
+      assert.equal(again.body.cloud.ok, true);
+      assert.equal(again.body.job.fire_status, 'cloud');
+      assert.equal(fires.length, 1);
+      assert.equal(fires[0].headers.authorization, 'Bearer sk-ant-oat01-biztoken777');
+      assert.match(fires[0].body.text, new RegExp(`for the mailbox ${BIZ}\\.`));
+      // The routine works its job with the pass; while it has the job, the office AVS does not take it.
+      const claim = await claimWith(first.body.job.id, passOf(fires[0]));
+      assert.equal(claim.status, 200);
+      assert.equal((await claim.json()).mailbox.email, BIZ);
+      assert.equal(await take(), null);
+      await closeOpenFetches();
+
+      // A new Fetch from mail starts the cloud at once. If the office AVS gets there first, the cloud run finds it taken.
+      const next = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' });
+      assert.equal(next.status, 201);
+      assert.equal(next.body.job.fire_status, 'cloud');
+      assert.equal(fires.length, 2);
+      assert.equal((await take()).job_id, next.body.job.id);
+      assert.equal((await claimWith(next.body.job.id, passOf(fires[1]))).status, 409);
+      await closeOpenFetches();
+
+      // A start that fails leaves the job to the office AVS's next run.
+      answer = { status: 429, body: { error: { message: 'rate limited' } } };
+      const failed = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' });
+      assert.equal(failed.body.job.fire_status, 'cloud_failed');
+      assert.equal((await take()).job_id, failed.body.job.id);
+      await closeOpenFetches();
+      const fired = fires.length;
+
+      // The trial mailbox never borrows the company link: its Fetch still waits for the Mac.
+      const trial = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'trial' });
+      assert.equal(trial.body.job.fire_status, 'waiting');
+      assert.equal(trial.body.cloud.status, 'not_linked');
+      await closeOpenFetches();
+      // Nor does the timer start the company routine: the company mailbox keeps the office AVS's hours.
+      assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 200);
+      const timer = await fetch(`${base}/cron/enquiry-fetch`, { headers: { 'user-agent': 'vercel-cron/1.0' } });
+      assert.match((await timer.json()).skipped, /office AVS/);
+      assert.equal(fires.length, fired);
+      assert.ok(fires.every(x => x.url.includes('trig_biz01')), 'only the company routine was started, never the AVS check');
+    } finally {
+      fake.close();
+      await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'trial' });
+      await db.q(`DELETE FROM avs.settings WHERE key LIKE 'enquiry_%routine_%' OR key IN ('routine_fire_url', 'routine_token')`);
+      await closeOpenFetches();
     }
   });
 

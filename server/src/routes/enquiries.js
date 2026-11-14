@@ -60,7 +60,7 @@ import {
 import { orderLine, orderTotals, orderMail } from '../order-finalise.js';
 import { kldPdf } from '../kld-pdf.js';
 import { redirectUri, signState } from './gmail-link.js';
-import { startFetch, cloudLink, cloudView, saveCloudLink } from '../enquiry-cloud.js';
+import { startFetch, cloudLinks, cloudView, saveCloudLink, CLOUD_MAILBOXES } from '../enquiry-cloud.js';
 
 const r = Router();
 const fail = (status, error, extra = {}) => Object.assign(new Error(error), { status, body: extra });
@@ -231,12 +231,12 @@ const withinSeconds = (p, s) => Promise.race([p, new Promise(res => setTimeout(r
 r.get('/costing/enquiry-desk', async (req, res, next) => {
   try {
     await withinSeconds(syncSentDrafts().catch(e => console.error('[gmail] sent check:', e.message)), 6);
-    const [boxes, s, counts, jobs, links, cloud] = await Promise.all([
+    const [boxes, s, counts, jobs, links, clouds] = await Promise.all([
       mailboxes(), settings(),
       q(`SELECT ${STAGE_SQL} AS stage, count(*)::int AS n FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id GROUP BY 1`),
       q(`SELECT ${JOB_COLS} FROM enquiry_jobs j ORDER BY j.id DESC LIMIT 10`),
       q(`SELECT ${LINK_VIEW} FROM gmail_links`),
-      cloudLink(),
+      cloudLinks(),
     ]);
     for (const b of boxes) b.gmail = links.find(l => l.mailbox === b.key) || null;
     const quotes = await q(`SELECT status, count(*)::int AS n FROM quotations GROUP BY status`);
@@ -247,8 +247,8 @@ r.get('/costing/enquiry-desk', async (req, res, next) => {
       jobs,
       can_finalise: mayApproveCosting(req.costingUser), can_admin: req.costingUser.role === 'admin',
       statuses: STATUS_LABEL, gmail_ready: gmailConfigured(),
-      // Claude in the cloud: Fetch and the 11 am / 3 pm timer start it (enquiry-cloud.js).
-      cloud: cloudView(cloud, req.costingUser.role === 'admin'),
+      // Claude in the cloud, one routine per mailbox: { trial, business } — Fetch starts the mailbox's own (enquiry-cloud.js).
+      cloud: Object.fromEntries(Object.entries(clouds).map(([box, link]) => [box, cloudView(link, req.costingUser.role === 'admin')])),
     });
   } catch (e) { next(e); }
 });
@@ -338,16 +338,18 @@ r.get('/costing/enquiry-desk/summary', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Claude in the cloud (admin): the desk routine's API URL and token, as claude.ai shows them once. An empty token keeps
-// the one saved; the token never comes back.
+// Claude in the cloud (admin): a mailbox's routine API URL and token, as claude.ai shows them once — { mailbox, fire_url,
+// token }, the trial mailbox when none is named. An empty token keeps the one saved; the token never comes back.
 r.put('/costing/enquiry-desk/cloud', async (req, res, next) => {
   try {
     const u = req.costingUser;
     needAdmin(u);
-    const out = await saveCloudLink({ fire_url: req.body?.fire_url, token: req.body?.token }, u);
+    const mailbox = req.body?.mailbox ?? 'trial';
+    if (!CLOUD_MAILBOXES.includes(mailbox)) throw fail(400, 'Link which mailbox — business or trial?');
+    const out = await saveCloudLink({ mailbox, fire_url: req.body?.fire_url, token: req.body?.token }, u);
     if (out.problem) throw fail(400, out.problem);
-    await audit('enquiry_desk', 1, 'cloud_link', 'Claude in the cloud linked to the enquiry desk', q, u.name);
-    res.json({ cloud: cloudView(out.cfg, true) });
+    await audit('enquiry_desk', 1, 'cloud_link', `Claude in the cloud linked to the enquiry desk (${mailbox === 'business' ? 'company' : 'trial'} mailbox)`, q, u.name);
+    res.json({ mailbox, cloud: cloudView(out.cfg, true) });
   } catch (e) { next(e); }
 });
 

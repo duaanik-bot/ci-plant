@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { needsFire, fireText, passHash, mintPass, tokenHint, cloudView, REFIRE_AFTER_MIN } from './enquiry-cloud.js';
+import { readFileSync } from 'node:fs';
+import { needsFire, fireText, passHash, mintPass, tokenHint, cloudView, cloudKeys, REFIRE_AFTER_MIN } from './enquiry-cloud.js';
 
 // Claude in the cloud for the Enquiry desk (enquiry-cloud.js): the start note, the pass, and when a waiting fetch is
 // started again. The routes are tested against a real Postgres in enquiry-pg.test.js.
@@ -35,4 +36,26 @@ test('the desk sees whether the cloud is linked; only an admin sees the URL, and
   assert.ok(!JSON.stringify(cloudView(cfg, true)).includes('secretvalue'));
   assert.deepEqual(cloudView({ routine_fire_url: '', routine_token: '' }, false), { linked: false });
   assert.equal(tokenHint(''), '');
+});
+
+// Each mailbox has its own routine (14 Nov 2026: the company mailbox's lives on the company Claude account, beside the
+// AVS check routine, because that account's Gmail is the company mailbox): its own keys, never the AVS routine's.
+test('each mailbox keeps its own routine link, under its own keys — never the AVS check routine\'s', () => {
+  assert.deepEqual({ ...cloudKeys('trial') }, { url: 'enquiry_routine_fire_url', token: 'enquiry_routine_token' });
+  assert.deepEqual({ ...cloudKeys('business') }, { url: 'enquiry_business_routine_fire_url', token: 'enquiry_business_routine_token' });
+  assert.throws(() => cloudKeys('nonsense'), /mailbox/);
+  const all = ['trial', 'business'].flatMap(k => Object.values(cloudKeys(k)));
+  assert.equal(new Set(all).size, 4);
+  assert.ok(!all.some(k => ['routine_fire_url', 'routine_token'].includes(k)));
+});
+
+test('the company routine\'s prompt: the company mailbox only, two values from the start note, read-only Gmail, CI Plant only through desk.py', () => {
+  const p = readFileSync(new URL('../../client/src/lib/enquiry-robot/company-routine-prompt.md', import.meta.url), 'utf8');
+  assert.match(p, /mppchd@gmail\.com/);
+  assert.doesNotMatch(p, /dua\.anik/);
+  assert.match(p, /JOB=<number> and\s+CI_JOB_TOKEN=<pass>/);
+  for (const route of ['/api/avs/robot/enquiry-desk/desk.py', '/api/avs/robot/enquiry-desk/procedure']) assert.ok(p.includes(route), route);
+  assert.match(p, /x-enquiry-job-token/);
+  assert.match(p, /Never send, reply, forward or draft/);
+  assert.doesNotMatch(p, /x-avs-robot-key|robot_key|execute_sql|supabase/i);
 });

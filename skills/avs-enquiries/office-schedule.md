@@ -2,8 +2,11 @@
 
 The office AVS (the company Mac, CARTON PC MAIN) runs the intake at 7:30 am, 1 pm, 3:30 pm and 5:30 pm, reading
 mppchd@gmail.com through its Gmail connector. Since 14 Nov the company mailbox is the Enquiry desk's only mailbox, and
-the desk's **Fetch from mail** button starts this computer within a minute. Three things, done once by a person (or by
-the office Claude from the setup message `office-pc-avs-enquiries-update-2.txt`):
+the desk's **Fetch from mail** button starts this computer within a minute when it is a Mac with the watcher (section 3).
+The office computer is Windows (14 Nov 2026), so there a Fetch from mail is started at once by the company account's
+cloud routine, linked in the desk's Settings (`skills/enquiry-desk/robot/cloud-routine.md`), and otherwise waits for
+the next run. Three things, done once by a person (or by the office Claude from the setup message
+`office-pc-avs-enquiries-update-2.txt`):
 
 ## 1. The skill
 
@@ -26,7 +29,7 @@ and one line to its note ("Enquiries: …"). If the skill is not installed, writ
 skill missing" in the note and go on.
 ```
 
-## 3. The watcher (answers "Fetch from mail" within a minute)
+## 3. The watcher (a Mac only: answers "Fetch from mail" within a minute)
 
 In Terminal on the office computer:
 

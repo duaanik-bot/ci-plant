@@ -62,6 +62,26 @@ export function mailboxTag(box) {
   };
 }
 
+// Who reads a waiting Fetch, and when (14 Nov 2026, "Cloud trigger instead"). The company mailbox: its own cloud routine
+// at once when linked, else the office computer's AVS at its hours — the office computer is Windows, with no watcher, so
+// nothing there starts "within a minute". The trial mailbox: the owner's Mac, within a minute. `cloud` = the desk's
+// { trial, business } links.
+export const OFFICE_RUNS = '7:30 am, 1 pm, 3:30 pm or 5:30 pm';
+const officeRun = `the office computer's next AVS run reads it (${OFFICE_RUNS})`;
+export function fetchWaitText(job, cloud = {}) {
+  if (job.fire_status === 'office') return `Waiting for the office computer's next AVS run (${OFFICE_RUNS}).`;
+  if (job.fire_status === 'cloud') return `Claude was started in the cloud ${dateText(job.fired_at)} — the enquiries land here in a few minutes.`;
+  if (job.fire_status === 'cloud_failed') {
+    const linked = !!cloud?.[job.mailbox]?.linked;
+    return `Claude in the cloud did not start: ${job.fire_error || 'no answer'}. Press Fetch again${linked ? '' : ', or link Claude in Settings'}`
+      + (job.mailbox === 'business' ? ` — otherwise ${officeRun}.` : '.');
+  }
+  return 'Waiting for the Mac — its Claude starts within a minute when the Mac is on.';
+}
+export const fetchQueuedText = (mailbox, id) => (mailbox === 'business'
+  ? `Fetch queued (job ${id}) — ${officeRun}`
+  : `Fetch queued (job ${id}) — the Mac starts within a minute when it is on; the enquiries land here as they are filed`);
+
 // A row whose mail came to a mailbox other than the one in use (13 Nov 2026: the office AVS files the business
 // mailbox) names that mailbox, so a person knows where its reply goes from. A row typed in by hand has none.
 export function mailboxNote(e, desk) {
