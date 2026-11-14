@@ -35,7 +35,7 @@ import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip
 import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, approverName, batchText, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, list, paiseOf, plantMonth, plural, qtyText, shiftMonth, signedInr, sumPaise,
-} from './RunLineDrawer.jsx';
+ settlingMonth } from './RunLineDrawer.jsx';
 import { fmt } from '../../api.js';
 import { refusalText } from './PersonDrawer.jsx';
 import { downloadBankList, downloadPaymentAdvice } from './bankFile.js';
@@ -349,7 +349,7 @@ export default function Reports({ level }) {
   const canExportBank = levelAtLeast(level, 'accounts');
   const [params, setParams] = useSearchParams();
   const asked = params.get('month');
-  const month = MONTH_RE.test(asked || '') ? asked : plantMonth();
+  const month = MONTH_RE.test(asked || '') ? asked : settlingMonth();
   const setMonth = useCallback(m => {
     if (!MONTH_RE.test(m || '')) return;
     setParams(p => { const n = new URLSearchParams(p); n.set('month', m); return n; }, { replace: true });

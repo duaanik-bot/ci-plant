@@ -9,7 +9,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Banknote, ChevronLeft, ChevronRight, HandCoins, RefreshCw, UserCheck, Users, Wallet } from 'lucide-react';
 import { Button, Input, KpiCard, KpiRow } from '../../components/ui.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
-import { LEVEL_META, MONTH_RE, flagLabel, list, plantMonth, plural, shiftMonth } from './RunLineDrawer.jsx';
+import { LEVEL_META, MONTH_RE, flagLabel, list, plantMonth, plural, shiftMonth, settlingMonth } from './RunLineDrawer.jsx';
 import { refusalText } from './PersonDrawer.jsx';
 
 const RUN_LABEL = { draft: 'Draft', submitted: 'Submitted', approved: 'Approved', finalised: 'Finalised' };
@@ -24,7 +24,7 @@ function Tile({ href, ...props }) {
 export default function Overview() {
   const [params, setParams] = useSearchParams();
   const asked = params.get('month');
-  const month = MONTH_RE.test(asked || '') ? asked : plantMonth();
+  const month = MONTH_RE.test(asked || '') ? asked : settlingMonth();
   const setMonth = useCallback(m => {
     if (!MONTH_RE.test(m || '')) return;
     setParams(p => { const n = new URLSearchParams(p); n.set('month', m); return n; }, { replace: true });

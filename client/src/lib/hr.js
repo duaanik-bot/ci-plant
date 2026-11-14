@@ -11,6 +11,7 @@
 // decimals. This file only ever FORMATS it. It never adds, rounds or compares amounts —
 // the engine on the server does that arithmetic, exactly — and it logs nothing: an
 // amount must never reach a console.
+import { withImpact } from './impact.js';
 import { api, auth } from '../api.js';
 
 // ── Access levels ───────────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ export const hrApi = {
   submitAdvanceSheet: id => api.post(`/hr/advance-sheets/${seg(id)}/submit`, {}),
   decideAdvanceSheet: (id, body) => api.post(`/hr/advance-sheets/${seg(id)}/decide`, body),
   sendBackAdvanceSheet: (id, reason) => api.post(`/hr/advance-sheets/${seg(id)}/send-back`, { reason }),
-  postAdvanceSheet: id => api.post(`/hr/advance-sheets/${seg(id)}/post`, {}),
+  postAdvanceSheet: id => withImpact(x => api.post(`/hr/advance-sheets/${seg(id)}/post`, { ...x })),
   deleteAdvanceSheet: id => api.del(`/hr/advance-sheets/${seg(id)}`),
   accessPeople: userId => api.get(`/hr/access/${seg(userId)}/people`),
   // PUT /hr/access/:userId/people — admin. changes: [{ person_id, mode }]; answers as accessPeople.
@@ -226,7 +227,7 @@ export const hrApi = {
   // GET /hr/runs/:month — viewer. { run, lines, inputs, flags_summary }.
   run: month => api.get(`/hr/runs/${seg(month)}`),
   // PUT /hr/runs/:month/inputs/:personId — operator. The input fields plus a `reason`.
-  saveRunInput: (month, personId, input) => api.put(`/hr/runs/${seg(month)}/inputs/${seg(personId)}`, input),
+  saveRunInput: (month, personId, input) => withImpact(x => api.put(`/hr/runs/${seg(month)}/inputs/${seg(personId)}`, { ...input, ...x })),
   // PUT /hr/runs/:month/inputs — operator. Many people's inputs at once ({ rows: [{ person_id, …fields }], reason? });
   // starts the month when it has no run. Answers the month as runMonth does.
   saveRunInputs: (month, rows, reason) => api.put(`/hr/runs/${seg(month)}/inputs`, { rows, ...(reason ? { reason } : {}) }),
@@ -275,22 +276,22 @@ export const hrApi = {
   // GET /hr/reports/pending-pay?months=N|all — viewer. Salary not yet paid, person by person, over the last N months.
   pendingPay: (months = 3) => api.get(`/hr/reports/pending-pay?months=${encodeURIComponent(months)}`),
   // POST /hr/loans — operator. { person_id, principal, issued_on, purpose, instalment, first_due_month, paid_via, is_opening }; mints CI-LN-####.
-  createLoan: loan => api.post('/hr/loans', loan),
+  createLoan: loan => withImpact(x => api.post('/hr/loans', { ...loan, ...x })),
   // POST /hr/loans/:id/prepay — operator. { amount, date }.
-  prepayLoan: (id, prepayment) => api.post(`/hr/loans/${seg(id)}/prepay`, prepayment),
+  prepayLoan: (id, prepayment) => withImpact(x => api.post(`/hr/loans/${seg(id)}/prepay`, { ...prepayment, ...x })),
   // POST /hr/loans/:id/holiday — operator. Holds (skips) the instalment of one month ('YYYY-MM'), any month whose
   // payroll is not finalised (409 RUN_FINALISED otherwise); optional `note` is the reason. A draft run is
   // recalculated; a submitted/approved one answers with `warning`.
-  loanHoliday: (id, month, note) => api.post(`/hr/loans/${seg(id)}/holiday`, note ? { month, note } : { month }),
+  loanHoliday: (id, month, note) => withImpact(x => api.post(`/hr/loans/${seg(id)}/holiday`, { month, ...(note ? { note } : {}), ...x })),
   // DELETE /hr/loans/:id/holiday/:month — operator. Releases the hold ("deduct after all"); same rules and answer.
-  releaseLoanHoliday: (id, month) => api.del(`/hr/loans/${seg(id)}/holiday/${seg(month)}`),
+  releaseLoanHoliday: (id, month) => withImpact(x => api.del(`/hr/loans/${seg(id)}/holiday/${seg(month)}`, Object.keys(x).length ? x : undefined)),
   // GET /hr/loan-holds?month= — viewer. The month's holds [{ loan_id, loan_no, person_id, note }]; with personId, that
   // person's open loans [{ loan_id, loan_no, instalment, due, outstanding, held, note }].
   loanHolds: (month, personId) => api.get(`/hr/loan-holds${qs({ month, person_id: personId })}`),
   // POST /hr/loans/:id/cancel — operator. Only while nothing has been recovered.
-  cancelLoan: id => api.post(`/hr/loans/${seg(id)}/cancel`, {}),
+  cancelLoan: id => withImpact(x => api.post(`/hr/loans/${seg(id)}/cancel`, { ...x })),
   // PUT /hr/loans/:id/instalment — operator. { instalment, from_month }.
-  setLoanInstalment: (id, change) => api.put(`/hr/loans/${seg(id)}/instalment`, change),
+  setLoanInstalment: (id, change) => withImpact(x => api.put(`/hr/loans/${seg(id)}/instalment`, { ...change, ...x })),
 
   // ── Advances ──
   // GET /hr/advances — viewer. A balance per person.
@@ -298,14 +299,14 @@ export const hrApi = {
   // GET /hr/advances/:personId — viewer. One person's statement.
   advanceStatement: personId => api.get(`/hr/advances/${seg(personId)}`),
   // POST /hr/advances — operator. { person_id, amount, txn_date, note }.
-  giveAdvance: advance => api.post('/hr/advances', advance),
+  giveAdvance: advance => withImpact(x => api.post('/hr/advances', { ...advance, ...x })),
   // POST /hr/advances/:personId/waive — approver. { amount, note }.
-  waiveAdvance: (personId, waiver) => api.post(`/hr/advances/${seg(personId)}/waive`, waiver),
+  waiveAdvance: (personId, waiver) => withImpact(x => api.post(`/hr/advances/${seg(personId)}/waive`, { ...waiver, ...x })),
 
   // ── Pay staff ──
   // POST /hr/staff-payments — operator. { person_id, kind:'advance'|'loan', amount, paid_on, paid_via, instalments?,
   // first_due_month?, note }; a loan mints CI-LN-####. Answers { kind, advance, loan, warnings, ledger }.
-  staffPayment: payment => api.post('/hr/staff-payments', payment),
+  staffPayment: payment => withImpact(x => api.post('/hr/staff-payments', { ...payment, ...x })),
   // GET /hr/people/:id/ledger — viewer. { person, totals, rows } — every advance and loan movement, newest first.
   personLedger: personId => api.get(`/hr/people/${seg(personId)}/ledger`),
 

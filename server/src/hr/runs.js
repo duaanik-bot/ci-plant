@@ -726,6 +726,9 @@ export async function finaliseRun(qc, run, req) {
   return done;
 }
 
+const KEY_MONEY = ['payable', 'advance_recovery', 'loan_recovery', 'advance_given', 'gross'];
+const KEY_MONEY_SQL = KEY_MONEY.map((k) => `${k}::text AS ${k}`).join(', ');
+
 // ── The payroll month an advance is deducted in (owner's request 2026-11-14) ──────────────────────────────
 // "If we pay an advance today, ask which payroll month it is deducted from, and choose the previous month by
 // default: in November we pay October's salary." The date it is paid stays the day it is paid; this is only the
@@ -804,13 +807,21 @@ export async function refreshPersonLine(qc, req, month, personId, why) {
   const [has] = await qc(`SELECT 1 FROM hr.run_inputs WHERE run_id = $1 AND person_id = $2`, [run.id, personId]);
   if (!has) return null;
   const submitted = run.status === 'submitted';
+  const [paidLine] = await qc(`SELECT 1 FROM hr.run_lines WHERE run_id = $1 AND person_id = $2 AND payment_status = 'paid'`,
+    [run.id, personId]);
+  if (paidLine) return 'paid';                               // a paid line is never worked out again under it
   let undone = null;
   if (submitted) {
     [undone] = await qc(
-      `SELECT id, approved_by, approved_at, approval_note FROM hr.run_lines
+      `SELECT id, approved_by, approved_at, approval_note, ${KEY_MONEY_SQL} FROM hr.run_lines
         WHERE run_id = $1 AND person_id = $2 AND approval_status = 'approved' FOR UPDATE`, [run.id, personId]);
   }
   await recalcRun(qc, run, { personIds: [personId], submitted });
+  if (undone) {
+    // The approval goes only when the amounts it approved moved.
+    const [now] = await qc(`SELECT ${KEY_MONEY_SQL} FROM hr.run_lines WHERE id = $1`, [undone.id]);
+    if (now && KEY_MONEY.every((k) => now[k] === undone[k])) undone = null;
+  }
   if (undone) {
     const note = `${why}`.slice(0, 500);
     await qc(`UPDATE hr.run_lines SET approval_status = 'unapproved', approved_by = NULL, approved_at = NULL, approval_note = $2
@@ -821,4 +832,74 @@ export async function refreshPersonLine(qc, req, month, personId, why) {
     });
   }
   return run.status;
+}
+
+// ── A change to a settled month and what it does to the months after it (owner's request 2026-11-14) ─────────
+// "Whenever a previous month's loan or advance is changed and the payout is impacted, the next month gets the impact,
+// with a pop-up giving remarks about the change and taking approval before changing."
+//
+// applyWithImpact runs `apply` (the change itself) inside the caller's transaction, then works out again every line
+// of those people in every payroll month from `month` on that is still open (draft or submitted; a paid line is
+// left as it is and said so). It compares each line's money before and after. When the change moves a SUBMITTED
+// month, or any month after `month`, it needs approval: without a remark it answers 409 IMPACT_NEEDS_APPROVAL with
+// the list of what would change, and the transaction rolls back, so nothing changes; with a remark it goes ahead and
+// the remark is audited with the list. A change that only moves the draft month being entered needs nothing.
+// Locks the open runs (ascending month) before `apply` locks any person or loan row: the run → people order.
+export async function applyWithImpact(qc, req, { personIds, month, remark = null, what = 'This change' }, apply) {
+  const ids = [...new Set([].concat(personIds ?? []).map(Number).filter(Number.isInteger))].sort((a, b) => a - b);
+  if (typeof month !== 'string' || !MONTH.test(month) || !ids.length) return { result: await apply(), impact: [] };
+  const runs = await qc(
+    `SELECT id, month, status FROM hr.runs WHERE month >= $1 AND status IN ('draft', 'submitted') ORDER BY month FOR UPDATE`, [month]);
+  const snap = async () => (runs.length ? qc(
+    `SELECT l.run_id, l.person_id, l.approval_status, l.payment_status, ${KEY_MONEY.map((k) => `l.${k}::text AS ${k}`).join(', ')}
+       FROM hr.run_lines l WHERE l.run_id = ANY($1::int[]) AND l.person_id = ANY($2::int[])`, [runs.map((r) => r.id), ids]) : []);
+  const before = new Map((await snap()).map((l) => [`${l.run_id}:${l.person_id}`, l]));
+  const result = await apply();
+  const paid = [];
+  for (const run of runs) {
+    for (const pid of ids) {
+      if ((await refreshPersonLine(qc, req, run.month, pid, `${what} (${label(month)})${remark ? `: ${remark}` : ''}`)) === 'paid') {
+        paid.push({ person_id: pid, month: run.month });
+      }
+    }
+  }
+  const after = await snap();
+  const monthOfRun = new Map(runs.map((r) => [r.id, r]));
+  const impact = [];
+  for (const a of after) {
+    const b = before.get(`${a.run_id}:${a.person_id}`) ?? null;
+    const moved = !b || KEY_MONEY.some((k) => a[k] !== b[k]);
+    if (!moved) continue;
+    const run = monthOfRun.get(a.run_id);
+    impact.push({
+      person_id: a.person_id, month: run.month, run_status: run.status,
+      before: b ? { payable: b.payable, advance_recovery: b.advance_recovery, loan_recovery: b.loan_recovery } : null,
+      after: { payable: a.payable, advance_recovery: a.advance_recovery, loan_recovery: a.loan_recovery },
+      approval_undone: Boolean(b && b.approval_status === 'approved' && a.approval_status !== 'approved'),
+    });
+  }
+  const needs = impact.filter((x) => x.month > month || x.run_status === 'submitted');
+  if (needs.length) {
+    const names = new Map((await qc(`SELECT id, code, coalesce(display_name, name) AS name FROM hr.people WHERE id = ANY($1::int[])`,
+      [ids])).map((p) => [p.id, p]));
+    const named = (x) => ({ ...x, name: names.get(x.person_id)?.name ?? null, code: names.get(x.person_id)?.code ?? null });
+    if (!remark) {
+      throw fail(409, 'IMPACT_NEEDS_APPROVAL', `${what} changes payroll already worked out for ${label(month)}`
+        + `${needs.some((x) => x.month > month) ? ' and the months after it' : ''}: check what moves, give a remark and approve it to go ahead`,
+      { what, month, impact: needs.map(named), paid_unchanged: paid.map(named) });
+    }
+    for (const run of runs.filter((r) => needs.some((x) => x.month === r.month))) {
+      await hrAudit(qc, req, 'run', run.id, 'impact_approved', {
+        month: run.month, changed_month: month, what, remark, people: needs.filter((x) => x.month === run.month),
+      });
+    }
+  }
+  return { result, impact: needs, paid_unchanged: paid };
+}
+
+// The first payroll month still open (draft or submitted), or null: where a change that is not tied to one month
+// (a waiver, a prepayment, a loan's instalment) first shows.
+export async function firstOpenMonth(qc) {
+  const [r] = await qc(`SELECT min(month) AS month FROM hr.runs WHERE status IN ('draft', 'submitted')`);
+  return r?.month ?? null;
 }

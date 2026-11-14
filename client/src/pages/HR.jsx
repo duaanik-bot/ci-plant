@@ -25,6 +25,7 @@ import People from './hr/People.jsx';
 import LoansAdvances from './hr/LoansAdvances.jsx';
 import Reports from './hr/Reports.jsx';
 import Settings from './hr/Settings.jsx';
+import ImpactHost from './hr/ImpactModal.jsx';
 
 // Tab key → its body (pages/hr/<Name>.jsx).
 const BODY = {
@@ -118,6 +119,7 @@ export default function HR() {
           </span>
         )} />
       <GroupedTabs groups={groups} active={tab} onChange={setTab} />
+      <ImpactHost />
       {Body && <Body level={level} />}
     </div>
   );

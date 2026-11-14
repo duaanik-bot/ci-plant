@@ -116,7 +116,7 @@ import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
 import { add, cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
-import { ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
+import { applyWithImpact, ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
 import { assertPayVisible, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
 import { monthlySchedule } from '../hr/monthly-report.js';
 
@@ -1427,6 +1427,9 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
             + 'so the amount paid and the amount worked out stay the same', 'LINE_PAID');
         }
       }
+      // A change that moves a submitted month, or a later open one, needs a remark (hr/runs.js applyWithImpact).
+      const impactRemark = textOf(body.impact_remark, 'The remark', 500);
+      return (await applyWithImpact(qc, req, { personIds: [personId], month, remark: impactRemark, what: 'Changing the inputs' }, async () => {
       const [before] = await qc(
         `SELECT id, ${INPUT_EXACT} FROM hr.run_inputs WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
       const start = before ?? { ...blankInput(true) };
@@ -1457,6 +1460,7 @@ r.put('/hr/runs/:month/inputs/:personId', requireHr('operator'), async (req, res
         });
       }
       return run.id;
+      })).result;
     });
 
     const [line] = await q(`${LINE_SELECT} WHERE l.run_id = $1 AND l.person_id = $2`, [runId, personId]);

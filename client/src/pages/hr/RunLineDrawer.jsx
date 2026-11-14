@@ -147,6 +147,13 @@ export function plantMonth() {
   return `${year}-${month}`;
 }
 
+// The month being settled (owner's request 2026-11-14): salary is paid the month after it is earned — in November,
+// October's salary — so HR opens on the month before the plant's own. The month after is one click right.
+export function settlingMonth() {
+  const [y, m] = plantMonth().split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
 // Today at the plant ('2026-10-17').
 export function plantToday() {
   const { year, month, day } = istParts(true);

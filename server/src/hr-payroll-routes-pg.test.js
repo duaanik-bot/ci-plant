@@ -726,7 +726,12 @@ describe('HR payroll routes through the real app', {
     // month stays submitted, and their approval for payment is undone (audited, via input-edit).
     const before = await novLine(A);
     assert.equal((await approval('approver', { person_ids: [A], action: 'approve' })).status, 200);
-    const edit = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc' });
+    // It moves a submitted month's pay, so it needs a remark (2026-11-14): without one nothing changes.
+    const ask = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc' });
+    refused(ask, 409, 'IMPACT_NEEDS_APPROVAL');
+    assert.deepEqual([ask.body.impact[0].person_id, ask.body.impact[0].approval_undone], [A, true]);
+    assert.equal((await novLine(A)).approval_status, 'approved', 'refused: nothing changed');
+    const edit = await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: 100, reason: 'Test: late misc', impact_remark: 'Test: ok' });
     assert.equal(edit.status, 200, edit.text);
     const after = await novLine(A);
     assert.equal(Number(after.payable), Number(before.payable) + 100, 'the line is worked out again');
@@ -734,7 +739,7 @@ describe('HR payroll routes through the real app', {
     assert.equal((await db.one(`SELECT status FROM hr.runs WHERE month = $1`, [NOV])).status, 'submitted');
     const undone = (await lineAudits(A, ['unapprove'])).at(-1);
     assert.deepEqual([undone.detail.via, undone.detail.reason], ['input-edit', 'Inputs changed after approval: Test: late misc']);
-    assert.equal((await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: null, reason: 'Test: back' })).status, 200);
+    assert.equal((await call('operator', 'PUT', `/hr/runs/${NOV}/inputs/${A}`, { misc_earning: null, reason: 'Test: back', impact_remark: 'Test: back' })).status, 200);
     assert.equal((await novLine(A)).payable, before.payable);
 
     assert.equal((await call('approver', 'POST', `/hr/runs/${NOV}/approve`, {})).status, 200);
@@ -996,6 +1001,24 @@ describe('HR payroll routes through the real app', {
     const staff = await call('operator', 'POST', '/hr/staff-payments', { person_id: B, kind: 'advance', amount: 25, paid_on: '2027-02-11', for_month: JAN });
     assert.equal(staff.status, 200, staff.text);
     assert.equal((await db.one(`SELECT for_month FROM hr.advance_txns WHERE person_id = $1 ORDER BY id DESC LIMIT 1`, [B])).for_month, JAN);
+  });
+
+  test('a change to one month that moves the next month asks for a remark first, then the next month follows', T, async () => {
+    const DEC = '2026-12';
+    const JAN = '2027-01';
+    const jan = () => db.one(`SELECT l.advance_recovery::text AS r, l.payable::text AS p FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+      WHERE r.month = $1 AND l.person_id = $2`, [JAN, A]);
+    const was = await jan();
+    const ask = await call('operator', 'POST', '/hr/advances', { person_id: A, amount: 70, date: '2027-01-02', for_month: DEC });
+    refused(ask, 409, 'IMPACT_NEEDS_APPROVAL');
+    assert.ok(ask.body.impact.some((x) => x.month === JAN && x.person_id === A), "January's line is listed as moving");
+    assert.deepEqual(await jan(), was, 'refused: nothing changed');
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.advance_txns WHERE person_id = $1 AND amount = 70`, [A])).n, 0);
+    const ok = await call('operator', 'POST', '/hr/advances', { person_id: A, amount: 70, date: '2027-01-02', for_month: DEC, impact_remark: 'Test: paid late' });
+    assert.equal(ok.status, 200, ok.text);
+    assert.notDeepEqual(await jan(), was, 'January was worked out again with it');
+    const audit = await db.one(`SELECT detail FROM hr.audit_log WHERE action = 'impact_approved' ORDER BY id DESC LIMIT 1`);
+    assert.deepEqual([audit.detail.month, audit.detail.changed_month, audit.detail.remark], [JAN, DEC, 'Test: paid late']);
   });
 
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {

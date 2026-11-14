@@ -83,6 +83,9 @@ export const HANDLED_BY = {
   // Switching AVS off once printing has started: AvsSwitch asks for the reason
   // and sends the switch again with it.
   AVS_REASON_REQUIRED: { at: ['components/avs/AvsSwitch.jsx'], says: 'AVS_REASON_REQUIRED' },
+  // HR: a loan / advance / input change that moves payroll already worked out. withImpact catches it, the HR page's
+  // pop-up shows what moves and takes a remark, and the change is sent again with it.
+  IMPACT_NEEDS_APPROVAL: { at: ['lib/impact.js'], says: 'IMPACT_NEEDS_APPROVAL' },
 };
 
 export const HANDLED_CODES = new Set(Object.keys(HANDLED_BY));

@@ -69,7 +69,7 @@ import PersonCards from './PersonCards.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
-  plantToday, plural, qtyText, shiftMonth, sumPaise, sumQty, whenText,
+  plantToday, plural, qtyText, settlingMonth, shiftMonth, sumPaise, sumQty, whenText,
 } from './RunLineDrawer.jsx';
 import PersonDrawer, { InlineError, refusalText } from './PersonDrawer.jsx';
 
@@ -474,7 +474,7 @@ export default function Payroll({ level }) {
   const limited = hrRestricted();
   const canApprove = levelAtLeast(level, 'approver');
   const [params, setParams] = useSearchParams();
-  const thisMonth = plantMonth();
+  const thisMonth = settlingMonth();   // the month being settled (2026-11-14): October's salary is paid in November
   const asked = params.get('month');
   const month = MONTH_RE.test(asked || '') ? asked : thisMonth;
   const setMonth = useCallback(m => {
@@ -1279,7 +1279,7 @@ export default function Payroll({ level }) {
           <h2 className="text-lg font-extrabold tracking-[-0.03em] text-[#1D1D1F]">{monthLabel(month)}</h2>
           <RunChip status={status} />
           {status === 'draft' && run?.sent_back_reason && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Sent back</span>}
-          {month !== thisMonth && <Button size="sm" variant="ghost" onClick={() => setMonth(thisMonth)}>This month</Button>}
+          {month !== thisMonth && <Button size="sm" variant="ghost" onClick={() => setMonth(thisMonth)} title={`${monthLabel(thisMonth)}: the month whose salary is paid now`}>Settling month</Button>}
           <button type="button" aria-label="Reload" title="Reload" onClick={() => { load(); checkPending(); }}
             className="flex h-8 w-8 items-center justify-center rounded-full text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F]">
             <RefreshCw size={14} />

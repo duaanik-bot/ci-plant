@@ -80,7 +80,7 @@ import { hrGuard, requireHr } from '../hr/access.js';
 import { assertPayVisible, canSeePay, hiddenIds } from '../hr/privacy.js';
 import { hrAudit } from '../hr/audit.js';
 import { effectiveSetup } from '../hr/engine.js';
-import { advanceMonthFor, recalcRun, refreshPersonLine } from '../hr/runs.js';
+import { advanceMonthFor, applyWithImpact, firstOpenMonth, recalcRun, refreshPersonLine } from '../hr/runs.js';
 import { advanceBalances } from '../hr/ledger.js';
 import { dueForMonth, loanOutstanding, nextMonth, projectSchedule } from '../hr/loans.js';
 import { normCode, normName } from '../hr/match.js';
@@ -455,21 +455,36 @@ r.post('/hr/loans', requireHr('operator'), async (req, res, next) => {
   try {
     const loan = readNewLoan(bodyOf(req));
     const id = await tx(async (qc, oc) => {
-      const made = await insertLoan(qc, oc, req, loan);
-      await hrAudit(qc, req, 'loan', made.id, 'create', {
-        loan_no: made.loan_no,
-        person_id: loan.personId,
-        principal: money(loan.principal),
-        instalment: money(loan.instalment),
-        first_due_month: loan.firstDue,
-        issued_on: loan.issuedOn,
-        is_opening: loan.isOpening,
+      return withImpact(qc, req, [loan.personId], loan.firstDue ?? null, 'A new loan', async () => {
+        const made = await insertLoan(qc, oc, req, loan);
+        await hrAudit(qc, req, 'loan', made.id, 'create', {
+          loan_no: made.loan_no,
+          person_id: loan.personId,
+          principal: money(loan.principal),
+          instalment: money(loan.instalment),
+          first_due_month: loan.firstDue,
+          issued_on: loan.issuedOn,
+          is_opening: loan.isOpening,
+        });
+        return made.id;
       });
-      return made.id;
     });
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
 });
+
+
+// ── A change that moves payroll already worked out (owner's request 2026-11-14) ──
+// Every loan and advance change runs through applyWithImpact (hr/runs.js): the open payroll months from `month` on
+// (a change not tied to a month: the first open one) are worked out again for the people it touches; when that
+// moves a submitted month or a later one, the change needs a remark (body.impact_remark) — without one the answer
+// is 409 IMPACT_NEEDS_APPROVAL listing what would move, and nothing changes.
+const impactRemarkOf = (req) => textOf(bodyOf(req)?.impact_remark, 'The remark', 500);
+async function withImpact(qc, req, personIds, month, what, apply) {
+  const m = month ?? await firstOpenMonth(qc);
+  return (await applyWithImpact(qc, req, { personIds, month: m, remark: impactRemarkOf(req), what }, apply)).result;
+}
+const loanPersonOf = async (qc, id) => (await qc(`SELECT person_id FROM hr.loans WHERE id = $1`, [id]))[0]?.person_id ?? null;
 
 // ── Loans: changing ─────────────────────────────────────────────────────────
 
@@ -483,24 +498,26 @@ r.post('/hr/loans/:id/prepay', requireHr('operator'), async (req, res, next) => 
     const date = dateOf(body.date, 'The prepayment date') ?? plantDateStr();
     const note = textOf(body.note, 'The note', 500);
     await tx(async (qc, oc) => {
-      const loan = await lockedLoan(qc, oc, id);
-      mustBeActive(loan);
-      const owed = loanOutstanding(loan, await qc(LOAN_TXNS, [[id]]));
-      if (cmp(rat(amount), rat(owed)) > 0) {
-        throw bad(`The prepayment (${money(amount)}) is more than the ${owed} still owed on ${loan.loan_no}`);
-      }
-      await qc(
-        `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-         VALUES ($1, $2::date, 'prepayment', $3, $4, $5)`,
-        [id, date, amount, note ?? 'Prepayment', req.user.id]);
-      const left = loanOutstanding(loan, await qc(LOAN_TXNS, [[id]]));
-      await hrAudit(qc, req, 'loan', id, 'prepay', {
-        loan_no: loan.loan_no, amount: money(amount), date, outstanding_before: owed, outstanding_after: left,
+      return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'A loan prepayment', async () => {
+        const loan = await lockedLoan(qc, oc, id);
+        mustBeActive(loan);
+        const owed = loanOutstanding(loan, await qc(LOAN_TXNS, [[id]]));
+        if (cmp(rat(amount), rat(owed)) > 0) {
+          throw bad(`The prepayment (${money(amount)}) is more than the ${owed} still owed on ${loan.loan_no}`);
+        }
+        await qc(
+          `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
+           VALUES ($1, $2::date, 'prepayment', $3, $4, $5)`,
+          [id, date, amount, note ?? 'Prepayment', req.user.id]);
+        const left = loanOutstanding(loan, await qc(LOAN_TXNS, [[id]]));
+        await hrAudit(qc, req, 'loan', id, 'prepay', {
+          loan_no: loan.loan_no, amount: money(amount), date, outstanding_before: owed, outstanding_after: left,
+        });
+        if (isZero(rat(left))) {
+          await qc(`UPDATE hr.loans SET status = 'closed' WHERE id = $1`, [id]);
+          await hrAudit(qc, req, 'loan', id, 'close', { loan_no: loan.loan_no, reason: 'prepaid in full' });
+        }
       });
-      if (isZero(rat(left))) {
-        await qc(`UPDATE hr.loans SET status = 'closed' WHERE id = $1`, [id]);
-        await hrAudit(qc, req, 'loan', id, 'close', { loan_no: loan.loan_no, reason: 'prepaid in full' });
-      }
     });
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
@@ -528,7 +545,8 @@ async function changeHold(req, hold) {
   const note = hold ? textOf(bodyOf(req).note, 'The reason', 200) : null;
   let warning = null;
   let recalculated = false;
-  await tx(async (qc, oc) => {
+  await tx(async (qc, oc) => withImpact(qc, req, [await loanPersonOf(qc, id)], month,
+    hold ? 'Holding a loan instalment' : 'Releasing a held loan instalment', async () => {
     if (!(await oc(`SELECT 1 AS one FROM hr.loans WHERE id = $1`, [id]))) throw missing('Loan');
     const run = await oc(`SELECT id, status FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
     if (run?.status === 'finalised') {
@@ -544,16 +562,14 @@ async function changeHold(req, hold) {
         [id, month, note, req.user.id])
       : await oc(`DELETE FROM hr.loan_holidays WHERE loan_id = $1 AND month = $2 RETURNING id`, [id, month]);
     if (!changed) return;                                  // the same hold twice, or nothing to release: no change
-    if (run && run.status === 'draft') {
-      await recalcRun(qc, run, { personIds: [loan.person_id] });
-      recalculated = true;
-    } else if (run) {
-      warning = `The ${monthName(month)} payroll is ${run.status}: send it back to draft for the change to show`;
-    }
+    // Every open payroll from this month on is worked out again for the person (applyWithImpact, around this);
+    // an approved month cannot take it.
+    if (run && (run.status === 'draft' || run.status === 'submitted')) recalculated = true;
+    else if (run) warning = `The ${monthName(month)} payroll is ${run.status}: send it back for the change to show`;
     await hrAudit(qc, req, 'loan', id, hold ? 'holiday' : 'holiday_release', {
       loan_no: loan.loan_no, month, note, run_status: run?.status ?? null, recalculated,
     });
-  });
+  }));
   const view = await loanView(id);
   return { ...view, ...(warning ? { warning } : {}), run_recalculated: recalculated };
 }
@@ -613,21 +629,23 @@ r.put('/hr/loans/:id/instalment', requireHr('operator'), async (req, res, next) 
     const fromMonth = monthOf(body.from_month, 'The month the change starts from');
     let warning = null;
     await tx(async (qc, oc) => {
-      const loan = await lockedLoan(qc, oc, id);
-      mustBeActive(loan);
-      const was = money(loan.instalment);
-      if (cmp(rat(instalment), rat(was)) === 0) return;
-      await qc(`UPDATE hr.loans SET instalment = $2 WHERE id = $1`, [id, instalment]);
-      await hrAudit(qc, req, 'loan', id, 'instalment', {
-        loan_no: loan.loan_no, field: 'instalment', from_month: fromMonth, from: was, to: money(instalment),
+      return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'A change of loan instalment', async () => {
+        const loan = await lockedLoan(qc, oc, id);
+        mustBeActive(loan);
+        const was = money(loan.instalment);
+        if (cmp(rat(instalment), rat(was)) === 0) return;
+        await qc(`UPDATE hr.loans SET instalment = $2 WHERE id = $1`, [id, instalment]);
+        await hrAudit(qc, req, 'loan', id, 'instalment', {
+          loan_no: loan.loan_no, field: 'instalment', from_month: fromMonth, from: was, to: money(instalment),
+        });
+        const latest = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+        const open = latest?.month ? nextMonth(latest.month) : plantMonth();
+        const first = open > loan.first_due_month ? open : loan.first_due_month;
+        if (fromMonth > first) {
+          warning = `The new instalment is taken by every payroll not yet finalised, starting with ${first}, `
+            + `not only from ${fromMonth}. Change it again in ${fromMonth} if it should start then`;
+        }
       });
-      const latest = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
-      const open = latest?.month ? nextMonth(latest.month) : plantMonth();
-      const first = open > loan.first_due_month ? open : loan.first_due_month;
-      if (fromMonth > first) {
-        warning = `The new instalment is taken by every payroll not yet finalised, starting with ${first}, `
-          + `not only from ${fromMonth}. Change it again in ${fromMonth} if it should start then`;
-      }
     });
     const view = await loanView(id);
     res.json(warning ? { ...view, warning } : view);
@@ -640,21 +658,23 @@ r.post('/hr/loans/:id/cancel', requireHr('operator'), async (req, res, next) => 
   try {
     const id = idOf(req.params.id, 'Loan');
     await tx(async (qc, oc) => {
-      const loan = await lockedLoan(qc, oc, id);
-      mustBeActive(loan);
-      const txns = await qc(LOAN_TXNS, [[id]]);
-      if (txns.some((t) => t.kind === 'payroll_recovery' || t.kind === 'prepayment')) {
-        throw refuse(409, `${loan.loan_no} cannot be cancelled: money has already been taken back against it`, LOAN_HAS_RECOVERIES);
-      }
-      const owed = loanOutstanding(loan, txns);
-      if (!isZero(rat(owed))) {
-        await qc(
-          `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-           VALUES ($1, $2::date, 'adjustment', $3, 'Loan cancelled', $4)`,
-          [id, plantDateStr(), money(neg(rat(owed))), req.user.id]);
-      }
-      await qc(`UPDATE hr.loans SET status = 'cancelled' WHERE id = $1`, [id]);
-      await hrAudit(qc, req, 'loan', id, 'cancel', { loan_no: loan.loan_no, reversed: owed });
+      return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'Cancelling a loan', async () => {
+        const loan = await lockedLoan(qc, oc, id);
+        mustBeActive(loan);
+        const txns = await qc(LOAN_TXNS, [[id]]);
+        if (txns.some((t) => t.kind === 'payroll_recovery' || t.kind === 'prepayment')) {
+          throw refuse(409, `${loan.loan_no} cannot be cancelled: money has already been taken back against it`, LOAN_HAS_RECOVERIES);
+        }
+        const owed = loanOutstanding(loan, txns);
+        if (!isZero(rat(owed))) {
+          await qc(
+            `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
+             VALUES ($1, $2::date, 'adjustment', $3, 'Loan cancelled', $4)`,
+            [id, plantDateStr(), money(neg(rat(owed))), req.user.id]);
+        }
+        await qc(`UPDATE hr.loans SET status = 'cancelled' WHERE id = $1`, [id]);
+        await hrAudit(qc, req, 'loan', id, 'cancel', { loan_no: loan.loan_no, reversed: owed });
+      });
     });
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
@@ -733,12 +753,13 @@ r.post('/hr/advances', requireHr('accounts'), async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       // The payroll month first: it locks that month's run, before any person row (the run → people order).
       const forMonth = await advanceMonthFor(qc, wanted, date, [personId]);
-      if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw bad('That person does not exist');
-      const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note, forMonth);
-      await refreshPersonLine(qc, req, forMonth, personId, `Advance of ${money(amount)} given for ${monthWord(forMonth)}`);
-      const balance = (await advanceBalances(qc, [personId])).get(personId);
-      await hrAudit(qc, req, 'advance', personId, 'give', { txn_id: row.id, amount: money(amount), date, for_month: forMonth, balance_after: balance });
-      return { ...row, balance };
+      return withImpact(qc, req, [personId], forMonth, 'An advance', async () => {
+        if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw bad('That person does not exist');
+        const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note, forMonth);
+        const balance = (await advanceBalances(qc, [personId])).get(personId);
+        await hrAudit(qc, req, 'advance', personId, 'give', { txn_id: row.id, amount: money(amount), date, for_month: forMonth, balance_after: balance });
+        return { ...row, balance };
+      });
     });
     res.json(out);
   } catch (e) { next(refusal(e)); }
@@ -753,18 +774,20 @@ r.post('/hr/advances/:personId/waive', requireHr('approver'), async (req, res, n
     const amount = positiveOf(body.amount, 'The amount to waive');
     const note = textOf(body.note, 'The note', 500);
     const out = await tx(async (qc, oc) => {
-      if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw missing('Person');
-      await lockHolder(qc, personId);
-      const owed = (await advanceBalances(qc, [personId])).get(personId);
-      if (cmp(rat(amount), rat(owed)) > 0) {
-        throw bad(`The waiver (${money(amount)}) is more than the advance balance (${owed})`);
-      }
-      const row = await postAdvance(oc, req, personId, 'waived', amount, plantDateStr(), WAIVER, note);
-      const balance = (await advanceBalances(qc, [personId])).get(personId);
-      await hrAudit(qc, req, 'advance', personId, 'waive', {
-        txn_id: row.id, amount: money(amount), balance_before: owed, balance_after: balance,
+      return withImpact(qc, req, [personId], null, 'Waiving an advance', async () => {
+        if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw missing('Person');
+        await lockHolder(qc, personId);
+        const owed = (await advanceBalances(qc, [personId])).get(personId);
+        if (cmp(rat(amount), rat(owed)) > 0) {
+          throw bad(`The waiver (${money(amount)}) is more than the advance balance (${owed})`);
+        }
+        const row = await postAdvance(oc, req, personId, 'waived', amount, plantDateStr(), WAIVER, note);
+        const balance = (await advanceBalances(qc, [personId])).get(personId);
+        await hrAudit(qc, req, 'advance', personId, 'waive', {
+          txn_id: row.id, amount: money(amount), balance_before: owed, balance_after: balance,
+        });
+        return { ...row, balance };
       });
-      return { ...row, balance };
     });
     res.json(out);
   } catch (e) { next(refusal(e)); }
@@ -1001,7 +1024,8 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
         pay.forMonth = await advanceMonthFor(qc, pay.forMonth, pay.paidOn, [pay.personId]);
         if (pay.forMonth !== natural) pay.wantedMonth = natural;   // the default month was closed: say where it went
       }
-      return postStaffPayment(qc, oc, req, pay, loanNo);
+      return withImpact(qc, req, [pay.personId], pay.kind === 'advance' ? pay.forMonth : pay.firstDue ?? null,
+        pay.kind === 'advance' ? 'An advance' : 'A new loan', () => postStaffPayment(qc, oc, req, pay, loanNo));
     });
 
     const ledger = await personLedger(q, pay.personId);
@@ -1328,6 +1352,7 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
       for (const l of lines) {
         if (l.kind === 'advance') forMonths.set(l.id, await advanceMonthFor(qc, sheet.month, paidOn, [l.person_id], { fallback: true }));
       }
+      const posted = await withImpact(qc, req, lines.map((l) => l.person_id), sheet.month, `Advance sheet ${sheet.sheet_no}`, async () => {
       for (const l of lines) {
         const pay = {
           personId: l.person_id, kind: l.kind, amount: money(l.amount), paidOn, paidVia: sheet.paid_via,
@@ -1344,6 +1369,9 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
         await qc(`UPDATE hr.advance_sheet_lines SET advance_txn_id = $2, loan_id = $3, posted_at = now() WHERE id = $1`,
           [l.id, out.advanceId, out.loanId]);
       }
+      return true;
+      });
+      void posted;
       const done = pending.n === 0;
       if (done) await qc(`UPDATE hr.advance_sheets SET status = 'posted', posted_by = $2, posted_at = now() WHERE id = $1`, [id, req.user.id]);
       await hrAudit(qc, req, 'advance_sheet', id, 'post', { posted: lines.length, closed: done });
