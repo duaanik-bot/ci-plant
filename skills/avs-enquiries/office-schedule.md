@@ -1,50 +1,41 @@
-# Putting `avs-enquiries` on the office computer
+# Putting `avs-enquiries` on the office computer (v2, 14 Nov 2026)
 
-The office AVS (the company Mac, CARTON PC MAIN) already runs the intake at 7:30 am, 1 pm, 3:30 pm and 5:30 pm, reading
-mppchd@gmail.com through its Gmail connector. Two things make it file enquiries too. Both are done once, on the
-office computer, by a person.
+The office AVS (the company Mac, CARTON PC MAIN) runs the intake at 7:30 am, 1 pm, 3:30 pm and 5:30 pm, reading
+mppchd@gmail.com through its Gmail connector. Since 14 Nov the company mailbox is the Enquiry desk's only mailbox, and
+the desk's **Fetch from mail** button starts this computer within a minute. Three things, done once by a person (or by
+the office Claude from the setup message `office-pc-avs-enquiries-update-2.txt`):
 
-## 1. Install the skill
+## 1. The skill
 
-In the Claude app on the office computer: **Customize → Skills → Upload** the file `avs-enquiries-skill.zip` (or copy
-the `avs-enquiries` folder into `~/.claude/skills/` on that Mac). It needs the same Gmail (mppchd) and Supabase
-connectors the intake already uses — nothing new.
+Install `SKILL.md` as the skill `avs-enquiries` (Customize → Skills → Upload, or `~/.claude/skills/avs-enquiries/`).
 
-## 2. Add this to each AVS scheduled task
+## 2. The paragraph in each AVS scheduled task
 
-Open each of the four AVS intake tasks (7:30 am, 1 pm, 3:30 pm, 5:30 pm), and paste this at the **end** of its prompt:
-
-```
-ENQUIRIES FOR CI PLANT (Anik, 13 Nov 2026) — do this in EVERY run, even a catch-up that has nothing else to do (do it
-before you stop):
-Run the avs-enquiries skill for this run. Read mppchd@gmail.com since this run's mail_since (minus one day) for
-customers asking us for a price, rate or quotation, and for customers' counter-offers on our quotes, and file them on
-CI Plant's Enquiry desk with ONE call: SELECT avs.file_enquiry_mails(...). That call is the only write this step adds
-to your rules; e-mail stays read only (never reply, draft or send). Leave any mail that also went to
-dua.anik@gmail.com (in To or Cc): the owner's Mac files those. A minute later read back avs.enquiry_intake for your
-mails and report what CI Plant did. Add enquiries_filed, enquiry_counters and enquiries_left_to_dua_anik to this run's
-stats, and one line to its note ("Enquiries: …"). If the skill is not installed, write "enquiries skipped —
-avs-enquiries skill missing" in the note and go on.
-```
-
-## Or: a task of its own
-
-If the AVS tasks should stay as they are, make one new scheduled task instead on the office computer — same schedule
-(7:35 am, 1:05 pm, 3:35 pm, 5:35 pm), same connectors — with this prompt:
+Replace the 13 Nov "ENQUIRIES FOR CI PLANT" paragraph at the end of each of the four AVS intake tasks with:
 
 ```
-You are the office AVS's enquiry step for Colour Impressions (Anik, 13 Nov 2026). Run the avs-enquiries skill: read
-mppchd@gmail.com (only — never dua.anik@gmail.com) for customers asking us for a price and for counter-offers on our
-quotes, received in the last 2 days, and file them on CI Plant's Enquiry desk with ONE call of
-avs.file_enquiry_mails(...). E-mail is read only: never reply, draft, send, label or delete. Your only write is that
-call. Leave any mail that also went to dua.anik@gmail.com (in To or Cc). A minute later read back avs.enquiry_intake
-for your mails and end with one line: what was filed (CI-ENQ numbers), skipped or refused. If the skill is not
-installed, say so and stop.
+ENQUIRIES FOR CI PLANT (Anik, 13–14 Nov 2026) — do this in EVERY run, even a catch-up that has nothing else to do (do
+it before you stop):
+Run the avs-enquiries skill for this run. It takes a waiting "Fetch from mail" first (avs.take_enquiry_fetch), reads
+mppchd@gmail.com since this run's mail_since (minus one day) for every customer asking us for a price, rate or
+quotation and for counter-offers on our quotes — also mails that went to other addresses of ours too — files them with
+ONE call of avs.file_enquiry_mails, and closes the Fetch (avs.finish_enquiry_fetch). Those three avs calls are the only
+writes this step adds to your rules; e-mail stays read only (never reply, draft or send). A minute later read back
+avs.enquiry_intake for your mails. Add enquiries_filed, enquiry_counters and enquiries_asked_again to this run's stats,
+and one line to its note ("Enquiries: …"). If the skill is not installed, write "enquiries skipped — avs-enquiries
+skill missing" in the note and go on.
 ```
 
-## What happens then
+## 3. The watcher (answers "Fetch from mail" within a minute)
 
-- Within seconds of the call, CI Plant puts each request in the Enquiry desk's Inbox (rows tagged "to mppchd@gmail.com")
-  and every login with Costing ticked gets one bell and phone alert for the run's mails.
-- Replies to these customers are drafted in mppchd once an admin connects mppchd's Gmail in the desk Settings
-  (Business → Connect Gmail, signed in as mppchd). Until then the desk says so when a reply is drafted.
+In Terminal on the office computer:
+
+    curl -fsSL https://motionci.in/office/avs-enquiry-watch/install.sh | bash
+
+It installs `~/.config/ci-plant/avs-enquiry-watch/` (the watcher, its run prompt, and a guard that lets the run only
+read the company mailbox and file through the avs functions) and a launchd job that asks CI Plant every minute whether
+a Fetch is waiting — a yes or no, with no key. Claude starts only on a yes. The command line Claude must be signed in
+once on that computer (`claude`, then `/login`); the installer says whether it is.
+
+Its log: `~/.config/ci-plant/avs-enquiry-watch/watch.log`. To stop it:
+`launchctl unload -w ~/Library/LaunchAgents/in.motionci.avs-enquiry-watch.plist`.

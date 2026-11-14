@@ -26,6 +26,7 @@ import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import CounterPanel from './CounterPanel.jsx';
 import OrderPanel, { OrdersList } from './OrderPanel.jsx';
 import { canOrder } from '../../lib/orderUi.js';
+import { NEW_ENQUIRY_ROW } from '../../components/EnquiryBadge.jsx';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 const nos = list => list.map(m => m.enquiry_no).join(', ');
@@ -43,17 +44,44 @@ function MailboxBadge({ box }) {
 
 // The last fetch, in words. A fetch is started in the cloud when the desk is linked (Settings → Claude in the cloud),
 // on Fetch and at 11 am / 3 pm; else it waits for the Claude robot on the owner's Mac.
+// The desk's mailbox addresses, for the Fetch buttons' tips.
+const mailboxEmail = (desk, key) => (desk?.mailboxes || []).find(b => b.key === key)?.email || '';
+
+// New enquiries stand out as new POs do (14 Nov 2026): "New" until someone starts on it; "Asked again" when the
+// customer has asked for the same item again since it came in (no new row is made for that).
+function NewTags({ e }) {
+  return (
+    <>
+      {e.status === 'new' && (
+        <span title="Not started yet — cost it, or send it to Costing"
+          className="inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-px text-[10px] font-bold text-white">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-white/80" />New
+        </span>
+      )}
+      {e.asked_again_count > 0 && (
+        <span title={`The customer asked for this again${e.asked_again_at ? ` (last ${dateText(e.asked_again_at)})` : ''} — no new row was made`}
+          className="rounded-full bg-amber-100 px-2 py-px text-[10px] font-bold text-amber-900 ring-1 ring-inset ring-amber-300">
+          Asked again{e.asked_again_count > 1 ? ` ×${e.asked_again_count}` : ''}
+        </span>
+      )}
+    </>
+  );
+}
+
 function JobLine({ job, cloud }) {
   if (!job) return <span className="text-xs text-slate-500">No fetch yet.{cloud?.linked ? ' Claude in the cloud also fetches at 11 am and 3 pm.' : ''}</span>;
   const r = job.result || {};
-  const queued = job.fire_status === 'cloud'
-    ? `Claude was started in the cloud ${dateText(job.fired_at)} — the enquiries land here in a few minutes.`
-    : job.fire_status === 'cloud_failed'
-      ? `Claude in the cloud did not start: ${job.fire_error || 'no answer'}. Press Fetch again${cloud?.linked ? '' : ', or link Claude in Settings'}.`
-      : 'Waiting for Claude — the robot on the Mac picks it up at its next run (link Claude in the cloud in Settings to fetch at once).';
+  // The company mailbox waits for the office computer; the trial mailbox for the owner's Mac (14 Nov 2026).
+  const queued = job.fire_status === 'office'
+    ? 'Waiting for the office computer — it starts within a minute when it is on; if it is off, its next AVS run (7:30 am, 1 pm, 3:30 pm, 5:30 pm) does it.'
+    : job.fire_status === 'cloud'
+      ? `Claude was started in the cloud ${dateText(job.fired_at)} — the enquiries land here in a few minutes.`
+      : job.fire_status === 'cloud_failed'
+        ? `Claude in the cloud did not start: ${job.fire_error || 'no answer'}. Press Fetch again${cloud?.linked ? '' : ', or link Claude in Settings'}.`
+        : 'Waiting for the Mac — its Claude starts within a minute when the Mac is on.';
   const text = {
     queued,
-    working: `${job.claimed_by || 'Claude'} is reading the mailbox…`,
+    working: `${job.claimed_by === 'AVS (office)' ? 'The office computer' : job.claimed_by || 'Claude'} is reading the mailbox…`,
     done: `Done ${dateText(job.finished_at)}${r.filed != null ? ` — ${plural(r.filed, 'mail')} filed${r.skipped ? `, ${r.skipped} filed before` : ''}` : ''}.`,
     failed: `Failed: ${job.error}`,
     cancelled: 'Cancelled.',
@@ -227,13 +255,15 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     return () => clearInterval(poll.current);
   }, [lastFetch?.id, lastFetch?.status, reload]);
 
-  const fetchMail = async () => {
-    const r = await api.post('/costing/enquiry-desk/fetch', {});
+  // Fetch from mail = the company mailbox (the office computer); Fetch from dua.anik = the trial mailbox (the Mac).
+  const fetchMail = async mailbox => {
+    const r = await api.post('/costing/enquiry-desk/fetch', { mailbox });
     const c = r.cloud;
+    const who = mailbox === 'business' ? 'the office computer' : 'the Mac';
     if (c?.ok) toast.success(`Fetch started (job ${r.job.id}) — Claude is reading the mailbox in the cloud; the enquiries land here in a few minutes`);
     else if (c && c.status !== 'not_linked') toast.error(`Job ${r.job.id} is queued, but Claude in the cloud did not start: ${c.error}`);
-    else if (r.already) toast.success(`Job ${r.job.id} is already ${r.job.status === 'working' ? 'being worked by Claude' : 'waiting for Claude'}`);
-    else toast.success(`Fetch queued (job ${r.job.id}) — the Claude robot on the Mac reads the mailbox at its next run`);
+    else if (r.already) toast.success(`Job ${r.job.id} is already ${r.job.status === 'working' ? `being read by ${who}` : `waiting for ${who}`}`);
+    else toast.success(`Fetch queued (job ${r.job.id}) — ${who} starts within a minute when it is on; the enquiries land here as they are filed`);
     await loadDesk();
   };
 
@@ -324,7 +354,12 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   );
   const baseCols = [
     { key: 'enquiry_no', label: 'No.', sortValue: e => `${String(e.mail_id || 0).padStart(6, '0')}|${String(e.mail_pos || 0).padStart(3, '0')}`,
-      render: e => <div className="space-y-1"><div className="font-bold text-brand-600">{e.enquiry_no}</div><MailTag e={e} onPickMail={pickMail} /></div> },
+      render: e => (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5"><span className="font-bold text-brand-600">{e.enquiry_no}</span><NewTags e={e} /></div>
+          <MailTag e={e} onPickMail={pickMail} />
+        </div>
+      ) },
     // Newest first, and the products of one mail together in the mail's own order.
     { key: 'received', label: 'Received', sortValue: e => `${new Date(e.mail_received_at || e.created_at).toISOString()}|${String(e.mail_id || 0).padStart(8, '0')}|${String(1000 - (e.mail_pos || 0)).padStart(4, '0')}`,
       render: e => dateText(e.mail_received_at || e.created_at) },
@@ -480,7 +515,14 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <MailboxBadge box={desk.in_use} />
         <div className="min-w-0 flex-1"><JobLine job={lastFetch} cloud={desk.cloud} /></div>
         <Button variant="secondary" size="sm" onClick={() => setOpen('new')}><Plus size={14} className="mr-1 inline" />Add an enquiry</Button>
-        <Button onClick={fetchMail} disabled={!desk.in_use}><Inbox size={15} className="mr-1.5 inline" />Fetch enquiries from mail</Button>
+        <Button variant="secondary" size="sm" onClick={() => fetchMail('trial')}
+          title={`Only the mail that came to ${mailboxEmail(desk, 'trial') || 'the trial mailbox'} — read by the Claude on the owner's Mac`}>
+          <Mail size={13} className="mr-1 inline" />Fetch from dua.anik
+        </Button>
+        <Button onClick={() => fetchMail('business')}
+          title={`The company mailbox ${mailboxEmail(desk, 'business') || ''} — read by the office computer's AVS`}>
+          <Inbox size={15} className="mr-1.5 inline" />Fetch from mail
+        </Button>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <SubTabs views={views} active={tab} onChange={k => { setTab(k); setSearch(''); }} />
@@ -514,8 +556,9 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {stages && (
         <DataTable rows={shown} columns={columns} onRowClick={e => setOpen(e.id)}
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
+          rowClass={e => (e.status === 'new' ? NEW_ENQUIRY_ROW : '')}
           defaultSort={{ key: 'received', dir: 'desc' }} serialNumber={false}
-          empty={rows ? (tab === 'inbox' ? 'No new enquiries. Press "Fetch enquiries from mail".' : 'Nothing here.') : 'Loading…'} />
+          empty={rows ? (tab === 'inbox' ? 'No new enquiries. Press "Fetch from mail".' : 'Nothing here.') : 'Loading…'} />
       )}
 
       {(tab === 'quote' || tab === 'sent') && (

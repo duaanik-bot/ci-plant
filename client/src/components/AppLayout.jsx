@@ -21,6 +21,7 @@ import { notificationLink } from '../lib/notificationLink.js';
 import { currentSubscription, readEnvironment, registerWorker, subscribe } from '../lib/webPush.js';
 import { PressButton, useToast } from './ui.jsx';
 import { useDraftSummary } from './Drafts.jsx';
+import { EnquiryBadge } from './EnquiryBadge.jsx';
 // A lazy chunk behind a boundary and an open-request queue — see ChatDockLoader.jsx.
 import ChatDock from './ChatDockLoader.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -680,6 +681,7 @@ function NavItem({ item }) {
           <span className="truncate">{item.label}</span>
           {item.module === 'avs' && <AvsBadge isActive={isActive} />}
           {item.to === '/orders' && <DraftOrdersBadge isActive={isActive} />}
+          {item.to === '/costing' && <EnquiryBadge isActive={isActive} />}
         </>
       )}
     </NavLink>
@@ -863,6 +865,7 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
                         <span className="flex-1">{i.label}</span>
                         {i.module === 'avs' && <AvsBadge isActive={isActive} />}
                         {i.to === '/orders' && <DraftOrdersBadge isActive={isActive} />}
+                        {i.to === '/costing' && <EnquiryBadge isActive={isActive} />}
                       </>
                     )}
                   </NavLink>
@@ -899,6 +902,7 @@ function TabletRail({ groups, floorTotal }) {
                   <span className="max-w-full truncate leading-tight">{label}</span>
                   {i.module === 'avs' && <AvsBadge isActive={isActive} corner />}
                   {i.to === '/orders' && <DraftOrdersBadge isActive={isActive} corner />}
+                  {i.to === '/costing' && <EnquiryBadge isActive={isActive} corner />}
                   {isFloor && floorTotal > 0 && (
                     <span className={`absolute right-0.5 top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
                       {floorTotal > 99 ? '99+' : floorTotal}

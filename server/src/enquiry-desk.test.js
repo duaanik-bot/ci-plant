@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { computeCosting, quantityBreaks } from './costing-engine.js';
 import {
   parseQuantity, cleanQuantities, cleanItem, cleanMail, priceRows, ceilPaise, stageOf, customerLine, LINE_KEYS,
-  quotationLines, groupByCustomer, customerKey, composeReply, replySubject, replyRecipient, customerSpecs, sizeText,
+  quotationLines, groupByCustomer, customerKey, productKey, isRepeat, composeReply, replySubject, replyRecipient, customerSpecs, sizeText,
   BACK_TO, broughtBack, UNDO_COLS,
 } from './enquiry-desk.js';
 import { quotationPdf, pdfSafe } from './quotation-pdf.js';
@@ -245,4 +245,29 @@ test('the desk never starts the AVS cloud routine, and the routine prompt has no
   assert.deepEqual({ ...CLOUD_KEYS }, { url: 'enquiry_routine_fire_url', token: 'enquiry_routine_token' });
   const prompt = readFileSync(new URL('../../client/src/lib/avs-robot/routine-prompt.md', import.meta.url), 'utf8');
   assert.doesNotMatch(prompt, /enquiry/i);
+});
+
+// A customer asking again for the same item (owner, 14 Nov 2026: "If an inquiry has already been downloaded into the
+// system, it should not be coming up again … If work has already been done, then those inquiries should not be coming
+// up again"): same product (case, spacing and punctuation aside) and either no quantity or only quantities already asked.
+test('a product is the same product whatever its case, spacing or punctuation', () => {
+  assert.equal(productKey('  Alphacal-500  Tab. CARTON '), productKey('alphacal 500 tab carton'));
+  assert.notEqual(productKey('ALPHA 10 TAB CARTON'), productKey('ALPHA 20 TAB CARTON'));
+  assert.equal(productKey(null), '');
+});
+
+test('asked again: the same item with no quantity or only quantities already asked', () => {
+  const open = { product_name: 'Alpha 10 Tab Carton', quantities: [5000, 10000] };
+  assert.equal(isRepeat(open, { product_name: 'ALPHA 10 TAB CARTON', quantities: [5000] }), true);
+  assert.equal(isRepeat(open, { product_name: 'alpha 10 tab carton', quantities: [10000, 5000] }), true);
+  assert.equal(isRepeat(open, { product_name: 'ALPHA 10 TAB CARTON', quantities: [] }), true, 'no quantity: a reminder');
+});
+
+test('a new quantity, another product or a nameless item is a new request', () => {
+  const open = { product_name: 'ALPHA 10 TAB CARTON', quantities: [5000] };
+  assert.equal(isRepeat(open, { product_name: 'ALPHA 10 TAB CARTON', quantities: [5000, 25000] }), false);
+  assert.equal(isRepeat(open, { product_name: 'ALPHA 20 TAB CARTON', quantities: [5000] }), false);
+  assert.equal(isRepeat(open, { product_name: '', quantities: [5000] }), false);
+  assert.equal(isRepeat({ product_name: 'ALPHA 10 TAB CARTON', quantities: [] }, { product_name: 'ALPHA 10 TAB CARTON', quantities: [3000] }), false,
+    'the first asked no quantity; a quantity now is new');
 });

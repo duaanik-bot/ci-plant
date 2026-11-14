@@ -2888,6 +2888,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261113120000_enquiry_orders.sql'));
   // The desk's alert (13 Nov 2026): enquiry_mails.alerted_at, the "announced once" mark. A replay changes nothing.
   await pool.query(migration('20261113180000_enquiry_mail_alerts.sql'));
+  // A customer asking again (14 Nov 2026): the open row is marked, no new row. Idempotent.
+  await pool.query(migration('20261114120000_enquiry_asked_again.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

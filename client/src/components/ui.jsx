@@ -2096,6 +2096,12 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
                   className={`grow whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold transition-all duration-300 ease-spring active:scale-[0.97]
                     ${active === t.key ? GT_ACTIVE : GT_IDLE}`}>
                   {t.label}
+                  {t.badge > 0 && (
+                    <span title={t.badgeTitle || undefined}
+                      className={`ml-1.5 rounded-full px-1.5 py-px text-[10px] font-bold tabular-nums ${active === t.key ? 'bg-white/25 text-white' : 'bg-orange-500 text-white'}`}>
+                      {t.badge > 99 ? '99+' : t.badge}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

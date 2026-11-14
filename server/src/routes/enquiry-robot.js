@@ -12,6 +12,7 @@
 //   POST /api/avs/robot/enquiry-jobs/:id/counters    a Fetch files a customer's counter-offer (their prices) against quoted rows
 //   POST /api/avs/robot/enquiry-jobs/:id/done        { ok: true, result } or { ok: false, error }
 //   GET  /api/cron/enquiry-fetch                     Vercel Cron, 11:00 and 15:00 India: a Fetch, started in the cloud
+//   GET  /api/enquiry-desk/waiting?mailbox=          the office computer's watcher: is a fetch waiting? (yes or no, no key)
 //   POST /api/avs/robot/enquiries-notify             the database, when the office AVS has filed mails into avs.enquiry_intake:
 //                                                    copy them onto the desk and tell the desk (enquiry-intake.js)
 //
@@ -27,7 +28,7 @@ import { keyOk } from './avs-robot.js';
 import { cleanMail, unreadItem } from '../enquiry-desk.js';
 import { num } from '../costing-engine.js';
 import { plantDateStr } from '../plant-calendar.js';
-import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup } from './enquiries.js';
+import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup, askedAgain } from './enquiries.js';
 import { jobOfPass, startFetch, CLOUD_RUNNER, TIMER_NAME } from '../enquiry-cloud.js';
 import { syncIntakeEnquiries, notifyNewEnquiriesSoft, sameMailOnDesk } from '../enquiry-intake.js';
 
@@ -189,13 +190,16 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
         };
         // A mail read as an enquiry with no item made out still lands on the desk, to be read by a person.
         const items = m.items.length ? m.items : [unreadItem(m.subject)];
-        const made = [];
+        const made = [], again = [];
         for (const item of items) {
+          // Asked again for an item still open on the desk: that row is marked, no new row (14 Nov 2026).
+          const prior = m.items.length ? await askedAgain(qc, item, who, mail.id, req.robotName) : null;
+          if (prior) { again.push(prior.enquiry_no); continue; }
           const e = await insertEnquiry(qc, oc, item, who, null);
           await enquiryEvent(qc, { enquiryId: e.id, action: 'fetched', detail: { job: id } }, { name: req.robotName });
           made.push(e.enquiry_no);
         }
-        filed.push({ gmail_message_id: m.gmail_message_id, enquiries: made });
+        filed.push({ gmail_message_id: m.gmail_message_id, enquiries: made, asked_again: again });
       }
       if (filed.length) await audit('enquiry_job', id, 'file', `Job ${id} — ${filed.length} mail${filed.length === 1 ? '' : 's'} filed`, qc, req.robotName);
       return { filed, skipped, refused, same_mail: sameMail };
@@ -320,6 +324,18 @@ r.post('/avs/robot/enquiry-jobs/:id/done', async (req, res, next) => {
       await enquiryEvent(qc, { quotationId: qid, action: 'drafted', detail: { job: id } }, robot);
     });
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Is a fetch waiting for this mailbox? The office computer's watcher asks every minute (14 Nov 2026: "it should trigger
+// the AVS on my office PC") and starts its Claude only on a yes. No key: the answer is yes or no, nothing more.
+r.get('/enquiry-desk/waiting', async (req, res, next) => {
+  try {
+    markUncacheable();
+    res.set('Cache-Control', 'no-store');
+    const key = String(req.query.mailbox || '');
+    if (!['business', 'trial'].includes(key)) return res.status(400).json({ error: 'Which mailbox — business or trial?' });
+    res.json({ waiting: !!await one(`SELECT 1 AS y FROM enquiry_jobs WHERE kind = 'fetch' AND mailbox = $1 AND (${OPEN}) LIMIT 1`, [key]) });
   } catch (e) { next(e); }
 });
 

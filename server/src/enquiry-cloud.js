@@ -107,12 +107,21 @@ export function needsFire(job, now = Date.now()) {
   return !(at > 0) || now - at > REFIRE_AFTER_MIN * 60e3;
 }
 
-// Fetch: one open fetch per mailbox. A new one is queued from the last finished fetch (a day's overlap: a mail filed
-// twice is refused), else fetch_days back; then Claude is started in the cloud when the desk is linked. The timer
-// (auto) starts nothing within TIMER_QUIET_MIN of the last fetch queued.
-export async function startFetch({ user = null, by, auto = false }) {
-  const box = await one(`SELECT key, email FROM enquiry_mailboxes WHERE in_use`);
-  if (!box) return { error: 'No mailbox is in use — an admin chooses one in the desk settings.', status: 409 };
+// Fetch: one open fetch per mailbox — the mailbox named (14 Nov 2026: "Fetch from mail" = the company mailbox, read by
+// the office computer; "Fetch from dua.anik" = the trial mailbox, read by the owner's Mac), else the one in use. A new
+// one is queued from the last finished fetch of that mailbox (a day's overlap: a mail filed twice is refused), else
+// fetch_days back. The company mailbox's job waits for the office computer (fire_status 'office'): its watcher asks
+// GET /api/enquiry-desk/waiting and the office AVS takes the job (avs.take_enquiry_fetch). Only the trial mailbox's job
+// starts the desk's cloud routine, whose Gmail is that mailbox. The timer (auto) fetches nothing while the company
+// mailbox is in use — the office AVS reads it at its own hours — and nothing within TIMER_QUIET_MIN of the last fetch.
+export const OFFICE_HOURS = 'The office AVS reads the company mailbox itself at 7:30 am, 1 pm, 3:30 pm and 5:30 pm.';
+export async function startFetch({ user = null, by, auto = false, mailbox = null }) {
+  const box = mailbox
+    ? await one(`SELECT key, email FROM enquiry_mailboxes WHERE key = $1`, [mailbox])
+    : await one(`SELECT key, email FROM enquiry_mailboxes WHERE in_use`);
+  if (!box) return mailbox ? { error: 'No such mailbox.', status: 400 } : { error: 'No mailbox is in use — an admin chooses one in the desk settings.', status: 409 };
+  const office = box.key === 'business';
+  if (auto && office) return { skipped: OFFICE_HOURS };
   const open = await one(`SELECT id, status, fire_status, brief FROM enquiry_jobs
                            WHERE kind = 'fetch' AND mailbox_email = $1 AND status IN ('queued', 'working') ORDER BY id LIMIT 1`, [box.email]);
   if (auto) {
@@ -121,16 +130,16 @@ export async function startFetch({ user = null, by, auto = false }) {
     if (recent && !needsFire(open)) return { skipped: `A fetch was started in the last ${TIMER_QUIET_MIN} minutes.`, job: { id: recent.id } };
   }
   if (open) {
-    const cloud = needsFire(open) ? await fireCloud({ id: open.id, mailbox_email: box.email }, by) : null;
+    const cloud = !office && needsFire(open) ? await fireCloud({ id: open.id, mailbox_email: box.email }, by) : null;
     return { job: { id: open.id }, already: true, cloud };
   }
   const s = await one('SELECT fetch_days FROM enquiry_settings WHERE id = 1');
   const last = await one(`SELECT finished_at FROM enquiry_jobs WHERE kind = 'fetch' AND mailbox_email = $1 AND status = 'done' ORDER BY id DESC LIMIT 1`, [box.email]);
   const since = new Date((last?.finished_at ? new Date(last.finished_at).getTime() : Date.now() - (s?.fetch_days || 7) * 864e5) - 864e5);
   const job = await one(`INSERT INTO enquiry_jobs (kind, mailbox, mailbox_email, brief, queued_by, queued_by_name, fire_status)
-                         VALUES ('fetch', $1, $2, $3, $4, $5, 'waiting') RETURNING id`,
-  [box.key, box.email, { since: plantDateStr(since) }, user?.id ?? null, by]);
-  await audit('enquiry_job', job.id, 'fetch', `Fetch enquiries — job ${job.id}${auto ? ' (timer)' : ''}`, q, by);
-  const cloud = await fireCloud({ id: job.id, mailbox_email: box.email }, by);
+                         VALUES ('fetch', $1, $2, $3, $4, $5, $6) RETURNING id`,
+  [box.key, box.email, { since: plantDateStr(since) }, user?.id ?? null, by, office ? 'office' : 'waiting']);
+  await audit('enquiry_job', job.id, 'fetch', `Fetch enquiries — job ${job.id}${auto ? ' (timer)' : ''}${office ? ' (office computer)' : ''}`, q, by);
+  const cloud = office ? null : await fireCloud({ id: job.id, mailbox_email: box.email }, by);
   return { job: { id: job.id }, already: false, cloud };
 }

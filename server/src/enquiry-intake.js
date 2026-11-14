@@ -8,8 +8,10 @@
 // moment the row lands (pg_net → POST /api/avs/robot/enquiries-notify, migration 20261113180100_avs_enquiry_intake),
 // and by the two-minute /drafts/summary poll of any open CI Plant if that call was lost.
 //
-// Each mail once: AVS leaves a mail that also went to the trial mailbox to the Mac robot, and both ways CI Plant
-// refuses a mail it already holds from the other mailbox (same sender, same text — sameMailOnDesk).
+// Each mail once: CI Plant refuses a mail it already holds from the other mailbox (sameMailOnDesk), both ways. Since 14
+// Nov the company mailbox is the desk's mailbox ("just keep it on MPP only"): AVS files everything that reaches it, and
+// the trial mailbox is fetched only on "Fetch from dua.anik". An item a customer only asks for again while it is open
+// marks that row instead of adding one (routes/enquiries.js askedAgain).
 //
 // The alert: every mail filed on the desk — a new enquiry or a counter-offer, from either mailbox — is announced once
 // (enquiry_mails.alerted_at) to every login with Costing ticked, in one bell row and phone push per batch. No price, no
@@ -19,7 +21,7 @@ import { audit, notify, lockDocNumber } from './helpers.js';
 import { cleanMail, unreadItem } from './enquiry-desk.js';
 import { num } from './costing-engine.js';
 import { mayCost } from './costing-match.js';
-import { insertEnquiry, resolveCustomer, enquiryEvent, lockRows, recordCounter, newGroup } from './routes/enquiries.js';
+import { insertEnquiry, resolveCustomer, enquiryEvent, lockRows, recordCounter, newGroup, askedAgain } from './routes/enquiries.js';
 
 export const AVS_RUNNER = 'AVS (office)';
 const MISSING = new Set(['42P01', '3F000']);
@@ -34,19 +36,22 @@ export function bodyPrint(text) {
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const who = m => m.customer || 'a customer';
 
-// The alert's words for the mails being announced: [{ mail_id, kind: 'enquiry'|'counter', customer, mailbox_email,
-// rows: [{ id, product_name }] }]. Pure, so it is tested.
+// The alert's words for the mails being announced: [{ mail_id, kind: 'enquiry'|'counter'|'again', customer,
+// mailbox_email, rows: [{ id, product_name, enquiry_no }] }]. Pure, so it is tested.
 export function newEnquiryAlert(mails) {
   if (mails.length === 1) {
     const m = mails[0];
     const names = m.rows.slice(0, 3).map(r => r.product_name).filter(Boolean).join(', ');
     const more = m.rows.length > 3 ? ` +${m.rows.length - 3} more` : '';
     const counter = m.kind === 'counter';
+    const again = m.kind === 'again';
     return {
-      title: `${counter ? 'Counter-offer' : 'New enquiry'}: ${who(m)} — ${plural(m.rows.length, 'item')}`,
+      title: `${counter ? 'Counter-offer' : again ? 'Asked again' : 'New enquiry'}: ${who(m)} — ${plural(m.rows.length, 'item')}`,
       body: counter
         ? `Their own prices for ${names}${more} · to ${m.mailbox_email}. Revise them on the Enquiry desk's Counter tab.`
-        : `${names}${more} · to ${m.mailbox_email}. Cost it on the Enquiry desk.`,
+        : again
+          ? `${names}${more} · already on the desk as ${m.rows.map(r => r.enquiry_no).filter(Boolean).join(', ')}. Answer it there.`
+          : `${names}${more} · to ${m.mailbox_email}. Cost it on the Enquiry desk.`,
       link: `/costing?tab=enquiries${m.rows[0] ? `&enquiry=${m.rows[0].id}` : ''}`,
       refTable: 'enquiry_mails', refId: m.mail_id,
     };
@@ -54,9 +59,10 @@ export function newEnquiryAlert(mails) {
   const list = kind => mails.filter(m => m.kind === kind).map(m => `${who(m)} (${plural(m.rows.length, 'item')})`).join(', ');
   const fresh = list('enquiry');
   const counters = list('counter');
+  const again = list('again');
   return {
     title: `${mails.length} mails on the Enquiry desk`,
-    body: [fresh && `New: ${fresh}.`, counters && `Counter-offer: ${counters}.`].filter(Boolean).join(' '),
+    body: [fresh && `New: ${fresh}.`, counters && `Counter-offer: ${counters}.`, again && `Asked again: ${again}.`].filter(Boolean).join(' '),
     link: '/costing?tab=enquiries',
     // A distinct key per batch, so a later batch never replaces this one on a lock screen.
     refTable: 'enquiry_mails', refId: Math.max(...mails.map(m => m.mail_id)),
@@ -117,14 +123,18 @@ async function fileEnquiry(qc, oc, row, box, m) {
     ...(await resolveCustomer(oc, { customer_name: m.customer_name, contact_email: m.contact_email })),
     mail_id: mail.id, mailbox: box.key, contact_name: m.contact_name, contact_email: m.contact_email, source: 'robot', by: AVS_RUNNER,
   };
-  const made = [];
+  const made = [], again = [];
   for (const item of m.items.length ? m.items : [unreadItem(m.subject, 'AVS')]) {
+    // Asked again for an item still open on the desk: that row is marked, no new row (14 Nov 2026).
+    const prior = m.items.length ? await askedAgain(qc, item, who, mail.id, AVS_RUNNER) : null;
+    if (prior) { again.push(prior.enquiry_no); continue; }
     const e = await insertEnquiry(qc, oc, item, who, null);
     await enquiryEvent(qc, { enquiryId: e.id, action: 'fetched', detail: { intake: Number(row.id) } }, { name: AVS_RUNNER });
     made.push(e.enquiry_no);
   }
-  await audit('enquiry_intake', row.id, 'file', `AVS intake ${row.id} — ${made.length} enquir${made.length === 1 ? 'y' : 'ies'} filed`, qc, AVS_RUNNER);
-  return answer('filed', { enquiries: made, mail_id: mail.id });
+  await audit('enquiry_intake', row.id, 'file', `AVS intake ${row.id} — ${made.length} enquir${made.length === 1 ? 'y' : 'ies'} filed`
+    + `${again.length ? `, ${again.length} asked again` : ''}`, qc, AVS_RUNNER);
+  return answer('filed', { enquiries: made, asked_again: again, mail_id: mail.id });
 }
 
 // One row's prices from a counter-offer, read as the robot route reads them ("5,000" is 5000).
@@ -235,15 +245,17 @@ export async function notifyNewEnquiries() {
     if (!mails.length) return { announced: 0 };
     const ids = mails.map(m => m.id);
     await qc('UPDATE enquiry_mails SET alerted_at = now() WHERE id = ANY($1::int[])', [ids]);
-    const rows = await qc(`SELECT id, product_name, customer_name, mail_id, counter_mail_id FROM enquiries
-                            WHERE mail_id = ANY($1::int[]) OR counter_mail_id = ANY($1::int[]) ORDER BY id`, [ids]);
+    const rows = await qc(`SELECT id, enquiry_no, product_name, customer_name, mail_id, counter_mail_id, asked_again_mail_id FROM enquiries
+                            WHERE mail_id = ANY($1::int[]) OR counter_mail_id = ANY($1::int[]) OR asked_again_mail_id = ANY($1::int[])
+                            ORDER BY id`, [ids]);
     const told = [];
     for (const m of mails) {
       const fresh = rows.filter(e => e.mail_id === m.id);
       const countered = rows.filter(e => e.counter_mail_id === m.id && e.mail_id !== m.id);
-      const list = fresh.length ? fresh : countered;
+      const again = rows.filter(e => e.asked_again_mail_id === m.id && e.mail_id !== m.id);
+      const [kind, list] = fresh.length ? ['enquiry', fresh] : countered.length ? ['counter', countered] : ['again', again];
       if (!list.length) continue;
-      told.push({ mail_id: m.id, kind: fresh.length ? 'enquiry' : 'counter', customer: list[0].customer_name, mailbox_email: m.mailbox_email, rows: list });
+      told.push({ mail_id: m.id, kind, customer: list[0].customer_name, mailbox_email: m.mailbox_email, rows: list });
     }
     if (!told.length) return { announced: 0 };
     const users = (await qc('SELECT id, role, modules FROM users WHERE active = 1')).filter(u => mayCost(u));

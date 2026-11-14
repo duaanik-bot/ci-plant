@@ -5,7 +5,9 @@
 // (?tab=enquiries&enquiry=). Old links still open New costing for an enquiry (?tab=new&enquiry=) or Bulk
 // costing for several (?enquiries=). Open for admins and for logins given the Costing tick (it shows
 // quotation prices); the server holds the same rule.
-import { useCallback, useEffect, useState } from 'react';
+// It opens on the Enquiry desk (owner, 14 Nov 2026: "when I go to the costing module, my landing page should be Inquiry
+// Desk, not the new costing"), whose tab carries the count of new enquiries.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { api } from '../api.js';
@@ -17,6 +19,7 @@ import CostingView from './costing/CostingView.jsx';
 import SizeLibrary from './costing/SizeLibrary.jsx';
 import CostingRates from './costing/CostingRates.jsx';
 import EnquiryDesk from './costing/EnquiryDesk.jsx';
+import { enquiryBadgeTip, useEnquirySummary } from '../components/EnquiryBadge.jsx';
 
 const GROUPS = [
   { label: 'Enquiries', items: [{ key: 'enquiries', label: 'Enquiry desk' }] },
@@ -34,6 +37,10 @@ export default function Costing() {
   const [viewing, setViewing] = useState(null);
   const [reload, setReload] = useState(0);
   const [startSize, setStartSize] = useState(null);
+  const [summary] = useEnquirySummary(!refused);
+  const groups = useMemo(() => GROUPS.map(g => ({
+    ...g, items: g.items.map(i => (i.key === 'enquiries' ? { ...i, badge: summary.new, badgeTitle: enquiryBadgeTip(summary) } : i)),
+  })), [summary]);
 
   const loadBoot = () => api.get('/costing/bootstrap').then(setBoot).catch(e => { if (e?.status === 403) setRefused(true); });
   useEffect(() => {
@@ -42,7 +49,8 @@ export default function Costing() {
   }, []);
 
   const asked = params.get('tab');
-  const tab = KEYS.includes(asked) ? asked : 'new';
+  // No tab named: the Enquiry desk (an old Bulk costing link names only ?enquiries=).
+  const tab = KEYS.includes(asked) ? asked : params.get('enquiries') ? 'bulk' : 'enquiries';
   const go = useCallback((key, extra = {}) => setParams(() => new URLSearchParams({ tab: key, ...extra }), { replace: false }), [setParams]);
 
   if (refused) {
@@ -58,8 +66,8 @@ export default function Costing() {
 
   return (
     <div>
-      <PageHeader title="Costing" subtitle="Cost a new product the way our cost sheet does — check it against every earlier costing of the same size and the dies we hold" />
-      <GroupedTabs groups={GROUPS} active={tab} onChange={key => { setStartSize(null); go(key); }} />
+      <PageHeader title="Costing" subtitle="Customers' enquiries land on the Enquiry desk — cost them, price them and quote them there. New and bulk costing, the records and the rates are a tab away." />
+      <GroupedTabs groups={groups} active={tab} onChange={key => { setStartSize(null); go(key); }} />
       {tab === 'new' && (
         <SingleCosting boot={boot} customers={customers} openId={params.get('id')} fromId={params.get('from')} startSize={startSize}
           enquiryId={params.get('enquiry')}

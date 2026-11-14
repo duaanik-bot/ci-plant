@@ -12,7 +12,8 @@
 //
 //   GET  /costing/enquiry-desk                 mailboxes, settings, rights, counts, the latest jobs
 //   PUT  /costing/enquiry-desk/settings        mailbox in use, who a mailbox replies to, terms, words (admin)
-//   POST /costing/enquiry-desk/fetch           queue a Fetch for the mailbox in use and start Claude
+//   POST /costing/enquiry-desk/fetch           queue a Fetch { mailbox: business | trial, else the one in use }
+//   GET  /costing/enquiry-desk/summary         the side menu's count: new enquiries, asked again this week
 //   GET  /costing/enquiry-jobs/:id · POST /costing/enquiry-jobs/:id/cancel
 //   GET  /costing/enquiries?stage=&search=     the desk's rows     GET /costing/enquiries/:id  one, with its mail and history
 //   POST /costing/enquiries                    one typed in by hand        PUT /costing/enquiries/:id  its details
@@ -47,7 +48,7 @@ import { audit, nextNumber, lockDocNumber } from '../helpers.js';
 import { mayCost, mayApproveCosting } from '../costing-match.js';
 import {
   STAGE_SQL, STATUS_LABEL, stageOf, cleanItem, priceRows, quotationLines, groupByCustomer,
-  composeReply, replySubject, replyRecipient, BACK_TO, broughtBack, UNDO_COLS,
+  composeReply, replySubject, replyRecipient, BACK_TO, broughtBack, UNDO_COLS, productKey, isRepeat,
 } from '../enquiry-desk.js';
 import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
@@ -316,9 +317,23 @@ const jobById = id => one(`SELECT ${JOB_COLS} FROM enquiry_jobs j WHERE j.id = $
 r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
   try {
     const u = req.costingUser;
-    const out = await startFetch({ user: u, by: u.name });
+    // "Fetch from mail" names the company mailbox, "Fetch from dua.anik" the trial one; none = the mailbox in use.
+    const mailbox = req.body?.mailbox ?? null;
+    if (mailbox != null && !['business', 'trial'].includes(mailbox)) throw fail(400, 'Fetch from which mailbox — business or trial?');
+    const out = await startFetch({ user: u, by: u.name, mailbox });
     if (out.error) throw fail(out.status || 409, out.error);
     res.status(out.already ? 200 : 201).json({ job: await jobById(out.job.id), already: out.already, cloud: out.cloud });
+  } catch (e) { next(e); }
+});
+
+// The side menu's count (14 Nov 2026: "like in the sales order, how things are getting highlighted when there are new
+// sales orders"): enquiries in the Inbox not yet started, and rows a customer asked for again this week.
+r.get('/costing/enquiry-desk/summary', async (_req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await one(`SELECT count(*) FILTER (WHERE status = 'new')::int AS new,
+                               count(*) FILTER (WHERE asked_again_at > now() - interval '7 days' AND status NOT IN ('dropped', 'ordered'))::int AS asked_again
+                          FROM enquiries`));
   } catch (e) { next(e); }
 });
 
@@ -366,7 +381,7 @@ const ENQ_COLS = `
   e.product_id, e.product_name, e.size_text, e.size_key, e.style, e.board, e.gsm::float8 AS gsm, e.colours::float8 AS colours,
   e.coating, e.specs, e.quantities::float8[] AS quantities, e.target_price::float8 AS target_price, e.notes, e.status,
   ${STAGE_SQL} AS stage, e.dropped_reason, e.costing_id, e.batch_id, e.final_prices, e.finalised_by_name, e.finalised_at,
-  e.quotation_id, e.source, e.created_by_name, e.created_at, e.updated_by_name, e.updated_at,
+  e.quotation_id, e.source, e.created_by_name, e.created_at, e.updated_by_name, e.updated_at, e.asked_again_count, e.asked_again_at,
   c.costing_no, c.complete AS costing_complete, c.status AS costing_status, c.inputs AS costing_inputs,
   c.archived AS costing_archived, c.version AS costing_version, c.batch_id AS costing_batch_id, c.approved_by_name AS costing_approved_by,
   c.qty::float8 AS costing_qty, c.quote_per_unit::float8 AS costing_quote, b.batch_no,
@@ -463,6 +478,29 @@ export async function resolveProduct(qc, name, customerId) {
   const hits = await qc(`SELECT id FROM products WHERE active = 1 AND (lower(trim(name)) = lower(trim($1)) OR lower(code) = lower(trim($1)))
                           AND ($2::int IS NULL OR customer_id = $2 OR customer_id IS NULL) LIMIT 2`, [name, customerId ?? null]);
   return hits.length === 1 ? hits[0].id : null;
+}
+
+// A customer asking again (owner, 14 Nov 2026: "If an inquiry has already been downloaded into the system, it should not
+// be coming up again … If work has already been done, then those inquiries should not be coming up again") for an item
+// still open on the desk: no new row — the open row is marked (asked_again_*) with an event naming the mail. Same
+// customer = the same customer master, else the same address, else the same name; open = neither dropped nor ordered,
+// touched in the last ASKED_AGAIN_DAYS; same item = isRepeat (enquiry-desk.js). Returns { id, enquiry_no } or null.
+export const ASKED_AGAIN_DAYS = 90;
+export async function askedAgain(qc, item, who, mailId, by) {
+  const cust = who.customer_id ? ['e.customer_id = $1', who.customer_id]
+    : who.contact_email ? ['lower(e.contact_email) = lower($1)', who.contact_email]
+      : who.customer_name ? ['lower(trim(e.customer_name)) = lower(trim($1))', who.customer_name] : null;
+  if (!cust || !productKey(item?.product_name)) return null;
+  const open = await qc(`SELECT e.id, e.enquiry_no, e.product_name, e.quantities::float8[] AS quantities FROM enquiries e
+                          WHERE ${cust[0]} AND e.status NOT IN ('dropped', 'ordered')
+                            AND COALESCE(e.updated_at, e.created_at) > now() - make_interval(days => $2)
+                          ORDER BY e.id DESC LIMIT 200`, [cust[1], ASKED_AGAIN_DAYS]);
+  const hit = open.find(e => isRepeat(e, item));
+  if (!hit) return null;
+  await qc(`UPDATE enquiries SET asked_again_at = now(), asked_again_count = asked_again_count + 1, asked_again_mail_id = $2,
+                   updated_at = now() WHERE id = $1`, [hit.id, mailId]);
+  await enquiryEvent(qc, { enquiryId: hit.id, action: 'asked_again', detail: { mail_id: mailId } }, { name: by });
+  return { id: hit.id, enquiry_no: hit.enquiry_no };
 }
 
 // An enquiry row, minted in the caller's transaction (the CI-ENQ- lock is taken first by the caller).

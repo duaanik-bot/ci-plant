@@ -98,3 +98,17 @@ test('a counter-offer quantity written with a comma is read as a number', () => 
     { enquiry_no: 'CI-ENQ-0043', qty: '1,000', theirs: 9 }];
   assert.deepEqual(counterPrices(list, 'CI-ENQ-0042'), [{ qty: 5000, theirs: '3.20' }, { qty: 10000, theirs: 3 }]);
 });
+
+test('a mail that only asks again: who, how many, the rows already on the desk', () => {
+  const a = newEnquiryAlert([{ mail_id: 12, kind: 'again', customer: 'Example Pharma Ltd', mailbox_email: 'office@plant.test',
+    rows: [{ id: 7, product_name: 'ALPHA 10 TAB CARTON', enquiry_no: 'CI-ENQ-0007' }, { id: 8, product_name: 'BETA CARTON', enquiry_no: 'CI-ENQ-0008' }] }]);
+  assert.equal(a.title, 'Asked again: Example Pharma Ltd — 2 items');
+  assert.match(a.body, /already on the desk as CI-ENQ-0007, CI-ENQ-0008/);
+  assert.equal(a.link, '/costing?tab=enquiries&enquiry=7');
+});
+
+test('several mails: asked-again ones are named apart', () => {
+  const a = newEnquiryAlert([mail(), { mail_id: 13, kind: 'again', customer: 'Sample Labs', mailbox_email: 'office@plant.test',
+    rows: [{ id: 9, product_name: 'OMEGA LABEL', enquiry_no: 'CI-ENQ-0009' }] }]);
+  assert.match(a.body, /New: Example Pharma Ltd \(4 items\)\. Asked again: Sample Labs \(1 item\)\./);
+});

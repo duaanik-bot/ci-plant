@@ -1187,6 +1187,125 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await db.one(`SELECT status FROM quotations WHERE id = $1`, [sent.body.quotations[0].id])).status, 'ready');
   });
 
+  // ── Fetch per mailbox, the office computer, repeats, the badge (owner, 14 Nov 2026: "keep it on MPP only … it should
+  // trigger the AVS on my office PC … a small button, Fetch from dua.anik … deduplication … highlighted").
+  const fetchSql = fs.readFileSync(new URL('../../supabase/migrations/20261114120100_avs_enquiry_fetch.sql', import.meta.url), 'utf8');
+  const boxEmail = async key => (await db.one('SELECT email FROM enquiry_mailboxes WHERE key = $1', [key])).email;
+  const waiting = async box => {
+    const res = await fetch(`${base}/enquiry-desk/waiting?mailbox=${box}`);
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+  const closeOpenFetches = () => db.q(`UPDATE enquiry_jobs SET status = 'done', finished_at = now() WHERE kind = 'fetch' AND status IN ('queued', 'working')`);
+
+  test('Fetch from mail waits for the office computer; Fetch from the trial mailbox for the Mac; the office takes and closes its job', async () => {
+    await db.q(fetchSql);
+    await db.q(fetchSql); // a replay changes nothing
+    await closeOpenFetches();
+    const TRIAL = await boxEmail('trial');
+    assert.deepEqual((await waiting('business')).body, { waiting: false });
+    assert.equal((await waiting('nonsense')).status, 400);
+    assert.equal((await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'nonsense' })).status, 400);
+
+    const biz = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' });
+    assert.equal(biz.status, 201, JSON.stringify(biz.body));
+    assert.equal(biz.body.job.mailbox_email, BIZ);
+    assert.equal(biz.body.job.fire_status, 'office', 'waiting for the office computer, never the trial mailbox\'s cloud routine');
+    assert.deepEqual((await waiting('business')).body, { waiting: true }, 'the office watcher\'s question: yes, and nothing more');
+    assert.equal((await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'business' })).body.already, true);
+
+    const trial = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'trial' });
+    assert.equal(trial.status, 201);
+    assert.equal(trial.body.job.mailbox_email, TRIAL);
+    assert.notEqual(trial.body.job.id, biz.body.job.id, 'one open fetch per mailbox, each its own');
+    assert.deepEqual((await robot('GET', '/enquiry-jobs')).body.filter(j => j.kind === 'fetch').map(j => j.mailbox_email).sort(), [TRIAL, BIZ].sort());
+
+    // The office run: take the job, file, close it.
+    const took = (await db.one('SELECT avs.take_enquiry_fetch() AS t')).t;
+    assert.equal(took.job_id, biz.body.job.id);
+    assert.ok(took.since);
+    assert.equal((await db.one('SELECT avs.take_enquiry_fetch() AS t')).t, null, 'taken once');
+    assert.deepEqual((await waiting('business')).body, { waiting: false });
+    assert.equal((await db.one(`SELECT avs.finish_enquiry_fetch($1, '{"read": 9, "filed": 2}'::jsonb) AS r`, [took.job_id])).r, 'done');
+    assert.equal((await db.one(`SELECT avs.finish_enquiry_fetch($1, '{}'::jsonb) AS r`, [took.job_id])).r, 'not open: nothing changed');
+    const j = (await call('clerk', 'GET', `/costing/enquiry-jobs/${biz.body.job.id}`)).body;
+    assert.deepEqual([j.status, j.claimed_by, j.result.filed], ['done', 'AVS (office)', 2]);
+    // The office takes only business jobs: the trial job is still the Mac's.
+    assert.equal((await db.one('SELECT avs.take_enquiry_fetch() AS t')).t, null);
+    await closeOpenFetches();
+  });
+
+  test('with the company mailbox in use the timer fetches nothing: the office AVS keeps its own hours', async () => {
+    assert.equal((await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 200);
+    try {
+      const before = (await db.one(`SELECT count(*)::int AS n FROM enquiry_jobs`)).n;
+      const res = await fetch(`${base}/cron/enquiry-fetch`, { headers: { 'user-agent': 'vercel-cron/1.0' } });
+      const body = await res.json();
+      assert.equal(res.status, 200, JSON.stringify(body));
+      assert.match(body.skipped, /office AVS/);
+      assert.equal((await db.one(`SELECT count(*)::int AS n FROM enquiry_jobs`)).n, before, 'no job queued');
+      // The desk's own Fetch now means the company mailbox.
+      const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', {});
+      assert.equal(f.body.job.mailbox_email, BIZ);
+      assert.equal(f.body.job.fire_status, 'office');
+    } finally {
+      await closeOpenFetches();
+      await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'trial' });
+    }
+  });
+
+  test('a customer asking again for an open item marks that row — no new row — and the desk is told once', async () => {
+    await closeOpenFetches();
+    const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch', { mailbox: 'trial' });
+    await robot('POST', `/enquiry-jobs/${f.body.job.id}/claim`, {});
+    const file = mails => robot('POST', `/enquiry-jobs/${f.body.job.id}/mails`, { mails });
+    const first = await file([{ gmail_message_id: 'm-rep-1', gmail_thread_id: 't-rep', subject: 'Rate for repeat carton', from_email: 'buyer@example-pharma.test',
+      customer_name: 'Example Pharma Ltd', received_at: '2026-11-14T04:00:00Z', body_text: 'Please quote 4,000 repeat cartons.',
+      items: [{ product_name: 'REPEAT CARTON', quantities: [4000] }] }]);
+    const [no] = first.body.filed[0].enquiries;
+    const since = await nowIs();
+    const again = await file([{ gmail_message_id: 'm-rep-2', gmail_thread_id: 't-rep', subject: 'RE: Rate for repeat carton', from_email: 'buyer@example-pharma.test',
+      customer_name: 'Example Pharma Ltd', received_at: '2026-11-14T06:00:00Z', body_text: 'Reminder — the rate for the repeat carton please.',
+      items: [{ product_name: 'Repeat  Carton.', quantities: ['4,000'] }] }]);
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.deepEqual(again.body.filed[0].enquiries, [], 'no new row');
+    assert.deepEqual(again.body.filed[0].asked_again, [no]);
+    const row = await db.one(`SELECT asked_again_count, asked_again_at, asked_again_mail_id FROM enquiries WHERE enquiry_no = $1`, [no]);
+    assert.equal(row.asked_again_count, 1);
+    assert.ok(row.asked_again_at);
+    assert.equal(row.asked_again_mail_id, (await db.one(`SELECT id FROM enquiry_mails WHERE gmail_message_id = 'm-rep-2'`)).id, 'the mail is kept');
+    const told = await alertsSince(since);
+    assert.ok(told.length > 0);
+    assert.equal(told[0].title, 'Asked again: Example Pharma Ltd — 1 item');
+    assert.match(told[0].body, new RegExp(no));
+    // A new quantity is a new request.
+    const more = await file([{ gmail_message_id: 'm-rep-3', subject: 'More', from_email: 'buyer@example-pharma.test', customer_name: 'Example Pharma Ltd',
+      received_at: '2026-11-14T07:00:00Z', body_text: 'And 8,000 too.', items: [{ product_name: 'REPEAT CARTON', quantities: [4000, 8000] }] }]);
+    assert.equal(more.body.filed[0].enquiries.length, 1);
+    assert.deepEqual(more.body.filed[0].asked_again || [], []);
+    await robot('POST', `/enquiry-jobs/${f.body.job.id}/done`, { ok: true, result: {} });
+
+    // AVS from the company mailbox: the same rule.
+    await fileMails([{ mailbox_email: BIZ, gmail_message_id: 'avs-rep-1', from_email: 'buyer@sample-labs.test', customer_name: 'Sample Labs',
+      subject: 'Rates', received_at: '2026-11-14T05:00:00Z', body_text: 'Rate for omega label 2,000.', items: [{ product_name: 'OMEGA LABEL', quantities: [2000] }] }]);
+    await robot('POST', '/enquiries-notify', {});
+    const [omega] = (await deskRows('avs-rep-1')).map(r => r.enquiry_no);
+    await fileMails([{ mailbox_email: BIZ, gmail_message_id: 'avs-rep-2', from_email: 'buyer@sample-labs.test', customer_name: 'Sample Labs',
+      subject: 'Re: Rates', received_at: '2026-11-14T08:00:00Z', body_text: 'Any update on the omega label rate?', items: [{ product_name: 'Omega label' }] }]);
+    await robot('POST', '/enquiries-notify', {});
+    const i2 = await intake('avs-rep-2');
+    assert.equal(i2.status, 'filed');
+    assert.deepEqual([i2.result.enquiries, i2.result.asked_again], [[], [omega]]);
+  });
+
+  test('the badge: how many new enquiries wait, for Costing logins only', async () => {
+    const s = await call('clerk', 'GET', '/costing/enquiry-desk/summary');
+    assert.equal(s.status, 200);
+    const n = (await db.one(`SELECT count(*)::int AS n FROM enquiries WHERE status = 'new'`)).n;
+    assert.equal(s.body.new, n);
+    assert.ok(n > 0);
+    assert.equal((await call('plain', 'GET', '/costing/enquiry-desk/summary')).status, 403);
+  });
+
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {
     assert.equal((await call('clerk', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' })).status, 403);
     const s = await call('admin', 'PUT', '/costing/enquiry-desk/settings', { in_use: 'business' });

@@ -229,6 +229,21 @@ export function customerKey(e) {
   if (e.contact_email) return `e:${e.contact_email.toLowerCase()}`;
   return `n:${(e.customer_name || '').trim().toLowerCase() || `enquiry-${e.id}`}`;
 }
+// ── a customer asking again ─────────────────────────────────────────────────────────────────────────────────────
+// Owner, 14 Nov 2026: "If an inquiry has already been downloaded into the system, it should not be coming up again …
+// If work has already been done, then those inquiries should not be coming up again." A product is the same product
+// whatever its case, spacing or punctuation. An item asks again for an open row when it is the same product and asks no
+// quantity, or only quantities that row already has; a new quantity is a new request.
+export const productKey = name => String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export function isRepeat(existing, item) {
+  const key = productKey(item?.product_name);
+  if (!key || key !== productKey(existing?.product_name)) return false;
+  const asked = (item?.quantities || []).map(Number).filter(n => n > 0);
+  if (!asked.length) return true;
+  const had = new Set((existing?.quantities || []).map(Number));
+  return asked.every(n => had.has(n));
+}
+
 // One quotation per customer AND mailbox (13 Nov 2026): a customer who wrote to both mailboxes gets a reply in each
 // mailbox's own thread. A row typed in by hand (no mailbox) joins its customer's first mailbox, so it rides in that
 // customer's reply as it always has.

@@ -46,11 +46,14 @@ routine at claude.ai. The owner's AVS mailbox rule keeps AVS off dua.anik@gmail.
 | business | mppchd@gmail.com   | the office AVS, with the `avs-enquiries` skill — not this one    |
 
 **The business mailbox (since 13 Nov 2026)** is read by the office AVS in its own runs (7:30 am, 1 pm, 3:30 pm,
-5:30 pm), through its mppchd Gmail connector: it files price requests and counter-offers into `avs.enquiry_intake`
-with the `avs-enquiries` skill (`skills/avs-enquiries/`), and CI Plant copies them onto the desk and alerts the
-Costing logins. It works no desk jobs and never drafts; replies to that mailbox are drafted by CI Plant's own Gmail
-link once an admin connects it. A mail that also went to the trial mailbox is left to this skill (each mail once):
-CI Plant skips a mail already on the desk from the other mailbox, and the `mails` answer names it in `same_mail`.
+5:30 pm) and, since 14 Nov, within a minute of **Fetch from mail** (a watcher on the office computer), through its
+mppchd Gmail connector: it files price requests and counter-offers into `avs.enquiry_intake` with the
+`avs-enquiries` skill (`skills/avs-enquiries/`), and CI Plant copies them onto the desk and alerts the Costing logins.
+It never drafts; replies to that mailbox are drafted by CI Plant's own Gmail link once an admin connects it.
+**Since 14 Nov the business mailbox is the desk's mailbox** (owner: "just keep it on MPP only"): the trial mailbox is
+fetched only when someone presses **Fetch from dua.anik**, and this skill works only those jobs. A mail already on the
+desk from the other mailbox is skipped (the `mails` answer names it in `same_mail`), and an item a customer only asks
+for again while it is open marks that row "Asked again" (`asked_again` in the answer) instead of adding a row.
 
 **In the cloud (since 12 Nov 2026):** the desk's cloud routine — a claude.ai scheduled task on the owner's Claude
 plan, with this mailbox's Gmail connector limited to its read tools — is started by CI Plant itself: when Fetch is
