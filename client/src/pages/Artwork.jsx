@@ -2,7 +2,8 @@
 // lockable; the planner locks it with the Lock button (nothing locks by
 // itself), and the Locked queue can reverse it while no job card exists.
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import ArtworkRegister from './artwork/ArtworkRegister.jsx';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, odDays, odExport, OverdueDays, PageHeader, PlanSavedBadge, PressButton, ResetFilters, Select, ShadeAge, StatusBadge, Tabs, Textarea, useFilterReset, useToast, WipChip } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
@@ -318,7 +319,27 @@ function PushToToolingModal({ line, onClose, onDone }) {
   );
 }
 
+// The page is two things side by side (15 Nov 2026): the approvals queue it has always been, and the register of
+// artwork mails the office AVS files (pages/artwork/ArtworkRegister.jsx). ?tab=register opens the register — the link
+// an artwork alert carries. The queue below is unchanged.
 export default function Artwork() {
+  const [params, setParams] = useSearchParams();
+  const view = params.get('tab') === 'register' ? 'register' : 'approvals';
+  return (
+    <div>
+      <Tabs active={view} onChange={k => setParams(k === 'register' ? { tab: 'register' } : {}, { replace: true })} tabs={[
+        { key: 'approvals', label: 'Approvals' },
+        { key: 'register', label: 'Register' },
+      ]} />
+      {view === 'register'
+        ? <><PageHeader title="Artwork Register" subtitle="Every artwork mail filed from the company mailbox — each job, each version the customer sent, its files and its mails" />
+            <ArtworkRegister focus={params.get('job')} /></>
+        : <ArtworkQueue />}
+    </div>
+  );
+}
+
+function ArtworkQueue() {
   const toast = useToast();
   const [lines, setLines] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);

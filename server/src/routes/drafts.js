@@ -37,6 +37,7 @@ import { requireRole } from '../auth.js';
 import { syncPartLines } from '../carton-parts-db.js';
 import { markUncacheable } from '../data-tables.js';
 import { syncIntakeEnquiriesSoft } from '../enquiry-intake.js';
+import { syncIntakeArtworkSoft } from '../artwork-intake.js';
 
 const r = Router();
 const canPlan = requireRole('planner'); // admin implied — the same people who key orders
@@ -277,6 +278,8 @@ r.get('/drafts/summary', async (_req, res, next) => {
     await notifyNewDraftOrdersSoft();
     // The same fallback for the office AVS's enquiries (enquiry-intake.js): a lost database call is filed here.
     await syncIntakeEnquiriesSoft();
+    // And for its artwork mails (artwork-intake.js).
+    await syncIntakeArtworkSoft();
     res.json(await draftSummary());
   } catch (e) { next(e); }
 });

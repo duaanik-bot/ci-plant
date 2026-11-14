@@ -34,8 +34,10 @@ import coa from './routes/coa.js';
 import coaRegister from './routes/coa-register.js';
 import costing from './routes/costing.js';
 import enquiries from './routes/enquiries.js';
+import artworkRegister from './routes/artwork-register.js';
 import sizing from './routes/sizing.js';
 import enquiryRobot from './routes/enquiry-robot.js';
+import artworkRobot from './routes/artwork-robot.js';
 import gmailLink from './routes/gmail-link.js';
 import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
@@ -95,6 +97,8 @@ app.use('/api', authRouter);          // login is public
 app.use('/api', avsRobot);
 // The enquiry desk's jobs, for the same AVS robot with the same key (routes/enquiry-robot.js).
 app.use('/api', enquiryRobot);
+// The artwork register's intake, for the same AVS robot with the same key (routes/artwork-robot.js).
+app.use('/api', artworkRobot);
 // Google's way back after an admin connects a desk mailbox's Gmail (signed state, no login token on that redirect).
 app.use('/api', gmailLink);
 app.use('/api', requireAuth);         // everything below needs a token
@@ -133,6 +137,7 @@ app.use('/api', coa);
 app.use('/api', coaRegister);   // COA Register — the Drive register, mirrored in
 app.use('/api', costing);       // Costing — new-product costing, Size Library, bulk batches (tick-only)
 app.use('/api', enquiries);     // Enquiry desk — mailbox enquiries → costing → final price → quotation (Costing tick)
+app.use('/api', artworkRegister); // Artwork register — artwork mails filed by the office AVS: jobs, versions, files, threads (Artwork tick)
 app.use('/api', sizing);        // Size proposals and KLDs — die check, layouts, the KLD and its Drive copy (Costing tick)
 app.use('/api', masterHistory);
 app.use('/api', notifications);
