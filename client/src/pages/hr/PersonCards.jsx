@@ -211,7 +211,7 @@ function Shortfall({ r, carryTo }) {
   );
 }
 
-function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change, switches, onMaster, onPayStaff }) {
+function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change, switches, onMaster, onPayStaff, onPersonStatus }) {
   const l = r.line;
   const held = r.held.map(h => `${h.loan_no}${h.note ? ` (${h.note})` : ''}`).join(', ');
   return (
@@ -230,6 +230,27 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
             className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-800 hover:bg-violet-100">
             Give advance / loan
           </button>
+        )}
+        {onPersonStatus && (
+          <span className="ml-auto flex flex-wrap gap-1.5">
+            {r.person?.status === 'exited' ? (
+              <button type="button" onClick={() => onPersonStatus(r, 'activate')}
+                className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100">
+                Activate
+              </button>
+            ) : (
+              <button type="button" onClick={() => onPersonStatus(r, 'deactivate')}
+                className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100">
+                Deactivate
+              </button>
+            )}
+            {onPersonStatus.canDelete && (
+              <button type="button" onClick={() => onPersonStatus(r, 'delete')}
+                className="rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-semibold text-red-700 hover:bg-red-100">
+                Delete
+              </button>
+            )}
+          </span>
         )}
       </div>
     )}
@@ -318,7 +339,7 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
 export default function PersonCards({
   rows, approvable, canApprove, canOperate, canSelect = canOperate, selected, onToggle, onRange, onApprove, onUndo, busyId, onOpen,
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
-  month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff,
+  month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff, onPersonStatus,
 }) {
   const approvedCount = rows.filter(x => x.approval === 'approved').length;
   // Editing a loan's instalment is open to accounts and up (2026-11-14): canSelect is the paying level.
@@ -491,7 +512,7 @@ export default function PersonCards({
                           </div>
                         </div>
                         {isOpen && short && <Shortfall r={r} carryTo={carryTo} />}
-                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} switches={switches} onMaster={onMaster} onPayStaff={onPayStaff} />}
+                        {isOpen && <Details r={r} showPaidSep={showPaidSep} onOpen={onOpen} onPayslip={onPayslip} pos={pos} month={month} final={final} change={change} switches={switches} onMaster={onMaster} onPayStaff={onPayStaff} onPersonStatus={onPersonStatus} />}
                       </li>
                     );
                   })}

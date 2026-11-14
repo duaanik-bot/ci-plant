@@ -37,6 +37,7 @@ import { Button, Checkbox, ConfirmDialog, ExportMenu, Modal, SearchInput, Select
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { InlineError, StatusPill, refusalText } from './PersonDrawer.jsx';
+import NewPersonFromRow from './NewPersonFromRow.jsx';
 import { diffPaise, list, paiseOf, plural, qtyText, whenText } from './RunLineDrawer.jsx';
 
 const MAX_BYTES = 4 * 1024 * 1024; // the server's upload cap
@@ -378,8 +379,9 @@ function ColumnsStep({ batch, rows, draft, setDraft, editable }) {
 
 // ── Step: rows ──────────────────────────────────────────────────────────────
 
-function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank, channelLabel }) {
+function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank, channelLabel, batchId, people, onCreated }) {
   const [pick, setPick] = useState('');
+  const [creating, setCreating] = useState(false);
   const [remember, setRemember] = useState(false);
   const [changing, setChanging] = useState(false);
   const f = objectOr(r.fields);
@@ -543,6 +545,9 @@ function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank,
                   onChange={e => setRemember(e.target.checked)} />
               )}
               <Button size="sm" onClick={assign} disabled={!pick}>Assign</Button>
+              {!s.matched && onCreated && batchId != null && !creating && (
+                <Button size="sm" variant="secondary" onClick={() => setCreating(true)}><UserPlus size={13} /> Create new person</Button>
+              )}
               {changing && <Button size="sm" variant="ghost" onClick={() => { setChanging(false); setPick(''); }}>Cancel</Button>}
               <Button size="sm" variant="secondary" onClick={() => onDecide(r, { decision: 'ignore' })}><Ban size={13} /> Ignore</Button>
             </>
@@ -555,6 +560,11 @@ function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank,
           )}
         </div>
       )}
+      {creating && picking && (
+        <NewPersonFromRow batchId={batchId} row={r} people={people}
+          onCancel={() => setCreating(false)}
+          onCreated={async made => { setCreating(false); await onCreated(r, made); }} />
+      )}
       <InlineError message={error} className="mt-2" />
     </li>
   );
@@ -564,7 +574,7 @@ function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank,
 
 export default function ImportWizard({
   month, run = null, inputs = [], people = [], channelLabel = c => c || '', canEdit = false,
-  resumeBatchId = null, onClose, onApplied, onPending,
+  resumeBatchId = null, onClose, onApplied, onPending, onPeopleChanged,
 }) {
   const runStatus = run?.status || null;
   const editable = canEdit && (runStatus === null || runStatus === 'draft');
@@ -768,14 +778,25 @@ export default function ImportWizard({
       .map(i => ({ id: String(i.person_id), name: nameOf(i.person_id), at: i.updated_at }));
   }, [inputs, liveIds, choices, nameOf]);
 
+  // What stops Apply: only a run that cannot take it, or columns changed and not read. Anything unsettled is applied
+  // without (owner, 2026-11-14: "remove the hard blocker") and said so here and in the result.
   const blockers = [
     !editable && (runStatus && runStatus !== 'draft'
       ? `The ${monthLabel(month)} run is ${runStatus}. Imports are refused until it is sent back to draft.`
       : 'Your HR access level cannot apply an import.'),
-    counts.todo > 0 && `${plural(counts.todo, 'row')} still need${counts.todo === 1 ? 's' : ''} a decision.`,
-    undecided > 0 && `${plural(undecided, 'missing person', 'missing people')} need${undecided === 1 ? 's' : ''} Include or Leave out.`,
     mapDirty && 'The column changes have not been read yet — go back to Columns and read the sheet again.',
   ].filter(Boolean);
+  const cautions = [
+    counts.todo > 0 && `${plural(counts.todo, 'row')} still need${counts.todo === 1 ? 's' : ''} a decision — ${counts.todo === 1 ? 'it is' : 'they are'} left out; decide later and apply again.`,
+    undecided > 0 && `${plural(undecided, 'missing person', 'missing people')} not decided — they stay "missing" on the payroll to include or leave out there.`,
+  ].filter(Boolean);
+
+  const createdFromRow = useCallback(async (r, made) => {
+    mutations.current += 1;
+    toast.success(`${made?.name || 'The new person'} (${made?.code || ''}) created and matched to row ${r.row_no}`);
+    await onPeopleChanged?.();
+    refresh(batchId);
+  }, [batchId, onPeopleChanged, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const apply = async overwriteIds => {
     setStepError('');
@@ -937,7 +958,8 @@ export default function ImportWizard({
             {visible.map(r => (
               <RowCard key={rowKey(r)} r={r} s={states.get(rowKey(r))} person={isMatched(r) ? peopleById.get(String(r.person_id)) : null}
                 options={personOptions} canEdit={editable && parsed} error={rowErrors[rowKey(r)]} onDecide={decide}
-                cols={cols} blank={blank} channelLabel={channelLabel} />
+                cols={cols} blank={blank} channelLabel={channelLabel}
+                batchId={batchId} people={list(people)} onCreated={createdFromRow} />
             ))}
           </ul>
         )}
@@ -1030,6 +1052,11 @@ export default function ImportWizard({
           Applied to the {monthLabel(month)} payroll{appliedN != null ? ` — ${plural(appliedN, 'person', 'people')}’s inputs written` : ''}, and
           the run was recalculated.
         </Banner>
+        {list(result?.warnings).length > 0 && (
+          <ul className="space-y-1 rounded-2xl border border-amber-200 bg-amber-50/60 p-3 text-xs font-semibold text-amber-900">
+            {list(result.warnings).map(w => <li key={w} className="flex gap-1.5"><AlertTriangle size={13} className="mt-px shrink-0" />{w}</li>)}
+          </ul>
+        )}
         {kept.length > 0 && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3">
             <p className="text-xs font-bold text-amber-900">Kept as typed by hand ({kept.length})</p>
@@ -1121,6 +1148,9 @@ export default function ImportWizard({
       {body}
       {step === 'apply' && blockers.length > 0 && (
         <p className="mt-3 text-xs font-semibold text-red-700">Apply waits for: {blockers.join(' ')}</p>
+      )}
+      {step === 'apply' && blockers.length === 0 && cautions.length > 0 && (
+        <p className="mt-3 text-xs font-semibold text-amber-800">Apply goes ahead without: {cautions.join(' ')}</p>
       )}
       {(step === 'rows' || step === 'missing') && <InlineError message={stepError} />}
       <ConfirmDialog open={askDiscard} onClose={() => setAskDiscard(false)} onConfirm={discard}

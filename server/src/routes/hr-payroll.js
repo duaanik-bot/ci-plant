@@ -36,9 +36,9 @@
 //     back and matches the row again); save_alias stores the row's spelling for that person (lockNames first,
 //     409 ALIAS_IS_A_NAME for a spelling that is somebody's name); decision 'ignore' drops a row.
 //   * POST /hr/imports/:id/apply, in one transaction: the month's run (made a draft if there is none; anything
-//     else is 409 RUN_LOCKED); 409 IMPORT_UNRESOLVED while a live row is unmatched, conflicting, ambiguous, has an
-//     unknown code or an error, while two live rows name one person, or while a missing person has no include /
-//     leave-out choice. Then every live row is written to run_inputs (source 'import', source_row_id, advance_mode),
+//     else is 409 RUN_LOCKED). Nothing unsettled refuses it (2026-11-14): a row still needing a decision is left out,
+//     of two rows for one person the first is used, and a missing person with no include / leave-out choice is not
+//     written (still missing on the run) — each said in `warning`. Then every settled live row is written to run_inputs (source 'import', source_row_id, advance_mode),
 //     each missing person as chosen (include: a row with nothing typed; leave out: include = false). A row typed by
 //     hand (source 'manual') is kept, and listed in manual_edits_kept, unless its person is in overwrite_manual.
 //     Import inputs the batch no longer gives (a person the corrected sheet dropped, a row now ignored) are removed,
@@ -1033,26 +1033,9 @@ function choicesOf(raw) {
   return out;
 }
 
-function unresolvedRefusal(open, groups, rowsById, unchosen) {
-  const duplicateRows = groups.map((ids) => ids.map((id) => rowsById.get(id).row_no));
-  const rowNos = [...new Set([...open.map((row) => row.row_no), ...duplicateRows.flat()])].sort((a, b) => a - b);
-  const parts = [];
-  if (open.length) {
-    parts.push(`${open.length === 1 ? 'row' : 'rows'} ${listText(firstFew(open.map((row) => String(row.row_no))))} `
-      + `${open.length === 1 ? 'needs' : 'need'} a decision`);
-  }
-  if (groups.length) {
-    parts.push(`${groups.length === 1 ? 'one person has' : `${groups.length} people have`} more than one row `
-      + `(rows ${duplicateRows.map((g) => g.join(' & ')).join(', ')}): keep one and ignore the rest`);
-  }
-  if (unchosen.length) {
-    parts.push(`${listText(firstFew(unchosen.map((p) => `${p.name} (${p.code})`)))} `
-      + `${unchosen.length === 1 ? 'is' : 'are'} missing from the sheet: include or leave out`);
-  }
-  return fail(409, `The sheet cannot be applied yet: ${parts.join('; ')}`, 'IMPORT_UNRESOLVED', {
-    rows: rowNos, duplicate_rows: duplicateRows, missing: unchosen.map((p) => p.id),
-  });
-}
+const rowNoOf = (rows, id) => rows.find((row) => row.id === id)?.row_no ?? 0;
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) => {
   try {
@@ -1083,14 +1066,36 @@ r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) =>
       // A person hidden from this login is not on its screen to decide: included with nothing typed.
       for (const p of absent) if (!choices.has(p.id) && !canSeePay(req, p.id)) choices.set(p.id, 'include');
       const unchosen = absent.filter((p) => !choices.has(p.id));
-      if (open.length || groups.length || unchosen.length) {
-        throw unresolvedRefusal(open, groups, new Map(rows.map((row) => [row.id, row])), unchosen);
+      // No hard blocker (owner, 2026-11-14: "remove the hard blocker"): what is not settled is left out and said so.
+      //   a row still needing a decision      not applied (its person keeps what they had)
+      //   one person on several rows          the first row applies, the others are left out
+      //   a missing person nobody decided     not written: they stay "missing" on the run, to include or leave out there
+      const openIds = new Set(open.map((row) => row.id));
+      const dupLater = new Set(groups.flatMap((ids) => [...ids].sort((a, b) => rowNoOf(rows, a) - rowNoOf(rows, b)).slice(1)));
+      const skippedRows = rows.filter((row) => openIds.has(row.id) || dupLater.has(row.id));
+      const warnings = [];
+      if (open.length) {
+        warnings.push(`${plural(open.length, 'row')} still needing a decision ${open.length === 1 ? 'was' : 'were'} left out `
+          + `(row ${listText(firstFew(open.map((row) => String(row.row_no))))}): decide ${open.length === 1 ? 'it' : 'them'} and apply again, or enter the figures by hand`);
+      }
+      if (dupLater.size) {
+        warnings.push(`${groups.length === 1 ? 'One person was' : `${groups.length} people were`} on more than one row: the first row was used, `
+          + `${plural(dupLater.size, 'later row')} left out`);
+      }
+      const visibleUnchosen = unchosen.filter((p) => canSeePay(req, p.id));
+      if (visibleUnchosen.length) {
+        warnings.push(`${listText(firstFew(visibleUnchosen.map((p) => `${p.name} (${p.code})`)))} `
+          + `${visibleUnchosen.length === 1 ? 'is' : 'are'} not on the sheet and not decided yet: include or leave them out on the payroll`);
       }
 
       // What this batch says each person's inputs are.
       const wanted = new Map();
-      for (const row of live) if (given(row.person_id)) wanted.set(row.person_id, inputFromRow(row));
-      for (const p of absent) wanted.set(p.id, blankInput(choices.get(p.id) === 'include'));
+      for (const row of live) {
+        if (!given(row.person_id) || openIds.has(row.id) || dupLater.has(row.id) || wanted.has(row.person_id)) continue;
+        wanted.set(row.person_id, inputFromRow(row));
+      }
+      for (const p of absent) if (choices.has(p.id)) wanted.set(p.id, blankInput(choices.get(p.id) === 'include'));
+      const notTouched = new Set([...skippedRows.map((row) => row.person_id), ...unchosen.map((p) => p.id)].filter(given));
 
       const existing = await qc(
         `SELECT i.person_id, i.source, i.updated_at, p.code, p.name
@@ -1103,7 +1108,8 @@ r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) =>
       const overwritten = existing.filter((e) => e.source === 'manual' && wanted.has(e.person_id) && overwrite.has(e.person_id))
         .map((e) => e.person_id);
       // Imported inputs this batch no longer gives: a person the corrected sheet dropped, a row now ignored.
-      const stale = existing.filter((e) => e.source === 'import' && !wanted.has(e.person_id)).map((e) => e.person_id);
+      const stale = existing.filter((e) => e.source === 'import' && !wanted.has(e.person_id) && !notTouched.has(e.person_id))
+        .map((e) => e.person_id);
       const write = [...wanted].filter(([personId]) => !keptIds.has(personId))
         .map(([personId, input]) => ({ person_id: personId, ...input }));
 
@@ -1119,14 +1125,14 @@ r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) =>
       await hrAudit(qc, req, 'import', id, 'apply', {
         month, run_id: run.id, applied: included, left_out: write.length - included, removed: stale,
         manual_kept: [...keptIds], manual_overwritten: overwritten, superseded: superseded.map((b) => b.id),
-        lines: lines.length,
+        lines: lines.length, skipped_rows: skippedRows.map((row) => row.row_no), undecided_missing: unchosen.map((p) => p.id),
       });
       // The counts a restricted login gets cover only the people it can see.
       const shown = write.filter((w) => canSeePay(req, w.person_id));
       const shownIn = shown.filter((w) => w.include).length;
       return {
         run: recalced, applied: shownIn, excluded: shown.length - shownIn,
-        removed: stale.filter((pid) => canSeePay(req, pid)).length, kept,
+        removed: stale.filter((pid) => canSeePay(req, pid)).length, kept, warnings,
       };
     });
 
@@ -1136,6 +1142,7 @@ r.post('/hr/imports/:id/apply', requireHr('accounts'), async (req, res, next) =>
       excluded: out.excluded,
       removed: out.removed,
       manual_edits_kept: out.kept.map((e) => ({ person_id: e.person_id, code: e.code, name: e.name, updated_at: e.updated_at })),
+      ...(out.warnings.length ? { warning: out.warnings.join('. '), warnings: out.warnings } : {}),
     });
   } catch (e) { next(e); }
 });

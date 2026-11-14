@@ -216,6 +216,9 @@ export const hrApi = {
   saveImportMap: (id, map) => api.put(`/hr/imports/${seg(id)}/map`, map),
   // PUT /hr/imports/:id/rows/:rowId — accounts and up. { person_id?, decision?, save_alias?, advance_mode? }.
   saveImportRow: (id, rowId, decision) => api.put(`/hr/imports/${seg(id)}/rows/${seg(rowId)}`, decision),
+  // POST /hr/imports/:id/rows/:rowId/new-person — accounts and up. { person, setup }: a new person from the row, their
+  // pay setup from the 1st of the month, and the row matched to them. { person_id, code, name }.
+  newPersonFromRow: (id, rowId, body) => api.post(`/hr/imports/${seg(id)}/rows/${seg(rowId)}/new-person`, body),
   // POST /hr/imports/:id/apply — accounts and up. { missing:[{ person_id, choice:'include'|'exclude' }], overwrite_manual:[person_id] }.
   applyImport: (id, choices = {}) => api.post(`/hr/imports/${seg(id)}/apply`, choices),
   // POST /hr/imports/:id/discard — accounts and up, open months only. Sets a parsed upload aside; answers the batch.

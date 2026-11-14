@@ -223,9 +223,7 @@ describe('HR payroll routes through the real app', {
     assert.equal(maps.body[0].signature, HEADERS.join('|'));
 
     const rows = remapped.body.rows;
-    const blocked = await call('operator', 'POST', `/hr/imports/${batch2}/apply`, {});
-    refused(blocked, 409, 'IMPORT_UNRESOLVED');
-    assert.ok(blocked.body.rows.includes(rows.find((r) => r.issues.some((i) => i.code === 'NO_NAME_OR_CODE')).row_no));
+    // Apply never refuses an unsettled sheet (2026-11-14): see the September test below.
 
     for (const row of rows.filter((r) => r.fields.code === 'T-203' || r.issues.some((i) => i.code === 'NO_NAME_OR_CODE'))) {
       const decided = await call('operator', 'PUT', `/hr/imports/${batch2}/rows/${row.id}`, { decision: 'ignore' });
@@ -435,9 +433,11 @@ describe('HR payroll routes through the real app', {
     assert.equal(up.status, 200, up.text);
     assert.deepEqual(up.body.missing.map((p) => p.person_id), [E]);
     assert.equal(up.body.missing[0].exited_on, '2026-09-12');
-    const blocked = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, { overwrite_manual: [A] });
-    refused(blocked, 409, 'IMPORT_UNRESOLVED');
-    assert.deepEqual(blocked.body.missing, [E]);
+    // No hard blocker (2026-11-14): applied with E undecided, E is not written and the answer says so.
+    const warned = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, { overwrite_manual: [A] });
+    assert.equal(warned.status, 200, warned.text);
+    assert.match(warned.body.warning, /not on the sheet and not decided yet/);
+    assert.equal((await db.q(`SELECT 1 FROM hr.run_inputs i JOIN hr.runs r ON r.id = i.run_id WHERE r.month = $1 AND i.person_id = $2`, [SEPT, E])).length, 0);
 
     // B owes far more advance than a month's pay, so the line is capped at nothing to pay.
     await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source) VALUES ($1, '2026-08-31', 'opening', 500000, 'test')`, [B]);
@@ -1027,6 +1027,43 @@ describe('HR payroll routes through the real app', {
     assert.notDeepEqual(await jan(), was, 'January was worked out again with it');
     const audit = await db.one(`SELECT detail FROM hr.audit_log WHERE action = 'impact_approved' ORDER BY id DESC LIMIT 1`);
     assert.deepEqual([audit.detail.month, audit.detail.changed_month, audit.detail.remark], [JAN, DEC, 'Test: paid late']);
+  });
+
+  test('a new person straight from an unmatched row; deactivating can leave them out of the draft month', T, async () => {
+    const MAR = '2027-03';
+    const up = await uploadAs('operator', await sheet([['Test Newcomer Spelling', 'T-299', 4, 1]]), MAR);
+    assert.equal(up.status, 200, up.text);
+    const row = up.body.rows.find((r) => r.fields.code === 'T-299');
+    assert.equal(row.person_id, null);
+    // A person with the details asked there, their pay setup and the row matched, in one go.
+    refused(await call('viewer', 'POST', `/hr/imports/${up.body.batch.id}/rows/${row.id}/new-person`, {}), 403, 'HR_LEVEL');
+    const made = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/rows/${row.id}/new-person`, {
+      person: { code: 'T-299', name: 'Test Newcomer Person', department: 'PASTING', pay_channel: 'TCASH' },
+      setup: { pay_basis: 'monthly', base: '13000', ot_hours_per_day: '8', holiday_mode: 'formula', holiday_divisor: '30.5', holiday_multiplier: '1.5' },
+    });
+    assert.equal(made.status, 200, made.text);
+    const N = made.body.person_id;
+    const setup = await db.one(`SELECT effective_from::text AS f, base::text AS base FROM hr.pay_setups WHERE person_id = $1`, [N]);
+    assert.deepEqual([setup.f, setup.base], [`${MAR}-01`, '13000.00']);
+    assert.equal((await db.one(`SELECT person_id, decision FROM hr.import_rows WHERE id = $1`, [row.id])).person_id, N);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.person_aliases WHERE person_id = $1 AND alias_norm = 'TEST NEWCOMER SPELLING'`, [N])).n, 1,
+      "the sheet's spelling is remembered");
+    refused(await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/rows/${row.id}/new-person`, {
+      person: { code: 'T-299', name: 'Test Another Person' }, setup: { pay_basis: 'monthly', base: '1' } }), 409, 'CODE_EXISTS');
+    const applied = await call('operator', 'POST', `/hr/imports/${up.body.batch.id}/apply`, {
+      missing: (up.body.missing || []).map((p) => ({ person_id: p.person_id, choice: 'exclude' })) });
+    assert.equal(applied.status, 200, applied.text);
+    const line = () => db.q(`SELECT l.payable FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id WHERE r.month = $1 AND l.person_id = $2`, [MAR, N]);
+    assert.equal((await line()).length, 1, 'the new person is on the month');
+    // Deactivate and leave them out of the draft month in one step.
+    const off = await call('operator', 'POST', `/hr/people/${N}/deactivate`, { leave_out_month: MAR, reason: 'Test: left' });
+    assert.equal(off.status, 200, off.text);
+    assert.equal(off.body.left_out_of, MAR);
+    assert.equal(off.body.warning, undefined);
+    assert.equal((await line()).length, 0, 'their line is gone');
+    const input = await db.one(`SELECT i.include FROM hr.run_inputs i JOIN hr.runs r ON r.id = i.run_id WHERE r.month = $1 AND i.person_id = $2`, [MAR, N]);
+    assert.equal(input.include, false);
+    assert.equal((await call('operator', 'POST', `/hr/people/${N}/activate`, {})).status, 200);
   });
 
   test('every write left its hr.audit_log row, and none went to the plant audit_log', T, async () => {

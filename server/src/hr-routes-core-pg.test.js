@@ -1038,12 +1038,24 @@ describe('HR core routes through the real app', {
     assert.ok(!text.includes('555566667777') && !text.includes(PAN_2), 'no bank number or PAN in the audit');
     await refusedWrite('admin', 'DELETE', `/hr/people/${clean}`, undefined, 404);
 
-    // Payroll history keeps a person: a run line, a loan, an advance.
+    // A line in a month not finalised is cleared with the person (2026-11-14), and the month's totals follow.
+    const inDraft = await mk('DEL-5', 'Only In A Draft');
+    const draft = await db.one(`INSERT INTO hr.runs (month, days_in_month, status) VALUES ('2027-02', 28, 'draft') RETURNING id`);
+    await db.q(`INSERT INTO hr.run_inputs (run_id, person_id, include, source) VALUES ($1, $2, true, 'manual')`, [draft.id, inDraft]);
+    await db.q(`INSERT INTO hr.run_lines (run_id, person_id, gross, payable) VALUES ($1, $2, 100, 100)`, [draft.id, inDraft]);
+    const cleared = await call('admin', 'DELETE', `/hr/people/${inDraft}`);
+    assert.equal(cleared.status, 200, cleared.text);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.run_lines WHERE run_id = $1`, [draft.id])).n, 0);
+    const delAudit = await lastAudit('person', inDraft);
+    assert.deepEqual([delAudit.detail.open_months_cleared, delAudit.detail.lines_deleted, delAudit.detail.inputs_deleted], [['2027-02'], 1, 1]);
+    await db.q(`DELETE FROM hr.runs WHERE id = $1`, [draft.id]);
+
+    // Money that moved keeps a person: a line of a finalised month, a loan, an advance.
     const withLine = await mk('DEL-2', 'Has A Line');
-    const run = await db.one(`INSERT INTO hr.runs (month, days_in_month, status) VALUES ('2026-12', 31, 'draft') RETURNING id`);
+    const run = await db.one(`INSERT INTO hr.runs (month, days_in_month, status) VALUES ('2026-12', 31, 'finalised') RETURNING id`);
     await db.q(`INSERT INTO hr.run_lines (run_id, person_id, gross, payable) VALUES ($1, $2, 100, 100)`, [run.id, withLine]);
     const r1 = await refusedWrite('admin', 'DELETE', `/hr/people/${withLine}`, undefined, 409, 'HAS_PAY_HISTORY');
-    assert.match(r1.body.error, /Has A Line \(DEL-2\) has payroll history: deactivate instead/);
+    assert.match(r1.body.error, /Has A Line \(DEL-2\) was paid in December 2026, so they cannot be deleted: deactivate them instead/);
 
     const withLoan = await mk('DEL-3', 'Has A Loan');
     await db.q(

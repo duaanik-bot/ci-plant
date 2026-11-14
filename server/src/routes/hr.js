@@ -467,6 +467,75 @@ r.post('/hr/people', requireHr('operator'), async (req, res, next) => {
   } catch (e) { next(refusal(e)); }
 });
 
+// ── A new person straight from an import row (owner's request 2026-11-14) ─────────────────────────────────────
+// "For the new entries, give an option to create master; ask the relevant details there itself while creating; keep
+// the seamless experience." POST /hr/imports/:id/rows/:rowId/new-person { person: {code, name, department, firm,
+// designation, worker_type, pay_channel, joined_on, ...}, setup: {pay_basis, base, ot_hours_per_day, holiday_mode, ...,
+// effective_from? (the 1st of the import's month)} }, accounts and up. One transaction: the person (as POST
+// /hr/people would make them), their first pay setup, and the row matched to them and included. The sheet's spelling
+// of the name is kept as an approved alias when it differs. Answers { person_id, code, name }.
+r.post('/hr/imports/:id/rows/:rowId/new-person', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const batchId = idOf(req.params.id, 'Import');
+    const rowId = idOf(req.params.rowId, 'Import row');
+    const body = bodyOf(req);
+    const p = readPerson(body.person && typeof body.person === 'object' ? body.person : {}, true);
+    if (p.joined_on && p.exited_on && p.exited_on < p.joined_on) throw bad('The exit date is before the joining date');
+    const made = await tx(async (qc, oc) => {
+      await lockNames(qc);
+      const batch = await oc(`SELECT id, month, status FROM hr.import_batches WHERE id = $1 FOR UPDATE`, [batchId]);
+      if (!batch) throw missing('Import');
+      if (batch.status === 'discarded' || batch.status === 'superseded') {
+        throw fail(409, `This upload is ${batch.status}: open the month's current upload`, 'IMPORT_STATE');
+      }
+      const row = await oc(`SELECT id, row_no, fields, person_id FROM hr.import_rows WHERE id = $1 AND batch_id = $2 FOR UPDATE`, [rowId, batchId]);
+      if (!row) throw missing('Import row');
+      const setupBody = body.setup && typeof body.setup === 'object' ? body.setup : {};
+      const s = readSetup({ effective_from: `${batch.month}-01`, ...setupBody });
+      await assertCodeFree(qc, p.code, null);
+      await assertNameFree(qc, { personId: null, name: p.name, displayName: p.display_name });
+      if (p.pay_channel) p.pay_channel = await resolveChannel(oc, p.pay_channel);
+      if (p.employee_id !== null && p.employee_id !== undefined) await assertOperatorFree(oc, p.employee_id, null);
+      const columns = Object.keys(p);
+      const person = await oc(
+        `INSERT INTO hr.people (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, code, name`,
+        columns.map((c) => p[c]));
+      const setupCols = Object.keys(s);
+      const setup = await oc(
+        `INSERT INTO hr.pay_setups (person_id, created_by, ${setupCols.join(', ')})
+         VALUES ($1, $2, ${setupCols.map((_, i) => `$${i + 3}`).join(', ')}) RETURNING id`,
+        [person.id, req.user.id, ...setupCols.map((c) => s[c])]);
+      // The sheet's own spelling, when it is not the name given, so next month's sheet matches by itself.
+      const spelling = normName(row.fields?.name ?? '');
+      let alias = null;
+      if (spelling && spelling !== normName(p.name) && spelling.length <= 120) {
+        const held = await oc(`SELECT person_id FROM hr.person_aliases WHERE alias_norm = $1`, [spelling]);
+        const isName = await oc(`SELECT id FROM hr.people WHERE upper(name) = $1 AND id <> $2 LIMIT 1`, [spelling, person.id]);
+        if (!held && !isName) {
+          const a = await oc(`INSERT INTO hr.person_aliases (person_id, alias_norm, source, approved_by) VALUES ($1, $2, 'import', $3) RETURNING id`,
+            [person.id, spelling, req.user.id]);
+          alias = spelling;
+          await hrAudit(qc, req, 'alias', a.id, 'create', { person_id: person.id, alias: spelling, batch_id: batchId, row_no: row.row_no });
+        }
+      }
+      await qc(
+        `UPDATE hr.import_rows SET match = 'manual', person_id = $2, candidates = '[]'::jsonb, decision = 'include',
+                decided_by = $3, decided_at = now() WHERE id = $1`, [rowId, person.id, req.user.id]);
+      await hrAudit(qc, req, 'person', person.id, 'create', {
+        code: p.code, name: p.name, worker_type: p.worker_type, status: p.status, pay_channel: p.pay_channel ?? null,
+        via: 'import_row', batch_id: batchId, row_no: row.row_no,
+      });
+      await hrAudit(qc, req, 'pay_setup', setup.id, 'create', { person_id: person.id, ...s, via: 'import_row' });
+      await hrAudit(qc, req, 'import_row', rowId, 'decide', {
+        batch_id: batchId, row_no: row.row_no, from: { person_id: row.person_id }, to: { person_id: person.id, decision: 'include' },
+        new_person: true, alias_saved: alias,
+      });
+      return person;
+    });
+    res.json({ person_id: made.id, code: made.code, name: made.name });
+  } catch (e) { next(refusal(e)); }
+});
+
 r.put('/hr/people/:id', requireHr('operator'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Person');
@@ -531,20 +600,39 @@ r.post('/hr/people/:id/deactivate', requireHr('operator'), async (req, res, next
     const body = optBody(req);
     const reason = textOf(body.reason, 'The reason', 500);
     const given = dateOf(body.exited_on, 'The exit date');
+    // leave_out_month (2026-11-14): a draft month they are in is told to leave them out (include = false) and
+    // their line there goes, in the same transaction. A month that is not a draft is only reported, as before.
+    const leaveOut = body.leave_out_month === undefined || body.leave_out_month === null || body.leave_out_month === ''
+      ? null : String(body.leave_out_month);
+    if (leaveOut !== null && !MONTH.test(leaveOut)) throw bad('leave_out_month must be a month like 2026-10');
+    let leftOut = null;
     const months = await tx(async (qc, oc) => {
+      const draft = leaveOut ? await oc(`SELECT id, month, status FROM hr.runs WHERE month = $1 FOR UPDATE`, [leaveOut]) : null;
       const was = await oc(`SELECT id, code, name, status, joined_on::text AS joined_on FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
       if (!was) throw missing('Person');
       if (was.status === 'exited') throw fail(409, `${was.name} (${was.code}) is already inactive`, 'ALREADY_INACTIVE');
       const exitedOn = given ?? plantDateStr();
       if (was.joined_on && exitedOn < was.joined_on) throw bad('The exit date is before the joining date');
       await oc(`UPDATE hr.people SET status = 'exited', exited_on = $2::date, updated_at = now() WHERE id = $1 RETURNING id`, [id, exitedOn]);
-      const open = await openRunsOf(qc, id);
+      if (draft?.status === 'draft') {
+        await qc(
+          `INSERT INTO hr.run_inputs (run_id, person_id, include, source, updated_by, updated_at)
+           VALUES ($1, $2, false, 'manual', $3, now())
+           ON CONFLICT (run_id, person_id) DO UPDATE SET include = false, source = 'manual', updated_by = $3, updated_at = now()`,
+          [draft.id, id, req.user.id]);
+        await qc(`DELETE FROM hr.run_lines WHERE run_id = $1 AND person_id = $2 AND payment_status <> 'paid'`, [draft.id, id]);
+        await qc(`UPDATE hr.runs SET totals = $2::jsonb WHERE id = $1`, [draft.id, JSON.stringify(await totalsOf(qc, draft.id))]);
+        leftOut = draft.month;
+      }
+      const open = (await openRunsOf(qc, id)).filter((m) => m !== leftOut);
       await hrAudit(qc, req, 'person', id, 'deactivate', {
         code: was.code, from: was.status, exited_on: exitedOn, reason, ...(open.length ? { open_runs: open } : {}),
+        ...(leftOut ? { left_out_of: leftOut } : {}),
       });
       return open;
     });
     const person = await personDetail(id, req.hr.level);
+    if (leftOut) person.left_out_of = leftOut;
     res.json(months.length
       ? { ...person, warning: `${person.name} is still in the payroll run for ${months.map(monthName).join(', ')}, which is not finalised. Remove the line there if they should not be paid.` }
       : person);
@@ -565,10 +653,13 @@ r.post('/hr/people/:id/activate', requireHr('operator'), async (req, res, next) 
   } catch (e) { next(refusal(e)); }
 });
 
-// Every table that holds payroll history for a person. Any row in any of them and the person stays: they
-// are deactivated instead. (hr.import_rows counts too: a row there names the person and the database
-// would refuse the delete.)
-const HISTORY_TABLES = ['run_inputs', 'run_lines', 'advance_txns', 'loans', 'adjustments', 'import_rows'];
+// What keeps a person from being deleted: money that has really moved — a line of a FINALISED month, a paid
+// line, an advance, a loan or an adjustment. Then they are deactivated instead (the answer says so, with
+// code HAS_PAY_HISTORY). Anything else of theirs is cleared with them (owner, 2026-11-14: "give option to
+// activate or deactivate or delete employee at payroll and row level"): their inputs and lines in months not
+// finalised (those months' totals are worked out again) and the import rows matched to them (the rows go
+// back to unmatched).
+const HISTORY_TABLES = ['advance_txns', 'loans', 'adjustments'];
 
 r.delete('/hr/people/:id', requireHr('admin'), async (req, res, next) => {
   try {
@@ -580,8 +671,40 @@ r.delete('/hr/people/:id', requireHr('admin'), async (req, res, next) => {
       for (const table of HISTORY_TABLES) {
         const used = await oc(`SELECT 1 AS x FROM hr.${table} WHERE person_id = $1 LIMIT 1`, [id]);
         if (used) {
-          throw fail(409, `${was.name} (${was.code}) has payroll history: deactivate instead`, 'HAS_PAY_HISTORY');
+          throw fail(409, `${was.name} (${was.code}) has ${table === 'loans' ? 'a loan' : table === 'advance_txns' ? 'advances' : 'adjustments'} `
+            + 'on record, so they cannot be deleted: deactivate them instead', 'HAS_PAY_HISTORY');
         }
+      }
+      const settled = await oc(
+        `SELECT r.month FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
+          WHERE l.person_id = $1 AND (r.status = 'finalised' OR l.payment_status = 'paid') ORDER BY r.month LIMIT 1`, [id]);
+      if (settled) {
+        throw fail(409, `${was.name} (${was.code}) was paid in ${monthName(settled.month)}, so they cannot be deleted: deactivate them instead`,
+          'HAS_PAY_HISTORY');
+      }
+      // The open months they are in: lock the runs (the run → person order), then clear them out.
+      const runs = await qc(
+        `SELECT DISTINCT r.id, r.month, r.status FROM hr.runs r
+          WHERE r.status <> 'finalised'
+            AND (EXISTS (SELECT 1 FROM hr.run_lines l WHERE l.run_id = r.id AND l.person_id = $1)
+              OR EXISTS (SELECT 1 FROM hr.run_inputs i WHERE i.run_id = r.id AND i.person_id = $1))
+          ORDER BY r.month`, [id]);
+      if (runs.length) await qc(`SELECT id FROM hr.runs WHERE id = ANY($1::int[]) ORDER BY month FOR UPDATE`, [runs.map((x) => x.id)]);
+      const lines = await qc(`DELETE FROM hr.run_lines WHERE person_id = $1 RETURNING run_id`, [id]);
+      const inputs = await qc(`DELETE FROM hr.run_inputs WHERE person_id = $1 RETURNING run_id`, [id]);
+      for (const run of runs) {
+        await qc(`UPDATE hr.runs SET totals = $2::jsonb WHERE id = $1`, [run.id, JSON.stringify(await totalsOf(qc, run.id))]);
+      }
+      const rows = await qc(
+        `UPDATE hr.import_rows SET person_id = NULL, match = 'unmatched', decision = NULL, candidates = '[]'::jsonb
+          WHERE person_id = $1 RETURNING id`, [id]);
+      // A line of a bulk advance sheet not posted yet (a posted one made an advance, refused above).
+      const sheetLines = await qc(
+        `DELETE FROM hr.advance_sheet_lines l USING hr.advance_sheets s
+          WHERE l.sheet_id = s.id AND l.person_id = $1 AND s.status <> 'posted' RETURNING l.sheet_id`, [id]);
+      if (await oc(`SELECT 1 AS x FROM hr.advance_sheet_lines WHERE person_id = $1 LIMIT 1`, [id])) {
+        throw fail(409, `${was.name} (${was.code}) is on a posted advance sheet, so they cannot be deleted: deactivate them instead`,
+          'HAS_PAY_HISTORY');
       }
       const setups = await qc(`DELETE FROM hr.pay_setups WHERE person_id = $1 RETURNING id`, [id]);
       const aliases = await qc(`DELETE FROM hr.person_aliases WHERE person_id = $1 RETURNING alias_norm`, [id]);
@@ -591,6 +714,8 @@ r.delete('/hr/people/:id', requireHr('admin'), async (req, res, next) => {
         'status', 'joined_on', 'exited_on', 'pay_channel', 'employee_id', 'bank_last4']) snapshot[c] = was[c] ?? null;
       await hrAudit(qc, req, 'person', id, 'delete', {
         ...snapshot, pay_setups_deleted: setups.length, aliases_deleted: aliases.map((a) => a.alias_norm),
+        open_months_cleared: runs.map((x) => x.month), lines_deleted: lines.length, inputs_deleted: inputs.length,
+        import_rows_unmatched: rows.length, advance_sheet_lines_deleted: sheetLines.length,
       });
     });
     res.json({ ok: true });

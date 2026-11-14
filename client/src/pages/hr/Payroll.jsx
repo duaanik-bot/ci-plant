@@ -66,6 +66,7 @@ import ImportWizard, { batchSummary } from './ImportWizard.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
 import EntrySheet from './EntrySheet.jsx';
 import PersonCards from './PersonCards.jsx';
+import PersonStatusDialog from './PersonStatusDialog.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -471,6 +472,9 @@ export default function Payroll({ level }) {
   const canOperate = levelAtLeast(level, 'operator');
   // Accounts and up pay: mark paid / on hold, payment batches, Pay staff (server: requireHr('accounts')).
   const canPay = levelAtLeast(level, 'accounts');
+  // Activate / deactivate (operator) and delete (admin) people from the payroll itself (owner, 2026-11-14).
+  const canAdmin = levelAtLeast(level, 'admin');
+  const [statusFor, setStatusFor] = useState(null);      // { action, people: [{ id, name, code }] }
   // Importing the month's sheet is open to accounts too (owner, 2026-11-14); the server leaves hidden people out.
   const canImport = levelAtLeast(level, 'accounts');
   const limited = hrRestricted();
@@ -777,6 +781,7 @@ export default function Payroll({ level }) {
   // pruned to the rows shown whenever the filters, chips, search or the run change (below).
   const shownIds = useMemo(() => new Set(filtered.map(r => r.id)), [filtered]);
   const picked = useMemo(() => filtered.filter(r => selected.has(r.id)), [filtered, selected]);
+  const personOf = r => ({ id: toId(r.id), name: r.name, code: r.code });
   const allShownPicked = filtered.length > 0 && filtered.every(r => selected.has(r.id));
   const pickShown = (test = () => true) => setSelected(new Set(filtered.filter(test).map(r => r.id)));
   const toggleRow = (r, on) => {
@@ -1624,6 +1629,15 @@ export default function Payroll({ level }) {
                   title={!approvable ? 'A line can be marked paid once the month is submitted' : picked.some(r => r.approval === 'approved') ? 'Mark the ticked approved people paid' : 'Only approved people can be marked paid'}>Mark paid</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'on_hold' })}>Put on hold</Button>
                 <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'status', status: 'pending' })}>Mark unpaid</Button>
+                {canOperate && (
+                  <>
+                    <Button size="sm" variant="secondary" onClick={() => setStatusFor({ action: 'deactivate', people: picked.map(personOf) })}>Deactivate</Button>
+                    {picked.some(r => r.person?.status === 'exited') && (
+                      <Button size="sm" variant="secondary" onClick={() => setStatusFor({ action: 'activate', people: picked.filter(r => r.person?.status === 'exited').map(personOf) })}>Activate</Button>
+                    )}
+                    {canAdmin && <Button size="sm" variant="danger" onClick={() => setStatusFor({ action: 'delete', people: picked.map(personOf) })}>Delete</Button>}
+                  </>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
               </span>
               {!approvable && <span className="w-full text-[11px] text-[#515154]">Mark paid opens once {monthLabel(month)} is submitted and people are approved; a hold can be set now.</span>}
@@ -1642,6 +1656,7 @@ export default function Payroll({ level }) {
               status={status} onLoanChanged={async msg => { toast.success(msg); await load(); }}
               onMaster={(r, tab) => setMaster({ id: toId(r.id), tab, key: ++masterKey.current, changed: false })}
               onPayStaff={canPay ? r => setPayFor(toId(r.id)) : undefined}
+              onPersonStatus={canOperate ? Object.assign((r, action) => setStatusFor({ action, people: [personOf(r)] }), { canDelete: canAdmin }) : undefined}
               onSwitched={async (res, change) => {
                 const what = change.holiday !== undefined ? `Holiday pay ${change.holiday ? 'on' : 'off'}` : `Overtime ${change.overtime ? 'on' : 'off'}`;
                 const later = list(res?.not_recalculated).map(x => monthLabel(x.month));
@@ -1768,6 +1783,15 @@ export default function Payroll({ level }) {
           )}
         </ActionDialog>
       )}
+      {statusFor && (
+        <PersonStatusDialog action={statusFor.action} people={statusFor.people} month={month} draft={status === 'draft'}
+          onClose={() => setStatusFor(null)}
+          onDone={async (msg, { keepOpen = false } = {}) => {
+            toast.success(msg);
+            if (!keepOpen) { setStatusFor(null); setSelected(new Set()); }
+            await load();
+          }} />
+      )}
       {dialog?.kind === 'status' && (
         <StatusDialog month={month} status={dialog.status} picked={dialog.only ?? picked} canApprove={canApprove}
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
@@ -1811,7 +1835,7 @@ export default function Payroll({ level }) {
 
       {wizard && (
         <ImportWizard key={wizard.key} month={month} run={run} inputs={inputs} people={people} channelLabel={channelLabel}
-          canEdit={canImport} resumeBatchId={wizard.resume}
+          canEdit={canImport} resumeBatchId={wizard.resume} onPeopleChanged={load}
           onClose={() => { setWizard(null); checkPending(); load(); }}
           onPending={onPending}
           onApplied={() => { load(); }} />
