@@ -1271,7 +1271,8 @@ const INPUT_SELECT = `
 // The month's latest upload that is parsed but not applied (nor discarded), with how many of its rows still need a
 // decision (the rows the review screen counts as needs_decision), or null. `parsed_uploads` says how many such
 // uploads the month has in all, so an older forgotten one is not hidden behind the latest.
-async function pendingImportOf(qx, imports) {
+// exclude: people hidden from a restricted login, left out of the unresolved count.
+async function pendingImportOf(qx, imports, exclude = []) {
   const parsed = imports.filter((b) => b.status === 'parsed');
   const latest = parsed[0];                                   // imports are newest first
   if (!latest) return null;
@@ -1280,10 +1281,11 @@ async function pendingImportOf(qx, imports) {
        FROM hr.import_rows ir
       WHERE ir.batch_id = $1
         AND ir.decision IS DISTINCT FROM 'ignore'
+        AND (ir.person_id IS NULL OR ir.person_id <> ALL($3::int[]))
         AND (ir.match = ANY($2::text[])
              OR (jsonb_typeof(ir.issues) = 'array'
                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(ir.issues) e WHERE e->>'level' = 'error')))`,
-    [latest.id, [...UNRESOLVED]]);
+    [latest.id, [...UNRESOLVED], exclude]);
   return {
     batch_id: latest.id,
     file_name: latest.file_name,
@@ -1340,8 +1342,9 @@ async function runResponse(req, res, next) {
       uploaded_by_name: given(b.uploaded_by) ? importNames.get(b.uploaded_by) ?? null : null,
       applied_by_name: given(b.applied_by) ? importNames.get(b.applied_by) ?? null : null,
     }));
-    const pendingImport = await pendingImportOf(q, importViews);
-    // A restricted login (hr/privacy.js): no uploads (a sheet has everyone on it), hidden people out of every list
+    const pendingImport = await pendingImportOf(q, importViews, hiddenIds(req));
+    // A restricted login (hr/privacy.js): no upload list (a sheet has everyone on it) — but the month's pending upload,
+    // so it can pick its import up again (2026-11-14; its review hides hidden people) — hidden people out of every list
     // and total, and the people whose pay is hidden named in pay_hidden_people.
     const ex = hiddenIds(req);
     const limited = restricted(req);
@@ -1349,7 +1352,7 @@ async function runResponse(req, res, next) {
     if (!run) {
       return res.json({
         run: null, lines: [], inputs: [], payment_totals: paymentTotals([]), flags_summary: flagsSummary([]),
-        missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: limited ? null : pendingImport,
+        missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: pendingImport,
         ...(limited ? { pay_hidden_people: [] } : {}),
         carried_forward: await carriedInto(q, month, ex),
       });
@@ -1376,7 +1379,7 @@ async function runResponse(req, res, next) {
       flags_summary: flagsSummary(lines),
       missing: await peopleWithoutInputs(q, run.id, month),
       imports: importViews,
-      pending_import: limited ? null : pendingImport,
+      pending_import: pendingImport,
       carried_forward: await carriedInto(q, month, ex),
     });
   } catch (e) { next(e); }

@@ -218,6 +218,8 @@ export const hrApi = {
   saveImportRow: (id, rowId, decision) => api.put(`/hr/imports/${seg(id)}/rows/${seg(rowId)}`, decision),
   // POST /hr/imports/:id/rows/:rowId/new-person — accounts and up. { person, setup }: a new person from the row, their
   // pay setup from the 1st of the month, and the row matched to them. { person_id, code, name }.
+  // POST /hr/people/for-month — accounts and up. { month, person, setup }: a new active person paid from that month on.
+  newPersonForMonth: body => api.post('/hr/people/for-month', body),
   newPersonFromRow: (id, rowId, body) => api.post(`/hr/imports/${seg(id)}/rows/${seg(rowId)}/new-person`, body),
   // POST /hr/imports/:id/apply — accounts and up. { missing:[{ person_id, choice:'include'|'exclude' }], overwrite_manual:[person_id] }.
   applyImport: (id, choices = {}) => api.post(`/hr/imports/${seg(id)}/apply`, choices),

@@ -67,6 +67,7 @@ import PayStaffModal from './PayStaffModal.jsx';
 import EntrySheet from './EntrySheet.jsx';
 import PersonCards from './PersonCards.jsx';
 import PersonStatusDialog from './PersonStatusDialog.jsx';
+import NewPersonFromRow from './NewPersonFromRow.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -614,6 +615,13 @@ export default function Payroll({ level }) {
   const pend = here?.hasServerPending ? fromServer : ((pending?.month === month ? pending : null) || fromServer);
   const [ackUploads, setAckUploads] = useState(false);
   useEffect(() => { setAckUploads(false); }, [month]);
+  // Import with an upload of the month still open (owner, 2026-11-14: "for an already imported sheet ask me to open
+  // the already imported, give rights to delete the same, so that I can pick up my work there and then"): ask first —
+  // continue that upload, delete it, or upload a new sheet anyway.
+  const [askImport, setAskImport] = useState(false);
+  // New person for this month (accounts, 2026-11-14): the short form; operators keep the full master drawer.
+  const [newForMonth, setNewForMonth] = useState(false);
+  const startImport = () => (pend?.id != null ? setAskImport(true) : openWizard(null));
 
   // ── Who did what: the run's own names, else the HR audit log (approver and up), else "you" ──
   const [auditNames, setAuditNames] = useState({ key: null, map: new Map() });
@@ -1162,7 +1170,7 @@ export default function Payroll({ level }) {
         actions: canImport && (
           <span className="flex flex-wrap gap-1.5">
             {pend.id != null && <Button size="sm" onClick={() => openWizard(pend.id)}>Resume import</Button>}
-            {pend.id != null && <Button size="sm" variant="ghost" onClick={() => setForget(true)}>Discard this upload</Button>}
+            {pend.id != null && <Button size="sm" variant="ghost" onClick={() => setForget(true)}>Delete this upload</Button>}
           </span>
         ),
       });
@@ -1292,9 +1300,15 @@ export default function Payroll({ level }) {
           </button>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {(status === 'none' || status === 'draft') && canImport && !monthClosed && (
-              <Button variant="secondary" onClick={() => openWizard(null)}><FileUp size={14} /> {pend ? 'Import a new sheet' : 'Import sheet'}</Button>
+              <Button variant="secondary" onClick={startImport}><FileUp size={14} /> {pend ? 'Import sheet (one is open)' : 'Import sheet'}</Button>
             )}
             {canPay && <Button variant="secondary" onClick={() => setPaying(true)}><HandCoins size={14} /> Pay staff</Button>}
+            {canPay && !canOperate && (
+              <Button variant="secondary" title={`Add a new person paid from ${monthLabel(month)} on, until they are deactivated`}
+                onClick={() => setNewForMonth(true)}>
+                <UserPlus size={14} /> New person
+              </Button>
+            )}
             {canOperate && (
               <Button variant="secondary" title="Add a new person to the payroll master — details, salary setup, bank — without leaving Payroll"
                 onClick={() => setMaster({ id: null, tab: 'details', key: ++masterKey.current, changed: false })}>
@@ -1391,7 +1405,7 @@ export default function Payroll({ level }) {
                 Import the month’s sheet — its rows are matched to people and checked, and nothing is applied until you say so —
                 or type the month by hand in the entry sheet below.
               </p>
-              <Button className="mt-4" onClick={() => openWizard(null)}><FileUp size={14} /> Import the sheet</Button>
+              <Button className="mt-4" onClick={startImport}><FileUp size={14} /> {pend?.id != null ? 'Continue the uploaded sheet' : 'Import the sheet'}</Button>
             </>
           ) : (
             <p className="mt-1 text-xs text-[#6E6E73]">Nothing has been prepared for this month yet.</p>
@@ -1825,8 +1839,35 @@ export default function Payroll({ level }) {
           toast.success('Upload discarded');
           await load();
         }}
-        title="Discard this upload?" confirmLabel="Discard upload" danger
-        message="The upload is set aside: nothing from it reaches the payroll, Submit no longer waits for it, and the same file can be uploaded again later. Inputs already applied from an earlier sheet are not touched." />
+        title="Delete this upload?" confirmLabel="Delete upload" danger
+        message="The upload and the decisions made on it are set aside: nothing from it reaches the payroll, Submit no longer waits for it, and the same file can be uploaded again. Inputs already applied from an earlier sheet are not touched." />
+      {newForMonth && (
+        <Modal open size="xl" onClose={() => setNewForMonth(false)} title={`New person — from ${monthLabel(month)}`}>
+          <NewPersonFromRow month={month} people={list(people)} onCancel={() => setNewForMonth(false)}
+            onCreated={async made => {
+              setNewForMonth(false);
+              toast.success(`${made?.name || 'The new person'} (${made?.code || ''}) added — on the payroll from ${monthLabel(month)}`);
+              await load();
+            }} />
+        </Modal>
+      )}
+      {askImport && pend?.id != null && (
+        <Modal open onClose={() => setAskImport(false)} title={`A sheet for ${monthLabel(month)} is already uploaded`}
+          footer={(
+            <div className="flex w-full flex-wrap items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setAskImport(false); openWizard(null); }}>Upload a new sheet</Button>
+              <Button variant="danger" onClick={() => { setAskImport(false); setForget(true); }}>Delete it</Button>
+              <Button onClick={() => { setAskImport(false); openWizard(pend.id); }}>Open it and continue</Button>
+            </div>
+          )}>
+          <p className="text-sm text-[#3A3A3C]">
+            <b>{pend.batch?.file_name || 'The sheet'}</b>{pend.batch?.uploaded_at ? `, uploaded ${whenText(pend.batch.uploaded_at)}` : ''}
+            {pend.batch?.uploaded_by_name ? ` by ${pend.batch.uploaded_by_name}` : ''}, is not applied yet
+            {pend.summary?.todo > 0 ? ` — ${plural(pend.summary.todo, 'row')} still to resolve` : ''}.
+            Open it to pick up where you left off, every decision already made is kept.
+          </p>
+        </Modal>
+      )}
 
       {paying && (
         <PayStaffModal people={people} channels={channels} onClose={() => setPaying(false)} onDone={afterPayment} />

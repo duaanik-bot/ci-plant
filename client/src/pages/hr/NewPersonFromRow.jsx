@@ -34,8 +34,11 @@ export function otFromRemark(remark) {
 
 const Label = ({ children }) => <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-[0.06em] text-[#86868B]">{children}</span>;
 
-export default function NewPersonFromRow({ batchId, row, people, onCreated, onCancel }) {
-  const f = row.fields && typeof row.fields === 'object' ? row.fields : {};
+// Without a row (2026-11-14): a new person from a payroll month (`month`), POST /hr/people/for-month, nothing prefilled
+// but the next free code.
+export default function NewPersonFromRow({ batchId, row = null, month = null, people, onCreated, onCancel }) {
+  const f = row?.fields && typeof row.fields === 'object' ? row.fields : {};
+  const key = row?.id ?? 'month';
   const [channels, setChannels] = useState([]);
   useEffect(() => { hrApi.payChannels().then(c => setChannels(Array.isArray(c) ? c : []), () => {}); }, []);
   const departments = useMemo(() => [...new Set(people.map(p => p.department).filter(Boolean).map(String))].sort(), [people]);
@@ -82,7 +85,8 @@ export default function NewPersonFromRow({ batchId, row, people, onCreated, onCa
   const create = async () => {
     setBusy(true); setError('');
     try {
-      const made = await hrApi.newPersonFromRow(batchId, row.id, {
+      const send = body => (row ? hrApi.newPersonFromRow(batchId, row.id, body) : hrApi.newPersonForMonth({ month, ...body }));
+      const made = await send({
         person: {
           name: v.name.trim(), code: v.code.trim(), department: v.department.trim() || null,
           pay_channel: v.channel || null, worker_type: v.worker_type, joined_on: v.joined_on || null,
@@ -101,13 +105,13 @@ export default function NewPersonFromRow({ batchId, row, people, onCreated, onCa
 
   return (
     <div className="mt-2.5 rounded-xl border border-[#0A84FF]/30 bg-[#E1EFFF]/40 p-3">
-      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#0064D2]"><UserPlus size={13} /> New person from this row — check and create</p>
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#0064D2]"><UserPlus size={13} /> {row ? 'New person from this row — check and create' : 'New person — paid from this month on, until deactivated'}</p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <label className="block"><Label>Name</Label><Input value={v.name} onChange={e => set('name', e.target.value)} /></label>
         <label className="block"><Label>Payroll code</Label><Input value={v.code} onChange={e => set('code', e.target.value)} /></label>
         <label className="block"><Label>Department</Label>
-          <Input list={`depts-${row.id}`} value={v.department} onChange={e => set('department', e.target.value.toUpperCase())} />
-          <datalist id={`depts-${row.id}`}>{departments.map(d => <option key={d} value={d} />)}</datalist>
+          <Input list={`depts-${key}`} value={v.department} onChange={e => set('department', e.target.value.toUpperCase())} />
+          <datalist id={`depts-${key}`}>{departments.map(d => <option key={d} value={d} />)}</datalist>
         </label>
         <label className="block"><Label>Pay channel</Label>
           <Select value={v.channel} placeholder="Choose" options={channels.map(c => ({ value: c.code, label: c.label || c.code }))}
@@ -128,7 +132,7 @@ export default function NewPersonFromRow({ batchId, row, people, onCreated, onCa
         <Checkbox label="Holiday pay (base ÷ 30.5 × 1.5)" checked={v.holiday} onChange={e => set('holiday', e.target.checked)} />
         <span className="ml-auto flex gap-2">
           <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={create} disabled={busy || problems.length > 0}>{busy ? 'Creating…' : 'Create and match this row'}</Button>
+          <Button size="sm" onClick={create} disabled={busy || problems.length > 0}>{busy ? 'Creating…' : row ? 'Create and match this row' : 'Create'}</Button>
         </span>
       </div>
       {problems.length > 0 && <p className="mt-1 text-[11px] text-[#86868B]">{problems[0]}</p>}

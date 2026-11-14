@@ -307,6 +307,10 @@ describe('HR accounts level and hide list', {
     assert.deepEqual([up.body.counts.rows, up.body.missing.length], [1, 0]);
     const id = up.body.batch.id;
     clean(ok(await call('accounts', 'GET', `/hr/imports/${id}`)), 'batch');
+    // The month tells accounts its upload is waiting, to open again (2026-11-14).
+    const monthView = ok(await call('accounts', 'GET', `/hr/runs/${NOV}`));
+    assert.equal(monthView.body.pending_import.batch_id, id);
+    clean(monthView, 'month with a pending upload');
     // A hidden person's row cannot be touched, nor a hidden person picked for a row.
     const gRow = await db.one(`SELECT id FROM hr.import_rows WHERE batch_id = $1 AND person_id = $2`, [id, G]);
     assert.equal((await call('accounts', 'PUT', `/hr/imports/${id}/rows/${gRow.id}`, { decision: 'ignore' })).status, 404);
@@ -339,6 +343,17 @@ describe('HR accounts level and hide list', {
     ok(await call('accounts', 'DELETE', `/hr/people/${fresh}`));
     assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.people WHERE id = $1`, [fresh])).n, 0);
     assert.equal((await call('viewer', 'POST', `/hr/people/${S}/deactivate`, {})).status, 403);
+    // A new person from a payroll month (2026-11-14): on that month's list and after, not before.
+    const made = ok(await call('accounts', 'POST', '/hr/people/for-month', {
+      month: '2027-04', person: { code: 'T-398', name: 'Test Month Newcomer', department: 'PASTING', pay_channel: 'TCASH' },
+      setup: { pay_basis: 'monthly', base: '9000', ot_hours_per_day: '8', holiday_mode: 'none' },
+    }));
+    const NP = made.body.person_id;
+    const due = async (m) => (await call('accounts', 'GET', `/hr/runs/${m}`)).body.missing.map((x) => x.person_id ?? x.id);
+    assert.ok((await due('2027-04')).includes(NP), 'missing (to enter) from its month');
+    assert.ok((await due('2027-05')).includes(NP), 'and carried on after it');
+    assert.ok(!(await due('2027-03')).includes(NP), 'not before');
+    assert.equal((await call('accounts', 'POST', '/hr/people/for-month', { month: '2027-04', person: { code: 'T-398', name: 'Test Other' }, setup: { pay_basis: 'monthly', base: '1' } })).status, 409);
   });
 
   function refused(res, status, code) {

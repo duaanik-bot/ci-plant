@@ -467,6 +467,44 @@ r.post('/hr/people', requireHr('operator'), async (req, res, next) => {
   } catch (e) { next(refusal(e)); }
 });
 
+// ── A new person from a payroll month (owner's request 2026-11-14) ───────────────────────────────────────────
+// "Give a button to accounts here to open a new master employee for the given month, the same to be carried for
+// future months until cancelled." POST /hr/people/for-month { month, person: {code, name, department, …},
+// setup: {pay_basis, base, ot_hours_per_day, holiday_mode, …} }, accounts and up. One transaction: the person (active)
+// and their pay setup from the 1st of `month`. Being active with an open-ended setup, they are on every month from
+// it on until they are deactivated. Answers { person_id, code, name }.
+r.post('/hr/people/for-month', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const body = bodyOf(req);
+    const month = typeof body.month === 'string' && MONTH.test(body.month) ? body.month : null;
+    if (!month) throw bad('Say the payroll month the person starts in, like 2026-10');
+    const p = readPerson(body.person && typeof body.person === 'object' ? { ...body.person, status: 'active' } : {}, true);
+    const made = await tx(async (qc, oc) => {
+      await lockNames(qc);
+      const s = readSetup({ ...(body.setup && typeof body.setup === 'object' ? body.setup : {}), effective_from: `${month}-01` });
+      await assertCodeFree(qc, p.code, null);
+      await assertNameFree(qc, { personId: null, name: p.name, displayName: p.display_name });
+      if (p.pay_channel) p.pay_channel = await resolveChannel(oc, p.pay_channel);
+      if (p.employee_id !== null && p.employee_id !== undefined) await assertOperatorFree(oc, p.employee_id, null);
+      const columns = Object.keys(p);
+      const person = await oc(
+        `INSERT INTO hr.people (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id, code, name`,
+        columns.map((c) => p[c]));
+      const setupCols = Object.keys(s);
+      const setup = await oc(
+        `INSERT INTO hr.pay_setups (person_id, created_by, ${setupCols.join(', ')})
+         VALUES ($1, $2, ${setupCols.map((_, i) => `$${i + 3}`).join(', ')}) RETURNING id`,
+        [person.id, req.user.id, ...setupCols.map((c) => s[c])]);
+      await hrAudit(qc, req, 'person', person.id, 'create', {
+        code: p.code, name: p.name, worker_type: p.worker_type, status: 'active', pay_channel: p.pay_channel ?? null, via: 'payroll_month', month,
+      });
+      await hrAudit(qc, req, 'pay_setup', setup.id, 'create', { person_id: person.id, ...s, via: 'payroll_month' });
+      return person;
+    });
+    res.json({ person_id: made.id, code: made.code, name: made.name });
+  } catch (e) { next(refusal(e)); }
+});
+
 // ── A new person straight from an import row (owner's request 2026-11-14) ─────────────────────────────────────
 // "For the new entries, give an option to create master; ask the relevant details there itself while creating; keep
 // the seamless experience." POST /hr/imports/:id/rows/:rowId/new-person { person: {code, name, department, firm,
