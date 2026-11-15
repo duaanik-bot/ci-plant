@@ -619,7 +619,9 @@ r.get('/hr/loan-holds', requireHr('viewer'), async (req, res, next) => {
     const held = new Map(rows.filter((h) => h.amount === null).map((h) => [h.loan_id, h.note]));
     const own = new Map(rows.filter((h) => h.amount !== null).map((h) => [h.loan_id, h]));
     res.json(loans.map((loan) => {
-      const { due, outstanding } = dueForMonth(loan, txns.get(loan.id) ?? [], [], month);
+      // Before the first due month only a month's own amount makes anything due (hr/loans.js).
+      const early = month < loan.first_due_month && own.has(loan.id) ? [{ month, amount: own.get(loan.id).amount }] : [];
+      const { due, outstanding } = dueForMonth(loan, txns.get(loan.id) ?? [], early, month);
       return {
         loan_id: loan.id, loan_no: loan.loan_no, person_id: loan.person_id, instalment: loan.instalment,
         due, outstanding, held: held.has(loan.id), note: held.get(loan.id) ?? own.get(loan.id)?.note ?? null,

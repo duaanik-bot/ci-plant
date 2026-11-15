@@ -326,3 +326,22 @@ test('a month given its own instalment takes it, the schedule follows, and the e
   // Never more than is outstanding.
   assert.equal(dueForMonth(loan, tx1, [{ month: '2026-10', amount: '99999' }], '2026-10').due, '13000.00');
 });
+
+// A month's own amount before the first due month (2026-11-15): a loan given in October, first due November, with an
+// amount set for October takes it in October; a month before the first due month with no amount still takes nothing.
+test('an own amount before the first due month is deducted, and the schedule starts there', () => {
+  const late = { ...loan, first_due_month: '2026-11' };
+  const txns = [{ kind: 'disbursed', principal_amount: '20000' }];
+  const rules = [{ month: '2026-09', amount: '2000' }];
+  assert.equal(dueForMonth(late, txns, rules, '2026-09').due, '2000.00');
+  assert.equal(dueForMonth(late, txns, rules, '2026-10').due, '0.00');      // not due yet, no own amount
+  assert.equal(dueForMonth(late, txns, rules, '2026-11').due, '5000.00');
+  assert.equal(dueForMonth(late, txns, [{ month: '2026-09', amount: '0' }], '2026-09').due, '0.00');
+  assert.equal(dueForMonth(late, txns, [], '2026-09').due, '0.00');
+  const sch = projectSchedule(late, txns, rules, '2026-08');
+  assert.deepEqual(sch.map((r) => [r.month, r.opening, r.due, r.closing]), [
+    ['2026-09', '20000.00', '2000.00', '18000.00'], ['2026-11', '18000.00', '5000.00', '13000.00'],
+    ['2026-12', '13000.00', '5000.00', '8000.00'], ['2027-01', '8000.00', '5000.00', '3000.00'], ['2027-02', '3000.00', '3000.00', '0.00']]);
+  // Without an early amount the schedule is as before.
+  assert.equal(projectSchedule(late, txns, [], '2026-08')[0].month, '2026-11');
+});

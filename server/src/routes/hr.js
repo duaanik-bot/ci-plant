@@ -905,7 +905,7 @@ r.post('/hr/people/:id/setups', requireHr('operator'), async (req, res, next) =>
 //     the policy default, 30.5) and the kept multiplier, or 1.5 — the workbook's usual base ÷ 30.5 × 1.5.
 //   * overtime off → ot_hours_per_day 0 and no fixed OT rate; on → ot_hours_per_day as sent (above 0).
 // The setup is changed in place, because it is the one the open months use — but never one a finalised month used
-// (409 SETUP_LOCKED: add a pay revision from the next open month instead). Every draft month the setup covers is
+// (2026-11-14: then the switch goes on a revision from the first open month, revision_from). Every draft month the setup covers is
 // worked out again for this person at once; a submitted / approved month is listed in `not_recalculated` (send it
 // back to apply the change; finalising it would refuse, because the line no longer matches its inputs).
 r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (req, res, next) => {
@@ -924,15 +924,34 @@ r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (
       otPerDay = String(n);
     }
     const out = await tx(async (qc, oc) => {
-      const setup = await oc(`SELECT ${SETUP_COLS} FROM hr.pay_setups WHERE id = $1 AND person_id = $2 FOR UPDATE`, [setupId, personId]);
+      let setup = await oc(`SELECT ${SETUP_COLS} FROM hr.pay_setups WHERE id = $1 AND person_id = $2 FOR UPDATE`, [setupId, personId]);
       if (!setup) throw missing('Pay setup');
       const used = await oc(
         `SELECT r.month FROM hr.run_lines l JOIN hr.runs r ON r.id = l.run_id
           WHERE l.pay_setup_id = $1 AND r.status = 'finalised' ORDER BY r.month DESC LIMIT 1`, [setupId]);
+      // A setup a finalised month used stays as that month paid it (owner, 2026-11-14: "September had OT, so I should be
+      // able to change it for future months"): the switch goes on a revision from the first open month instead — the
+      // person's setup already starting then, or a copy of this one from then — and the answer says so.
+      let revisionFrom = null;
       if (used) {
-        throw fail(409, `This pay setup was used by ${monthName(used.month)}, which is finalised, so it cannot change: add a pay `
-          + 'revision from the next open month instead', 'SETUP_LOCKED');
+        const fin = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+        const [y, m] = fin.month.split('-').map(Number);
+        const from = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+        const own = await oc(`SELECT ${SETUP_COLS} FROM hr.pay_setups WHERE person_id = $1 AND effective_from = $2::date FOR UPDATE`, [personId, from]);
+        setup = own ?? await oc(
+          `INSERT INTO hr.pay_setups (person_id, effective_from, created_by, pay_basis, base, absence_basis, absence_divisor,
+                                      ot_hours_per_day, ot_multiplier, ot_fixed_rate, holiday_mode, holiday_divisor,
+                                      holiday_multiplier, holiday_fixed, note)
+           SELECT person_id, $2::date, $3, pay_basis, base, absence_basis, absence_divisor, ot_hours_per_day, ot_multiplier,
+                  ot_fixed_rate, holiday_mode, holiday_divisor, holiday_multiplier, holiday_fixed,
+                  left(concat_ws(' · ', note, 'Copied for a switch: ' || $4), 500)
+             FROM hr.pay_setups WHERE id = $1
+           RETURNING ${SETUP_COLS}`,
+          [setupId, from, req.user.id, `${monthName(used.month)} is finalised`]);
+        if (!own) await hrAudit(qc, req, 'pay_setup', setup.id, 'create', { person_id: personId, copied_from: setupId, effective_from: from, via: 'switches' });
+        revisionFrom = from.slice(0, 7);
       }
+      const targetId = setup.id;
       const next = {};
       if (has('holiday')) {
         if (body.holiday === false) next.holiday_mode = 'none';
@@ -951,8 +970,8 @@ r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (
       if (cols.length) {
         row = await oc(
           `UPDATE hr.pay_setups SET ${cols.map((c, i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1 RETURNING ${SETUP_COLS}`,
-          [setupId, ...cols.map((c) => next[c])]);
-        await hrAudit(qc, req, 'pay_setup', setupId, 'switches', {
+          [targetId, ...cols.map((c) => next[c])]);
+        await hrAudit(qc, req, 'pay_setup', targetId, 'switches', {
           person_id: personId, reason,
           changes: Object.fromEntries(cols.map((c) => [c, { from: setup[c] ?? null, to: row[c] ?? null }])),
         });
@@ -974,7 +993,7 @@ r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (
           else if (run.status !== 'finalised') notRecalculated.push({ month: run.month, status: run.status });
         }
       }
-      return { setup: row, recalculated, not_recalculated: notRecalculated };
+      return { setup: row, recalculated, not_recalculated: notRecalculated, ...(revisionFrom ? { revision_from: revisionFrom, kept_month: used.month } : {}) };
     });
     res.json(out);
   } catch (e) { next(refusal(e)); }

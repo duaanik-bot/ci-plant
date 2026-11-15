@@ -12,7 +12,7 @@ import { AlertTriangle, Plus } from 'lucide-react';
 import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset, useToast } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, levelAtLeast, monthLabel } from '../../lib/hr.js';
-import { OtDayPicker } from './PaySwitches.jsx';
+import { OtDayPicker, Switch, holidayOn } from './PaySwitches.jsx';
 import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText, usePersonActions } from './PersonDrawer.jsx';
 
 // The register opens on active people only; Inactive and On leave are one chip away.
@@ -48,10 +48,24 @@ export default function People({ level }) {
     try {
       const res = await hrApi.setPaySwitches(r.id, s.id, h > 0 ? { overtime: true, ot_hours_per_day: h } : { overtime: false });
       const later = Array.isArray(res?.not_recalculated) ? res.not_recalculated : [];
-      toast.success(`${r.name}: overtime ${h > 0 ? `${h} h a day` : 'off'}`);
+      toast.success(`${r.name}: overtime ${h > 0 ? `${h} h a day` : 'off'}${res?.revision_from ? ` from ${monthLabel(res.revision_from)} on (${monthLabel(res.kept_month)} stays as paid)` : ''}`);
       if (later.length) toast.info(`${later.map(x => monthLabel(x.month)).join(', ')} not changed: send ${later.length === 1 ? 'it' : 'them'} back to draft to apply`);
       await load();
     } catch { /* refused — the central toast says why */ } finally { setOtBusy(null); }
+  }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Holiday pay on / off right in the list (2026-11-14), no questions: the current setup, or a revision from the first
+  // open month when a finalised month used it.
+  const [holBusy, setHolBusy] = useState(null);
+  const flipHoliday = useCallback(async r => {
+    const s = r.current_setup;
+    if (!s) return;
+    const on = !holidayOn(s);
+    setHolBusy(r.id);
+    try {
+      const res = await hrApi.setPaySwitches(r.id, s.id, { holiday: on });
+      toast.success(`${r.name}: holiday pay ${on ? 'on' : 'off'}${res?.revision_from ? ` from ${monthLabel(res.revision_from)} on (${monthLabel(res.kept_month)} stays as paid)` : ''}`);
+      await load();
+    } catch { /* refused — the central toast says why */ } finally { setHolBusy(null); }
   }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
   const [rows, setRows] = useState(null); // null until the first answer
   const [channels, setChannels] = useState([]);
@@ -87,7 +101,8 @@ export default function People({ level }) {
   const searched = useMemo(() => (q.trim()
     ? all.filter(r => rowMatches(r, q, `${labelOf(r.pay_channel)} ${holidayText(r.current_setup)}`))
     : all), [all, q, labelOf]);
-  const filtered = useMemo(() => searched.filter(r => (!status || r.status === status)
+  // status is the list of chips on (empty = everyone).
+  const filtered = useMemo(() => searched.filter(r => (!status.length || status.includes(r.status))
     && (!dept || (r.department || '') === dept)
     && (!channel || (channel === NO_CHANNEL ? !r.pay_channel : r.pay_channel === channel))
     && (!noSetup || !r.current_setup)), [searched, status, dept, channel, noSetup]);
@@ -147,17 +162,22 @@ export default function People({ level }) {
     { key: 'ot', label: 'OT hours a day', align: 'right', card: 'metric',
       sortValue: r => r.current_setup?.ot_hours_per_day ?? null,
       render: r => (canEdit && r.current_setup
-        ? <OtDayPicker size="sm" value={r.current_setup.ot_hours_per_day} disabled={otBusy === r.id} onPick={h => setOt(r, h)} />
+        ? <span onClick={e => e.stopPropagation()}><OtDayPicker size="sm" value={r.current_setup.ot_hours_per_day} disabled={otBusy === r.id} onPick={h => setOt(r, h)} /></span>
         : numText(r.current_setup?.ot_hours_per_day)),
       export: r => (Number(r.current_setup?.ot_hours_per_day || 0) > 0 ? numText(r.current_setup.ot_hours_per_day) : 'Off') },
     { key: 'holiday', label: 'Holiday', card: 'detail', sortValue: r => holidayText(r.current_setup),
-      render: r => <span className="whitespace-nowrap">{holidayText(r.current_setup)}</span>, export: r => holidayText(r.current_setup) },
+      render: r => (canEdit && r.current_setup ? (
+        <span className="flex items-center gap-2 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+          <Switch on={holidayOn(r.current_setup)} disabled={holBusy === r.id} label={`Holiday pay for ${r.name}`} onClick={() => flipHoliday(r)} />
+          <span className="text-[11px] text-[#6E6E73]">{holidayText(r.current_setup)}</span>
+        </span>
+      ) : <span className="whitespace-nowrap">{holidayText(r.current_setup)}</span>), export: r => holidayText(r.current_setup) },
     { key: 'bank_last4', label: 'Bank', card: 'detail',
       render: r => (r.bank_last4 ? <span className="whitespace-nowrap font-mono text-xs">•••• {r.bank_last4}</span> : '—'),
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
     ...(canEdit ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
       render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
-  ], [labelOf, openPerson, canEdit, actions.items, otBusy, setOt]);
+  ], [labelOf, openPerson, canEdit, actions.items, otBusy, setOt, holBusy, flipHoliday]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';

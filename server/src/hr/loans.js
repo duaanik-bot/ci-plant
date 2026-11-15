@@ -89,15 +89,21 @@ const holidaySet = (holidays) => new Set([...monthRules(holidays)].filter(([, a]
 // The instalment `month` asks of the loan: its own amount for that month when one is set, else the loan's.
 const instalmentFor = (rules, month, instalment) => (rules.has(month) && rules.get(month) !== null ? rules.get(month) : instalment);
 
+// A month given its own amount before the first due month (owner, 2026-11-15: a loan given in October, first due
+// November, with ₹10,000 set for October was silently not deducted): that month takes its amount; the months between
+// it and the first due month still take nothing.
+const earlyMonth = (rules, month, first) => month < first && rules.has(month) && rules.get(month) !== null && cmp(rules.get(month), ZERO) > 0;
+
 // What payroll takes from this loan in `month`, and the balance it is worked out from. Nothing is due
-// unless the loan is active, its first due month has come, and the month is not a repayment holiday.
+// unless the loan is active, its first due month has come (or the month has its own amount), and the month is not
+// a repayment holiday.
 export function dueForMonth(loan, txns, holidays, month) {
   const when = monthOf(month, 'month');
   const first = monthOf(loan.first_due_month, 'first_due_month');
   const rules = monthRules(holidays);
   const skip = holidaySet(holidays);
   const outstanding = balanceOf(txns);
-  const owing = loan.status === 'active' && when >= first && !skip.has(when);
+  const owing = loan.status === 'active' && (when >= first || earlyMonth(rules, when, first)) && !skip.has(when);
   return {
     due: text(owing ? instalmentDue(instalmentFor(rules, when, rat(loan.instalment)), outstanding) : ZERO),
     outstanding: text(outstanding),
@@ -146,6 +152,8 @@ export function projectSchedule(loan, txns, holidays, fromMonth, max = 120) {
   for (const run of taken.keys()) if (run > latest) latest = run;
 
   let month = from > first ? from : first;
+  // An own amount set for a month before the first due month starts the schedule there.
+  for (const m of rules.keys()) if (m >= from && m < month && (earlyMonth(rules, m, first) || taken.has(m))) month = m;
   let opening = balanceOf(txns);
   for (const [run, got] of taken) if (run >= month) opening = add(opening, got);
 
@@ -153,6 +161,7 @@ export function projectSchedule(loan, txns, holidays, fromMonth, max = 120) {
   while (rows.length < max) {
     const history = month <= latest;                   // a month the recorded recoveries already reach
     if (!history && !(active && cmp(opening, ZERO) > 0)) break;
+    if (month < first && !earlyMonth(rules, month, first) && !taken.has(month)) { month = nextMonth(month); continue; }
 
     const holiday = skip.has(month);
     const custom = !holiday && rules.has(month);         // a month given its own instalment

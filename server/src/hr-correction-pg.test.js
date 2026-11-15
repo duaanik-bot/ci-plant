@@ -142,4 +142,16 @@ describe('HR: correcting a finalised month\'s loan instalment', {
       JOIN hr.runs r ON r.id = l.run_id WHERE r.month = '2026-09' AND l.person_id = $1`, [D]);
     assert.deepEqual(sept, { arrears: '1000.00', loan: '1000.00' });
   });
+  test('a switch on a setup a finalised month used goes on a revision from the first open month', T, async () => {
+    const old = await db.one(`SELECT id, holiday_mode FROM hr.pay_setups WHERE person_id = $1 AND effective_from = '2026-04-01'`, [S]);
+    const res = ok(await call('operator', 'POST', `/hr/people/${S}/setups/${old.id}/switches`, { holiday: true, overtime: true, ot_hours_per_day: 8 }));
+    assert.deepEqual([res.body.revision_from, res.body.kept_month], ['2026-09', AUG]);
+    const rows = await db.q(`SELECT effective_from::text AS f, holiday_mode, ot_hours_per_day::text AS ot FROM hr.pay_setups WHERE person_id = $1 ORDER BY effective_from`, [S]);
+    assert.deepEqual(rows.map((r) => [r.f, r.holiday_mode]), [['2026-04-01', old.holiday_mode], ['2026-09-01', 'formula']], 'August\'s setup is untouched');
+    assert.equal(rows[1].ot, '8.0000');
+    // Again: the September revision itself takes it.
+    const again = ok(await call('operator', 'POST', `/hr/people/${S}/setups/${old.id}/switches`, { overtime: false }));
+    assert.equal(Number(again.body.setup.ot_hours_per_day), 0);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM hr.pay_setups WHERE person_id = $1`, [S])).n, 2);
+  });
 });

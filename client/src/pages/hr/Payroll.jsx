@@ -57,7 +57,7 @@ import {
   ShieldCheck, UserPlus, Wallet,
 } from 'lucide-react';
 import {
-  Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiRow, Modal, SubTabs, Textarea, rowMatches, useToast,
+  Button, ConfirmDialog, DataTable, ExportMenu, Field, Input, KpiCard, KpiRow, Modal, SubTabs, Textarea, rowMatches, useToast,
 } from '../../components/ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
@@ -1573,6 +1573,12 @@ export default function Payroll({ level }) {
               </FilterGroup>
             )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* The month's register as Excel or PDF from any view (owner, 2026-11-15: "give an export button in payroll
+                  to export the final reports"): every component in its own column, the filters on screen, by name. */}
+              {filtered.length > 0 && (
+                <ExportMenu label="Export report"
+                  build={() => exportSpec([...filtered].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))))} />
+              )}
               <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">View</span>
               <SubTabs active={layout} onChange={setLayout}
                 views={[{ key: 'cards', label: 'People' }, { key: 'table', label: 'Full table' }, { key: 'entry', label: run?.inputs_locked_at ? 'Entry sheet 🔒' : 'Entry sheet' }]} />
@@ -1677,7 +1683,7 @@ export default function Payroll({ level }) {
                 if (later.length) toast.info(`${later.join(', ')} not changed: send ${later.length === 1 ? 'it' : 'them'} back to draft to apply`);
                 await Promise.all([reloadPeople(), load()]);
               }}
-              toolbar={<span className="text-[11px] text-[#86868B]">The Full table view has every column and the Excel / PDF export.</span>} />
+              toolbar={<span className="text-[11px] text-[#86868B]">Export report (top right) downloads the month as Excel or PDF.</span>} />
           ) : (
           <DataTable
             columns={columns}

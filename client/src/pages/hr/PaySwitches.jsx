@@ -18,7 +18,7 @@ const n = v => (v == null || v === '' ? 0 : Number(v));
 export const holidayOn = s => Boolean(s) && s.holiday_mode !== 'none';
 export const overtimeOn = s => Boolean(s) && (n(s.ot_hours_per_day) > 0 || n(s.ot_fixed_rate) > 0);
 
-function Switch({ on, disabled, onClick, label }) {
+export function Switch({ on, disabled, onClick, label }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onClick}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-[#34C759]' : 'bg-[#1D1D1F]/20'}`}>
@@ -84,10 +84,12 @@ export default function PaySwitches({ personId, setup, canEdit, month, status, c
   const [sendBack, setSendBack] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   if (!setup) return <p className="text-xs text-[#86868B]">No pay setup yet — add one under People › Pay setup.</p>;
   const hol = holidayOn(setup);
   const ot = overtimeOn(setup);
-  const locked = Boolean(month) && status && status !== 'draft' && status !== 'none';
+  // A finalised month is never sent back: the server puts the switch on a revision from the first open month (2026-11-14).
+  const locked = Boolean(month) && status && !['draft', 'none', 'finalised'].includes(status);
 
   const apply = async change => {
     setBusy(true); setError('');
@@ -100,6 +102,8 @@ export default function PaySwitches({ personId, setup, canEdit, month, status, c
       }
       const res = await hrApi.setPaySwitches(personId, setup.id, change);
       setAsking(null); setSendBack(false);
+      setInfo(res?.revision_from
+        ? `${monthLabel(res.kept_month)} is finalised and stays as paid; the change applies from ${monthLabel(res.revision_from)} on.` : '');
       await onChanged?.(res, change);
     } catch (e) {
       setError(e?.data?.error || e?.message || 'The switch could not be saved.');
@@ -153,6 +157,7 @@ export default function PaySwitches({ personId, setup, canEdit, month, status, c
           <Button size="sm" variant="ghost" onClick={() => { setAsking(null); setSendBack(false); }}>Cancel</Button>
         </div>
       )}
+      {info && <p className="text-[11px] font-semibold text-[#0064D2]">{info}</p>}
       {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
     </div>
   );
