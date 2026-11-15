@@ -188,14 +188,15 @@ test('ledger reads: as at month end, manual increases dated after the month are 
     { id: 11, loan_no: 'CI-LN-0011', person_id: 4, instalment: '1000.00', first_due_month: '2026-07', status: 'active' },
   ]], [/FROM hr\.loan_txns/, []], [/FROM hr\.loan_holidays/, []]]);
   await loanPositions(loans, [4], '2026-07', '2026-07');
-  assert.deepEqual(loans.calls[0].params, [[4], '2026-08-01']);
-  assert.match(loans.calls[0].sql, /issued_on < \$2::date/, 'a loan issued after the month is not in it');
-  assert.deepEqual(loans.calls[1].params, [[11], '2026-08-01']);
-  assert.match(loans.calls[1].sql, /t\.run_id IS NULL[\s\S]*'disbursed', 'opening'[\s\S]*principal_amount > 0/);
+  assert.deepEqual(loans.calls[0].params, [[4], '2026-08-01', '2026-07']);
+  assert.match(loans.calls[0].sql, /issued_on < \$2::date OR first_due_month <= \$3/,
+    'a loan issued after the month is not in it, unless its first payroll was chosen as this month or earlier (2026-11-15)');
+  assert.deepEqual(loans.calls[1].params, [[11], '2026-08-01', []]);
+  assert.match(loans.calls[1].sql, /t\.run_id IS NULL[\s\S]*'opening'[\s\S]*'disbursed'[\s\S]*principal_amount > 0/);
   assert.doesNotMatch(loans.calls[1].sql, /payroll_recovery|prepayment|waiver/, 'no reduction is ever filtered out');
   const now = fakeQc([[/FROM hr\.loans/, []]]);
   await loanPositions(now, [4], '2026-07');
-  assert.deepEqual(now.calls[0].params, [[4], null], 'no as-at month: every loan');
+  assert.deepEqual(now.calls[0].params, [[4], null, null], 'no as-at month: every loan');
 });
 
 test('ledger reads: an advance kind nobody knows throws instead of counting as nothing', async () => {

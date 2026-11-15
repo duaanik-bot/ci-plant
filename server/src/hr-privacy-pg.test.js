@@ -168,7 +168,7 @@ describe('HR accounts level and hide list', {
     const loan = await db.one(`SELECT id FROM hr.loans WHERE person_id = $1`, [G]);
     assert.equal((await call('accounts', 'GET', `/hr/loans/${loan.id}`)).status, 404);
     for (const [m, url] of [['GET', `/hr/runs/${MONTH}/variance`], ['GET', '/hr/audit'], ['GET', '/hr/column-maps'], ['GET', '/hr/loan-holds'],
-      ['GET', '/hr/adjustments'], ['POST', '/hr/people'], ['GET', '/hr/anything-new']]) {
+      ['POST', '/hr/people'], ['GET', '/hr/anything-new']]) {
       refused(await call('accounts', m, url, m === 'GET' ? undefined : {}), 403, 'HR_RESTRICTED');
     }
   });
@@ -179,6 +179,11 @@ describe('HR accounts level and hide list', {
     assert.equal((await call('accounts', 'POST', '/hr/staff-payments', { person_id: G, kind: 'advance', amount: 10 })).status, 404);
     const gLoan = await db.one(`SELECT id FROM hr.loans WHERE person_id = $1`, [G]);
     assert.equal((await call('accounts', 'PUT', `/hr/loans/${gLoan.id}/month-instalment`, { month: '2026-10', amount: 1, scope: 'month' })).status, 404);
+    // Accounts' new rights (2026-11-15) never reach a hidden person either.
+    assert.equal((await call('accounts', 'POST', `/hr/loans/${gLoan.id}/cancel`, {})).status, 404);
+    assert.equal((await call('accounts', 'POST', `/hr/loans/${gLoan.id}/prepay`, { amount: 1 })).status, 404);
+    assert.equal((await call('accounts', 'POST', '/hr/loans', { person_id: G, principal: 100, issued_on: '2026-08-01', instalment: 50, first_due_month: '2026-08' })).status, 404);
+    assert.equal((await call('accounts', 'POST', `/hr/people/${G}/setups/1/switches`, { holiday: true })).status, 404);
     const batch = ok(await call('accounts', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH', reference: 'AUG-CASH' }));
     clean(batch, 'payments');
     assert.deepEqual(batch.body.person_ids, [S]);

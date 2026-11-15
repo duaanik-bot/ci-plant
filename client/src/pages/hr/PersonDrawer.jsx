@@ -858,7 +858,10 @@ function RevisionModal({ pid, setups, onClose, onSaved }) {
 export function usePersonActions(level, { onDone } = {}) {
   const toast = useToast();
   const canEdit = levelAtLeast(level, 'operator');
-  const canDelete = levelAtLeast(level, 'admin');
+  // Accounts activates, deactivates and deletes people it can see (the server has allowed it since 2026-11-14; the
+  // menu now offers it, owner 2026-11-15: "give him the rights to delete").
+  const canStatus = levelAtLeast(level, 'accounts');
+  const canDelete = levelAtLeast(level, 'accounts');
   const [dlg, setDlg] = useState(null); // { kind, person, error, busy, reason, date, code, name, display }
   const busyRef = useRef(false);
   const patch = p => setDlg(d => (d ? { ...d, error: null, ...p } : d));
@@ -869,13 +872,15 @@ export function usePersonActions(level, { onDone } = {}) {
     if (canEdit) {
       out.push({ key: 'duplicate', label: 'Duplicate', icon: Copy,
         onClick: () => setDlg({ kind: 'duplicate', person, code: '', name: '', display: '' }) });
+    }
+    if (canStatus) {
       out.push(person.status === 'exited'
         ? { key: 'activate', label: 'Activate', icon: UserCheck, onClick: () => setDlg({ kind: 'activate', person }) }
         : { key: 'deactivate', label: 'Deactivate', icon: UserX, onClick: () => setDlg({ kind: 'deactivate', person, reason: '', date: '' }) });
     }
     if (canDelete) out.push({ key: 'delete', label: 'Delete', icon: Trash2, tone: 'danger', onClick: () => setDlg({ kind: 'delete', person }) });
     return out;
-  }, [canEdit, canDelete]);
+  }, [canEdit, canStatus, canDelete]);
 
   const submit = async () => {
     if (!dlg || busyRef.current) return;

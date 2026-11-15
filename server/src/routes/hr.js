@@ -908,9 +908,11 @@ r.post('/hr/people/:id/setups', requireHr('operator'), async (req, res, next) =>
 // (2026-11-14: then the switch goes on a revision from the first open month, revision_from). Every draft month the setup covers is
 // worked out again for this person at once; a submitted / approved month is listed in `not_recalculated` (send it
 // back to apply the change; finalising it would refuse, because the line no longer matches its inputs).
-r.post('/hr/people/:id/setups/:setupId/switches', requireHr('operator'), async (req, res, next) => {
+// Accounts and up (2026-11-15: the People list toggles for accounts too), for a person whose pay it can see.
+r.post('/hr/people/:id/setups/:setupId/switches', requireHr('accounts'), async (req, res, next) => {
   try {
     const personId = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, personId)) throw notThere('Person');
     const setupId = idOf(req.params.setupId, 'Pay setup');
     const body = bodyOf(req);
     const has = (k) => Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined && body[k] !== null;

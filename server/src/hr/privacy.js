@@ -57,6 +57,12 @@ const ALLOW = [
   ['POST', '/hr/people/for-month'], ['POST', '/hr/people/\\d+/deactivate'], ['POST', '/hr/people/\\d+/activate'], ['DELETE', '/hr/people/\\d+'],
   // A loan's instalment for a month, or from a month on (2026-11-14): only for a person the login can see.
   ['PUT', '/hr/loans/\\d+/month-instalment'],
+  // Accounts runs the month to approval, gives and cancels loans and adjustments, and flips holiday / OT (2026-11-15);
+  // each person-level route checks the person is visible.
+  ['POST', `/hr/runs/${M}/recalc`], ['POST', `/hr/runs/${M}/submit`], ['POST', '/hr/people/\\d+/setups/\\d+/switches'],
+  ['POST', '/hr/loans'], ['POST', '/hr/loans/\\d+/prepay'], ['POST', '/hr/loans/\\d+/holiday'], ['DELETE', `/hr/loans/\\d+/holiday/${M}`],
+  ['PUT', '/hr/loans/\\d+/instalment'], ['POST', '/hr/loans/\\d+/cancel'],
+  ['GET', '/hr/adjustments'], ['POST', '/hr/adjustments'], ['POST', '/hr/adjustments/\\d+/cancel'],
   // Bulk advance sheets: the restricted login sees and enters only its visible people (routes/hr-ledgers.js).
   ['GET', '/hr/advance-sheets'], ['GET', '/hr/advance-sheets/\\d+'], ['POST', '/hr/advance-sheets'], ['PUT', '/hr/advance-sheets/\\d+'],
   ['PUT', '/hr/advance-sheets/\\d+/lines'], ['POST', '/hr/advance-sheets/\\d+/submit'], ['POST', '/hr/advance-sheets/\\d+/post'],

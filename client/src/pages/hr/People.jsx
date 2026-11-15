@@ -38,6 +38,8 @@ function tally(rows, pick) {
 
 export default function People({ level }) {
   const canEdit = levelAtLeast(level, 'operator');
+  // Accounts flips holiday / OT and uses the row menu (activate, deactivate, delete) too (2026-11-15).
+  const canToggle = levelAtLeast(level, 'accounts');
   const toast = useToast();
   // OT hours a day, set right in the list (Off · 6 h · 8 h · Other) — the person's current pay setup, switched in place.
   const [otBusy, setOtBusy] = useState(null);
@@ -161,12 +163,12 @@ export default function People({ level }) {
       export: r => (r.current_setup ? baseText(r.current_setup) : 'No pay setup') },
     { key: 'ot', label: 'OT hours a day', align: 'right', card: 'metric',
       sortValue: r => r.current_setup?.ot_hours_per_day ?? null,
-      render: r => (canEdit && r.current_setup
+      render: r => (canToggle && r.current_setup
         ? <span onClick={e => e.stopPropagation()}><OtDayPicker size="sm" value={r.current_setup.ot_hours_per_day} disabled={otBusy === r.id} onPick={h => setOt(r, h)} /></span>
         : numText(r.current_setup?.ot_hours_per_day)),
       export: r => (Number(r.current_setup?.ot_hours_per_day || 0) > 0 ? numText(r.current_setup.ot_hours_per_day) : 'Off') },
     { key: 'holiday', label: 'Holiday', card: 'detail', sortValue: r => holidayText(r.current_setup),
-      render: r => (canEdit && r.current_setup ? (
+      render: r => (canToggle && r.current_setup ? (
         <span className="flex items-center gap-2 whitespace-nowrap" onClick={e => e.stopPropagation()}>
           <Switch on={holidayOn(r.current_setup)} disabled={holBusy === r.id} label={`Holiday pay for ${r.name}`} onClick={() => flipHoliday(r)} />
           <span className="text-[11px] text-[#6E6E73]">{holidayText(r.current_setup)}</span>
@@ -175,9 +177,9 @@ export default function People({ level }) {
     { key: 'bank_last4', label: 'Bank', card: 'detail',
       render: r => (r.bank_last4 ? <span className="whitespace-nowrap font-mono text-xs">•••• {r.bank_last4}</span> : '—'),
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
-    ...(canEdit ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
+    ...(canToggle ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
       render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
-  ], [labelOf, openPerson, canEdit, actions.items, otBusy, setOt, holBusy, flipHoliday]);
+  ], [labelOf, openPerson, canEdit, canToggle, actions.items, otBusy, setOt, holBusy, flipHoliday]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';

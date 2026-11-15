@@ -313,7 +313,7 @@ function CancelLoanDialog({ loan, onClose, onDone }) {
 }
 
 function LoanDrawer({ id, level, onClose, onChanged }) {
-  const canOperate = levelAtLeast(level, 'operator');
+  const canOperate = levelAtLeast(level, 'accounts'); // accounts too (2026-11-15)
   const [d, setD] = useState(null);
   const [failed, setFailed] = useState(false);
   const [dialog, setDialog] = useState(null);
@@ -414,7 +414,7 @@ function LoanDrawer({ id, level, onClose, onChanged }) {
 const loansFetch = () => hrApi.loans();
 
 function LoansTab({ level, people }) {
-  const canOperate = levelAtLeast(level, 'operator');
+  const canOperate = levelAtLeast(level, 'accounts'); // accounts too (2026-11-15)
   const [rows, load, failed] = useList(loansFetch);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('active');
@@ -698,7 +698,7 @@ function AdjustmentActionDialog({ adjustment, action, onClose, onDone }) {
 }
 
 function AdjustmentsTab({ level, people }) {
-  const canOperate = levelAtLeast(level, 'operator');
+  const canOperate = levelAtLeast(level, 'accounts'); // accounts too (2026-11-15)
   const canApprove = levelAtLeast(level, 'approver');
   const [month, setMonth] = useState('');
   const fetcher = useCallback(() => hrApi.adjustments(month || undefined), [month]);

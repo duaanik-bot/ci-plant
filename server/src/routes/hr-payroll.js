@@ -1588,7 +1588,8 @@ r.post('/hr/runs/:month/inputs/unlock', requireHr('accounts'), inputsLockRoute('
 
 // ── POST /hr/runs/:month/recalc ─────────────────────────────────────────────
 
-r.post('/hr/runs/:month/recalc', requireHr('operator'), async (req, res, next) => {
+// Accounts and up (owner, 2026-11-15: "once payroll is made, accounts should be able to submit for approval").
+r.post('/hr/runs/:month/recalc', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const run = await tx(async (qc) => {
@@ -1607,7 +1608,7 @@ r.post('/hr/runs/:month/recalc', requireHr('operator'), async (req, res, next) =
 
 const payrollLink = (month) => `/hr?tab=payroll&month=${month}`;
 
-r.post('/hr/runs/:month/submit', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/runs/:month/submit', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const userId = userIdOf(req);

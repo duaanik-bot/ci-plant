@@ -460,9 +460,11 @@ async function insertLoan(qc, oc, req, loan) {
   return made;
 }
 
-r.post('/hr/loans', requireHr('operator'), async (req, res, next) => {
+// Accounts and up (owner, 2026-11-15: accounts gives loans and can cancel / delete them), for people it can see.
+r.post('/hr/loans', requireHr('accounts'), async (req, res, next) => {
   try {
     const loan = readNewLoan(bodyOf(req));
+    assertPayVisible(req, loan.personId);
     const id = await tx(async (qc, oc) => {
       return withImpact(qc, req, [loan.personId], loan.firstDue ?? null, 'A new loan', async () => {
         const made = await insertLoan(qc, oc, req, loan);
@@ -499,8 +501,9 @@ const loanPersonOf = async (qc, id) => (await qc(`SELECT person_id FROM hr.loans
 
 // Taking money back before payroll does: at most what is outstanding. A prepayment that brings the loan to 0
 // closes it, as a finalise that pays it off does.
-r.post('/hr/loans/:id/prepay', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/loans/:id/prepay', requireHr('accounts'), async (req, res, next) => {
   try {
+    assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     const id = idOf(req.params.id, 'Loan');
     const body = bodyOf(req);
     const amount = positiveOf(body.amount, 'The prepayment');
@@ -585,15 +588,17 @@ async function changeHold(req, hold) {
   return { ...view, ...(warning ? { warning } : {}), run_recalculated: recalculated };
 }
 
-r.post('/hr/loans/:id/holiday', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/loans/:id/holiday', requireHr('accounts'), async (req, res, next) => {
   try {
+    assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     res.json(await changeHold(req, true));
   } catch (e) { next(refusal(e)); }
 });
 
 // Deduct after all: the hold on that month is released. Releasing a month with no hold is the same as done.
-r.delete('/hr/loans/:id/holiday/:month', requireHr('operator'), async (req, res, next) => {
+r.delete('/hr/loans/:id/holiday/:month', requireHr('accounts'), async (req, res, next) => {
   try {
+    assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     res.json(await changeHold(req, false));
   } catch (e) { next(refusal(e)); }
 });
@@ -637,8 +642,9 @@ r.get('/hr/loan-holds', requireHr('viewer'), async (req, res, next) => {
 
 // One instalment per loan, so the new value is what every payroll not yet finalised takes. from_month is
 // audited with the old value; a warning comes back when it is later than the first payroll that could use it.
-r.put('/hr/loans/:id/instalment', requireHr('operator'), async (req, res, next) => {
+r.put('/hr/loans/:id/instalment', requireHr('accounts'), async (req, res, next) => {
   try {
+    assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     const id = idOf(req.params.id, 'Loan');
     const body = bodyOf(req);
     const instalment = positiveOf(body.instalment, 'The instalment');
@@ -791,8 +797,9 @@ r.put('/hr/loans/:id/month-instalment', requireHr('accounts'), async (req, res, 
 
 // Only while nothing has been taken back: no payroll recovery and no prepayment. What was lent is then
 // reversed by an adjustment row, so a cancelled loan reads 0.00 wherever it is summed.
-r.post('/hr/loans/:id/cancel', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/loans/:id/cancel', requireHr('accounts'), async (req, res, next) => {
   try {
+    assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     const id = idOf(req.params.id, 'Loan');
     await tx(async (qc, oc) => {
       return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'Cancelling a loan', async () => {
@@ -1606,9 +1613,10 @@ r.get('/hr/adjustments', requireHr('viewer'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/hr/adjustments', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/adjustments', requireHr('accounts'), async (req, res, next) => {
   try {
     const a = readAdjustment(bodyOf(req));
+    assertPayVisible(req, a.personId);
     const id = await tx(async (qc, oc) => {
       if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [a.personId]))) throw bad('That person does not exist');
       const made = await oc(
@@ -1644,9 +1652,10 @@ r.post('/hr/adjustments/:id/approve', requireHr('approver'), async (req, res, ne
   } catch (e) { next(refusal(e)); }
 });
 
-r.post('/hr/adjustments/:id/cancel', requireHr('operator'), async (req, res, next) => {
+r.post('/hr/adjustments/:id/cancel', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Adjustment');
+    assertPayVisible(req, (await q(`SELECT person_id FROM hr.adjustments WHERE id = $1`, [id]))[0]?.person_id ?? null);
     await tx(async (qc, oc) => {
       const a = await oc(
         `SELECT id, person_id, status, start_month, end_month FROM hr.adjustments WHERE id = $1 FOR UPDATE`, [id]);

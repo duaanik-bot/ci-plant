@@ -1315,8 +1315,9 @@ export default function Payroll({ level }) {
                 <UserPlus size={14} /> New person
               </Button>
             )}
-            {status === 'draft' && canOperate && <Button variant="secondary" onClick={recalc}><Calculator size={14} /> Recalculate</Button>}
-            {status === 'draft' && canOperate && (
+            {/* Accounts too (owner, 2026-11-15): once the month is made, accounts sends it for approval. */}
+            {status === 'draft' && canPay && <Button variant="secondary" onClick={recalc}><Calculator size={14} /> Recalculate</Button>}
+            {status === 'draft' && canPay && (
               <Button onClick={() => setDialog({ kind: 'submit' })} disabled={submitBlocked}><Send size={14} /> Submit for approval</Button>
             )}
             {(status === 'submitted' || status === 'approved') && canApprove && (
