@@ -147,6 +147,8 @@ export const hrApi = {
   // answers { setup, recalculated: [months], not_recalculated: [{month, status}] }.
   // POST /hr/people/:id/pay-channel — accounts and up. { pay_channel: code | null }: the person's channel, and their
   // unpaid lines in open months.
+  // POST /hr/people/:id/parent — accounts and up. { parent_id | null }: make the person a sub-account of another.
+  setParent: (personId, parentId) => api.post(`/hr/people/${seg(personId)}/parent`, { parent_id: parentId ?? null }),
   setPayChannel: (personId, code) => api.post(`/hr/people/${seg(personId)}/pay-channel`, { pay_channel: code || null }),
   setPaySwitches: (personId, setupId, change) => api.post(`/hr/people/${seg(personId)}/setups/${seg(setupId)}/switches`, change),
   // POST /hr/people/:id/aliases — operator. `alias` is the spelling to remember.

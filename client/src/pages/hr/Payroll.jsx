@@ -888,6 +888,7 @@ export default function Payroll({ level }) {
           <button type="button" onClick={() => openDrawer(r.id)} className="block max-w-[220px] text-left">
             <span className="block truncate text-sm font-semibold text-[#1D1D1F] hover:text-[#007AFF]">{r.name}</span>
             {r.code && <span className="block truncate font-mono text-[11px] text-[#86868B]">{r.code}</span>}
+            {r.person?.parent_id != null && <span className="block truncate text-[11px] font-semibold text-[#0064D2]">↳ Sub-account of {peopleById.get(r.person.parent_id)?.name || `#${r.person.parent_id}`}</span>}
           </button>
         )) },
       { key: 'department', label: 'Department', card: 'subtitle', render: r => (r._total ? '' : r.department || '—') },
@@ -992,7 +993,7 @@ export default function Payroll({ level }) {
           </span>
         ) : <FlagDots flags={r.flags} />) },
     ];
-  }, [openDrawer, showPaidSep, approvable, canApprove, rowBusy, approveOne, canPay, final, channels, load]);
+  }, [openDrawer, showPaidSep, approvable, canApprove, rowBusy, approveOne, canPay, final, channels, load, peopleById]);
 
   // ── Export: every component in its own column; grouped views export one section per group ──
   const exportSpec = useCallback(sorted => {

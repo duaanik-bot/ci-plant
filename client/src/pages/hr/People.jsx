@@ -9,7 +9,8 @@
 // reaches an operator's drawer, nowhere else). Pay figures are formatted here, never summed.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Plus } from 'lucide-react';
-import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset, useToast } from '../../components/ui.jsx';
+import { ActionMenu, Button, DataTable, Modal, ResetFilters, Select, rowMatches, useFilterReset, useToast } from '../../components/ui.jsx';
+import { Link2 } from 'lucide-react';
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { OtDayPicker, Switch, holidayOn } from './PaySwitches.jsx';
@@ -136,6 +137,34 @@ export default function People({ level }) {
     },
   });
 
+  // Sub-accounts (2026-11-15): "Gangadhari is the sub account of Jiut". A sub-account keeps its own line; what its pay
+  // cannot cover is taken from the main account's pay. Set from the row menu.
+  const byId = useMemo(() => new Map(all.map(p => [p.id, p])), [all]);
+  const subsOf = useMemo(() => {
+    const m = new Map();
+    for (const p of all) if (p.parent_id != null) m.set(p.parent_id, [...(m.get(p.parent_id) || []), p]);
+    return m;
+  }, [all]);
+  const [linking, setLinking] = useState(null); // { person, parent }
+  const [linkBusy, setLinkBusy] = useState(false);
+  const saveLink = async () => {
+    if (!linking) return;
+    setLinkBusy(true);
+    try {
+      const res = await hrApi.setParent(linking.person.id, linking.parent ? Number(linking.parent) : null);
+      const main = linking.parent ? byId.get(Number(linking.parent)) : null;
+      const months = Array.isArray(res?.months) ? res.months : [];
+      toast.success(`${linking.person.name}: ${main ? `sub-account of ${main.name}` : 'its own account again'}${months.length ? ` — ${months.map(monthLabel).join(', ')} worked out again` : ''}`);
+      setLinking(null);
+      await load();
+    } catch { /* refused — the central toast says why */ } finally { setLinkBusy(false); }
+  };
+  const rowItems = useCallback(r => [
+    ...actions.items(r),
+    ...(canToggle && !r.pay_hidden && !subsOf.has(r.id) ? [{ key: 'parent', label: r.parent_id != null ? 'Change main account…' : 'Make sub-account of…', icon: Link2,
+      onClick: () => setLinking({ person: r, parent: r.parent_id != null ? String(r.parent_id) : '' }) }] : []),
+  ], [actions.items, canToggle, subsOf]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const openPerson = useCallback(r => setDrawer({ id: r.id, seed: r, key: ++drawerKey.current }), []);
   const addPerson = () => setDrawer({ id: null, seed: null, key: ++drawerKey.current });
 
@@ -147,6 +176,8 @@ export default function People({ level }) {
         <button type="button" onClick={() => openPerson(r)} className="block max-w-[240px] text-left">
           <span className="block truncate text-sm font-semibold text-[#1D1D1F] hover:text-[#007AFF]">{r.name}</span>
           {r.designation && <span className="block truncate text-[11px] text-[#86868B]">{r.designation}</span>}
+          {r.parent_id != null && <span className="block truncate text-[11px] font-semibold text-[#0064D2]">↳ Sub-account of {byId.get(r.parent_id)?.name || `#${r.parent_id}`}</span>}
+          {subsOf.has(r.id) && <span className="block truncate text-[11px] font-semibold text-[#0064D2]">+ {subsOf.get(r.id).map(s => s.name).join(', ')} (sub-account)</span>}
         </button>
       ) },
     { key: 'department', label: 'Department', render: r => r.department || '—', export: r => r.department || '' },
@@ -181,8 +212,8 @@ export default function People({ level }) {
       render: r => (r.bank_last4 ? <span className="whitespace-nowrap font-mono text-xs">•••• {r.bank_last4}</span> : '—'),
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
     ...(canToggle ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
-      render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
-  ], [labelOf, openPerson, canEdit, canToggle, channels, load, actions.items, otBusy, setOt, holBusy, flipHoliday]);
+      render: r => <ActionMenu items={rowItems(r)} label={`Actions for ${r.name}`} /> }] : []),
+  ], [labelOf, openPerson, canEdit, canToggle, channels, load, actions.items, rowItems, byId, subsOf, otBusy, setOt, holBusy, flipHoliday]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';
@@ -263,6 +294,22 @@ export default function People({ level }) {
       )}
 
       {actions.node}
+      {linking && (
+        <Modal open size="md" onClose={() => setLinking(null)} title={`${linking.person.name} — main account`}>
+          <p className="mb-2 text-sm text-[#515154]">
+            A sub-account keeps its own bill and pay. Whatever its pay cannot cover — its advance or loan instalment — is taken
+            from the main account’s pay the same month, and both show together.
+          </p>
+          <Select value={linking.parent} placeholder="No main account (its own account)"
+            options={all.filter(p => p.id !== linking.person.id && p.parent_id == null && p.status === 'active' && !p.pay_hidden)
+              .map(p => ({ value: String(p.id), label: [p.name, p.code, p.department].filter(Boolean).join(' · ') }))}
+            onChange={e => setLinking(l => ({ ...l, parent: e.target.value || '' }))} />
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setLinking(null)}>Cancel</Button>
+            <Button onClick={saveLink} disabled={linkBusy}>{linkBusy ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </Modal>
+      )}
       {drawer && (
         <PersonDrawer key={drawer.key} id={drawer.id} seed={drawer.seed} level={level} channels={channels}
           onClose={() => setDrawer(null)} onChanged={load} />

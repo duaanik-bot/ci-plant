@@ -51,7 +51,7 @@ import { normCode, normName } from '../hr/match.js';
 import { assertAliasFree, assertNameFree, lockNames } from '../hr/names.js';
 import { add, cmp, fmtPaise, rat, toPaise } from '../hr/money.js';
 import { paymentTotals } from '../hr/payment-status.js';
-import { recalcRun, totalsOf } from '../hr/runs.js';
+import { recalcRun, refreshPersonLine, totalsOf } from '../hr/runs.js';
 
 const r = Router();
 
@@ -201,7 +201,7 @@ const BANK_LAST4 = `NULLIF(right(regexp_replace(COALESCE(p.bank_account, ''), '[
 
 const LIST_COLS = `p.id, p.code, p.name, p.display_name, p.department, p.designation, p.worker_type, p.status,
   p.pay_channel, p.joined_on::text AS joined_on, p.exited_on::text AS exited_on, ${BANK_LAST4} AS bank_last4,
-  p.employee_id`;
+  p.employee_id, p.parent_id`;
 
 // Every person column but the numbers that identify or pay someone: the bank account, PAN, PF UAN and ESI
 // number. Operator and above are given those whole (SECRETS_FULL); a viewer is given only the end of the
@@ -908,6 +908,49 @@ r.post('/hr/people/:id/setups', requireHr('operator'), async (req, res, next) =>
 // (2026-11-14: then the switch goes on a revision from the first open month, revision_from). Every draft month the setup covers is
 // worked out again for this person at once; a submitted / approved month is listed in `not_recalculated` (send it
 // back to apply the change; finalising it would refuse, because the line no longer matches its inputs).
+// ── POST /hr/people/:id/parent — make a person a sub-account of another (owner's request 2026-11-15) ─────────
+// "Consolidate Jiut Paswan and Gangadhari Paswan — Gangadhari is the sub account of Jiut." { parent_id: id | null },
+// accounts and up, both people visible to the login. One level: the main account is not itself a sub-account, and a
+// person with sub-accounts cannot become one. The open payroll months (draft or submitted) are worked out again for
+// the family, so what the sub-account's pay cannot cover moves onto the main account's line at once (a submitted
+// line whose money moves loses its approval, as any change does). Answers { person_id, parent_id, months }.
+r.post('/hr/people/:id/parent', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const personId = idOf(req.params.id, 'Person');
+    const body = bodyOf(req);
+    const parentId = body.parent_id === null || body.parent_id === undefined || body.parent_id === '' ? null : idOf(body.parent_id, 'Main account');
+    if (!canSeePay(req, personId) || (parentId !== null && !canSeePay(req, parentId))) throw notThere('Person');
+    if (parentId === personId) throw bad('A person cannot be their own sub-account');
+    const out = await tx(async (qc, oc) => {
+      const runs = await qc(`SELECT month FROM hr.runs WHERE status IN ('draft', 'submitted') ORDER BY month FOR UPDATE`);
+      const ids = [personId, parentId].filter((x) => x !== null).sort((a, b) => a - b);
+      const rows = await qc(`SELECT id, name, parent_id FROM hr.people WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids]);
+      const me = rows.find((r) => r.id === personId);
+      if (!me) throw missing('Person');
+      const was = me.parent_id;
+      if (parentId !== null) {
+        const main = rows.find((r) => r.id === parentId);
+        if (!main) throw missing('Main account');
+        if (main.parent_id !== null) throw bad(`${main.name} is itself a sub-account: choose its main account instead`);
+        const [subs] = await qc(`SELECT count(*)::int AS n FROM hr.people WHERE parent_id = $1`, [personId]);
+        if (subs.n > 0) throw bad(`${me.name} has sub-accounts of their own, so cannot become one`);
+      }
+      if (was === parentId) return { person_id: personId, parent_id: parentId, months: [] };
+      await qc(`UPDATE hr.people SET parent_id = $2 WHERE id = $1`, [personId, parentId]);
+      await hrAudit(qc, req, 'person', personId, 'parent', { from: was, to: parentId });
+      const months = [];
+      for (const r of runs) {
+        for (const id of new Set([parentId, was].filter((x) => x !== null))) {
+          const done = await refreshPersonLine(qc, req, r.month, id, `Sub-account ${me.name} ${parentId === null ? 'unlinked' : 'linked'}`);
+          if (done && done !== 'paid' && !months.includes(r.month)) months.push(r.month);
+        }
+      }
+      return { person_id: personId, parent_id: parentId, months };
+    });
+    res.json(out);
+  } catch (e) { next(refusal(e)); }
+});
+
 // ── POST /hr/people/:id/pay-channel — the person's pay channel, from a dropdown (owner's request 2026-11-15) ─────
 // "Give options to enter or change the pay channel — a dropdown in payroll itself, in People, and at master creation
 // while importing." { pay_channel: code | null }, accounts and up, a person whose pay the login can see. The person's

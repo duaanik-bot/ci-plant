@@ -330,6 +330,7 @@ async function loadContext(qc, run, policy, scope) {
 
   const people = await qc(
     `SELECT p.id, p.status, p.joined_on::text AS joined_on, p.exited_on::text AS exited_on, p.pay_channel,
+            p.parent_id, coalesce(nullif(btrim(p.display_name), ''), p.name) AS shown_name,
             c.kind AS pay_channel_kind,
             (coalesce(btrim(p.bank_account), '') <> '' AND coalesce(btrim(p.bank_ifsc), '') <> '') AS has_bank_details
        FROM hr.people p
@@ -338,6 +339,14 @@ async function loadContext(qc, run, policy, scope) {
     [ids],
   );
   ctx.people = new Map(people.map((p) => [p.id, p]));
+  // Sub-accounts (2026-11-15): main account id → its sub-accounts in this run, each worked out before it.
+  ctx.subsOf = new Map();
+  for (const p of people) {
+    if (p.parent_id !== null && p.parent_id !== undefined && ctx.people.has(p.parent_id)) {
+      if (!ctx.subsOf.has(p.parent_id)) ctx.subsOf.set(p.parent_id, []);
+      ctx.subsOf.get(p.parent_id).push(p.id);
+    }
+  }
   ctx.setups = groupBy(await qc(
     `SELECT id, person_id, effective_from::text AS effective_from, pay_basis, base::text AS base, absence_basis,
             absence_divisor::text AS absence_divisor, ot_hours_per_day::text AS ot_hours_per_day,
@@ -376,7 +385,7 @@ async function loadContext(qc, run, policy, scope) {
 
 // One person's line. Whatever stops it (input the engine refuses, a figure too large to store) stops only
 // this line: it is stored with zero amounts and the block flag ENGINE_ERROR.
-function computeOne(ctx, personId) {
+function computeOne(ctx, personId, extra = []) {
   let setupId = null;
   let hash = null;
   try {
@@ -399,7 +408,7 @@ function computeOne(ctx, personId) {
       setup: setupRow ? engineSetup(setupRow, ctx.policy) : null,
       inputs: engineInputs(row, advance),
       balances: { advance: ctx.advances.get(personId) ?? money(ZERO), loans: ctx.loans.get(personId) ?? [] },
-      adjustments: (ctx.adjustments.get(personId) ?? []).map(engineAdjustment),
+      adjustments: [...(ctx.adjustments.get(personId) ?? []).map(engineAdjustment), ...extra],
       policy: enginePolicy(ctx.policy),
     };
     hash = linesHash({ engine_version: ENGINE_VERSION, ...engineInput });
@@ -507,16 +516,69 @@ export async function ensureRun(qc, month, userId) {
 // are recomputed after their inputs were typed again, under the run's frozen policy (submit froze it), and the run
 // stays submitted. Only with personIds; the caller undoes those people's line approvals. Finalise still recomputes
 // every line and compares it with the stored one, so a line stored here is exactly what finalise expects.
+// ── Sub-accounts (owner's request 2026-11-15) ────────────────────────────────────────────────────────────
+// "Gangadhari is the sub account of Jiut": a sub-account keeps its own line, and what its pay could not cover —
+// the advance and loan instalments it owed — is taken from its main account's pay the same month, as deductions
+// on the main account's line with the codes ADJ:SUB<sub id>-ADV and ADJ:SUB<sub id>-LN<loan id>. At finalise
+// those amounts are posted to the sub-account's own advance and loan ledgers, with its own recovery.
+const SUB_CODE = /^ADJ:SUB(\d+)-(ADV|LN(\d+))$/;
+export const subCodeOf = (code) => {
+  const m = SUB_CODE.exec(String(code ?? ''));
+  return m ? { subId: Number(m[1]), loanId: m[3] ? Number(m[3]) : null } : null;
+};
+
+// Every line of a run's people: sub-accounts and stand-alone people first, then each main account with what
+// its sub-accounts left uncovered.
+function computeAll(ctx) {
+  const lines = new Map();
+  for (const id of ctx.ids) if (!ctx.subsOf.has(id)) lines.set(id, computeOne(ctx, id));
+  for (const id of ctx.ids) {
+    if (!ctx.subsOf.has(id)) continue;
+    const extra = [];
+    for (const sub of ctx.subsOf.get(id)) {
+      const u = lines.get(sub)?.unrecovered;
+      const who = ctx.people.get(sub)?.shown_name ?? `#${sub}`;
+      if (!u) continue;
+      if (paise(u.advance) > 0n) {
+        extra.push({ id: `SUB${sub}-ADV`, kind: 'deduction', amount: money(u.advance),
+          label: `Sub-account ${who}: advance its pay did not cover` });
+      }
+      for (const l of u.loans ?? []) {
+        if (paise(l.amount) > 0n) {
+          extra.push({ id: `SUB${sub}-LN${l.loan_id}`, kind: 'deduction', amount: money(l.amount),
+            label: `Sub-account ${who}: loan instalment its pay did not cover` });
+        }
+      }
+    }
+    lines.set(id, computeOne(ctx, id, extra));
+  }
+  return ctx.ids.map((id) => lines.get(id));
+}
+
+// A scope widened to whole families: a main account is worked out with its sub-accounts, and a sub-account's
+// change moves its main account's line.
+async function withFamily(qc, scope) {
+  if (scope === null) return null;
+  if (!scope.length) return scope;
+  const rows = await qc(
+    `SELECT id FROM hr.people
+      WHERE id = ANY($1::int[]) OR parent_id = ANY($1::int[])
+         OR id IN (SELECT parent_id FROM hr.people WHERE id = ANY($1::int[]) AND parent_id IS NOT NULL)
+         OR parent_id IN (SELECT parent_id FROM hr.people WHERE id = ANY($1::int[]) AND parent_id IS NOT NULL)`,
+    [scope]);
+  return [...new Set([...scope, ...rows.map((r) => r.id)])].sort((a, b) => a - b);
+}
+
 export async function recalcRun(qc, run, { personIds, submitted = false } = {}) {
   const runId = runIdOf(run);
-  let scope = personIds === undefined || personIds === null ? null : idsOf(personIds);
+  let scope = await withFamily(qc, personIds === undefined || personIds === null ? null : idsOf(personIds));
   const locked = await lockRun(qc, runId);
   const inSubmitted = submitted && locked.status === 'submitted' && scope !== null;
   if (locked.status !== 'draft' && !inSubmitted) throw fail(409, 'RUN_LOCKED', 'Run is not a draft');
 
   if (inSubmitted) {
     const ctx = await loadContext(qc, locked, locked.policy ?? {}, scope);
-    const lines = ctx.ids.map((id) => computeOne(ctx, id));
+    const lines = computeAll(ctx);
     await qc(
       `DELETE FROM hr.run_lines WHERE run_id = $1 AND person_id <> ALL($2::int[]) AND person_id = ANY($3::int[])`,
       [locked.id, ctx.ids, scope],
@@ -530,7 +592,7 @@ export async function recalcRun(qc, run, { personIds, submitted = false } = {}) 
   const policy = await currentPolicy(qc);
   if (canonical(policy) !== canonical(locked.policy ?? {}) || locked.engine_version !== ENGINE_VERSION) scope = null;
   const ctx = await loadContext(qc, locked, policy, scope);
-  const lines = ctx.ids.map((id) => computeOne(ctx, id));
+  const lines = computeAll(ctx);
 
   await qc(
     `DELETE FROM hr.run_lines
@@ -652,10 +714,10 @@ export async function finaliseRun(qc, run, req) {
   }
 
   const ctx = await loadContext(qc, locked, locked.policy ?? {}, null);
-  const fresh = new Map(ctx.ids.map((id) => [id, computeOne(ctx, id)]));
+  const fresh = new Map(computeAll(ctx).map((l) => [l.person_id, l]));
   const stored = await qc(
     `SELECT person_id, inputs_hash, payable::text AS payable, advance_given::text AS advance_given,
-            advance_recovery::text AS advance_recovery, loan_recoveries
+            advance_recovery::text AS advance_recovery, loan_recoveries, breakdown
        FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`,
     [locked.id],
   );
@@ -674,24 +736,38 @@ export async function finaliseRun(qc, run, req) {
       { person_ids: blocked });
   }
 
-  // The approved lines, which the recompute has just matched, are what is posted.
+  // The approved lines, which the recompute has just matched, are what is posted. What a main account's pay
+  // covered for a sub-account (ADJ:SUB… deductions) is posted to the sub-account's ledgers, in the same one row
+  // per person / loan as its own recovery (the run-once keys allow one).
   const advanceRows = [];
-  const loanRows = [];
+  const recovered = new Map();   // person id → { own, sub } paise
+  const loanBy = new Map();      // loan id → { own, sub } paise
+  const add = (map, key, part, v) => {
+    if (!map.has(key)) map.set(key, { own: 0n, sub: 0n });
+    map.get(key)[part] += v;
+  };
   for (const l of stored) {
     if (paise(l.advance_given) > 0n) {
       advanceRows.push({ person_id: l.person_id, kind: 'given', amount: money(l.advance_given),
         note: `Payroll ${locked.month}: advance from the month's sheet` });
     }
-    if (paise(l.advance_recovery) > 0n) {
-      advanceRows.push({ person_id: l.person_id, kind: 'recovered', amount: money(l.advance_recovery),
-        note: `Payroll ${locked.month}: recovered from pay` });
-    }
-    for (const r of l.loan_recoveries ?? []) {
-      if (paise(r.amount) > 0n) {
-        loanRows.push({ loan_id: r.loan_id, amount: money(r.amount), note: `Payroll ${locked.month}: instalment recovered from pay` });
-      }
+    if (paise(l.advance_recovery) > 0n) add(recovered, l.person_id, 'own', paise(l.advance_recovery));
+    for (const r of l.loan_recoveries ?? []) if (paise(r.amount) > 0n) add(loanBy, r.loan_id, 'own', paise(r.amount));
+    for (const b of Array.isArray(l.breakdown) ? l.breakdown : []) {
+      const sub = subCodeOf(b?.code);
+      if (!sub || !(paise(b.amount) > 0n)) continue;
+      if (sub.loanId === null) add(recovered, sub.subId, 'sub', paise(b.amount));
+      else add(loanBy, sub.loanId, 'sub', paise(b.amount));
     }
   }
+  const noteOf = (v, what) => `Payroll ${locked.month}: ${what}${v.sub > 0n
+    ? `${v.own > 0n ? ` (${fmtPaise(v.sub)} of it from the main account's pay)` : ' from the main account\'s pay'}` : ''}`;
+  for (const [personId, v] of recovered) {
+    advanceRows.push({ person_id: personId, kind: 'recovered', amount: fmtPaise(v.own + v.sub),
+      note: noteOf(v, 'recovered from pay') });
+  }
+  const loanRows = [...loanBy].map(([loanId, v]) => ({ loan_id: loanId, amount: fmtPaise(v.own + v.sub),
+    note: noteOf(v, 'instalment recovered from pay') }));
   const userId = idOrNull(req?.user?.id);
   const monthEnd = `${locked.month}-${String(daysInMonthOf(locked.month)).padStart(2, '0')}`;
   const advances = advanceRows.length
