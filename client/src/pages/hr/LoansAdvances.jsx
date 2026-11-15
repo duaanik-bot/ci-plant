@@ -177,7 +177,8 @@ function NewLoanDialog({ people, onClose, onDone }) {
   const toast = useToast();
   const [f, setF] = useState(() => ({
     person_id: '', principal: '', issued_on: plantToday(), purpose: '', instalment: '',
-    first_due_month: shiftMonth(plantMonth(), 1), paid_via: '', is_opening: false,
+    // The payroll the first instalment is cut from (2026-11-15): the one being settled, last month, by default.
+    first_due_month: shiftMonth(plantMonth(), -1), paid_via: '', is_opening: false,
   }));
   const set = (k, v) => setF(c => ({ ...c, [k]: v }));
   const submit = async () => {
@@ -187,8 +188,7 @@ function NewLoanDialog({ people, onClose, onDone }) {
     const instalment = amountCheck(f.instalment, 'the monthly instalment');
     if (instalment.error) return instalment.error;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.issued_on)) return 'Enter the date the loan was issued.';
-    if (!MONTH_RE.test(f.first_due_month)) return 'Choose the first month an instalment is due.';
-    if (f.first_due_month < f.issued_on.slice(0, 7)) return 'The first instalment cannot fall due before the month the loan was issued.';
+    if (!MONTH_RE.test(f.first_due_month)) return 'Choose the payroll month the first instalment is cut from.';
     const loan = await hrApi.createLoan({
       person_id: Number(f.person_id), principal: principal.value, issued_on: f.issued_on, purpose: f.purpose.trim() || null,
       instalment: instalment.value, first_due_month: f.first_due_month, paid_via: f.paid_via.trim() || null, is_opening: f.is_opening,
@@ -205,7 +205,9 @@ function NewLoanDialog({ people, onClose, onDone }) {
         <Field label="Issued on" required><Input type="date" value={f.issued_on} onChange={e => set('issued_on', e.target.value)} /></Field>
         <Field label="Paid out via" hint="e.g. cash, or the bank it went from."><Input autoComplete="off" value={f.paid_via} onChange={e => set('paid_via', e.target.value)} /></Field>
         <Field label="Monthly instalment (₹)" required><Input inputMode="decimal" autoComplete="off" value={f.instalment} onChange={e => set('instalment', e.target.value)} /></Field>
-        <Field label="First instalment month" required hint="Taken from that month’s pay."><Input type="month" value={f.first_due_month} onChange={e => set('first_due_month', e.target.value)} /></Field>
+        <Field label="Start deducting from the payroll of" required
+          hint={MONTH_RE.test(f.first_due_month) ? `${monthLabel(f.first_due_month)} payroll — the salary paid in ${monthLabel(shiftMonth(f.first_due_month, 1))}` : 'In November, October’s salary is paid: choose October to cut it from that pay.'}>
+          <Input type="month" value={f.first_due_month} onChange={e => set('first_due_month', e.target.value)} /></Field>
         <Field label="Purpose" className="sm:col-span-2"><Input autoComplete="off" value={f.purpose} onChange={e => set('purpose', e.target.value)} /></Field>
         <div className="sm:col-span-2">
           <Checkbox label="This is an opening balance (a loan already running before HR & Payroll)" checked={f.is_opening} onChange={e => set('is_opening', e.target.checked)} />

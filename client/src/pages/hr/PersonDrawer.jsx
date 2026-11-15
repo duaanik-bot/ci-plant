@@ -585,7 +585,7 @@ function MoneyTab({ person, pid }) {
                   <th className={`${TH} text-right`}>Principal</th>
                   <th className={`${TH} text-right`}>Outstanding</th>
                   <th className={`${TH} text-right`}>Instalment</th>
-                  <th className={TH}>First due</th>
+                  <th className={TH}>First payroll</th>
                   <th className={TH}>Status</th>
                 </tr>
               </thead>

@@ -537,6 +537,16 @@ describe('payroll runs on a real Postgres', {
     assert.deepEqual(views.loansAsAt.get(B), [], 'a loan issued in December is not in November');
     assert.deepEqual(views.loansNow.get(B), [{ loan_id: loanDec, loan_no: 'CI-LN-0003', due: '400.00', outstanding: '1200.00' }]);
 
+    // Given in December but CHOSEN for the November payroll (owner, 2026-11-15: settling a month in the next one):
+    // November takes its first instalment, from its full amount.
+    const chosen = (await db.one(`INSERT INTO hr.loans (loan_no, person_id, principal, issued_on, instalment, first_due_month)
+                                  VALUES ('CI-LN-0099', $1, 900, '2026-12-04', 300, '2026-11') RETURNING id`, [B])).id;
+    await db.q(`INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount) VALUES ($1, '2026-12-04', 'disbursed', 900)`, [chosen]);
+    assert.deepEqual((await db.tx((qc) => ledger.loanPositions(qc, [B], '2026-11', '2026-11'))).get(B),
+      [{ loan_id: chosen, loan_no: 'CI-LN-0099', due: '300.00', outstanding: '900.00' }], 'chosen for November: in November');
+    await db.q(`DELETE FROM hr.loan_txns WHERE loan_id = $1`, [chosen]);
+    await db.q(`DELETE FROM hr.loans WHERE id = $1`, [chosen]);
+
     const done = await finalise(november);
     assert.equal(done.status, 'finalised', 'no RUN_CHANGED_SINCE_APPROVAL');
     assert.deepEqual(await hashes(november), approved);

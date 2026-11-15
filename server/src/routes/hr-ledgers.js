@@ -420,8 +420,12 @@ function readNewLoan(body) {
   const issuedOn = dateOf(body.issued_on, 'The issue date');
   if (issuedOn === null) throw bad('The issue date is required');
   const instalment = positiveOf(body.instalment, 'The instalment');
-  const firstDue = monthOf(body.first_due_month, 'The first month an instalment is due');
-  if (firstDue < issuedOn.slice(0, 7)) throw bad('The first instalment cannot fall due before the month the loan was issued');
+  // The payroll the first instalment is cut from. It may be the month before the loan was given (2026-11-15: in
+  // November, October's payroll is settled); no earlier.
+  const firstDue = monthOf(body.first_due_month, 'The payroll the first instalment is cut from');
+  if (firstDue < prevMonthOf(issuedOn.slice(0, 7))) {
+    throw bad('The first instalment can be cut from the payroll of the month before the loan was given at the earliest');
+  }
   return {
     personId,
     principal,
@@ -989,9 +993,9 @@ function readStaffPayment(body) {
   if (kind === 'loan') {
     rejectInterest(body);
     out.instalments = instalmentsOf(body.instalments);
-    out.firstDue = blank(body.first_due_month) ? null : monthOf(body.first_due_month, 'The first month an instalment is due');
-    if (out.firstDue !== null && out.firstDue < out.paidOn.slice(0, 7)) {
-      throw bad('The first instalment cannot fall due before the month the loan was given');
+    out.firstDue = blank(body.first_due_month) ? null : monthOf(body.first_due_month, 'The payroll the first instalment is cut from');
+    if (out.firstDue !== null && out.firstDue < prevMonthOf(out.paidOn.slice(0, 7))) {
+      throw bad('The first instalment can be cut from the payroll of the month before the loan was given at the earliest');
     }
   }
   return out;
@@ -1121,7 +1125,10 @@ async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payme
     }
 
     const instalment = instalmentOf(pay.amount, pay.instalments);
-    const firstDue = pay.firstDue ?? open;
+    // Blank = the payroll being settled when the money is given: the month before (in November, October's), or the
+    // next open month when that one is finalised — as an advance (2026-11-15).
+    const settling = prevMonthOf(paidMonth);
+    const firstDue = pay.firstDue ?? (closed && settling <= closed ? nextMonth(closed) : settling);
     if (closed && firstDue <= closed) {
       warnings.push(`Payroll for ${firstDue} is already finalised: the first instalment is taken from ${nextMonth(closed)}, `
         + 'the next open payroll month');
@@ -1156,6 +1163,12 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
         const natural = pay.forMonth ?? prevMonthOf(pay.paidOn.slice(0, 7));
         pay.forMonth = await advanceMonthFor(qc, pay.forMonth, pay.paidOn, [pay.personId]);
         if (pay.forMonth !== natural) pay.wantedMonth = natural;   // the default month was closed: say where it went
+      }
+      // A loan's blank first payroll is settled here, so the months it moves are shown for approval like any other.
+      if (pay.kind === 'loan' && !pay.firstDue) {
+        const fin = await oc(`SELECT max(month) AS month FROM hr.runs WHERE status = 'finalised'`);
+        const settling = prevMonthOf(pay.paidOn.slice(0, 7));
+        pay.firstDue = fin?.month && settling <= fin.month ? nextMonth(fin.month) : settling;
       }
       return withImpact(qc, req, [pay.personId], pay.kind === 'advance' ? pay.forMonth : pay.firstDue ?? null,
         pay.kind === 'advance' ? 'An advance' : 'A new loan', () => postStaffPayment(qc, oc, req, pay, loanNo));

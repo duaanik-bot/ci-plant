@@ -104,16 +104,21 @@ export async function loanPositions(qc, personIds, month, asAtMonth) {
   const ids = idsOf(personIds);
   const when = monthOf(month);
   const cutoff = cutoffOf(asAtMonth);
+  const asAt = asAtMonth === undefined || asAtMonth === null ? null : monthOf(asAtMonth);
   const out = new Map(ids.map((id) => [id, []]));
   if (!ids.length) return out;
 
+  // A loan whose first deduction payroll was CHOSEN as this month or earlier is in this month's payroll even when it
+  // was given after the month ended (owner, 2026-11-15: "settling October in November, I choose October payroll, the
+  // deduction must happen in October pay"); its disbursement then counts too.
   const loans = await qc(
-    `SELECT id, loan_no, person_id, instalment::text AS instalment, first_due_month, status
+    `SELECT id, loan_no, person_id, instalment::text AS instalment, first_due_month, status,
+            ($2::date IS NOT NULL AND issued_on >= $2::date) AS chosen_early
        FROM hr.loans
       WHERE person_id = ANY($1::int[]) AND status = 'active'
-        AND ($2::date IS NULL OR issued_on < $2::date)
+        AND ($2::date IS NULL OR issued_on < $2::date OR first_due_month <= $3)
       ORDER BY person_id, issued_on, id`,
-    [ids, cutoff],
+    [ids, cutoff, asAt],
   );
   if (!loans.length) return out;
   const loanIds = loans.map((l) => l.id);
@@ -123,9 +128,10 @@ export async function loanPositions(qc, personIds, month, asAtMonth) {
        LEFT JOIN hr.runs r ON r.id = t.run_id
       WHERE t.loan_id = ANY($1::int[])
         AND NOT ($2::date IS NOT NULL AND t.run_id IS NULL AND t.txn_date >= $2::date
-                 AND (t.kind IN ('disbursed', 'opening') OR (t.kind = 'adjustment' AND t.principal_amount > 0)))
+                 AND (t.kind = 'opening' OR (t.kind = 'disbursed' AND NOT t.loan_id = ANY($3::int[]))
+                      OR (t.kind = 'adjustment' AND t.principal_amount > 0)))
       ORDER BY t.loan_id, t.id`,
-    [loanIds, cutoff],
+    [loanIds, cutoff, loans.filter((l) => l.chosen_early).map((l) => l.id)],
   );
   const holidays = await qc(
     `SELECT loan_id, month, amount::text AS amount FROM hr.loan_holidays WHERE loan_id = ANY($1::int[]) ORDER BY loan_id, month`,

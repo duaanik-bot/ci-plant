@@ -195,7 +195,10 @@ function Choice({ on, onClick, children, disabled }) {
 
 const blankForm = personId => ({
   staff: personId != null ? 'yes' : null, person: personId != null ? String(personId) : '', kind: 'advance',
-  amount: '', date: plantToday(), via: 'cash', instalments: '', firstDue: '', note: '',
+  amount: '', date: plantToday(), via: 'cash', instalments: '', note: '',
+  // The payroll a loan's first instalment is cut from (2026-11-15): asked as a payroll month, the month before by
+  // default, like an advance — in November, choose October to cut it from the salary paid now.
+  firstDue: shiftMonth(plantToday().slice(0, 7), -1),
   // The payroll month an advance is deducted in (2026-11-14): the month before by default — in November, October's
   // salary is paid.
   forMonth: shiftMonth(plantToday().slice(0, 7), -1),
@@ -256,7 +259,9 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
     if (form.firstDue && !MONTH_RE.test(form.firstDue)) errors.firstDue = 'A month like 2026-11.';
   }
   const open = openMonthFor(form.date, closedMonth);
-  const firstDue = form.kind === 'loan' ? (form.firstDue || open) : null;
+  const settling = openMonthFor(`${shiftMonth(String(form.date).slice(0, 7), -1)}-01`, closedMonth);
+  const firstDue = form.kind === 'loan' ? (form.firstDue || settling) : null;
+  const paidIn = m => (MONTH_RE.test(m || '') ? monthLabel(shiftMonth(m, 1)) : '');
   const plan = form.kind === 'loan' && !errors.amount && n >= 1 ? instalmentPlan(String(form.amount).trim(), n) : null;
 
   const submit = async () => {
@@ -270,7 +275,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
     if (form.kind === 'advance') body.for_month = form.forMonth || null;
     if (form.kind === 'loan') {
       body.instalments = n;
-      if (form.firstDue) body.first_due_month = form.firstDue;
+      if (firstDue) body.first_due_month = firstDue;
     }
     setBusy(true);
     let res;
@@ -381,17 +386,18 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
                     <Input inputMode="numeric" autoComplete="off" value={form.instalments} disabled={Boolean(done)}
                       onChange={e => set('instalments', e.target.value)} />
                   </Field>
-                  <Field label="First instalment" hint={err('firstDue') || (open ? `Blank = ${monthLabel(open)}` : null)}>
+                  <Field label="Start deducting from the payroll of" required
+                    hint={err('firstDue') || (firstDue ? `${monthLabel(firstDue)} payroll — the salary paid in ${paidIn(firstDue)}` : null)}>
                     <Input type="month" value={form.firstDue} disabled={Boolean(done)} onChange={e => set('firstDue', e.target.value)} />
                   </Field>
                 </div>
               )}
               {form.kind === 'loan' && plan && firstDue && (
                 <p className="rounded-xl bg-[#E1EFFF]/70 px-3 py-2 text-sm font-semibold text-[#0064D2]">
-                  {inr2(plan.each)} a month for {plan.months} {plan.months === 1 ? 'month' : 'months'} from {monthLabel(firstDue)}
+                  {inr2(plan.each)} a month for {plan.months} {plan.months === 1 ? 'month' : 'months'}, first cut from the {monthLabel(firstDue)} payroll (paid in {paidIn(firstDue)})
                   {plan.lastDiffers && <span className="block text-xs font-medium">The last month takes what is left: {inr2(plan.last)}.</span>}
                   <span className="block text-xs font-medium">
-                    No payroll before the month it was given takes an instalment; if {monthLabel(firstDue)} is already finalised, the first comes from the next open month.
+                    In November, October's salary is paid: choose October to cut the first instalment from the pay given now. If that payroll is already finalised, the first comes from the next open one.
                   </span>
                 </p>
               )}
@@ -411,7 +417,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
                   <p className="flex items-center gap-1.5 font-bold">
                     <Wallet size={13} />
                     {done.kind === 'loan'
-                      ? `Loan ${done.loan?.loan_no || ''} saved: ${inr2(done.loan?.instalment)} a month from ${monthLabel(done.loan?.first_due_month)}.`
+                      ? `Loan ${done.loan?.loan_no || ''} saved: ${inr2(done.loan?.instalment)} a month, first from the ${monthLabel(done.loan?.first_due_month)} payroll.`
                       : `Advance saved. Balance now ${inr2(done.ledger?.totals?.advance_balance)}.`}
                   </p>
                   {warnings.map(w => <p key={w} className="font-medium text-amber-800">{w}.</p>)}

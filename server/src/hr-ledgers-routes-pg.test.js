@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { plantDateStr } from './plant-calendar.js';
 import { nextMonth } from './hr/loans.js';
+const prevMonth = (m) => { const [y, mo] = m.split('-').map(Number); return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`; };
 
 const ENABLED = process.env.HR_PG === '1';
 const T = { timeout: 30_000 };
@@ -975,7 +976,7 @@ describe('HR ledger routes through the real app', {
     assert.match(loan.loan_no, /^CI-LN-\d{4}$/);
     assert.equal(Number(loan.loan_no.slice(6)), Number(before.slice(6)) + 1, 'the next number');
     assert.equal(loan.instalment, 3334, '10000 / 3 = 3333.33, rounded up so it never under-recovers');
-    assert.equal(loan.first_due_month, NOW, 'the month it was given, which payroll has not closed');
+    assert.equal(loan.first_due_month, prevMonth(NOW), 'the payroll being settled when it was given: the month before');
     assert.equal(loan.paid_via, 'TPAY');
     assert.equal(loan.outstanding, '10000.00');
     const txns = await db.q(`SELECT kind, principal_amount::text AS amount, txn_date::text AS d, note FROM hr.loan_txns WHERE loan_id = $1`, [loan.id]);
