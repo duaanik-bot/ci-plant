@@ -53,7 +53,12 @@ import {
 
 const owes = l => (paiseOf(l?.payable) ?? 0n) > 0n;
 const nonZero = v => (paiseOf(v) ?? 0n) !== 0n;
-const isShort = r => (paiseOf(r.line?.net_before_cap) ?? 0n) < 0n;
+// Sub-accounts (2026-11-15): a sub-account whose shortfall its main account's pay covers is not short — nothing is
+// carried forward — and both cards say who covers whom.
+const flagOf = (r, code) => list(r.line?.flags).find(f => f?.code === code) || null;
+const coveredBy = r => flagOf(r, 'COVERED_BY_MAIN');
+const coversSubs = r => list(r.line?.flags).filter(f => f?.code === 'COVERS_SUB');
+const isShort = r => (paiseOf(r.line?.net_before_cap) ?? 0n) < 0n && !coveredBy(r);
 const negInr = v => inr2(v); // inr2 prints a negative as -₹…
 
 const SECTION_META = {
@@ -340,6 +345,7 @@ export default function PersonCards({
   showPaidSep, search, onSearch, toolbar, loansBy = new Map(), carryTo = 'next month', onCarry, onPayslip,
   month = '', final = false, status = 'draft', onLoanChanged, onSwitched, onMaster, onPayStaff, onPersonStatus,
 }) {
+  const nameById = useMemo(() => new Map(list(rows).map(r => [String(r.id), r.name])), [rows]);
   const approvedCount = rows.filter(x => x.approval === 'approved').length;
   // Editing a loan's instalment is open to accounts and up (2026-11-14): canSelect is the paying level.
   const change = canSelect && onLoanChanged ? { status, canApprove, approvedCount, onDone: onLoanChanged } : null;
@@ -437,6 +443,8 @@ export default function PersonCards({
                     const ticked = selected.has(r.id);
                     const short = isShort(r);
                     const carried = short && r.approval === 'approved';
+                    const cover = coveredBy(r);
+                    const covers = coversSubs(r);
                     const pos = loanPositions(r, loansBy.get(r.id) ?? [], final);
                     return (
                       <li key={r.id} data-card={r.id} tabIndex={0} aria-selected={ticked} aria-expanded={isOpen} onKeyDown={e => onKey(e, r)}
@@ -465,6 +473,16 @@ export default function PersonCards({
                                   </span>
                                 ))}
                                 {short && <span className="rounded-full bg-red-100 px-1.5 py-px text-[10px] font-bold text-red-700">Short pay</span>}
+                                {cover && (
+                                  <span title={cover.message} className="rounded-full bg-[#E1EFFF] px-1.5 py-px text-[10px] font-bold text-[#0064D2]">
+                                    {inr2(cover.amount)} covered by {nameById.get(String(cover.main_id)) || 'main account'}
+                                  </span>
+                                )}
+                                {covers.map(c => (
+                                  <span key={c.sub_id} title={c.message} className="rounded-full bg-[#E1EFFF] px-1.5 py-px text-[10px] font-bold text-[#0064D2]">
+                                    Covers {inr2(c.amount)} for {nameById.get(String(c.sub_id)) || 'sub-account'}
+                                  </span>
+                                ))}
                               </span>
                             </span>
                           </button>
@@ -473,7 +491,9 @@ export default function PersonCards({
                             sub={r.carriedIn ? `incl. ${inr2(r.carriedIn.advance)} c/f` : undefined} subTone="text-amber-700"
                             title={r.carriedIn ? `${inr2(r.carriedIn.amount)} short pay carried forward from ${monthLabel(r.carriedIn.from_month)}` : undefined} />
                           <LoanFigure pos={pos} />
-                          <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''} />
+                          <Figure label="Payable" value={short ? negInr(r.line.net_before_cap) : inr2(r.line.payable)} strong tone={short ? '!text-red-700' : ''}
+                            sub={cover ? `+${inr2(cover.amount)} from ${nameById.get(String(cover.main_id)) || 'main a/c'}` : covers.length ? `incl. ${inr2(sumPaise(covers.map(c => c.amount)))} for sub-a/c` : undefined}
+                            subTone="text-[#0064D2]" />
                           <div className="flex w-[290px] shrink-0 items-center justify-end gap-1.5">
                             {r.payment !== 'pending' && <PaymentPill status={r.payment} reason={r.payment === 'on_hold' ? r.line.hold_reason || 'No reason recorded' : null} />}
                             {carried

@@ -59,7 +59,7 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
 
   const lineOf = (personId) => db.one(
     `SELECT payable::text AS payable, adj_deductions::text AS adj_deductions, advance_recovery::text AS advance_recovery,
-            loan_recoveries, unrecovered, breakdown FROM hr.run_lines WHERE run_id = $1 AND person_id = $2`, [run.id, personId]);
+            loan_recoveries, unrecovered, breakdown, flags FROM hr.run_lines WHERE run_id = $1 AND person_id = $2`, [run.id, personId]);
   const subLines = (l) => l.breakdown.filter((b) => /^ADJ:SUB/.test(b.code)).map((b) => [b.code, b.amount]);
 
   test('alone, the sub-account leaves 3000 uncovered and the main account pays in full', T, async () => {
@@ -83,6 +83,13 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     assert.deepEqual(subLines(m).sort(), wanted.sort());
     assert.equal(m.payable, '27000.00', '30000 less the 3000 the sub-account could not cover');
     assert.match(m.breakdown.find((b) => /^ADJ:SUB/.test(b.code)).label, /Sub-account Test Main Second/);
+    // Both lines say so (2026-11-15: "make this adjustment visible"): the sub-account is covered, not short.
+    const cover = s.flags.find((f) => f.code === 'COVERED_BY_MAIN');
+    assert.equal(cover?.amount, '3000.00');
+    assert.equal(cover?.main_id, M);
+    assert.match(cover.message, /Test Main Contractor's pay/);
+    const covers = m.flags.find((f) => f.code === 'COVERS_SUB');
+    assert.deepEqual([covers?.sub_id, covers?.amount], [S, '3000.00']);
   });
 
   test('finalise posts the covered amounts to the sub-account\'s ledgers: its advance and loan are fully recovered', T, async () => {

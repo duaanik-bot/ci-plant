@@ -193,6 +193,8 @@ export const FLAG_LABEL = {
   JOINED_MID_MONTH: 'Joined mid-month',
   LEFT_MID_MONTH: 'Left mid-month',
   VARIANCE: 'Changed against last month',
+  COVERED_BY_MAIN: 'Covered by main account',
+  COVERS_SUB: 'Covers a sub-account',
 };
 
 export function flagLabel(code) {

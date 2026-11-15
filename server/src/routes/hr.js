@@ -1223,7 +1223,8 @@ r.get('/hr/pay-channels', requireHr('viewer'), async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/hr/pay-channels', requireHr('admin'), async (req, res, next) => {
+// Accounts and up (2026-11-15: "I need the rights and setup to set the channel up").
+r.post('/hr/pay-channels', requireHr('accounts'), async (req, res, next) => {
   try {
     const body = bodyOf(req);
     const code = readChannelCode(body.code);
@@ -1250,7 +1251,7 @@ r.post('/hr/pay-channels', requireHr('admin'), async (req, res, next) => {
 
 // The stored account is kept when `account` is left out (or sent blank): the list only ever shows it
 // masked, so a client cannot send it back. `account: null` clears it. A code is permanent.
-r.put('/hr/pay-channels/:code', requireHr('admin'), async (req, res, next) => {
+r.put('/hr/pay-channels/:code', requireHr('accounts'), async (req, res, next) => {
   try {
     const body = bodyOf(req);
     const has = (key) => Object.hasOwn(body, key);

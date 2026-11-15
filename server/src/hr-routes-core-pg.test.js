@@ -164,8 +164,8 @@ describe('HR core routes through the real app', {
 
   test('settings, pay channels and access are admin only; the audit trail is approver and above', T, async () => {
     refused(await call('operator', 'PUT', '/hr/settings', { rounding: 'paise' }), 403, 'HR_LEVEL');
-    refused(await call('operator', 'POST', '/hr/pay-channels', { code: 'X', label: 'X', kind: 'cash' }), 403, 'HR_LEVEL');
-    refused(await call('operator', 'PUT', '/hr/pay-channels/X', { label: 'Y' }), 403, 'HR_LEVEL');
+    refused(await call('viewer', 'POST', '/hr/pay-channels', { code: 'X', label: 'X', kind: 'cash' }), 403, 'HR_LEVEL');
+    refused(await call('viewer', 'PUT', '/hr/pay-channels/X', { label: 'Y' }), 403, 'HR_LEVEL');
     refused(await call('operator', 'GET', '/hr/access'), 403, 'HR_LEVEL');
     refused(await call('operator', 'PUT', `/hr/access/${ids.viewer}`, { level: 'admin' }), 403, 'HR_LEVEL');
     refused(await call('approver', 'PUT', '/hr/settings', { rounding: 'paise' }), 403, 'HR_LEVEL');

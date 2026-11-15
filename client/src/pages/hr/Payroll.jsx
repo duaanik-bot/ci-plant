@@ -54,7 +54,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, Calculator, Check, ChevronLeft, ChevronRight, CornerUpLeft, FileUp, HandCoins, Lock, RefreshCw, Send,
-  ShieldCheck, UserPlus, Wallet,
+  Landmark, ShieldCheck, UserPlus, Wallet,
 } from 'lucide-react';
 import {
   Button, ConfirmDialog, DataTable, ExportMenu, Field, Input, KpiCard, KpiRow, Modal, SubTabs, Textarea, rowMatches, useToast,
@@ -69,6 +69,7 @@ import PersonCards from './PersonCards.jsx';
 import PersonStatusDialog from './PersonStatusDialog.jsx';
 import NewPersonFromRow from './NewPersonFromRow.jsx';
 import PayChannelSelect from './PayChannelSelect.jsx';
+import { ChannelsPanel } from './Settings.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -337,8 +338,10 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   );
 }
 
-function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, final, payOpen = final, nameOf, onPay, onOpen, onStatus, onPending }) {
+function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, final, payOpen = final, nameOf, onPay, onOpen, onStatus, onPending,
+  channels = null, onChannel = null }) {
   const [open, setOpen] = useState(null);
+  const [setup, setSetup] = useState(false);
   const groups = useMemo(() => {
     const by = new Map();
     for (const l of lines) {
@@ -369,8 +372,17 @@ function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, fi
           {paid} of {plural(due, 'person', 'people')} paid
         </span>
         <span className="text-[11px] text-[#86868B]">Mark a whole channel, or one person, when the money has gone; Mark unpaid takes it back.</span>
-        {onPending && <Button size="sm" variant="secondary" className="ml-auto" onClick={onPending}>Pending salary (past months)</Button>}
+        <span className="ml-auto inline-flex gap-1.5">
+          {/* The pay channels themselves — add, rename, bank, active (accounts and up, 2026-11-15). */}
+          {onChannel && <Button size="sm" variant="secondary" onClick={() => setSetup(true)}><Landmark size={13} /> Pay channels</Button>}
+          {onPending && <Button size="sm" variant="secondary" onClick={onPending}>Pending salary (past months)</Button>}
+        </span>
       </div>
+      {setup && (
+        <Modal open size="xl" onClose={() => { setSetup(false); onChannel?.(); }} title="Pay channels">
+          <ChannelsPanel />
+        </Modal>
+      )}
       <div className="overflow-x-auto rounded-2xl border border-white/75 bg-white/55">
         <table className="w-full text-xs">
           <thead>
@@ -430,6 +442,10 @@ function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, fi
                               {nameOf(l.person_id)}
                             </button>
                             <span className="tabular-nums">{inr2(l.payable)}</span>
+                            {/* Change who pays them right here (2026-11-15): an unpaid line in a month not finalised. */}
+                            {onChannel && !final && payStatus(l) !== 'paid' && (
+                              <PayChannelSelect personId={l.person_id} name={nameOf(l.person_id)} value={l.pay_channel} channels={channels} onChanged={() => onChannel()} />
+                            )}
                             {owes(l) || payStatus(l) !== 'pending'
                               ? <PaymentPill status={payStatus(l)} reason={payStatus(l) === 'on_hold' ? l.hold_reason || 'No reason recorded' : null} />
                               : <span className="text-[11px] text-[#86868B]">Nothing to pay</span>}
@@ -1534,7 +1550,11 @@ export default function Payroll({ level }) {
                 setDialog({ kind: 'status', status, only: rows.filter(r => want.has(String(toId(r.id)))) });
               }}
               onPending={() => setParams(p => { const n = new URLSearchParams(p); n.set('tab', 'reports'); n.set('report', 'pending'); return n; })}
-              onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer} />
+              onPay={g => setDialog({ kind: 'pay', group: g })} onOpen={openDrawer}
+              channels={channels} onChannel={canPay ? async () => {
+                try { const c = await hrApi.payChannels(); if (Array.isArray(c)) setChannels(c); } catch { /* keep the last list */ }
+                await load();
+              } : null} />
           )}
 
           {/* ── Register ── */}

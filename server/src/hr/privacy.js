@@ -61,6 +61,7 @@ const ALLOW = [
   // each person-level route checks the person is visible.
   ['POST', `/hr/runs/${M}/recalc`], ['POST', `/hr/runs/${M}/submit`], ['POST', '/hr/people/\\d+/setups/\\d+/switches'],
   ['POST', '/hr/people/\\d+/pay-channel'], ['POST', '/hr/people/\\d+/parent'],
+  ['POST', '/hr/pay-channels'], ['PUT', '/hr/pay-channels/[^/]+'],
   ['POST', '/hr/loans'], ['POST', '/hr/loans/\\d+/prepay'], ['POST', '/hr/loans/\\d+/holiday'], ['DELETE', `/hr/loans/\\d+/holiday/${M}`],
   ['PUT', '/hr/loans/\\d+/instalment'], ['POST', '/hr/loans/\\d+/cancel'],
   ['GET', '/hr/adjustments'], ['POST', '/hr/adjustments'], ['POST', '/hr/adjustments/\\d+/cancel'],

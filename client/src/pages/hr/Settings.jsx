@@ -181,7 +181,8 @@ function PolicyPanel() {
 const CHANNEL_KIND = { bank: 'Bank', cash: 'Cash' };
 const BLANK_CHANNEL = { isNew: true, code: '', label: '', kind: 'bank', bank_name: '', account: '', onFile: '' };
 
-function ChannelsPanel() {
+// Also opened from Payroll › Payments for accounts and up (2026-11-15).
+export function ChannelsPanel() {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [failed, setFailed] = useState(false);

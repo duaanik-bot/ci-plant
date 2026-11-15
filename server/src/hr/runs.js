@@ -550,7 +550,25 @@ function computeAll(ctx) {
         }
       }
     }
-    lines.set(id, computeOne(ctx, id, extra));
+    const main = computeOne(ctx, id, extra);
+    lines.set(id, main);
+    // Say on both lines what moved (2026-11-15: "make this adjustment visible"): the sub-account is not short —
+    // its main account covers it — and the main account's line names who it covers. Notes only: no money.
+    const mainName = ctx.people.get(id)?.shown_name ?? `#${id}`;
+    const covered = new Map();
+    for (const b of Array.isArray(main.breakdown) ? main.breakdown : []) {
+      const s = subCodeOf(b?.code);
+      if (s && paise(b.amount) > 0n) covered.set(s.subId, (covered.get(s.subId) ?? 0n) + paise(b.amount));
+    }
+    for (const [subId, amount] of covered) {
+      const subLine = lines.get(subId);
+      if (!subLine) continue;
+      const subName = ctx.people.get(subId)?.shown_name ?? `#${subId}`;
+      subLine.flags = byLevel([...subLine.flags, { level: 'info', code: 'COVERED_BY_MAIN', main_id: id, amount: fmtPaise(amount),
+        message: `${inr(fmtPaise(amount))} its pay could not cover is taken from ${mainName}'s pay (main account) — not carried forward` }]);
+      main.flags = byLevel([...main.flags, { level: 'info', code: 'COVERS_SUB', sub_id: subId, amount: fmtPaise(amount),
+        message: `Covers ${inr(fmtPaise(amount))} for sub-account ${subName}, posted to ${subName}'s advance / loan` }]);
+    }
   }
   return ctx.ids.map((id) => lines.get(id));
 }
