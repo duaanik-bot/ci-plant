@@ -145,6 +145,9 @@ export const hrApi = {
   addSetup: (personId, setup) => api.post(`/hr/people/${seg(personId)}/setups`, setup),
   // POST /hr/people/:id/setups/:setupId/switches — operator. { holiday?, overtime?, ot_hours_per_day?, reason? };
   // answers { setup, recalculated: [months], not_recalculated: [{month, status}] }.
+  // POST /hr/people/:id/pay-channel — accounts and up. { pay_channel: code | null }: the person's channel, and their
+  // unpaid lines in open months.
+  setPayChannel: (personId, code) => api.post(`/hr/people/${seg(personId)}/pay-channel`, { pay_channel: code || null }),
   setPaySwitches: (personId, setupId, change) => api.post(`/hr/people/${seg(personId)}/setups/${seg(setupId)}/switches`, change),
   // POST /hr/people/:id/aliases — operator. `alias` is the spelling to remember.
   addAlias: (personId, alias) => api.post(`/hr/people/${seg(personId)}/aliases`, { alias }),

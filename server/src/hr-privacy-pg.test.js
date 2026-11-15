@@ -191,6 +191,18 @@ describe('HR accounts level and hide list', {
     assert.deepEqual([status[S], status[P], status[G]], ['paid', 'pending', 'pending'], 'the hidden two stay for the owner to pay');
     ok(await call('accounts', 'POST', '/hr/staff-payments', { person_id: S, kind: 'advance', amount: 500 }));
     assert.equal((await call('accounts', 'POST', '/hr/runs/2026-08/approve', {})).status, 403);
+    // The pay channel dropdown (2026-11-15): a visible person's channel changes; a paid line keeps its channel;
+    // a hidden person is not there; a code nobody has is refused.
+    const moved = ok(await call('accounts', 'POST', `/hr/people/${S}/pay-channel`, { pay_channel: null }));
+    assert.deepEqual(moved.body, { person_id: S, pay_channel: null, lines_moved: [] }, 'the paid August line stays');
+    assert.equal((await db.one(`SELECT pay_channel FROM hr.people WHERE id = $1`, [S])).pay_channel, null);
+    ok(await call('accounts', 'POST', `/hr/people/${S}/pay-channel`, { pay_channel: 'TCASH' }));
+    assert.equal((await call('accounts', 'POST', `/hr/people/${G}/pay-channel`, { pay_channel: null })).status, 404);
+    assert.equal((await call('accounts', 'POST', `/hr/people/${S}/pay-channel`, { pay_channel: 'NOPE' })).status, 400);
+    ok(await call('operator', 'POST', `/hr/people/${P}/pay-channel`, { pay_channel: null }));
+    assert.equal((await db.one(`SELECT pay_channel FROM hr.run_lines WHERE person_id = $1`, [P])).pay_channel, 'TCASH',
+      'a finalised month keeps the channel it was paid by, even on an unpaid line');
+    ok(await call('operator', 'POST', `/hr/people/${P}/pay-channel`, { pay_channel: 'TCASH' }));
   });
 
   test('a plain viewer with nobody hidden reads as before; operators and up ignore any list', T, async () => {

@@ -68,6 +68,7 @@ import EntrySheet from './EntrySheet.jsx';
 import PersonCards from './PersonCards.jsx';
 import PersonStatusDialog from './PersonStatusDialog.jsx';
 import NewPersonFromRow from './NewPersonFromRow.jsx';
+import PayChannelSelect from './PayChannelSelect.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -890,7 +891,11 @@ export default function Payroll({ level }) {
           </button>
         )) },
       { key: 'department', label: 'Department', card: 'subtitle', render: r => (r._total ? '' : r.department || '—') },
-      { key: 'channel', label: 'Channel', card: 'detail', sortValue: r => r.channelLabel, render: r => (r._total ? '' : r.channelLabel || '—') },
+      // A dropdown for accounts and up on an unpaid line (2026-11-15): changes the person's channel and this line.
+      { key: 'channel', label: 'Channel', card: 'detail', sortValue: r => r.channelLabel, export: r => (r._total ? '' : r.channelLabel || ''),
+        render: r => (r._total ? '' : canPay && !final && r.payment !== 'paid'
+          ? <PayChannelSelect personId={r.id} name={r.name} value={r.channel} channels={channels} onChanged={() => load()} />
+          : r.channelLabel || '—') },
       { key: 'present', label: 'Present', align: 'right', card: 'metric', sortValue: r => (r._total ? null : Number(r.line.present_days)),
         render: r => (r._total ? '' : qtyText(r.line.present_days)) },
       { key: 'ot_h', label: 'OT h', align: 'right', card: 'detail', sortValue: r => (r._total ? null : Number(r.input?.ot_hours ?? 0)),
@@ -987,7 +992,7 @@ export default function Payroll({ level }) {
           </span>
         ) : <FlagDots flags={r.flags} />) },
     ];
-  }, [openDrawer, showPaidSep, approvable, canApprove, rowBusy, approveOne]);
+  }, [openDrawer, showPaidSep, approvable, canApprove, rowBusy, approveOne, canPay, final, channels, load]);
 
   // ── Export: every component in its own column; grouped views export one section per group ──
   const exportSpec = useCallback(sorted => {

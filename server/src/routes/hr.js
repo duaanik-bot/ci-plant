@@ -908,6 +908,40 @@ r.post('/hr/people/:id/setups', requireHr('operator'), async (req, res, next) =>
 // (2026-11-14: then the switch goes on a revision from the first open month, revision_from). Every draft month the setup covers is
 // worked out again for this person at once; a submitted / approved month is listed in `not_recalculated` (send it
 // back to apply the change; finalising it would refuse, because the line no longer matches its inputs).
+// ── POST /hr/people/:id/pay-channel — the person's pay channel, from a dropdown (owner's request 2026-11-15) ─────
+// "Give options to enter or change the pay channel — a dropdown in payroll itself, in People, and at master creation
+// while importing." { pay_channel: code | null }, accounts and up, a person whose pay the login can see. The person's
+// channel changes, and so does every line of theirs in a month not finalised that is not paid and not in a payment
+// batch, so the month's payments group them under the new channel. Answers { person_id, pay_channel, lines_moved }.
+r.post('/hr/people/:id/pay-channel', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const personId = idOf(req.params.id, 'Person');
+    if (!canSeePay(req, personId)) throw notThere('Person');
+    const body = bodyOf(req);
+    const raw = body.pay_channel;
+    if (raw !== null && raw !== undefined && typeof raw !== 'string') throw bad('pay_channel must be a channel code or null');
+    const out = await tx(async (qc, oc) => {
+      const person = await oc(`SELECT id, pay_channel FROM hr.people WHERE id = $1 FOR UPDATE`, [personId]);
+      if (!person) throw missing('Person');
+      const code = raw === null || raw === undefined || raw.trim() === '' ? null : await resolveChannel(oc, raw.trim());
+      if (code === person.pay_channel) return { person_id: personId, pay_channel: code, lines_moved: [] };
+      await qc(`UPDATE hr.people SET pay_channel = $2 WHERE id = $1`, [personId, code]);
+      const moved = await qc(
+        `UPDATE hr.run_lines l SET pay_channel = $2
+           FROM hr.runs r
+          WHERE r.id = l.run_id AND l.person_id = $1 AND r.status <> 'finalised'
+            AND l.payment_status <> 'paid' AND l.payment_batch_id IS NULL
+            AND l.pay_channel IS DISTINCT FROM $2
+        RETURNING r.month`, [personId, code]);
+      await hrAudit(qc, req, 'person', personId, 'pay_channel', {
+        from: person.pay_channel, to: code, lines_moved: moved.map((m) => m.month),
+      });
+      return { person_id: personId, pay_channel: code, lines_moved: moved.map((m) => m.month).sort() };
+    });
+    res.json(out);
+  } catch (e) { next(refusal(e)); }
+});
+
 // Accounts and up (2026-11-15: the People list toggles for accounts too), for a person whose pay it can see.
 r.post('/hr/people/:id/setups/:setupId/switches', requireHr('accounts'), async (req, res, next) => {
   try {

@@ -38,6 +38,7 @@ import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { InlineError, StatusPill, refusalText } from './PersonDrawer.jsx';
 import NewPersonFromRow from './NewPersonFromRow.jsx';
+import PayChannelSelect from './PayChannelSelect.jsx';
 import { diffPaise, list, paiseOf, plural, qtyText, whenText } from './RunLineDrawer.jsx';
 
 const MAX_BYTES = 4 * 1024 * 1024; // the server's upload cap
@@ -459,7 +460,9 @@ function RowCard({ r, s, person, options, canEdit, error, onDecide, cols, blank,
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[#515154]">
           <span aria-hidden>→</span>
           <span className="font-semibold text-[#1D1D1F]">{person.name}</span>
-          {[person.code, person.department, channelLabel(person.pay_channel)].filter(Boolean).map(x => <span key={x}>· {x}</span>)}
+          {[person.code, person.department, !canEdit && channelLabel(person.pay_channel)].filter(Boolean).map(x => <span key={x}>· {x}</span>)}
+          {/* The matched person's pay channel, changeable right here (2026-11-15). */}
+          {canEdit && <span className="flex items-center gap-1">· <PayChannelSelect personId={person.id} name={person.name} value={person.pay_channel} /></span>}
           {person.status && person.status !== 'active' && <StatusPill status={person.status} />}
         </p>
       )}

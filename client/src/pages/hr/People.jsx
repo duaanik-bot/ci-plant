@@ -13,6 +13,7 @@ import { ActionMenu, Button, DataTable, ResetFilters, rowMatches, useFilterReset
 import { FilterChip, FilterGroup, FilterRail } from '../../components/FilterChip.jsx';
 import { hrApi, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { OtDayPicker, Switch, holidayOn } from './PaySwitches.jsx';
+import PayChannelSelect from './PayChannelSelect.jsx';
 import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText, usePersonActions } from './PersonDrawer.jsx';
 
 // The register opens on active people only; Inactive and On leave are one chip away.
@@ -150,7 +151,9 @@ export default function People({ level }) {
       ) },
     { key: 'department', label: 'Department', render: r => r.department || '—', export: r => r.department || '' },
     { key: 'channel', label: 'Channel', sortValue: r => labelOf(r.pay_channel),
-      render: r => labelOf(r.pay_channel) || '—', export: r => labelOf(r.pay_channel) },
+      render: r => (canToggle && !r.pay_hidden
+        ? <PayChannelSelect personId={r.id} name={r.name} value={r.pay_channel} channels={channels} onChanged={() => load()} />
+        : labelOf(r.pay_channel) || '—'), export: r => labelOf(r.pay_channel) },
     { key: 'worker_type', label: 'Type', render: r => WORKER_TYPE[r.worker_type] || r.worker_type || '—',
       export: r => WORKER_TYPE[r.worker_type] || r.worker_type || '' },
     { key: 'status', label: 'Status', card: 'status', sortValue: r => PERSON_STATUS[r.status]?.label || r.status,
@@ -179,7 +182,7 @@ export default function People({ level }) {
       export: r => (r.bank_last4 ? `****${r.bank_last4}` : '') },
     ...(canToggle ? [{ key: '_actions', label: '', sortable: false, card: 'actions', align: 'right',
       render: r => <ActionMenu items={actions.items(r)} label={`Actions for ${r.name}`} /> }] : []),
-  ], [labelOf, openPerson, canEdit, canToggle, actions.items, otBusy, setOt, holBusy, flipHoliday]);
+  ], [labelOf, openPerson, canEdit, canToggle, channels, load, actions.items, otBusy, setOt, holBusy, flipHoliday]);
 
   const empty = loadError && rows == null ? 'The people list could not be loaded.'
     : all.length === 0 ? 'No people yet.' : 'No one matches these filters.';
