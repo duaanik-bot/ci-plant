@@ -975,7 +975,12 @@ r.post('/hr/people/:id/pay-channel', requireHr('accounts'), async (req, res, nex
           WHERE r.id = l.run_id AND l.person_id = $1 AND r.status <> 'finalised'
             AND l.payment_status <> 'paid' AND l.payment_batch_id IS NULL
             AND l.pay_channel IS DISTINCT FROM $2
-        RETURNING r.month`, [personId, code]);
+        RETURNING r.month, r.id AS run_id`, [personId, code]);
+      // The month's stored totals (Overview › Payable by channel) follow the move (2026-11-15).
+      for (const runId of new Set(moved.map((m) => m.run_id))) {
+        const totals = await totalsOf(qc, runId);
+        await qc(`UPDATE hr.runs SET totals = $2::jsonb WHERE id = $1`, [runId, JSON.stringify(totals)]);
+      }
       await hrAudit(qc, req, 'person', personId, 'pay_channel', {
         from: person.pay_channel, to: code, lines_moved: moved.map((m) => m.month),
       });
@@ -1541,7 +1546,8 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
         WHERE b.month = $1 AND b.status = 'parsed' AND ir.decision IS NULL
           AND ir.match IN ('conflict', 'unknown_code', 'ambiguous', 'unmatched')`, [month])).n;
 
-    if (run && restricted(req)) run.totals = await totalsOf(q, run.id, { exclude: ex });
+    // Worked out fresh from the lines every time (2026-11-15: a channel changed in Payroll must show here at once).
+    if (run) run.totals = await totalsOf(q, run.id, { exclude: restricted(req) ? ex : [] });
     res.json({
       month,
       headcount,

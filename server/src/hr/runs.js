@@ -564,6 +564,12 @@ function computeAll(ctx) {
       const subLine = lines.get(subId);
       if (!subLine) continue;
       const subName = ctx.people.get(subId)?.shown_name ?? `#${subId}`;
+      // What the main account covers of the advance is not carried forward on the sub-account's line.
+      const advCovered = paise(main.breakdown.find((b) => b?.code === `ADJ:SUB${subId}-ADV`)?.amount ?? '0') ?? 0n;
+      if (advCovered > 0n && paise(subLine.carried_advance) > 0n) {
+        const left = paise(subLine.carried_advance) - advCovered;
+        subLine.carried_advance = fmtPaise(left > 0n ? left : 0n);
+      }
       subLine.flags = byLevel([...subLine.flags, { level: 'info', code: 'COVERED_BY_MAIN', main_id: id, amount: fmtPaise(amount),
         message: `${inr(fmtPaise(amount))} its pay could not cover is taken from ${mainName}'s pay (main account) — not carried forward` }]);
       main.flags = byLevel([...main.flags, { level: 'info', code: 'COVERS_SUB', sub_id: subId, amount: fmtPaise(amount),

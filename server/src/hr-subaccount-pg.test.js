@@ -90,6 +90,10 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     assert.match(cover.message, /Test Main Contractor's pay/);
     const covers = m.flags.find((f) => f.code === 'COVERS_SUB');
     assert.deepEqual([covers?.sub_id, covers?.amount], [S, '3000.00']);
+    const carried = await db.one(`SELECT carried_advance::text AS c FROM hr.run_lines WHERE run_id = $1 AND person_id = $2`, [run.id, S]);
+    assert.equal(carried.c, '0.00', 'what the main account covers is not carried forward on the sub-account');
+    const totals = await db.tx((qc) => runs.totalsOf(qc, run.id));
+    assert.equal(totals.carried_advance, '0.00');
   });
 
   test('finalise posts the covered amounts to the sub-account\'s ledgers: its advance and loan are fully recovered', T, async () => {
