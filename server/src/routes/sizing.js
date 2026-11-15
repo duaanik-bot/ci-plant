@@ -2,7 +2,7 @@
 // of which I will select one. Once we select all of this, you will create the KLD for the product and save it … in
 // the cost sheet itself … save those KLDs in the drive dua.anik@gmail.com and share it with mppchd@gmail.com").
 //
-//   GET  /costing/sizing/proposals?size=&style=&gsm=   die check (Die Master + 2024 register), then layouts on the
+//   GET  /costing/sizing/proposals?size=&style=&gsm=   die check (Die Master + the die list, sizes in any order), then layouts on the
 //                                                      board master's sheets (client/src/lib/sizing.js)
 //   PUT  /costing/sizing/kld                           draw the KLD of a size + layout; saved on its Size Library entry
 //                                                      (made if new), a redraw is the next revision
@@ -14,7 +14,7 @@ import { Router } from 'express';
 import { q, one } from '../db.js';
 import { audit } from '../helpers.js';
 import { parseSize, normStyle } from '../costing-engine.js';
-import { matchDies, mayCost } from '../costing-match.js';
+import { mayCost, registerMatchesFrom, dieMasterMatches, REGISTER_MM } from '../costing-match.js';
 import { proposals, readings, cartonPlan, overRules, settingsProblem, cleanSettings } from '../../../client/src/lib/sizing.js';
 import { kldPdf } from '../kld-pdf.js';
 import { accessToken, gmailConfigured } from '../gmail.js';
@@ -36,14 +36,26 @@ const guard = async (req, res, next) => {
 };
 const intId = v => (/^\d{1,9}$/.test(String(v ?? '')) ? Number(v) : 0);
 
-// The 2024 register by size: the same three numbers, then each side within 3 mm (written in the same order).
+// The die list by size (owner, 15 Nov 2026): the 2024 register and the dies from the studio's Drive drawings, each side
+// within REGISTER_MM as written or once both sizes are sorted, then sorted into exact / another order / close by
+// registerMatchesFrom. The list's copies of Die Master dies are left out — the Die Master is checked from the Die Master
+// itself (dieMasterMatches, the same rule), so they would show twice. The sizes go in as numeric: untyped, `$1 - 3` made
+// $1 an integer and any size with a decimal failed the whole check. job_no is read through to_jsonb so the check keeps
+// working on a database the job-number migration has not reached yet.
 async function registerMatches(size) {
-  const rows = await q(`SELECT die_no, l_mm::float8 AS l, w_mm::float8 AS w, h_mm::float8 AS h, style, ups, size_text
-                          FROM die_register
-                         WHERE l_mm BETWEEN $1 - 3 AND $1 + 3 AND w_mm BETWEEN $2 - 3 AND $2 + 3 AND h_mm BETWEEN $3 - 3 AND $3 + 3
-                         ORDER BY abs(l_mm - $1) + abs(w_mm - $2) + abs(h_mm - $3), die_no`, [size.l, size.w, size.h]);
-  const exact = rows.filter(x => x.l === size.l && x.w === size.w && x.h === size.h);
-  return { exact, near: rows.filter(x => !exact.includes(x)).slice(0, 8) };
+  const [s1, s2, s3] = [size.l, size.w, size.h].sort((a, b) => a - b);
+  const rows = await q(`
+    SELECT die_no, l_mm::float8 AS l, w_mm::float8 AS w, h_mm::float8 AS h, style, ups, size_text, source, to_jsonb(d) ->> 'job_no' AS job_no
+      FROM die_register d
+     WHERE source IS DISTINCT FROM 'CI PLANT DIE MASTER'
+       AND l_mm IS NOT NULL AND w_mm IS NOT NULL AND h_mm IS NOT NULL
+       AND ((abs(l_mm - $1::numeric) <= $7::numeric AND abs(w_mm - $2::numeric) <= $7::numeric AND abs(h_mm - $3::numeric) <= $7::numeric)
+         OR (abs(LEAST(l_mm, w_mm, h_mm) - $4::numeric) <= $7::numeric
+             AND abs(l_mm + w_mm + h_mm - LEAST(l_mm, w_mm, h_mm) - GREATEST(l_mm, w_mm, h_mm) - $5::numeric) <= $7::numeric
+             AND abs(GREATEST(l_mm, w_mm, h_mm) - $6::numeric) <= $7::numeric))
+     ORDER BY abs(l_mm - $1::numeric) + abs(w_mm - $2::numeric) + abs(h_mm - $3::numeric), die_no`,
+  [size.l, size.w, size.h, s1, s2, s3, REGISTER_MM]);
+  return registerMatchesFrom(size, rows);
 }
 
 r.get('/costing/sizing/proposals', guard, async (req, res, next) => {
@@ -51,7 +63,7 @@ r.get('/costing/sizing/proposals', guard, async (req, res, next) => {
     const size = parseSize(req.query.size);
     const style = normStyle(req.query.style);
     const gsm = Number(req.query.gsm) > 0 ? Number(req.query.gsm) : null;
-    const none = { master: { exact: [], near: [] }, register: { exact: [], near: [] } };
+    const none = { master: { exact: [], reordered: [], near: [] }, register: { exact: [], reordered: [], near: [] } };
     if (!size || size.kind !== 'carton') {
       return res.json({ size, style, unsupported: true, reason: 'Type the carton size as L × W × H in mm.', readings: [], dies: none });
     }
@@ -62,7 +74,7 @@ r.get('/costing/sizing/proposals', guard, async (req, res, next) => {
            FROM tools t LEFT JOIN products p ON p.id = t.product_id WHERE t.family = 'die' AND t.active = 1 ORDER BY t.code`),
       registerMatches(size),
     ]);
-    res.json({ size, style, gsm, dies: { master: matchDies(size, tools), register }, ...proposals({ style, size, boards, gsm }) });
+    res.json({ size, style, gsm, dies: { master: dieMasterMatches(size, tools), register }, ...proposals({ style, size, boards, gsm }) });
   } catch (e) { next(e); }
 });
 

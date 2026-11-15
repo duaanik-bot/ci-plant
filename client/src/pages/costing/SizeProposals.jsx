@@ -1,13 +1,15 @@
 // Size proposals for a carton size the Size Library has no layout for (owner, 12 Nov 2026: "Whenever there is a new
 // size, I put the dimensions. You will propose the size to me … out of which I will select one"). First the dies that
-// already exist — the Die Master and the 2024 die register — then layouts on whole pieces of the board master's sheets,
+// already exist — the Die Master and the die list (the 2024 register and the dies from the studio's Drive drawings,
+// named by their job and found in any size order, 15 Nov 2026) — then layouts on whole pieces of the board master's sheets,
 // least board a carton first (client/src/lib/sizing.js; routes/sizing.js). Picking one fills the sheet and ups and
 // ticks New die; the KLD is drawn from it in the box below.
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Lightbulb, Ruler } from 'lucide-react';
 import { api } from '../../api.js';
 import { IN, layoutBlocks } from '../../lib/sizing.js';
-import { num, styleLabel } from '../../lib/costing.js';
+import { num } from '../../lib/costing.js';
+import { dieName, dieFrom, dieFacts, listed, masterItem, listItem } from '../../lib/die-check.js';
 
 const GRAIN = {
   ok: ['Grain fits', 'bg-emerald-100 text-emerald-700'],
@@ -17,7 +19,6 @@ const GRAIN = {
 const PIECE = { 1: 'a whole', 2: '½ of', 3: '⅓ of', 4: '¼ of' };
 const pieceOf = (p, mill) => `${PIECE[p] || `1/${p} of`} ${mill.short} × ${mill.long}`;
 const n1 = x => (x == null ? '—' : Number(x).toLocaleString('en-IN', { maximumFractionDigits: 1 }));
-const sizeText = d => [d.l, d.w, d.h].map(x => n1(x)).join(' × ');
 
 // The print sheet with every up: body blue, glue flap yellow, flaps red; the green bar is the grain the layout needs.
 export function LayoutPicture({ reading, option, className = '' }) {
@@ -41,13 +42,18 @@ export function LayoutPicture({ reading, option, className = '' }) {
   );
 }
 
+// A die line names the die by its job and says where it is known from (lib/die-check.js); the same three numbers in
+// another order are a check, never "this size" — the carton may open another way.
 function DieCheck({ dies, size, onUseDie }) {
-  const master = dies?.master || { exact: [], near: [] }, reg = dies?.register || { exact: [], near: [] };
+  const none = { exact: [], reordered: [], near: [] };
+  const master = { ...none, ...dies?.master }, reg = { ...none, ...dies?.register };
   const sheetOf = d => {
     const m = String(d.sheet_size || '').toLowerCase().replace(/\s+/g, '').match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)$/);
     return m ? { a: +m[1], b: +m[2] } : null;
   };
-  const any = master.exact.length + master.near.length + reg.exact.length + reg.near.length > 0;
+  const turned = [...master.reordered.map(masterItem), ...reg.reordered.map(d => listItem(d))];
+  const close = [...master.near.map(masterItem), ...reg.near.map(d => (d.other_order ? listItem(d, 'another order') : listItem(d)))];
+  const any = master.exact.length + reg.exact.length + turned.length + close.length > 0;
   return (
     <div className="space-y-1.5 text-xs">
       {master.exact.map(d => {
@@ -66,17 +72,20 @@ function DieCheck({ dies, size, onUseDie }) {
       {reg.exact.map(d => (
         <div key={`r${d.die_no}`} className="flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 ring-1 ring-emerald-200">
           <CheckCircle2 size={14} className="text-emerald-600" />
-          <span><b>Die {d.die_no}</b> in the 2024 die register is this size · {styleLabel(d.style)} · {d.ups ?? '?'} up. Check it is still in the rack.</span>
+          <span><b>{dieName(d)}</b> is this size · {[...dieFacts(d), dieFrom(d)].join(' · ')}. Check it is still in the rack.</span>
         </div>
       ))}
-      {(master.near.length > 0 || reg.near.length > 0) && (
+      {turned.length > 0 && (
         <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 ring-1 ring-amber-200">
-          <b>Close dies</b> — if the customer can take one of these sizes, no new die:{' '}
-          {[...master.near.map(d => `die ${d.code} ${String(d.carton_size).replace(/x/gi, ' × ')} (${d.ups ?? '?'} up)`),
-            ...reg.near.map(d => `die ${d.die_no} ${sizeText(d)} ${styleLabel(d.style).toLowerCase()} (${d.ups ?? '?'} up, register)`)].slice(0, 6).join(' · ')}
+          <b>Same numbers, written another way</b> — check it opens the same way: {listed(turned)}
         </div>
       )}
-      {!any && <p className="text-slate-600">No die of this size or within 3 mm in the Die Master or the 2024 die register — a new die is needed.</p>}
+      {close.length > 0 && (
+        <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 ring-1 ring-amber-200">
+          <b>Close dies</b> — if the customer can take one of these sizes, no new die: {listed(close)}
+        </div>
+      )}
+      {!any && <p className="text-slate-600">No die of this size or within 3 mm, in any order, in the Die Master or the die list — a new die is needed.</p>}
       {size && <p className="sr-only">{size.label}</p>}
     </div>
   );

@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 // Size proposals and KLDs through the REAL app against a real Postgres (owner, 12 Nov 2026): the die check across the
-// Die Master and the 2024 die register, proposals on the board master's sheets, the KLD saved on the Size Library
+// Die Master and the die list (die_register), proposals on the board master's sheets, the KLD saved on the Size Library
 // entry (and redrawn as a new revision), its PDF, a board's grain, and the KLD saved to Drive and shared with the
 // business mailbox only — through a fake Google. Invented sizes and boards; nothing is a customer's.
 //
@@ -220,5 +220,44 @@ describe('Size proposals and KLDs — through the real app', { skip: ENABLED ? f
     const pdf = await call('clerk', 'GET', `/costing/sizes/${a.body.size_id}/kld.pdf`);
     assert.equal(pdf.status, 200);
     assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
+  });
+
+  test('the die list: job numbers, sizes in any order, a Die Master copy never shown twice', async () => {
+    // invented dies: 2024-list dies with and without a job (one with a decimal size), a Drive die written in another
+    // order, the die list's copy of Die Master die T-901, and a Die Master die 3 mm off
+    await db.q(`INSERT INTO die_register (die_no, l_mm, w_mm, h_mm, style, ups, size_text, source, job_no)
+                VALUES ('R-57', 71.5, 43.5, 109, 'LOCK', 2, '71.5X43.5X109', 'DIE DATA 2024', '10001'),
+                       ('R-58', 88, 76, 152, 'SIDE', 4, '88X76X152', 'DIE DATA 2024', NULL),
+                       ('J10002', 152, 88, 76, NULL, NULL, '152X88X76', 'DRIVE NEW DIE', '10002'),
+                       ('DM-T-901', 92, 80, 66, NULL, NULL, '92X80X66', 'CI PLANT DIE MASTER', NULL)`);
+    await db.q(`INSERT INTO tools (family, code, title, carton_size, sheet_size, ups) VALUES ('die', 'T-902', 'Test die', '95X80X66', '15X25', 4)`);
+    const dec = await call('clerk', 'GET', '/costing/sizing/proposals?size=71.5x43.5x109&style=LOCK');
+    assert.equal(dec.status, 200, JSON.stringify(dec.body));
+    assert.deepEqual(dec.body.dies.register.exact.map(d => [d.die_no, d.job_no, d.source]), [['R-57', '10001', 'DIE DATA 2024']]);
+
+    const same = await call('clerk', 'GET', '/costing/sizing/proposals?size=92x80x66&style=LOCK');
+    assert.deepEqual(same.body.dies.master.exact.map(d => d.code), ['T-901']);
+    assert.ok(same.body.dies.master.near.some(d => d.code === 'T-902'), 'a Die Master die 3 mm off is a close die');
+    assert.deepEqual(same.body.dies.register.exact, []);
+    assert.ok(!JSON.stringify(same.body.dies.register).includes('DM-T-901'));
+    assert.deepEqual(same.body.dies.register.near.map(d => [d.die_no, d.other_order]), [['R-55', false]]);
+
+    const turned = await call('clerk', 'GET', '/costing/sizing/proposals?size=88x76x152&style=SIDE');
+    assert.deepEqual(turned.body.dies.register.exact.map(d => [d.die_no, d.job_no]), [['R-58', null]]);
+    assert.deepEqual(turned.body.dies.register.reordered.map(d => [d.die_no, d.job_no]), [['J10002', '10002']]);
+
+    const master = await call('clerk', 'GET', '/costing/sizing/proposals?size=80x92x66&style=LOCK');
+    assert.deepEqual(master.body.dies.master.reordered.map(d => d.code), ['T-901']);
+  });
+
+  test('the size check still works on a database the job-number migration has not reached', async () => {
+    await db.q('ALTER TABLE die_register DROP COLUMN job_no');
+    try {
+      const r = await call('clerk', 'GET', '/costing/sizing/proposals?size=71.5x43.5x109&style=LOCK');
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual(r.body.dies.register.exact.map(d => [d.die_no, d.job_no]), [['R-57', null]]);
+    } finally {
+      await db.q('ALTER TABLE die_register ADD COLUMN IF NOT EXISTS job_no text');
+    }
   });
 });

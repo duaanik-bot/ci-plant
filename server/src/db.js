@@ -2886,6 +2886,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261111150000_enquiry_counter.sql'));
   // Size proposals and KLDs — the KLD on a Size Library entry, a board's grain, the 2024 die register. 2026-11-12
   await pool.query(migration('20261112160000_size_kld.sql'));
+  // The die list's job numbers (15 Nov 2026): die_register.job_no, the job a die was made for. Idempotent.
+  await pool.query(migration('20261115120000_die_register_job_no.sql'));
   // Order finalised on the enquiry desk (13 Nov 2026): enquiry_orders, enquiries.order_id, status 'ordered'.
   await pool.query(migration('20261113120000_enquiry_orders.sql'));
   // The desk's alert (13 Nov 2026): enquiry_mails.alerted_at, the "announced once" mark. A replay changes nothing.
