@@ -2900,6 +2900,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261114180000_enquiry_deleted.sql'));
   // The artwork register (Artwork Manager P1, 15 Nov 2026): artwork_mails, _jobs, _versions, _files, _events. Idempotent.
   await pool.query(migration('20261115100000_artwork_register.sql'));
+  // No artwork work done twice + the "already done" notice (17 Nov 2026): saved_by, designer_reply_at, artwork_notices.
+  await pool.query(migration('20261117100000_artwork_dedup_notice.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

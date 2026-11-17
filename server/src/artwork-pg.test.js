@@ -388,4 +388,228 @@ describe('Artwork register — through the real app', {
     assert.deepEqual(vs.map(v => v.label), ['R0.1', 'R0.2', 'R1.1']);
     assert.equal(new Set(vs.map(v => v.job_no)).size, 1);
   });
+
+  // ── Dedup + the "already done" notice (17 Nov 2026) ───────────────────────────────────────────────────────────
+  const notice = () => import('./artwork-notice.js');
+  const BIZ = 'office@plant.test', OWNER = 'owner@plant.test';
+
+  test('the dedup columns and the notice table exist; mails filed before notices existed are not announced', async () => {
+    for (const [t, c] of [['artwork_files', 'saved_by'], ['artwork_versions', 'designer_reply_at'], ['artwork_mails', 'notice_id']]) {
+      assert.ok(await db.one(`SELECT 1 AS y FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`, [t, c]), `${t}.${c}`);
+    }
+    assert.ok((await db.one(`SELECT to_regclass('public.artwork_notices') AS r`)).r);
+    const before = await db.one(`SELECT count(*)::int AS n FROM artwork_notices`);
+    await db.q(fs.readFileSync(new URL('../../supabase/migrations/20261117100000_artwork_dedup_notice.sql', import.meta.url), 'utf8'));
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM artwork_notices`)).n, before.n, 'a replay adds nothing');
+    assert.equal(await code(() => db.q(`INSERT INTO artwork_notices (status, mail_ids) VALUES ('posted', '{}')`)), '23514');
+  });
+
+  test('what the designer already did is recorded: their copy of a file, and their reply in the thread', async () => {
+    await fileMails([mailOf('n-001', [{ client_item_code: 'PCS-Z901', client_rev: 'R0', designer_reply_at: '2026-11-10T10:30:00Z',
+      files: [f('PCS-Z901-R0.cdr', 'nn01', { saved_by: 'designer', drive_url: 'https://drive.test/clients/nn01' }),
+        f('PCS-Z901-R0.pdf', 'nn02'), f('PCS-Z901-R0.jpg', 'nn03', { saved_by: 'robot' })] }])]);
+    await sync();
+    const v = (await versionsOf('PCS-Z901'))[0];
+    const files = await db.q(`SELECT file_name, saved_by, drive_url FROM artwork_files WHERE version_id = $1 ORDER BY id`, [v.id]);
+    assert.deepEqual(files.map(x => x.saved_by), ['designer', 'system', 'system'], 'anything but "designer" is the system');
+    assert.equal(files[0].drive_url, 'https://drive.test/clients/nn01');
+    assert.equal(v.status, 'received');
+    const r = await db.one(`SELECT designer_reply_at FROM artwork_versions WHERE id = $1`, [v.id]);
+    assert.equal(new Date(r.designer_reply_at).toISOString(), '2026-11-10T10:30:00.000Z');
+    const job = await call('artist', 'GET', `/artwork/register/${await jobOf('PCS-Z901')}`);
+    assert.equal(job.body.versions[0].files[0].saved_by, 'designer');
+    assert.ok(job.body.versions[0].designer_reply_at);
+  });
+
+  test('each mail is in one notice only, listing what the system did and what the designer already had', async () => {
+    const { claimNotice } = await notice();
+    while (await claimNotice()) { /* the earlier tests' mails */ }
+    await fileMails([
+      mailOf('n-002', [{ client_item_code: 'PCS-Z902', client_rev: 'R0', product_name: 'DELTA CARTON', files: [f('PCS-Z902-R0.cdr', 'nn04')] }]),
+      mailOf('n-003', [{ client_item_code: 'PCS-Z901', client_rev: 'R0', files: [f('PCS-Z901-R0.cdr', 'nn01'), f('PCS-Z901-R0.pdf', 'nn02'), f('PCS-Z901-R0.jpg', 'nn03')] }], { subject: 'resend' }),
+    ]);
+    await sync();
+    const id = await claimNotice();
+    assert.ok(id);
+    assert.equal(await claimNotice(), null, 'nothing left to announce');
+    const n = await db.one(`SELECT status, mail_ids, subject, text_body FROM artwork_notices WHERE id = $1`, [id]);
+    const mine = await db.q(`SELECT id FROM artwork_mails WHERE gmail_message_id IN ('n-002', 'n-003') ORDER BY id`);
+    assert.deepEqual([...n.mail_ids].sort(), mine.map(m => m.id));
+    assert.equal(n.status, 'waiting');
+    assert.match(n.subject, /^Artwork done by the system/);
+    assert.match(n.text_body, /PCS-Z902[\s\S]*R0\.1/);
+    assert.match(n.text_body, /SENT AGAIN[\s\S]*PCS-Z901/);
+    assert.match(n.text_body, /https:\/\/drive\.test\/nn04/);
+  });
+
+  test('a notice waits while mppchd\'s Gmail is not connected, then goes once, only to the two company mailboxes', async () => {
+    const { sendNotices } = await notice();
+    await db.q(`UPDATE enquiry_mailboxes SET email = $1 WHERE key = 'business'`, [BIZ]);
+    await db.q(`UPDATE enquiry_mailboxes SET email = $1 WHERE key = 'trial'`, [OWNER]);
+    await sendNotices();
+    const waiting = await db.q(`SELECT status, tries, error FROM artwork_notices WHERE status NOT IN ('skipped') ORDER BY id`);
+    assert.ok(waiting.length >= 1 && waiting.every(x => x.status === 'waiting' && x.tries === 0));
+    assert.match(waiting[0].error, /Connect Gmail/);
+    const reg = await call('artist', 'GET', '/artwork/register');
+    assert.equal(reg.body.notice.status, 'waiting');
+
+    const http = await import('node:http');
+    const G = { raws: [], fail: false };
+    const google = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+        const u = new URL(req.url, 'http://x');
+        if (u.pathname === '/token') return send(200, { access_token: 'at-1', expires_in: 3600 });
+        if (u.pathname.endsWith('/messages/send') && req.method === 'POST') {
+          if (G.fail) return send(500, { error: { message: 'backend error' } });
+          G.raws.push(JSON.parse(body).raw); return send(200, { id: `sent-${G.raws.length}`, threadId: 't-notice' });
+        }
+        return send(404, { error: { message: 'no fake' } });
+      });
+    });
+    await new Promise(res => google.listen(0, '127.0.0.1', res));
+    const gbase = `http://127.0.0.1:${google.address().port}`;
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: 'fake-client', GOOGLE_CLIENT_SECRET: 'fake-secret', GMAIL_TOKEN_KEY: 'ab'.repeat(32),
+      GMAIL_API_BASE: `${gbase}/gmail/v1/users/me`, GOOGLE_TOKEN_URL: `${gbase}/token`, GOOGLE_REVOKE_URL: `${gbase}/revoke` });
+    try {
+      const { sealToken } = await import('./gmail.js');
+      // only the business mailbox's link sends; the trial link alone is not enough
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ('trial', $1, $2, 'Admin')`, [OWNER, sealToken('1//t')]);
+      await sendNotices();
+      assert.equal(G.raws.length, 0);
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ('business', $1, $2, 'Admin')`, [BIZ, sealToken('1//b')]);
+      await sendNotices();
+      const sent = await db.q(`SELECT status, to_text, message_id FROM artwork_notices WHERE status NOT IN ('skipped') ORDER BY id`);
+      assert.ok(sent.every(x => x.status === 'sent' && x.message_id));
+      assert.equal(G.raws.length, sent.length, 'one mail per notice');
+      const mime = Buffer.from(G.raws[0], 'base64url').toString('utf8');
+      assert.match(mime, new RegExp(`^From: .*${BIZ.replace('.', '\\.')}`, 'm'));
+      assert.match(mime, /^To: office@plant\.test, owner@plant\.test$/m);
+      assert.doesNotMatch(mime, /^(Cc|Bcc):/mi);
+      assert.doesNotMatch(mime, /example-pharma\.test/, 'never the customer');
+      await sendNotices();
+      assert.equal(G.raws.length, sent.length, 'never twice');
+
+      // Google trouble: tried again later, and given up after five tries — shown on the register
+      await fileMails([mailOf('n-004', [{ client_item_code: 'PCS-Z903', files: [f('PCS-Z903.cdr', 'nn05')] }])]);
+      await sync();
+      const id = await (await notice()).claimNotice();
+      G.fail = true;
+      for (let i = 0; i < 5; i++) {
+        await db.q(`UPDATE artwork_notices SET next_try_at = now() - interval '1 minute' WHERE id = $1`, [id]);
+        await sendNotices();
+      }
+      const gave = await db.one(`SELECT status, tries, error FROM artwork_notices WHERE id = $1`, [id]);
+      assert.equal(gave.status, 'gave_up');
+      assert.equal(gave.tries, 5);
+      assert.match(gave.error, /backend error/);
+      assert.equal((await call('artist', 'GET', '/artwork/register')).body.notice.status, 'gave_up');
+    } finally {
+      google.close();
+      await db.q('DELETE FROM gmail_links');
+      for (const k of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_TOKEN_KEY', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL', 'GOOGLE_REVOKE_URL']) delete process.env[k];
+    }
+  });
+
+  test('the database\'s call also makes the notice', async () => {
+    await fileMails([mailOf('n-005', [{ client_item_code: 'PCS-Z904', files: [f('PCS-Z904.cdr', 'nn06')] }])]);
+    const res = await fetch(base + '/avs/robot/artwork-notify', { method: 'POST', headers: { 'content-type': 'application/json', 'x-avs-robot-key': ROBOT_KEY }, body: '{}' });
+    const body = await res.json();
+    assert.ok(body.notice?.claimed);
+    const m = await db.one(`SELECT notice_id FROM artwork_mails WHERE gmail_message_id = 'n-005'`);
+    assert.ok(m.notice_id);
+  });
+
+  // ── after review: never sent blind twice, a bad address waits, Send again ─────────────────────────────────────
+  const fakeGoogle = async () => {
+    const http = await import('node:http');
+    const G = { raws: [], fail: false, calls: 0 };
+    const srv = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        G.calls += 1;
+        const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+        const u = new URL(req.url, 'http://x');
+        if (u.pathname === '/token') return send(200, { access_token: 'at-1', expires_in: 3600 });
+        if (u.pathname.endsWith('/messages/send')) {
+          if (G.fail) return send(500, { error: { message: 'backend error' } });
+          G.raws.push(JSON.parse(body).raw); return send(200, { id: `s-${G.raws.length}`, threadId: 't' });
+        }
+        return send(404, { error: { message: 'no fake' } });
+      });
+    });
+    await new Promise(res => srv.listen(0, '127.0.0.1', res));
+    const gb = `http://127.0.0.1:${srv.address().port}`;
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: 'fake-client', GOOGLE_CLIENT_SECRET: 'fake-secret', GMAIL_TOKEN_KEY: 'cd'.repeat(32),
+      GMAIL_API_BASE: `${gb}/gmail/v1/users/me`, GOOGLE_TOKEN_URL: `${gb}/token`, GOOGLE_REVOKE_URL: `${gb}/revoke` });
+    const { sealToken } = await import('./gmail.js');
+    await db.q('DELETE FROM gmail_links');
+    await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ('business', $1, $2, 'Admin')`, [BIZ, sealToken('1//b')]);
+    return { G, close: async () => {
+      srv.close();
+      await db.q('DELETE FROM gmail_links');
+      for (const k of ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_TOKEN_KEY', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL', 'GOOGLE_REVOKE_URL']) delete process.env[k];
+    } };
+  };
+  const newNotice = async id => {
+    await fileMails([mailOf(id, [{ client_item_code: `PCS-Z9${id.slice(-2)}`, files: [f(`${id}.cdr`, `zz${id}`)] }])]);
+    await sync();
+    return (await notice()).claimNotice();
+  };
+
+  test('a send that started and was never confirmed is not sent again by itself; a person sends it again from the register', async () => {
+    const { sendNotices } = await notice();
+    const { G, close } = await fakeGoogle();
+    try {
+      await sendNotices();                                  // clear anything earlier tests left waiting
+      const base0 = (await db.one(`SELECT count(*)::int AS n FROM artwork_notices WHERE status = 'gave_up'`)).n;
+      const id = await newNotice('n-011');
+      await db.q(`UPDATE artwork_notices SET status = 'sending', claimed_at = now() - interval '11 minutes', tries = 1 WHERE id = $1`, [id]);
+      const before = G.raws.length;
+      await sendNotices();
+      const row = await db.one(`SELECT status, error FROM artwork_notices WHERE id = $1`, [id]);
+      assert.equal(row.status, 'gave_up');
+      assert.match(row.error, /may have gone — look in mppchd's Sent folder/);
+      assert.equal(G.raws.length, before, 'not sent blind a second time');
+      // an older notice that gave up is shown even though a newer one went
+      await newNotice('n-012');
+      await sendNotices();
+      const reg = (await call('artist', 'GET', '/artwork/register')).body.notice;
+      assert.equal(reg.status, 'sent');
+      assert.equal(reg.gave_up, base0 + 1);
+      assert.match(reg.gave_up_error, /Sent folder/);
+      assert.equal((await call('plain', 'POST', '/artwork/register/notices/resend')).status, 403);
+      const again = await call('artist', 'POST', '/artwork/register/notices/resend');
+      assert.equal(again.body.requeued, base0 + 1);
+      assert.equal((await db.one(`SELECT status FROM artwork_notices WHERE id = $1`, [id])).status, 'sent');
+      assert.equal((await call('artist', 'GET', '/artwork/register')).body.notice.gave_up, 0);
+    } finally { await close(); }
+  });
+
+  test('a desk address that is not a plain address, or an expired connection, makes the notice wait — no try spent, nothing sent', async () => {
+    const { sendNotices } = await notice();
+    const { G, close } = await fakeGoogle();
+    try {
+      const id = await newNotice('n-013');
+      await db.q(`UPDATE enquiry_mailboxes SET email = 'Owner <owner@plant.test>' WHERE key = 'trial'`);
+      const calls = G.calls;
+      await sendNotices();
+      let row = await db.one(`SELECT status, tries, error FROM artwork_notices WHERE id = $1`, [id]);
+      assert.deepEqual([row.status, row.tries], ['waiting', 0]);
+      assert.match(row.error, /not a plain e-mail address/);
+      assert.equal(G.calls, calls, 'Google not even asked');
+      await sendNotices();                                   // the poll again: nothing changes, nothing written
+      assert.equal((await db.one(`SELECT tries FROM artwork_notices WHERE id = $1`, [id])).tries, 0);
+      await db.q(`UPDATE enquiry_mailboxes SET email = $1 WHERE key = 'trial'`, [OWNER]);
+      // the business mailbox's Gmail permission withdrawn in Google: waits for a person, the try given back
+      await db.q(`UPDATE gmail_links SET refresh_token_enc = 'v1.broken'`);
+      await sendNotices();
+      row = await db.one(`SELECT status, tries, error FROM artwork_notices WHERE id = $1`, [id]);
+      assert.deepEqual([row.status, row.tries], ['waiting', 0]);
+      assert.match(row.error, /connect Gmail again/i);
+    } finally { await close(); }
+  });
 });

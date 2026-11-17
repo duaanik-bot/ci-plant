@@ -4,9 +4,10 @@
 // pressed — no robot, no Mac, no schedule.
 //
 // It never sends to a customer. Google's compose permission would allow a send, so the rule lives in the code: the
-// writes here are drafts.create and drafts.update, and ONE send — sendToCompany, the order sheet for the company's own
-// mailbox (owner, 12 Nov 2026: it "will directly shoot to mppchd@gmail.com", not a draft). It builds that mail itself,
-// to that one address only (no Cc, no Bcc). gmail-link.test.js fails the build on any other send.
+// writes here are drafts.create and drafts.update, and ONE send — sendToOwnMailboxes, to the company's own mailboxes
+// only: the order sheet (owner, 12 Nov 2026: it "will directly shoot to mppchd@gmail.com", not a draft) and the artwork
+// "done by the system" notice (17 Nov 2026). It builds that mail itself, to one or two company addresses read from the
+// database (no Cc, no Bcc). gmail-link.test.js fails the build on any other send.
 // A person checks every customer draft and presses Send in Gmail.
 // Permission: gmail.compose (make and change drafts) + gmail.metadata (headers and labels only — to reply in the right
 // thread and to notice a draft that has been sent). No mail body is ever read.
@@ -224,14 +225,31 @@ export async function draftSent(token, { draftId, threadId, since }) {
   return sent ? { sent: true, at: new Date(Number(sent.internalDate)).toISOString() } : { sent: false, gone: true };
 }
 
-// The ONE send: the order sheet to the company's own mailbox (owner, 12 Nov 2026). The mail is built here, addressed to
-// `company` alone — the desk's business mailbox address, read from the database by the caller, never from a request —
-// so no caller can add a customer, a Cc or a Bcc. → { message_id, thread_id }
+// The ONE send, and only to the company's own mailboxes. Two callers: the order sheet (owner, 12 Nov 2026), to the
+// business mailbox alone (sendToCompany), and the artwork "done by the system" notice (owner, 17 Nov 2026: "sent by the
+// mppchd email to both [the owner's mailbox] and mppchd"), to the desk's business and trial mailboxes. The addresses are read from
+// the database by the caller (enquiry_mailboxes), never from a mail or a request. One or two recipients, each a plain
+// address, no Cc, no Bcc — so no caller can reach a customer. → { message_id, thread_id }
 const COMPANY_ADDRESS = /^[^\s@<>,;"']+@[^\s@<>,;"']+\.[^\s@<>,;"']+$/;
-export async function sendToCompany(token, { from, company, subject, text, html, attachments = [] }) {
-  const to = String(company ?? '').trim().toLowerCase();
-  if (!COMPANY_ADDRESS.test(to)) throw gmailError('No company mailbox address to send the order sheet to — set the business mailbox in the desk settings.', 409);
-  const raw = rawOf(buildMime({ from, to: [to], subject, text, html, attachments }));
+// The company's own mailboxes: the desk's business and trial addresses, read here from the database — so a caller
+// cannot widen the list. (Tests pass their own reader; gmail-link.test.js fails the build if any other file does.)
+async function deskMailboxes() {
+  const { q } = await import('./db.js');
+  return (await q(`SELECT email FROM enquiry_mailboxes WHERE key IN ('business', 'trial')`)).map(r => String(r.email ?? '').trim().toLowerCase());
+}
+export async function sendToOwnMailboxes(token, { from, to, subject, text, html, attachments = [], what = 'the mail', ownAddresses = deskMailboxes }) {
+  const list = [...new Set((Array.isArray(to) ? to : [to]).map(a => String(a ?? '').trim().toLowerCase()))];
+  if (!list.length || list.length > 2 || !list.every(a => COMPANY_ADDRESS.test(a))) {
+    throw gmailError(`No company mailbox address to send ${what} to — set the business mailbox in the desk settings.`, 409);
+  }
+  const own = new Set((await ownAddresses()).filter(Boolean));
+  const stranger = list.filter(a => !own.has(a));
+  if (stranger.length) throw gmailError(`${what} may go only to the company's own mailboxes (desk settings) — not to ${stranger.join(', ')}.`, 409);
+  const raw = rawOf(buildMime({ from, to: list, subject, text, html, attachments }));
   const m = await gmailCall(token, 'POST', '/messages/send', { raw });
   return { message_id: m.id || null, thread_id: m.threadId || null };
+}
+export async function sendToCompany(token, { from, company, subject, text, html, attachments = [], ownAddresses }) {
+  if (Array.isArray(company)) throw gmailError('No company mailbox address to send the order sheet to — set the business mailbox in the desk settings.', 409);
+  return sendToOwnMailboxes(token, { from, to: [company], subject, text, html, attachments, what: 'the order sheet', ...(ownAddresses ? { ownAddresses } : {}) });
 }

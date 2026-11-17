@@ -64,25 +64,28 @@ test('the e-mail: threaded headers, text + HTML, the PDF attached, Unicode subje
   assert.equal(Buffer.from(g.rawOf(mime), 'base64url').toString('utf8'), mime);
 });
 
-test('CI Plant sends to nobody but the company: the only Gmail send is sendToCompany, used only by the order sheet', () => {
+test('CI Plant sends to nobody but the company: one Gmail send, sendToOwnMailboxes — the order sheet and the artwork notice', () => {
   const SEND = /(messages|drafts)\/send|\/send['"`]\s*,\s*\{\s*raw|users\/me\/messages\/send/g;
   const dirs = [new URL('./', import.meta.url), new URL('./routes/', import.meta.url)];
   const importers = [];
   for (const dir of dirs) {
     for (const f of readdirSync(dir).filter(x => x.endsWith('.js') && !x.endsWith('.test.js'))) {
       const src = readFileSync(new URL(f, dir), 'utf8');
-      if (/\bsendToCompany\b/.test(src) && f !== 'gmail.js') importers.push(f);
+      if (/\bsendToCompany\b/.test(src) && f !== 'gmail.js') importers.push(`${f}:company`);
+      if (/\bsendToOwnMailboxes\b/.test(src) && f !== 'gmail.js') importers.push(`${f}:own`);
+      if (f !== 'gmail.js') assert.doesNotMatch(src, /\bownAddresses\b/, `${f} must not choose who counts as the company's own mailboxes`);
       if (f === 'gmail.js') continue;
       assert.doesNotMatch(src, SEND, `${f} calls Gmail send`);
     }
   }
-  assert.deepEqual(importers, ['enquiries.js'], 'only the enquiry desk (its order sheet) uses sendToCompany');
+  assert.deepEqual(importers.sort(), ['artwork-notice.js:own', 'enquiries.js:company'],
+    'only the order sheet (sendToCompany) and the artwork notice (sendToOwnMailboxes) send');
   const gm = readFileSync(new URL('./gmail.js', import.meta.url), 'utf8');
   const hits = [...gm.matchAll(SEND)];
   assert.equal(hits.length, 1, 'one send in gmail.js');
-  const from = gm.indexOf('export async function sendToCompany');
+  const from = gm.indexOf('export async function sendToOwnMailboxes');
   const to = gm.indexOf('\n}\n', from);
-  assert.ok(from > 0 && hits[0].index > from && hits[0].index < to, 'and it is inside sendToCompany');
+  assert.ok(from > 0 && hits[0].index > from && hits[0].index < to, 'and it is inside sendToOwnMailboxes');
   const writes = [...gm.matchAll(/gmailCall\(token, '(POST|PUT|DELETE|PATCH)', `?'?([^`',]+)/g)].map(m => `${m[1]} ${m[2]}`);
   assert.deepEqual(writes.sort(), ['POST /drafts', 'POST /messages/send', 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(),
     'the only Gmail writes are draft create / update and the company send');
@@ -96,7 +99,8 @@ test('sendToCompany addresses only the company mailbox: one recipient, no Cc, an
     return { status: 200, ok: true, statusText: 'OK', json: async () => ({ id: 'm-1', threadId: 't-1' }) };
   };
   try {
-    const out = await g.sendToCompany('tok', { from: 'box@plant.test', company: 'Office@Plant.test', subject: 'Order finalised — X',
+    const own = async () => ['office@plant.test'];
+    const out = await g.sendToCompany('tok', { ownAddresses: own, from: 'box@plant.test', company: 'Office@Plant.test', subject: 'Order finalised — X',
       text: 'hello', html: '<p>hello</p>', attachments: [{ name: 'KLD 1.pdf', bytes: Buffer.from('%PDF-1.7 a'), mime: 'application/pdf' }] });
     assert.deepEqual(out, { message_id: 'm-1', thread_id: 't-1' });
     assert.equal(seen.length, 1);
@@ -106,9 +110,34 @@ test('sendToCompany addresses only the company mailbox: one recipient, no Cc, an
     assert.doesNotMatch(mime, /^(Cc|Bcc):/mi);
     assert.match(mime, /filename="KLD 1\.pdf"/);
     for (const bad of ['', 'not-an-address', 'a@b.test, c@d.test', 'x@y.test\r\nBcc: z@w.test', null]) {
-      await assert.rejects(g.sendToCompany('tok', { from: 'box@plant.test', company: bad, subject: 's', text: 't' }), /company mailbox/);
+      await assert.rejects(g.sendToCompany('tok', { ownAddresses: own, from: 'box@plant.test', company: bad, subject: 's', text: 't' }), /company mailbox/);
     }
     assert.equal(seen.length, 1, 'nothing sent for a bad address');
+  } finally { globalThis.fetch = was; }
+});
+
+test('sendToOwnMailboxes: one or two plain company addresses, once each, no Cc — three or a smuggled header is refused', async () => {
+  const seen = [];
+  const was = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    seen.push(JSON.parse(opts.body));
+    return { status: 200, ok: true, statusText: 'OK', json: async () => ({ id: 'm-2', threadId: 't-2' }) };
+  };
+  const own = async () => ['box@plant.test', 'owner@plant.test'];
+  try {
+    await g.sendToOwnMailboxes('tok', { ownAddresses: own, from: 'box@plant.test', to: ['Box@Plant.test', 'owner@plant.test', 'box@plant.test'], subject: 'Artwork done', text: 'x' });
+    const mime = Buffer.from(seen[0].raw, 'base64url').toString('utf8');
+    assert.match(mime, /^To: box@plant\.test, owner@plant\.test$/m);
+    assert.doesNotMatch(mime, /^(Cc|Bcc):/mi);
+    for (const bad of [[], ['a@b.test', 'c@d.test', 'e@f.test'], ['a@b.test', 'x@y.test\r\nBcc: z@w.test'], ['a@b.test, c@d.test'], [null]]) {
+      await assert.rejects(g.sendToOwnMailboxes('tok', { ownAddresses: own, from: 'box@plant.test', to: bad, subject: 's', text: 't' }), /company mailbox/);
+    }
+    await assert.rejects(g.sendToCompany('tok', { ownAddresses: own, from: 'box@plant.test', company: ['a@b.test', 'c@d.test'], subject: 's', text: 't' }), /company mailbox/);
+    // a well-formed address that is not one of the desk's mailboxes — a customer — is refused
+    await assert.rejects(g.sendToOwnMailboxes('tok', { ownAddresses: own, from: 'box@plant.test', to: ['box@plant.test', 'buyer@customer.test'], subject: 's', text: 't' }),
+      /only to the company's own mailboxes .*buyer@customer\.test/);
+    await assert.rejects(g.sendToCompany('tok', { ownAddresses: own, from: 'box@plant.test', company: 'buyer@customer.test', subject: 's', text: 't' }), /own mailboxes/);
+    assert.equal(seen.length, 1, 'nothing sent for a bad list');
   } finally { globalThis.fetch = was; }
 });
 

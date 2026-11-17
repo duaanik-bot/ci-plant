@@ -13,6 +13,10 @@ In each run you read the company mailbox for artwork a customer has sent, save e
 each mail out, and file them all with **one** Supabase call. CI Plant puts them in the Artwork register within seconds,
 never twice, and alerts the artwork team (bell and phone). People take it from there. **You never reply.**
 
+**Never do the designer's work twice** (owner, 17 Nov 2026): before saving a file, look whether the designer already
+saved it, and whether mppchd already answered the mail (section 4b). What the designer did is recorded, not repeated.
+CI Plant then mails the two company mailboxes a notice of what the system did — that mail is CI Plant's, not yours.
+
 This step comes **after** the run's existing steps and changes none of them. If it fails, say so in the report and
 finish the run as usual.
 
@@ -71,7 +75,31 @@ not from mppchd itself, not already filed.
 - **Not sure it is artwork, or not sure which product it is for → file it with `"kind": "to_sort"`** and say why in
   `summary`. A mail filed "to sort" is shown to a person; a mail left out is lost.
 
+## 4b. Has the designer already done it?
+
+For each kept message, before saving anything:
+
+1. **The thread.** You opened it whole in step 3. If **mppchd sent a message in the thread after this customer mail
+   that answers it about the artwork** — a proof ("Please Provide Approval", a PDF or JPG attached), or a question about
+   the file — the designer has already taken it up: write that message's time as the item's `designer_reply_at` (ISO,
+   with the time zone). A forward, a price or a PO reply does not count. Still file the mail.
+2. **Each file.** Download the attachment and take its sha256 first (step 5.1–5.2). Then search Drive (`search_files`)
+   for a file whose name is **exactly** the attachment's name, not trashed, **outside `CI AVS`** (the designer's
+   `Clients` or `Colour` folders). An older revision often keeps the same name and nearly the same size, so a name is
+   never enough. The hit is the designer's copy only when:
+   - **its bytes are the same**: download it (`download_file_content`) and its sha256 equals the attachment's; or,
+     only when Drive will not let you download it because it is too big,
+   - **same size in bytes AND saved (modified) after this customer mail arrived.**
+   Then **do not save it again**: write the file with `"saved_by": "designer"`, the attachment's sha256, and the
+   designer's copy as its `drive_file_id` / `drive_url`.
+   - Anything else — different bytes, different size, older than the mail, several candidates you cannot tell apart,
+     the search or download failing → **save it as usual.** A second copy in the library costs nothing; a skipped file
+     is lost. Never guess.
+   - Never move, rename or change the designer's file — it is only read.
+
 ## 5. Save the files, and take their fingerprints
+
+Files marked `"saved_by": "designer"` in 4b are **not** saved again — skip step 3 for them.
 
 For each attachment that is artwork (not signature images such as `image001.png`):
 
@@ -110,7 +138,8 @@ and a label is two items. Five cartons are five items.
 | product_name     | the product as the customer names it ("ALPHA - SALE CARTON"). For a customer who uses no codes this is what identifies the job — write it the same way every time |
 | pack_type        | `carton`, `label`, `insert` or `other`                                                           |
 | variant          | `batch` when this is batch / mfg / exp detail artwork for one batch; else leave out              |
-| files            | `[{"file_name": "…", "size_bytes": 1234567, "sha256": "…", "drive_file_id": "…", "drive_url": "…"}]` |
+| files            | `[{"file_name": "…", "size_bytes": 1234567, "sha256": "…", "drive_file_id": "…", "drive_url": "…"}]` — add `"saved_by": "designer"` for a file the designer had already saved (4b) |
+| designer_reply_at | when mppchd had already replied in the thread after this mail (4b); else leave out              |
 | links            | `["https://…"]` — only links that were not fetched                                              |
 
 Do **not** decide whether this is a new version or one sent before — send what the mail holds. CI Plant compares the
@@ -155,6 +184,7 @@ About a minute later:
 
 ## 9. Report
 
-Add `artwork_filed`, `artwork_to_sort` and `artwork_files_not_saved` to the run's stats, and one line to its note, such
-as: "Artwork: 3 mails filed (CI-AW-0012 R0.2, CI-AW-0013 R0.1, CI-AW-0019 v1 to sort); 1 file not saved to Drive." In
+Add `artwork_filed`, `artwork_to_sort`, `artwork_files_not_saved` and `artwork_files_by_designer` to the run's stats, and
+one line to its note, such as: "Artwork: 3 mails filed (CI-AW-0012 R0.2, CI-AW-0013 R0.1, CI-AW-0019 v1 to sort); 2
+files already saved by the designer (not copied); 1 file not saved to Drive." In
 the end summary: the same line, and anything refused, unreadable or left for a person — never a guess.

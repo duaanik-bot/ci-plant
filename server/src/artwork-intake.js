@@ -12,11 +12,14 @@
 // version under it — or, when the very same files are already a version, one more line in that version's history
 // (artwork-register.js holds the rules). A mail AVS could not classify is filed "to sort", never dropped.
 //
-// P1 registers and files. It checks nothing, drafts nothing and touches no order line.
+// P1 registers and files. It checks nothing, drafts nothing and touches no order line. What the designer already did
+// (their copy of a file, their reply in the thread) is recorded as AVS saw it (17 Nov 2026), and artwork-notice.js tells
+// the two company mailboxes what the system did.
 import { one, tx } from './db.js';
 import { audit, notify, nextNumber } from './helpers.js';
 import { canAccess } from '../../client/src/modules.js';
 import { resolveCustomer } from './routes/enquiries.js';
+import { artworkNoticeSoft, noticeWorkWaiting } from './artwork-notice.js';
 import { parseItemCode, productFromFileName, sourcePrint, placeVersion, versionLabel, jobKey } from './artwork-register.js';
 
 export const AVS_RUNNER = 'AVS (office)';
@@ -75,6 +78,9 @@ export function itemIdentity(item, subject, alone = true) {
 // nothing else can ever be rendered as a link.
 export const safeUrl = v => (/^https?:\/\//i.test(text(v)) ? text(v) : null);
 const wholeNumber = v => (Number.isFinite(Number(v)) && text(v) !== '' ? Math.round(Number(v)) : null);
+
+// A time AVS wrote, or nothing: a value Postgres would refuse never stops the mail being filed.
+const whenOf = v => { const t = Date.parse(text(v)); return Number.isFinite(t) ? new Date(t).toISOString() : null; };
 
 const extOf = name => (/\.([a-z0-9]{1,5})$/i.exec(text(name))?.[1] ?? '').toLowerCase() || null;
 
@@ -154,14 +160,16 @@ async function fileIntakeRow(qc, oc, row) {
     const label = versionLabel(id.rev, place.receipt_no);
     const saved = files.some(f => text(f?.drive_file_id));
     const v = await oc(`
-      INSERT INTO artwork_versions (job_id, client_rev, receipt_no, label, variant, source_print, status, first_mail_id, received_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-    [job.id, id.rev, place.receipt_no, label, text(item.variant) || null, print, saved ? 'received' : 'file_to_fetch', mail.id, row.received_at]);
+      INSERT INTO artwork_versions (job_id, client_rev, receipt_no, label, variant, source_print, status, first_mail_id, received_at, designer_reply_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+    [job.id, id.rev, place.receipt_no, label, text(item.variant) || null, print, saved ? 'received' : 'file_to_fetch', mail.id, row.received_at,
+      whenOf(item.designer_reply_at)]);
     for (const f of files) {
-      await qc(`INSERT INTO artwork_files (version_id, file_name, ext, size_bytes, sha256, drive_file_id, drive_url)
-                VALUES ($1, $2, $3, $4::bigint, $5, $6, $7)`,
+      // saved_by 'designer': AVS found the designer's own copy on Drive and saved no second one (drive_url = their copy)
+      await qc(`INSERT INTO artwork_files (version_id, file_name, ext, size_bytes, sha256, drive_file_id, drive_url, saved_by)
+                VALUES ($1, $2, $3, $4::bigint, $5, $6, $7, $8)`,
       [v.id, text(f.file_name) || null, extOf(f.file_name), wholeNumber(f.size_bytes), text(f.sha256).toLowerCase() || null,
-        text(f.drive_file_id) || null, safeUrl(f.drive_url)]);
+        text(f.drive_file_id) || null, safeUrl(f.drive_url), text(f.saved_by).toLowerCase() === 'designer' ? 'designer' : 'system']);
     }
     for (const url of links) await qc('INSERT INTO artwork_files (version_id, link_url) VALUES ($1, $2)', [v.id, url]);
     await qc(`INSERT INTO artwork_events (job_id, version_id, mail_id, action, detail, by_name) VALUES ($1, $2, $3, 'received', $4, $5)`,
@@ -244,9 +252,14 @@ const SOFT_MAX = 10;
 export async function syncIntakeArtworkSoft() {
   const none = { filed: [], skipped: [], refused: [] };
   try {
-    if (!await one(`SELECT 1 AS y FROM avs.artwork_intake WHERE status = 'new' LIMIT 1`)) return none;
+    if (!await one(`SELECT 1 AS y FROM avs.artwork_intake WHERE status = 'new' LIMIT 1`)) {
+      // nothing new to file — but a notice may still be waiting for mppchd's Gmail, or due a retry
+      if (await noticeWorkWaiting()) await artworkNoticeSoft();
+      return none;
+    }
     const out = await syncIntakeArtwork({ max: SOFT_MAX });
     await notifyNewArtworkSoft();
+    await artworkNoticeSoft();
     return out;
   } catch (e) {
     if (!MISSING.has(e?.code)) console.warn(`[artwork-intake] ${e.message}`);

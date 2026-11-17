@@ -25,16 +25,40 @@ const CHIPS = [
 ];
 const matches = (job, chip) => (chip === 'to_sort' ? job.to_sort : chip === 'file_to_fetch' ? job.latest.status === 'file_to_fetch' : true);
 
+// The last "done by the system" notice mail (from mppchd to the two company mailboxes): one quiet line when it went,
+// a loud one when it is waiting for mppchd's Gmail or Google refused it — so a notice nobody got is never silent.
+function NoticeLine({ notice, onResend }) {
+  if (!notice) return null;
+  const warn = 'mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-900';
+  return (
+    <>
+      {notice.gave_up > 0 && (
+        <div className={`${warn} flex flex-wrap items-center gap-2`}>
+          <span>{notice.gave_up === 1 ? 'One "done by the system" mail to the designer was NOT sent.' : `${notice.gave_up} "done by the system" mails to the designer were NOT sent.`} {notice.gave_up_error}</span>
+          <Button size="sm" variant="secondary" className="ml-auto" onClick={onResend}>Send again</Button>
+        </div>
+      )}
+      {notice.pending > 0 && notice.status !== 'sent' && (
+        <div className={warn}>The "done by the system" mail to the designer is waiting to be sent. {notice.error}</div>
+      )}
+      {notice.status === 'sent' && (
+        <div className="mb-2 text-[12px] text-slate-500">Last "done by the system" mail sent {fmt.date(notice.sent_at)} to {notice.to_text}.</div>
+      )}
+    </>
+  );
+}
+
 export default function ArtworkRegister({ focus }) {
   const toast = useToast();
   const [jobs, setJobs] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [chip, setChip] = useState('');
   const [openId, setOpenId] = useState(focus ? Number(focus) : null);
 
   // The toast and the close handler are read through refs: neither is a stable object, and a loader that depended on
   // them would run again on every render.
   const toastRef = useRef(toast); toastRef.current = toast;
-  const load = useCallback(() => api.get('/artwork/register').then(r => setJobs(r.jobs)).catch(e => toastRef.current.error(e.message)), []);
+  const load = useCallback(() => api.get('/artwork/register').then(r => { setJobs(r.jobs); setNotice(r.notice || null); }).catch(e => toastRef.current.error(e.message)), []);
   const closeJob = useCallback(() => setOpenId(null), []);
   useEffect(() => { load(); }, [load]);
   // AVS files four times a day; an open register picks a new run up without a reload.
@@ -79,6 +103,7 @@ export default function ArtworkRegister({ focus }) {
         </FilterGroup>
         <Button size="sm" variant="secondary" className="ml-auto" onClick={load}><RefreshCw size={13} className="mr-1 inline" />Refresh</Button>
       </FilterRail>
+      <NoticeLine notice={notice} onResend={() => api.post('/artwork/register/notices/resend').then(r => { toast.success(r.requeued ? `${r.requeued} sent again${r.sent ? '' : ' — still waiting, see the note'}` : 'Nothing to send again'); load(); }).catch(e => toast.error(e.message))} />
       <DataTable searchable columns={columns} rows={rows} onRowClick={j => setOpenId(j.id)}
         defaultSort={{ key: 'received_at', dir: 'desc' }}
         exportName="Artwork register"

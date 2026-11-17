@@ -7,6 +7,7 @@
 //   POST /api/artwork/register/:jobId/map                 { product_id } — a person says which product a job is
 //   POST /api/artwork/register/versions/:id/not-artwork   { reason } — filed by mistake; kept, hidden from the work
 //   POST /api/artwork/register/versions/:id/restore       put it back
+//   POST /api/artwork/register/notices/resend             the "done by the system" mails that gave up: send again
 //
 // Behind the Artwork tick. The office AVS fills the register (artwork-intake.js); nothing here sends mail, checks
 // artwork or touches an order line — that is the next stage. Search is done here in JavaScript, not in SQL: the plant
@@ -15,6 +16,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { mayArtwork } from '../artwork-intake.js';
+import { resendGaveUp, artworkNoticeSoft } from '../artwork-notice.js';
 
 const r = Router();
 const REFUSED = { error: 'Artwork is not ticked for this login — ask an admin to tick it in Masters → Users.', code: 'ARTWORK_REFUSED' };
@@ -56,7 +58,15 @@ r.get('/artwork/register', async (req, res, next) => {
         latest: { id: j.v_id, label: j.label, status: j.status, variant: j.variant, received_at: j.received_at },
         waiting_days: Math.max(0, Math.floor((now - new Date(j.received_at).getTime()) / DAY)),
       }));
-    res.json({ jobs });
+    // The last "done by the system" notice mail (artwork-notice.js): sent, waiting for mppchd's Gmail, or given up.
+    // Every notice not sent is counted, so an older one that gave up is never hidden behind a newer one that went.
+    const notice = await one(`SELECT id, status, to_text, error, tries, sent_at, created_at FROM artwork_notices
+                               WHERE status <> 'skipped' ORDER BY id DESC LIMIT 1`);
+    const counts = await one(`SELECT count(*) FILTER (WHERE status = 'gave_up')::int AS gave_up,
+                                     count(*) FILTER (WHERE status IN ('waiting', 'failed', 'sending'))::int AS pending,
+                                     (array_agg(error ORDER BY id DESC) FILTER (WHERE status = 'gave_up'))[1] AS gave_up_error
+                                FROM artwork_notices`);
+    res.json({ jobs, notice: notice ? { ...notice, ...counts } : null });
   } catch (e) { next(e); }
 });
 
@@ -64,9 +74,9 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
   try {
     const job = idOf(req.params.jobId) && await one('SELECT * FROM artwork_jobs WHERE id = $1', [idOf(req.params.jobId)]);
     if (!job) return res.status(404).json({ error: 'No such artwork job.' });
-    const versions = await q(`SELECT id, label, client_rev, receipt_no, variant, status, COALESCE(received_at, created_at) AS received_at
-                                FROM artwork_versions WHERE job_id = $1 ORDER BY id DESC`, [job.id]);
-    const files = await q(`SELECT f.id, f.version_id, f.role, f.file_name, f.ext, f.size_bytes, f.sha256, f.drive_file_id, f.drive_url, f.link_url
+    const versions = await q(`SELECT id, label, client_rev, receipt_no, variant, status, COALESCE(received_at, created_at) AS received_at,
+                                     designer_reply_at FROM artwork_versions WHERE job_id = $1 ORDER BY id DESC`, [job.id]);
+    const files = await q(`SELECT f.id, f.version_id, f.role, f.file_name, f.ext, f.size_bytes, f.sha256, f.drive_file_id, f.drive_url, f.link_url, f.saved_by
                              FROM artwork_files f JOIN artwork_versions v ON v.id = f.version_id WHERE v.job_id = $1 ORDER BY f.id`, [job.id]);
     const events = await q(`SELECT id, version_id, mail_id, action, detail, by_name, at FROM artwork_events WHERE job_id = $1 ORDER BY id`, [job.id]);
     const mails = await q(`SELECT id, subject, from_name, from_email, received_at, view_url, gmail_thread_id FROM artwork_mails
@@ -77,6 +87,16 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
       v.mails = mails.filter(m => mine.has(m.id));
     }
     res.json({ job, versions, events });
+  } catch (e) { next(e); }
+});
+
+// Send again: the notices that gave up go back in the queue (a person has looked — e.g. in mppchd's Sent folder).
+r.post('/artwork/register/notices/resend', async (req, res, next) => {
+  try {
+    const n = await resendGaveUp();
+    if (n) await audit('artwork_notice', 0, 'resend', `${n} artwork notice(s) put back to send`, q, req.user?.name);
+    const out = n ? await artworkNoticeSoft() : null;
+    res.json({ requeued: n, ...(out || {}) });
   } catch (e) { next(e); }
 });
 

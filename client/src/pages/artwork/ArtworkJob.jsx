@@ -73,6 +73,7 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
                   <VersionStatus status={v.status} />
                   {v.variant === 'batch' && <span className="text-[11px] font-semibold text-slate-500">batch details</span>}
                   <span className="text-[12px] text-slate-500">received {fmt.date(v.received_at)}</span>
+                  {v.designer_reply_at && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">designer replied {fmt.date(v.designer_reply_at)}</span>}
                   <span className="ml-auto">
                     {v.status === 'not_artwork'
                       ? <Button size="sm" variant="secondary" onClick={() => api.post(`/artwork/register/versions/${v.id}/restore`).then(() => done(`${v.label} is back in the register`)).catch(e => toast.error(e.message))}>Put back</Button>
@@ -87,7 +88,8 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
                     : <div key={f.id} className="flex flex-wrap items-center gap-2 text-[13px]"><FileText size={13} className="text-slate-400" />
                         <span className="font-semibold">{f.file_name || 'file'}</span>
                         <span className="text-[11px] text-slate-500">{size(f.size_bytes)}</span>
-                        {f.drive_url ? <Out href={f.drive_url}>Open in Drive</Out> : <span className="text-[11px] text-amber-800">not saved in Drive — open the mail</span>}</div>))}
+                        {f.drive_url ? <Out href={f.drive_url}>Open in Drive</Out> : <span className="text-[11px] text-amber-800">not saved in Drive — open the mail</span>}
+                        {f.saved_by === 'designer' && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">saved by designer — not copied again</span>}</div>))}
                   {!v.files.length && <div className="text-[13px] text-amber-800">No file was saved for this version — open the mail.</div>}
                 </div>
                 <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
