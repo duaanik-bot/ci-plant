@@ -570,6 +570,25 @@ function computeAll(ctx) {
         const left = paise(subLine.carried_advance) - advCovered;
         subLine.carried_advance = fmtPaise(left > 0n ? left : 0n);
       }
+      // Nor is it left as unrecovered or short (2026-11-17: November listed Gangadhari's covered ₹1,940 as carried over):
+      // the next month's "carried forward", the short-pay count and reports read these.
+      const takenOff = (left, code) => {
+        const got = paise(main.breakdown.find((b) => b?.code === code)?.amount ?? '0') ?? 0n;
+        const rest = (paise(left) ?? 0n) - got;
+        return fmtPaise(rest > 0n ? rest : 0n);
+      };
+      const u = subLine.unrecovered ?? {};
+      subLine.unrecovered = {
+        ...u,
+        advance: takenOff(u.advance ?? '0', `ADJ:SUB${subId}-ADV`),
+        loans: (Array.isArray(u.loans) ? u.loans : [])
+          .map((l) => ({ ...l, amount: takenOff(l.amount, `ADJ:SUB${subId}-LN${l.loan_id}`) }))
+          .filter((l) => paise(l.amount) > 0n),
+      };
+      if (paise(subLine.net_before_cap) < 0n) {
+        const nb = paise(subLine.net_before_cap) + amount;
+        subLine.net_before_cap = fmtPaise(nb < 0n ? nb : 0n);
+      }
       subLine.flags = byLevel([...subLine.flags, { level: 'info', code: 'COVERED_BY_MAIN', main_id: id, amount: fmtPaise(amount),
         message: `${inr(fmtPaise(amount))} its pay could not cover is taken from ${mainName}'s pay (main account) — not carried forward` }]);
       main.flags = byLevel([...main.flags, { level: 'info', code: 'COVERS_SUB', sub_id: subId, amount: fmtPaise(amount),

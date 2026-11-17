@@ -20,7 +20,7 @@ const freePort = () => new Promise((resolve, reject) => {
 
 describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG=1 to boot a throwaway Postgres' }, () => {
   let epg, dir, db, pool, runs, ledger;
-  let M, S, loanS, run;
+  let M, S, loanS, run, alone;
   const req = { user: { id: 1, name: 'Test Approver' } };
 
   before(async () => {
@@ -66,6 +66,7 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     await db.tx((qc) => runs.recalcRun(qc, run));
     const s = await lineOf(S);
     assert.equal(s.payable, '0.00');
+    alone = s.unrecovered;
     const left = Number(s.unrecovered.advance) + s.unrecovered.loans.reduce((t, l) => t + Number(l.amount), 0);
     assert.equal(left, 3000, '6000 owed, 3000 of pay');
     assert.equal((await lineOf(M)).payable, '30000.00');
@@ -78,8 +79,8 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     const s = await lineOf(S);
     const m = await lineOf(M);
     const wanted = [];
-    if (Number(s.unrecovered.advance) > 0) wanted.push([`ADJ:SUB${S}-ADV`, s.unrecovered.advance]);
-    for (const l of s.unrecovered.loans) wanted.push([`ADJ:SUB${S}-LN${l.loan_id}`, l.amount]);
+    if (Number(alone.advance) > 0) wanted.push([`ADJ:SUB${S}-ADV`, alone.advance]);
+    for (const l of alone.loans) wanted.push([`ADJ:SUB${S}-LN${l.loan_id}`, l.amount]);
     assert.deepEqual(subLines(m).sort(), wanted.sort());
     assert.equal(m.payable, '27000.00', '30000 less the 3000 the sub-account could not cover');
     assert.match(m.breakdown.find((b) => /^ADJ:SUB/.test(b.code)).label, /Sub-account Test Main Second/);
@@ -92,6 +93,10 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     assert.deepEqual([covers?.sub_id, covers?.amount], [S, '3000.00']);
     const carried = await db.one(`SELECT carried_advance::text AS c FROM hr.run_lines WHERE run_id = $1 AND person_id = $2`, [run.id, S]);
     assert.equal(carried.c, '0.00', 'what the main account covers is not carried forward on the sub-account');
+    // Nor left as unrecovered / short, which next month's "carried forward" and the reports read (2026-11-17).
+    assert.deepEqual([s.unrecovered.advance, s.unrecovered.loans], ['0.00', []]);
+    const nb = await db.one(`SELECT net_before_cap::text AS n FROM hr.run_lines WHERE run_id = $1 AND person_id = $2`, [run.id, S]);
+    assert.equal(nb.n, '0.00');
     const totals = await db.tx((qc) => runs.totalsOf(qc, run.id));
     assert.equal(totals.carried_advance, '0.00');
   });
