@@ -256,6 +256,7 @@ const userNameOf = (req) => (typeof req?.user?.name === 'string' && req.user.nam
 
 const given = (v) => v !== null && v !== undefined;
 const paiseOf = (v) => (given(v) ? toPaise(rat(v)) : 0n);
+const prevMonth = (mm) => { const [y, m] = mm.split('-').map(Number); return `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`; };
 const money = (v) => fmtPaise(paiseOf(v));               // exact, to paise: '1500.00'
 const INDIAN = new Intl.NumberFormat('en-IN');
 // '1234567.50' → '₹12,34,567.50' (the whole part through Intl as a BigInt, so it stays exact).
@@ -1399,8 +1400,12 @@ async function runResponse(req, res, next) {
     }
     const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
     const names = await userNames(q, found.flatMap((l) => [l.held_by, l.approved_by]));
+    const bf = await advanceBroughtForward(q, run, found);
     const lines = found.map((l) => ({
       ...l,
+      advance_brought_forward: bf.get(l.person_id)?.brought_forward ?? null,
+      advance_given_all: bf.get(l.person_id)?.given ?? null,
+      advance_covered_by_main: bf.get(l.person_id)?.covered_by_main ?? null,
       held_by_name: given(l.held_by) ? names.get(l.held_by) ?? null : null,
       approved_by_name: given(l.approved_by) ? names.get(l.approved_by) ?? null : null,
     }));
@@ -2225,6 +2230,36 @@ r.get('/hr/runs/:month/lines/:personId/history', requireHr('viewer'), async (req
   } catch (e) { next(e); }
 });
 
+// ── The advance brought forward into a month (owner's request 2026-11-17) ───────────────────────────────────
+// "The amount carried forward from the previous months is missing in the payslip." Per line: what was owed coming into
+// the month = balance after − everything given this month (the sheet's advance_given and the app's own advances for
+// the month) + recovered from this pay + what a main account's pay covered for a sub-account (ADJ:SUB<id>-ADV on the
+// main line). So brought forward + given − recovered − covered = balance after, on every screen that shows it.
+async function advanceBroughtForward(qx, run, lines) {
+  const ids = lines.map((l) => l.person_id);
+  const out = new Map();
+  if (!ids.length) return out;
+  const inApp = await inAppAdvancesInMonth(qx, ids, run.month);
+  const covered = new Map();
+  for (const row of await qx(
+    `SELECT b->>'code' AS code, (b->>'amount')::text AS amount FROM hr.run_lines l
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(l.breakdown) = 'array' THEN l.breakdown ELSE '[]'::jsonb END) b
+      WHERE l.run_id = $1 AND b->>'code' LIKE 'ADJ:SUB%-ADV'`, [run.id])) {
+    const sub = /^ADJ:SUB(\d+)-ADV$/.exec(row.code);
+    if (sub) covered.set(Number(sub[1]), (covered.get(Number(sub[1])) ?? 0n) + paiseOf(row.amount));
+  }
+  for (const l of lines) {
+    const givenAll = paiseOf(l.advance_given) + paiseOf(inApp.get(l.person_id) ?? '0');
+    const cov = covered.get(l.person_id) ?? 0n;
+    const before = paiseOf(l.carried_advance) - givenAll + paiseOf(l.advance_recovery) + cov;
+    out.set(l.person_id, {
+      brought_forward: fmtPaise(before > 0n ? before : 0n), given: fmtPaise(givenAll),
+      covered_by_main: cov > 0n ? fmtPaise(cov) : null,
+    });
+  }
+  return out;
+}
+
 // ── GET /hr/runs/:month/payslips?person_ids=1,2&channel=X ───────────────────
 
 // Each loan's outstanding after the run. A finalised run is read as of its finalising: its own and earlier months'
@@ -2268,7 +2303,8 @@ async function slipLoans(qx, run, lines) {
     if (outstanding <= 0n && recovered === 0n) continue;
     out.get(loan.person_id).push({
       loan_id: loan.id, loan_no: loan.loan_no, principal: money(loan.principal), instalment: money(loan.instalment),
-      recovered: fmtPaise(recovered), outstanding_after: fmtPaise(outstanding), status: loan.status,
+      recovered: fmtPaise(recovered), outstanding_before: fmtPaise(outstanding + recovered), outstanding_after: fmtPaise(outstanding),
+      status: loan.status,
     });
   }
   return out;
@@ -2308,6 +2344,8 @@ r.get('/hr/runs/:month/payslips', requireHr('viewer'), async (req, res, next) =>
         ORDER BY lower(coalesce(p.department, '')), lower(p.name), p.id`, params);
     const loans = await slipLoans(q, run, lines);
     const m = (v) => (given(v) ? money(v) : null);
+    const bf = await advanceBroughtForward(q, run, lines);
+    const carriedIn = new Map((await carriedInto(q, month, hiddenIds(req))).map((c) => [c.person_id, c]));
     const slips = lines.map((l) => {
       const unrecovered = l.unrecovered && typeof l.unrecovered === 'object' ? l.unrecovered : {};
       const loansShort = (Array.isArray(unrecovered.loans) ? unrecovered.loans : []).reduce((t, x) => t + paiseOf(x?.amount), 0n);
@@ -2327,7 +2365,16 @@ r.get('/hr/runs/:month/payslips', requireHr('viewer'), async (req, res, next) =>
           net_before_cap: m(l.net_before_cap),
         },
         loans: loans.get(l.person_id) ?? [],
-        advance: { given: m(l.advance_given), recovered: m(l.advance_recovery), balance_after: m(l.carried_advance) },
+        advance: (() => {
+          const b = bf.get(l.person_id);
+          const c = carriedIn.get(l.person_id);
+          return {
+            brought_forward: b.brought_forward, from_month: prevMonth(month),
+            given: b.given, recovered: m(l.advance_recovery), covered_by_main: b.covered_by_main,
+            balance_after: m(l.carried_advance),
+            short_carried_in: c ? { from_month: c.from_month, amount: c.amount, advance: c.advance, loans: c.loans } : null,
+          };
+        })(),
         insufficient_pay: short > 0n ? {
           advance: money(unrecovered.advance), loans: fmtPaise(loansShort), other: money(unrecovered.other), total: fmtPaise(short),
         } : null,
@@ -2432,16 +2479,30 @@ r.get('/hr/runs/:month/compare', requireHr('viewer'), async (req, res, next) => 
     const [setting] = await q(`SELECT value FROM hr.settings WHERE key = 'variance_warn_pct'`);
     const pct = Number(setting?.value ?? 25) > 0 ? Number(setting?.value ?? 25) : 25;
     const side = async (mm) => {
-      const [run] = await q(`SELECT id, month, status FROM hr.runs WHERE month = $1`, [mm]);
+      const [run] = await q(`SELECT id, month, status, finalised_at FROM hr.runs WHERE month = $1`, [mm]);
       if (!run) return null;
       const lines = await q(
-        `SELECT l.person_id, p.name, ${COMPARE_MONEY.map((c) => `l.${c}::text AS ${c}`).join(', ')}
+        `SELECT l.person_id, p.name, l.loan_recoveries, ${COMPARE_MONEY.map((c) => `l.${c}::text AS ${c}`).join(', ')}
            FROM hr.run_lines l JOIN hr.people p ON p.id = l.person_id
           WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
       const sums = Object.fromEntries(COMPARE_MONEY.map((c) => [c, 0n]));
       for (const l of lines) for (const c of COMPARE_MONEY) sums[c] += toPaise(rat(l[c] ?? '0'));
+      // Loans still owed after the month (2026-11-17: "also add the loan amount which is outstanding"), as the payslips
+      // read them: a finalised month as at its finalising, an open one today's balance less what its lines recover.
+      let loansOut = 0n;
+      let loansOpen = 0;
+      let loanPeople = 0;
+      for (const list of (await slipLoans(q, run, lines)).values()) {
+        let owes = false;
+        for (const ln of list) {
+          const o = toPaise(rat(ln.outstanding_after));
+          if (o > 0n) { loansOut += o; loansOpen += 1; owes = true; }
+        }
+        if (owes) loanPeople += 1;
+      }
       return {
         month: mm, status: run.status, people: lines.length, lines,
+        loans_outstanding: fmtPaise(loansOut), loans_open: loansOpen, loan_people: loanPeople,
         ...Object.fromEntries(COMPARE_MONEY.map((c) => [c, fmtPaise(sums[c])])),
         ot_share_pct: sums.gross > 0n ? Number((sums.ot_amount * 10000n) / sums.gross) / 100 : 0,
       };

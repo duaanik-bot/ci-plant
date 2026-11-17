@@ -394,6 +394,9 @@ describe('HR accounts level and hide list', {
     assert.ok(all.before.people >= 3);
     for (const k of ['gross', 'ot_amount', 'payable', 'total_deductions']) assert.match(all.now[k], /^-?\d+\.\d{2}$/, k);
     assert.equal(typeof all.now.ot_share_pct, 'number');
+    assert.match(all.now.loans_outstanding, /^\d+\.\d{2}$/);
+    assert.match(all.before.loans_outstanding, /^\d+\.\d{2}$/);
+    assert.equal(typeof all.now.loan_people, 'number');
     assert.equal(all.people.threshold_pct, 25);
     for (const x of [...all.people.down, ...all.people.up]) assert.ok(Math.abs(x.change_pct) >= 25);
     const mine = ok(await call('accounts', 'GET', '/hr/runs/2026-09/compare')).body;
@@ -402,5 +405,26 @@ describe('HR accounts level and hide list', {
     for (const list of Object.values(mine.people).filter(Array.isArray)) assert.ok(!list.some((x) => hidden.has(x.person_id)));
     const none = ok(await call('admin', 'GET', '/hr/runs/2030-01/compare')).body;
     assert.deepEqual([none.now, none.before, none.people], [null, null, null]);
+  });
+  test('payslips and lines say what was brought forward, and it adds up to the balance after', T, async () => {
+    const P2 = (v) => Math.round(Number(v ?? 0) * 100);
+    for (const month of ['2026-08', '2026-09']) {
+      const slips = ok(await call('admin', 'GET', `/hr/runs/${month}/payslips`)).body.slips;
+      assert.ok(slips.length > 0, month);
+      for (const sl of slips) {
+        const a = sl.advance;
+        assert.match(a.brought_forward, /^\d+\.\d{2}$/);
+        assert.equal(P2(a.brought_forward) + P2(a.given) - P2(a.recovered) - P2(a.covered_by_main), P2(a.balance_after), `${month} ${sl.person.name}`);
+        for (const l of sl.loans) assert.equal(P2(l.outstanding_before) - P2(l.recovered), P2(l.outstanding_after));
+      }
+      for (const l of ok(await call('admin', 'GET', `/hr/runs/${month}`)).body.lines) {
+        assert.equal(P2(l.advance_brought_forward) + P2(l.advance_given_all) - P2(l.advance_recovery) - P2(l.advance_covered_by_main),
+          P2(l.carried_advance), `${month} line ${l.person_id}`);
+      }
+    }
+    // A person who came in owing: the opening balance shows as brought forward.
+    const carry = (await db.one(`SELECT id FROM hr.people WHERE code = 'T-304'`)).id;
+    const oct = ok(await call('admin', 'GET', '/hr/runs/2026-09/payslips')).body.slips.find((x) => x.person.id === carry);
+    assert.equal(oct.advance.brought_forward, '0.00', 'nothing owed before September');
   });
 });

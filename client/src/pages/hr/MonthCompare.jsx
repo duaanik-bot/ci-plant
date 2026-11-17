@@ -51,7 +51,7 @@ export default function MonthCompare({ month, stamp, onPeople }) {
       <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">
         {monthLabel(month)} against {prevLabel}{before.status !== 'finalised' ? ` (${prevLabel} is ${before.status})` : ''}
       </p>
-      <KpiRow cols={6}>
+      <KpiRow cols={7}>
         {card('Salary (gross)', 'gross')}
         {card('Payable', 'payable')}
         <KpiCard compact label="Overtime" value={`${now.ot_share_pct.toFixed(1)}% of salary`}
@@ -59,6 +59,10 @@ export default function MonthCompare({ month, stamp, onPeople }) {
           sub={`${inr2(now.ot_amount)} · ${prevLabel} ${before.ot_share_pct.toFixed(1)}% (${otPts >= 0 ? '+' : ''}${otPts.toFixed(1)} pts) · ${pctText(pctChange(now.ot_amount, before.ot_amount))}`}
           title={`Overtime ${inr2(now.ot_amount)} against ${inr2(before.ot_amount)} in ${prevLabel}`} />
         {card('Deductions', 'total_deductions', `advance ${inr2(now.advance_recovery)} · loans ${inr2(now.loan_recovery)}`)}
+        <KpiCard compact label="Loans outstanding" value={inr2(now.loans_outstanding)}
+          tone="neutral"
+          sub={`${pctText(pctChange(now.loans_outstanding, before.loans_outstanding))} · ${prevLabel} ${inr2(before.loans_outstanding)} · ${now.loans_open} loan${now.loans_open === 1 ? '' : 's'}, ${now.loan_people} ${now.loan_people === 1 ? 'person' : 'people'} · recovered ${inr2(now.loan_recovery)}`}
+          title={`Still owed on loans after ${monthLabel(month)}: ${inr2(now.loans_outstanding)} (after ${prevLabel}: ${inr2(before.loans_outstanding)}). Recovered from pay this month: ${inr2(now.loan_recovery)}.`} />
         <KpiCard compact label="People" value={`${now.people} (${headDelta >= 0 ? '+' : ''}${headDelta})`}
           sub={`${prevLabel} ${before.people} · ${people?.joined?.length ?? 0} new · ${people?.left?.length ?? 0} not paid this month`}
           title={[people?.joined?.length ? `New: ${names(people.joined)}` : '', people?.left?.length ? `Not this month: ${names(people.left)}` : ''].filter(Boolean).join('\n') || undefined} />

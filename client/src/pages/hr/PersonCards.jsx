@@ -293,6 +293,9 @@ function Details({ r, showPaidSep, onOpen, onPayslip, pos, month, final, change,
       <section>
         <h4 className="mb-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/40">Deductions</h4>
         <dl className="divide-y divide-[#1D1D1F]/[0.05]">
+          {/* What was owed coming into the month (2026-11-17), so it reads: brought forward + given − recovered = after. */}
+          {nonZero(l.advance_brought_forward) && <Pair label="Advance brought forward" value={inr2(l.advance_brought_forward)} hint="owed from earlier months, before this month's advance and recovery" />}
+          {nonZero(l.advance_given_all) && <Pair label="Advance given this month" value={inr2(l.advance_given_all)} />}
           <Pair label="Advance recovered" value={inr2(l.advance_recovery)} />
           {r.carriedIn && (
             <Pair label={`of which carried forward from ${monthLabel(r.carriedIn.from_month)}`} value={inr2(r.carriedIn.advance)}

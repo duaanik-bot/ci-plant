@@ -128,6 +128,7 @@ export function Slip({ slip, company, monthName }) {
               <div key={l.loan_id ?? l.loan_no} className="mb-1.5">
                 <div className="font-semibold text-gray-800">{l.loan_no}</div>
                 <Row label="Instalment" value={inr2(l.instalment)} />
+                {l.outstanding_before != null && <Row label="Outstanding before this month" value={inr2(l.outstanding_before)} />}
                 <Row label="Recovered this month" value={inr2(l.recovered)} />
                 <Row label="Outstanding after this month" value={inr2(l.outstanding_after)} />
               </div>
@@ -135,8 +136,18 @@ export function Slip({ slip, company, monthName }) {
           </div>
           <div className="rounded-lg border border-gray-200 p-2.5">
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Advance</div>
+            {/* Brought forward from earlier months (2026-11-17), so the box adds up: brought forward + given − recovered. */}
+            {adv.brought_forward != null && (
+              <Row label={`Brought forward${adv.from_month ? ` (till ${monthLabel(adv.from_month)})` : ''}`} value={inr2(adv.brought_forward)} />
+            )}
+            {adv.short_carried_in && nonZero(adv.short_carried_in.advance) && (
+              <p className="-mt-0.5 mb-0.5 text-[10px] text-amber-800">
+                incl. {inr2(adv.short_carried_in.advance)} short pay carried from {monthLabel(adv.short_carried_in.from_month)}
+              </p>
+            )}
             {nonZero(adv.given) && <Row label="Given this month" value={inr2(adv.given)} />}
             {nonZero(adv.recovered) && <Row label="Recovered this month" value={inr2(adv.recovered)} />}
+            {nonZero(adv.covered_by_main) && <Row label="Recovered from main account's pay" value={inr2(adv.covered_by_main)} />}
             <Row label="Balance after this month" value={inr2(adv.balance_after)} strong />
           </div>
         </div>

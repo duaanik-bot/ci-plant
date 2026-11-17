@@ -559,7 +559,20 @@ function AfterTheCap({ line }) {
         {line?.daily_rate != null && !isZeroMoney(line.daily_rate) && (
           <span>Daily rate <b className="text-[#1D1D1F]">{inr2(line.daily_rate)}</b></span>
         )}
-        <span>Advance balance after this month <b className="text-[#1D1D1F]">{inr2(line?.carried_advance)}</b></span>
+        {/* The advance brought in from earlier months (2026-11-17), so the line adds up to the balance after. */}
+        {line?.advance_brought_forward != null && (
+          <span>Advance brought forward <b className="text-[#1D1D1F]">{inr2(line.advance_brought_forward)}</b></span>
+        )}
+        {line?.advance_given_all != null && !isZeroMoney(line.advance_given_all) && (
+          <span>+ given this month <b className="text-[#1D1D1F]">{inr2(line.advance_given_all)}</b></span>
+        )}
+        {line?.advance_recovery != null && !isZeroMoney(line.advance_recovery) && (
+          <span>− recovered <b className="text-[#1D1D1F]">{inr2(line.advance_recovery)}</b></span>
+        )}
+        {line?.advance_covered_by_main != null && (
+          <span>− from main account <b className="text-[#1D1D1F]">{inr2(line.advance_covered_by_main)}</b></span>
+        )}
+        <span>= Advance balance after this month <b className="text-[#1D1D1F]">{inr2(line?.carried_advance)}</b></span>
       </p>
     </>
   );
