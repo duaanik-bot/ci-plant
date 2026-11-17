@@ -110,7 +110,7 @@ import { hrGuard, levelAtLeast, requireHr } from '../hr/access.js';
 import { hrAudit } from '../hr/audit.js';
 import { daysInMonthOf } from '../hr/engine.js';
 import { FIELDS, autoMap, extractRows, pickSheet, readWorkbook } from '../hr/import-parse.js';
-import { inAppAdvancesInMonth } from '../hr/ledger.js';
+import { advanceBalances, inAppAdvancesInMonth, loanPositions } from '../hr/ledger.js';
 import { loanOutstanding, nextMonth } from '../hr/loans.js';
 import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
 import { add, cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
@@ -1303,7 +1303,7 @@ async function pendingImportOf(qx, imports, exclude = []) {
 // recovered here, a loan instalment stays on the loan. Read from the previous month's run lines, whatever their
 // status — `final` says whether that month is finalised (only then is the advance in the balance this month reads).
 // Listed even when this month has no run or upload yet. A restricted login's hidden people are left out.
-async function carriedInto(qx, month, exclude = []) {
+export async function carriedInto(qx, month, exclude = []) {
   const [y, m] = month.split('-').map(Number);
   const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`;
   const rows = await qx(
@@ -1312,7 +1312,9 @@ async function carriedInto(qx, month, exclude = []) {
             coalesce((SELECT sum((x->>'amount')::numeric) FROM jsonb_array_elements(
               CASE WHEN jsonb_typeof(l.unrecovered->'loans') = 'array' THEN l.unrecovered->'loans' ELSE '[]'::jsonb END) x), 0)::text AS loans,
             coalesce((l.unrecovered->>'other')::numeric, 0)::text AS other,
-            l.net_before_cap::text AS net_before_cap, l.carried_advance::text AS carried_advance
+            l.net_before_cap::text AS net_before_cap, l.carried_advance::text AS carried_advance,
+            l.advance_recovery::text AS advance_recovery, l.advance_given::text AS advance_given_line, l.loan_recoveries,
+            l.unrecovered AS unrecovered_raw
        FROM hr.run_lines l
        JOIN hr.runs r ON r.id = l.run_id
        JOIN hr.people p ON p.id = l.person_id
@@ -1320,12 +1322,50 @@ async function carriedInto(qx, month, exclude = []) {
         AND (coalesce((l.unrecovered->>'advance')::numeric, 0) > 0 OR coalesce((l.unrecovered->>'other')::numeric, 0) > 0
              OR jsonb_array_length(CASE WHEN jsonb_typeof(l.unrecovered->'loans') = 'array' THEN l.unrecovered->'loans' ELSE '[]'::jsonb END) > 0)
       ORDER BY lower(p.name), p.id`, [prev, exclude]);
-  return rows.map((r) => ({
-    ...r,
-    amount: fmtPaise(toPaise(add(add(rat(r.advance), rat(r.loans)), rat(r.other)))),
-    advance: money(r.advance), loans: money(r.loans), other: money(r.other),
-    final: r.from_status === 'finalised',
-  }));
+  if (!rows.length) return [];
+  // Only what is STILL owed is carried (owner, 2026-11-17: "if we are able to make some sort of recovery from someone
+  // else, it should not be carried forward"). A shortfall recovered since — by a main account, a cash repayment, a
+  // waiver, a prepayment, any reduction on the ledgers — is not carried again. Still owed = the balance as at the end
+  // of last month with every reduction counted, less last month's own payroll recovery while that month is not yet
+  // finalised (not posted yet), plus what payroll of this month and later has posted (that is this carry being
+  // recovered, not a reason to stop showing it).
+  const ids = [...new Set(rows.map((r) => r.person_id))];
+  const advNow = await advanceBalances(qx, ids, prev);
+  const loanNow = await loanPositions(qx, ids, prev, prev);
+  const laterAdv = new Map((await qx(
+    `SELECT t.person_id, sum(t.amount)::text AS amount FROM hr.advance_txns t JOIN hr.runs r ON r.id = t.run_id
+      WHERE t.person_id = ANY($1::int[]) AND t.kind = 'recovered' AND r.month >= $2 GROUP BY t.person_id`, [ids, month]))
+    .map((x) => [x.person_id, toPaise(rat(x.amount))]));
+  const laterLoan = new Map((await qx(
+    `SELECT t.loan_id, sum(t.principal_amount)::text AS amount FROM hr.loan_txns t JOIN hr.runs r ON r.id = t.run_id
+      WHERE t.kind = 'payroll_recovery' AND r.month >= $2
+        AND t.loan_id IN (SELECT id FROM hr.loans WHERE person_id = ANY($1::int[])) GROUP BY t.loan_id`, [ids, month]))
+    .map((x) => [x.loan_id, toPaise(rat(x.amount))]));
+  const P = (v) => toPaise(rat(v ?? '0'));
+  const clamp = (v, cap) => (v < 0n ? 0n : v > cap ? cap : v);
+  return rows.map((r) => {
+    const final = r.from_status === 'finalised';
+    // Not finalised yet, last month's own postings are still to come: its sheet advance adds, its recovery takes off.
+    const advStill = P(advNow.get(r.person_id)) + (laterAdv.get(r.person_id) ?? 0n)
+      + (final ? 0n : P(r.advance_given_line) - P(r.advance_recovery));
+    const advance = clamp(advStill, P(r.advance));
+    const own = new Map((Array.isArray(r.loan_recoveries) ? r.loan_recoveries : []).map((x) => [x.loan_id, P(x.amount)]));
+    const out = new Map((loanNow.get(r.person_id) ?? []).map((x) => [x.loan_id, P(x.outstanding)]));
+    let loans = 0n;
+    for (const l of Array.isArray(r.unrecovered_raw?.loans) ? r.unrecovered_raw.loans : []) {
+      const still = (out.get(l.loan_id) ?? 0n) + (laterLoan.get(l.loan_id) ?? 0n) - (final ? 0n : (own.get(l.loan_id) ?? 0n));
+      loans += clamp(still, P(l.amount));
+    }
+    const other = P(r.other);
+    const { advance_recovery: _a, advance_given_line: _g, loan_recoveries: _l, unrecovered_raw: _u, ...rest } = r;
+    return {
+      ...rest,
+      amount: fmtPaise(advance + loans + other),
+      advance: fmtPaise(advance), loans: fmtPaise(loans), other: fmtPaise(other),
+      recovered_since: fmtPaise(P(r.advance) - advance + P(r.loans) - loans),
+      final,
+    };
+  }).filter((r) => toPaise(rat(r.amount)) > 0n);
 }
 
 // The month as GET /hr/runs/:month answers it (also the answer of bulk entry, lock and unlock).

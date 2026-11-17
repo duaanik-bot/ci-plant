@@ -120,4 +120,24 @@ describe('sub-accounts on a real Postgres', { skip: ENABLED ? false : 'set HR_PG
     assert.deepEqual(await db.q(`SELECT kind FROM hr.advance_txns WHERE run_id = $1 AND person_id = $2`, [run.id, M]), [],
       'nothing is posted to the main account: the money was the sub-account\'s debt');
   });
+  test('only what is still owed is carried into the next month: a cash repayment shrinks it, a waiver ends it', T, async () => {
+    const { carriedInto } = await import('./routes/hr-payroll.js');
+    const X = (await db.one(`INSERT INTO hr.people (code, name, pay_channel) VALUES ('T-903', 'Test Short Worker', 'TCASH') RETURNING id`)).id;
+    await db.q(`INSERT INTO hr.pay_setups (person_id, effective_from, pay_basis, base) VALUES ($1, '2026-04-01', 'monthly', 1000)`, [X]);
+    await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source) VALUES ($1, '2026-09-30', 'opening', 3000, 'loader')`, [X]);
+    const oct = await db.tx((qc) => runs.ensureRun(qc, '2026-10', 1));
+    await db.q(`INSERT INTO hr.run_inputs (run_id, person_id, absent_days, source) VALUES ($1, $2, 0, 'manual')`, [oct.id, X]);
+    await db.tx((qc) => runs.recalcRun(qc, oct));
+    const carried = async () => (await db.tx((qc) => carriedInto(qc, '2026-11'))).find((c) => c.person_id === X) ?? null;
+    assert.equal((await carried())?.advance, '2000.00', '3000 owed, 1000 of pay: 2000 short');
+    // The main account's cover never shows here either: S is not carried.
+    assert.equal((await db.tx((qc) => carriedInto(qc, '2026-11'))).some((c) => c.person_id === S), false);
+    // Paid back 1500 in cash after the month: only 500 is still owed, so only 500 is carried.
+    await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note) VALUES ($1, '2026-11-02', 'recovered', 1500, 'manual', 'Test cash')`, [X]);
+    const part = await carried();
+    assert.deepEqual([part?.advance, part?.recovered_since], ['500.00', '1500.00']);
+    // The rest waived: nothing is carried.
+    await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note) VALUES ($1, '2026-11-03', 'waived', 500, 'manual', 'Test waiver')`, [X]);
+    assert.equal(await carried(), null);
+  });
 });
