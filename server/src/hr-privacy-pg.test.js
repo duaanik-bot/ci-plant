@@ -387,4 +387,20 @@ describe('HR accounts level and hide list', {
     assert.equal(res.status, status, res.text);
     if (code) assert.equal(res.body?.code, code, res.text);
   }
+  test('compare: a month against the one before, totals and people beyond the warning — never a hidden person', T, async () => {
+    const all = ok(await call('admin', 'GET', '/hr/runs/2026-09/compare')).body;
+    assert.equal(all.previous_month, '2026-08');
+    assert.ok(all.now && all.before, 'both months have a run');
+    assert.ok(all.before.people >= 3);
+    for (const k of ['gross', 'ot_amount', 'payable', 'total_deductions']) assert.match(all.now[k], /^-?\d+\.\d{2}$/, k);
+    assert.equal(typeof all.now.ot_share_pct, 'number');
+    assert.equal(all.people.threshold_pct, 25);
+    for (const x of [...all.people.down, ...all.people.up]) assert.ok(Math.abs(x.change_pct) >= 25);
+    const mine = ok(await call('accounts', 'GET', '/hr/runs/2026-09/compare')).body;
+    assert.ok(mine.before.people < all.before.people, 'hidden people are left out');
+    const hidden = new Set([P, G]);
+    for (const list of Object.values(mine.people).filter(Array.isArray)) assert.ok(!list.some((x) => hidden.has(x.person_id)));
+    const none = ok(await call('admin', 'GET', '/hr/runs/2030-01/compare')).body;
+    assert.deepEqual([none.now, none.before, none.people], [null, null, null]);
+  });
 });

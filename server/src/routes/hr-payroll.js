@@ -2414,6 +2414,70 @@ function varianceOf(now, prev, setups) {
   };
 }
 
+// ── GET /hr/runs/:month/compare — this month against the month before (owner's request 2026-11-17) ──────────────
+// "When we take November's payroll there should be a comparison at the top with KPIs: this much percentage impact
+// against the previous month, salary down by this much, overtime this much percentage." For each of the two runs
+// (whatever their status): people, gross, basic, overtime, holiday, deductions (advance, loan), payable, and overtime
+// as a share of gross; and person by person, for people in both months, how many have payable down / up by more
+// than the change-on-last-month warning (hr.settings.variance_warn_pct, default 25%), with names. Joined = only this
+// month; left = only last month. A restricted login's hidden people are left out of everything. No run this month or
+// last: that side is null.
+const COMPARE_MONEY = ['gross', 'basic', 'ot_amount', 'holiday_amount', 'total_deductions', 'advance_recovery', 'loan_recovery', 'payable'];
+r.get('/hr/runs/:month/compare', requireHr('viewer'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const [y, m] = month.split('-').map(Number);
+    const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`;
+    const ex = hiddenIds(req);
+    const [setting] = await q(`SELECT value FROM hr.settings WHERE key = 'variance_warn_pct'`);
+    const pct = Number(setting?.value ?? 25) > 0 ? Number(setting?.value ?? 25) : 25;
+    const side = async (mm) => {
+      const [run] = await q(`SELECT id, month, status FROM hr.runs WHERE month = $1`, [mm]);
+      if (!run) return null;
+      const lines = await q(
+        `SELECT l.person_id, p.name, ${COMPARE_MONEY.map((c) => `l.${c}::text AS ${c}`).join(', ')}
+           FROM hr.run_lines l JOIN hr.people p ON p.id = l.person_id
+          WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
+      const sums = Object.fromEntries(COMPARE_MONEY.map((c) => [c, 0n]));
+      for (const l of lines) for (const c of COMPARE_MONEY) sums[c] += toPaise(rat(l[c] ?? '0'));
+      return {
+        month: mm, status: run.status, people: lines.length, lines,
+        ...Object.fromEntries(COMPARE_MONEY.map((c) => [c, fmtPaise(sums[c])])),
+        ot_share_pct: sums.gross > 0n ? Number((sums.ot_amount * 10000n) / sums.gross) / 100 : 0,
+      };
+    };
+    const now = await side(month);
+    const before = await side(prev);
+    let people = null;
+    if (now && before) {
+      const was = new Map(before.lines.map((l) => [l.person_id, l]));
+      const is = new Map(now.lines.map((l) => [l.person_id, l]));
+      const down = [];
+      const up = [];
+      for (const l of now.lines) {
+        const p = was.get(l.person_id);
+        if (!p) continue;
+        const a = toPaise(rat(p.payable ?? '0'));
+        const b = toPaise(rat(l.payable ?? '0'));
+        if (a <= 0n) continue;
+        const change = Number(((b - a) * 10000n) / a) / 100;
+        const row = { person_id: l.person_id, name: l.name, previous: fmtPaise(a), payable: fmtPaise(b), change_pct: change };
+        if (change <= -pct) down.push(row);
+        else if (change >= pct) up.push(row);
+      }
+      people = {
+        threshold_pct: pct,
+        down: down.sort((x, z) => x.change_pct - z.change_pct),
+        up: up.sort((x, z) => z.change_pct - x.change_pct),
+        joined: now.lines.filter((l) => !was.has(l.person_id)).map((l) => ({ person_id: l.person_id, name: l.name })),
+        left: before.lines.filter((l) => !is.has(l.person_id)).map((l) => ({ person_id: l.person_id, name: l.name })),
+      };
+    }
+    const strip = (x) => (x ? (({ lines, ...rest }) => rest)(x) : null);
+    res.json({ month, previous_month: prev, now: strip(now), before: strip(before), people });
+  } catch (e) { next(e); }
+});
+
 r.get('/hr/runs/:month/variance', requireHr('viewer'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);

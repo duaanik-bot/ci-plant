@@ -70,6 +70,7 @@ import PersonStatusDialog from './PersonStatusDialog.jsx';
 import NewPersonFromRow from './NewPersonFromRow.jsx';
 import PayChannelSelect from './PayChannelSelect.jsx';
 import { ChannelsPanel } from './Settings.jsx';
+import MonthCompare from './MonthCompare.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -1444,6 +1445,7 @@ export default function Payroll({ level }) {
 
       {here && run && (
         <>
+          <MonthCompare month={month} stamp={`${lines.length}:${kpi('payable')}:${kpi('gross')}`} />
           <KpiRow cols={5}>
             <KpiCard compact label="People" value={String(totals.lines ?? lines.length)}
               sub={blockedCount ? `${blockedCount} blocked · ${plural(warnCount, 'warning')}` : warnCount ? plural(warnCount, 'warning') : 'no flags to clear'} />

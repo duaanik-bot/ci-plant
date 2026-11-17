@@ -275,6 +275,8 @@ export const hrApi = {
   payslips: (month, { person_ids, channel } = {}) => api.get(`/hr/runs/${seg(month)}/payslips${qs({ person_ids, channel })}`),
   // GET /hr/runs/:month/variance — viewer.
   variance: month => api.get(`/hr/runs/${seg(month)}/variance`),
+  // GET /hr/runs/:month/compare — this month against the month before, totals and people beyond the warning %.
+  runCompare: month => api.get(`/hr/runs/${seg(month)}/compare`),
 
   // ── Loans ──
   // GET /hr/loans — viewer.
