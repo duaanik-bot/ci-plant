@@ -737,4 +737,74 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     assert.equal(desk.scope, undefined);
     await db.q(`UPDATE gmail_links SET scope = $1 WHERE mailbox = 'business'`, [scope]);
   });
+
+  // ── a product not in our masters, made from the artwork window (owner, 18 Nov 2026) ────────────────────────────
+  test('a product not in our masters is made from the artwork window as a draft master, and the job is linked to it; a Fluence job gets its kit', async () => {
+    const { default: jwt } = await import('jsonwebtoken');
+    const { JWT_SECRET: secret } = await import('./auth.js');
+    const qa = await db.one(`INSERT INTO users (name, email, password_hash, role, modules) VALUES ('Art qa', 'art-qa@test.local', 'x', 'qc', $1) RETURNING id, name, role`, [JSON.stringify(['artwork'])]);
+    tokens.qa = jwt.sign({ id: qa.id, name: qa.name, role: qa.role }, secret);
+
+    await fileMails([mailOf('w-401', [{ client_item_code: 'PCS-W401', client_rev: 'R0', product_name: 'GAMMA 10 TAB CARTON', pack_type: 'carton', files: [f('PCS-W401-R0.cdr', 'w401')] }], { received_at: new Date().toISOString() })]);
+    await sync();
+    const v = await version('PCS-W401');
+    const preview = await call('artist', 'GET', `/artwork/register/${v.job_id}/new-product`);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.name, 'GAMMA 10 TAB CARTON');
+    assert.equal(preview.body.party_item_code, 'PCS-W401');
+    assert.equal(preview.body.customer_name, 'Example Pharma Ltd');
+    assert.equal(preview.body.fluence, false);
+    assert.equal((await call('qa', 'POST', `/artwork/register/${v.job_id}/create-product`)).status, 403, 'only those who keep the product master');
+    const res = await call('artist', 'POST', `/artwork/register/${v.job_id}/create-product`);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const p = await db.one('SELECT * FROM products WHERE id = $1', [res.body.product.id]);
+    assert.deepEqual([p.name, p.party_item_code, p.is_draft, p.spec_incomplete, p.product_type, p.draft_source],
+      ['GAMMA 10 TAB CARTON', 'PCS-W401', 1, 1, 'carton', 'artwork']);
+    assert.equal(p.internal_carton_code, p.code);
+    assert.ok(p.code, 'the next code in the customer\'s series');
+    const job = await db.one('SELECT product_id, product_name, to_sort FROM artwork_jobs WHERE id = $1', [v.job_id]);
+    assert.deepEqual([job.product_id, job.to_sort], [p.id, false]);
+    assert.ok(await db.one(`SELECT 1 AS y FROM artwork_events WHERE job_id = $1 AND action = 'product_created'`, [v.job_id]));
+    assert.equal((await call('artist', 'POST', `/artwork/register/${v.job_id}/create-product`)).status, 409, 'already linked');
+    // the same item code for that customer again: refused, naming the master that exists
+    await fileMails([mailOf('w-402', [{ client_item_code: 'PCS-W401', product_name: 'GAMMA 10 TAB CARTON NEW', files: [f('x402.cdr', 'w402')] }], { received_at: new Date().toISOString(), customer_name: 'Example Pharma Ltd' })]);
+    await sync();
+    const dupJob = await db.one(`SELECT id FROM artwork_jobs WHERE product_id IS NULL AND client_item_code = 'PCS-W401'`).catch(() => null);
+    if (dupJob) {
+      const dup = await call('artist', 'POST', `/artwork/register/${dupJob.id}/create-product`);
+      assert.equal(dup.status, 409);
+      assert.match(dup.body.error, new RegExp(p.code));
+    }
+    // a master that already has this name for the customer: refused, naming it
+    const cust = await db.one(`SELECT id FROM customers WHERE name = 'Example Pharma Ltd'`);
+    const board = await db.one(`SELECT id FROM materials WHERE category = 'board' ORDER BY id LIMIT 1`);
+    const omega = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id) VALUES ($1, 'OMEGA 5 CARTON', 'EPL-T905', $2) RETURNING code`, [cust.id, board.id]);
+    await fileMails([mailOf('w-405', [{ client_item_code: 'PCS-W405', product_name: 'Omega 5 Carton', files: [f('x405.cdr', 'w405')] }], { received_at: new Date().toISOString() })]);
+    await sync();
+    const o = await version('PCS-W405');
+    const pv = await call('artist', 'GET', `/artwork/register/${o.job_id}/new-product`);
+    assert.deepEqual(pv.body.existing.map(x => x.code), [omega.code]);
+    const od = await call('artist', 'POST', `/artwork/register/${o.job_id}/create-product`);
+    assert.equal(od.status, 409);
+    assert.match(od.body.error, /EPL-T905 OMEGA 5 CARTON is already in the masters/);
+    // a customer not in the master: said, nothing made
+    await fileMails([mailOf('w-403', [{ client_item_code: 'PCS-W403', product_name: 'DELTA', files: [f('x403.cdr', 'w403')] }], { received_at: new Date().toISOString(), customer_name: 'Nobody Pharma', from_email: 'x@nobody.test' })]);
+    await sync();
+    const nobody = await version('PCS-W403');
+    const r403 = await call('artist', 'POST', `/artwork/register/${nobody.job_id}/create-product`);
+    assert.equal(r403.status, 409);
+    assert.match(r403.body.error, /not in the customer master/);
+    // Fluence: the kit record too
+    const fl = await db.one(`INSERT INTO customers (name, segment) VALUES ('Fluence Test Pharma', 'pharma') RETURNING id`);
+    await db.q('INSERT INTO fluence_customers (customer_id) VALUES ($1) ON CONFLICT DO NOTHING', [fl.id]);
+    await fileMails([mailOf('w-404', [{ product_name: 'Zeta Glow Kit-Q', pack_type: 'carton', files: [f('Zeta Glow Kit-Q.cdr', 'w404')] }], { received_at: new Date().toISOString(), customer_name: 'Fluence Test Pharma', from_email: 'graphics@fluence.test' })]);
+    await sync();
+    const z = await db.one(`SELECT id FROM artwork_jobs WHERE product_name = 'Zeta Glow Kit-Q'`);
+    assert.equal((await call('artist', 'GET', `/artwork/register/${z.id}/new-product`)).body.fluence, true);
+    const zr = await call('artist', 'POST', `/artwork/register/${z.id}/create-product`);
+    assert.equal(zr.status, 200, JSON.stringify(zr.body));
+    const kit = await db.one('SELECT * FROM fluence_kits WHERE product_id = $1', [zr.body.product.id]);
+    assert.deepEqual([kit.kit_name, kit.source_ref, kit.link_method], ['Zeta Glow Kit-Q', `erp-product:${zr.body.product.id}`, 'created_from_product']);
+    assert.equal(zr.body.fluence_kit_id, kit.id);
+  });
 });

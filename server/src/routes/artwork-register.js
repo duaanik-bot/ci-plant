@@ -9,6 +9,8 @@
 //   POST /api/artwork/register/versions/:id/restore       put it back
 //   POST /api/artwork/register/notices/resend             the "done by the system" mails that gave up: send again
 //   GET  /api/artwork/register/:jobId/thread              the job's whole mail trail, read live from mppchd's Gmail
+//   GET  /api/artwork/register/:jobId/new-product         what "Create it" would make, and any master that looks the same
+//   POST /api/artwork/register/:jobId/create-product      a product not in our masters → a DRAFT master, linked (Masters rights)
 //   GET  /api/artwork/register/thread-attachment?message=&attachment=&name=   one file from an artwork thread
 //
 // Behind the Artwork tick. The office AVS fills the register (artwork-intake.js); nothing here sends mail, checks
@@ -16,7 +18,8 @@
 // database's SQL_ASCII encoding lower-cases and splits spaces byte by byte.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
+import { requireRole } from '../auth.js';
 import { mayArtwork } from '../artwork-intake.js';
 import { resendGaveUp, artworkNoticeSoft } from '../artwork-notice.js';
 import { actionsFor } from '../artwork-flow.js';
@@ -218,6 +221,81 @@ r.post('/artwork/register/:jobId/map', async (req, res, next) => {
       return { status: 200, ok: true, order_lines: lines };
     });
     res.status(out.status).json(out.error ? { error: out.error } : { ok: true });
+  } catch (e) { next(e); }
+});
+
+// ── a product not in our masters (owner, 18 Nov 2026: "give me the information that this product is not in our
+// masters. Do you want to create it? We should be able to create that master") ──────────────────────────────────
+// "Create it" makes a DRAFT product master from what the artwork mail says — the customer, the product's name, the
+// customer's item code, the kind of pack — with the next code in that customer's series, the board on the placeholder
+// and the spec marked incomplete, exactly as a product raised from a PO is (routes/drafts.js: it shows among the draft
+// masters, and Masters finishes board, size and print spec). The job is linked to it at once. For a Fluence customer the
+// Fluence kit record is made too, the way the Fluence module makes one for a product (source erp-product:<id>), so its
+// prescription and MRPs have a home. Only those who keep the product master may do it (Masters: planner, admin).
+const PACK_TYPE = { carton: 'carton', label: 'label', insert: 'leaflet', leaflet: 'leaflet' };
+const flatName = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function newProductOf(jobId, qc = q) {
+  const [job] = await qc(`SELECT j.*, c.name AS customer_master_name, (fc.customer_id IS NOT NULL) AS fluence
+                            FROM artwork_jobs j LEFT JOIN customers c ON c.id = j.customer_id
+                            LEFT JOIN fluence_customers fc ON fc.customer_id = j.customer_id WHERE j.id = $1`, [jobId]);
+  if (!job) return null;
+  const name = String(job.product_name || job.client_item_code || `Artwork ${job.job_no}`).trim().slice(0, 200);
+  // what already exists for this customer under the same item code or name (compared here: SQL_ASCII lower-cases bytes)
+  const same = job.customer_id ? (await qc(`SELECT id, code, name, party_item_code, is_draft FROM products WHERE customer_id = $1`, [job.customer_id]))
+    .filter(p => (job.client_item_code && String(p.party_item_code || '').toUpperCase() === String(job.client_item_code).toUpperCase())
+      || flatName(p.name) === flatName(name)) : [];
+  return { job, preview: { customer_id: job.customer_id, customer_name: job.customer_master_name || job.customer_name, name,
+    party_item_code: job.client_item_code || null, product_type: PACK_TYPE[String(job.pack_type || '').toLowerCase()] || null,
+    fluence: !!job.fluence, linked: job.product_id || null, existing: same.map(p => ({ id: p.id, code: p.code, name: p.name, draft: !!p.is_draft })) } };
+}
+
+r.get('/artwork/register/:jobId/new-product', async (req, res, next) => {
+  try {
+    const it = await newProductOf(idOf(req.params.jobId));
+    if (!it) return res.status(404).json({ error: 'No such artwork job.' });
+    res.json(it.preview);
+  } catch (e) { next(e); }
+});
+
+r.post('/artwork/register/:jobId/create-product', requireRole('planner'), async (req, res, next) => {
+  try {
+    const jobId = idOf(req.params.jobId);
+    const out = await tx(async (qc, oc) => {
+      const locked = jobId && await oc('SELECT id FROM artwork_jobs WHERE id = $1 FOR UPDATE', [jobId]);
+      if (!locked) return { status: 404, error: 'No such artwork job.' };
+      const { job, preview } = await newProductOf(jobId, qc);
+      if (job.product_id) return { status: 409, error: 'This job is linked to a product already — use Change product to pick another.' };
+      if (!job.customer_id) return { status: 409, error: `${job.customer_name || 'The customer'} is not in the customer master — add the customer first, then create the product.` };
+      if (preview.existing.length) {
+        const e = preview.existing[0];
+        return { status: 409, error: `${e.code} ${e.name} is already in the masters${e.draft ? ' (a draft)' : ''} — pick it under Match to a product.` };
+      }
+      const code = await nextProductCode(job.customer_id, qc, oc);
+      const board = await placeholderBoardId(oc);
+      if (!board) return { status: 409, error: 'There is no board material at all yet — create one in Masters first.' };
+      const p = await oc(`INSERT INTO products (customer_id, name, code, internal_carton_code, party_item_code, board_material_id, spec_incomplete,
+                                                 product_type, is_draft, draft_source)
+                          VALUES ($1, $2, $3, $3, $4, $5, 1, $6, 1, 'artwork') RETURNING id, code, name`,
+      [job.customer_id, preview.name, code, preview.party_item_code, board, preview.product_type]);
+      await audit('products', p.id, 'create', `Draft master ${p.code} ${p.name} made from artwork ${job.job_no}`, qc, req.user.name);
+      await qc('UPDATE artwork_jobs SET product_id = $2, product_name = $3, to_sort = false WHERE id = $1', [job.id, p.id, p.name]);
+      await qc(`INSERT INTO artwork_events (job_id, action, detail, by_name) VALUES ($1, 'product_created', $2, $3)`,
+        [job.id, JSON.stringify({ product_id: p.id, code: p.code, product_name: p.name }), req.user.name]);
+      await audit('artwork_job', job.id, 'map', `${job.job_no} is ${p.code} ${p.name} (new draft master)`, qc, req.user.name);
+      let kitId = null;
+      if (preview.fluence) {
+        const kit = await oc(`INSERT INTO fluence_kits (kit_name, source_ref, product_id, link_method, linked_at, linked_by, created_by, updated_by)
+                              VALUES ($1, $2, $3, 'created_from_product', now(), $4, $4, $4)
+                              ON CONFLICT (source_ref) DO UPDATE SET product_id = EXCLUDED.product_id, updated_at = now() RETURNING id`,
+        [p.name, `erp-product:${p.id}`, p.id, req.user.name]);
+        kitId = kit.id;
+      }
+      // artwork approved before the job had a product: its open lines (none yet for a new master) — kept for symmetry
+      await tickIfApproved(qc, p.id, req.user.name);
+      return { status: 200, product: p, fluence_kit_id: kitId };
+    });
+    if (out.error) return res.status(out.status).json({ error: out.error });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

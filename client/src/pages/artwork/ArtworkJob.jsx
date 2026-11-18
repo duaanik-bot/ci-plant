@@ -26,6 +26,8 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
   const [mapping, setMapping] = useState(false);
   const [products, setProducts] = useState(null);
   const [find, setFind] = useState('');
+  const [preview, setPreview] = useState(null);       // what "Create it" would make (not in our masters)
+  const [creating, setCreating] = useState(false);
   const [rejecting, setRejecting] = useState(null);   // the version being marked not artwork
   const [reason, setReason] = useState('');
 
@@ -40,7 +42,8 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
 
   const done = say => { toast.success(say); load(); onChanged?.(); };
   const startMapping = () => {
-    setMapping(true); setFind('');
+    setMapping(true); setFind(''); setPreview(null);
+    api.get(`/artwork/register/${jobId}/new-product`).then(setPreview).catch(() => setPreview(null));
     if (!products) api.get('/products').then(setProducts).catch(e => toast.error(e.message));
   };
   const found = useMemo(() => {
@@ -154,7 +157,7 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
         </Field>
         <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
           {!products && <div className="text-sm text-slate-500">Loading products…</div>}
-          {products && find && !found.length && <div className="text-sm text-slate-500">No product matches.</div>}
+          {products && find && !found.length && <div className="text-sm font-semibold text-amber-800">This product is not in our masters.</div>}
           {found.map(p => (
             <button key={p.id} type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-100"
               onClick={() => api.post(`/artwork/register/${jobId}/map`, { product_id: p.id }).then(() => { setMapping(false); done(`Matched to ${p.name}`); }).catch(e => toast.error(e.message))}>
@@ -163,6 +166,39 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
             </button>
           ))}
         </div>
+        {preview && !preview.linked && (
+          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-[13px] ring-1 ring-inset ring-slate-200">
+            {preview.existing.length ? (
+              <>
+                <div className="font-semibold text-slate-800">Already in the masters for {preview.customer_name}:</div>
+                {preview.existing.map(p => (
+                  <button key={p.id} type="button" className="mt-1 block w-full rounded-lg bg-white px-2 py-1.5 text-left hover:bg-slate-100"
+                    onClick={() => api.post(`/artwork/register/${jobId}/map`, { product_id: p.id }).then(() => { setMapping(false); done(`Matched to ${p.name}`); }).catch(e => toast.error(e.message))}>
+                    <span className="font-mono text-[12px] font-semibold">{p.code}</span> <span className="font-semibold">{p.name}</span>
+                    {p.draft && <span className="ml-1 text-[11px] text-amber-800">draft</span>}<span className="ml-2 text-[11px] text-[#0064D2]">Match to this</span>
+                  </button>
+                ))}
+              </>
+            ) : (
+              <>
+                <div className="font-semibold text-slate-800">Not in our masters? Create it.</div>
+                <div className="mt-1 text-slate-600">
+                  A draft product master: <b>{preview.name}</b>{preview.party_item_code ? ` · item code ${preview.party_item_code}` : ''}
+                  {preview.product_type ? ` · ${preview.product_type}` : ''} · for {preview.customer_name || 'the customer'}, with the next code in its series.
+                  {preview.fluence ? ' Its Fluence kit record is made too, for the prescription and MRPs.' : ''}
+                  {' '}Masters then finishes the board, size and print spec (it shows among the draft masters).
+                </div>
+                {!preview.customer_id && <div className="mt-1 text-amber-800">The customer is not in the customer master yet — add it first.</div>}
+                <Button size="sm" className="mt-2" disabled={creating || !preview.customer_id} onClick={() => {
+                  setCreating(true);
+                  api.post(`/artwork/register/${jobId}/create-product`)
+                    .then(r => { setMapping(false); done(`Draft master ${r.product.code} ${r.product.name} created and linked${r.fluence_kit_id ? ', with its Fluence kit' : ''}`); })
+                    .catch(e => toast.error(e.message)).finally(() => setCreating(false));
+                }}>{creating ? 'Creating…' : 'Create it'}</Button>
+              </>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Modal open={!!rejecting} onClose={() => setRejecting(null)} title={`${rejecting?.label || ''} is not artwork`} layer={2}

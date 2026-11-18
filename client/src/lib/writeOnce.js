@@ -36,6 +36,7 @@ export const MINTING_POSTS = Object.freeze([
   '/approvals',
   '/avs/robot/enquiries-notify',
   '/avs/robot/artwork-notify',
+  '/artwork/register/:jobId/create-product',
   '/avs/robot/enquiry-jobs/:id/mails',
   '/board/move',
   '/coas',
