@@ -16,6 +16,11 @@ import { hrApi, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { OtDayPicker, Switch, holidayOn } from './PaySwitches.jsx';
 import PayChannelSelect from './PayChannelSelect.jsx';
 import PersonDrawer, { PERSON_STATUS, StatusPill, WORKER_TYPE, baseText, holidayText, numText, usePersonActions } from './PersonDrawer.jsx';
+// Accounts adds people from here too (owner, 18 Nov 2026: "give the option in both areas"):
+// the same short month form Payroll offers (person + pay from the settling month,
+// POST /hr/people/for-month). Operators keep the full master drawer.
+import NewPersonFromRow from './NewPersonFromRow.jsx';
+import { plantMonth } from './RunLineDrawer.jsx';
 
 // The register opens on active people only; Inactive and On leave are one chip away.
 const DEFAULT_STATUS = ['active'];
@@ -42,6 +47,8 @@ export default function People({ level }) {
   const canEdit = levelAtLeast(level, 'operator');
   // Accounts flips holiday / OT and uses the row menu (activate, deactivate, delete) too (2026-11-15).
   const canToggle = levelAtLeast(level, 'accounts');
+  // Accounts' Add person: the short month form (see the import note above).
+  const [newForMonth, setNewForMonth] = useState(false);
   const toast = useToast();
   // OT hours a day, set right in the list (Off · 6 h · 8 h · Other) — the person's current pay setup, switched in place.
   const [otBusy, setOtBusy] = useState(null);
@@ -257,6 +264,12 @@ export default function People({ level }) {
         <div className="ml-auto flex items-center gap-2">
           <ResetFilters filters={filters} shown={filtered.length} total={all.length} />
           {canEdit && <Button size="sm" onClick={addPerson}><Plus size={14} /> Add person</Button>}
+          {canToggle && !canEdit && (
+            <Button size="sm" title={`Add a new person paid from ${monthLabel(plantMonth())} on, until they are deactivated`}
+              onClick={() => setNewForMonth(true)}>
+              <Plus size={14} /> Add person
+            </Button>
+          )}
         </div>
       </FilterRail>
 
@@ -313,6 +326,16 @@ export default function People({ level }) {
       {drawer && (
         <PersonDrawer key={drawer.key} id={drawer.id} seed={drawer.seed} level={level} channels={channels}
           onClose={() => setDrawer(null)} onChanged={load} />
+      )}
+      {newForMonth && (
+        <Modal open size="xl" onClose={() => setNewForMonth(false)} title={`New person — from ${monthLabel(plantMonth())}`}>
+          <NewPersonFromRow month={plantMonth()} people={all} onCancel={() => setNewForMonth(false)}
+            onCreated={async made => {
+              setNewForMonth(false);
+              toast.success(`${made?.name || 'The new person'} (${made?.code || ''}) added — on the payroll from ${monthLabel(plantMonth())}`);
+              await load();
+            }} />
+        </Modal>
       )}
     </div>
   );
