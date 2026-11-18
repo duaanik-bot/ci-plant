@@ -95,6 +95,15 @@ const payStatus = l => (PAYMENT_STATUS[l?.payment_status] ? l.payment_status : '
 // Every line is in exactly one bucket: paid, on hold, or unpaid (pending, failed, reversed) — as the server's totals.
 const payBucket = l => { const s = payStatus(l); return s === 'paid' ? 'paid' : s === 'on_hold' ? 'on_hold' : 'unpaid'; };
 const PAY_FILTERS = ['pending', 'paid', 'on_hold', 'failed', 'reversed'];
+// What each Select chip picks — and, while it is lit, the only rows shown.
+const PICKS = {
+  unpaid: r => payBucket(r.line) === 'unpaid',
+  on_hold: r => r.payment === 'on_hold',
+  paid: r => r.payment === 'paid',
+  unapproved: r => r.approval !== 'approved',
+  approved_unpaid: r => r.approval === 'approved' && payBucket(r.line) === 'unpaid',
+};
+const pickTest = key => (key.startsWith('ch:') ? (r => (r.channel ?? '_') === key.slice(3)) : (PICKS[key] ?? (() => true)));
 const APPROVAL_FILTERS = ['approved', 'unapproved'];
 const LAYOUT_KEY = 'hr.payroll.layout';
 const readLayout = () => { try { const v = storage.getItem(LAYOUT_KEY); return v === 'table' || v === 'entry' ? v : 'cards'; } catch { return 'cards'; } };
@@ -751,10 +760,13 @@ export default function Payroll({ level }) {
   const [groupBy, setGroupBy] = useState('none');
   const [payFilter, setPayFilter] = useState(() => new Set()); // payment statuses shown; empty = every status
   const [approvalFilter, setApprovalFilter] = useState(() => new Set()); // approved / unapproved; empty = both
-  useEffect(() => { setView('all'); setFocus(null); setQ(''); setPayFilter(new Set()); setApprovalFilter(new Set()); }, [month]);
+  // A Select chip (Unpaid, Paid, a channel…) also narrows the list to what it picked (owner, 2026-11-18: "while
+  // filtering, it should show only unpaid"); null = no narrowing. Clicking the lit chip again shows everyone.
+  const [pickView, setPickView] = useState(null);
+  useEffect(() => { setView('all'); setFocus(null); setQ(''); setPayFilter(new Set()); setApprovalFilter(new Set()); setPickView(null); }, [month]);
   const togglePayFilter = s => setPayFilter(cur => { const n = new Set(cur); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   const toggleApprovalFilter = s => setApprovalFilter(cur => { const n = new Set(cur); if (n.has(s)) n.delete(s); else n.add(s); return n; });
-  const filtered = useMemo(() => rows.filter(r => {
+  const listed = useMemo(() => rows.filter(r => {
     if (focus && !focus.has(r.id)) return false;
     if (view === 'blocked' && !r.blocked) return false;
     if (view === 'warn' && !(r.warned && !r.blocked)) return false;
@@ -766,6 +778,7 @@ export default function Payroll({ level }) {
     return rowMatches({ name: r.name, code: r.code, department: r.department, channel: r.channelLabel },
       q, [...r.flags.map(f => flagLabel(f.code)), PAYMENT_STATUS[r.payment]?.label || '', APPROVAL_STATUS[r.approval].label].join(' '));
   }), [rows, view, focus, q, payFilter, approvalFilter]);
+  const filtered = useMemo(() => (pickView ? listed.filter(pickTest(pickView)) : listed), [listed, pickView]);
 
   const totalRow = useMemo(() => {
     const sum = pick => sumPaise(filtered.map(pick));
@@ -809,6 +822,12 @@ export default function Payroll({ level }) {
   const personOf = r => ({ id: toId(r.id), name: r.name, code: r.code });
   const allShownPicked = filtered.length > 0 && filtered.every(r => selected.has(r.id));
   const pickShown = (test = () => true) => setSelected(new Set(filtered.filter(test).map(r => r.id)));
+  // A Select chip: tick what it names and show only those; the same chip again shows everyone and clears the ticks.
+  const pickChip = key => {
+    if (pickView === key) { setPickView(null); setSelected(new Set()); return; }
+    setPickView(key);
+    setSelected(new Set(listed.filter(pickTest(key)).map(r => r.id)));
+  };
   const toggleRow = (r, on) => {
     if (r._total) { setSelected(on ? new Set([...selected, ...filtered.map(x => x.id)]) : new Set([...selected].filter(id => !shownIds.has(id)))); return; }
     setSelected(cur => { const n = new Set(cur); if (on) n.add(r.id); else n.delete(r.id); return n; });
@@ -1620,34 +1639,32 @@ export default function Payroll({ level }) {
               )}
             </div>
           </FilterRail>
-          {canPay && filtered.length > 0 && (
+          {canPay && listed.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">Select</span>
               <FilterChip label="All" count={filtered.length} on={allShownPicked} onClick={() => pickShown()} />
-              <FilterChip label="None" on={false} onClick={() => setSelected(new Set())} />
+              <FilterChip label="None" on={false} onClick={() => { setSelected(new Set()); setPickView(null); }} />
               <span className="order-last w-full text-[11px] text-[#86868B]">
                 Keyboard: click a row (or Tab to it), <b>Space</b> ticks it, <b>↑ ↓</b> move, <b>Shift + ↑ ↓</b> tick as you go,
                 {' '}<b>Shift + Space</b> or Shift-click a tick box ticks everything from the last one, <b>Enter</b> {layout === 'cards' ? 'shows or hides the details' : 'opens the person'}.
               </span>
-              <FilterChip label="Unpaid" count={filtered.filter(r => payBucket(r.line) === 'unpaid').length} on={false}
-                onClick={() => pickShown(r => payBucket(r.line) === 'unpaid')} />
-              <FilterChip label="On hold" count={filtered.filter(r => r.payment === 'on_hold').length} on={false}
-                onClick={() => pickShown(r => r.payment === 'on_hold')} />
-              <FilterChip label="Paid" count={filtered.filter(r => r.payment === 'paid').length} on={false}
-                onClick={() => pickShown(r => r.payment === 'paid')} />
+              {[['unpaid', 'Unpaid'], ['on_hold', 'On hold'], ['paid', 'Paid']].map(([k, label]) => (
+                <FilterChip key={k} label={pickView === k ? `${label} ×` : label} count={listed.filter(PICKS[k]).length} on={pickView === k}
+                  onClick={() => pickChip(k)} />
+              ))}
               {approvable && (
                 <>
-                  <FilterChip label="Unapproved" count={filtered.filter(r => r.approval !== 'approved').length} on={false}
-                    onClick={() => pickShown(r => r.approval !== 'approved')} />
-                  <FilterChip label="Approved & unpaid" count={filtered.filter(r => r.approval === 'approved' && payBucket(r.line) === 'unpaid').length} on={false}
-                    onClick={() => pickShown(r => r.approval === 'approved' && payBucket(r.line) === 'unpaid')} />
+                  {[['unapproved', 'Unapproved'], ['approved_unpaid', 'Approved & unpaid']].map(([k, label]) => (
+                    <FilterChip key={k} label={pickView === k ? `${label} ×` : label} count={listed.filter(PICKS[k]).length} on={pickView === k}
+                      onClick={() => pickChip(k)} />
+                  ))}
                 </>
               )}
               {channelsShown.length > 1 && (
-                <select aria-label="Select a pay channel" value=""
-                  className="h-8 rounded-full border border-white/70 bg-white/70 px-3 text-xs font-semibold text-[#515154]"
-                  onChange={e => { const k = e.target.value; if (k !== '') pickShown(r => (r.channel ?? '_') === k); }}>
-                  <option value="">By channel…</option>
+                <select aria-label="Select a pay channel" value={pickView?.startsWith('ch:') ? pickView.slice(3) : ''}
+                  className={`h-8 rounded-full border px-3 text-xs font-semibold ${pickView?.startsWith('ch:') ? 'border-[#0A84FF] bg-[#0A84FF] text-white' : 'border-white/70 bg-white/70 text-[#515154]'}`}
+                  onChange={e => { const k = e.target.value; if (k === '') { setPickView(null); setSelected(new Set()); } else pickChip(`ch:${k}`); }}>
+                  <option value="">{pickView?.startsWith('ch:') ? 'All channels' : 'By channel…'}</option>
                   {channelsShown.map(([k, label]) => <option key={k || '_'} value={k || '_'}>{label}</option>)}
                 </select>
               )}
