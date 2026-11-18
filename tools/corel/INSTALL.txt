@@ -32,7 +32,7 @@ IF SOMETHING GOES WRONG
   - "answered 401": the key is wrong or was switched off — ask the admin for a new one, do step 2 again.
   - "could not tell which job": the file name has no item code/revision — open the job in CI Plant and use
     "Upload designer's PDF", or rename the file and press the button again.
-  - "at most 18 MB": the PDF is too big for an approval mail — lower the image resolution in the export, or send a
+  - "at most 17 MB": the PDF is too big for an approval mail — lower the image resolution in the export, or send a
     smaller proof by hand.
   - Anything else: the message is shown; nothing in the artwork was changed. The job window's
     "Upload designer's PDF" always works as a fallback.
