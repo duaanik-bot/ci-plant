@@ -2,13 +2,18 @@
 // Drive) and the mails that carried it (open in Gmail). Two things a person can do here: say which product a job is,
 // and mark a version that was filed by mistake as not artwork (it is kept, and can be put back).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmt } from '../../api.js';
+import { api, auth, fmt } from '../../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../../components/ui.jsx';
 import { ExternalLink, FileText, Link2, Mail } from 'lucide-react';
 import { VersionStatus } from './ArtworkRegister.jsx';
+import ArtworkVersionFlow, { StageBadge } from './ArtworkVersionFlow.jsx';
 
 const size = n => (n == null ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-const ACTION = { received: 'Received', received_again: 'Sent again (same files)', mapped: 'Matched to a product', not_artwork: 'Marked not artwork', restored: 'Put back' };
+const ACTION = { received: 'Received', received_again: 'Sent again (same files)', mapped: 'Matched to a product', not_artwork: 'Marked not artwork', restored: 'Put back',
+  designer_file: "Designer's file in", proof_ready: 'Proof + draft made', approval_sent: 'Approval mail sent', approval_sent_by_hand: 'Proof sent by hand',
+  draft_cancelled: 'Draft cancelled', reply: 'Client replied', reply_approved: 'Client approved', reply_changes: 'Client asked for changes',
+  reply_to_confirm: 'Client reply to confirm', decided_approved: 'Approved by hand', decided_changes: 'Changes recorded by hand', changes: 'Changes asked',
+  released: 'Released to plates', deleted: 'Deleted' };
 
 function Out({ href, children }) {
   return <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#0064D2] hover:underline">{children}<ExternalLink size={11} /></a>;
@@ -60,6 +65,22 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
               <div><div className="text-[11px] text-slate-500">Pack</div><div className="font-semibold">{job.pack_type || '—'}</div></div>
               <div><div className="text-[11px] text-slate-500">Our product</div><div className="font-semibold">{job.product_id ? job.product_name : 'not linked yet'}</div></div>
             </div>
+            <div className="text-[12px] text-slate-600">KLD: {data.kld ? (
+              <button type="button" className="font-semibold text-[#0064D2] hover:underline" onClick={async () => {
+                // the PDF needs the login, so it is fetched with it and shown from memory; the tab is opened on the click
+                // itself, as the AVS reports do, so the browser does not block it
+                const win = window.open('', '_blank');
+                const res = await fetch(data.kld.pdf, { headers: { authorization: `Bearer ${auth.token}` } }).catch(() => null);
+                if (!res?.ok) {
+                  win?.close();
+                  toast.error(res?.status === 403 ? 'Opening the KLD needs the Costing tick on this login.' : `The KLD could not be opened (${res?.status || 'no answer'}).`);
+                  return;
+                }
+                const url = URL.createObjectURL(await res.blob());
+                if (win) win.location.href = url; else window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 120000);
+              }}>{`KLD ${data.kld.size_key} (PDF)`}</button>
+            ) : job.product_id ? 'none drawn for this product in Costing' : 'link the job to a product to see its KLD'}</div>
             {job.to_sort && (
               <div className="rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-amber-900 ring-1 ring-inset ring-amber-600/20">
                 To sort: the mail did not say clearly which product this is. Match it to a product, or mark the version as not artwork.
@@ -71,6 +92,8 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="font-mono text-base font-bold">{v.label}</span>
                   <VersionStatus status={v.status} />
+                  <StageBadge stage={v.stage} />
+                  {v.deleted_at && <span className="text-[11px] font-semibold text-red-700">deleted — {v.deleted_reason}</span>}
                   {v.variant === 'batch' && <span className="text-[11px] font-semibold text-slate-500">batch details</span>}
                   <span className="text-[12px] text-slate-500">received {fmt.date(v.received_at)}</span>
                   {v.designer_reply_at && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">designer replied {fmt.date(v.designer_reply_at)}</span>}
@@ -99,6 +122,7 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
                       <span>{m.from_name || m.from_email}</span><span>{fmt.date(m.received_at)}</span>
                       {m.view_url && <Out href={m.view_url}>Open in Gmail</Out>}</div>))}
                 </div>
+                <ArtworkVersionFlow v={v} onDone={() => { load(); onChanged?.(); }} />
               </div>
             ))}
 

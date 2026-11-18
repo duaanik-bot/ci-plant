@@ -17,6 +17,9 @@ import { q, one, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { mayArtwork } from '../artwork-intake.js';
 import { resendGaveUp, artworkNoticeSoft } from '../artwork-notice.js';
+import { actionsFor } from '../artwork-flow.js';
+import { tickIfApproved } from '../artwork-approval.js';
+import { cancelDraftsOf } from '../artwork-settle.js';
 
 const r = Router();
 const REFUSED = { error: 'Artwork is not ticked for this login — ask an admin to tick it in Masters → Users.', code: 'ARTWORK_REFUSED' };
@@ -37,16 +40,23 @@ r.get('/artwork/register', async (req, res, next) => {
     const rows = await q(`
       SELECT j.id, j.job_no, j.customer_name, j.client_item_code, j.product_id, j.product_name, j.pack_type, j.to_sort,
              (SELECT count(*)::int FROM artwork_versions x WHERE x.job_id = j.id) AS versions,
-             v.id AS v_id, v.label, v.status, v.variant, COALESCE(v.received_at, v.created_at) AS received_at
+             v.id AS v_id, v.label, v.status, v.variant, COALESCE(v.received_at, v.created_at) AS received_at,
+             v.stage, v.stage_at, v.deleted_at, m.gmail_thread_id,
+             (SELECT pm.id FROM artwork_proof_mails pm WHERE v.id = ANY(pm.version_ids) AND pm.status IN ('draft', 'sending') ORDER BY pm.id DESC LIMIT 1) AS draft_id
         FROM artwork_jobs j
-        JOIN artwork_versions v ON v.id = (SELECT max(x.id) FROM artwork_versions x WHERE x.job_id = j.id)
+        -- the newest live version; a job whose every version is deleted shows its newest one (under the Deleted chip)
+        JOIN artwork_versions v ON v.id = COALESCE((SELECT max(x.id) FROM artwork_versions x WHERE x.job_id = j.id AND x.deleted_at IS NULL),
+                                                   (SELECT max(x.id) FROM artwork_versions x WHERE x.job_id = j.id))
+        LEFT JOIN artwork_mails m ON m.id = v.first_mail_id
        ORDER BY v.id DESC`);
     const status = String(req.query.status ?? '');
     const customer = flat(req.query.customer);
     const words = flat(req.query.q).split(' ').filter(Boolean);
     const now = Date.now();
     const jobs = rows
-      .filter(j => (status === 'to_sort' ? j.to_sort : status === 'file_to_fetch' ? j.status === 'file_to_fetch' : true))
+      .filter(j => (status === 'deleted' ? !!j.deleted_at : !j.deleted_at))
+      .filter(j => (status === 'to_sort' ? j.to_sort : status === 'file_to_fetch' ? j.status === 'file_to_fetch'
+        : status.startsWith('stage:') ? j.stage === status.slice(6) : true))
       .filter(j => !customer || flat(j.customer_name).includes(customer))
       .filter(j => {
         const hay = flat(`${j.job_no} ${j.customer_name} ${j.client_item_code} ${j.product_name}`);
@@ -55,7 +65,9 @@ r.get('/artwork/register', async (req, res, next) => {
       .map(j => ({
         id: j.id, job_no: j.job_no, customer_name: j.customer_name, client_item_code: j.client_item_code,
         product_id: j.product_id, product_name: j.product_name, pack_type: j.pack_type, to_sort: j.to_sort, versions: j.versions,
-        latest: { id: j.v_id, label: j.label, status: j.status, variant: j.variant, received_at: j.received_at },
+        latest: { id: j.v_id, label: j.label, status: j.status, variant: j.variant, received_at: j.received_at, stage: j.stage, stage_at: j.stage_at,
+          actions: actionsFor({ stage: j.stage, status: j.status, deleted_at: j.deleted_at }), draft_id: j.draft_id, gmail_thread_id: j.gmail_thread_id,
+          deleted_at: j.deleted_at },
         waiting_days: Math.max(0, Math.floor((now - new Date(j.received_at).getTime()) / DAY)),
       }));
     // The last "done by the system" notice mail (artwork-notice.js): sent, waiting for mppchd's Gmail, or given up.
@@ -66,16 +78,29 @@ r.get('/artwork/register', async (req, res, next) => {
                                      count(*) FILTER (WHERE status IN ('waiting', 'failed', 'sending'))::int AS pending,
                                      (array_agg(error ORDER BY id DESC) FILTER (WHERE status = 'gave_up'))[1] AS gave_up_error
                                 FROM artwork_notices`);
-    res.json({ jobs, notice: notice ? { ...notice, ...counts } : null });
+    // Designers' exports the system could not put on a job: a person picks the job.
+    const unmatched = await q(`SELECT id, file_name, by_name, match_note, drive_url, created_at FROM artwork_exports WHERE version_id IS NULL AND dismissed_at IS NULL ORDER BY id DESC LIMIT 50`);
+    res.json({ jobs, notice: notice ? { ...notice, ...counts } : null, unmatched_exports: unmatched });
   } catch (e) { next(e); }
 });
 
 r.get('/artwork/register/:jobId', async (req, res, next) => {
+  if (!/^\d+$/.test(req.params.jobId)) return next();   // /artwork/register/keys and the like belong to other routes
   try {
     const job = idOf(req.params.jobId) && await one('SELECT * FROM artwork_jobs WHERE id = $1', [idOf(req.params.jobId)]);
     if (!job) return res.status(404).json({ error: 'No such artwork job.' });
     const versions = await q(`SELECT id, label, client_rev, receipt_no, variant, status, COALESCE(received_at, created_at) AS received_at,
-                                     designer_reply_at FROM artwork_versions WHERE job_id = $1 ORDER BY id DESC`, [job.id]);
+                                     designer_reply_at, stage, stage_at, decided_note, deleted_at, deleted_reason, deleted_by
+                                FROM artwork_versions WHERE job_id = $1 ORDER BY id DESC`, [job.id]);
+    const vIds = versions.map(v => v.id);
+    const exportsOf = await q(`SELECT id, version_id, by_name, file_name, size_bytes, page_w_mm::float8 AS page_w_mm, page_h_mm::float8 AS page_h_mm, colours,
+                                      drive_url, created_at FROM artwork_exports WHERE version_id = ANY($1::int[]) ORDER BY id DESC`, [vIds]);
+    const proofsOf = await q(`SELECT id, proof_no, version_id, proof_mail_id, file_name, drive_url, by_hand, created_at FROM artwork_proofs
+                               WHERE version_id = ANY($1::int[]) ORDER BY id DESC`, [vIds]);
+    const proofMails = await q(`SELECT id, version_ids, to_text, cc_text, subject, body_text, draft_url, status, error, created_by, created_at, sent_by, sent_at
+                                  FROM artwork_proof_mails WHERE version_ids && $1::int[] ORDER BY id DESC`, [vIds]);
+    const kld = job.product_id ? await one(`SELECT cs.id, cs.size_key FROM costings c JOIN costing_sizes cs ON cs.id = c.size_id AND cs.kld IS NOT NULL
+                                             WHERE c.product_id = $1 ORDER BY c.id DESC LIMIT 1`, [job.product_id]).catch(() => null) : null;
     const files = await q(`SELECT f.id, f.version_id, f.role, f.file_name, f.ext, f.size_bytes, f.sha256, f.drive_file_id, f.drive_url, f.link_url, f.saved_by
                              FROM artwork_files f JOIN artwork_versions v ON v.id = f.version_id WHERE v.job_id = $1 ORDER BY f.id`, [job.id]);
     const events = await q(`SELECT id, version_id, mail_id, action, detail, by_name, at FROM artwork_events WHERE job_id = $1 ORDER BY id`, [job.id]);
@@ -85,8 +110,13 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
       v.files = files.filter(f => f.version_id === v.id);
       const mine = new Set(events.filter(e => e.version_id === v.id && e.mail_id).map(e => e.mail_id));
       v.mails = mails.filter(m => mine.has(m.id));
+      v.superseded = versions.some(x => x.id > v.id && !x.deleted_at && x.status !== 'not_artwork');
+      v.actions = actionsFor(v);
+      v.exports = exportsOf.filter(e => e.version_id === v.id);
+      v.proofs = proofsOf.filter(p => p.version_id === v.id);
+      v.proof_mails = proofMails.filter(pm => pm.version_ids.includes(v.id)).map(pm => ({ ...pm, attachments: proofsOf.filter(p => p.proof_mail_id === pm.id).map(p => ({ name: p.file_name, drive_url: p.drive_url })) }));
     }
-    res.json({ job, versions, events });
+    res.json({ job, versions, events, kld: kld ? { size_id: kld.id, size_key: kld.size_key, pdf: `/api/costing/sizes/${kld.id}/kld.pdf` } : null });
   } catch (e) { next(e); }
 });
 
@@ -112,7 +142,9 @@ r.post('/artwork/register/:jobId/map', async (req, res, next) => {
       await qc(`INSERT INTO artwork_events (job_id, action, detail, by_name) VALUES ($1, 'mapped', $2, $3)`,
         [job.id, JSON.stringify({ product_id: p.id, product_name: p.name }), req.user.name]);
       await audit('artwork_job', job.id, 'map', `${job.job_no} is ${p.name}`, qc, req.user.name);
-      return { status: 200, ok: true };
+      // artwork approved before the job was linked: the product's open lines are ticked now
+      const lines = await tickIfApproved(qc, p.id, req.user.name);
+      return { status: 200, ok: true, order_lines: lines };
     });
     res.status(out.status).json(out.error ? { error: out.error } : { ok: true });
   } catch (e) { next(e); }
@@ -139,6 +171,8 @@ const setStatus = (toNotArtwork) => async (req, res, next) => {
         [v.job_id, v.id, toNotArtwork ? 'not_artwork' : 'restored', JSON.stringify(toNotArtwork ? { reason } : {}), req.user.name]);
       await audit('artwork_version', v.id, toNotArtwork ? 'not_artwork' : 'restore',
         `${v.job_no} ${v.label} ${toNotArtwork ? `marked not artwork — ${reason}` : 'put back in the register'}`, qc, req.user.name);
+      // an approval mail for something that is not artwork must not go (the Gmail draft is deleted by the next settle)
+      if (toNotArtwork) await cancelDraftsOf(qc, [v.id], `marked not artwork by ${req.user.name}`, req.user.name);
       return { status: 200 };
     });
     res.status(out.status).json(out.error ? { error: out.error } : { ok: true });

@@ -1,0 +1,42 @@
+EXPORT FOR CI PLANT — the designer's button in CorelDRAW 2024 (Windows)
+Install once on each designer's PC. Takes about 5 minutes.
+
+BEFORE YOU START
+  - CorelDRAW's macro part (VBA) must be installed: in CorelDRAW open Tools > Scripts > Script Manager.
+    If you see "GlobalMacros" or VBA projects, it is there. If Tools > Scripts is missing or greyed,
+    run the CorelDRAW installer again, choose Modify, and tick "Visual Basic for Applications".
+  - An admin makes a key for this PC in CI Plant: Artwork > Register > Designer PCs > New key for
+    (e.g. "Designer 1 - office PC") > Make key. Copy the key shown (it is shown only once).
+
+1. PUT THE MACRO IN
+   CorelDRAW > Tools > Scripts > Visual Basic Editor (Alt+F11).
+   In the left panel, right-click "GlobalMacros (GlobalMacros.gms)" > Import File... > choose ExportForCIPlant.bas.
+   File > Save GlobalMacros. Close the editor.
+
+2. GIVE IT THIS PC'S KEY
+   Tools > Scripts > Run Script... (Alt+Shift+F11) > GlobalMacros > ExportForCIPlant > SetUpCIPlantKey > Run.
+   Paste the key. Leave the address as https://motionci.in.
+
+3. MAKE THE BUTTON
+   Tools > Customization > Commands > choose "Macros" in the list > drag "GlobalMacros.ExportForCIPlant.ExportForCIPlant"
+   onto a toolbar. Right-click it > Customize > name it "Export for CI Plant".
+
+4. USE IT
+   Open the single-up .cdr (named with the item code and revision, as always: PCS-B398-R3 - ... CARTON.cdr)
+   and press Export for CI Plant. It saves the .cdr, exports the PDF into a CI Plant folder under Windows' TEMP
+   (it never writes over a PDF next to the .cdr — that is often the client's), and sends it to CI Plant.
+   A message says which job it went to. In CI Plant the job now shows "Send for approval".
+
+IF SOMETHING GOES WRONG
+  - "no CI Plant key": do step 2.
+  - "answered 401": the key is wrong or was switched off — ask the admin for a new one, do step 2 again.
+  - "could not tell which job": the file name has no item code/revision — open the job in CI Plant and use
+    "Upload designer's PDF", or rename the file and press the button again.
+  - "at most 18 MB": the PDF is too big for an approval mail — lower the image resolution in the export, or send a
+    smaller proof by hand.
+  - Anything else: the message is shown; nothing in the artwork was changed. The job window's
+    "Upload designer's PDF" always works as a fallback.
+
+NOTE: this macro was written for CorelDRAW 2024 and checked against CI Plant's upload, but it has not yet been
+run on the office PC. The first export should be watched: open the PDF CI Plant shows (Open in Drive) to check it
+looks right, and that the job shows "Designer file in". The artwork itself is never changed by the button.

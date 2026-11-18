@@ -20,6 +20,9 @@ import { audit, notify, nextNumber } from './helpers.js';
 import { canAccess } from '../../client/src/modules.js';
 import { resolveCustomer } from './routes/enquiries.js';
 import { artworkNoticeSoft, noticeWorkWaiting } from './artwork-notice.js';
+import { applyVerdict } from './artwork-flow.js';
+import { moveStage, tickOrderLines } from './artwork-approval.js';
+import { cancelDraftsOf, markSentIn, settleProofMailsSoft } from './artwork-settle.js';
 import { parseItemCode, productFromFileName, sourcePrint, placeVersion, versionLabel, jobKey } from './artwork-register.js';
 
 export const AVS_RUNNER = 'AVS (office)';
@@ -118,6 +121,8 @@ async function fileIntakeRow(qc, oc, row) {
   [row.mailbox_email, row.gmail_message_id, row.gmail_thread_id, row.subject, row.from_name, row.from_email, row.to_text,
     row.received_at, row.body_text, JSON.stringify(list(row.attachments)), safeUrl(row.view_url), row.summary]);
   if (!mail) return answer('skipped', { why: 'filed before' });
+  if (row.kind === 'reply') return fileReply(qc, row, mail);
+  if (row.kind === 'proof_by_hand') return fileHandProof(qc, oc, row, mail);
 
   const cust = await resolveCustomer(oc, { customer_name: row.customer_name, contact_email: row.from_email });
   const items = (list(row.items).length ? list(row.items) : [{}]).map(i => (i && typeof i === 'object' && !Array.isArray(i) ? i : {}));
@@ -175,10 +180,97 @@ async function fileIntakeRow(qc, oc, row) {
     await qc(`INSERT INTO artwork_events (job_id, version_id, mail_id, action, detail, by_name) VALUES ($1, $2, $3, 'received', $4, $5)`,
       [job.id, v.id, mail.id, JSON.stringify({ intake: Number(row.id), files: files.length, links: links.length }), AVS_RUNNER]);
     versions.push(label);
+    // A newer file from the client: an older version out for approval, or with a proof waiting to be sent, is now
+    // "changes asked" — and a draft not yet sent for it must not go.
+    const older = await moveStage(qc, { versionIds: have.map(x => x.id), to: 'changes', from: ['approval_sent', 'to_confirm', 'proof_ready'], by: AVS_RUNNER,
+      action: 'changes', detail: { why: `a newer file came from the client (${label})` } });
+    await cancelDraftsOf(qc, older.map(x => x.id), `a newer file came from the client (${label}) — not sent`, AVS_RUNNER);
   }
   await audit('artwork_intake', row.id, 'file',
     `AVS intake ${row.id} — ${plural(versions.length, 'version')} filed${again ? `, ${again} received again` : ''} (${[...new Set(jobs)].join(', ')})`, qc, AVS_RUNNER);
   return answer('filed', { jobs: [...new Set(jobs)], versions, received_again: again, mail_id: mail.id });
+}
+
+// The versions a client thread carries, through the mails filed in it.
+const NEWEST = `NOT EXISTS (SELECT 1 FROM artwork_versions x WHERE x.job_id = v.job_id AND x.id > v.id AND x.deleted_at IS NULL AND x.status <> 'not_artwork')`;
+const threadVersions = (qc, threadId) => qc(`
+  SELECT DISTINCT v.id, v.stage FROM artwork_mails m JOIN artwork_events e ON e.mail_id = m.id JOIN artwork_versions v ON v.id = e.version_id
+   WHERE m.gmail_thread_id = $1 AND v.deleted_at IS NULL AND v.status <> 'not_artwork' AND ${NEWEST}`, [threadId]);
+
+// A client's answer to our approval mail (owner, 17 Nov 2026: "the status should be automatically updated in each run").
+// Each item: { proof_nos, verdict: approval | changes | unclear, remarks }. It answers the proofs that had reached the
+// client before it was written (a reply older than a version's newest proof answers an older proof: that version does
+// not move). Only versions out for approval in this thread move; an approval ticks the product's open order lines.
+async function fileReply(qc, row, mail) {
+  const when = row.received_at ? new Date(row.received_at) : new Date();
+  const sent = row.gmail_thread_id ? await qc(`
+    SELECT p.version_id, p.proof_no, p.sent_at, v.stage FROM artwork_proofs p JOIN artwork_versions v ON v.id = p.version_id
+     WHERE p.gmail_thread_id = $1 AND p.sent_at IS NOT NULL
+       AND v.stage IN ('approval_sent', 'to_confirm', 'changes') AND v.deleted_at IS NULL AND v.status <> 'not_artwork' AND ${NEWEST}
+     ORDER BY p.version_id, p.sent_at DESC, p.id DESC`, [row.gmail_thread_id]) : [];
+  // each version's newest proof — counted only when it had gone out before the reply
+  const newest = new Map();
+  for (const p of sent) if (!newest.has(p.version_id)) newest.set(p.version_id, p);
+  const out = [...newest.values()].filter(p => new Date(p.sent_at) <= when).map(p => ({ version_id: p.version_id, proof_no: p.proof_no }));
+  const stageNow = new Map([...newest.values()].map(p => [p.version_id, p.stage]));
+  if (!out.length) return answer('skipped', { why: 'no proof of ours had reached the client in this thread before this reply', mail_id: mail.id });
+  const moved = [];
+  let lines = 0;
+  for (const item of list(row.items)) {
+    for (const m0 of applyVerdict({ verdict: item?.verdict, proof_nos: list(item?.proof_nos) }, out)) {
+      // after "changes asked", an approval needs a person: the client may be approving the old proof by mistake
+      const m = m0.stage === 'approved' && stageNow.get(m0.version_id) === 'changes' ? { ...m0, stage: 'to_confirm' } : m0;
+      const done = await moveStage(qc, { versionIds: [m.version_id], to: m.stage, from: ['approval_sent', 'to_confirm', 'changes'], by: AVS_RUNNER,
+        action: `reply_${m.stage}`, detail: { mail_id: mail.id, remarks: text(item?.remarks).slice(0, 2000), proof_nos: list(item?.proof_nos) } });
+      for (const d of done) {
+        await qc(`INSERT INTO artwork_events (job_id, version_id, mail_id, action, detail, by_name) VALUES ($1, $2, $3, 'reply', $4, $5)`,
+          [d.job_id, d.id, mail.id, JSON.stringify({ verdict: item?.verdict }), AVS_RUNNER]);
+        if (m.stage === 'approved') lines += await tickOrderLines(qc, d.id, AVS_RUNNER);
+        moved.push({ version_id: d.id, stage: m.stage });
+      }
+    }
+  }
+  await audit('artwork_intake', row.id, 'reply', `AVS intake ${row.id} — client reply: ${moved.map(x => `${x.version_id}→${x.stage}`).join(', ') || 'nothing moved'}`, qc, AVS_RUNNER);
+  return answer('filed', { reply: moved, order_lines: lines, mail_id: mail.id });
+}
+
+// mppchd replied in the client's thread with a proof. Three cases (review of 18 Nov 2026):
+//   - it is CI Plant's own approval mail, already recorded as sent (same message id) → nothing to do;
+//   - it carries CI Plant's proof file (PRF-…) of a draft not yet recorded as sent — the draft was sent from Gmail
+//     itself → that draft is recorded as sent, at the mail's time;
+//   - it carries no PRF- file → a proof the designer made by hand: the versions in the thread waiting for one are
+//     "approval sent (by hand)", the proof is kept so the client's answer has something to attach to.
+async function fileHandProof(qc, oc, row, mail) {
+  const files = list(row.items).flatMap(i => list(i?.files)).filter(f => f && typeof f === 'object');
+  const own = await oc(`SELECT id FROM artwork_proof_mails WHERE gmail_message_id = $1 AND status = 'sent'`, [row.gmail_message_id]);
+  if (own) return answer('skipped', { why: 'CI Plant\'s own approval mail, already recorded as sent', mail_id: mail.id });
+  const prf = files.map(f => text(f.file_name).replace(/\.pdf$/i, '')).filter(n => /^PRF-/i.test(n));
+  if (prf.length) {
+    const drafts = await qc(`SELECT DISTINCT pm.id FROM artwork_proofs p JOIN artwork_proof_mails pm ON pm.id = p.proof_mail_id
+                              WHERE upper(p.proof_no) = ANY($1::text[]) AND pm.status IN ('draft', 'sending')`, [prf.map(n => n.toUpperCase())]);
+    const sent = [];
+    for (const d of drafts) {
+      if (await markSentIn(qc, oc, d.id, { at: row.received_at || new Date().toISOString(), messageId: row.gmail_message_id, by: 'Gmail (sent from Gmail itself)' })) sent.push(d.id);
+    }
+    await audit('artwork_intake', row.id, 'proof_mail_sent', `AVS intake ${row.id} — CI Plant approval mail(s) sent from Gmail: ${sent.join(', ') || 'already recorded'}`, qc, AVS_RUNNER);
+    return answer(sent.length ? 'filed' : 'skipped', sent.length ? { sent_from_gmail: sent, mail_id: mail.id } : { why: 'CI Plant\'s own proof, already recorded', mail_id: mail.id });
+  }
+  const vs = row.gmail_thread_id ? (await threadVersions(qc, row.gmail_thread_id)).filter(v => ['new', 'designer_file', 'proof_ready'].includes(v.stage)) : [];
+  if (!vs.length) return answer('skipped', { why: 'no version in this thread is waiting for a proof', mail_id: mail.id });
+  for (const v of vs) {
+    for (const f of files.length ? files : [{}]) {
+      await qc(`INSERT INTO artwork_proofs (version_id, sha256, file_name, drive_file_id, drive_url, by_hand, gmail_thread_id, sent_at)
+                VALUES ($1, $2, $3, $4, $5, true, $6, $7)`,
+        [v.id, text(f.sha256).toLowerCase() || null, text(f.file_name) || null, text(f.drive_file_id) || null, safeUrl(f.drive_url),
+          row.gmail_thread_id, row.received_at || new Date().toISOString()]);
+    }
+  }
+  const moved = await moveStage(qc, { versionIds: vs.map(v => v.id), to: 'approval_sent', from: ['new', 'designer_file', 'proof_ready'], by: AVS_RUNNER,
+    action: 'approval_sent_by_hand', detail: { mail_id: mail.id } });
+  // a CI Plant draft for the same versions must not go as well
+  await cancelDraftsOf(qc, moved.map(m => m.id), 'the designer sent a proof by hand from Gmail — not sent', AVS_RUNNER);
+  await audit('artwork_intake', row.id, 'proof_by_hand', `AVS intake ${row.id} — proof sent by hand for ${moved.length} version(s)`, qc, AVS_RUNNER);
+  return answer('filed', { by_hand: moved.map(m => m.id), mail_id: mail.id });
 }
 
 // A mail whose items could not be written is not left where nobody sees it: the mail itself is put in the register
@@ -208,6 +300,7 @@ async function fileBareMail(qc, oc, row, problem) {
 // reason only if even that fails), never retried in a loop; a
 // passing database trouble (a deadlock, a lock wait, a cancelled statement) leaves the row waiting for the next call.
 export const MAX_PER_CALL = 100;
+const INTAKE_LOCK = 727100;           // pg advisory lock: one artwork intake row at a time
 const PASSING = new Set(['40001', '40P01', '55P03', '57014']);
 export async function syncIntakeArtwork({ max = MAX_PER_CALL } = {}) {
   const out = { filed: [], skipped: [], refused: [] };
@@ -215,7 +308,12 @@ export async function syncIntakeArtwork({ max = MAX_PER_CALL } = {}) {
     let done;
     try {
       done = await tx(async (qc, oc) => {
-        const row = await oc(`SELECT * FROM avs.artwork_intake WHERE status = 'new' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`);
+        // One row at a time across every caller (the robot's call and the polls), in the order the mails were written,
+        // so a reply is never read before the proof it answers. Another caller filing right now → this one stops and
+        // leaves the queue to it.
+        const lock = await oc(`SELECT pg_try_advisory_xact_lock(${INTAKE_LOCK}) AS ok`);
+        if (!lock?.ok) return { busy: true };
+        const row = await oc(`SELECT * FROM avs.artwork_intake WHERE status = 'new' ORDER BY received_at NULLS LAST, id LIMIT 1 FOR UPDATE SKIP LOCKED`);
         if (!row) return null;
         await qc('SAVEPOINT intake_row');
         let a;
@@ -240,7 +338,7 @@ export async function syncIntakeArtwork({ max = MAX_PER_CALL } = {}) {
       if (PASSING.has(e?.code)) { console.warn(`[artwork-intake] left for the next call: ${e.message}`); break; }
       throw e;
     }
-    if (!done) break;
+    if (!done || done.busy) break;
     out[done.status].push(done);
   }
   return out;
@@ -252,6 +350,7 @@ const SOFT_MAX = 10;
 export async function syncIntakeArtworkSoft() {
   const none = { filed: [], skipped: [], refused: [] };
   try {
+    await settleProofMailsSoft();               // what really happened to approval mails, before replies are read
     if (!await one(`SELECT 1 AS y FROM avs.artwork_intake WHERE status = 'new' LIMIT 1`)) {
       // nothing new to file — but a notice may still be waiting for mppchd's Gmail, or due a retry
       if (await noticeWorkWaiting()) await artworkNoticeSoft();

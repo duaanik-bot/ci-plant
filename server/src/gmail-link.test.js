@@ -73,22 +73,24 @@ test('CI Plant sends to nobody but the company: one Gmail send, sendToOwnMailbox
       const src = readFileSync(new URL(f, dir), 'utf8');
       if (/\bsendToCompany\b/.test(src) && f !== 'gmail.js') importers.push(`${f}:company`);
       if (/\bsendToOwnMailboxes\b/.test(src) && f !== 'gmail.js') importers.push(`${f}:own`);
+      if (/\bsendDraft\b/.test(src) && f !== 'gmail.js') importers.push(`${f}:draft`);
       if (f !== 'gmail.js') assert.doesNotMatch(src, /\bownAddresses\b/, `${f} must not choose who counts as the company's own mailboxes`);
       if (f === 'gmail.js') continue;
       assert.doesNotMatch(src, SEND, `${f} calls Gmail send`);
     }
   }
-  assert.deepEqual(importers.sort(), ['artwork-notice.js:own', 'enquiries.js:company'],
-    'only the order sheet (sendToCompany) and the artwork notice (sendToOwnMailboxes) send');
+  assert.deepEqual(importers.sort(), ['artwork-flow.js:draft', 'artwork-notice.js:own', 'enquiries.js:company'],
+    'only the order sheet (sendToCompany), the artwork notice (sendToOwnMailboxes) and the artwork Send email (sendDraft) send');
   const gm = readFileSync(new URL('./gmail.js', import.meta.url), 'utf8');
   const hits = [...gm.matchAll(SEND)];
-  assert.equal(hits.length, 1, 'one send in gmail.js');
-  const from = gm.indexOf('export async function sendToOwnMailboxes');
-  const to = gm.indexOf('\n}\n', from);
-  assert.ok(from > 0 && hits[0].index > from && hits[0].index < to, 'and it is inside sendToOwnMailboxes');
+  assert.equal(hits.length, 2, 'two sends in gmail.js: to the company, and a reviewed draft');
+  const inside = (name, i) => { const from = gm.indexOf(`export async function ${name}`); const to = gm.indexOf('\n}\n', from); return from > 0 && i > from && i < to; };
+  assert.ok(hits.every(h => inside('sendToOwnMailboxes', h.index) || inside('sendDraft', h.index)), 'each inside sendToOwnMailboxes or sendDraft');
   const writes = [...gm.matchAll(/gmailCall\(token, '(POST|PUT|DELETE|PATCH)', `?'?([^`',]+)/g)].map(m => `${m[1]} ${m[2]}`);
-  assert.deepEqual(writes.sort(), ['POST /drafts', 'POST /messages/send', 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(),
-    'the only Gmail writes are draft create / update and the company send');
+  assert.deepEqual(writes.sort(), ['DELETE /drafts/${encodeURIComponent(draftId)}', 'POST /drafts', 'POST /drafts/send', 'POST /messages/send', 'PUT /drafts/${encodeURIComponent(draftId)}'].sort(),
+    'the only Gmail writes are draft create / update / delete, the company send and sending a reviewed draft');
+  const uploads = [...gm.matchAll(/gmailUpload\(token, '([^']+)'/g)].map(m => m[1]);
+  assert.deepEqual(uploads, ['/drafts?uploadType=multipart'], 'the upload door only ever makes a draft');
 });
 
 test('sendToCompany addresses only the company mailbox: one recipient, no Cc, and refuses a bad address', async () => {

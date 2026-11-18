@@ -16,12 +16,13 @@
 //
 // Google's refresh token is stored ENCRYPTED (AES-256-GCM, key GMAIL_TOKEN_KEY in the server's environment — never in
 // the database). Env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_TOKEN_KEY (64 hex characters).
-// GMAIL_API_BASE / GOOGLE_OAUTH_BASE / GOOGLE_TOKEN_URL exist only so the tests can point at a fake Google.
+// GMAIL_API_BASE / GMAIL_UPLOAD_BASE / GOOGLE_OAUTH_BASE / GOOGLE_TOKEN_URL exist only so the tests can point at a fake Google.
 import crypto from 'node:crypto';
 import { DRIVE_SCOPE } from './gdrive.js';
 
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata'];
 const api = () => process.env.GMAIL_API_BASE || 'https://gmail.googleapis.com/gmail/v1/users/me';
+const uploadApi = () => process.env.GMAIL_UPLOAD_BASE || 'https://gmail.googleapis.com/upload/gmail/v1/users/me';
 const authBase = () => process.env.GOOGLE_OAUTH_BASE || 'https://accounts.google.com/o/oauth2/v2/auth';
 const tokenUrl = () => process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
 const revokeUrl = () => process.env.GOOGLE_REVOKE_URL || 'https://oauth2.googleapis.com/revoke';
@@ -132,10 +133,12 @@ const cleanLine = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
 const safeName = n => cleanLine(n).replace(/["\\]/g, '') || 'quotation.pdf';
 
 // RFC 822 message: text + HTML alternatives, the PDF attached, threaded under the customer's mail when given.
-export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, references, attachment, attachments = [], boundary = crypto.randomBytes(12).toString('hex') }) {
+export function buildMime({ from, to, cc = [], subject, text, html, inReplyTo, references, attachment, attachments = [], headers = {}, boundary = crypto.randomBytes(12).toString('hex') }) {
   const mix = `mix_${boundary}`, alt = `alt_${boundary}`;
   const L = [];
   if (from) L.push(`From: ${cleanAddr(from)}`);
+  // CI Plant's own X- headers (e.g. the approval mail's mark); anything else is not a header CI Plant writes
+  for (const [k, v] of Object.entries(headers || {})) if (/^X-[A-Za-z0-9-]{1,40}$/.test(k)) L.push(`${k}: ${cleanLine(v).replace(/[^\x20-\x7e]/g, '')}`);
   L.push(`To: ${(Array.isArray(to) ? to : [to]).map(cleanAddr).filter(Boolean).join(', ')}`);
   const ccs = (Array.isArray(cc) ? cc : [cc]).map(cleanAddr).filter(Boolean);
   if (ccs.length) L.push(`Cc: ${ccs.join(', ')}`);
@@ -252,4 +255,80 @@ export async function sendToOwnMailboxes(token, { from, to, subject, text, html,
 export async function sendToCompany(token, { from, company, subject, text, html, attachments = [], ownAddresses }) {
   if (Array.isArray(company)) throw gmailError('No company mailbox address to send the order sheet to — set the business mailbox in the desk settings.', 409);
   return sendToOwnMailboxes(token, { from, to: [company], subject, text, html, attachments, what: 'the order sheet', ...(ownAddresses ? { ownAddresses } : {}) });
+}
+
+// ── the client send (owner, 17 Nov 2026: "if we click Send Email, we should be able to send the email from here, from
+// the ERP") ─ the ONE way a mail reaches a client: a person presses Send email on the artwork window, and the DRAFT CI
+// Plant built and they reviewed is sent as it stands in Gmail (drafts.send) — never a mail made up at send time. Used
+// only by routes/artwork-flow.js; gmail-link.test.js fails the build on any other caller.
+export async function sendDraft(token, { draftId }) {
+  if (!draftId) throw gmailError('No draft to send — press Send for approval first.', 409);
+  const m = await gmailCall(token, 'POST', '/drafts/send', { id: draftId });
+  return { message_id: m.id || null, thread_id: m.threadId || null };
+}
+
+// The draft as Gmail holds it now: who it goes to, its subject, its message id (it changes when someone edits the draft
+// in Gmail) and its labels (SENT and no DRAFT = it was sent from Gmail). null = the draft is gone.
+export async function draftHeaders(token, { draftId }) {
+  try {
+    const d = await gmailCall(token, 'GET', `/drafts/${encodeURIComponent(draftId)}?format=metadata&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject`);
+    const h = n => (d.message?.payload?.headers || []).filter(x => String(x.name).toLowerCase() === n).map(x => x.value).join(', ') || '';
+    const labels = d.message?.labelIds || [];
+    const t = Number(d.message?.internalDate);
+    return { to: h('to'), cc: h('cc'), subject: h('subject'), message_id: d.message?.id || null, labels,
+      sent: labels.includes('SENT') && !labels.includes('DRAFT'), at: t > 0 ? new Date(t).toISOString() : null };
+  } catch (e) { if (e.gmailStatus === 404) return null; throw e; }
+}
+
+// Was this approval mail sent? Strict, because a client must never be told twice nor told nothing: the draft itself
+// answering SENT (Gmail's web app keeps the id when it sends a draft), or — the draft gone — a SENT message in the thread
+// carrying CI Plant's own mark (header X-CIPlant-Approval). Any other mail from the mailbox in that thread is not it.
+// → { sent: true, at, message_id } | { sent: false, gone }
+export const APPROVAL_HEADER = 'X-CIPlant-Approval';
+export async function approvalSent(token, { draftId, threadId, marker }) {
+  const iso = ms => { const t = Number(ms); return new Date(t > 0 ? t : Date.now()).toISOString(); };
+  try {
+    const d = await gmailCall(token, 'GET', `/drafts/${encodeURIComponent(draftId)}?format=minimal`);
+    const labels = d.message?.labelIds || [];
+    if (labels.includes('SENT') && !labels.includes('DRAFT')) return { sent: true, at: iso(d.message?.internalDate), message_id: d.message?.id || null };
+    return { sent: false, gone: false };
+  } catch (e) { if (e.gmailStatus !== 404) throw e; }
+  if (!threadId || !marker) return { sent: false, gone: true };
+  let t;
+  try { t = await gmailCall(token, 'GET', `/threads/${encodeURIComponent(threadId)}?format=metadata&metadataHeaders=${APPROVAL_HEADER}`); }
+  catch (e) { if (e.gmailStatus === 404) return { sent: false, gone: true }; throw e; }
+  const hit = (t.messages || []).find(m => (m.labelIds || []).includes('SENT')
+    && (m.payload?.headers || []).some(h => String(h.name).toLowerCase() === APPROVAL_HEADER.toLowerCase() && String(h.value).trim() === marker));
+  return hit ? { sent: true, at: iso(hit.internalDate), message_id: hit.id || null } : { sent: false, gone: true };
+}
+
+// A draft made through Gmail's upload door (multipart: the thread, then the whole message), so a proof of several MB
+// fits — a plain JSON request carries only a few MB. Same answer as saveDraft. Never sends.
+export async function saveDraftUpload(token, { email, mime, threadId }) {
+  const boundary = `ciplant_${crypto.randomBytes(10).toString('hex')}`;
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ message: threadId ? { threadId } : {} })}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`), Buffer.from(mime, 'utf8'),
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+  const d = await gmailUpload(token, '/drafts?uploadType=multipart', body, `multipart/related; boundary=${boundary}`);
+  const mid = d.message?.id;
+  return { draft_id: d.id, message_id: mid, thread_id: d.message?.threadId || threadId || null, view_url: mid ? draftViewUrl(email, mid) : null };
+}
+async function gmailUpload(token, path, body, contentType) {
+  const res = await fetch(uploadApi() + path, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': contentType }, body });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const why = j.error?.message || res.statusText || String(res.status);
+    throw gmailError(res.status === 401 || res.status === 403 ? `Gmail refused (${why}) — an admin presses Connect Gmail again.` : `Gmail said: ${why}`,
+      res.status === 404 ? 404 : 502, { gmailStatus: res.status, expired: res.status === 401 });
+  }
+  return j;
+}
+
+// Take a draft out of Gmail's Drafts (a cancelled approval mail, so nobody sends it from Gmail by mistake). Gone already = fine.
+export async function deleteDraft(token, { draftId }) {
+  if (!draftId) return { deleted: false };
+  try { await gmailCall(token, 'DELETE', `/drafts/${encodeURIComponent(draftId)}`); return { deleted: true }; }
+  catch (e) { if (e.gmailStatus === 404) return { deleted: false, gone: true }; throw e; }
 }

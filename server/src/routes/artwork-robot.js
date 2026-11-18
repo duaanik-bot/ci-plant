@@ -11,6 +11,7 @@ import { markUncacheable } from '../data-tables.js';
 import { keyOk } from './avs-robot.js';
 import { syncIntakeArtwork, notifyNewArtworkSoft } from '../artwork-intake.js';
 import { artworkNoticeSoft } from '../artwork-notice.js';
+import { settleProofMailsSoft } from '../artwork-settle.js';
 
 const r = Router();
 const MISSING = new Set(['42P01', '3F000']);
@@ -20,6 +21,7 @@ r.post('/avs/robot/artwork-notify', async (req, res, next) => {
     markUncacheable();
     res.set('Cache-Control', 'no-store');
     if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
+    await settleProofMailsSoft();               // approval mails settled with Gmail before the run's replies are read
     const out = await syncIntakeArtwork();
     const alert = await notifyNewArtworkSoft();
     res.json({ ...out, alert, notice: await artworkNoticeSoft() });

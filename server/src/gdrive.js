@@ -55,3 +55,47 @@ export async function saveKldToDrive({ token, folderName, fileName, bytes, share
   }
   return { file_id: file.id, link: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`, folder_id: folderId };
 }
+
+// ── artwork files (17 Nov 2026): the designer's exports and the proofs, in the business mailbox's Drive ───────────
+// One folder CI Plant made (appProperties ciplant=artwork). A resumable upload, so a large export is never refused
+// (a multipart upload is only for files up to 5 MB). Every save is a new file; a file is shared as reader with each
+// address given (the company mailboxes), so everyone who reviews can open it.
+const ART = "appProperties has { key='ciplant' and value='artwork' }";
+export async function saveArtworkToDrive({ token, folderName = 'CI Plant – artwork proofs', fileName, bytes, mime = 'application/pdf', shareWith = [] }) {
+  const found = await call(token, 'GET', `${api()}/files?${new URLSearchParams({
+    q: `mimeType='application/vnd.google-apps.folder' and trashed=false and ${ART}`, fields: 'files(id,name)', spaces: 'drive',
+  })}`);
+  let folderId = found.files?.[0]?.id;
+  if (!folderId) {
+    const made = await call(token, 'POST', `${api()}/files?fields=id`,
+      JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder', appProperties: { ciplant: 'artwork' } }),
+      { 'content-type': 'application/json' });
+    folderId = made.id;
+  }
+  const start = await fetch(`${uploadBase()}/files?uploadType=resumable&fields=id,webViewLink`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-type': mime,
+      'x-upload-content-length': String(bytes.length) },
+    body: JSON.stringify({ name: fileName, mimeType: mime, parents: [folderId], appProperties: { ciplant: 'artwork' } }),
+  });
+  const where = start.headers.get('location');
+  if (!start.ok || !where) {
+    const j = await start.json().catch(() => ({}));
+    const refused = start.status === 401 || start.status === 403;
+    throw Object.assign(new Error(refused ? `Drive refused (${j.error?.message || start.status}) — press Connect Gmail again for the business mailbox and allow Drive.`
+      : `Drive said: ${j.error?.message || start.status}`), { status: refused ? 409 : 502 });
+  }
+  const file = await call(token, 'PUT', where, Buffer.from(bytes), { 'content-type': mime });
+  for (const email of [...new Set(shareWith.filter(Boolean))]) {
+    await call(token, 'POST', `${api()}/files/${encodeURIComponent(file.id)}/permissions?sendNotificationEmail=false`,
+      JSON.stringify({ type: 'user', role: 'reader', emailAddress: email }), { 'content-type': 'application/json' });
+  }
+  return { file_id: file.id, link: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`, folder_id: folderId };
+}
+
+// A file CI Plant saved (drive.file lets it read only its own files) → its bytes.
+export async function readArtworkFromDrive({ token, fileId }) {
+  const res = await fetch(`${api()}/files/${encodeURIComponent(fileId)}?alt=media`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw Object.assign(new Error(`Drive could not give the file back (${res.status}).`), { status: 502 });
+  return Buffer.from(await res.arrayBuffer());
+}
