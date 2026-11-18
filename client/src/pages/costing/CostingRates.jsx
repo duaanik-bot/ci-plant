@@ -107,7 +107,7 @@ export default function CostingRates({ boot, onSaved }) {
           <li>Embossing: <b>₹{plain(HOUSE_RULES.emb_rate, 2)}</b> a carton when asked</li>
           <li>Leafing: <b>₹{plain(HOUSE_RULES.leaf_rate, 2)}</b> a carton per panel + <b>₹{plain(HOUSE_RULES.leaf_process)}</b> set-up for the job</li>
           <li>Die & pasting: side <b>₹{plain(HOUSE_RULES.dp.SIDE, 2)}</b> · lock bottom <b>₹{plain(HOUSE_RULES.dp.LOCK, 2)}</b> · big box <b>₹{plain(HOUSE_RULES.dp_big, 2)}</b> (tick on the costing)</li>
-          <li>Process: <b>₹{plain(HOUSE_RULES.process)}</b> for the job, <b>₹{plain(HOUSE_RULES.process_new_die)}</b> with a new die (tick; on for a product not in the Product Master)</li>
+          <li>Process: <b>₹{plain(HOUSE_RULES.process)}</b> for the job, <b>₹{plain(HOUSE_RULES.process_new_die)}</b> with a new die (tick; on for a product not in the Product Master, unless the Die Master has a usable die of exactly the size)</li>
         </ul>
         <h4 className="mt-4 text-sm font-bold">Typical in your costings (last two years)</h4>
         <p className="mb-1 text-xs text-slate-500">Worked out live from the saved costings; a new costing is filled with these where nothing better is known.</p>

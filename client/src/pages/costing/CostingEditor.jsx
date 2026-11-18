@@ -22,7 +22,8 @@ import {
   SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
   rankHistory, recommend, rupees, stillNeeded,
 } from '../../lib/costingUi.js';
-import { HOUSE_RULES, chargeGrades, gradeLabel, newDieDefault } from '../../lib/costingRules.js';
+import { HOUSE_RULES, chargeGrades, gradeLabel, newDieDefault, masterDieOf, isUsableDie } from '../../lib/costingRules.js';
+import { dieName, dieFrom, dieFacts, listed, masterItem, listItem, noNewDieLabel } from '../../lib/die-check.js';
 
 // ── small pieces ─────────────────────────────────────────────────────────────────────────────────
 export function Card({ icon: Icon, title, hint, children, className = '' }) {
@@ -243,7 +244,8 @@ function Panel({ icon: Icon, title, children, tone }) {
   );
 }
 
-export function SizeKnowledge({ value, result, onChange, excludeId, alertPct = 15, readOnly = false, check: given }) {
+// `newDie` + `onNoNewDie` (the editor only): a die only on the die list offers one click to untick New die (owner, 17 Nov 2026).
+export function SizeKnowledge({ value, result, onChange, excludeId, alertPct = 15, readOnly = false, check: given, newDie = null, onNoNewDie = null }) {
   const size = parseSize(value.size_text);
   const own = useSizeCheck(given ? null : size?.key, excludeId);
   const { data, loading } = given || own;
@@ -252,7 +254,10 @@ export function SizeKnowledge({ value, result, onChange, excludeId, alertPct = 1
   }
   if (loading && !data) return <Panel icon={Ruler} title="This size before"><p className="text-sm text-slate-500">Checking {size.label}…</p></Panel>;
   const lib = data?.library || { exact: [], near: [] };
-  const dies = data?.dies || { exact: [], near: [] };
+  const dies = { exact: [], reordered: [], near: [], ...data?.dies };
+  const reg = { exact: [], reordered: [], near: [], ...data?.register };
+  const turned = [...dies.reordered.map(masterItem), ...reg.reordered.map(d => listItem(d))];
+  const close = [...dies.near.map(masterItem), ...reg.near.map(d => (d.other_order ? listItem(d, 'another order') : listItem(d)))];
   const history = data?.history || [];
   const cmp = closestComparison(value, result, history, alertPct);
   const ranked = rankHistory(value, history);
@@ -324,17 +329,34 @@ export function SizeKnowledge({ value, result, onChange, excludeId, alertPct = 1
         ) : lib.exact.length > 0 && <p className="text-xs text-slate-500">In the Size Library, not yet costed.</p>}
       </Panel>
 
-      <Panel icon={Wrench} title="Die in the factory (Die Master)">
-        {dies.exact.length > 0 ? (
+      <Panel icon={Wrench} title="Die in the factory">
+        {dies.exact.length > 0 && (
           <ul className="space-y-1 text-xs">
             {dies.exact.map(d => (
-              <li key={d.id} className="flex items-center gap-1.5"><CheckCircle2 size={13} className="text-emerald-600" />
-                <b>{d.code}</b> · {d.carton_size} · {d.ups ?? '?'} ups{d.condition && d.condition !== 'Good' ? ` · ${d.condition}` : ''}
-                {d.product_name ? <span className="text-slate-500"> · {d.product_name}</span> : null}</li>
+              <li key={d.id} className="flex items-start gap-1.5">
+                {isUsableDie(d) ? <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-600" /> : <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-600" />}
+                <span className="min-w-0 flex-1"><b>Die {d.code}</b> in the Die Master is this size · {d.carton_size} · {d.ups ?? '?'} ups{d.condition && d.condition !== 'Good' ? ` · ${d.condition}` : ''}
+                  {d.product_name ? <span className="text-slate-500"> · {d.product_name}</span> : null}
+                  {isUsableDie(d) ? ' — no new die needed.' : ' — not usable, so a new die would be needed.'}</span></li>
             ))}
           </ul>
-        ) : <p className="text-sm text-slate-600">No die of this size in the Die Master — a new die would be needed.</p>}
-        {dies.near.length > 0 && <p className="mt-2 text-xs text-slate-500">Close: {dies.near.slice(0, 5).map(d => `${d.code} (${d.carton_size})`).join(', ')}</p>}
+        )}
+        {reg.exact.length > 0 && (
+          <ul className={`space-y-1.5 text-xs ${dies.exact.length ? 'mt-2' : ''}`}>
+            {reg.exact.map(d => (
+              <li key={`r${d.die_no}`} className="flex flex-wrap items-start gap-1.5"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-600" />
+                <span className="min-w-0 flex-1"><b>{dieName(d)}</b> is this size · {[...dieFacts(d), dieFrom(d)].join(' · ')}. Check it is still in the rack.</span>
+                {newDie && onNoNewDie && !readOnly && (
+                  <button type="button" onClick={onNoNewDie}
+                    className="rounded-md bg-white px-2 py-0.5 font-bold text-emerald-700 ring-1 ring-emerald-300 hover:bg-emerald-50">{noNewDieLabel(d)}</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {!dies.exact.length && !reg.exact.length && <p className="text-sm text-slate-600">No die of this size in the Die Master or the die list — a new die would be needed.</p>}
+        {turned.length > 0 && <p className="mt-2 text-xs text-amber-800"><b>Same numbers, written another way</b> — check it opens the same way: {listed(turned)}</p>}
+        {close.length > 0 && <p className="mt-2 text-xs text-slate-500">Close: {listed(close)}</p>}
       </Panel>
     </div>
   );
@@ -507,7 +529,8 @@ function ProductBox({ value, onPick, onName, onUnlink }) {
 }
 
 // ── the editor ───────────────────────────────────────────────────────────────────────────────────
-export default function CostingEditor({ boot, customers = [], value, onChange, excludeId, hideProductStep = false, askLibrary = false, recheck = 0 }) {
+// `followDieCheck` off (the bulk row editor, whose rows keep only their inputs): New die follows only the product and the tick.
+export default function CostingEditor({ boot, customers = [], value, onChange, excludeId, hideProductStep = false, askLibrary = false, recheck = 0, followDieCheck = true }) {
   const toast = useToast();
   const inputs = value.inputs || {};
   const settings = boot?.settings || { coatings: [], alert_pct: 15, defaults: {} };
@@ -533,7 +556,9 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   // Fill (and refill) the suggestions whenever what they depend on changes: the product, the size check,
   // the pasting (die & pasting follows it), the colours (process follows them). A costing reopened from
   // the register is left as saved until its product or size is changed.
-  const newDie = newDieDefault(value);
+  // a Die Master die of exactly this size means no new die unless somebody ticks it (owner, 17 Nov 2026, "Die Master only")
+  const masterDie = followDieCheck && checked ? masterDieOf(check.data) : null;
+  const newDie = newDieDefault(value, { masterDie });
   const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}|${value.board_grade ?? ''}`;
   const lastCtx = useRef(null);
   useEffect(() => {
@@ -541,7 +566,7 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
     if (size?.key && check.key !== size.key) return;          // wait for this size's check
     if (lastCtx.current === ctxKey) return;
     lastCtx.current = ctxKey;
-    const next = recommend(value, { product: value.product, check: check.data, typical: boot.typical, defaults: settings.defaults, grades });
+    const next = recommend(value, { product: value.product, check: check.data, typical: boot.typical, defaults: settings.defaults, grades, masterDie });
     const pick = x => JSON.stringify([x.inputs, x.sources, x.size_text, x.style, x.board_grade, x.coat_choice, x.customer_name]);
     if (pick(next) !== pick(value)) onChange(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -729,7 +754,8 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
         <ResultCard result={result} missing={missing} />
         <QuantityCard inputs={inputs} quantities={value.quantities} onQuantities={q => onChange({ ...value, quantities: q })} />
         <SizeKnowledge value={value} result={result} onChange={({ _edited, ...patch }) => set(patch, _edited || [])} excludeId={excludeId}
-          alertPct={settings.alert_pct || 15} check={check} />
+          alertPct={settings.alert_pct || 15} check={check} newDie={newDie}
+          onNoNewDie={followDieCheck && checked ? () => tick('new_die', false, 'process') : null} />
       </div>
     </div>
   );

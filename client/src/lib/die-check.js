@@ -46,3 +46,7 @@ export function masterItem(d) {
   return `${String(d.carton_size).replace(/x/gi, ' × ')}, Die Master die ${d.code}${more.length ? ` (${more.join(', ')})` : ''}`;
 }
 export const listItem = (d, ...more) => `${dieSize(d)}, ${dieName(d)} (${[...dieFacts(d), dieFrom(d), ...more].join(', ')})`;
+
+// The costing card's one click for a die only on the die list (owner, 17 Nov 2026): New die stays ticked until somebody
+// says the die is still in the rack.
+export const noNewDieLabel = d => `No new die — use ${dieName(d)}`;

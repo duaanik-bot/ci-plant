@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeCosting } from './costing-engine.js';
 import { computeCosting as clientCompute } from '../../client/src/lib/costing.js';
-import { HOUSE_RULES, coatingFromText, finishFromEnquiry, dpFor, processFor, houseRuleValues, ruleInputsForRow } from '../../client/src/lib/costingRules.js';
+import { HOUSE_RULES, coatingFromText, finishFromEnquiry, dpFor, processFor, houseRuleValues, ruleInputsForRow, newDieDefault, masterDieOf } from '../../client/src/lib/costingRules.js';
 import { recommend, valueFromSaved } from '../../client/src/lib/costingUi.js';
 import { costingValueFromEnquiry, bulkSeedFromEnquiry } from '../../client/src/lib/enquiryUi.js';
 
@@ -150,4 +150,44 @@ test('Met Saffire: charged ₹120, coated at factor 1 whatever the finish words 
   const v = recommend({ product_name: 'X', size_text: '', style: 'LOCK', board_grade: 'Met Saffire', inputs: {}, sources: { board_grade: { kind: 'manual' } } }, {});
   assert.equal(v.coat_choice, '1');
   assert.equal(v.inputs.coat_factor, 1);
+});
+
+// Owner, 17 Nov 2026 ("Die Master only"): a Die Master die of exactly this size means no new die; a die only on the
+// die list (2024 list, Drive drawings) does not — nobody has confirmed it is still in the rack. A hand-set tick wins.
+test('New die: off by itself for a Die Master die of this size, never for a die-list die; a hand-set tick wins', () => {
+  assert.equal(newDieDefault({}), true);
+  assert.equal(newDieDefault({}, { masterDie: 'D-1' }), false);
+  assert.equal(newDieDefault({ new_die: true }, { masterDie: 'D-1' }), true);
+  assert.equal(newDieDefault({ product_id: 7 }), false);
+  const asMap = xs => Object.fromEntries(xs.map(([k, v, note]) => [k, [v, note]]));
+  assert.deepEqual(asMap(houseRuleValues({ style: 'LOCK' }, { masterDie: 'D-1' })).process, [2000, 'existing die (Die Master D-1) — ₹2,000']);
+  assert.deepEqual(asMap(houseRuleValues({ style: 'LOCK', new_die: true }, { masterDie: 'D-1' })).process, [3000, 'new die — ₹3,000']);
+  assert.equal(asMap(houseRuleValues({ style: 'LOCK' })).process[0], 3000);
+
+  const v = { style: 'LOCK', size_text: '92x80x66', inputs: {}, sources: {} };
+  const lib = { exact: [] };
+  assert.equal(recommend(v, { check: { library: lib, dies: { exact: [{ code: 'D-1' }], near: [] } } }).inputs.process, 2000);
+  assert.equal(recommend(v, { check: { library: lib, dies: { exact: [] }, register: { exact: [{ die_no: 'J1', job_no: '1' }] } } }).inputs.process, 3000);
+  assert.equal(recommend(v, { check: { library: lib, dies: { exact: [], near: [{ code: 'D-2' }] } } }).inputs.process, 3000);
+  assert.equal(recommend({ ...v, new_die: true }, { check: { library: lib, dies: { exact: [{ code: 'D-1' }] } } }).inputs.process, 3000);
+});
+
+// A Die Master die the Tooling Hub would not release (Poor: lost or damaged; Scrapped) is no reason to skip a new die.
+test('New die: only a usable Die Master die counts; a reopened costing keeps what it was saved with', () => {
+  assert.equal(masterDieOf({ dies: { exact: [{ code: 'D-1', condition: 'Poor' }, { code: 'D-2', condition: 'Good' }] } }), 'D-2');
+  assert.equal(masterDieOf({ dies: { exact: [{ code: 'D-1', condition: 'Scrapped' }, { code: 'D-3', condition: ' poor ' }] } }), null);
+  assert.equal(masterDieOf({ dies: { exact: [{ code: 'D-4', condition: null }, { code: 'D-5', condition: 'Fair' }] } }), 'D-4');
+  assert.equal(masterDieOf(null), null);
+  const v = { style: 'LOCK', size_text: '92x80x66', inputs: {}, sources: {} };
+  assert.equal(recommend(v, { check: { library: { exact: [] }, dies: { exact: [{ code: 'D-1', condition: 'Scrapped' }] } } }).inputs.process, 3000);
+  const reopened = valueFromSaved({ size_key: '92x80x66', style: 'LOCK', inputs: { process: 3000 } });
+  assert.equal(newDieDefault(reopened, { masterDie: 'D-2' }), true);
+});
+
+// The editor says which Die Master die counts (none in the bulk row editor), so the tick and the process never disagree.
+test('recommend: the Die Master die the editor passes wins over the check', () => {
+  const v = { style: 'LOCK', size_text: '92x80x66', inputs: {}, sources: {} };
+  const check = { library: { exact: [] }, dies: { exact: [{ code: 'D-1', condition: 'Good' }] } };
+  assert.equal(recommend(v, { check, masterDie: null }).inputs.process, 3000);
+  assert.equal(recommend(v, { check }).inputs.process, 2000);
 });

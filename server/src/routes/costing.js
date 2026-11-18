@@ -3,7 +3,7 @@
 // earlier costings of the same size.
 //
 //   GET  /costing/bootstrap              defaults, coating factors, board grades with today's ₹/kg
-//   GET  /costing/size-check?size=&exclude=   library entries, dies and earlier costings for one size
+//   GET  /costing/size-check?size=&exclude=   library entries, dies (Die Master + the die list) and earlier costings for one size
 //   POST /costing/size-check/bulk        the same, summarised, for the rows of a bulk costing
 //   GET  /costing/products?search=       Product Master entries to start a costing from
 //   GET  /costing/costings               the register (filters below); GET /costing/costings/:id one, with revisions
@@ -24,7 +24,8 @@ import { audit, nextNumber, lockDocNumber, optionalText } from '../helpers.js';
 import { PLANT_TODAY_SQL } from '../plant-calendar.js';
 import { computeCosting, parseSize, normStyle, num, CURRENT_FORMULA, FORMULAS, INPUTS, STYLES } from '../costing-engine.js';
 import { possibleDuplicates, sizeEntryKey } from '../costing-sheet.js';
-import { matchDies, sizeRelation, mayCost, mayEditCostingRates, mayApproveCosting } from '../costing-match.js';
+import { matchDies, sizeRelation, mayCost, mayEditCostingRates, mayApproveCosting, dieMasterMatches } from '../costing-match.js';
+import { registerMatches } from '../die-list.js';
 import { linkEnquiry, unlinkCosting, newGroup } from './enquiries.js';
 
 const r = Router();
@@ -158,11 +159,15 @@ async function historyFor(sizeKey, excludeId) {
 r.get('/costing/size-check', async (req, res, next) => {
   try {
     const size = parseSize(req.query.size);
-    if (!size) return res.json({ size: null, library: { exact: [], near: [] }, dies: { exact: [], near: [] }, history: [] });
-    const [library, dies, history] = await Promise.all([
-      libraryFor(size), allDies(), historyFor(size.key, intOrNull(req.query.exclude)),
+    const none = { exact: [], reordered: [], near: [] };
+    if (!size) return res.json({ size: null, library: { exact: [], near: [] }, dies: none, register: none, history: [] });
+    // the Die Master by the size proposals' rule (exact / another order / within 3 mm either way) and the die list beside
+    // it (owner, 17 Nov 2026): an exact Die Master die turns New die off, a die-list die only offers to
+    const carton = size.kind === 'carton';
+    const [library, dies, history, register] = await Promise.all([
+      libraryFor(size), allDies(), historyFor(size.key, intOrNull(req.query.exclude)), carton ? registerMatches(size).catch(e => { console.error('[costing] die list check failed:', e.message); return none; }) : none,
     ]);
-    res.json({ size, library, dies: matchDies(size, dies), history });
+    res.json({ size, library, dies: carton ? dieMasterMatches(size, dies) : { ...none, ...matchDies(size, dies) }, register, history });
   } catch (e) { next(e); }
 });
 

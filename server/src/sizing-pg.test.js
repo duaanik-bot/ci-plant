@@ -260,4 +260,20 @@ describe('Size proposals and KLDs — through the real app', { skip: ENABLED ? f
       await db.q('ALTER TABLE die_register ADD COLUMN IF NOT EXISTS job_no text');
     }
   });
+
+  test('the costing editor\'s size check: the Die Master by the same rule, the die list beside it', async () => {
+    // invented: a Die Master die, its copy on the die list (never shown) and a die-list die of the same size
+    await db.q(`INSERT INTO tools (family, code, title, carton_size, sheet_size, ups) VALUES ('die', 'T-903', 'Test die', '77X63X118', '18X23', 6)`);
+    await db.q(`INSERT INTO die_register (die_no, l_mm, w_mm, h_mm, style, ups, size_text, source, job_no)
+                VALUES ('R-59', 77, 63, 118, 'LOCK', 2, '77X63X118', 'DIE DATA 2024', '10003'),
+                       ('DM-T-903', 77, 63, 118, NULL, NULL, '77X63X118', 'CI PLANT DIE MASTER', NULL)`);
+    const r = await call('clerk', 'GET', '/costing/size-check?size=77x63x118');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.dies.exact.map(d => d.code), ['T-903']);
+    assert.deepEqual(r.body.register.exact.map(d => [d.die_no, d.job_no, d.source]), [['R-59', '10003', 'DIE DATA 2024']]);
+    assert.ok(!JSON.stringify(r.body.register).includes('DM-T-903'));
+    const turned = await call('clerk', 'GET', '/costing/size-check?size=63x77x118');
+    assert.deepEqual(turned.body.dies.reordered.map(d => d.code), ['T-903']);
+    assert.deepEqual(turned.body.register.reordered.map(d => d.die_no), ['R-59']);
+  });
 });

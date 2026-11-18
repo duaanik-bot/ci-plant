@@ -10,6 +10,7 @@ import { api } from '../../api.js';
 import { IN, layoutBlocks } from '../../lib/sizing.js';
 import { num } from '../../lib/costing.js';
 import { dieName, dieFrom, dieFacts, listed, masterItem, listItem } from '../../lib/die-check.js';
+import { isUsableDie } from '../../lib/costingRules.js';
 
 const GRAIN = {
   ok: ['Grain fits', 'bg-emerald-100 text-emerald-700'],
@@ -58,6 +59,13 @@ function DieCheck({ dies, size, onUseDie }) {
     <div className="space-y-1.5 text-xs">
       {master.exact.map(d => {
         const s = sheetOf(d);
+        // a Die Master die marked Poor (lost or damaged) or Scrapped is not one to use — New die stays on (owner, 17 Nov 2026)
+        if (!isUsableDie(d)) return (
+          <div key={`m${d.id}`} className="flex items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 ring-1 ring-amber-200">
+            <AlertTriangle size={14} className="shrink-0 text-amber-600" />
+            <span><b>Die {d.code}</b> in the Die Master is this size but marked {d.condition} — not usable, so a new die would be needed.</span>
+          </div>
+        );
         return (
           <div key={`m${d.id}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 ring-1 ring-emerald-200">
             <CheckCircle2 size={14} className="text-emerald-600" />

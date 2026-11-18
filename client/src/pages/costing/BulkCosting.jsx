@@ -19,8 +19,8 @@ import { api, fmt } from '../../api.js';
 import { Button, DataTable, ExportMenu, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { computeCosting, parseSize, styleLabel, num, quantityBreaks } from '../../lib/costing.js';
 import {
-  answeredNo, batchExportSpec, coatingChoices, coatingLabel, gradeFor, libraryDeclined, libraryKey, newLibraryEntry, parsePaste, pastingFromProduct,
-  perUnit, plain, rupees, startingInputs,
+  answeredNo, batchExportSpec, bulkRowPatch, coatingChoices, coatingLabel, gradeFor, libraryDeclined, libraryKey, mergeBulkRow, newLibraryEntry, parsePaste,
+  pastingFromProduct, perUnit, plain, rowWithTicks, rupees, savedTicks, startingInputs,
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import QuoteProgress from './QuoteProgress.jsx';
@@ -70,7 +70,7 @@ const rowsFromServer = rows => rows.map(r => {
   const row = {
     key: rowKey(), id: r.id, costing_no: r.costing_no, version: r.version, status: r.status, approved_by_name: r.approved_by_name,
     complete: r.complete, product_id: r.product_id, product_name: r.product_name, size_text: r.size_text || r.size_key || '', style: r.style,
-    inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false,
+    inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false, ...savedTicks(r.inputs),
     enquiry_id: r.enquiry_id ?? null, enquiry_no: r.enquiry_no ?? null,
   };
   return answeredNo(r) ? { ...row, skip_library: libraryKey(row) } : row;
@@ -177,30 +177,29 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   }, [batchId]);
 
   const update = fn => { setBatch(b => fn(b)); setDirty(true); };
-  const setRow = (key, patch) => update(b => ({ ...b, rows: b.rows.map(r => {
-    if (r.key !== key) return r;
-    const next = { ...r, ...patch };
-    // A row whose die & pasting follows its style takes the new style's figure.
-    if (patch.style !== undefined && r.dp_auto) next.inputs = { ...next.inputs, dp_rate: styleDp(typical, next.style) || defaults.dp_rate || '' };
-    return next;
-  }) }));
+  // A row whose die & pasting follows its style takes the new style's figure (mergeBulkRow).
+  const setRow = (key, patch) => update(b => ({ ...b, rows: b.rows.map(r => (r.key === key
+    ? mergeBulkRow(r, patch, style => styleDp(typical, style) || defaults.dp_rate || '') : r)) }));
   const setRowIn = (key, k, v) => update(b => ({ ...b, rows: b.rows.map(r => (r.key === key ? { ...r, ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: v } } : r)) }));
   // A common setting carries into the rows that still follow it — the box is blank, or holds the common
   // value as it was (die & pasting: or follows the style). A row given its own value keeps it.
   const follows = (r, k, commonWas) => blank(r.inputs[k]) || String(r.inputs[k]) === String(commonWas ?? '') || (k === 'dp_rate' && r.dp_auto);
+  // A common box written over a row's charge takes back the tick that charge came from; the row editor then reads it
+  // from the charge again (rowWithTicks).
+  const untick = k => (k === 'dp_rate' ? { big_box: undefined } : k === 'process' ? { new_die: undefined } : {});
   const setCommon = (k, v) => update(b => ({
     ...b,
     common: { ...b.common, inputs: { ...b.common.inputs, [k]: v } },
     rows: b.rows.map(r => {
       if (!follows(r, k, b.common.inputs[k])) return r;
-      if (k === 'dp_rate' && blank(v)) return { ...r, dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } };
-      return { ...r, ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: v } };
+      if (k === 'dp_rate' && blank(v)) return { ...r, ...untick(k), dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } };
+      return { ...r, ...untick(k), ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: v } };
     }),
   }));
   const applyAll = k => {
     update(b => ({ ...b, rows: b.rows.map(r => (k === 'dp_rate' && blank(b.common.inputs.dp_rate)
-      ? { ...r, dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } }
-      : { ...r, ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: b.common.inputs[k] } })) }));
+      ? { ...r, ...untick(k), dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } }
+      : { ...r, ...untick(k), ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: b.common.inputs[k] } })) }));
     toast.info(`${COMMON.find(c => c.key === k)?.label || k} copied into all ${batch.rows.length} rows`);
   };
   const setCoat = v => update(b => {
@@ -426,6 +425,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   if (loading) return <div className="p-8 text-sm text-slate-400">Opening the batch…</div>;
   const cell = 'h-8 !px-2 !py-1 text-[13px]';
   const editingRow = batch.rows.find(r => r.key === editing);
+  const editingView = editingRow ? rowWithTicks(editingRow) : null;   // the ticks as its charges say, until one is set
   const exportRows = batch.rows.filter(r => r.product_name.trim());
 
   return (
@@ -636,13 +636,16 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
               <NumField label="Quantity" unit="cartons" value={editingRow.inputs.qty} onChange={v => setRowIn(editingRow.key, 'qty', v)} />
               <p className="self-end text-xs text-slate-500">Changes here apply to this row only.</p>
             </div>
-            <CostingEditor hideProductStep boot={boot} customers={customers} excludeId={editingRow.id}
-              value={{ ...editingRow, customer_name: batch.customer_name }}
-              onChange={v => setRow(editingRow.key, {
-                size_text: v.size_text, style: v.style, inputs: v.inputs, coat_choice: v.coat_choice, board_grade: v.board_grade,
-                sources: v.sources, autofill: v.autofill, quantities: v.quantities, show_emb: v.show_emb,
-                ...(v.sources?.dp_rate?.kind === 'manual' ? { dp_auto: false } : {}),
-              })} />
+            <CostingEditor hideProductStep followDieCheck={false} boot={boot} customers={customers} excludeId={editingRow.id}
+              value={{ ...editingView, customer_name: batch.customer_name }}
+              onChange={v => {
+                // The ticks come back with the house rule's charge (bulkRowPatch); Big box off puts the row back on the
+                // batch's die & pasting — its pasting style's figure under a blank common box.
+                const follows = blank(batch.common.inputs.dp_rate);
+                setRow(editingRow.key, bulkRowPatch(editingView, v, {
+                  back: follows ? styleDp(typical, v.style) || defaults.dp_rate || '' : batch.common.inputs.dp_rate, follows,
+                }));
+              }} />
           </div>
         )}
       </Modal>

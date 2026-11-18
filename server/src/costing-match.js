@@ -16,7 +16,8 @@
 //   reordered — the same three numbers in another order: the carton may open another way, so it is a check
 //   near      — each side within REGISTER_MM as written, or once both sizes are sorted (other_order: true)
 // dieMasterMatches holds the Die Master to the same rule on that screen, so hiding the die list's copies of Die Master
-// dies (they showed twice) loses nothing — matchDies, used by the other checks, keeps its 2 mm.
+// dies (they showed twice) loses nothing. The costing editor's carton check uses it too (17 Nov 2026); matchDies keeps
+// its 2 mm for the bulk check and for flat sizes.
 import { parseSize } from './costing-engine.js';
 import { canAccess } from '../../client/src/modules.js';
 import { canDecideManagement } from './approvals.js';

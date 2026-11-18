@@ -4,7 +4,9 @@ import { computeCosting } from './costing-engine.js';
 import {
   parsePaste, rankHistory, closestComparison, batchExportSpec, valueFromSaved, blankValue, stillNeeded, coatingWords, coatingLabel, coatingChoices, perUnit,
   recommend, markEdited, layoutOptions, gradeFor, pastingFromProduct, newLibraryEntry, libraryKey, libraryDeclined, savePayload,
+  bulkRowPatch, mergeBulkRow, savedTicks, rowWithTicks,
 } from '../../client/src/lib/costingUi.js';
+import { newDieDefault } from '../../client/src/lib/costingRules.js';
 
 // Invented figures, not a customer's.
 const JOB = { qty: 10000, sheet_l: 18, sheet_w: 24, ups: 8, gsm: 300, board_rate: 95, wastage: 250, colours: 4, print_rate: 400, print_min: 1600, coat_factor: 6, dp_rate: 0.3, process: 2000, pf_pct: 5, margin: 0.05 };
@@ -289,4 +291,93 @@ test('the quotation with quantities prices each one, and is stamped DRAFT until 
   assert.equal(q5, Math.round(computeCosting({ ...JOB, qty: 5000 }).quote_per_unit * 1000) / 1000);
   assert.equal(spec.watermark.text, 'DRAFT — NOT APPROVED');
   assert.equal(batchExportSpec({}, [{ product_name: 'One', inputs: JOB }], { customer: true }).watermark, undefined);
+});
+
+// Bulk costing's row editor (owner, 18 Nov 2026, "fix bulk too"). The full editor of a bulk row hands its value back after
+// every change. A New die or Big box tick empties the charge it governs for the editor to refill; the row must come
+// back with the house rule's charge, never a blank box priced at ₹0. Invented figures.
+const bulkRow = (over = {}) => ({
+  key: 'r1', id: null, product_name: 'Carton one', size_text: '100x48x48', style: 'SIDE', autofill: false, dp_auto: true,
+  inputs: { ...JOB, dp_rate: 0.2, process: 3000 }, ...over,
+});
+// What CostingEditor's tick() hands back: the flag set, the box it governs emptied, that box's source dropped.
+const ticked = (row, flag, on, field) => ({ ...row, [flag]: on, inputs: { ...row.inputs, [field]: '' }, sources: {}, autofill: true });
+const styleRate = style => ({ SIDE: 0.2, LOCK: 0.3 })[style] ?? '';
+
+test("bulk row editor: New die ticked off charges ₹2,000 and on again ₹3,000 — the box is never left blank", () => {
+  const row = bulkRow();
+  const off = mergeBulkRow(row, bulkRowPatch(row, ticked(row, 'new_die', false, 'process')), styleRate);
+  assert.equal(off.inputs.process, 2000);
+  assert.equal(off.new_die, false);
+  const on = mergeBulkRow(off, bulkRowPatch(off, ticked(off, 'new_die', true, 'process')), styleRate);
+  assert.equal(on.inputs.process, 3000);
+  assert.equal(on.new_die, true);
+  const processLine = inputs => computeCosting(inputs).lines.find(l => l.key === 'process').amount;
+  assert.equal(processLine(on.inputs), 3000);
+  assert.equal(processLine(off.inputs), 2000);
+});
+
+test("bulk row editor: Big box gives the row ₹0.41 of its own; off again, the batch's die & pasting", () => {
+  const row = bulkRow();
+  const on = mergeBulkRow(row, bulkRowPatch(row, ticked(row, 'big_box', true, 'dp_rate'), { back: 0.2, follows: true }), styleRate);
+  assert.equal(on.inputs.dp_rate, 0.41);
+  assert.equal(on.big_box, true);
+  assert.equal(on.dp_auto, false);
+  // a later edit in the editor (here the quantity) keeps the big box's figure
+  const later = mergeBulkRow(on, bulkRowPatch(on, { ...on, inputs: { ...on.inputs, qty: 5000 }, autofill: true }), styleRate);
+  assert.equal(later.inputs.dp_rate, 0.41);
+  // off again under a blank common box: back to following the pasting style
+  const off = mergeBulkRow(later, bulkRowPatch(later, ticked(later, 'big_box', false, 'dp_rate'), { back: 0.2, follows: true }), styleRate);
+  assert.equal(off.inputs.dp_rate, 0.2);
+  assert.equal(off.big_box, false);
+  assert.equal(off.dp_auto, true);
+  // off again in a batch with its own die & pasting: that figure, and the row does not follow the style
+  const own = mergeBulkRow(later, bulkRowPatch(later, ticked(later, 'big_box', false, 'dp_rate'), { back: 0.25, follows: false }), styleRate);
+  assert.equal(own.inputs.dp_rate, 0.25);
+  assert.equal(own.dp_auto, false);
+});
+
+test('bulk row editor: a die & pasting typed in a style-following row is kept, not reset to the style rate', () => {
+  const row = bulkRow();
+  const typed = { ...row, inputs: { ...row.inputs, dp_rate: '0.25' }, sources: { dp_rate: { kind: 'manual' } }, autofill: true };
+  const next = mergeBulkRow(row, bulkRowPatch(row, typed), styleRate);
+  assert.equal(next.inputs.dp_rate, '0.25');
+  assert.equal(next.dp_auto, false);
+});
+
+test('bulk row editor: an edit that is not a tick keeps the charges as the editor has them', () => {
+  const row = bulkRow({ new_die: true });
+  const typed = { ...row, inputs: { ...row.inputs, process: '2500', qty: 5000 }, sources: { process: { kind: 'manual' } }, autofill: true };
+  const p = bulkRowPatch(row, typed);
+  assert.equal(p.inputs.process, '2500');
+  assert.equal(p.inputs.qty, 5000);
+  assert.equal(p.new_die, true);
+  // a new pasting style on a style-following row still takes that style's figure
+  const styled = mergeBulkRow(row, bulkRowPatch(row, { ...row, style: 'LOCK', autofill: true }), styleRate);
+  assert.equal(styled.inputs.dp_rate, 0.3);
+});
+
+test('savedTicks: a saved row reopens with the ticks its charges say', () => {
+  assert.deepEqual(savedTicks({ process: 3000, dp_rate: 0.41 }), { new_die: true, big_box: true });
+  assert.deepEqual(savedTicks({ process: '2000', dp_rate: '0.2' }), { new_die: false, big_box: false });
+  assert.deepEqual(savedTicks({}), { new_die: false, big_box: false });
+});
+
+test('rowWithTicks: a bulk row shows the ticks its charges say until somebody ticks one', () => {
+  const typed = bulkRow({ inputs: { ...JOB, process: 2000, dp_rate: 0.2 } });   // typed into the table: the common ₹2,000
+  assert.equal(newDieDefault(typed), true);                                  // the editor showed New die ticked over ₹2,000
+  assert.equal(newDieDefault(rowWithTicks(typed)), false);
+  assert.equal(rowWithTicks(bulkRow()).new_die, true);                       // pasted, no product: the house rule's ₹3,000
+  assert.equal(rowWithTicks(bulkRow({ new_die: false })).new_die, false);    // a tick somebody set stays as set
+  assert.equal(rowWithTicks(bulkRow({ inputs: { ...JOB, dp_rate: 0.41 } })).big_box, true);
+  assert.equal(rowWithTicks(bulkRow({ big_box: false, inputs: { ...JOB, dp_rate: 0.41 } })).big_box, false);
+});
+
+test('bulk row editor: on a typed row a size proposal charges the new die, and other edits leave its ₹2,000 alone', () => {
+  const base = rowWithTicks(bulkRow({ inputs: { ...JOB, process: 2000, dp_rate: 0.2 } }));
+  const qty = bulkRowPatch(base, { ...base, inputs: { ...base.inputs, qty: 5000 }, autofill: true });
+  assert.equal(qty.inputs.process, 2000);
+  // "Use this layout" on a proposal: the editor sets New die and empties the process box
+  const picked = bulkRowPatch(base, { ...base, new_die: true, inputs: { ...base.inputs, sheet_l: 20, sheet_w: 28, ups: 6, process: '' }, autofill: true });
+  assert.equal(picked.inputs.process, 3000);
 });

@@ -2,7 +2,7 @@
 // reading rows pasted from Excel, and the export layouts. No React, no fetch, so the server suite
 // tests it (server/src/costing-ui.test.js).
 import { computeCosting, compareCostings, parseSize, num, styleLabel, quantityBreaks, CURRENT_FORMULA, INPUTS } from './costing.js';
-import { houseRuleValues } from './costingRules.js';
+import { HOUSE_RULES, dpFor, houseRuleValues, masterDieOf, processFor } from './costingRules.js';
 
 // ₹ per carton to three decimals (3.142, 0.618 — the trade quotes to a tenth of a paisa); totals whole.
 export const perUnit = n => (n == null || !Number.isFinite(+n) ? '—' : `₹${(+n).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`);
@@ -190,6 +190,12 @@ export function batchExportSpec(batch, rows, { customer = false, quantities = []
 // A saved costing back into the form's shape. History-only inputs (a printing amount typed on the old
 // sheet, a floor under a higher threshold) are dropped: a new costing is worked out by today's rules.
 // A saved costing made its coating choice, so a blank factor reads back as "No coating".
+// The house-rule ticks a saved costing carries, read back from its charges: process ₹3,000 = a new die, D&P ₹0.41 = a big box.
+export const savedTicks = inputs => ({
+  new_die: num(inputs?.process) === HOUSE_RULES.process_new_die,
+  big_box: num(inputs?.dp_rate) === HOUSE_RULES.dp_big,
+});
+
 export function valueFromSaved(c, { asNew = false } = {}) {
   const inputs = {};
   for (const { key } of INPUTS) inputs[key] = c?.inputs?.[key] ?? '';
@@ -206,12 +212,46 @@ export function valueFromSaved(c, { asNew = false } = {}) {
     coat_choice: rate > 0 ? 'rate' : f > 0 ? String(f) : 'none',
     remarks: asNew ? '' : (c?.remarks || ''),
     sources: {},
-    // The house-rule ticks, read back from what was saved (process ₹3,000 = a new die, D&P ₹0.41 = a big box).
-    new_die: num(inputs.process) === 3000,
-    big_box: num(inputs.dp_rate) === 0.41,
+    ...savedTicks(inputs),
   };
   return !asNew && answeredNo(c) ? { ...value, skip_library: libraryKey(value) } : value;
 }
+
+// Bulk costing's row editor (owner, 18 Nov 2026, "fix bulk too"). The full editor of a bulk row hands its value back
+// after every change, and the row keeps its own copy. A New die or Big box tick empties the charge it governs for the
+// editor to refill; the row used to drop the tick, so no refill came and the charge priced at ₹0. Now the ticks travel
+// back and the row takes the charge from the house rule at once: New die ₹3,000 or ₹2,000; Big box ₹0.41 as the row's own
+// die & pasting, and off again the batch's (`dp.back`, and `dp.follows` = that figure follows the pasting style).
+export function bulkRowPatch(row, v, dp = {}) {
+  const patch = {
+    size_text: v.size_text, style: v.style, inputs: { ...v.inputs }, coat_choice: v.coat_choice, board_grade: v.board_grade,
+    sources: v.sources, autofill: v.autofill, quantities: v.quantities, show_emb: v.show_emb,
+    new_die: v.new_die, big_box: v.big_box,
+    ...(v.sources?.dp_rate?.kind === 'manual' ? { dp_auto: false } : {}),
+  };
+  if (v.new_die != null && v.new_die !== row.new_die) patch.inputs.process = processFor(v.new_die);
+  if (!!v.big_box !== !!row.big_box) {
+    patch.inputs.dp_rate = v.big_box ? dpFor(v.style, true) : (dp.back ?? '');
+    patch.dp_auto = !v.big_box && !!dp.follows;
+  }
+  return patch;
+}
+
+// One edit to a bulk row. A row whose die & pasting follows its pasting style takes the style's figure — unless the same
+// edit gives it a figure of its own (typed, or a Big box tick).
+export function mergeBulkRow(row, patch, dpOfStyle) {
+  const next = { ...row, ...patch };
+  if (patch.style !== undefined && next.dp_auto) next.inputs = { ...next.inputs, dp_rate: dpOfStyle(next.style) };
+  return next;
+}
+
+// A bulk row as its full editor shows it: a tick nobody has set yet reads from the row's charges, so New die never shows
+// ticked over a ₹2,000 process (a row typed into the table takes the common box's figure, not the house rule's).
+export const rowWithTicks = row => {
+  const t = savedTicks(row.inputs);
+  return { ...row, new_die: row.new_die ?? t.new_die, big_box: row.big_box ?? t.big_box };
+};
+
 
 // A blank costing for a new product, or one started from a Size Library entry.
 export function blankValue(defaults = {}, entry = null) {
@@ -325,7 +365,8 @@ const when = h => `${h.costing_no}${h.costed_on ? `, ${h.costed_on}` : ''}`;
 // A field somebody typed (source manual) is never touched; one filled from an earlier suggestion is
 // refilled from the new context; a saved value with no recorded source is kept unless it is blank.
 export function recommend(value, ctx = {}) {
-  const { product: p = null, check = null, typical = {}, defaults = {}, grades = [] } = ctx;
+  // masterDie: the Die Master die the editor counts (null = none, e.g. the bulk row editor); left out, read from the check
+  const { product: p = null, check = null, typical = {}, defaults = {}, grades = [], masterDie = masterDieOf(check) } = ctx;
   const v = { ...value, inputs: { ...(value.inputs || {}) }, sources: { ...(value.sources || {}) } };
   const get = f => (TOP_FIELDS.has(f) ? v[f] : v.inputs[f]);
   const write = (f, x) => { if (TOP_FIELDS.has(f)) v[f] = x; else v.inputs[f] = x; };
@@ -375,7 +416,7 @@ export function recommend(value, ctx = {}) {
   }
 
   // House rules (owner, 11 Nov 2026): "by default take …" — ahead of what past costings did.
-  for (const [f, x, note] of houseRuleValues(v, { finish: v.finish || null, productEmboss: p ? +p.emboss : null, productGrade: p?.board_grade ?? null, hasProduct: !!p })) put(f, x, 'rule', note);
+  for (const [f, x, note] of houseRuleValues(v, { finish: v.finish || null, productEmboss: p ? +p.emboss : null, productGrade: p?.board_grade ?? null, hasProduct: !!p, masterDie })) put(f, x, 'rule', note);
 
   // History: the same product's last costing says it all; otherwise what is MOST USED across the
   // recent comparable costings of the size (one odd costing does not set the rate), and for the board

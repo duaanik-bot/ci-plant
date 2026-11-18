@@ -11,7 +11,7 @@
 //   leafing            ₹0.20 a carton per panel, plus ₹5,000 leafing set-up for the job
 //   die & pasting      side pasting ₹0.20, lock bottom ₹0.30, a big box ₹0.41 (ticked on the costing)
 //   process            ₹2,000 for the job; ₹3,000 when the job needs a new die (ticked; on for a product
-//                      not in the Product Master yet)
+//                      not in the Product Master yet, unless the Die Master has a usable die of exactly the size)
 import { num } from './costing.js';
 
 export const HOUSE_RULES = Object.freeze({
@@ -78,18 +78,25 @@ export const gradeLabel = g => `${g.grade} — ₹${g.rate_per_kg}/kg${g.buy_rat
 // Met Saffire board (owner, 11 Nov 2026): charged ₹120 like FBB, coated at factor 1 whatever the finish words say.
 export const isMetSaffire = (...boards) => boards.some(b => /\bmet(alli[sz]ed|allic)?\b[\s.-]*(saff?ire|sapphire)|met[\s.-]*saff?ire|met[\s.-]*sapphire/i.test(String(b ?? '')));
 
-// A new product (not in the Product Master) needs a new die unless somebody said otherwise.
-export const newDieDefault = v => (v?.new_die != null ? !!v.new_die : !(v?.product_id || v?.product));
+// A new product (not in the Product Master) needs a new die unless somebody said otherwise — or the Die Master has a die
+// of exactly this size (owner, 17 Nov 2026, "Die Master only": a die only on the die list does not count, nobody has
+// confirmed it is still in the rack). `masterDie` = that Die Master die's code.
+// A Die Master die counts only when the Tooling Hub would release it: not Poor (lost or damaged) and not Scrapped.
+export const isUsableDie = d => !['poor', 'scrapped'].includes(String(d?.condition ?? '').trim().toLowerCase());
+export const masterDieOf = check => (check?.dies?.exact || []).find(isUsableDie)?.code ?? null;
+export const newDieDefault = (v, { masterDie = null } = {}) => (v?.new_die != null ? !!v.new_die : !(v?.product_id || v?.product || masterDie));
 
 // The rules as [field, value, note] for one costing. `finish` = finishFromEnquiry (or null when the costing
 // has no enquiry); `productEmboss` = the Product Master's emboss flag, when a product is picked.
-export function houseRuleValues(v, { finish = null, productEmboss = null, productGrade = null, hasProduct = false } = {}) {
+export function houseRuleValues(v, { finish = null, productEmboss = null, productGrade = null, hasProduct = false, masterDie = null } = {}) {
   const out = [];
   const style = v?.style || null;
   const dp = dpFor(style, !!v?.big_box);
   if (dp != null) out.push(['dp_rate', dp, v?.big_box ? 'big box ₹0.41' : `${style === 'LOCK' ? 'lock bottom' : 'side pasting'} house rate`]);
-  const newDie = v?.new_die != null ? !!v.new_die : !(v?.product_id || v?.product || hasProduct);
-  out.push(['process', processFor(newDie), newDie ? 'new die — ₹3,000' : 'existing die — ₹2,000']);
+  const known = !!(v?.product_id || v?.product || hasProduct);
+  const newDie = v?.new_die != null ? !!v.new_die : !(known || masterDie);
+  const byMaster = v?.new_die == null && !known && !!masterDie;
+  out.push(['process', processFor(newDie), newDie ? 'new die — ₹3,000' : byMaster ? `existing die (Die Master ${masterDie}) — ₹2,000` : 'existing die — ₹2,000']);
   if (takesFbbRate(productGrade, finish?.board)) out.push(['board_rate', HOUSE_RULES.board_rate, 'house rate ₹120/kg (FBB)']);
   const embossed = finish?.emboss || productEmboss === 1;
   if (embossed) out.push(['emb_rate', HOUSE_RULES.emb_rate, finish?.emboss ? `embossed (${finish.from || 'enquiry'})` : 'embossed on the Product Master']);

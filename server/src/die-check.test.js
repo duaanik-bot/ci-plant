@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSize } from './costing-engine.js';
 import { registerMatchesFrom, dieMasterMatches, REGISTER_MM } from './costing-match.js';
-import { dieName, dieFrom, dieFacts, dieSize, masterItem, listItem, listed } from '../../client/src/lib/die-check.js';
+import { dieName, dieFrom, dieFacts, dieSize, masterItem, listItem, listed, noNewDieLabel } from '../../client/src/lib/die-check.js';
 
 // The size check's die list (owner, 15 Nov 2026): a die is found whichever order its size is written in, a die with
 // the same three numbers in another order is a check ("does it open the same way?"), never "this size". Invented
@@ -78,4 +78,9 @@ test('the list lines: size first, the Die Master marked, another order said, at 
   const nine = Array.from({ length: 9 }, (_, i) => `d${i}`);
   assert.equal(listed(nine), 'd0 · d1 · d2 · d3 · d4 · d5 · + 3 more');
   assert.equal(listed(nine.slice(0, 6)), 'd0 · d1 · d2 · d3 · d4 · d5');
+});
+
+test('the costing card\'s button for a die-list die names the die', () => {
+  assert.equal(noNewDieLabel({ die_no: 'J12345', job_no: '12345', source: 'DRIVE NEW DIE' }), "No new die — use Job 12345's die");
+  assert.equal(noNewDieLabel({ die_no: '7', source: 'DIE DATA 2024' }), 'No new die — use 2024 die list no. 7');
 });
