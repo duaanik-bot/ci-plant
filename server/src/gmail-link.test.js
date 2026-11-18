@@ -24,12 +24,12 @@ test('the refresh token is sealed: it round-trips, is never stored in clear, and
   process.env.GMAIL_TOKEN_KEY = was;
 });
 
-test('consent: offline, the two Gmail permissions plus Drive for KLDs (files CI Plant makes) and only those, the mailbox as the hint', () => {
+test('consent: offline, compose + read (never "metadata only", which would block reading a thread) plus Drive, the mailbox as the hint', () => {
   const u = new URL(g.consentUrl({ redirectUri: 'https://plant.test/api/gmail/callback', state: 's1', loginHint: 'box@plant.test' }));
   assert.equal(u.searchParams.get('access_type'), 'offline');
   assert.equal(u.searchParams.get('prompt'), 'consent');
   assert.deepEqual(u.searchParams.get('scope').split(' ').sort(),
-    ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata']);
+    ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.readonly']);
   assert.equal(u.searchParams.get('login_hint'), 'box@plant.test');
   assert.equal(u.searchParams.get('state'), 's1');
 });
@@ -150,4 +150,12 @@ test('reply to everyone: Reply-To (else the sender) in To, everyone else in Cc, 
   const mime = g.buildMime({ to: ['buyer@customer.test'], cc: ['a@customer.test', 'b@customer.test'], subject: 'Re: x', text: 'hi', boundary: 'B' });
   assert.match(mime, /^Cc: a@customer\.test, b@customer\.test$/m);
   assert.doesNotMatch(mime, /Content-Disposition: attachment/, 'no attachment unless one is given');
+});
+
+test('a connection may read threads only with the read permission and without "metadata only"', () => {
+  const C = 'https://www.googleapis.com/auth/gmail.compose', R = 'https://www.googleapis.com/auth/gmail.readonly', M = 'https://www.googleapis.com/auth/gmail.metadata';
+  assert.equal(g.readAllowed({ scope: `${C} ${R}` }), true);
+  assert.equal(g.readAllowed({ scope: `${C} ${M}` }), false, 'the old connection: headers only');
+  assert.equal(g.readAllowed({ scope: `${C} ${R} ${M}` }), false, 'Google refuses full reads while metadata is granted');
+  assert.equal(g.readAllowed(null), false);
 });

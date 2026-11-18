@@ -9,8 +9,12 @@
 // "done by the system" notice (17 Nov 2026). It builds that mail itself, to one or two company addresses read from the
 // database (no Cc, no Bcc). gmail-link.test.js fails the build on any other send.
 // A person checks every customer draft and presses Send in Gmail.
-// Permission: gmail.compose (make and change drafts) + gmail.metadata (headers and labels only — to reply in the right
-// thread and to notice a draft that has been sent). No mail body is ever read.
+// Permission: gmail.compose (make, change and send drafts) + gmail.readonly. Until 18 Nov 2026 the second was
+// gmail.metadata (headers only); the owner then asked to see the whole artwork mail trail in CI Plant ("the whole mail,
+// the whole trail, the thread, should all be visible"), so a NEW connection asks to read mail. It is used for exactly
+// that: the threads of artwork jobs, read when a person opens the job's window (routes/artwork-register.js) — no other
+// mail is read. (Google refuses full reads while "metadata only" is granted too, so the new consent does not ask for it;
+// an older connection keeps working for what it did and the window asks for Connect Gmail again.)
 // Since 12 Nov 2026 the consent also asks for drive.file, for KLDs (gdrive.js): files CI Plant makes, nothing else.
 // It is optional — a link without it keeps working for drafts; only Save to Drive asks for a new connection.
 //
@@ -20,7 +24,14 @@
 import crypto from 'node:crypto';
 import { DRIVE_SCOPE } from './gdrive.js';
 
-export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.compose', 'https://www.googleapis.com/auth/gmail.metadata'];
+export const READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const METADATA_SCOPE = 'https://www.googleapis.com/auth/gmail.metadata';
+export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.compose', READ_SCOPE];
+// May this connection read a whole message? Read granted, and not "metadata only" (with which Google refuses full reads).
+export const readAllowed = link => {
+  const granted = String(link?.scope || '').split(/\s+/);
+  return granted.includes(READ_SCOPE) && !granted.includes(METADATA_SCOPE);
+};
 const api = () => process.env.GMAIL_API_BASE || 'https://gmail.googleapis.com/gmail/v1/users/me';
 const uploadApi = () => process.env.GMAIL_UPLOAD_BASE || 'https://gmail.googleapis.com/upload/gmail/v1/users/me';
 const authBase = () => process.env.GOOGLE_OAUTH_BASE || 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -331,4 +342,19 @@ export async function deleteDraft(token, { draftId }) {
   if (!draftId) return { deleted: false };
   try { await gmailCall(token, 'DELETE', `/drafts/${encodeURIComponent(draftId)}`); return { deleted: true }; }
   catch (e) { if (e.gmailStatus === 404) return { deleted: false, gone: true }; throw e; }
+}
+
+// ── reading an artwork thread (18 Nov 2026) ─ the caller has checked the thread belongs to an artwork job ───────────
+export async function readThread(token, { threadId }) {
+  try { return await gmailCall(token, 'GET', `/threads/${encodeURIComponent(threadId)}?format=full`); }
+  catch (e) { if (e.gmailStatus === 404) return null; throw e; }
+}
+// Which thread a message is in (to check, before handing out its attachment, that it is an artwork thread).
+export async function messageThread(token, { messageId }) {
+  try { return (await gmailCall(token, 'GET', `/messages/${encodeURIComponent(messageId)}?format=minimal`)).threadId || null; }
+  catch (e) { if (e.gmailStatus === 404) return null; throw e; }
+}
+export async function readAttachment(token, { messageId, attachmentId }) {
+  const a = await gmailCall(token, 'GET', `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`);
+  return Buffer.from(String(a.data || ''), 'base64url');
 }

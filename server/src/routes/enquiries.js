@@ -55,7 +55,7 @@ import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
 import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
-  sendToCompany,
+  sendToCompany, readAllowed,
 } from '../gmail.js';
 import { orderLine, orderTotals, orderMail } from '../order-finalise.js';
 import { kldPdf } from '../kld-pdf.js';
@@ -190,7 +190,9 @@ const JOB_COLS = `j.id, j.kind, j.mailbox, j.mailbox_email, j.quotation_id, j.st
 
 // A mailbox's Gmail link as the desk shows it (never the token).
 const linkOf = key => one('SELECT * FROM gmail_links WHERE mailbox = $1', [key]);
-const LINK_VIEW = `mailbox, email, connected_at, connected_by_name, last_used_at, last_error, last_error_at`;
+const LINK_VIEW = `mailbox, email, connected_at, connected_by_name, last_used_at, last_error, last_error_at, scope`;
+// What the settings show of a link: may it read mail (artwork threads, 18 Nov 2026)? The scope list itself stays here.
+const linkShown = ({ scope, ...l }) => ({ ...l, can_read: readAllowed({ scope }) });
 
 // Drafts the person has since sent from Gmail → Sent. At most once a minute per server, a few seconds at most, and
 // never in the way of the desk: any trouble is only noted on the link.
@@ -238,7 +240,7 @@ r.get('/costing/enquiry-desk', async (req, res, next) => {
       q(`SELECT ${LINK_VIEW} FROM gmail_links`),
       cloudLinks(),
     ]);
-    for (const b of boxes) b.gmail = links.find(l => l.mailbox === b.key) || null;
+    for (const b of boxes) { const l = links.find(x => x.mailbox === b.key); b.gmail = l ? linkShown(l) : null; }
     const quotes = await q(`SELECT status, count(*)::int AS n FROM quotations GROUP BY status`);
     res.json({
       mailboxes: boxes, in_use: boxes.find(b => b.in_use) || null, settings: s,

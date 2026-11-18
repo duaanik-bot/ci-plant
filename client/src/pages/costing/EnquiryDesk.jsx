@@ -822,13 +822,14 @@ function GmailLink({ box, ready, onChanged }) {
           </span>
           <span className="text-slate-500">by {g.connected_by_name || '—'} · {dateText(g.connected_at)}{g.last_used_at ? ` · last draft ${dateText(g.last_used_at)}` : ''}</span>
           {g.last_error && <span className="text-red-700">{g.last_error}</span>}
-          {g.last_error && <Button size="sm" onClick={connect} disabled={busy}>Connect Gmail again</Button>}
+          {!g.last_error && !g.can_read && <span className="text-amber-800">Reading mail is not allowed yet — needed to show artwork mail threads.</span>}
+          {(g.last_error || !g.can_read) && <Button size="sm" onClick={connect} disabled={busy}>Connect Gmail again</Button>}
           <button type="button" onClick={disconnect} disabled={busy} className="font-semibold text-slate-500 underline hover:text-red-700">Disconnect</button>
         </>
       ) : (
         <>
           <Button size="sm" onClick={connect} disabled={busy}><Mail size={13} className="mr-1 inline" />Connect Gmail</Button>
-          <span className="text-slate-500">Sign in to Google as {box.email} and press Allow — then drafts are saved by CI Plant, no robot.</span>
+          <span className="text-slate-500">Sign in to Google as {box.email} and press Allow — then drafts are saved by CI Plant, no robot, and artwork mail threads can be read.</span>
         </>
       )}
     </div>

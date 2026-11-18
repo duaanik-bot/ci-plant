@@ -7,6 +7,7 @@ import { Button, Field, Input, Modal, Textarea, useToast } from '../../component
 import { ExternalLink, FileText, Link2, Mail } from 'lucide-react';
 import { VersionStatus } from './ArtworkRegister.jsx';
 import ArtworkVersionFlow, { StageBadge } from './ArtworkVersionFlow.jsx';
+import ArtworkThread from './ArtworkThread.jsx';
 
 const size = n => (n == null ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const ACTION = { received: 'Received', received_again: 'Sent again (same files)', mapped: 'Matched to a product', not_artwork: 'Marked not artwork', restored: 'Put back',
@@ -86,6 +87,13 @@ export default function ArtworkJob({ jobId, onClose, onChanged }) {
                 To sort: the mail did not say clearly which product this is. Match it to a product, or mark the version as not artwork.
               </div>
             )}
+
+            {(() => {
+              // the client's mails the office AVS filed for this job, once each, oldest first (shown when Gmail cannot be read)
+              const filed = [...new Map(data.versions.flatMap(v => v.mails).map(m => [m.id, m])).values()]
+                .sort((a, b) => String(a.received_at).localeCompare(String(b.received_at)));
+              return <ArtworkThread jobId={job.id} filed={filed} gmailUrl={filed.find(m => m.view_url)?.view_url} />;
+            })()}
 
             {data.versions.map(v => (
               <div key={v.id} className={`rounded-2xl border border-slate-200 p-3 ${v.status === 'not_artwork' ? 'opacity-60' : ''}`}>

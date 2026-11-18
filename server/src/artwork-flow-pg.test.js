@@ -26,7 +26,7 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
   let epg, dir, db, server, base, google, pdfLib;
   const tokens = {};
   // the fake Google
-  const G = { drafts: new Map(), files: new Map(), sent: [], perms: [], n: 0, refuseSend: false, threads: new Map(), deleted: [], draftCreates: 0, sendCalls: 0, threadOf: new Map() };
+  const G = { drafts: new Map(), files: new Map(), sent: [], perms: [], n: 0, refuseSend: false, threads: new Map(), deleted: [], draftCreates: 0, sendCalls: 0, threadOf: new Map(), fullThreads: new Map(), attachments: new Map() };
 
   before(async () => {
     const { default: EmbeddedPostgres } = await import('embedded-postgres');
@@ -61,6 +61,10 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
         if (req.headers.authorization !== 'Bearer at-1') return send(401, { error: { message: 'bad token' } });
         let m;
         // Gmail
+        if ((m = /\/gmail\/v1\/users\/me\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(p))) {
+          const bytes = G.attachments.get(`${m[1]}/${m[2]}`);
+          return bytes ? send(200, { size: bytes.length, data: bytes.toString('base64url') }) : send(404, { error: { message: 'not found' } });
+        }
         if ((m = /\/gmail\/v1\/users\/me\/messages\/([^/]+)$/.exec(p))) {
           return send(200, { id: m[1], threadId: G.threadOf.get(m[1]) || `t-${m[1]}`, payload: { headers: [{ name: 'Message-Id', value: `<${m[1]}@client.test>` },
             { name: 'From', value: `Asha Rao <${CLIENT}>` }, { name: 'To', value: BIZ }, { name: 'Cc', value: 'qa@example-pharma.test' }] } });
@@ -97,6 +101,9 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
           const h = n => (new RegExp(`^${n}: (.*)$`, 'mi').exec(mime) || [])[1] || '';
           return send(200, { id: d.id, message: { id: d.message.id, labelIds: d.message.labelIds, internalDate: d.message.internalDate || String(d.created),
             payload: { headers: [{ name: 'To', value: h('To') }, { name: 'Cc', value: h('Cc') }, { name: 'Subject', value: h('Subject') }] } } });
+        }
+        if ((m = /\/threads\/([^/]+)$/.exec(p)) && u.searchParams.get('format') === 'full') {
+          return G.fullThreads.has(m[1]) ? send(200, G.fullThreads.get(m[1])) : send(404, { error: { message: 'not found' } });
         }
         if ((m = /\/threads\/([^/]+)$/.exec(p))) {
           return G.threads.has(m[1]) ? send(200, { id: m[1], messages: G.threads.get(m[1]) }) : send(404, { error: { message: 'not found' } });
@@ -676,5 +683,58 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     const fin = await call('artist', 'POST', `/artwork/register/export/${st.body.upload}/finish`, {});
     assert.equal(fin.status, 409);
     assert.match(fin.body.error, /proof waiting|approval/);
+  });
+
+  // ── the whole mail thread in the window (owner, 18 Nov 2026: "the whole trail, the thread, should all be visible") ──
+  test('the window shows the whole mail thread, read live from Gmail; files open only from artwork threads', async () => {
+    const b64 = t => Buffer.from(t, 'utf8').toString('base64url');
+    const msg = (id, at, from, text, extra = {}) => ({ id, internalDate: String(Date.parse(at)), labelIds: extra.labels || ['INBOX'],
+      payload: { mimeType: extra.parts ? 'multipart/mixed' : 'text/plain', headers: [{ name: 'From', value: from }, { name: 'To', value: BIZ }, { name: 'Subject', value: 'RE: W301 KIT' }],
+        ...(extra.parts ? { parts: [{ mimeType: 'text/plain', body: { data: b64(text) } }, ...extra.parts] } : { body: { data: b64(text) } }) } });
+    await fileMails([mailOf('w-301', [{ client_item_code: 'PCS-W301', client_rev: 'R0', files: [f('PCS-W301-R0.cdr', 'w301')] }], { received_at: '2026-11-18T05:00:00Z', body_text: 'Please find the artwork.' })]);
+    await sync();
+    const v = await version('PCS-W301');
+    G.fullThreads.set('t-w-301', { id: 't-w-301', messages: [
+      msg('tm-3', '2026-11-18T05:42:00Z', `Care <care@example-pharma.test>`, 'Approved, please go ahead.'),
+      msg('w-301', '2026-11-18T05:00:00Z', `Asha Rao <${CLIENT}>`, 'Please find the artwork.'),
+      msg('tm-2', '2026-11-18T05:40:00Z', `Office <${BIZ}>`, 'Please Provide Approval,', { labels: ['SENT'],
+        parts: [{ mimeType: 'application/pdf', filename: 'PRF-W301.pdf', body: { attachmentId: 'att-1', size: 15 } }] }),
+    ] });
+    G.attachments.set('tm-2/att-1', Buffer.from('%PDF-1.4 proof'));
+    G.threadOf.set('tm-2', 't-w-301');
+    const res = await call('artist', 'GET', `/artwork/register/${v.job_id}/thread`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.available, true);
+    assert.deepEqual(res.body.messages.map(m => m.id), ['w-301', 'tm-2', 'tm-3'], 'the whole trail, oldest first');
+    assert.deepEqual(res.body.messages.map(m => m.ours), [false, true, false]);
+    assert.equal((await call('admin', 'GET', '/costing/enquiry-desk')).body.mailboxes.find(b => b.key === 'business').gmail.can_read, true);
+    assert.equal(res.body.messages[2].text, 'Approved, please go ahead.');
+    assert.equal(res.body.messages[1].attachments[0].name, 'PRF-W301.pdf');
+    const open = (q, who = 'artist') => fetch(`${base}/artwork/register/thread-attachment?${q}`, { headers: { authorization: `Bearer ${tokens[who]}` } });
+    const a = await open('message=tm-2&attachment=att-1&name=PRF-W301.pdf');
+    assert.equal(a.status, 200);
+    assert.match(a.headers.get('content-disposition'), /PRF-W301\.pdf/);
+    assert.equal(a.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(Buffer.from(await a.arrayBuffer()).toString(), '%PDF-1.4 proof');
+    // a message outside the artwork threads is never read through CI Plant
+    G.threadOf.set('private-1', 't-private');
+    G.attachments.set('private-1/att-2', Buffer.from('not artwork'));
+    assert.equal((await open('message=private-1&attachment=att-2')).status, 404);
+    assert.equal((await open('message=tm-2&attachment=att-1', 'plain')).status, 403);
+    assert.equal((await call('plain', 'GET', `/artwork/register/${v.job_id}/thread`)).status, 403);
+    // the job window carries the text the robot filed, for when Gmail cannot be read
+    const win = (await call('artist', 'GET', `/artwork/register/${v.job_id}`)).body;
+    assert.equal(win.versions[0].mails[0].body_text, 'Please find the artwork.');
+    // a connection without the read permission: the window says what to do
+    const scope = (await db.one(`SELECT scope FROM gmail_links WHERE mailbox = 'business'`)).scope;
+    await db.q(`UPDATE gmail_links SET scope = $1 WHERE mailbox = 'business'`, ['https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/drive.file']);
+    const old = await call('artist', 'GET', `/artwork/register/${v.job_id}/thread`);
+    assert.equal(old.body.available, false);
+    assert.match(old.body.why, /Connect Gmail again/);
+    // the desk settings say so too, so an admin can connect again (the scope list itself is not handed out)
+    const desk = (await call('admin', 'GET', '/costing/enquiry-desk')).body.mailboxes.find(b => b.key === 'business').gmail;
+    assert.equal(desk.can_read, false);
+    assert.equal(desk.scope, undefined);
+    await db.q(`UPDATE gmail_links SET scope = $1 WHERE mailbox = 'business'`, [scope]);
   });
 });

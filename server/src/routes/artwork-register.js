@@ -8,6 +8,8 @@
 //   POST /api/artwork/register/versions/:id/not-artwork   { reason } — filed by mistake; kept, hidden from the work
 //   POST /api/artwork/register/versions/:id/restore       put it back
 //   POST /api/artwork/register/notices/resend             the "done by the system" mails that gave up: send again
+//   GET  /api/artwork/register/:jobId/thread              the job's whole mail trail, read live from mppchd's Gmail
+//   GET  /api/artwork/register/thread-attachment?message=&attachment=&name=   one file from an artwork thread
 //
 // Behind the Artwork tick. The office AVS fills the register (artwork-intake.js); nothing here sends mail, checks
 // artwork or touches an order line — that is the next stage. Search is done here in JavaScript, not in SQL: the plant
@@ -20,6 +22,8 @@ import { resendGaveUp, artworkNoticeSoft } from '../artwork-notice.js';
 import { actionsFor } from '../artwork-flow.js';
 import { tickIfApproved } from '../artwork-approval.js';
 import { cancelDraftsOf } from '../artwork-settle.js';
+import { gmailConfigured, accessToken, readAllowed, readThread, messageThread, readAttachment } from '../gmail.js';
+import { threadMessages } from '../artwork-thread.js';
 
 const r = Router();
 const REFUSED = { error: 'Artwork is not ticked for this login — ask an admin to tick it in Masters → Users.', code: 'ARTWORK_REFUSED' };
@@ -104,7 +108,7 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
     const files = await q(`SELECT f.id, f.version_id, f.role, f.file_name, f.ext, f.size_bytes, f.sha256, f.drive_file_id, f.drive_url, f.link_url, f.saved_by
                              FROM artwork_files f JOIN artwork_versions v ON v.id = f.version_id WHERE v.job_id = $1 ORDER BY f.id`, [job.id]);
     const events = await q(`SELECT id, version_id, mail_id, action, detail, by_name, at FROM artwork_events WHERE job_id = $1 ORDER BY id`, [job.id]);
-    const mails = await q(`SELECT id, subject, from_name, from_email, received_at, view_url, gmail_thread_id FROM artwork_mails
+    const mails = await q(`SELECT id, subject, from_name, from_email, received_at, view_url, gmail_thread_id, body_text, summary FROM artwork_mails
                             WHERE id = ANY($1::int[]) ORDER BY received_at NULLS LAST, id`, [[...new Set(events.map(e => e.mail_id).filter(Boolean))]]);
     for (const v of versions) {
       v.files = files.filter(f => f.version_id === v.id);
@@ -118,6 +122,73 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
     }
     res.json({ job, versions, events, kld: kld ? { size_id: kld.id, size_key: kld.size_key, pdf: `/api/costing/sizes/${kld.id}/kld.pdf` } : null });
   } catch (e) { next(e); }
+});
+
+// ── the mail trail (owner, 18 Nov 2026: "This whole mail, the whole trail, the thread, should all be visible") ─────
+// Read live from the business mailbox (mppchd) each time the window asks: every message of the job's threads, ours and
+// the client's. Only threads of artwork jobs are ever read here. Without a connection allowed to read mail, the window
+// says what to do and shows the text the office AVS filed.
+async function businessRead() {
+  if (!gmailConfigured()) return { why: 'Gmail is not set up on the server yet.' };
+  const link = await one(`SELECT * FROM gmail_links WHERE mailbox = 'business'`);
+  if (!link) return { why: "mppchd's Gmail is not connected to CI Plant yet — an admin presses Connect Gmail for the business mailbox (Enquiry desk › Settings) and allows reading mail." };
+  if (!readAllowed(link)) return { why: "mppchd's Gmail was connected before CI Plant could read mail — an admin presses Connect Gmail again for the business mailbox (Enquiry desk › Settings) and allows reading mail." };
+  return { link, token: await accessToken(link) };
+}
+const threadsOfJob = jobId => q(`
+  SELECT DISTINCT t FROM (
+    SELECT m.gmail_thread_id AS t FROM artwork_mails m JOIN artwork_events e ON e.mail_id = m.id JOIN artwork_versions v ON v.id = e.version_id WHERE v.job_id = $1
+    UNION SELECT pm.gmail_thread_id FROM artwork_proof_mails pm JOIN artwork_versions v ON v.id = ANY(pm.version_ids) WHERE v.job_id = $1
+  ) x WHERE t IS NOT NULL LIMIT 5`, [jobId]);
+
+r.get('/artwork/register/:jobId/thread', async (req, res, next) => {
+  try {
+    const jobId = idOf(req.params.jobId);
+    if (!jobId || !await one('SELECT id FROM artwork_jobs WHERE id = $1', [jobId])) return res.status(404).json({ error: 'No such artwork job.' });
+    const threads = (await threadsOfJob(jobId)).map(x => x.t);
+    if (!threads.length) return res.json({ available: true, threads: [], messages: [] });
+    const g = await businessRead();
+    if (!g.link) return res.json({ available: false, why: g.why });
+    let messages = [];
+    for (const t of threads) {
+      const th = await readThread(g.token, { threadId: t });
+      if (th) messages.push(...threadMessages(th, { own: g.link.email }).map(m => ({ ...m, thread_id: t })));
+    }
+    messages = [...new Map(messages.map(m => [m.id, m])).values()].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    res.json({ available: true, threads, messages, mailbox: g.link.email });
+  } catch (e) {
+    if (e.gmail) return res.json({ available: false, why: e.message });
+    next(e);
+  }
+});
+
+// One attachment of an artwork thread. The message's thread is asked of Gmail and must be an artwork thread, so no other
+// mail can be opened through CI Plant. A request carries at most ~4.5 MB back: a bigger file opens in Gmail.
+const ID = /^[A-Za-z0-9_-]{1,200}$/;
+const MIME = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', txt: 'text/plain' };
+r.get('/artwork/register/thread-attachment', async (req, res, next) => {
+  try {
+    const messageId = String(req.query.message || ''), attachmentId = String(req.query.attachment || '');
+    if (!ID.test(messageId) || !ID.test(attachmentId)) return res.status(400).json({ error: 'Which file?' });
+    const g = await businessRead();
+    if (!g.link) return res.status(409).json({ error: g.why });
+    const thread = await messageThread(g.token, { messageId });
+    const ours = thread && await one(`SELECT 1 AS y FROM artwork_mails WHERE gmail_thread_id = $1
+                                      UNION ALL SELECT 1 FROM artwork_proof_mails WHERE gmail_thread_id = $1 LIMIT 1`, [thread]);
+    if (!ours) return res.status(404).json({ error: 'No such file in an artwork mail.' });
+    const bytes = await readAttachment(g.token, { messageId, attachmentId });
+    if (bytes.length > 4 * 1024 * 1024) return res.status(413).json({ error: 'This file is too big to open here — open the mail in Gmail.' });
+    const name = String(req.query.name || 'attachment').replace(/[\r\n"\\/]+/g, ' ').slice(0, 150) || 'attachment';
+    const ext = (/\.([a-z0-9]{1,5})$/i.exec(name)?.[1] || '').toLowerCase();
+    res.set('Content-Type', MIME[ext] || 'application/octet-stream');
+    res.set('Content-Disposition', `${MIME[ext] ? 'inline' : 'attachment'}; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Content-Type-Options', 'nosniff');           // a client's file is never taken for a page of CI Plant's
+    res.send(bytes);
+  } catch (e) {
+    if (e.gmail) return res.status(e.status || 502).json({ error: e.message });
+    next(e);
+  }
 });
 
 // Send again: the notices that gave up go back in the queue (a person has looked — e.g. in mppchd's Sent folder).
