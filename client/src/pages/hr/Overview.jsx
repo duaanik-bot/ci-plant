@@ -11,6 +11,7 @@ import { Button, Input, KpiCard, KpiRow } from '../../components/ui.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { LEVEL_META, MONTH_RE, flagLabel, list, plantMonth, plural, shiftMonth, settlingMonth } from './RunLineDrawer.jsx';
 import { refusalText } from './PersonDrawer.jsx';
+import PayoutExport from './PayoutExport.jsx';
 
 const RUN_LABEL = { draft: 'Draft', submitted: 'Submitted', approved: 'Approved', finalised: 'Finalised' };
 
@@ -99,7 +100,10 @@ export default function Overview() {
 
           <div className="grid gap-3 lg:grid-cols-2">
             <section className="glass rounded-[22px] border border-white/70 p-4 shadow-card">
-              <h3 className="mb-2 text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">Payable by channel</h3>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">Payable by channel</h3>
+                {run && <span className="ml-auto"><PayoutExport month={month} /></span>}
+              </div>
               {!run ? <p className="text-xs text-[#86868B]">No run for this month yet.</p> : (
                 <div className="overflow-x-auto rounded-2xl border border-white/75 bg-white/55">
                   <table className="w-full text-xs">

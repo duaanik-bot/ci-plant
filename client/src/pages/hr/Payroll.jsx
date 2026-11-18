@@ -71,6 +71,7 @@ import NewPersonFromRow from './NewPersonFromRow.jsx';
 import PayChannelSelect from './PayChannelSelect.jsx';
 import { ChannelsPanel } from './Settings.jsx';
 import MonthCompare from './MonthCompare.jsx';
+import PayoutExport from './PayoutExport.jsx';
 import PayslipModal from './PayslipModal.jsx';
 import RunLineDrawer, {
   APPROVAL_STATUS, ApprovalPill, approvalOf, approvalTitle, batchText, FlagDots, LEVEL_META, MONTH_RE, PAYMENT_STATUS, PaymentPill, flagLabel, flagsOf, levelOf, list, paiseOf, plantMonth,
@@ -348,7 +349,7 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   );
 }
 
-function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, final, payOpen = final, nameOf, onPay, onOpen, onStatus, onPending,
+function PaymentsPanel({ month, lines, channelLabel, canOperate, canApprove = false, final, payOpen = final, nameOf, onPay, onOpen, onStatus, onPending,
   channels = null, onChannel = null }) {
   const [open, setOpen] = useState(null);
   const [setup, setSetup] = useState(false);
@@ -386,6 +387,8 @@ function PaymentsPanel({ lines, channelLabel, canOperate, canApprove = false, fi
           {/* The pay channels themselves — add, rename, bank, active (accounts and up, 2026-11-15). */}
           {onChannel && <Button size="sm" variant="secondary" onClick={() => setSetup(true)}><Landmark size={13} /> Pay channels</Button>}
           {onPending && <Button size="sm" variant="secondary" onClick={onPending}>Pending salary (past months)</Button>}
+          {/* Cash vs bank pending, or everyone — PDF, Excel or print (owner, 2026-11-18). */}
+          {month && <PayoutExport month={month} />}
         </span>
       </div>
       {setup && (
@@ -1564,7 +1567,7 @@ export default function Payroll({ level }) {
             </p>
           )}
           {approvable && (
-            <PaymentsPanel lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} payOpen={approvable} nameOf={nameOf}
+            <PaymentsPanel month={month} lines={lines} channelLabel={channelLabel} canOperate={canPay} final={final} payOpen={approvable} nameOf={nameOf}
               canApprove={canApprove}
               onStatus={(ids, status) => {
                 const want = new Set(ids.map(String));

@@ -264,7 +264,9 @@ function watermarkSheet(ws, wm, imageId, totalCols, at) {
 }
 
 // ─── PDF ─────────────────────────────────────────────────────────────────────
-export async function exportPDF(rawSpec) {
+// opts.printWindow: a tab opened on the click (so no pop-up blocker stops it) — the PDF opens there and asks to print
+// instead of downloading.
+export async function exportPDF(rawSpec, opts = {}) {
   const spec = normalizeSpec(rawSpec);
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   // Measured on what will actually be PRINTED, so a section that trades 16
@@ -579,6 +581,11 @@ export async function exportPDF(rawSpec) {
       title: spec.title, author: BRAND.company, creator: `${BRAND.app} — ${BRAND.company}`,
       subject: spec.watermark.line, keywords: spec.watermark.ref,
     });
+  }
+  if (opts.printWindow) {
+    doc.autoPrint();
+    opts.printWindow.location.href = doc.output('bloburl');
+    return;
   }
   doc.save(`${specFileName(spec)}.pdf`);
 }
