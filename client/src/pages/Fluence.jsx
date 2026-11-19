@@ -28,6 +28,7 @@ import FluenceDrawer from '../components/fluence/FluenceDrawer.jsx';
 import { fluenceExportGate } from '../lib/fluenceDownloads.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import KitStudioFrame from '../components/fluence/KitStudioFrame.jsx';
+import FluenceMailTab from '../components/fluence/FluenceMailTab.jsx';
 import { FLUENCE_CONTEXTS, kitListPrice, partLabel } from '../lib/fluence.js';
 
 // Tab → where it lives: a view of the studio in the frame, or a table here.
@@ -71,6 +72,9 @@ function mrpDelta(r) {
   const pct = Number(r.old_mrp) ? ` · ${d > 0 ? '+' : ''}${((d / Number(r.old_mrp)) * 100).toFixed(1)}%` : '';
   return `${d > 0 ? '+' : d < 0 ? '−' : ''}${rs(Math.abs(d))}${pct}`;
 }
+
+// What an MRP change was the MRP of (the kit total is the carton's MRP — 18 Nov 2026).
+const MRP_OF = { kit_item: 'MRP in kit', inner_product: 'Inner product MRP', kit_total: 'Kit total (carton MRP)' };
 
 export default function Fluence() {
   const toast = useToast();
@@ -357,6 +361,8 @@ export default function Fluence() {
         </>
       )}
 
+      {tab === 'mail' && <FluenceMailTab />}
+
       {tab === 'changes' && (
         <>
           <p className="mb-3 text-xs text-gray-500">
@@ -420,9 +426,9 @@ export default function Fluence() {
               { key: 'changed_at', label: 'When', sortValue: r => new Date(r.changed_at).getTime(), export: r => fmt.dt(r.changed_at),
                 render: r => <span className="whitespace-nowrap text-xs tabular-nums">{fmt.dt(r.changed_at)}</span> },
               { key: 'item_name', label: 'Item', export: r => r.item_name || '', render: r => <span className="text-xs font-semibold">{r.item_name || '—'}</span> },
-              { key: 'kit_name', label: 'Kit', export: r => (r.subject === 'kit_item' ? r.kit_name || '' : ''), render: r => (r.subject === 'kit_item' ? <span className="text-xs">{r.kit_name || '—'}</span> : <span className="text-xs text-gray-400">—</span>) },
-              { key: 'subject', label: 'MRP of', export: r => (r.subject === 'kit_item' ? 'MRP in kit' : 'Inner product MRP'),
-                render: r => <span className="text-xs">{r.subject === 'kit_item' ? 'MRP in kit' : 'Inner product MRP'}</span> },
+              { key: 'kit_name', label: 'Kit', export: r => (r.subject !== 'inner_product' ? r.kit_name || '' : ''), render: r => (r.subject !== 'inner_product' ? <span className="text-xs">{r.kit_name || '—'}</span> : <span className="text-xs text-gray-400">—</span>) },
+              { key: 'subject', label: 'MRP of', export: r => MRP_OF[r.subject] || r.subject,
+                render: r => <span className="text-xs">{MRP_OF[r.subject] || r.subject}</span> },
               { key: 'old_mrp', label: 'Old MRP', align: 'right', sortValue: r => r.old_mrp ?? -1, export: r => (r.old_mrp == null ? '' : r.old_mrp),
                 render: r => <span className="tabular-nums text-gray-500">{r.old_mrp == null ? '—' : rs(r.old_mrp)}</span> },
               { key: 'new_mrp', label: 'New MRP', align: 'right', sortValue: r => r.new_mrp ?? -1, export: r => (r.new_mrp == null ? '' : r.new_mrp),

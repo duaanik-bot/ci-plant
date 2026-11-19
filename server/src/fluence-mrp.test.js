@@ -91,7 +91,13 @@ test('every place an MRP is written records it, in the same transaction', () => 
   assert.match(rec, /const real = \(changes \|\| \[\]\)\.filter\(c => !sameMrp\(c\.oldMrp, c\.newMrp\)\);/);
   assert.match(rec, /INSERT INTO fluence_mrp_changes/);
   assert.match(rec, /user\.outside \? 1 : 0/);
-  assert.match(rec, /if \(user\.outside\) \{[\s\S]*kind: 'fluence_mrp',[\s\S]*link: '\/fluence\?tab=mrp',/, 'a customer\'s change: management told');
+  assert.match(rec, /if \(user\.outside && !user\.quiet\) \{[\s\S]*kind: 'fluence_mrp',[\s\S]*link: '\/fluence\?tab=mrp',/, 'a customer\'s change: management told');
+  // Quiet is the Fluence-mail reader's alone (18 Nov 2026: its mail is told once, not kit by kit) — a customer's own
+  // login is never quiet, so its every MRP change still tells management.
+  assert.match(read('server/src/fluence-mail.js'), /const mailUser = r => \(\{ name: `AVS — Fluence mail \$\{day\(r\.received_at\)\}`, id: null, outside: true, quiet: true \}\);/);
+  for (const f of ['server/src/routes/fluence.js', 'server/src/routes/kitstudio.js', 'server/src/access.js', 'server/src/auth.js']) {
+    assert.doesNotMatch(read(f), /quiet: true/, `${f} never makes a quiet user`);
+  }
   assert.match(route, /await recordMrpChanges\(kitItemMrpChanges\(beforeComps, after, \{ kitId: kit\.id, kitName: label \}\), user, from, qc\);/, 'the one-table editor');
   assert.match(route, /await recordMrpChanges\(kitItemMrpChanges\(before, after, \{ kitId: kit\.id, kitName: `\$\{product\.code\} \$\{product\.name\}` \}\), req\.user, from, qc\);/, 'the old kit-list editor');
   assert.match(route, /oldMrp: null, newMrp: created\.standard_mrp \}\]/, 'a new inner product');

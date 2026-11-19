@@ -181,6 +181,45 @@ They go in the same ONE call as the run's artwork mails (section 7), each with i
 them in the order they were written, so a reply is never read before the proof it answers, and a reply written before
 our newest proof is not taken as an answer to it.
 
+## 6c. Fluence: prescriptions, MRPs and new kits (18 Nov 2026)
+
+Owner: *"the new MRP of a product and the prescription should be auto-saved in the Fluence module … I just want the
+system to fetch it whenever there is a new email from Fluence."* Fluence = mail from an address at Fluence
+Pharmaceuticals' own company domain (the domain begins with `fluence`; their dispatch, customer-care, graphics and
+design desks), or from Fluence's people on personal addresses already in their threads (e.g. their designers). A Fluence kit carton
+prints its **prescription** (each item, dose, morning / afternoon / evening / night, how long, instructions) and its
+**MRPs** (kit total, and each item's). You read them; CI Plant saves them (when the client approves that artwork
+version), holds what needs a person, and makes the masters for a new kit. **You never write the master yourself.**
+
+For each Fluence mail in the run, write **one** object with `"kind": "fluence"` and `items: [ … ]`, one item per kit:
+
+| source | when | what to read into the item |
+|---|---|---|
+| `artwork` | a kit's artwork as a **PDF** in the thread — Fluence's own, or our proof of it (PRF-…), or the designer's export | `kit_name` (as printed / as the job is named), `kit_code` (an FP- code if printed), `read_from` (the PDF's name), `prescription: { general_instructions, lines: [{ item, dosage, dose_form, pack_count, frequency, morning, afternoon, evening, night, other_timing, other_qty, instructions }] }`, `mrp: { kit_total, items: [{ item, qty, mrp }] }` |
+| `mrp_sheet` | an MRP sheet (e.g. the dispatch desk's "MRP SHEET", an xlsx) | one item per kit row: `kit_name`, `kit_code`, `mrp: { kit_total, items: [{ item, mrp }] }` |
+| `po` | a PO that prints MRPs | one item per line: `kit_name`, `kit_code`, `mrp: { kit_total }` — compared only, never saved |
+
+- **Find them — their own search, every run.** Section 3 keeps only threads about artwork and section 4 leaves out
+  POs, so Fluence's MRP sheets and POs are found here, not there: `search_threads` for mail **from** Fluence's domain
+  since *since* with an attachment (`has:attachment`), and for subjects with "MRP", "price", "PO" or "purchase order".
+  Open each whole with `get_thread`. An MRP sheet or a PO is **never** filed as artwork (section 6) — only as its
+  `fluence` object here. Fluence artwork is filed both ways: as artwork (section 6) and, once a PDF of it can be read,
+  as its `fluence` reading.
+- Open the PDF and read the printed table yourself; copy **exactly** what is printed: item names as printed, doses
+  as printed (`"1 cap"`, `"10 ml"`), numbers as numbers. A CDR alone cannot be read: read the PDF that comes later in
+  the same thread (our proof or the designer's export) and file it then.
+- **`"sure": true` only when every field was clearly legible.** Anything blurred, cut off, or that you had to guess:
+  `"sure": false` and list it in `"unsure": ["prescription.lines.2.night", "mrp.kit_total"]`. Never guess an MRP.
+  Write MRPs as plain numbers (`450`, `1183.5` — never `"Rs. 450/-"`), and every line with its `item` key: a line
+  without one, or a prescription with no lines, is treated as unsure.
+- In the run's one call (section 7), put each `fluence` object **after** the artwork mail it was read from.
+- Same thread as the artwork (`gmail_thread_id`), so CI Plant keeps the reading with that artwork version.
+- Example: `{"mailbox_email": "mppchd@gmail.com", "kind": "fluence", "gmail_message_id": "…", "gmail_thread_id": "…",
+  "subject": "…", "from_email": "…", "received_at": "…", "items": [{"source": "artwork", "kit_name": "…",
+  "read_from": "PRF-CI-AW-0012-R0.1-1.pdf", "prescription": {…}, "mrp": {…}, "sure": true, "unsure": []}]}`
+- Its `gmail_message_id` is the message id of the mail whose PDF you read **plus `#fluence`** (e.g. `18c9e…#fluence`):
+  the same mail may already be filed as an artwork mail (section 6), and each id is filed once.
+
 ## 7. File them — ONE call for the run
 
     select avs.file_artwork_mails($m$[

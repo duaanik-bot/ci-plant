@@ -139,6 +139,23 @@ export default function ArtworkVersionFlow({ v, onDone }) {
         );
       })()}
 
+      {!!v.fluence?.length && (
+        <div className="text-[12px]">
+          {v.fluence.map(f => (
+            <div key={f.id} className="text-slate-700">
+              <span className="font-semibold">Fluence:</span> prescription and MRPs read{f.read_from ? ` from ${f.read_from}` : ''} —{' '}
+              {{ waiting_approval: 'saved to the Fluence master when the client approves this version',
+                queued: 'being saved to the Fluence master',
+                saved: `saved to the Fluence master${f.changes?.rx_changed ? ` (prescription revision ${f.changes.revision})` : ''}${f.created_product_id ? ', new kit made' : ''}`,
+                same: 'the Fluence master already says this', held: `held: ${f.hold_reason}`, not_matched: 'no kit matched', undone: 'undone',
+                dismissed: 'not saved — the master kept as it was',
+              }[f.status] || f.status}{' '}
+              <a href="/fluence?tab=mail" className="font-semibold text-[#0064D2] hover:underline">Open in Fluence</a>
+            </div>
+          ))}
+        </div>
+      )}
+
       {!!v.proofs?.filter(p => p.by_hand).length && (
         <div className="text-[12px] text-slate-600">Proof sent by hand from Gmail: {v.proofs.filter(p => p.by_hand).map(p => p.file_name || 'file').join(', ')}</div>
       )}

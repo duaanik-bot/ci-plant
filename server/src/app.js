@@ -38,7 +38,9 @@ import artworkRegister from './routes/artwork-register.js';
 import sizing from './routes/sizing.js';
 import enquiryRobot from './routes/enquiry-robot.js';
 import artworkRobot from './routes/artwork-robot.js';
-import artworkFlow, { artworkExportRouter } from './routes/artwork-flow.js';
+import artworkFlow from './routes/artwork-flow.js';
+import artworkExport from './routes/artwork-export.js';
+import fluenceMail from './routes/fluence-mail.js';
 import gmailLink from './routes/gmail-link.js';
 import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
@@ -101,7 +103,7 @@ app.use('/api', enquiryRobot);
 // The artwork register's intake, for the same AVS robot with the same key (routes/artwork-robot.js).
 app.use('/api', artworkRobot);
 // The CorelDRAW button on a designer's PC uploads its export with that PC's key, not a login (routes/artwork-flow.js).
-app.use('/api', artworkExportRouter);
+app.use('/api', artworkExport);
 // Google's way back after an admin connects a desk mailbox's Gmail (signed state, no login token on that redirect).
 app.use('/api', gmailLink);
 app.use('/api', requireAuth);         // everything below needs a token
@@ -142,6 +144,7 @@ app.use('/api', costing);       // Costing — new-product costing, Size Library
 app.use('/api', enquiries);     // Enquiry desk — mailbox enquiries → costing → final price → quotation (Costing tick)
 app.use('/api', artworkRegister); // Artwork register — artwork mails filed by the office AVS: jobs, versions, files, threads (Artwork tick)
 app.use('/api', artworkFlow); // Artwork workflow — Send for approval, Send email, decide, release, delete, designer uploads (Artwork tick)
+app.use('/api', fluenceMail);  // Fluence › From Fluence mail — readings from Fluence's mails: apply, undo, acknowledge
 app.use('/api', sizing);        // Size proposals and KLDs — die check, layouts, the KLD and its Drive copy (Costing tick)
 app.use('/api', masterHistory);
 app.use('/api', notifications);

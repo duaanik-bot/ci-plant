@@ -1,7 +1,6 @@
 // The artwork workflow's buttons (owner, 17 Nov 2026; design plans/2026-11-17-artwork-workflow-design.md):
 //
-//   POST /api/artwork/export/start | PUT /api/artwork/export/:up/chunk/:n | POST /api/artwork/export/:up/finish
-//        the CorelDRAW button on a designer's PC (header x-artwork-key) — mounted before the login check
+//   (the CorelDRAW button's own upload routes, with a PC's key: routes/artwork-export.js)
 //   POST /api/artwork/register/versions/:id/export/start (+ the same chunk / finish under /api/artwork/register/export)
 //        "Upload designer's PDF" in the window, with the person's login
 //   POST /api/artwork/register/exports/:id/match          { version_id } — a person puts an unmatched export on its job
@@ -24,9 +23,10 @@ import { actionsFor, groupByThread, proofNo, proofMailText } from '../artwork-fl
 import { buildProof } from '../artwork-proof.js';
 import { readArtworkFromDrive, saveArtworkToDrive } from '../gdrive.js';
 import { replyHeaders, replyAll, buildMime, saveDraftUpload, sendDraft, draftHeaders, approvalSent, deleteDraft, APPROVAL_HEADER } from '../gmail.js';
-import { CHUNK, hashKey, keyOf, startUpload, putChunk, finishUpload, matchByHand, businessDrive } from '../artwork-upload.js';
+import { CHUNK, hashKey, startUpload, putChunk, finishUpload, matchByHand, businessDrive } from '../artwork-upload.js';
 import { moveStage, tickOrderLines } from '../artwork-approval.js';
 import { markSent, cancelDraftsOf, settleProofMails } from '../artwork-settle.js';
+import { applyApprovedReadings } from '../fluence-mail.js';
 
 const raw = express.raw({ type: () => true, limit: CHUNK + 1024 });
 const idOf = v => (/^\d{1,9}$/.test(String(v)) ? Number(v) : null);
@@ -36,17 +36,6 @@ const wrap = fn => async (req, res, next) => {
   try { res.json(await fn(req, res)); } catch (e) { if (e.status && e.status < 500) return res.status(e.status).json({ error: e.message }); next(e); }
 };
 const fail = (status, error) => Object.assign(new Error(error), { status });
-
-// ── the CorelDRAW button (a PC's key, no login) ─────────────────────────────────────────────────────────────────
-export const artworkExportRouter = Router();
-const keyed = async req => {
-  const k = await keyOf(req.get('x-artwork-key'));
-  if (!k) throw fail(401, 'This PC\'s artwork key is wrong or switched off — ask an admin for a key (Artwork › Designer PCs).');
-  return { key_id: k.id, by_name: k.name };
-};
-artworkExportRouter.post('/artwork/export/start', wrap(async req => startUpload(await keyed(req), req.body)));
-artworkExportRouter.put('/artwork/export/:up/chunk/:n', raw, wrap(async req => putChunk(req.params.up, req.params.n, req.body, await keyed(req))));
-artworkExportRouter.post('/artwork/export/:up/finish', wrap(async req => finishUpload(req.params.up, await keyed(req))));
 
 // ── the window's buttons (login + Artwork tick) ────────────────────────────────────────────────────────────────
 const r = Router();
@@ -277,7 +266,7 @@ r.post('/artwork/register/decide', wrap(async req => {
   if (!note) throw fail(400, 'Say how the client answered (e.g. "approved on WhatsApp by Mr X, 17 Nov").');
   const all = await picked(ids(req.body?.version_ids));
   const out = { moved: [], skipped: [], order_lines: 0 };
-  await tx(async qc => {
+  await tx(async (qc, oc) => {
     for (const v of all) {
       if (!actionsFor(v).includes('decide')) { out.skipped.push(skipped(v, `is "${v.stage}" — nothing to decide`)); continue; }
       const m = await moveStage(qc, { versionIds: [v.id], to: verdict, from: ['approval_sent', 'to_confirm', 'changes'], by: who(req), action: `decided_${verdict}`, detail: { note } });
@@ -286,6 +275,8 @@ r.post('/artwork/register/decide', wrap(async req => {
       if (verdict === 'approved') out.order_lines += await tickOrderLines(qc, v.id, who(req));
       out.moved.push(v.id);
     }
+    // Fluence: what was read from an approved version's artwork is saved to the master now (owner, 18 Nov 2026)
+    if (verdict === 'approved') out.fluence_readings = await applyApprovedReadings(qc, oc, out.moved);
   });
   return out;
 }));

@@ -77,6 +77,9 @@ const TAB_ROUTES = [
   ['POST', /^\/fluence\/inner-products$/, ['inner']],
   ['PUT', /^\/fluence\/inner-products\/[^/]+$/, ['inner']],
   ['POST', /^\/fluence\/kits\/[^/]+\/(link|unlink)$/, ['customer']],
+  // From Fluence mail (routes/fluence-mail.js) — Colour Impressions' own tab.
+  ['GET', /^\/fluence\/mail-readings$/, ['mail']],
+  ['POST', /^\/fluence\/mail-readings\/([^/]+\/(apply|undo|keep|ack)|ack)$/, ['mail']],
   // Kit Studio. A kit's save is New kit's when it adds the kit and Kits' when it
   // changes one — the route tells which (routes/kitstudio.js).
   ['GET', /^\/kit-studio\/state$/, STUDIO_TABS],

@@ -41,6 +41,7 @@ export const FLUENCE_CONTEXTS = {
   warehouse: 'Warehouse',
   fluence_master: 'Fluence',
   kit_studio: 'Kit Studio',
+  fluence_mail: 'Fluence mail (AVS)',
   masters: 'Masters',
 };
 
@@ -412,8 +413,10 @@ export function kitItemMrpChanges(before, after, { kitId = null, kitName = null 
 }
 
 const rupees = v => (v == null ? 'no MRP' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+// An MRP on a screen where a person decides: to the paisa (₹188.64, never ₹189).
+export const mrpText = v => (v == null ? '—' : rupees(v));
 // "F-CAL D3 in NEW - M4: ₹200 → ₹221" — how a notice and the trail read one change.
 export function mrpLine(c) {
-  const where = c.subject === 'kit_item' && c.kitName ? ` in ${c.kitName}` : '';
+  const where = (c.subject === 'kit_item' || c.subject === 'kit_total') && c.kitName ? ` in ${c.kitName}` : '';
   return `${c.itemName || 'Item'}${where}: ${rupees(mrpValue(c.oldMrp))} → ${rupees(mrpValue(c.newMrp))}`;
 }

@@ -45,6 +45,7 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     await db.q(`INSERT INTO avs.settings (key, value) VALUES ('robot_key', $1)`, [ROBOT_KEY]);
     await db.q(fs.readFileSync(new URL('../../supabase/migrations/20261115100100_avs_artwork_intake.sql', import.meta.url), 'utf8'));
     await db.q(fs.readFileSync(new URL('../../supabase/migrations/20261118100100_avs_artwork_replies.sql', import.meta.url), 'utf8'));
+    await db.q(fs.readFileSync(new URL('../../supabase/migrations/20261118120100_avs_fluence_readings.sql', import.meta.url), 'utf8'));
     await db.q(`INSERT INTO customers (name, segment) VALUES ('Example Pharma Ltd', 'pharma')`);
     await db.q(`UPDATE enquiry_mailboxes SET email = $1 WHERE key = 'business'`, [BIZ]);
     await db.q(`UPDATE enquiry_mailboxes SET email = $1 WHERE key = 'trial'`, [OWNER]);
@@ -806,5 +807,461 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     const kit = await db.one('SELECT * FROM fluence_kits WHERE product_id = $1', [zr.body.product.id]);
     assert.deepEqual([kit.kit_name, kit.source_ref, kit.link_method], ['Zeta Glow Kit-Q', `erp-product:${zr.body.product.id}`, 'created_from_product']);
     assert.equal(zr.body.fluence_kit_id, kit.id);
+  });
+
+  // ── Fluence: prescriptions, MRPs and new kits read from Fluence's mails (18 Nov 2026) ─────────────────────────
+  const fx = {};
+  const fluenceSetup = async () => {
+    if (fx.kit) return fx;
+    const { default: jwt } = await import('jsonwebtoken');
+    const { JWT_SECRET: secret } = await import('./auth.js');
+    const boss = await db.one(`INSERT INTO users (name, email, password_hash, role, is_management) VALUES ('Art boss', 'art-boss@test.local', 'x', 'planner', 1) RETURNING id, name, role`);
+    tokens.boss = jwt.sign({ id: boss.id, name: boss.name, role: boss.role }, secret);
+    const cust = await db.one(`SELECT id FROM customers WHERE name = 'Fluence Test Pharma'`).catch(() => null)
+      || await db.one(`INSERT INTO customers (name, segment) VALUES ('Fluence Test Pharma', 'pharma') RETURNING id`);
+    await db.q('INSERT INTO fluence_customers (customer_id) VALUES ($1) ON CONFLICT DO NOTHING', [cust.id]);
+    const board = await db.one(`SELECT id FROM materials WHERE category = 'board' ORDER BY id LIMIT 1`);
+    const prod = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id, mrp) VALUES ($1, 'NOVA CALM KIT', 'FPT-501', $2, 1000) RETURNING id, code`, [cust.id, board.id]);
+    const caps = await db.one(`INSERT INTO fluence_inner_products (name, name_key, kind) VALUES ('F-NOVA CAPS', 'FNOVACAPS', 'item') RETURNING id`);
+    const syrup = await db.one(`INSERT INTO fluence_inner_products (name, name_key, kind) VALUES ('F-CALM SYRUP', 'FCALMSYRUP', 'item') RETURNING id`);
+    const kit = await db.one(`INSERT INTO fluence_kits (kit_name, source_ref, product_id, kit_total_mrp) VALUES ('NOVA CALM KIT', 'test:nova', $1, 1000) RETURNING id`, [prod.id]);
+    await db.q(`INSERT INTO fluence_kit_components (kit_id, inner_product_id, sr, qty_per_kit, mrp_in_kit) VALUES ($1, $2, 1, 2, 600), ($1, $3, 2, 1, 400)`, [kit.id, caps.id, syrup.id]);
+    const rx = await db.one(`INSERT INTO fluence_prescriptions (kit_id, general_instructions, revision) VALUES ($1, 'Old advice', 1) RETURNING id`, [kit.id]);
+    await db.q(`INSERT INTO fluence_prescription_lines (prescription_id, sr, inner_product_id, dosage, morning_qty) VALUES ($1, 1, $2, '1 cap', 1), ($1, 2, $3, '5 ml', NULL)`, [rx.id, caps.id, syrup.id]);
+    Object.assign(fx, { cust: cust.id, prod: prod.id, kit: kit.id, caps: caps.id, syrup: syrup.id });
+    return fx;
+  };
+  const fileFluence = (id, items, over = {}) => fileMails([{ mailbox_email: BIZ, kind: 'fluence', gmail_message_id: id, gmail_thread_id: `t-${id}`,
+    subject: `Fluence ${id}`, from_email: 'dispatch@fluence.test', received_at: new Date().toISOString(), items, ...over }]);
+  const reading = id => db.one(`SELECT r.* FROM fluence_mail_readings r WHERE r.gmail_message_id = $1 ORDER BY r.id DESC LIMIT 1`, [id]);
+  const kitNow = async () => ({
+    total: Number((await db.one('SELECT kit_total_mrp FROM fluence_kits WHERE id = $1', [fx.kit])).kit_total_mrp),
+    carton: Number((await db.one('SELECT mrp FROM products WHERE id = $1', [fx.prod])).mrp),
+    items: (await db.q('SELECT inner_product_id, mrp_in_kit::float8 AS mrp FROM fluence_kit_components WHERE kit_id = $1 ORDER BY sr', [fx.kit])).map(c => [c.inner_product_id, c.mrp]),
+    rev: (await db.one('SELECT revision FROM fluence_prescriptions WHERE kit_id = $1', [fx.kit])).revision,
+  });
+
+  test('Fluence MRP sheet: new MRPs are saved to the kit and the carton, signed from the mail, and wait for management', async () => {
+    await fluenceSetup();
+    await fileFluence('fm-1', [{ source: 'mrp_sheet', kit_code: 'FPT-501', kit_name: 'NOVA CALM KIT', sure: true,
+      mrp: { kit_total: 1100, items: [{ item: 'F-NOVA CAPS', mrp: 660 }, { item: 'F-CALM SYRUP', mrp: 440 }] } }]);
+    await sync();
+    const r = await reading('fm-1');
+    assert.equal(r.status, 'saved', r.hold_reason || '');
+    const k = await kitNow();
+    assert.deepEqual([k.total, k.carton], [1100, 1100], 'kit total and the carton\'s yellow MRP');
+    assert.deepEqual(k.items, [[fx.caps, 660], [fx.syrup, 440]]);
+    assert.equal(k.rev, 1, 'a sheet never touches the prescription');
+    const mc = await db.q(`SELECT subject, outside, ack_at, changed_from FROM fluence_mrp_changes WHERE kit_id = $1 ORDER BY id`, [fx.kit]);
+    assert.ok(mc.length >= 3 && mc.every(x => x.outside === 1 && !x.ack_at && x.changed_from === 'fluence_mail'));
+    assert.ok(mc.some(x => x.subject === 'kit_total'));
+  });
+
+  test('Fluence: an MRP more than 25 % lower is held; a PO is only compared; a sheet line with no kit is not matched; unsure is held', async () => {
+    await fluenceSetup();
+    await fileFluence('fm-2', [{ source: 'mrp_sheet', kit_code: 'FPT-501', sure: true, mrp: { kit_total: 700, items: [] } }]);
+    await fileFluence('fm-3', [{ source: 'po', kit_code: 'FPT-501', sure: true, mrp: { kit_total: 1050, items: [] } }]);
+    await fileFluence('fm-4', [{ source: 'mrp_sheet', kit_name: 'NO SUCH KIT', sure: true, mrp: { kit_total: 500, items: [] } }]);
+    await fileFluence('fm-5', [{ source: 'mrp_sheet', kit_code: 'FPT-501', sure: false, unsure: ['mrp.kit_total'], mrp: { kit_total: 1150, items: [] } }]);
+    await sync();
+    const held = await reading('fm-2');
+    assert.equal(held.status, 'held');
+    assert.match(held.hold_reason, /kit MRP 1100 → 700 is more than 25 % lower/);
+    assert.equal((await reading('fm-3')).status, 'compared');
+    assert.equal((await reading('fm-4')).status, 'not_matched');
+    assert.equal((await reading('fm-5')).status, 'held');
+    assert.equal((await kitNow()).total, 1100, 'nothing of these reached the master');
+    // a person applies the held one
+    assert.equal((await call('plain', 'POST', `/fluence/mail-readings/${held.id}/apply`)).status, 403);
+    const ap = await call('artist', 'POST', `/fluence/mail-readings/${held.id}/apply`);
+    assert.equal(ap.status, 200, JSON.stringify(ap.body));
+    assert.equal((await kitNow()).total, 700);
+    assert.equal((await reading('fm-2')).status, 'saved');
+  });
+
+  test('Fluence: a mail never undoes a person\'s later change', async () => {
+    await fluenceSetup();
+    await db.q(`INSERT INTO fluence_master_revisions (kit_id, area, note, changed_by, changed_from, changed_at) VALUES ($1, 'components', 'fixed by hand', 'Anik', 'fluence_master', now())`, [fx.kit]);
+    await fileFluence('fm-6', [{ source: 'mrp_sheet', kit_code: 'FPT-501', sure: true, mrp: { kit_total: 720, items: [] } }], { received_at: new Date(Date.now() - 86400e3).toISOString() });
+    await sync();
+    const r = await reading('fm-6');
+    assert.equal(r.status, 'held');
+    assert.match(r.hold_reason, /changed by Anik after this mail/);
+  });
+
+  test('Fluence artwork: the prescription is read with the version and saved only when the client approves it', async () => {
+    await fluenceSetup();
+    await fileMails([mailOf('fa-1', [{ product_name: 'NOVA CALM KIT', pack_type: 'carton', files: [f('NOVA CALM KIT.cdr', 'fa1')] }], { customer_name: 'Fluence Test Pharma', from_email: 'graphics@fluence.test', received_at: new Date().toISOString() })]);
+    await sync();
+    const job = await db.one(`SELECT id FROM artwork_jobs WHERE product_name = 'NOVA CALM KIT' ORDER BY id DESC LIMIT 1`);
+    await call('artist', 'POST', `/artwork/register/${job.id}/map`, { product_id: fx.prod });
+    await fileFluence('fa-1r', [{ source: 'artwork', kit_name: 'NOVA CALM KIT', read_from: 'NOVA CALM KIT proof.pdf', sure: true,
+      prescription: { general_instructions: 'Take after breakfast.', lines: [{ item: 'F-NOVA CAPS', dosage: '2 caps', morning: 2 }, { item: 'F-CALM SYRUP', dosage: '10 ml', night: 1 }] },
+      mrp: { kit_total: 720, items: [] } }], { gmail_thread_id: 't-fa-1', from_email: 'graphics@fluence.test' });
+    await sync();
+    const r = await reading('fa-1r');
+    assert.equal(r.status, 'waiting_approval');
+    assert.ok(r.artwork_version_id);
+    const before = await kitNow();
+    // approved (by hand here; a client's reply does the same)
+    await db.q(`UPDATE artwork_versions SET stage = 'approval_sent' WHERE id = $1`, [r.artwork_version_id]);
+    const d = await call('artist', 'POST', '/artwork/register/decide', { version_ids: [r.artwork_version_id], verdict: 'approved', note: 'approved on WhatsApp' });
+    assert.deepEqual(d.body.moved, [r.artwork_version_id]);
+    const after = await kitNow();
+    assert.equal(after.rev, before.rev + 1, 'a new prescription revision');
+    const rx = await db.one(`SELECT general_instructions, updated_from FROM fluence_prescriptions WHERE kit_id = $1`, [fx.kit]);
+    assert.deepEqual([rx.general_instructions, rx.updated_from], ['Take after breakfast.', 'fluence_mail']);
+    const lines = await db.q(`SELECT inner_product_id, dosage, morning_qty::float8 AS m, night_qty::float8 AS n FROM fluence_prescription_lines l JOIN fluence_prescriptions p ON p.id = l.prescription_id WHERE p.kit_id = $1 ORDER BY l.sr`, [fx.kit]);
+    assert.deepEqual(lines.map(l => [l.inner_product_id, l.dosage, l.m, l.n]), [[fx.caps, '2 caps', 2, null], [fx.syrup, '10 ml', null, 1]]);
+    assert.equal((await reading('fa-1r')).status, 'saved');
+    // undo puts it back
+    const u = await call('artist', 'POST', `/fluence/mail-readings/${r.id}/undo`);
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal((await db.one(`SELECT general_instructions FROM fluence_prescriptions WHERE kit_id = $1`, [fx.kit])).general_instructions, 'Old advice');
+    assert.equal((await kitNow()).total, before.total);
+    assert.equal((await reading('fa-1r')).status, 'undone');
+  });
+
+  test('Fluence artwork for a kit not in our masters: on approval its masters are made by themselves; management acknowledges', async () => {
+    await fluenceSetup();
+    await fileMails([mailOf('fa-2', [{ product_name: 'ORBIT REST KIT-Q', pack_type: 'carton', files: [f('ORBIT REST KIT-Q.cdr', 'fa2')] }], { customer_name: 'Fluence Test Pharma', from_email: 'graphics@fluence.test', received_at: new Date().toISOString() })]);
+    await sync();
+    await fileFluence('fa-2r', [{ source: 'artwork', kit_name: 'ORBIT REST KIT-Q', sure: true,
+      prescription: { general_instructions: 'Use daily.', lines: [{ item: 'F-NOVA CAPS', dosage: '1 cap', morning: 1 }, { item: 'F-ORBIT BALM', dosage: 'thin layer', night: 1 }] },
+      mrp: { kit_total: 950, items: [{ item: 'F-NOVA CAPS', mrp: 500 }, { item: 'F-ORBIT BALM', mrp: 450 }] } }], { gmail_thread_id: 't-fa-2', from_email: 'graphics@fluence.test' });
+    await sync();
+    const r0 = await reading('fa-2r');
+    assert.equal(r0.status, 'waiting_approval');
+    await db.q(`UPDATE artwork_versions SET stage = 'approval_sent' WHERE id = $1`, [r0.artwork_version_id]);
+    await call('artist', 'POST', '/artwork/register/decide', { version_ids: [r0.artwork_version_id], verdict: 'approved', note: 'approved in mail' });
+    const r = await reading('fa-2r');
+    assert.equal(r.status, 'saved', r.hold_reason || '');
+    const p = await db.one('SELECT id, name, is_draft, draft_source, mrp::float8 AS mrp, customer_id FROM products WHERE id = $1', [r.created_product_id]);
+    assert.deepEqual([p.name, p.is_draft, p.draft_source, p.mrp, p.customer_id], ['ORBIT REST KIT-Q', 1, 'fluence_mail', 950, fx.cust]);
+    const kit = await db.one('SELECT id, product_id FROM fluence_kits WHERE id = $1', [r.created_kit_id]);
+    assert.equal(kit.product_id, p.id);
+    const comps = await db.q(`SELECT ip.name FROM fluence_kit_components c JOIN fluence_inner_products ip ON ip.id = c.inner_product_id WHERE c.kit_id = $1 ORDER BY c.sr`, [kit.id]);
+    assert.deepEqual(comps.map(c => c.name), ['F-NOVA CAPS', 'F-ORBIT BALM'], 'a new item is added to the inner products');
+    const job = await db.one(`SELECT product_id FROM artwork_jobs WHERE product_name = 'ORBIT REST KIT-Q'`);
+    assert.equal(job.product_id, p.id, 'the artwork job is linked to its new master');
+    // the tab: who may see and acknowledge
+    const list = await call('boss', 'GET', '/fluence/mail-readings');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.rows.some(x => x.id === r.id && x.created_product_code));
+    assert.equal((await call('artist', 'POST', `/fluence/mail-readings/${r.id}/ack`)).status, 403, 'acknowledged by management');
+    assert.equal((await call('boss', 'POST', `/fluence/mail-readings/${r.id}/ack`)).status, 200);
+    assert.ok((await reading('fa-2r')).ack_at);
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM fluence_mrp_changes WHERE kit_id = $1 AND ack_at IS NULL AND outside = 1`, [kit.id])).n, 0, 'its MRP updates acknowledged with it');
+  });
+
+  // ── Fluence mail: the review of 18 Nov 2026. Each test its own invented kit. ──────────────────────────────────
+  let kitSeq = 0;
+  const makeKit = async ({ name, total = 1000, carton = total, comps } = {}) => {
+    await fluenceSetup();
+    const { nameKey } = await import('../../client/src/lib/fluence.js');
+    const n = ++kitSeq;
+    const kitName = name || `REVIEW KIT ${n}`;
+    const code = `RVK-${String(n).padStart(3, '0')}`;   // not the FP- series new kits are numbered in
+    const board = await db.one(`SELECT id FROM materials WHERE category = 'board' ORDER BY id LIMIT 1`);
+    const prod = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id, mrp) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [fx.cust, kitName, code, board.id, carton]);
+    const kit = await db.one(`INSERT INTO fluence_kits (kit_name, source_ref, product_id, kit_total_mrp) VALUES ($1, $2, $3, $4) RETURNING id`, [kitName, `test:review-${n}`, prod.id, total]);
+    const inner = {};
+    for (const [i, [nm, qty, mrp, kind]] of comps.entries()) {
+      const ip = await db.one(`INSERT INTO fluence_inner_products (name, name_key, kind) VALUES ($1, $2, $3) RETURNING id`, [nm, nameKey(nm), kind]);
+      inner[nm] = ip.id;
+      await db.q(`INSERT INTO fluence_kit_components (kit_id, inner_product_id, sr, qty_per_kit, mrp_in_kit) VALUES ($1, $2, $3, $4, $5)`, [kit.id, ip.id, i + 1, qty, mrp]);
+    }
+    const rx = await db.one(`INSERT INTO fluence_prescriptions (kit_id, general_instructions, remarks, revision) VALUES ($1, 'Old advice', 'rx remark', 1) RETURNING id`, [kit.id]);
+    let sr = 0;
+    for (const [nm, , , kind] of comps) {
+      await db.q(`INSERT INTO fluence_prescription_lines (prescription_id, sr, inner_product_id, dosage, dose_form, morning_qty) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [rx.id, ++sr, inner[nm], kind === 'item' ? '1 unit' : null, kind === 'item' ? 'tablet' : null, kind === 'item' ? 1 : null]);
+    }
+    const now = async () => ({
+      total: Number((await db.one('SELECT kit_total_mrp FROM fluence_kits WHERE id = $1', [kit.id])).kit_total_mrp),
+      carton: Number((await db.one('SELECT mrp FROM products WHERE id = $1', [prod.id])).mrp),
+      items: (await db.q('SELECT inner_product_id, qty_per_kit::float8 AS qty, mrp_in_kit::float8 AS mrp FROM fluence_kit_components WHERE kit_id = $1 ORDER BY sr', [kit.id])).map(c => [c.inner_product_id, c.qty, c.mrp]),
+      rev: (await db.one('SELECT revision FROM fluence_prescriptions WHERE kit_id = $1', [kit.id])).revision,
+      rx: await db.one('SELECT general_instructions, remarks FROM fluence_prescriptions WHERE kit_id = $1', [kit.id]),
+      lines: await db.q(`SELECT l.inner_product_id, l.dosage, l.dose_form, l.morning_qty::float8 AS m, l.night_qty::float8 AS n FROM fluence_prescription_lines l
+                           JOIN fluence_prescriptions p ON p.id = l.prescription_id WHERE p.kit_id = $1 ORDER BY l.sr`, [kit.id]),
+    });
+    return { name: kitName, code, prod: prod.id, kit: kit.id, inner, now };
+  };
+  // an artwork mail for a kit, its job linked to `prod` (when given), and the robot's reading of it in the same thread
+  const artworkFor = async (k, tag, item, { at = new Date().toISOString() } = {}) => {
+    await fileMails([mailOf(tag, [{ product_name: k.name, pack_type: 'carton', files: [f(`${k.name}.cdr`, tag)] }], { customer_name: 'Fluence Test Pharma', from_email: 'graphics@fluence.test', received_at: at })]);
+    await sync();
+    const job = await db.one(`SELECT id, product_id FROM artwork_jobs WHERE product_name = $1 ORDER BY id DESC LIMIT 1`, [k.name]);
+    if (k.prod && !job.product_id) {
+      const m = await call('artist', 'POST', `/artwork/register/${job.id}/map`, { product_id: k.prod });
+      assert.equal(m.status, 200, JSON.stringify(m.body));
+    }
+    await fileFluence(`${tag}r`, [{ source: 'artwork', kit_name: k.name, sure: true, ...item }], { gmail_thread_id: `t-${tag}`, from_email: 'graphics@fluence.test', received_at: at });
+    await sync();
+    return { job, r: await reading(`${tag}r`) };
+  };
+  const approve = async versionId => {
+    await db.q(`UPDATE artwork_versions SET stage = 'approval_sent' WHERE id = $1`, [versionId]);
+    const d = await call('artist', 'POST', '/artwork/register/decide', { version_ids: [versionId], verdict: 'approved', note: 'approved in a test' });
+    assert.equal(d.status, 200, JSON.stringify(d.body));
+    return d;
+  };
+  const tokenFor = async (key, { role = 'planner', modules = null, fluence_tabs = null } = {}) => {
+    const { default: jwt } = await import('jsonwebtoken');
+    const { JWT_SECRET: secret } = await import('./auth.js');
+    const u = await db.one(`INSERT INTO users (name, email, password_hash, role, modules, fluence_tabs) VALUES ($1, $2, 'x', $3, $4, $5) RETURNING id, name, role`,
+      [`Art ${key}`, `art-${key}@test.local`, role, modules && JSON.stringify(modules), fluence_tabs && JSON.stringify(fluence_tabs)]);
+    tokens[key] = jwt.sign({ id: u.id, name: u.name, role: u.role }, secret);
+    return u;
+  };
+
+  test('review C3: an approved artwork never changes what is in a kit we have — a printed item it does not hold, or an item it does not print, holds it', async () => {
+    const k = await makeKit({ comps: [['F-C3A CAPS', 2, 600, 'item'], ['F-C3B GEL', 1, 400, 'item'], ['C3 INNER BOX', 1, null, 'packaging']] });
+    const before = await k.now();
+    const a = await artworkFor(k, 'c3-1', { prescription: { lines: [{ item: 'F-C3A CAPSULES', dosage: '2 caps', morning: 2 }, { item: 'F-C3B GEL', dosage: 'thin', night: 1 }] },
+      mrp: { kit_total: 1000, items: [{ item: 'F-C3A CAPSULES', mrp: 300 }] } });
+    assert.equal(a.r.status, 'waiting_approval');
+    await approve(a.r.artwork_version_id);
+    const held = await reading('c3-1r');
+    assert.equal(held.status, 'held');
+    assert.match(held.hold_reason, /printed F-C3A CAPSULES, which is not in this kit/);
+    assert.match(held.hold_reason, /the kit has F-C3A CAPS, which the artwork does not print/);
+    assert.deepEqual(await k.now(), before, 'nothing of it reached the kit');
+    assert.equal((await db.one(`SELECT count(*)::int AS n FROM fluence_inner_products WHERE name_key = 'FC3ACAPSULES'`)).n, 0, 'no item is made for a kit we have');
+    const b = await artworkFor(k, 'c3-2', { prescription: { general_instructions: 'After food.', lines: [{ item: 'F-C3A CAPS', dosage: '2 caps', morning: 2 }, { item: 'F-C3B GEL', dosage: 'thin', night: 1 }] },
+      mrp: { kit_total: 1050, items: [{ item: 'F-C3A CAPS', mrp: 650 }] } });
+    await approve(b.r.artwork_version_id);
+    const saved = await reading('c3-2r');
+    assert.equal(saved.status, 'saved', saved.hold_reason || '');
+    const after = await k.now();
+    assert.deepEqual(after.items.map(([id, q]) => [id, q]), before.items.map(([id, q]) => [id, q]), 'the same items and quantities — the inner box too');
+    assert.equal(after.items[0][2], 650);
+    assert.deepEqual([after.rx.general_instructions, after.rx.remarks], ['After food.', 'rx remark'], 'the prescription\'s remarks are kept');
+    assert.deepEqual(after.lines.filter(l => l.inner_product_id === k.inner['F-C3A CAPS']).map(l => [l.dosage, l.dose_form, l.m]), [['2 caps', 'tablet', 2]],
+      'what the artwork does not print (the dose form) is kept');
+  });
+
+  test('review C1: Undo puts back only what the reading wrote, where it is still as it wrote it — a later prescription and a later MRP stay', async () => {
+    const k = await makeKit({ comps: [['F-C1A CAPS', 2, 600, 'item'], ['F-C1B GEL', 1, 400, 'item']] });
+    await fileFluence('c1-1', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1100, items: [{ item: 'F-C1A CAPS', mrp: 660 }, { item: 'F-C1B GEL', mrp: 440 }] } }]);
+    await sync();
+    const sheet = await reading('c1-1');
+    assert.equal(sheet.status, 'saved', sheet.hold_reason || '');
+    const comps = await db.q(`SELECT inner_product_id, qty_per_kit::float8 AS qty_per_kit, mrp_in_kit::float8 AS mrp_in_kit FROM fluence_kit_components WHERE kit_id = $1 ORDER BY sr`, [k.kit]);
+    const put = await call('admin', 'PUT', `/fluence/products/${k.prod}/kit`, {
+      components: comps.map(c => (c.inner_product_id === k.inner['F-C1B GEL'] ? { ...c, mrp_in_kit: 450 } : c)), general_instructions: 'New advice from the doctor',
+      lines: [{ inner_product_id: k.inner['F-C1A CAPS'], dosage: '3 caps', morning_qty: 3 }, { inner_product_id: k.inner['F-C1B GEL'], dosage: 'thin', night_qty: 1 }] });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    const mid = await k.now();
+    const u = await call('artist', 'POST', `/fluence/mail-readings/${sheet.id}/undo`);
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    const end = await k.now();
+    assert.equal(end.rev, mid.rev, 'the prescription a person wrote after the sheet is not touched');
+    assert.equal(end.rx.general_instructions, 'New advice from the doctor');
+    assert.deepEqual(end.items.map(([, , m]) => m), [600, 450], 'the sheet\'s own MRP put back; the one a person set since stays');
+    assert.deepEqual([end.total, end.carton], [1000, 1000], 'the kit total and the carton back as they were');
+    assert.match(JSON.stringify(u.body.left), /F-C1B GEL/, 'what it left as it is, it says');
+    assert.equal((await reading('c1-1')).status, 'undone');
+  });
+
+  test('review C1: a kit the mail made is not removed once its carton is no longer a draft', async () => {
+    const a = await artworkFor({ name: 'C1 NEW KIT-Q' }, 'c1-new', { prescription: { lines: [{ item: 'F-C1N CAPS', dosage: '1', morning: 1 }] }, mrp: { kit_total: 300, items: [{ item: 'F-C1N CAPS', mrp: 300 }] } });
+    await approve(a.r.artwork_version_id);
+    const r = await reading('c1-newr');
+    assert.equal(r.status, 'saved', r.hold_reason || '');
+    assert.ok(r.created_kit_id);
+    await db.q('UPDATE products SET is_draft = 0 WHERE id = $1', [r.created_product_id]);
+    const u = await call('artist', 'POST', `/fluence/mail-readings/${r.id}/undo`);
+    assert.equal(u.status, 409, JSON.stringify(u.body));
+    assert.match(u.body.error, /no longer a draft/);
+    assert.ok(await db.one('SELECT id FROM fluence_kits WHERE id = $1', [r.created_kit_id]), 'the kit is kept');
+    assert.equal((await reading('c1-newr')).status, 'saved');
+  });
+
+  test('review C2: filing a sheet only records it; it is saved afterwards in small steps, oldest first, within a time budget', async () => {
+    const ks = [];
+    for (const nm of ['F-C2A CAPS', 'F-C2B CAPS', 'F-C2C CAPS']) ks.push(await makeKit({ comps: [[nm, 1, 1000, 'item']] }));
+    await fileFluence('c2-1', ks.map((k, i) => ({ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1100 + i * 10, items: [] } })));
+    const { syncIntakeArtwork } = await import('./artwork-intake.js');
+    await syncIntakeArtwork({ fluenceBudgetMs: 0 });
+    const statuses = async () => (await db.q(`SELECT status FROM fluence_mail_readings WHERE gmail_message_id = 'c2-1' ORDER BY id`)).map(x => x.status);
+    assert.deepEqual(await statuses(), ['queued', 'queued', 'queued'], 'filing the mail only records what was read');
+    assert.equal((await db.one(`SELECT status FROM avs.artwork_intake WHERE gmail_message_id = 'c2-1'`)).status, 'filed');
+    const { applyQueuedReadings } = await import('./fluence-mail.js');
+    assert.equal((await applyQueuedReadings({ budgetMs: 60000, max: 1 })).applied, 1, 'one step at a time');
+    assert.deepEqual(await statuses(), ['saved', 'queued', 'queued'], 'oldest first');
+    await sync();
+    assert.deepEqual(await statuses(), ['saved', 'saved', 'saved']);
+    assert.deepEqual(await Promise.all(ks.map(async k => (await k.now()).total)), [1100, 1110, 1120]);
+  });
+
+  test('review C2: a reading that keeps failing to save is held after a few tries, never retried for ever', async () => {
+    const k = await makeKit({ comps: [['F-C2D CAPS', 1, 1000, 'item']] });
+    await fileFluence('c2-2', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1200, items: [] } }]);
+    const { syncIntakeArtwork } = await import('./artwork-intake.js');
+    await syncIntakeArtwork({ fluenceBudgetMs: 0 });
+    await db.q(`UPDATE fluence_mail_readings SET attempts = 5 WHERE gmail_message_id = 'c2-2'`);
+    await sync();
+    const h = await reading('c2-2');
+    assert.equal(h.status, 'held');
+    assert.match(h.hold_reason, /could not be saved after 5 tries/);
+    assert.equal((await k.now()).total, 1000);
+  });
+
+  test('review: an older mail filed after a newer one was saved never undoes the newer one', async () => {
+    const k = await makeKit({ comps: [['F-OLD CAPS', 1, 1000, 'item']] });
+    await fileFluence('old-2', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1150, items: [] } }]);
+    await sync();
+    assert.equal((await reading('old-2')).status, 'saved');
+    await fileFluence('old-1', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1100, items: [] } }], { received_at: new Date(Date.now() - 3 * 86400e3).toISOString() });
+    await sync();
+    const r = await reading('old-1');
+    assert.equal(r.status, 'held');
+    assert.match(r.hold_reason, /a newer mail/);
+    assert.equal((await k.now()).total, 1150);
+  });
+
+  test('review I1: the carton\'s own MRP counts — an edit in Masters after the mail holds it, a drop against it holds it, a PO is compared with it', async () => {
+    const k = await makeKit({ total: 1000, carton: 1000, comps: [['F-I1A CAPS', 1, 1000, 'item']] });
+    const mailAt = new Date(Date.now() - 86400e3).toISOString();
+    const ed = await call('admin', 'PUT', `/products/${k.prod}`, { mrp: 1200 });
+    assert.equal(ed.status, 200, JSON.stringify(ed.body));
+    await fileFluence('i1-1', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 850, items: [] } }], { received_at: mailAt });
+    await sync();
+    const r = await reading('i1-1');
+    assert.equal(r.status, 'held');
+    assert.match(r.hold_reason, /carton MRP 1200 → 850 is more than 25 % lower/);
+    assert.match(r.hold_reason, /changed by Art admin after this mail/);
+    assert.equal((await k.now()).carton, 1200);
+    await fileFluence('i1-2', [{ source: 'po', kit_code: k.code, sure: true, mrp: { kit_total: 1000, items: [] } }]);
+    await sync();
+    assert.match(JSON.stringify((await reading('i1-2')).changes), /carton MRP: master 1200, PO 1000/);
+  });
+
+  test('review I2: a job linked to a carton with no kit gets that carton\'s kit; a part carton\'s job its outer kit; a name two kits share is held — no master is made', async () => {
+    await fluenceSetup();
+    const board = await db.one(`SELECT id FROM materials WHERE category = 'board' ORDER BY id LIMIT 1`);
+    const bare = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id, mrp) VALUES ($1, 'I2 BARE KIT', 'RVB-701', $2, 500) RETURNING id`, [fx.cust, board.id]);
+    const products = async () => (await db.one('SELECT count(*)::int AS n FROM products')).n;
+    const n0 = await products();
+    const a = await artworkFor({ name: 'I2 BARE KIT', prod: bare.id }, 'i2-1', { prescription: { lines: [{ item: 'F-I2A CAPS', dosage: '1', morning: 1 }] }, mrp: { kit_total: 550, items: [{ item: 'F-I2A CAPS', mrp: 550 }] } });
+    await approve(a.r.artwork_version_id);
+    const r1 = await reading('i2-1r');
+    assert.equal(r1.status, 'saved', r1.hold_reason || '');
+    assert.equal(await products(), n0, 'no new carton master');
+    assert.equal(r1.created_product_id, null);
+    assert.equal(r1.kit_id, (await db.one('SELECT id FROM fluence_kits WHERE product_id = $1', [bare.id])).id, 'the kit was made for the carton the job is linked to');
+    const outer = await makeKit({ comps: [['F-I2B CAPS', 1, 500, 'item']] });
+    const part = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id) VALUES ($1, 'I2 LEAFLET', 'RVB-702', $2) RETURNING id`, [fx.cust, board.id]);
+    await db.q(`INSERT INTO fluence_part_cartons (product_id, outer_product_id, part) VALUES ($1, $2, 'leaflet')`, [part.id, outer.prod]);
+    const n1 = await products();
+    const b = await artworkFor({ name: 'I2 LEAFLET', prod: part.id }, 'i2-2', { prescription: { lines: [{ item: 'F-I2B CAPS', dosage: '2', morning: 2 }] }, mrp: { kit_total: 1020, items: [] } });
+    await approve(b.r.artwork_version_id);
+    const r2 = await reading('i2-2r');
+    assert.equal(r2.status, 'saved', r2.hold_reason || '');
+    assert.equal(r2.kit_id, outer.kit, 'the part carton reads its outer carton\'s kit');
+    assert.equal(await products(), n1);
+    await makeKit({ name: 'I2 TWIN KIT', comps: [['F-I2C CAPS', 1, 500, 'item']] });
+    await makeKit({ name: 'I2 TWIN KIT', comps: [['F-I2D CAPS', 1, 500, 'item']] });
+    const n2 = await products();
+    const c = await artworkFor({ name: 'I2 TWIN KIT' }, 'i2-3', { prescription: { lines: [{ item: 'F-I2C CAPS', dosage: '1' }] }, mrp: { kit_total: 600, items: [] } });
+    await approve(c.r.artwork_version_id);
+    const r3 = await reading('i2-3r');
+    assert.equal(r3.status, 'held');
+    assert.match(r3.hold_reason, /two kits are named I2 TWIN KIT/);
+    assert.equal(await products(), n2, 'nothing made on a guess');
+  });
+
+  test('review I3: Apply is not for a reading waiting for the client, one that matched no kit, or an artwork whose version is not approved', async () => {
+    const k = await makeKit({ comps: [['F-I3A CAPS', 1, 1000, 'item']] });
+    const a = await artworkFor(k, 'i3-1', { prescription: { lines: [{ item: 'F-I3A CAPS', dosage: '1' }] }, mrp: { kit_total: 1000, items: [] } });
+    assert.equal(a.r.status, 'waiting_approval');
+    const w = await call('artist', 'POST', `/fluence/mail-readings/${a.r.id}/apply`);
+    assert.equal(w.status, 409);
+    assert.match(w.body.error, /Approved by hand/);
+    await fileFluence('i3-2', [{ source: 'mrp_sheet', kit_name: 'I3 NO SUCH KIT', sure: true, mrp: { kit_total: 100, items: [] } }]);
+    await sync();
+    const nm = await reading('i3-2');
+    assert.equal(nm.status, 'not_matched');
+    assert.equal((await call('artist', 'POST', `/fluence/mail-readings/${nm.id}/apply`)).status, 409);
+    await db.q(`UPDATE fluence_mail_readings SET status = 'held', hold_reason = 'a test hold' WHERE id = $1`, [a.r.id]);
+    const h = await call('artist', 'POST', `/fluence/mail-readings/${a.r.id}/apply`);
+    assert.equal(h.status, 409);
+    assert.match(h.body.error, /not approved/);
+  });
+
+  test('review I4/I5: one notice per mail — management always, Planning when something is held; held rows stay to look at until a person keeps or applies them', async () => {
+    const ks = [await makeKit({ comps: [['F-I4A CAPS', 1, 1000, 'item']] }), await makeKit({ comps: [['F-I4B CAPS', 1, 1000, 'item']] })];
+    const planner = await tokenFor('fplanner');
+    const boss = await db.one(`SELECT id FROM users WHERE email = 'art-boss@test.local'`);
+    await sync();   // what earlier tests left untold is told first, so only this mail is counted
+    const mark = (await db.one('SELECT COALESCE(max(id), 0)::int AS m FROM notifications')).m;
+    await fileFluence('i4-1', [
+      { source: 'mrp_sheet', kit_code: ks[0].code, sure: true, mrp: { kit_total: 1100, items: [] } },
+      { source: 'mrp_sheet', kit_code: ks[1].code, sure: true, mrp: { kit_total: 600, items: [] } },
+    ]);
+    await sync();
+    const mine = async uid => db.q('SELECT kind, title FROM notifications WHERE user_id = $1 AND id > $2 ORDER BY id', [uid, mark]);
+    const b = await mine(boss.id);
+    assert.deepEqual(b.map(n => n.kind), ['fluence_mail'], 'management: one notice for the mail, no bell per kit');
+    assert.match(b[0].title, /1 saved, 1 held/);
+    assert.deepEqual((await mine(planner.id)).map(n => n.kind), ['fluence_mail'], 'Planning hears of what is held');
+    const held = await reading('i4-1');
+    assert.equal(held.status, 'held');
+    const open = async () => (await call('boss', 'GET', '/fluence/mail-readings?view=open')).body.rows.map(x => x.id);
+    assert.ok((await open()).includes(held.id));
+    const all = await call('boss', 'POST', '/fluence/mail-readings/ack', { ids: await open() });
+    assert.equal(all.status, 200, JSON.stringify(all.body));
+    assert.ok((await open()).includes(held.id), 'acknowledging is not deciding: the held one stays');
+    const keep = await call('artist', 'POST', `/fluence/mail-readings/${held.id}/keep`);
+    assert.equal(keep.status, 200, JSON.stringify(keep.body));
+    assert.equal((await reading('i4-1')).status, 'dismissed');
+    assert.ok(!(await open()).includes(held.id));
+    await sync();
+    assert.equal((await mine(boss.id)).length, 1, 'told once');
+  });
+
+  test('review I6: before the Fluence table exists, a client\'s approval still lands and the artwork window still opens', async () => {
+    await fileMails([mailOf('i6-1', [{ product_name: 'I6 KIT', pack_type: 'carton', files: [f('I6 KIT.cdr', 'i6')] }], { received_at: new Date().toISOString() })]);
+    await sync();
+    const v = await db.one(`SELECT v.id, v.job_id FROM artwork_versions v JOIN artwork_jobs j ON j.id = v.job_id WHERE j.product_name = 'I6 KIT'`);
+    await db.q('ALTER TABLE fluence_mail_readings RENAME TO fluence_mail_readings_away');
+    try {
+      await approve(v.id);
+      assert.equal((await db.one('SELECT stage FROM artwork_versions WHERE id = $1', [v.id])).stage, 'approved');
+      const w = await call('artist', 'GET', `/artwork/register/${v.job_id}`);
+      assert.equal(w.status, 200, JSON.stringify(w.body));
+      await sync();
+    } finally {
+      await db.q('ALTER TABLE fluence_mail_readings_away RENAME TO fluence_mail_readings');
+    }
+  });
+
+  test('review: a reading filed before its own artwork mail (the same time) still waits with that artwork', async () => {
+    await fluenceSetup();
+    const at = new Date().toISOString();
+    await fileMails([
+      { mailbox_email: BIZ, kind: 'fluence', gmail_message_id: 'm2-1#fluence', gmail_thread_id: 't-m2-1', subject: 'Artwork m2', from_email: 'graphics@fluence.test', received_at: at,
+        items: [{ source: 'artwork', kit_name: 'M2 ORDER KIT', sure: true, prescription: { lines: [{ item: 'F-M2 CAPS', dosage: '1' }] } }] },
+      mailOf('m2-1', [{ product_name: 'M2 ORDER KIT', pack_type: 'carton', files: [f('M2 ORDER KIT.cdr', 'm21')] }], { gmail_thread_id: 't-m2-1', customer_name: 'Fluence Test Pharma', from_email: 'graphics@fluence.test', received_at: at }),
+    ]);
+    await sync();
+    const r = await reading('m2-1#fluence');
+    assert.equal(r.status, 'waiting_approval', r.hold_reason || '');
+    assert.ok(r.artwork_version_id);
+  });
+
+  test('review: Apply and Undo change a kit, so they need a Fluence tab a kit is edited from', async () => {
+    await tokenFor('mailonly', { fluence_tabs: ['mail'] });
+    const k = await makeKit({ comps: [['F-M7 CAPS', 1, 1000, 'item']] });
+    await fileFluence('m7-1', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 600, items: [] } }]);
+    await sync();
+    const r = await reading('m7-1');
+    assert.equal(r.status, 'held');
+    const res = await call('mailonly', 'POST', `/fluence/mail-readings/${r.id}/apply`);
+    assert.equal(res.status, 403);
+    assert.match(res.body.error, /Kits/);
+    assert.equal((await k.now()).total, 1000);
   });
 });

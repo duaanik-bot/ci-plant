@@ -23,6 +23,7 @@ import { artworkNoticeSoft, noticeWorkWaiting } from './artwork-notice.js';
 import { applyVerdict } from './artwork-flow.js';
 import { moveStage, tickOrderLines } from './artwork-approval.js';
 import { cancelDraftsOf, markSentIn, settleProofMailsSoft } from './artwork-settle.js';
+import { fileFluenceRow, applyApprovedReadings, workFluenceMailSoft } from './fluence-mail.js';
 import { parseItemCode, productFromFileName, sourcePrint, placeVersion, versionLabel, jobKey } from './artwork-register.js';
 
 export const AVS_RUNNER = 'AVS (office)';
@@ -121,7 +122,8 @@ async function fileIntakeRow(qc, oc, row) {
   [row.mailbox_email, row.gmail_message_id, row.gmail_thread_id, row.subject, row.from_name, row.from_email, row.to_text,
     row.received_at, row.body_text, JSON.stringify(list(row.attachments)), safeUrl(row.view_url), row.summary]);
   if (!mail) return answer('skipped', { why: 'filed before' });
-  if (row.kind === 'reply') return fileReply(qc, row, mail);
+  if (row.kind === 'reply') return fileReply(qc, oc, row, mail);
+  if (row.kind === 'fluence') return fileFluenceRow(qc, oc, row, mail);
   if (row.kind === 'proof_by_hand') return fileHandProof(qc, oc, row, mail);
 
   const cust = await resolveCustomer(oc, { customer_name: row.customer_name, contact_email: row.from_email });
@@ -201,7 +203,7 @@ const threadVersions = (qc, threadId) => qc(`
 // Each item: { proof_nos, verdict: approval | changes | unclear, remarks }. It answers the proofs that had reached the
 // client before it was written (a reply older than a version's newest proof answers an older proof: that version does
 // not move). Only versions out for approval in this thread move; an approval ticks the product's open order lines.
-async function fileReply(qc, row, mail) {
+async function fileReply(qc, oc, row, mail) {
   const when = row.received_at ? new Date(row.received_at) : new Date();
   const sent = row.gmail_thread_id ? await qc(`
     SELECT p.version_id, p.proof_no, p.sent_at, v.stage FROM artwork_proofs p JOIN artwork_versions v ON v.id = p.version_id
@@ -230,6 +232,8 @@ async function fileReply(qc, row, mail) {
       }
     }
   }
+  // Fluence: what was read from an approved version's artwork is saved to the master now (owner, 18 Nov 2026)
+  await applyApprovedReadings(qc, oc, moved.filter(x => x.stage === 'approved').map(x => x.version_id));
   await audit('artwork_intake', row.id, 'reply', `AVS intake ${row.id} — client reply: ${moved.map(x => `${x.version_id}→${x.stage}`).join(', ') || 'nothing moved'}`, qc, AVS_RUNNER);
   return answer('filed', { reply: moved, order_lines: lines, mail_id: mail.id });
 }
@@ -302,18 +306,25 @@ async function fileBareMail(qc, oc, row, problem) {
 export const MAX_PER_CALL = 100;
 const INTAKE_LOCK = 727100;           // pg advisory lock: one artwork intake row at a time
 const PASSING = new Set(['40001', '40P01', '55P03', '57014']);
-export async function syncIntakeArtwork({ max = MAX_PER_CALL } = {}) {
+// A Fluence mail's readings are only recorded while its row is filed; they are saved right after, in small steps,
+// within what is left of FLUENCE_UNTIL of this call (fluence-mail.js) — so the steps after this one (the alert, the
+// notice mail) still have time inside the function's limit.
+const FLUENCE_UNTIL = 18000;
+export async function syncIntakeArtwork({ max = MAX_PER_CALL, fluenceBudgetMs = 10000 } = {}) {
+  const started = Date.now();
   const out = { filed: [], skipped: [], refused: [] };
   for (let n = 0; n < max; n++) {
     let done;
     try {
       done = await tx(async (qc, oc) => {
         // One row at a time across every caller (the robot's call and the polls), in the order the mails were written,
-        // so a reply is never read before the proof it answers. Another caller filing right now → this one stops and
+        // so a reply is never read before the proof it answers — and a Fluence reading never before the artwork mail
+        // it was read from (same time: the reading goes second). Another caller filing right now → this one stops and
         // leaves the queue to it.
         const lock = await oc(`SELECT pg_try_advisory_xact_lock(${INTAKE_LOCK}) AS ok`);
         if (!lock?.ok) return { busy: true };
-        const row = await oc(`SELECT * FROM avs.artwork_intake WHERE status = 'new' ORDER BY received_at NULLS LAST, id LIMIT 1 FOR UPDATE SKIP LOCKED`);
+        const row = await oc(`SELECT * FROM avs.artwork_intake WHERE status = 'new'
+                               ORDER BY received_at NULLS LAST, (kind = 'fluence'), id LIMIT 1 FOR UPDATE SKIP LOCKED`);
         if (!row) return null;
         await qc('SAVEPOINT intake_row');
         let a;
@@ -341,22 +352,26 @@ export async function syncIntakeArtwork({ max = MAX_PER_CALL } = {}) {
     if (!done || done.busy) break;
     out[done.status].push(done);
   }
+  out.fluence = await workFluenceMailSoft({ budgetMs: Math.max(0, Math.min(fluenceBudgetMs, FLUENCE_UNTIL - (Date.now() - started))) });
   return out;
 }
 
 // For readers (the two-minute /drafts/summary poll): copy only when something waits, a few rows at a time, and never
 // fail the read.
 const SOFT_MAX = 10;
+const SOFT_FLUENCE_MS = 4000;
 export async function syncIntakeArtworkSoft() {
   const none = { filed: [], skipped: [], refused: [] };
   try {
     await settleProofMailsSoft();               // what really happened to approval mails, before replies are read
     if (!await one(`SELECT 1 AS y FROM avs.artwork_intake WHERE status = 'new' LIMIT 1`)) {
-      // nothing new to file — but a notice may still be waiting for mppchd's Gmail, or due a retry
+      // nothing new to file — but a notice may still be waiting for mppchd's Gmail, or due a retry; and a Fluence
+      // sheet's readings may still be being saved
       if (await noticeWorkWaiting()) await artworkNoticeSoft();
+      await workFluenceMailSoft({ budgetMs: SOFT_FLUENCE_MS });
       return none;
     }
-    const out = await syncIntakeArtwork({ max: SOFT_MAX });
+    const out = await syncIntakeArtwork({ max: SOFT_MAX, fluenceBudgetMs: SOFT_FLUENCE_MS });
     await notifyNewArtworkSoft();
     await artworkNoticeSoft();
     return out;

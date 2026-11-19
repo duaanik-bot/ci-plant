@@ -37,7 +37,8 @@ const fail = (status, message, body) => Object.assign(new Error(message), { stat
 // management (Masters → Users: Management) is told in the same transaction:
 // what changed, on which kit, and who signed it. Staff changes stay quiet.
 export async function tellManagement(user, { kitId = null, subject, change, link = null }, qc) {
-  if (!user?.outside) return;
+  // A mail's reading (fluence-mail.js) is told once per mail, not per kit: its user is quiet.
+  if (!user?.outside || user.quiet) return;
   const users = await qc('SELECT id, active, is_management FROM users');
   await notify(notificationRecipients(users, 'is_management', user.id), {
     kind: 'fluence_change',
@@ -71,7 +72,7 @@ export async function recordMrpChanges(changes, user, from, qc) {
       mrpValue(c.oldMrp), mrpValue(c.newMrp), user.name, user.id ?? null, user.outside ? 1 : 0, from ?? null]);
     ids.push(row.id);
   }
-  if (user.outside) {
+  if (user.outside && !user.quiet) {
     const users = await qc('SELECT id, active, is_management FROM users');
     const lines = real.map(mrpLine);
     await notify(notificationRecipients(users, 'is_management', user.id), {
@@ -435,14 +436,14 @@ const outerCartonOf = (productId, oc) => oc(`
   WHERE pc.product_id = $1 AND NOT EXISTS (SELECT 1 FROM fluence_kits own WHERE own.product_id = $1)`, [productId]);
 
 // The kit a carton READS right now, if any — no lock, never creates one.
-const kitIdOf = async (productId, oc) => (await oc(`
+export const kitIdOf = async (productId, oc) => (await oc(`
   SELECT k.id FROM products p ${KIT_OF_CARTON} WHERE p.id = $1 AND k.id IS NOT NULL`, [productId]))?.id ?? null;
 
 // The kit a product's master hangs off: its own, or — for a part carton — its
 // outer carton's, so an edit made from a part changes that one kit. A Fluence
 // product with neither gets its own the first time someone records something
 // for it; a part whose outer carton has none starts it on the OUTER carton.
-async function kitForProduct(product, user, qc, oc) {
+export async function kitForProduct(product, user, qc, oc) {
   const own = await oc('SELECT * FROM fluence_kits WHERE product_id = $1 FOR UPDATE', [product.id]);
   if (own) return { kit: own, outer: null };
   const outer = await outerCartonOf(product.id, oc);
@@ -462,7 +463,7 @@ async function kitForProduct(product, user, qc, oc) {
 // Said on the revision and the audit line when the save came from a part.
 const fromPart = (product, outer) => (outer ? `Saved from part carton ${product.code} ${product.name} (${outer.part}) — the kit of its outer carton ${outer.code}` : null);
 
-const rxSnapshot = async (kitId, qc) => {
+export const rxSnapshot = async (kitId, qc) => {
   const rx = (await qc('SELECT general_instructions, remarks, revision FROM fluence_prescriptions WHERE kit_id = $1', [kitId]))[0];
   if (!rx) return null;
   const lines = await qc(`
@@ -475,7 +476,7 @@ const rxSnapshot = async (kitId, qc) => {
   return { general_instructions: rx.general_instructions, remarks: rx.remarks, revision: rx.revision, lines };
 };
 
-const componentsSnapshot = (kitId, qc) => qc(`
+export const componentsSnapshot = (kitId, qc) => qc(`
   SELECT kc.sr, kc.inner_product_id, ip.name, kc.qty_per_kit, kc.mrp_in_kit, kc.remarks
   FROM fluence_kit_components kc JOIN fluence_inner_products ip ON ip.id = kc.inner_product_id
   WHERE kc.kit_id = $1 ORDER BY kc.sr, kc.id`, [kitId]);
@@ -564,6 +565,19 @@ export async function keepRxInStep(kitId, user, from, qc, oc) {
   return { revision };
 }
 
+// A kit's total MRP and its carton's MRP (products.mrp, the yellow MRP every station shows), moved together, with the
+// same trail an item's MRP has (fluence_mrp_changes, subject 'kit_total'). Used by the Fluence-mail reader (18 Nov
+// 2026); nothing happens when the figure is the same.
+export async function setKitTotalMrp({ kit, product, newTotal, user, from }, qc) {
+  if (newTotal == null || sameMrp(kit.kit_total_mrp, newTotal)) return null;
+  const label = product ? `${product.code} ${product.name}` : kit.kit_name;
+  await qc('UPDATE fluence_kits SET kit_total_mrp = $2, updated_at = now(), updated_by = $3 WHERE id = $1', [kit.id, newTotal, user.name]);
+  if (product) await qc('UPDATE products SET mrp = $2 WHERE id = $1', [product.id, newTotal]);
+  const ids = await recordMrpChanges([{ subject: 'kit_total', kitId: kit.id, kitName: label, itemName: 'Kit total (carton MRP)', oldMrp: kit.kit_total_mrp, newMrp: newTotal }], user, from, qc);
+  await audit('fluence_kit', kit.id, 'kit_total_mrp', `${label} — kit MRP ${mrpValue(kit.kit_total_mrp) ?? '—'} → ${mrpValue(newTotal)}${product ? ' (carton MRP too)' : ''}, from ${FLUENCE_CONTEXTS[from] || from}`, qc, user.name);
+  return { ids, old: kit.kit_total_mrp, new: newTotal };
+}
+
 // ── Kit contents and prescription, in one save ───────────────────────────────
 // What is in the box and how each item is taken are edited together and saved
 // in ONE transaction; each keeps its own revision, minted only when it changed.
@@ -572,7 +586,7 @@ export async function keepRxInStep(kitId, user, from, qc, oc) {
 // prescription that disagree. Both halves carry what the editor opened
 // (base_components, base_revision): a colleague's save in between is refused,
 // never overwritten.
-async function saveKitAndRx({ kit, product, outer, body, user, from }, qc, oc) {
+export async function saveKitAndRx({ kit, product, outer, body, user, from }, qc, oc) {
   const comps = normaliseComponentsPayload(body);
   const rx = normaliseRxPayload(body);
   const errors = [...comps.errors, ...rx.errors];

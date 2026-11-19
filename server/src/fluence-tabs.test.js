@@ -14,7 +14,7 @@ const root = new URL('../../', import.meta.url);
 const read = p => readFileSync(new URL(p, root), 'utf8');
 
 test('the tabs are the Fluence page\'s chips, in its order, and every Kit Studio view is one of them', () => {
-  assert.deepEqual(FLUENCE_TAB_KEYS, ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'mrp', 'settings']);
+  assert.deepEqual(FLUENCE_TAB_KEYS, ['overview', 'kits', 'build', 'drafts', 'inner', 'products', 'customer', 'changes', 'mrp', 'mail', 'settings']);
   assert.deepEqual([...new Set(FLUENCE_TABS.map(t => t.group))], ['Kits', 'Masters', 'Records']);
   for (const t of FLUENCE_TABS) assert.ok(t.label && t.hint, t.key);
   const html = read('client/public/kit-studio-app/index.html');
@@ -91,7 +91,7 @@ test('every write of the Fluence module and Kit Studio belongs to a tab', () => 
   // A download's record belongs to whichever tab offered the file — the list it
   // exports was already served to that tab. It writes the record, not the master.
   const NO_TAB = new Set(['POST /fluence/downloads']);
-  for (const file of ['server/src/routes/kitstudio.js', 'server/src/routes/fluence.js']) {
+  for (const file of ['server/src/routes/kitstudio.js', 'server/src/routes/fluence.js', 'server/src/routes/fluence-mail.js']) {
     const src = read(file);
     for (const [, m, p] of src.matchAll(/r\.(put|post|delete)\('([^']+)'/g)) {
       if (NO_TAB.has(`${m.toUpperCase()} ${p}`)) continue;
@@ -103,6 +103,20 @@ test('every write of the Fluence module and Kit Studio belongs to a tab', () => 
   assert.deepEqual(tabsForRequest('GET', '/fluence/changes'), ['changes']);
   assert.deepEqual(tabsForRequest('GET', '/fluence/kits'), ['customer']);
   assert.equal(tabsForRequest('GET', '/fluence/kits/3'), null);
+});
+
+test('From Fluence mail is Colour Impressions\' own: never a customer\'s login, ticked or not; the API asks for the tab', () => {
+  const customer = { role: 'planner', modules: ['fluence'], fluence_tabs: null };
+  assert.ok(!fluenceTabsOf(customer).includes('mail'), 'a customer\'s login with no ticks');
+  assert.ok(!fluenceTabsOf({ ...customer, fluence_tabs: ['mail', 'kits'] }).includes('mail'), 'nor when ticked');
+  assert.deepEqual(fluenceTabsOf(customer), FLUENCE_TAB_KEYS.filter(k => k !== 'mail'), 'every other tab as before');
+  assert.ok(fluenceTabsOf({ role: 'planner', modules: ['planning', 'fluence'], fluence_tabs: null }).includes('mail'), 'staff have it');
+  const narrowed = accessOf({ role: 'planner', modules: ['planning', 'fluence'], fluence_tabs: ['kits'], email: 'x' });
+  for (const [m, p] of [['GET', '/fluence/mail-readings'], ['POST', '/fluence/mail-readings/4/apply'], ['POST', '/fluence/mail-readings/4/undo'], ['POST', '/fluence/mail-readings/4/ack']]) {
+    assert.equal(gateDecision(p, narrowed, m), 'The Fluence tab “From Fluence mail” is not ticked for this login.', `${m} ${p}`);
+  }
+  assert.equal(gateDecision('/fluence/mail-readings', accessOf({ role: 'planner', modules: ['planning', 'fluence'], fluence_tabs: ['mail'], email: 'x' }), 'GET'), 'ok');
+  assert.notEqual(gateDecision('/fluence/mail-readings', accessOf({ ...customer, email: 'fluence01' }), 'GET'), 'ok');
 });
 
 test('a refusal names the tab, and Kit Studio shows its own', () => {

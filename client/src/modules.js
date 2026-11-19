@@ -66,6 +66,7 @@ export const FLUENCE_TABS = [
   { key: 'customer', label: 'Customer list', group: 'Masters', hint: 'The customer’s kit list and the carton each is printed as' },
   { key: 'changes', label: 'Change log', group: 'Records', hint: 'Every change, who made it, signed' },
   { key: 'mrp', label: 'MRP updates', group: 'Records', hint: 'Every MRP change, old → new, and Colour Impressions’ acknowledgment' },
+  { key: 'mail', label: 'From Fluence mail', group: 'Records', staff: true, hint: 'Prescriptions, MRPs and new kits read from Fluence’s mails — saved, held or compared' },
   { key: 'settings', label: 'Export & settings', group: 'Records', view: 'export', hint: 'Spreadsheet exports and the carton clearances' },
 ];
 export const FLUENCE_TAB_KEYS = FLUENCE_TABS.map(t => t.key);
@@ -74,11 +75,15 @@ export const FLUENCE_TAB_KEYS = FLUENCE_TABS.map(t => t.key);
 export const KIT_EDIT_TABS = ['kits', 'products', 'customer'];
 
 // The Fluence tabs this login may open, in the page's order. Admins, and a
-// login with no tab ticks at all (NULL), open every tab.
+// login with no tab ticks at all (NULL), open every tab — except that a tab
+// marked staff (Colour Impressions' own, like From Fluence mail) is never a
+// customer's login's, ticked or not.
 export function fluenceTabsOf(user) {
   if (!user) return [];
-  if (user.role === 'admin' || !Array.isArray(user.fluence_tabs)) return FLUENCE_TAB_KEYS.slice();
-  return FLUENCE_TAB_KEYS.filter(k => user.fluence_tabs.includes(k));
+  if (user.role === 'admin') return FLUENCE_TAB_KEYS.slice();
+  const keys = isFluenceOnly(user) ? FLUENCE_TABS.filter(t => !t.staff).map(t => t.key) : FLUENCE_TAB_KEYS;
+  if (!Array.isArray(user.fluence_tabs)) return keys.slice();
+  return keys.filter(k => user.fluence_tabs.includes(k));
 }
 export function canOpenFluenceTab(user, key) {
   return fluenceTabsOf(user).includes(key);

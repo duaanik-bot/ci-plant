@@ -18,7 +18,8 @@
 // database's SQL_ASCII encoding lower-cases and splits spaces byte by byte.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
+import { audit } from '../helpers.js';
+import { createDraftProduct, fluenceKitFor } from '../artwork-masters.js';
 import { requireRole } from '../auth.js';
 import { mayArtwork } from '../artwork-intake.js';
 import { resendGaveUp, artworkNoticeSoft } from '../artwork-notice.js';
@@ -106,6 +107,10 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
                                WHERE version_id = ANY($1::int[]) ORDER BY id DESC`, [vIds]);
     const proofMails = await q(`SELECT id, version_ids, to_text, cc_text, subject, body_text, draft_url, status, error, created_by, created_at, sent_by, sent_at
                                   FROM artwork_proof_mails WHERE version_ids && $1::int[] ORDER BY id DESC`, [vIds]);
+    // (none before the Fluence-mail migration is applied: the window opens all the same)
+    const readingsOf = await q(`SELECT id, artwork_version_id, status, hold_reason, kit_name, read_from, changes, saved_at, created_product_id
+                                  FROM fluence_mail_readings WHERE artwork_version_id = ANY($1::int[]) ORDER BY id DESC`, [vIds])
+      .catch(e => (e?.code === '42P01' ? [] : Promise.reject(e)));
     const kld = job.product_id ? await one(`SELECT cs.id, cs.size_key FROM costings c JOIN costing_sizes cs ON cs.id = c.size_id AND cs.kld IS NOT NULL
                                              WHERE c.product_id = $1 ORDER BY c.id DESC LIMIT 1`, [job.product_id]).catch(() => null) : null;
     const files = await q(`SELECT f.id, f.version_id, f.role, f.file_name, f.ext, f.size_bytes, f.sha256, f.drive_file_id, f.drive_url, f.link_url, f.saved_by
@@ -121,6 +126,7 @@ r.get('/artwork/register/:jobId', async (req, res, next) => {
       v.actions = actionsFor(v);
       v.exports = exportsOf.filter(e => e.version_id === v.id);
       v.proofs = proofsOf.filter(p => p.version_id === v.id);
+      v.fluence = readingsOf.filter(x => x.artwork_version_id === v.id);
       v.proof_mails = proofMails.filter(pm => pm.version_ids.includes(v.id)).map(pm => ({ ...pm, attachments: proofsOf.filter(p => p.proof_mail_id === pm.id).map(p => ({ name: p.file_name, drive_url: p.drive_url })) }));
     }
     res.json({ job, versions, events, kld: kld ? { size_id: kld.id, size_key: kld.size_key, pdf: `/api/costing/sizes/${kld.id}/kld.pdf` } : null });
@@ -270,26 +276,13 @@ r.post('/artwork/register/:jobId/create-product', requireRole('planner'), async 
         const e = preview.existing[0];
         return { status: 409, error: `${e.code} ${e.name} is already in the masters${e.draft ? ' (a draft)' : ''} — pick it under Match to a product.` };
       }
-      const code = await nextProductCode(job.customer_id, qc, oc);
-      const board = await placeholderBoardId(oc);
-      if (!board) return { status: 409, error: 'There is no board material at all yet — create one in Masters first.' };
-      const p = await oc(`INSERT INTO products (customer_id, name, code, internal_carton_code, party_item_code, board_material_id, spec_incomplete,
-                                                 product_type, is_draft, draft_source)
-                          VALUES ($1, $2, $3, $3, $4, $5, 1, $6, 1, 'artwork') RETURNING id, code, name`,
-      [job.customer_id, preview.name, code, preview.party_item_code, board, preview.product_type]);
-      await audit('products', p.id, 'create', `Draft master ${p.code} ${p.name} made from artwork ${job.job_no}`, qc, req.user.name);
+      const p = await createDraftProduct(qc, oc, { customerId: job.customer_id, name: preview.name, partyItemCode: preview.party_item_code,
+        productType: preview.product_type, draftSource: 'artwork', by: req.user.name, note: `made from artwork ${job.job_no}` });
       await qc('UPDATE artwork_jobs SET product_id = $2, product_name = $3, to_sort = false WHERE id = $1', [job.id, p.id, p.name]);
       await qc(`INSERT INTO artwork_events (job_id, action, detail, by_name) VALUES ($1, 'product_created', $2, $3)`,
         [job.id, JSON.stringify({ product_id: p.id, code: p.code, product_name: p.name }), req.user.name]);
       await audit('artwork_job', job.id, 'map', `${job.job_no} is ${p.code} ${p.name} (new draft master)`, qc, req.user.name);
-      let kitId = null;
-      if (preview.fluence) {
-        const kit = await oc(`INSERT INTO fluence_kits (kit_name, source_ref, product_id, link_method, linked_at, linked_by, created_by, updated_by)
-                              VALUES ($1, $2, $3, 'created_from_product', now(), $4, $4, $4)
-                              ON CONFLICT (source_ref) DO UPDATE SET product_id = EXCLUDED.product_id, updated_at = now() RETURNING id`,
-        [p.name, `erp-product:${p.id}`, p.id, req.user.name]);
-        kitId = kit.id;
-      }
+      const kitId = preview.fluence ? (await fluenceKitFor(qc, oc, p, req.user.name)).id : null;
       // artwork approved before the job had a product: its open lines (none yet for a new master) — kept for symmetry
       await tickIfApproved(qc, p.id, req.user.name);
       return { status: 200, product: p, fluence_kit_id: kitId };

@@ -2904,6 +2904,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261117100000_artwork_dedup_notice.sql'));
   // The artwork workflow (17 Nov 2026): stages, designer exports, proofs, approval mails, upload keys. Idempotent.
   await pool.query(migration('20261118100000_artwork_workflow.sql'));
+  // Fluence readings from Fluence's mails (18 Nov 2026): fluence_mail_readings, kit-total MRP trail. Idempotent; after
+  // the Fluence tables and the artwork register, which it references.
+  await pool.query(migration('20261118120000_fluence_mail.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables
