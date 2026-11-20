@@ -190,7 +190,8 @@ describe('HR accounts level and hide list', {
     const status = Object.fromEntries((await db.q(`SELECT person_id, payment_status FROM hr.run_lines`)).map((l) => [l.person_id, l.payment_status]));
     assert.deepEqual([status[S], status[P], status[G]], ['paid', 'pending', 'pending'], 'the hidden two stay for the owner to pay');
     ok(await call('accounts', 'POST', '/hr/staff-payments', { person_id: S, kind: 'advance', amount: 500 }));
-    assert.equal((await call('accounts', 'POST', '/hr/runs/2026-08/approve', {})).status, 403);
+    // Accounts may run the month's steps now (2026-11-20); a finalised month is not approved again.
+    assert.equal((await call('accounts', 'POST', '/hr/runs/2026-08/approve', {})).status, 409);
     // The pay channel dropdown (2026-11-15): a visible person's channel changes; a paid line keeps its channel;
     // a hidden person is not there; a code nobody has is refused.
     const moved = ok(await call('accounts', 'POST', `/hr/people/${S}/pay-channel`, { pay_channel: null }));
@@ -426,5 +427,32 @@ describe('HR accounts level and hide list', {
     const carry = (await db.one(`SELECT id FROM hr.people WHERE code = 'T-304'`)).id;
     const oct = ok(await call('admin', 'GET', '/hr/runs/2026-09/payslips')).body.slips.find((x) => x.person.id === carry);
     assert.equal(oct.advance.brought_forward, '0.00', 'nothing owed before September');
+  });
+
+  test('accounts unlocks a finalised month: its postings are taken back, audited, and finalising again posts them afresh', T, async () => {
+    const run = await db.one(`SELECT id, status FROM hr.runs WHERE month = $1`, [MONTH]);
+    assert.equal(run.status, 'finalised');
+    const posted = async () => ({
+      adv: (await db.q(`SELECT person_id, kind, amount::text AS amount FROM hr.advance_txns WHERE run_id = $1 AND source = 'payroll' ORDER BY person_id, kind`, [run.id])),
+      loan: (await db.q(`SELECT loan_id, principal_amount::text AS amount FROM hr.loan_txns WHERE run_id = $1 AND kind = 'payroll_recovery' ORDER BY loan_id`, [run.id])),
+    });
+    const before = await posted();
+    // August's own postings, plus one more payroll posting of the run (as a month with a sheet advance would carry).
+    await db.q(`INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, run_id, source, note)
+                VALUES ($1, '2026-08-31', 'given', 1234, $2, 'payroll', 'Test posting')`, [S, run.id]);
+    const withExtra = await posted();
+    assert.ok(withExtra.adv.length > before.adv.length);
+    assert.equal((await call('accounts', 'POST', `/hr/runs/${MONTH}/unfinalise`, { reason: '' })).status, 400, 'a reason is required');
+    assert.equal((await call('viewer', 'POST', `/hr/runs/${MONTH}/unfinalise`, { reason: 'x' })).status, 403);
+    const res = ok(await call('accounts', 'POST', `/hr/runs/${MONTH}/unfinalise`, { reason: 'Wrong OT for one person' }));
+    clean(res, 'unfinalise');
+    assert.equal(res.body.run?.status ?? res.body.status, 'approved');
+    assert.deepEqual(await posted(), { adv: [], loan: [] }, 'every posting of the month is taken back');
+    const audit = await db.one(`SELECT detail FROM hr.audit_log WHERE entity = 'run' AND action = 'unfinalise' ORDER BY id DESC LIMIT 1`);
+    assert.equal(audit.detail.reason, 'Wrong OT for one person');
+    assert.equal(audit.detail.advance_txns_removed.length, withExtra.adv.length);
+    assert.equal((await call('accounts', 'POST', `/hr/runs/${MONTH}/unfinalise`, { reason: 'again' })).status, 409, 'an approved month is not unlocked');
+    ok(await call('accounts', 'POST', `/hr/runs/${MONTH}/finalise`, {}));
+    assert.deepEqual(await posted(), before, 'finalising again posts the same, once');
   });
 });

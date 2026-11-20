@@ -53,7 +53,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, Calculator, Check, ChevronLeft, ChevronRight, CornerUpLeft, FileUp, HandCoins, Lock, RefreshCw, Send,
+  AlertTriangle, Calculator, Check, ChevronLeft, ChevronRight, CornerUpLeft, FileUp, HandCoins, Lock, LockOpen, RefreshCw, Send,
   Landmark, ShieldCheck, UserPlus, Wallet,
 } from 'lucide-react';
 import {
@@ -509,6 +509,8 @@ export default function Payroll({ level }) {
   const canImport = levelAtLeast(level, 'accounts');
   const limited = hrRestricted();
   const canApprove = levelAtLeast(level, 'approver');
+  // The month's own steps — send back, approve, finalise, unlock — are accounts' too (owner, 2026-11-20).
+  const canRunMonth = levelAtLeast(level, 'accounts');
   const [params, setParams] = useSearchParams();
   const thisMonth = settlingMonth();   // the month being settled (2026-11-14): October's salary is paid in November
   const asked = params.get('month');
@@ -1253,10 +1255,10 @@ export default function Payroll({ level }) {
     }
   }
   if (status === 'submitted') {
-    reasons.push({ tone: 'info', key: 's', text: `Submitted ${by('submitted_by', 'submitted_at')}. ${canApprove ? 'Check the exceptions and the register, then approve or send it back.' : 'Waiting for an approver.'}` });
+    reasons.push({ tone: 'info', key: 's', text: `Submitted ${by('submitted_by', 'submitted_at')}. ${canRunMonth ? 'Check the exceptions and the register, then approve or send it back.' : 'Waiting for an approver.'}` });
   }
   if (status === 'approved') {
-    reasons.push({ tone: 'info', key: 'a', text: `Approved ${by('approved_by', 'approved_at')}. ${canApprove ? 'Finalising locks the month and posts advances and loan recoveries.' : 'Waiting to be finalised.'}` });
+    reasons.push({ tone: 'info', key: 'a', text: `Approved ${by('approved_by', 'approved_at')}. ${canRunMonth ? 'Finalising locks the month and posts advances and loan recoveries.' : 'Waiting to be finalised.'}` });
   }
   if (final) {
     const due = lines.filter(owes);
@@ -1365,15 +1367,22 @@ export default function Payroll({ level }) {
             {status === 'draft' && canPay && (
               <Button onClick={() => setDialog({ kind: 'submit' })} disabled={submitBlocked}><Send size={14} /> Submit for approval</Button>
             )}
-            {(status === 'submitted' || status === 'approved') && canApprove && (
+            {/* Accounts too (owner, 2026-11-20): send back, approve, finalise and unlock the month. */}
+            {(status === 'submitted' || status === 'approved') && canRunMonth && (
               <Button variant="secondary" onClick={() => setDialog({ kind: 'sendback' })}><CornerUpLeft size={14} /> Send back</Button>
             )}
-            {status === 'submitted' && canApprove && (
+            {status === 'submitted' && canRunMonth && (
               <Button onClick={() => setDialog({ kind: 'approve' })}><ShieldCheck size={14} /> Approve</Button>
             )}
-            {status === 'approved' && canApprove && (
+            {status === 'approved' && canRunMonth && (
               <Button onClick={() => setDialog({ kind: 'finalise' })}><Lock size={14} /> Finalise</Button>
             )}
+            {final && canRunMonth && (
+              <Button variant="secondary" disabled={laterFinal}
+                title={laterFinal ? 'A later month is finalised: unlock that one first' : 'Unlock this month: back to approved, its advance and loan postings taken back'}
+                onClick={() => setDialog({ kind: 'unfinalise' })}><LockOpen size={14} /> Unlock</Button>
+            )}
+            {run && <PayoutExport month={month} />}
           </div>
         </div>
         <div className="mt-4 border-t border-[#1D1D1F]/[0.06] pt-4">
@@ -1803,6 +1812,8 @@ export default function Payroll({ level }) {
           )}
         </ActionDialog>
       )}
+      {dialog?.kind === 'unfinalise' && <UnfinaliseDialog month={month} refusal={refusal} onClose={() => setDialog(null)}
+        onDone={async () => { toast.success(`${monthLabel(month)} unlocked — back to approved`); await load(); }} />}
       {dialog?.kind === 'sendback' && <SendBackDialog month={month} refusal={refusal} onClose={() => setDialog(null)}
         onDone={async () => { toast.success(`${monthLabel(month)} sent back to draft`); await load(); }} />}
       {dialog?.kind === 'finalise' && (
@@ -1956,6 +1967,24 @@ function SendBackDialog({ month, refusal, onClose, onDone }) {
       onConfirm={async () => { await hrApi.sendBackRun(month, reason.trim()); await onDone(); }}>
       <p>The run goes back to draft so its inputs can be changed; whoever prepared it is told why.</p>
       <Field label="Why it is going back" required>
+        <Textarea value={reason} onChange={e => setReason(e.target.value)} />
+      </Field>
+    </ActionDialog>
+  );
+}
+
+function UnfinaliseDialog({ month, refusal, onClose, onDone }) {
+  const [reason, setReason] = useState('');
+  return (
+    <ActionDialog title={`Unlock ${monthLabel(month)}`} confirmLabel="Unlock" variant="danger" refusal={refusal}
+      disabled={!reason.trim()} onClose={onClose}
+      onConfirm={async () => { await hrApi.unfinaliseRun(month, reason.trim()); await onDone(); }}>
+      <p>
+        The month goes back to <b>approved</b>. The advances and loan instalments that finalising posted are taken back,
+        and any loan it closed is opened again. Payments already marked stay as they are. To change amounts, send it back
+        to draft (a line already paid is marked unpaid first), then submit, approve and finalise again; finalising posts afresh.
+      </p>
+      <Field label="Why it is being unlocked" required>
         <Textarea value={reason} onChange={e => setReason(e.target.value)} />
       </Field>
     </ActionDialog>

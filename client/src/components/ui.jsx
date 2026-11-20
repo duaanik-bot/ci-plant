@@ -1,7 +1,7 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
 import { Children, Fragment, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, FilterX, Zap } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Printer, Filter, FilterX, Zap } from 'lucide-react';
 import { filtersDirty, dirtyFilterLabels, applyFilterReset } from '../lib/filterReset.js';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
@@ -1187,17 +1187,22 @@ export function ExportMenu({ build, gate = null, size = 'sm', variant = 'seconda
   const run = async kind => {
     setOpen(false);
     setBusy(kind);
+    // Print (owner, 2026-11-20): the same PDF, opened in a tab that asks to print. The tab is opened on the click
+    // itself, before anything is awaited, so no pop-up blocker stops it.
+    const printWindow = kind === 'print' ? window.open('', '_blank') : null;
     try {
       // Loaded on the click, not at boot: ui.jsx is in the entry chunk every
       // tablet parses cold, and the exporter is only ever needed right here.
       // Inside the try so a failed fetch on plant Wi-Fi toasts and clears busy.
       const { exportPDF, exportXLSX, specRowCount } = await import('../lib/exporter');
       const spec = await build();
-      if (!spec || !specRowCount(spec)) { toast?.info('Nothing to export'); return; }
-      const file = gate ? await gate(kind, spec) : spec;
-      if (kind === 'pdf') await exportPDF(file); else await exportXLSX(file);
-      toast?.success(`${kind === 'pdf' ? 'PDF' : 'Excel'} downloaded`);
+      if (!spec || !specRowCount(spec)) { printWindow?.close(); toast?.info('Nothing to export'); return; }
+      const file = gate ? await gate(kind === 'print' ? 'pdf' : kind, spec) : spec;
+      if (kind === 'print') await exportPDF(file, { printWindow });
+      else if (kind === 'pdf') await exportPDF(file); else await exportXLSX(file);
+      if (kind !== 'print') toast?.success(`${kind === 'pdf' ? 'PDF' : 'Excel'} downloaded`);
     } catch (e) {
+      printWindow?.close();
       console.error('Export failed', e);
       toast?.error(`Export failed: ${e.message}`);
     } finally {
@@ -1208,6 +1213,7 @@ export function ExportMenu({ build, gate = null, size = 'sm', variant = 'seconda
   const items = [
     { kind: 'pdf', icon: FileText, label: 'PDF document', sub: 'Branded A4 report' },
     { kind: 'xlsx', icon: FileSpreadsheet, label: 'Excel workbook', sub: 'Filtered rows, live table' },
+    { kind: 'print', icon: Printer, label: 'Print', sub: 'Opens the PDF and asks to print' },
   ];
 
   return (

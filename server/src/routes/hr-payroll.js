@@ -116,7 +116,7 @@ import { buildIndex, findDuplicates, matchRow, normName } from '../hr/match.js';
 import { add, cmp, div, fmtPaise, isZero, mul, rat, sub, toPaise } from '../hr/money.js';
 import { assertAliasFree, lockNames } from './../hr/names.js';
 import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
-import { applyWithImpact, ensureRun, finaliseRun, recalcRun, totalsOf } from '../hr/runs.js';
+import { applyWithImpact, ensureRun, finaliseRun, recalcRun, totalsOf, unfinaliseRun } from '../hr/runs.js';
 import { assertPayVisible, canSeePay, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
 import { monthlySchedule } from '../hr/monthly-report.js';
 
@@ -1698,7 +1698,7 @@ r.post('/hr/runs/:month/submit', requireHr('accounts'), async (req, res, next) =
   } catch (e) { next(e); }
 });
 
-r.post('/hr/runs/:month/send-back', requireHr('approver'), async (req, res, next) => {
+r.post('/hr/runs/:month/send-back', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const body = bodyOf(req);
@@ -1754,7 +1754,7 @@ r.post('/hr/runs/:month/send-back', requireHr('approver'), async (req, res, next
   } catch (e) { next(e); }
 });
 
-r.post('/hr/runs/:month/approve', requireHr('approver'), async (req, res, next) => {
+r.post('/hr/runs/:month/approve', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const userId = userIdOf(req);
@@ -1780,7 +1780,7 @@ r.post('/hr/runs/:month/approve', requireHr('approver'), async (req, res, next) 
   } catch (e) { next(e); }
 });
 
-r.post('/hr/runs/:month/finalise', requireHr('approver'), async (req, res, next) => {
+r.post('/hr/runs/:month/finalise', requireHr('accounts'), async (req, res, next) => {
   try {
     const month = monthOf(req.params.month);
     const run = await tx(async (qc) => {
@@ -1789,6 +1789,22 @@ r.post('/hr/runs/:month/finalise', requireHr('approver'), async (req, res, next)
         throw fail(404, `There is no payroll run for ${monthLabel(month)} yet`, 'RUN_NOT_FOUND');
       }
       return finaliseRun(qc, found, req);           // locks, checks, posts once and audits (hr/runs.js)
+    });
+    res.json(await runView(q, run));
+  } catch (e) { next(e); }
+});
+
+// Unlock a finalised month (owner, 2026-11-20): back to approved, its postings taken back (hr/runs.js unfinaliseRun).
+// Accounts may do it too, as it runs the month to approval and finalise (owner, 2026-11-20). A reason is required.
+r.post('/hr/runs/:month/unfinalise', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const month = monthOf(req.params.month);
+    const reason = textOf(bodyOf(req).reason, 'The reason', 1000);
+    if (!reason) throw bad('Say why the month is being unlocked: it goes on record');
+    const run = await tx(async (qc) => {
+      const [found] = await qc(`SELECT id FROM hr.runs WHERE month = $1`, [month]);
+      if (!found) throw fail(404, `There is no payroll run for ${monthLabel(month)} yet`, 'RUN_NOT_FOUND');
+      return unfinaliseRun(qc, found, req, reason);
     });
     res.json(await runView(q, run));
   } catch (e) { next(e); }

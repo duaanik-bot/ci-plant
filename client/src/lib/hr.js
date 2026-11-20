@@ -254,6 +254,7 @@ export const hrApi = {
   approveRun: month => api.post(`/hr/runs/${seg(month)}/approve`, {}),
   // POST /hr/runs/:month/finalise — approver.
   finaliseRun: month => api.post(`/hr/runs/${seg(month)}/finalise`, {}),
+  unfinaliseRun: (month, reason) => api.post(`/hr/runs/${seg(month)}/unfinalise`, { reason }),
   // POST /hr/runs/:month/payments — operator. { pay_channel, reference, paid_on, person_ids? } marks a channel's lines paid.
   recordPayments: (month, batch) => api.post(`/hr/runs/${seg(month)}/payments`, batch),
   // PUT /hr/runs/:month/lines/:personId/payment — operator (approver for 'reversed'). { status, reference }.

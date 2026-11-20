@@ -846,6 +846,75 @@ export async function finaliseRun(qc, run, req) {
   return done;
 }
 
+// Finalised → approved again: unlocking a month (owner's request 2026-11-20, "after locking the salary we should be
+// able to unlock the payroll also"). In the caller's transaction, all or nothing:
+//   1. lock the run; it must be finalised (409 RUN_STATE)
+//   2. no later month may be finalised (409 MONTH_BEFORE_FINALISED): its balances were built on this month's postings
+//   3. take back exactly what finaliseRun posted for this run: its payroll advance_txns ('given' / 'recovered') and its
+//      loan_txns 'payroll_recovery' rows (each audited with its amount), and reopen every loan that finalise closed
+//      (the audit's 'close' rows naming this run) — refused (409 POSTING_REVERSED) if a posting was itself reversed
+//   4. status back to 'approved', finalised_by/at cleared; line approvals and payments are left as they are
+// Finalising again posts afresh (the run-once keys are free again once the rows are gone).
+export async function unfinaliseRun(qc, run, req, reason) {
+  const runId = runIdOf(run);
+  const locked = await lockRun(qc, runId);
+  if (locked.status !== 'finalised') {
+    throw fail(409, 'RUN_STATE', `Only a finalised month can be unlocked; ${locked.month} is ${locked.status}`);
+  }
+  const latest = await laterFinalised(qc, locked.month);
+  if (latest) {
+    throw fail(409, 'MONTH_BEFORE_FINALISED',
+      `${locked.month} cannot be unlocked while ${latest} is finalised: unlock ${latest} first`, { month: latest });
+  }
+  const [reversed] = await qc(
+    `SELECT r.id FROM hr.advance_txns r JOIN hr.advance_txns a ON a.id = r.reverses_id
+      WHERE a.run_id = $1 AND a.source = 'payroll' LIMIT 1`, [locked.id]);
+  if (reversed) {
+    throw fail(409, 'POSTING_REVERSED',
+      `An advance posted by finalising ${locked.month} has since been reversed by hand, so the month cannot be unlocked`);
+  }
+  const people = (await qc(`SELECT DISTINCT person_id FROM hr.run_lines WHERE run_id = $1 ORDER BY person_id`, [locked.id]))
+    .map((r) => r.person_id);
+  if (people.length) {
+    await qc(`SELECT id FROM hr.people WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [people]);
+    await qc(`SELECT id FROM hr.loans WHERE person_id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [people]);
+  }
+  const advances = await qc(
+    `DELETE FROM hr.advance_txns WHERE run_id = $1 AND source = 'payroll'
+     RETURNING id, person_id, kind, amount::text AS amount, txn_date`, [locked.id]);
+  const recoveries = await qc(
+    `DELETE FROM hr.loan_txns WHERE run_id = $1 AND kind = 'payroll_recovery'
+     RETURNING id, loan_id, principal_amount::text AS amount, txn_date`, [locked.id]);
+  const closedIds = (await qc(
+    `SELECT DISTINCT entity_id::int AS id FROM hr.audit_log
+      WHERE entity = 'loan' AND action = 'close' AND (detail->>'run_id')::int = $1`, [locked.id])).map((r) => r.id);
+  const reopened = closedIds.length
+    ? await qc(`UPDATE hr.loans SET status = 'active' WHERE id = ANY($1::int[]) AND status = 'closed' RETURNING id, loan_no`, [closedIds])
+    : [];
+  const userId = idOrNull(req?.user?.id);
+  const [done] = await qc(
+    `UPDATE hr.runs SET status = 'approved', finalised_by = NULL, finalised_at = NULL
+      WHERE id = $1 AND status = 'finalised' RETURNING *`, [locked.id]);
+  if (!done) throw new Error(`unfinaliseRun: run ${locked.id} changed under its own lock`);
+  const total = (rows) => fmtPaise(rows.reduce((t, r) => t + paise(r.amount), 0n));
+  await hrAudit(qc, req, 'run', locked.id, 'unfinalise', {
+    month: locked.month, reason, by: userId,
+    was: { finalised_by: locked.finalised_by, finalised_at: locked.finalised_at },
+    advance_given: total(advances.filter((r) => r.kind === 'given')),
+    advance_recovered: total(advances.filter((r) => r.kind === 'recovered')),
+    loan_recovered: total(recoveries),
+    advance_txns_removed: advances,
+    loan_txns_removed: recoveries,
+    loans_reopened: reopened.map((l) => l.loan_no),
+  });
+  for (const l of reopened) {
+    await hrAudit(qc, req, 'loan', l.id, 'reopen', {
+      loan_no: l.loan_no, run_id: locked.id, month: locked.month, reason: `${locked.month} unlocked: ${reason}`,
+    });
+  }
+  return done;
+}
+
 const KEY_MONEY = ['payable', 'advance_recovery', 'loan_recovery', 'advance_given', 'gross'];
 const KEY_MONEY_SQL = KEY_MONEY.map((k) => `${k}::text AS ${k}`).join(', ');
 

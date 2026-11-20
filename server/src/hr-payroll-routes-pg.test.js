@@ -326,7 +326,7 @@ describe('HR payroll routes through the real app', {
   });
 
   test('send-back needs a reason and tells the preparer, again without amounts', T, async () => {
-    refused(await call('operator', 'POST', `/hr/runs/${MONTH}/send-back`, { reason: 'x' }), 403, 'HR_LEVEL');
+    refused(await call('viewer', 'POST', `/hr/runs/${MONTH}/send-back`, { reason: 'x' }), 403, 'HR_LEVEL');
     refused(await call('approver', 'POST', `/hr/runs/${MONTH}/send-back`, {}), 400, undefined);
     const res = await call('approver', 'POST', `/hr/runs/${MONTH}/send-back`, { reason: 'Recheck the OT for 30750 rupees' });
     assert.equal(res.status, 200, res.text);
@@ -351,7 +351,7 @@ describe('HR payroll routes through the real app', {
   });
 
   test('finalise posts once; payments are separate from finalise', T, async () => {
-    refused(await call('operator', 'POST', `/hr/runs/${MONTH}/finalise`, {}), 403, 'HR_LEVEL');
+    refused(await call('viewer', 'POST', `/hr/runs/${MONTH}/finalise`, {}), 403, 'HR_LEVEL');
     // Paying is open from submit on (2026-11-06); nobody is approved yet, so the batch has nothing to pay.
     refused(await call('operator', 'POST', `/hr/runs/${MONTH}/payments`, { pay_channel: 'TCASH' }), 409, 'NOTHING_TO_PAY');
     const before = await ledgerCounts();

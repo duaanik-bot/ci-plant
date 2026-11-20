@@ -57,9 +57,10 @@ const ALLOW = [
   ['POST', '/hr/people/for-month'], ['POST', '/hr/people/\\d+/deactivate'], ['POST', '/hr/people/\\d+/activate'], ['DELETE', '/hr/people/\\d+'],
   // A loan's instalment for a month, or from a month on (2026-11-14): only for a person the login can see.
   ['PUT', '/hr/loans/\\d+/month-instalment'],
-  // Accounts runs the month to approval, gives and cancels loans and adjustments, and flips holiday / OT (2026-11-15);
+  // Accounts runs the month to approval and on to finalise / unlock (2026-11-20), gives and cancels loans and adjustments, and flips holiday / OT (2026-11-15);
   // each person-level route checks the person is visible.
-  ['POST', `/hr/runs/${M}/recalc`], ['POST', `/hr/runs/${M}/submit`], ['POST', '/hr/people/\\d+/setups/\\d+/switches'],
+  ['POST', `/hr/runs/${M}/recalc`], ['POST', `/hr/runs/${M}/submit`], ['POST', `/hr/runs/${M}/approve`], ['POST', `/hr/runs/${M}/send-back`],
+  ['POST', `/hr/runs/${M}/finalise`], ['POST', `/hr/runs/${M}/unfinalise`], ['POST', '/hr/people/\\d+/setups/\\d+/switches'],
   ['POST', '/hr/people/\\d+/pay-channel'], ['POST', '/hr/people/\\d+/parent'],
   ['POST', '/hr/pay-channels'], ['PUT', '/hr/pay-channels/[^/]+'],
   ['POST', '/hr/loans'], ['POST', '/hr/loans/\\d+/prepay'], ['POST', '/hr/loans/\\d+/holiday'], ['DELETE', `/hr/loans/\\d+/holiday/${M}`],
