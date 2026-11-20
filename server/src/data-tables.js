@@ -24,6 +24,7 @@
 // later: pg-pool hands a queued query to whichever request releases a client, so
 // the async context at execution time can belong to a different request.
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
+import { performance } from 'node:perf_hooks';
 
 const als = new AsyncLocalStorage();
 let tableRe = null;
@@ -138,8 +139,21 @@ export function analyseSql(sql) {
 }
 
 // The request's ledger. `run` wraps the rest of the middleware chain.
+// Server-Timing's clock. Swappable so a test can move time by hand; null restores it.
+const realClock = () => performance.now();
+let clock = realClock;
+export function setTimingClock(fn) { clock = fn || realClock; }
+
 export function newLedger() {
-  return { read: new Set(), wrote: new Set(), cacheable: true };
+  return { read: new Set(), wrote: new Set(), cacheable: true, dbMs: 0, dbCount: 0, startedAt: clock() };
+}
+
+// Time one statement into the ledger it was called under, however it settles.
+function timeStatement(ledger) {
+  if (!ledger) return () => {};
+  const t0 = clock();
+  ledger.dbCount++;
+  return () => { ledger.dbMs += clock() - t0; };
 }
 
 // Run fn with `ledger` as the current request's ledger (the middleware's own entry).
@@ -182,6 +196,13 @@ export function markUncacheable(ledger = currentLedger()) {
 }
 
 // Headers for a finished request, or null when there is nothing to say.
+// Where a request's server time went: db is the SUM of statement times (parallel
+// statements overlap, so it can exceed app), app is request start → end().
+// Stamped on every request, whatever its method or status.
+export function timingHeader(ledger, now = clock()) {
+  return `db;dur=${ledger.dbMs.toFixed(1)};desc="${ledger.dbCount} q", app;dur=${(now - ledger.startedAt).toFixed(1)}`;
+}
+
 export function ledgerHeaders(ledger, { method = 'GET', status = 200 } = {}) {
   if (!ledger) return {};
   const h = {};
@@ -205,7 +226,7 @@ export function dataTablesMiddleware(req, res, next) {
   const end = res.end;
   res.end = function endWithLedger(...args) {
     if (!this.headersSent) {
-      const h = ledgerHeaders(ledger, { method: req.method, status: this.statusCode });
+      const h = { ...ledgerHeaders(ledger, { method: req.method, status: this.statusCode }), 'Server-Timing': timingHeader(ledger) };
       for (const [k, v] of Object.entries(h)) this.setHeader(k, v);
     }
     return end.apply(this, args);
@@ -215,21 +236,25 @@ export function dataTablesMiddleware(req, res, next) {
 
 // Wrap a query function (pool.query, or a checked-out client's query) so every
 // call records into the ledger current at call time, and a failure spoils it.
-export function instrumentQuery(fn, self) {
+// timed: count and time the statement for Server-Timing. pool.query passes false —
+// pg-pool runs it through an instrumented checked-out client, which times it once.
+export function instrumentQuery(fn, self, { timed = true } = {}) {
   return function instrumented(text, ...rest) {
     const ledger = als.getStore() || null;
     recordStatement(ledger, text);
+    const done = timed ? timeStatement(ledger) : () => {};
     const cbIndex = rest.findIndex(a => typeof a === 'function');
     if (cbIndex >= 0) {
       const cb = rest[cbIndex];
       // Bound to the CALLER's async context: a reply arrives from the socket's
       // context, and any query issued from inside this callback must still be
       // recorded against the request that asked, or its table goes unlisted.
-      rest[cbIndex] = AsyncResource.bind((err, ...args) => { if (err) markFailed(ledger); return cb(err, ...args); });
+      rest[cbIndex] = AsyncResource.bind((err, ...args) => { done(); if (err) markFailed(ledger); return cb(err, ...args); });
       return fn.call(self, text, ...rest);
     }
     const result = fn.call(self, text, ...rest);
-    if (result && typeof result.then === 'function') result.then(null, () => markFailed(ledger));
+    if (result && typeof result.then === 'function') result.then(done, () => { done(); markFailed(ledger); });
+    else done();
     return result;
   };
 }
@@ -239,7 +264,7 @@ export function instrumentQuery(fn, self) {
 export function instrumentPool(p) {
   if (p.__ledgerInstrumented) return;
   p.__ledgerInstrumented = true;
-  p.query = instrumentQuery(p.query, p);
+  p.query = instrumentQuery(p.query, p, { timed: false });
   const connect = p.connect.bind(p);
   p.connect = (...args) => {
     const wrap = client => {

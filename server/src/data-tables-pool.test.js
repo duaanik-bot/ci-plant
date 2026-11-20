@@ -79,3 +79,24 @@ test('instrumenting a pool twice is a no-op, and its clients still query', async
   });
   assert.deepEqual([...ledger.read], ['orders']);
 });
+
+// Server-Timing counts each statement ONCE. pg-pool's own pool.query checks a client
+// out through the (instrumented) pool.connect and calls that client's (instrumented)
+// query — counting at both layers doubled every q() (found in review, 20 Nov 2026).
+test('one pool.query is one statement in the timing count', async () => {
+  const pool = makePool();
+  const ledger = newLedger();
+  await withLedger(ledger, () => pool.query('SELECT * FROM orders'));
+  assert.equal(ledger.dbCount, 1);
+});
+
+test('a statement on a checked-out client (tx) is one statement too', async () => {
+  const pool = makePool();
+  const ledger = newLedger();
+  await withLedger(ledger, async () => {
+    const client = await pool.connect();
+    await client.query('SELECT * FROM orders');
+    client.release();
+  });
+  assert.equal(ledger.dbCount, 1);
+});

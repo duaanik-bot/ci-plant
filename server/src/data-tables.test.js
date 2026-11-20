@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   setKnownTables, analyseSql, newLedger, recordStatement, markFailed,
-  ledgerHeaders, instrumentQuery, dataTablesMiddleware, currentLedger,
+  ledgerHeaders, instrumentQuery, dataTablesMiddleware, currentLedger, setTimingClock,
 } from './data-tables.js';
 
 setKnownTables(['job_cards', 'job_stages', 'orders', 'order_lines', 'audit_log', 'users', 'stock_movements', 'conversation_members']);
@@ -196,4 +196,71 @@ test('headers are stamped however the body is sent — Express send, Vercel help
   } finally {
     server.close();
   }
+});
+
+// ── Server-Timing: where a response's server time went ─────────────────────────
+// db = the SUM of every statement's time (parallel queries overlap, so db may
+// exceed app — intended), with the statement count; app = request start → end().
+// A fake clock the test moves by hand, so the numbers are exact.
+function fakeClock() {
+  const c = { t: 1000, now: () => c.t };
+  setTimingClock(c.now);
+  return c;
+}
+const timedRequest = (clock, body, { headersSent = false } = {}) => new Promise(resolve => {
+  const res = {
+    headersSent, statusCode: 200, headers: {}, calls: 0,
+    setHeader(k, v) { this.calls++; this.headers[k] = v; },
+    end() { resolve(this); },
+  };
+  dataTablesMiddleware({ method: 'GET' }, res, async () => { await body(); res.end('{}'); });
+});
+const slowQuery = (clock, ms, { fail = false } = {}) => instrumentQuery(() => new Promise((resolve, reject) => {
+  setImmediate(() => { clock.t += ms; fail ? reject(new Error('boom')) : resolve({ rows: [] }); });
+}), null);
+
+test('server-timing sums query time and counts statements', async () => {
+  const clock = fakeClock();
+  try {
+    let ledger;
+    const res = await timedRequest(clock, async () => {
+      ledger = currentLedger();
+      await slowQuery(clock, 30)('SELECT * FROM orders');
+      await slowQuery(clock, 50)('SELECT * FROM job_cards');
+      clock.t += 5;
+    });
+    assert.equal(ledger.dbCount, 2);
+    assert.equal(ledger.dbMs, 80);
+    assert.equal(res.headers['Server-Timing'], 'db;dur=80.0;desc="2 q", app;dur=85.0');
+  } finally { setTimingClock(null); }
+});
+
+test('a failed query still counts its time', async () => {
+  const clock = fakeClock();
+  try {
+    let ledger;
+    await timedRequest(clock, async () => {
+      ledger = currentLedger();
+      await assert.rejects(slowQuery(clock, 40, { fail: true })('SELECT * FROM orders'), /boom/);
+    });
+    assert.equal(ledger.dbMs, 40);
+    assert.equal(ledger.dbCount, 1);
+    assert.equal(ledger.cacheable, false);
+  } finally { setTimingClock(null); }
+});
+
+test('server-timing is not set once headers were sent', async () => {
+  const clock = fakeClock();
+  try {
+    const res = await timedRequest(clock, async () => { await slowQuery(clock, 10)('SELECT * FROM orders'); }, { headersSent: true });
+    assert.equal(res.calls, 0);
+  } finally { setTimingClock(null); }
+});
+
+test('a request with no queries reports db;dur=0.0', async () => {
+  const clock = fakeClock();
+  try {
+    const res = await timedRequest(clock, async () => { clock.t += 2; });
+    assert.equal(res.headers['Server-Timing'], 'db;dur=0.0;desc="0 q", app;dur=2.0');
+  } finally { setTimingClock(null); }
 });
