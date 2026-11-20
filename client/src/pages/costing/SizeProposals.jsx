@@ -66,12 +66,15 @@ function DieCheck({ dies, size, onUseDie }) {
             <span><b>Die {d.code}</b> in the Die Master is this size but marked {d.condition} — not usable, so a new die would be needed.</span>
           </div>
         );
+        // the stocked piece the die's sheet is costed on (routes/sizing.js costing_sheet), else the sheet as recorded
+        const c = d.costing_sheet;
+        const use = c ? { sheet_l: c.short, sheet_w: c.long } : s ? { sheet_l: Math.min(s.a, s.b), sheet_w: Math.max(s.a, s.b) } : null;
         return (
           <div key={`m${d.id}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 ring-1 ring-emerald-200">
             <CheckCircle2 size={14} className="text-emerald-600" />
-            <span><b>Die {d.code}</b> in the Die Master is this size · {d.sheet_size || 'sheet not recorded'} · {d.ups ?? '?'} up — no new die needed.</span>
-            {s && d.ups > 0 && (
-              <button type="button" onClick={() => onUseDie({ sheet_l: Math.min(s.a, s.b), sheet_w: Math.max(s.a, s.b), ups: d.ups })}
+            <span><b>Die {d.code}</b> in the Die Master is this size · {d.ups ?? '?'} up{c ? ` · die sheet ${d.sheet_size} → costed on ${c.short} × ${c.long}` : ` · ${d.sheet_size || 'sheet not recorded'}`} — no new die needed.</span>
+            {use && d.ups > 0 && (
+              <button type="button" onClick={() => onUseDie({ ...use, ups: d.ups })}
                 className="ml-auto rounded-md bg-white px-2 py-0.5 font-bold text-emerald-700 ring-1 ring-emerald-300 hover:bg-emerald-100">Use this die's layout</button>
             )}
           </div>

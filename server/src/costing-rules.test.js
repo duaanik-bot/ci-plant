@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeCosting } from './costing-engine.js';
 import { computeCosting as clientCompute } from '../../client/src/lib/costing.js';
-import { HOUSE_RULES, coatingFromText, finishFromEnquiry, dpFor, processFor, houseRuleValues, ruleInputsForRow, newDieDefault, masterDieOf } from '../../client/src/lib/costingRules.js';
+import { HOUSE_RULES, coatingFromText, finishFromEnquiry, dpFor, processFor, houseRuleValues, ruleInputsForRow, newDieDefault, masterDieOf,
+  isCfbbBoard, customerBoardRate, cleanCustomerRates, chargeRateOf, chargeGrades, withRunWastage, assumedValues } from '../../client/src/lib/costingRules.js';
 import { recommend, valueFromSaved } from '../../client/src/lib/costingUi.js';
 import { costingValueFromEnquiry, bulkSeedFromEnquiry } from '../../client/src/lib/enquiryUi.js';
 
@@ -36,7 +37,7 @@ test('the enquiry finish: embossing and leafing from its words', () => {
 
 test('die & pasting and process follow the rules', () => {
   assert.equal(dpFor('SIDE'), 0.2);
-  assert.equal(dpFor('LOCK'), 0.3);
+  assert.equal(dpFor('LOCK'), 0.4);
   assert.equal(dpFor('LOCK', true), 0.41);
   assert.equal(dpFor('LIT'), null);
   assert.equal(processFor(false), 2000);
@@ -89,7 +90,7 @@ test('bulk rows from an enquiry take the coating, embossing and process rules', 
   assert.equal(r.inputs.coat_factor, 6);
   assert.equal(r.inputs.emb_rate, 0.15);
   assert.equal(r.inputs.process, 3000);
-  assert.equal(r.inputs.dp_rate, 0.3);
+  assert.equal(r.inputs.dp_rate, 0.4);
 });
 
 test('leafing: per panel per carton after P&F, set-up into the subtotal', () => {
@@ -131,7 +132,7 @@ test('a costing charges FBB-type grades ₹120; the buying rate is kept beside i
   assert.deepEqual(chargeGrades(gs).map(g => g.rate_per_kg), [120, 44, 80, 130], 'mapping twice changes nothing');
 });
 
-test('Met Saffire: charged ₹120, coated at factor 1 whatever the finish words say', async () => {
+test('Met Saffire: its own ₹120, coated at 1.5 whatever the finish words say', async () => {
   const { isMetSaffire, chargeGrades } = await import('../../client/src/lib/costingRules.js');
   assert.ok(isMetSaffire('Met Saffire'));
   assert.ok(isMetSaffire('MET SAPPHIRE 300'));
@@ -141,15 +142,15 @@ test('Met Saffire: charged ₹120, coated at factor 1 whatever the finish words 
   assert.equal(chargeGrades([{ grade: 'Met Saffire', rate_per_kg: 100 }])[0].rate_per_kg, 120);
   const asMap = xs => Object.fromEntries(xs.map(([k, v]) => [k, v]));
   const byGrade = asMap(houseRuleValues({ style: 'LOCK', board_grade: 'Met Saffire' }, { finish: finishFromEnquiry({ coating: 'Spot UV + drip off' }) }));
-  assert.equal(byGrade.coat_factor, 1);
-  assert.equal(byGrade.coat_choice, '1');
-  assert.equal(asMap(houseRuleValues({}, { finish: finishFromEnquiry({ board: 'Met Saffire', coating: 'UV' }) })).coat_factor, 1);
+  assert.equal(byGrade.coat_factor, 1.5);
+  assert.equal(byGrade.coat_choice, '1.5');
+  assert.equal(asMap(houseRuleValues({}, { finish: finishFromEnquiry({ board: 'Met Saffire', coating: 'UV' }) })).coat_factor, 1.5);
   assert.equal(asMap(houseRuleValues({}, { productGrade: 'MET' })).coat_factor, undefined, 'the master alias "MET" alone is not read as Met Saffire here');
-  assert.equal(ruleInputsForRow({ style: 'LOCK' }, null, null, 'Met Saffire').coat_choice, '1');
+  assert.equal(ruleInputsForRow({ style: 'LOCK' }, null, null, 'Met Saffire').coat_choice, '1.5');
   // recommend: picking the grade refills the coating from the rule.
   const v = recommend({ product_name: 'X', size_text: '', style: 'LOCK', board_grade: 'Met Saffire', inputs: {}, sources: { board_grade: { kind: 'manual' } } }, {});
-  assert.equal(v.coat_choice, '1');
-  assert.equal(v.inputs.coat_factor, 1);
+  assert.equal(v.coat_choice, '1.5');
+  assert.equal(v.inputs.coat_factor, 1.5);
 });
 
 // Owner, 17 Nov 2026 ("Die Master only"): a Die Master die of exactly this size means no new die; a die only on the
@@ -190,4 +191,107 @@ test('recommend: the Die Master die the editor passes wins over the check', () =
   const check = { library: { exact: [] }, dies: { exact: [{ code: 'D-1', condition: 'Good' }] } };
   assert.equal(recommend(v, { check, masterDie: null }).inputs.process, 3000);
   assert.equal(recommend(v, { check }).inputs.process, 2000);
+});
+
+// Owner, 20 Nov 2026: the enquiry desk costs by itself, so the house figures moved and the CFBB family got customer rates.
+const mapOf = xs => Object.fromEntries(xs.map(([k, v]) => [k, v]));
+const RATES = [{ word: 'northwind', board_rate: 131 }, { word: 'pharma', board_rate: 99 }];
+
+test('lock bottom is ₹0.40, side ₹0.20, big box ₹0.41', () => {
+  assert.equal(dpFor('LOCK'), 0.4);
+  assert.equal(dpFor('SIDE'), 0.2);
+  assert.equal(dpFor('SIDE', true), 0.41);
+});
+
+test('spot UV with AQ is factor 2', () => {
+  assert.deepEqual(coatingFromText('Spot UV + AQ varnish'), { factor: 2, label: 'Spot UV + AQ' });
+  assert.equal(coatingFromText('spot uv on aqueous').factor, 2);
+  assert.equal(coatingFromText('UV').factor, 3);
+  assert.equal(coatingFromText('aqueous varnish').factor, 6);
+  assert.equal(coatingFromText('drip off').factor, 2);
+  assert.equal(coatingFromText('spot UV + drip off').factor, 2);
+});
+
+test('Met Saffire: its own ₹120, coated at 1.5', () => {
+  assert.equal(chargeGrades([{ grade: 'Met Saffire', rate_per_kg: 100 }], 107)[0].rate_per_kg, 120);
+  assert.equal(mapOf(houseRuleValues({}, { productGrade: 'Met Saffire' })).coat_factor, 1.5);
+});
+
+test('Saffire, ITC Cyber and FBB are costed as CFBB; metallic, duplex and SBS are not', () => {
+  const grade = board => mapOf(houseRuleValues({}, { finish: { board } })).board_grade;
+  assert.equal(grade('ITC Cyber XL'), 'CFBB');
+  assert.equal(grade('SAPPHIRE 300'), 'CFBB');
+  assert.equal(grade('FBB'), 'CFBB');
+  for (const b of ['Met Saffire', 'Duplex WB', 'SBS']) assert.equal(grade(b), undefined, b);
+  assert.equal(mapOf(houseRuleValues({}, { finish: { board: 'FBB' }, productGrade: 'Saffire' })).board_grade, undefined);
+  assert.ok(isCfbbBoard('ITC Cyber XL') && !isCfbbBoard('Met Saffire', 'FBB'));
+});
+
+test('customerBoardRate: first word wins, blank name has none', () => {
+  assert.deepEqual(customerBoardRate('NORTHWIND Pharma Ltd', RATES), { word: 'northwind', rate: 131 });
+  assert.equal(customerBoardRate('', RATES), null);
+  assert.equal(customerBoardRate('Northwind', null), null);
+  assert.equal(customerBoardRate('Bluefin Labs', RATES), null);
+});
+
+test("a customer's rate never goes below the buying rate", () => {
+  assert.equal(chargeRateOf({ grade: 'CFBB', rate_per_kg: 100 }, 107), 107);
+  assert.equal(chargeRateOf({ grade: 'CFBB', rate_per_kg: 112 }, 107), 112);
+  assert.equal(chargeRateOf({ grade: 'Saffire', rate_per_kg: 81.5 }, 107), 107);
+  assert.equal(chargeRateOf({ grade: 'Duplex WB', rate_per_kg: 51 }, 107), 51);
+  assert.equal(chargeRateOf({ grade: 'CFBB', rate_per_kg: 100 }), 120);
+  const gs = chargeGrades([{ grade: 'CFBB', rate_per_kg: 100 }], 107);
+  assert.deepEqual([gs[0].rate_per_kg, gs[0].buy_rate], [107, 100]);
+});
+
+test('houseRuleValues: the CFBB board rate comes from the charged grade, with its note', () => {
+  const grades = chargeGrades([{ grade: 'CFBB', rate_per_kg: 100 }], 131);
+  const rate = houseRuleValues({}, { finish: { board: 'Saffire' }, grades, customerRate: { word: 'northwind', rate: 131 } }).find(x => x[0] === 'board_rate');
+  assert.deepEqual(rate, ['board_rate', 131, '₹131/kg — the "northwind" customer rate']);
+  const house = houseRuleValues({}, { finish: { board: 'Saffire' }, grades: chargeGrades([{ grade: 'CFBB', rate_per_kg: 100 }]) }).find(x => x[0] === 'board_rate');
+  assert.deepEqual(house, ['board_rate', 120, 'house rate ₹120/kg']);
+  // no CFBB grade given: the customer's rate, else the house rate
+  assert.equal(mapOf(houseRuleValues({}, { finish: { board: 'FBB' }, customerRate: { word: 'bluefin', rate: 107 } })).board_rate, 107);
+  assert.equal(mapOf(houseRuleValues({}, { finish: { board: 'FBB' } })).board_rate, 120);
+  const met = houseRuleValues({}, { finish: { board: 'Met Saffire' }, grades: chargeGrades([{ grade: 'Met Saffire', rate_per_kg: 100 }], 107) }).find(x => x[0] === 'board_rate');
+  assert.deepEqual(met, ['board_rate', 120, 'Met Saffire — its own rate']);
+});
+
+test('cleanCustomerRates keeps good rows only', () => {
+  const out = cleanCustomerRates([
+    { word: '  Northwind ', board_rate: 131 }, { word: '', board_rate: 100 }, { word: 'zero', board_rate: 0 },
+    { word: 'huge', board_rate: 5000 }, { word: 'NORTHWIND', board_rate: 90 }, { word: 'x', board_rate: 90 }, { word: 'bluefin', board_rate: '107' },
+  ]);
+  assert.deepEqual(out, [{ word: 'Northwind', board_rate: 131 }, { word: 'bluefin', board_rate: 107 }]);
+  assert.equal(cleanCustomerRates(Array.from({ length: 80 }, (_, i) => ({ word: `word${i}`, board_rate: 100 }))).length, 50);
+  assert.deepEqual(cleanCustomerRates(null), []);
+});
+
+test('wastage follows the run when asked', () => {
+  const on = mapOf(houseRuleValues({ inputs: { qty: 20000, ups: 6 } }, { byRun: true }));
+  assert.equal(on.wastage, 300, '3,334 sheets');
+  assert.equal(on.wastage_by_run, 1);
+  assert.ok(!houseRuleValues({ inputs: { qty: 20000, ups: 6 } }, {}).some(x => x[0] === 'wastage'));
+});
+
+test('withRunWastage refreshes only a run-following wastage', () => {
+  assert.equal(withRunWastage({ qty: 40000, ups: 6, wastage: 300, wastage_by_run: 1 }).wastage, 400);
+  const typed = { qty: 40000, ups: 6, wastage: 300, wastage_by_run: '' };
+  assert.deepEqual(withRunWastage(typed), typed);
+});
+
+test('assumed coating, GSM and colours are only for enquiry costings', () => {
+  const a = assumedValues({ enquiry_id: 5, inputs: {}, coat_choice: '' }, { defaults: { colours: 4 } });
+  assert.deepEqual(a, [
+    ['coat_factor', 3, 'coating not given — UV, the most used'], ['coat_choice', '3', 'coating not given — UV, the most used'],
+    ['gsm', 300, 'GSM not given — 300, the most used'], ['colours', 4, 'colours not given — the Rates default']]);
+  assert.deepEqual(assumedValues({ inputs: {} }), []);
+});
+
+test('ruleInputsForRow hands the CFBB board grade back beside coat_choice, never inside inputs', () => {
+  const r = ruleInputsForRow({ style: 'LOCK' }, { board: 'Saffire' });
+  assert.equal(r.inputs.board_grade, undefined);
+  assert.equal(r.board_grade, 'CFBB');
+  assert.equal(ruleInputsForRow({ style: 'LOCK' }, { board: 'Duplex WB' }).board_grade, null);
+  assert.equal(ruleInputsForRow({ style: 'LOCK' }, null).board_grade, null);
 });

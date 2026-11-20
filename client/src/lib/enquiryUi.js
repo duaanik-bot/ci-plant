@@ -117,6 +117,7 @@ export function costingValueFromEnquiry(e, defaults = {}) {
   v.product_name = e.product_name || '';
   v.size_text = e.size_key || e.size_text || '';
   v.style = e.style || null;
+  v.opening = e.opening ?? null;
   const qs = e.quantities || [];
   for (const [k, x] of [['qty', qs[0]], ['gsm', e.gsm], ['colours', e.colours]]) {
     if (num(x) > 0) { v.inputs[k] = num(x); v.sources[k] = from; }
@@ -131,6 +132,12 @@ export function costingValueFromEnquiry(e, defaults = {}) {
   v.enquiry_no = e.enquiry_no;
   return v;
 }
+
+// A desk row whose costing is CI Plant's own draft it could not finish (an incomplete auto-costing: held for "needs
+// pasting" and the like) holds the Rates defaults no rule could replace. The desk opens it in the form as a FRESH fill from
+// the enquiry, never as that saved draft; saving links the new costing and hides the draft (server: linkEnquiry). Final
+// review C1. Any other costing opens as it was saved.
+export const startsFresh = e => !!(e?.costing_live && e.costing_id && e.costing_auto && !e.costing_complete);
 
 // A saved costing opened for an enquiry. `fresh` (copied from an earlier costing to cost this enquiry): the
 // enquiry's customer, product and first quantity, the copy's size, layout and rates. Either way the other
@@ -174,3 +181,90 @@ export function adjustPrice(base, { mode, amount }) {
   if (mode === 'round') return Math.ceil(b / 0.05 - 1e-6) * 0.05 > 0 ? Math.round(Math.ceil(b / 0.05 - 1e-6) * 5) / 100 : null;
   return b;
 }
+
+// ── Auto costing on the desk (owner, 20 Nov 2026) ───────────────────────────────────────────────
+// What the To price row says of its costing: a draft waits for a manager's Approve (auto, or revised by a person — the
+// revision makes it theirs but it still needs approval); an approved one says by whom.
+export function autoPill(e) {
+  if (!e || e.stage === undefined || !['costed', 'price_pending'].includes(e.stage)) return null;
+  if (e.costing_status === 'approved') return { text: `Approved by ${e.costing_approved_by || 'Management'}`, tone: 'green' };
+  if (e.costing_status === 'draft') return { text: e.costing_auto ? 'Auto · waiting for approval' : 'Waiting for approval', tone: 'amber' };
+  return null;
+}
+export const PILL_TONE = { amber: 'bg-amber-100 text-amber-900 ring-amber-200', green: 'bg-emerald-100 text-emerald-900 ring-emerald-200' };
+
+// What a mail's one reply waits on, as mailReplyState (server/src/enquiry-desk.js) reports it, in that order.
+export function replyLine(e) {
+  const r = e?.reply;
+  if (!r) return null;
+  if (r.quoted?.length) return `Part of this mail went on ${r.quoted.join(', ')} — send these from here`;
+  // Approve is offered on To price only; the Quoted tab's Send quotation finishes a cut-off reply (final review I1).
+  if (r.resume) return 'Finalised, reply not finished — press Send quotation';
+  if (r.waiting?.length) {
+    const [w, ...rest] = r.waiting;
+    return `Reply waits on ${w.enquiry_no}: ${w.why}${rest.length ? ` and ${rest.length} more` : ''}`;
+  }
+  if (r.ready) return "Ready to reply — a manager's Approve makes it";
+  return null;
+}
+
+// Why a To cost row was not costed by itself. `auto_cost_stopped` comes from the server (one stale-claim threshold).
+export function heldLine(e) {
+  if (!e || !['new', 'ready', 'costing'].includes(e.stage) || !e.auto_cost_why) return null;
+  if (e.auto_cost_why === 'being costed') return e.auto_cost_stopped ? 'Costing stopped part-way — press Cost it for me' : 'Being costed by CI Plant now';
+  return /^could not/i.test(e.auto_cost_why) ? e.auto_cost_why : `Could not cost it by itself: ${e.auto_cost_why}`;
+}
+
+const mails = n => `${n} more mail${n === 1 ? '' : 's'}`;
+// The reply step's answer in words, one line each — Approve's, and a Management drop's or delete's (a mail left with
+// nothing waiting gets its reply then): each reply, the mails not reached in the press's time, what still waits.
+export function replyLines(r) {
+  const lines = [];
+  for (const rep of r?.replies || []) {
+    const failed = new Map((rep.failed || []).map(f => [f.id, f.why]));
+    const drafted = new Set((rep.drafted || []).map(d => d.id));
+    for (const q of rep.quotations || []) {
+      lines.push(`Quotation ${q.quotation_no} made · ${drafted.has(q.id) ? 'draft saved' : `draft not made: ${failed.get(q.id) || 'no reason given'}`}`);
+    }
+    // a failure with no quotation of its own (the reply itself stopped)
+    for (const [id, why] of failed) if (!(rep.quotations || []).some(q => q.id === id)) lines.push(`Reply not made: ${why}`);
+  }
+  if ((r?.later || []).length) lines.push(`${mails(r.later.length)}: reply not made yet — press Approve again`);
+  for (const w of r?.waiting || []) {
+    if (w.waiting?.length) lines.push(`M${w.mail_id} still waits on ${w.waiting.map(x => `${x.enquiry_no}: ${x.why}`).join('; ')}`);
+    if (w.quoted?.length) lines.push(`M${w.mail_id}: part of it went on ${w.quoted.join(', ')} — send the rest from here`);
+  }
+  return lines;
+}
+const replyFailed = r => (r?.replies || []).some(x => (x.failed || []).length);
+
+// The Approve answer in words, one line each: what was approved, each reply, what still waits, what was not approved.
+export function approveSummary(r) {
+  const lines = [`Approved ${(r.approved || []).length}`, ...replyLines(r)];
+  if ((r.skipped || []).length) lines.push(`Not approved: ${r.skipped.map(s => `${s.enquiry_no} ${s.why}`).join('; ')}`);
+  return lines;
+}
+
+// A move's answer in words (final review I5): what moved (`said`), then what the reply step did — a Management drop or
+// delete may have made a mail's reply. `moveTone`: Approve's tone when there is a reply line, else null (the bar alone, as
+// for any move).
+export const moveSummary = (r, said = null) => [said, ...replyLines(r)].filter(Boolean);
+export const moveTone = r => (!replyLines(r).length ? null : replyFailed(r) ? 'error' : 'info');
+
+// "Cost it for me": what was costed, and the rows a person must do (held, or failed); then the rows it left as they are,
+// with why, and how many it did not reach in the call's time (M1).
+export function autoCostSummary(r) {
+  const costed = Array.isArray(r.costed) ? r.costed.length : Number(r.costed) || 0;
+  return `Costed ${costed} · ${(r.held || []).length + (r.failed || []).length} need a person`;
+}
+export function autoCostLines(r) {
+  const lines = [autoCostSummary(r)];
+  if (r.held?.length) lines.push(`Needs a person: ${r.held.map(h => `${h.enquiry_no} ${h.why}`).join('; ')}`);
+  if (r.failed?.length) lines.push(`Not costed, it failed: ${r.failed.map(f => `${f.enquiry_no} ${f.why}`).join('; ')}`);
+  if (r.skipped?.length) lines.push(`Not costed: ${r.skipped.map(s => `${s.enquiry_no} ${s.why}`).join('; ')}`);
+  if (Number(r.left) > 0) lines.push(`${Number(r.left)} not reached — press Cost it for me again`);
+  return lines;
+}
+// The toast's tone: error when anything failed, info when there is more to read, else success.
+export const autoCostTone = r => (r.failed?.length ? 'error' : r.held?.length || r.skipped?.length || Number(r.left) > 0 ? 'info' : 'success');
+export const approveTone = r => (replyFailed(r) ? 'error' : approveSummary(r).length > 1 ? 'info' : 'success');

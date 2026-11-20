@@ -2,13 +2,47 @@
 // reading rows pasted from Excel, and the export layouts. No React, no fetch, so the server suite
 // tests it (server/src/costing-ui.test.js).
 import { computeCosting, compareCostings, parseSize, num, styleLabel, quantityBreaks, CURRENT_FORMULA, INPUTS } from './costing.js';
-import { HOUSE_RULES, dpFor, houseRuleValues, masterDieOf, processFor } from './costingRules.js';
+import { HOUSE_RULES, assumedValues, dpFor, houseRuleValues, masterDieOf, processFor, withRunWastage } from './costingRules.js';
+import { pickLayout } from './autoLayout.js';
 
 // ₹ per carton to three decimals (3.142, 0.618 — the trade quotes to a tenth of a paisa); totals whole.
 export const perUnit = n => (n == null || !Number.isFinite(+n) ? '—' : `₹${(+n).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`);
 export const rupees = n => (n == null || !Number.isFinite(+n) ? '—' : `₹${Math.round(+n).toLocaleString('en-IN')}`);
 export const pct = (n, dp = 1) => (n == null || !Number.isFinite(+n) ? '—' : `${n > 0 ? '+' : ''}${(+n).toFixed(dp)}%`);
 export const plain = (n, dp = 2) => (n == null || !Number.isFinite(+n) ? '—' : (+n).toLocaleString('en-IN', { maximumFractionDigits: dp }));
+
+// The inputs after one box is edited. A typed wastage no longer follows the run (wastage_by_run cleared); a new
+// quantity or ups reworks a wastage the run rule wrote.
+export function inputsAfterEdit(inputs, key, x) {
+  const next = { ...inputs, [key]: x };
+  if (key === 'wastage') next.wastage_by_run = '';
+  return key === 'qty' || key === 'ups' ? withRunWastage(next) : next;
+}
+
+// A bulk row's board grade: its own when it has one, else the one the rule gave (Saffire / ITC Cyber / FBB → CFBB).
+export const rowBoardGrade = (row, ruleGrade) => (row?.board_grade || ruleGrade || '');
+
+// A bulk row's board rate, and where it came from (final review I4, revising R28b). `from`: 'rule' (the rule's rate — the
+// customer's rate on the CFBB family, Met Saffire's own, the house ₹120 — or the ₹120 prefill), 'common' (a common rate a
+// person typed), 'product' (a matched Product Master grade's rate) or 'row' (typed on the row itself). A common rate a
+// person typed wins over the rule's only: a product's grade rate, a row's own, and an old row with no marker keep theirs
+// (a mixed batch never re-rates a duplex product at the FBB rate). A rule that gives no rate takes the common box.
+export function rowBoardRate({ from, rate, commonTyped = false, commonRate = '' } = {}) {
+  if (from !== 'rule' && from !== 'common') return { board_rate: rate, board_from: from };
+  if (commonTyped && !blank(commonRate)) return { board_rate: commonRate, board_from: 'common' };
+  return { board_rate: from === 'rule' && blank(rate) ? commonRate : rate, board_from: from };
+}
+// A row's marker as the server hands it back (by row position, on the batch): a known one, else none — the row's own.
+export const BOARD_FROM = Object.freeze(['rule', 'common', 'product', 'row']);
+export const boardFromSaved = x => (BOARD_FROM.includes(x) ? x : undefined);
+
+// The batch's common settings as saved, and back: the typed-board-rate flag rides with them (never inferred from the value).
+// The rows' board-rate markers the server keeps beside them come back on each row, never as an input.
+export const commonToSave = common => ({ ...common.inputs, quantities: common.quantities, board_typed: !!common.board_typed });
+export function commonFromSaved(saved = {}, defaults = {}) {
+  const { quantities = [], board_typed = false, board_from: _marks, ...inputs } = saved || {};
+  return { inputs: { ...startingInputs(defaults), ...inputs }, quantities, board_typed: board_typed === true };
+}
 
 // A coating factor in words a new joiner can check: factor 6 → "₹0.17 per 100 sq in".
 export const coatingWords = factor => (num(factor) > 0 ? `₹${(1 / num(factor)).toFixed(2)} per 100 sq in` : 'No coating');
@@ -228,6 +262,8 @@ export function bulkRowPatch(row, v, dp = {}) {
     sources: v.sources, autofill: v.autofill, quantities: v.quantities, show_emb: v.show_emb,
     new_die: v.new_die, big_box: v.big_box,
     ...(v.sources?.dp_rate?.kind === 'manual' ? { dp_auto: false } : {}),
+    // a board rate changed in the row's own editor is the row's (I4): a common rate typed later leaves it
+    ...(String(v.inputs?.board_rate ?? '') !== String(row?.inputs?.board_rate ?? '') ? { board_from: 'row' } : {}),
   };
   if (v.new_die != null && v.new_die !== row.new_die) patch.inputs.process = processFor(v.new_die);
   if (!!v.big_box !== !!row.big_box) {
@@ -308,8 +344,9 @@ export function newLibraryEntry(v, entries = []) {
 // "Not now" holds for that size + pasting + layout only: a different layout is a new question.
 export const libraryDeclined = v => !!v?.skip_library && v.skip_library === libraryKey(v);
 
-// A complete saved costing with no library entry: the question was asked and the answer was no.
-export const answeredNo = c => !!c?.complete && !c?.size_id;
+// A complete saved costing with no library entry: the question was asked and the answer was no. An auto-costing never
+// asked (CI Plant never adds a size to the library, 20 Nov 2026), so a person opening it is still asked.
+export const answeredNo = c => !!c?.complete && !c?.size_id && !c?.auto_costed;
 
 // ── Recommendations ──────────────────────────────────────────────────────────────────────────────
 // Where a value in the form came from. Shown beside every box, so a new joiner can see what the system
@@ -317,10 +354,13 @@ export const answeredNo = c => !!c?.complete && !c?.size_id;
 export const SOURCES = Object.freeze({
   product: { label: 'Product Master', short: 'Product', tone: 'auto' },
   library: { label: 'Size Library', short: 'Size Library', tone: 'auto' },
+  die: { label: 'Die Master', short: 'Die Master', tone: 'auto' },
+  proposal: { label: 'Size proposal', short: 'Proposal', tone: 'auto' },
   rates: { label: 'Board Rates', short: 'Board Rates', tone: 'auto' },
   rule: { label: 'House rule', short: 'House rule', tone: 'auto' },
   history: { label: 'A past costing', short: 'Past costing', tone: 'auto' },
   typical: { label: 'Typical in your costings', short: 'Typical', tone: 'typical' },
+  assumed: { label: 'Assumed — not given', short: 'Assumed', tone: 'typical' },
   default: { label: 'Rates & method default', short: 'Default', tone: 'default' },
   manual: { label: 'Typed here', short: 'Edited', tone: 'manual' },
 });
@@ -347,27 +387,54 @@ export function gradeFor(productGrade, grades = []) {
 const blank = x => x == null || String(x).trim() === '';
 const sameName = (a, b) => String(a ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === String(b ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 const TOP_FIELDS = new Set(['customer_name', 'customer_id', 'size_text', 'style', 'board_grade', 'coat_choice']);
-const AUTO = new Set(['product', 'library', 'rates', 'rule', 'history', 'typical', 'default']);
+const AUTO = new Set(['product', 'library', 'die', 'proposal', 'rates', 'rule', 'history', 'typical', 'assumed', 'default']);
+const libNote = (top, lib) => `${top.times_costed ? `used ${top.times_costed}×` : 'in the library'}${lib.length > 1 ? ` · ${lib.length - 1} other layout${lib.length > 2 ? 's' : ''}` : ''}`;
 const when = h => `${h.costing_no}${h.costed_on ? `, ${h.costed_on}` : ''}`;
+
+// The past costings of the size a suggestion is read from: the same product's last costing, else the recent comparable
+// ones; and the value MOST USED among them (one odd costing does not set it).
+function pastCostings(p, hist, v) {
+  const same = p && hist.find(h => sameName(h.product_name, p.name) && h.result?.ok);
+  return { same, rows: same ? [same] : rankHistory({ style: v.style, inputs: v.inputs }, hist).filter(h => h.comparable).slice(0, 20) };
+}
+function mostUsed({ same, rows }, get1) {
+  const counts = new Map();
+  for (const h of rows) { const x = get1(h); if (x != null) counts.set(x, (counts.get(x) || 0) + 1); }
+  if (!counts.size) return null;
+  const [x, n] = [...counts].sort((a, b) => b[1] - a[1])[0];   // ties: the newer (rankHistory order, Map keeps first seen)
+  return { x, note: same ? when(same) : `${n} of ${rows.length} recent costings of this size` };
+}
 
 // Fill a costing from what the ERP knows. `ctx`: the Product Master entry picked (product), the size
 // check (library layouts + earlier costings of the size), the typical figures, the Rates defaults and
 // today's board grades. Each field takes the first source that has a value:
 //   size, pasting, sheet & ups, GSM, colours, board, embossing on/off ← Product Master
-//   sheet & ups, pasting                                             ← Size Library (most used)
+//   pasting, if neither of those has it                              ← the most used among the past costings of the
+//                                                                       size (before the layout, drawn for the pasting)
+//   sheet & ups, pasting                                             ← Size Library (most used); with `boards`
+//                                                                       (the stocked mill sheets) the layout picker
+//                                                                       (autoLayout.js): the old Die Master die, else
+//                                                                       the least board a carton among the library and
+//                                                                       the size proposals
 //   board ₹120, die & pasting by style / big box, process (new die), ← house rules (costingRules.js),
 //   embossing, coating and leafing from the enquiry's words            ahead of past costings
+//   wastage by the run (sheets = cartons ÷ ups)                       ← house rules, once the layout is known
 //   coating, die & pasting, embossing (and GSM / board rate if no product) ← the same product's last
 //                                                                       costing, else the newest
 //                                                                       comparable one of the size
 //   die & pasting by pasting style, embossing, process per colour     ← typical in your costings
+//   coating UV, GSM 300, colours (an enquiry costing only, if still blank) ← assumed, shown as Assumed
 //   everything else                                                   ← Rates & method defaults
+// A customer's board rate (`customerRate`) and `grades` are the caller's: grades already charged for this customer.
+// With `boards`, the picker's answer is left on the value as `layout_pick` ({ kind, note, flags } or { none, why });
+// it is not an input.
 // A field somebody typed (source manual) is never touched; one filled from an earlier suggestion is
 // refilled from the new context; a saved value with no recorded source is kept unless it is blank.
 export function recommend(value, ctx = {}) {
   // masterDie: the Die Master die the editor counts (null = none, e.g. the bulk row editor); left out, read from the check
-  const { product: p = null, check = null, typical = {}, defaults = {}, grades = [], masterDie = masterDieOf(check) } = ctx;
+  const { product: p = null, check = null, typical = {}, defaults = {}, grades = [], customerRate = null, boards = null, masterDie = masterDieOf(check) } = ctx;
   const v = { ...value, inputs: { ...(value.inputs || {}) }, sources: { ...(value.sources || {}) } };
+  delete v.layout_pick;
   const get = f => (TOP_FIELDS.has(f) ? v[f] : v.inputs[f]);
   const write = (f, x) => { if (TOP_FIELDS.has(f)) v[f] = x; else v.inputs[f] = x; };
   // Suggestions from the last context are cleared first, so nothing stale survives a new product or size.
@@ -407,31 +474,54 @@ export function recommend(value, ctx = {}) {
     }
     if (+p.emboss !== 1) put('emb_rate', 0, 'product', 'no embossing on the Product Master');
   }
-  if (top) {
-    const note = `${top.times_costed ? `used ${top.times_costed}×` : 'in the library'}${lib.length > 1 ? ` · ${lib.length - 1} other layout${lib.length > 2 ? 's' : ''}` : ''}`;
-    put('sheet_l', top.sheet_l, 'library', note);
-    put('sheet_w', top.sheet_w, 'library', note);
-    put('ups', top.ups, 'library', note);
-    put('style', top.style, 'library', note);
+  const hist = check?.history || [];
+  // A pasting neither the Product Master nor the Size Library gives is the one the size's past costings use most (owner,
+  // 20 Nov 2026) — taken before the layout, which is drawn for the pasting.
+  const pastStyle = () => {
+    if (!blank(v.style)) return;
+    const s = mostUsed(pastCostings(p, hist, v), h => h.style || null);
+    if (s) put('style', s.x, 'history', s.note);
+  };
+  if (boards) {
+    // The layout picker: the old die's layout, else the least board a carton. Style still comes from the library's top entry.
+    if (top) put('style', top.style, 'library', libNote(top, lib));
+    pastStyle();
+    const pick = pickLayout({ style: v.style || top?.style, size: parseSize(v.size_text), opening: v.opening ?? null, library: lib, dies: check?.dies?.exact || [], masterDie, boards, gsm: num(get('gsm')) > 0 ? num(get('gsm')) : null });
+    if (pick.none) v.layout_pick = { none: true, why: pick.why };
+    else {
+      v.layout_pick = { kind: pick.kind, note: pick.note, flags: pick.flags };
+      put('sheet_l', pick.sheet_l, pick.kind, pick.note);
+      put('sheet_w', pick.sheet_w, pick.kind, pick.note);
+      put('ups', pick.ups, pick.kind, pick.note);
+    }
+  } else {
+    if (top) {
+      const note = libNote(top, lib);
+      put('sheet_l', top.sheet_l, 'library', note);
+      put('sheet_w', top.sheet_w, 'library', note);
+      put('ups', top.ups, 'library', note);
+      put('style', top.style, 'library', note);
+    }
+    pastStyle();
   }
 
   // House rules (owner, 11 Nov 2026): "by default take …" — ahead of what past costings did.
-  for (const [f, x, note] of houseRuleValues(v, { finish: v.finish || null, productEmboss: p ? +p.emboss : null, productGrade: p?.board_grade ?? null, hasProduct: !!p, masterDie })) put(f, x, 'rule', note);
+  // The wastage_by_run flag rides only with a wastage the rule itself put: a typed or saved wastage is never made to
+  // follow the run (quantityBreaks and withRunWastage would overwrite it).
+  let ruleWastage = false;
+  for (const [f, x, note] of houseRuleValues(v, { finish: v.finish || null, productEmboss: p ? +p.emboss : null, productGrade: p?.board_grade ?? null, hasProduct: !!p, masterDie, grades, customerRate, byRun: true })) {
+    if (f === 'wastage_by_run') { if (ruleWastage) put(f, x, 'rule', note); continue; }
+    const took = put(f, x, 'rule', note);
+    if (f === 'wastage') ruleWastage = took;
+  }
+  if (!ruleWastage && v.sources.wastage_by_run?.kind !== 'rule') delete v.inputs.wastage_by_run;
 
   // History: the same product's last costing says it all; otherwise what is MOST USED across the
   // recent comparable costings of the size (one odd costing does not set the rate), and for the board
   // rate the newest (prices move).
-  const hist = check?.history || [];
-  const same = p && hist.find(h => sameName(h.product_name, p.name) && h.result?.ok);
-  const comparable = same ? [same] : rankHistory({ style: v.style, inputs: v.inputs }, hist).filter(h => h.comparable).slice(0, 20);
-  if (comparable.length) {
-    const pick = get1 => {
-      const counts = new Map();
-      for (const h of comparable) { const x = get1(h.inputs || {}); if (x != null) counts.set(x, (counts.get(x) || 0) + 1); }
-      if (!counts.size) return null;
-      const [x, n] = [...counts].sort((a, b) => b[1] - a[1])[0];   // ties: the newer (rankHistory order, Map keeps first seen)
-      return { x, note: same ? when(same) : `${n} of ${comparable.length} recent costings of this size` };
-    };
+  const past = pastCostings(p, hist, v);
+  if (past.rows.length) {
+    const pick = get1 => mostUsed(past, h => get1(h.inputs || {}));
     const coat = pick(i => (num(i.coat_rate) > 0 ? `r${num(i.coat_rate)}` : num(i.coat_factor) > 0 ? `f${num(i.coat_factor)}` : 'none'));
     if (coat) {
       if (coat.x.startsWith('r')) { put('coat_rate', +coat.x.slice(1), 'history', coat.note); put('coat_choice', 'rate', 'history', coat.note); }
@@ -446,7 +536,7 @@ export function recommend(value, ctx = {}) {
     }
     const gsm = pick(i => num(i.gsm));
     if (gsm) put('gsm', gsm.x, 'history', gsm.note);
-    const newest = comparable.find(h => num(h.inputs?.board_rate) > 0);
+    const newest = past.rows.find(h => num(h.inputs?.board_rate) > 0);
     if (newest) put('board_rate', num(newest.inputs.board_rate), 'history', `${when(newest)} — check today's rate`);
   }
 
@@ -459,6 +549,7 @@ export function recommend(value, ctx = {}) {
     const ppc = typical.process_per_colour.value;
     put('process', Math.round(ppc * colours / 50) * 50, 'typical', `₹${plain(ppc, 0)} a colour × ${plain(colours)}`);
   }
+  for (const [f, x, note] of assumedValues(v, { defaults })) put(f, x, 'assumed', note);
   for (const k of ['wastage', 'colours', 'print_rate', 'print_min', 'process', 'dp_rate', 'emb_rate', 'pf_pct', 'misc_pct', 'margin']) {
     put(k, defaults[k], 'default');
   }

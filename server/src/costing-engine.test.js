@@ -248,3 +248,16 @@ test('client twin is the server file word for word below its header', () => {
     assert.equal(body('../../client/src/lib/costing.js'), body('./costing-engine.js'));
   });
 });
+
+test("runWastage: planning's bands", () => {
+  assert.deepEqual([1, 2500, 2501, 5000, 5001, 80000].map(server.runWastage), [200, 200, 300, 300, 400, 400]);
+  assert.equal(server.runWastage(0), null);
+});
+test("quantity breaks take their own run's wastage when the costing follows the run", () => {
+  const [a, b, c] = quantityBreaks({ ...JOB, ups: 6, wastage: 200, wastage_by_run: 1 }, [10000, 25000, 50000]);
+  assert.equal(a.sheets, 10000 / 6 + 200); assert.equal(b.sheets, 25000 / 6 + 300); assert.equal(c.sheets, 50000 / 6 + 400);
+});
+test("without the flag every break keeps the costing's wastage", () => {
+  const [, b] = quantityBreaks({ ...JOB, ups: 6, wastage: 250 }, [10000, 25000]);
+  assert.equal(b.sheets, 25000 / 6 + 250);
+});

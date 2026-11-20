@@ -46,6 +46,8 @@ const PINS = [
   ['routes/board.js', "r.post('/board/move'", 'FOR UPDATE', /lockDocNumber\('CI-PR-', oc\)/],
   // …and Push to Job Card share-locks the gang's row while holding its lines.
   ['routes/gangs.js', "r.post('/gang-runs/:id/raise-pr'", 'FOR UPDATE', /lockDocNumber\('CI-PR-', oc\)/],
+  // The enquiry desk's auto-costing mints a costing and links its enquiry, as a person's save for that enquiry does.
+  ['auto-costing.js', 'export async function autoCostEnquiry(', 'FOR UPDATE', /lockDocNumber\('CI-CST-', oc\)/],
 ];
 
 for (const [rel, anchor, until, lock] of PINS) {
@@ -68,6 +70,44 @@ test('raise-pr mirrors onto the gang after its transaction, not inside it', () =
   assert.match(body, /await tx\(async \(qc, oc\) => \{[\s\S]*nextNumber\('CI-PR-'[\s\S]*\}\);\s*[\s\S]*?await syncPrAllocation\(q, pr\);/,
     'the gang mirror must follow the committed transaction');
   assert.doesNotMatch(body, /syncPrAllocation\(qc/, 'the gang mirror runs inside the minting transaction');
+});
+
+// The enquiry desk's Approve (20 Nov 2026) locks each row's costing before the row, the order every costing save takes
+// (reviseCosting, then linkEnquiry): the other way round, a manager approving a row while a person saves its costing
+// would deadlock. The mail's reply mints CI-QTN- numbers in transactions of its own, so it runs only after Approve's
+// transaction has committed — inside it, on a one-client pool, the reply's first transaction would wait for itself.
+test('approve locks the costings before the enquiries, and replies after its transaction', () => {
+  const src = read('routes/enquiries.js');
+  const at = src.indexOf("r.post('/costing/enquiries/approve'");
+  assert.ok(at >= 0, 'routes/enquiries.js: cannot find the approve route');
+  const body = src.slice(at, src.indexOf('\nr.', at + 1));
+  // The transaction's own code: from the callback's `{` to the brace that closes it (the braces in its strings pair up).
+  const open = body.indexOf('{', body.indexOf('await tx(async (qc, oc) =>'));
+  assert.ok(open > 0, 'approve has no transaction of its own');
+  let close = -1;
+  for (let i = open, depth = 0; i < body.length && close < 0; i++) {
+    if (body[i] === '{') depth++;
+    else if (body[i] === '}' && --depth === 0) close = i;
+  }
+  const inside = body.slice(open, close);
+  const costings = inside.search(/FROM costings\b[^`]*FOR UPDATE/);
+  assert.ok(costings >= 0, 'approve takes no lock on the costings in its transaction');
+  assert.ok(costings < inside.indexOf('lockRows(qc'), 'approve locks the enquiries (lockRows) before their costings');
+  assert.doesNotMatch(inside, /reply(IfReady|Step)\(/, 'the reply runs inside the approve transaction');
+  assert.match(body.slice(close), /await replyStep\(/, 'the reply must follow the committed transaction');
+});
+
+// Two presses can reach one mail at once (R22): its reply is claimed in a transaction of its own that locks every row of
+// the mail and finalises them, and only then, after that commit, does the send step (its own transactions) run.
+test("a mail's reply is claimed under the lock of its rows, and sent only after that transaction", () => {
+  const claim = before('routes/enquiries.js', 'async function claimReply(', '\n}\n');
+  assert.match(claim, /return tx\(async \(qc\) => \{/, 'the claim is one transaction');
+  assert.match(claim, /mailItems\(qc, [^;]*\{ lock: true \}\)/, "the claim reads the mail's rows locked, inside it");
+  assert.doesNotMatch(claim, /sendQuotations\(|makeQuotations\(|queueDraft\(|\bq\(|\bone\(/, 'a pool call or the send step inside the claim');
+  assert.match(before('routes/enquiries.js', 'async function mailItems(', '\n}\n'), /ORDER BY e\.id\$\{lock \? ' FOR UPDATE OF e' : ''\}/,
+    'the rows are locked in id order');
+  assert.match(before('routes/enquiries.js', 'async function replyIfReady(', '\n}\n'), /await claimReply\([\s\S]*await sendQuotations\(/,
+    'the send step follows the claim');
 });
 
 test('several prefixes are locked in one fixed order, one at a time on the caller\'s transaction', async () => {

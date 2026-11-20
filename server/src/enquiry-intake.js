@@ -18,6 +18,7 @@
 // customer figure, no customer address in the words.
 import { one, tx } from './db.js';
 import { audit, notify, lockDocNumber } from './helpers.js';
+import { PENDING, autoCostPendingSoft } from './auto-costing.js';
 import { cleanMail, unreadItem } from './enquiry-desk.js';
 import { num } from './costing-engine.js';
 import { mayCost } from './costing-match.js';
@@ -45,18 +46,25 @@ export function newEnquiryAlert(mails) {
     const more = m.rows.length > 3 ? ` +${m.rows.length - 3} more` : '';
     const counter = m.kind === 'counter';
     const again = m.kind === 'again';
+    // The desk costs a filed item by itself (owner, 20 Nov 2026): say so, and how many wait for a person.
+    const costed = m.kind === 'enquiry' ? m.rows.filter(r => r.costed).length : 0;
+    const held = costed ? m.rows.filter(r => r.held).length : 0;
+    const items = costed ? `${plural(costed, 'item')} costed, waiting for your approval${held ? ` · ${held} ${held === 1 ? 'needs' : 'need'} a person` : ''}`
+      : plural(m.rows.length, 'item');
     return {
-      title: `${counter ? 'Counter-offer' : again ? 'Asked again' : 'New enquiry'}: ${who(m)} — ${plural(m.rows.length, 'item')}`,
+      title: `${counter ? 'Counter-offer' : again ? 'Asked again' : 'New enquiry'}: ${who(m)} — ${items}`,
       body: counter
         ? `Their own prices for ${names}${more} · to ${m.mailbox_email}. Revise them on the Enquiry desk's Counter tab.`
         : again
           ? `${names}${more} · already on the desk as ${m.rows.map(r => r.enquiry_no).filter(Boolean).join(', ')}. Answer it there.`
-          : `${names}${more} · to ${m.mailbox_email}. Cost it on the Enquiry desk.`,
+          : costed ? `${names}${more} · to ${m.mailbox_email}. Check and approve on the Enquiry desk.`
+            : `${names}${more} · to ${m.mailbox_email}. Cost it on the Enquiry desk.`,
       link: `/costing?tab=enquiries${m.rows[0] ? `&enquiry=${m.rows[0].id}` : ''}`,
       refTable: 'enquiry_mails', refId: m.mail_id,
     };
   }
-  const list = kind => mails.filter(m => m.kind === kind).map(m => `${who(m)} (${plural(m.rows.length, 'item')})`).join(', ');
+  const list = kind => mails.filter(m => m.kind === kind)
+    .map(m => `${who(m)} (${plural(m.rows.length, 'item')}${kind === 'enquiry' && m.rows.some(r => r.costed) ? ', costed' : ''})`).join(', ');
   const fresh = list('enquiry');
   const counters = list('counter');
   const again = list('again');
@@ -228,11 +236,18 @@ export async function syncIntakeEnquiries({ max = MAX_PER_CALL } = {}) {
 // For readers (the two-minute /drafts/summary poll): copy only when something waits, a few rows at a time (the poll's
 // answer is not held up for long; the database's own call takes the rest), and never fail the read.
 const SOFT_MAX = 10;
+// It also runs when no intake row waits but a row still waits to be costed or a mail to be announced (a call that
+// stopped part-way), costing for at most 5 s.
+// Rows wait to be costed only while the desk's switch is on; with it off the poll has nothing to do.
+export const pollHasWork = async () => !!await one(`SELECT 1 AS y WHERE EXISTS (SELECT 1 FROM enquiry_mails WHERE alerted_at IS NULL)
+  OR (COALESCE((SELECT auto_cost FROM enquiry_settings WHERE id = 1), false) AND EXISTS (SELECT 1 FROM enquiries e WHERE ${PENDING}))`);
 export async function syncIntakeEnquiriesSoft() {
   const none = { filed: [], skipped: [], refused: [] };
   try {
-    if (!await one(`SELECT 1 AS y FROM avs.enquiry_intake WHERE status = 'new' LIMIT 1`)) return none;
-    const out = await syncIntakeEnquiries({ max: SOFT_MAX });
+    const intake = await one(`SELECT 1 AS y FROM avs.enquiry_intake WHERE status = 'new' LIMIT 1`);
+    if (!intake && !await pollHasWork()) return none;
+    const out = intake ? await syncIntakeEnquiries({ max: SOFT_MAX }) : none;
+    await autoCostPendingSoft({ budgetMs: 5000 });
     await notifyNewEnquiriesSoft();
     return out;
   } catch (e) {
@@ -245,16 +260,32 @@ export async function syncIntakeEnquiriesSoft() {
 // The mails nobody has been told about yet are claimed (enquiry_mails.alerted_at, SKIP LOCKED), so however many callers
 // race, each mail is announced once; a mail that put nothing on the desk (a counter whose rows were all refused) is
 // stamped too, and never looked at again. Who hears it: every active login with Costing ticked.
+//
+// The desk costs a filed item by itself first (owner, 20 Nov 2026), and the alert says the items are costed and waiting
+// for approval. So a mail is claimed only when none of its rows still waits to be costed (the PENDING of auto-costing.js,
+// the one definition), or it was filed more than ALERT_WAIT_MINUTES ago (a costing that stalls never holds the alert
+// for long), or the desk's switch is off. A row a call is costing right now (a fresh 'being costed' claim, which PENDING
+// leaves alone) holds the alert too, so the words are not the plain ones for a mail whose last row is being costed.
+export const ALERT_WAIT_MINUTES = 5;
 export async function notifyNewEnquiries() {
   return tx(async (qc) => {
-    const mails = await qc(`SELECT id, mailbox_email FROM enquiry_mails WHERE alerted_at IS NULL
-                             ORDER BY id LIMIT 200 FOR UPDATE SKIP LOCKED`);
+    const mails = await qc(`SELECT m.id, m.mailbox_email FROM enquiry_mails m WHERE m.alerted_at IS NULL
+                               AND (m.created_at < now() - make_interval(mins => $1)
+                                    OR NOT COALESCE((SELECT auto_cost FROM enquiry_settings WHERE id = 1), false)
+                                    OR NOT EXISTS (SELECT 1 FROM enquiries e WHERE e.mail_id = m.id
+                                                    AND (${PENDING}
+                                                         OR (e.auto_cost_why = 'being costed' AND e.auto_cost_at > now() - make_interval(mins => $1)))))
+                             ORDER BY m.id LIMIT 200 FOR UPDATE OF m SKIP LOCKED`, [ALERT_WAIT_MINUTES]);
     if (!mails.length) return { announced: 0 };
     const ids = mails.map(m => m.id);
     await qc('UPDATE enquiry_mails SET alerted_at = now() WHERE id = ANY($1::int[])', [ids]);
-    const rows = await qc(`SELECT id, enquiry_no, product_name, customer_name, mail_id, counter_mail_id, asked_again_mail_id FROM enquiries
-                            WHERE mail_id = ANY($1::int[]) OR counter_mail_id = ANY($1::int[]) OR asked_again_mail_id = ANY($1::int[])
-                            ORDER BY id`, [ids]);
+    // `costed` = a complete costing the desk made by itself, `held` = it could not (its reason stands on the row).
+    const rows = await qc(`SELECT e.id, e.enquiry_no, e.product_name, e.customer_name, e.mail_id, e.counter_mail_id, e.asked_again_mail_id,
+                                  (c.id IS NOT NULL AND c.auto_costed AND c.complete AND NOT c.archived) AS costed,
+                                  (e.auto_cost_why IS NOT NULL AND e.auto_cost_why <> 'being costed') AS held
+                             FROM enquiries e LEFT JOIN costings c ON c.id = e.costing_id
+                            WHERE e.mail_id = ANY($1::int[]) OR e.counter_mail_id = ANY($1::int[]) OR e.asked_again_mail_id = ANY($1::int[])
+                            ORDER BY e.id`, [ids]);
     const told = [];
     for (const m of mails) {
       const fresh = rows.filter(e => e.mail_id === m.id);

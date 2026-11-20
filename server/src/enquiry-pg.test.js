@@ -74,6 +74,8 @@ describe('Enquiry desk — through the real app', {
     await db.q(`CREATE TABLE IF NOT EXISTS avs.settings (key text PRIMARY KEY, value text, note text)`);
     await db.q(`INSERT INTO avs.settings (key, value) VALUES ('robot_key', $1)`, [ROBOT_KEY]);
     await db.q(`INSERT INTO customers (name, segment) VALUES ('Example Pharma Ltd', 'pharma')`);
+    // Filing costs by itself since 20 Nov 2026; this suite tests the desk without it (auto-costing-pg.test.js tests that).
+    await db.q(`UPDATE enquiry_settings SET auto_cost = false WHERE id = 1`);
 
     const { default: jwt } = await import('jsonwebtoken');
     const { JWT_SECRET: secret } = await import('./auth.js');
@@ -1442,6 +1444,24 @@ describe('Enquiry desk — through the real app', {
     assert.deepEqual(Object.values(await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [x.id])), ['new', null]);
     // No Costing tick, no delete.
     assert.equal((await call('plain', 'POST', '/costing/enquiries/delete', { ids: [x.id] })).status, 403);
+  });
+
+  test('the robot files the opening and a details edit without it keeps it', async () => {
+    const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
+    const job = f.body.job;
+    assert.equal((await robot('POST', `/enquiry-jobs/${job.id}/claim`, {})).status, 200);
+    const filed = await robot('POST', `/enquiry-jobs/${job.id}/mails`, { mails: [{
+      gmail_message_id: 'm-open-1', subject: 'Side pasted carton', from_email: 'buyer@example-pharma.test', customer_name: 'Example Pharma Ltd',
+      items: [{ product_name: 'OPENING TEST CARTON', size_text: '100x40x80', style: 'SIDE', opening: 'Top open', quantities: [5000] }],
+    }] });
+    assert.equal(filed.status, 200);
+    const no = filed.body.filed[0].enquiries[0];
+    await robot('POST', `/enquiry-jobs/${job.id}/done`, { ok: true, result: { filed: 1 } });
+    const row = (await call('clerk', 'GET', `/costing/enquiries?search=${no}`)).body[0];
+    assert.equal(row.opening, 'top');
+    const details = { product_name: row.product_name, size_text: row.size_text, style: 'SIDE', quantities: [5000], customer_id: row.customer_id, customer_name: row.customer_name };
+    assert.equal((await call('clerk', 'PUT', `/costing/enquiries/${row.id}`, details)).body.opening, 'top');
+    assert.equal((await call('clerk', 'PUT', `/costing/enquiries/${row.id}`, { ...details, opening: null })).body.opening, null);
   });
 
   test('settings: an admin only; the plant-wide audit log carries no price and no address', async () => {

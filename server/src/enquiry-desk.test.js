@@ -4,10 +4,11 @@ import { computeCosting, quantityBreaks } from './costing-engine.js';
 import {
   parseQuantity, cleanQuantities, cleanItem, cleanMail, priceRows, ceilPaise, stageOf, customerLine, LINE_KEYS,
   quotationLines, groupByCustomer, customerKey, productKey, isRepeat, composeReply, replySubject, replyRecipient, customerSpecs, sizeText,
-  BACK_TO, broughtBack, UNDO_COLS,
+  BACK_TO, broughtBack, UNDO_COLS, mailReplyState, REPLY_FRESH_MS, STALE_CLAIM_MINUTES, autoCostStopped, RESUME_WHY, PRICE_CHANGED_WHY,
 } from './enquiry-desk.js';
 import { quotationPdf, pdfSafe } from './quotation-pdf.js';
 import { loadPdfjs } from './poparse.js';
+import { readFileSync } from 'node:fs';
 
 // Invented figures, not a customer's. The internal ones are marked so a leak is easy to see.
 const COSTING = {
@@ -45,6 +46,15 @@ test('an item: size read the Costing way, pasting normalised, nothing invented',
   assert.equal(i.board, null);
   assert.equal(cleanItem({ notes: 'no product, no size' }), null);
   assert.equal(cleanItem({ product_name: 'x', style: 'ZIGZAG' }).style, null);
+});
+
+test('cleanItem reads the opening of a side-pasted carton', () => {
+  const base = { product_name: 'Test carton' };
+  assert.equal(cleanItem({ ...base, style: 'SIDE', opening: 'Top open' }).opening, 'top');
+  assert.equal(cleanItem({ ...base, style: 'SIDE', opening: 'side' }).opening, 'side');
+  assert.equal(cleanItem({ ...base, style: 'LOCK', opening: 'top' }).opening, null);
+  assert.equal(cleanItem({ ...base, style: 'SIDE' }).opening, null);
+  assert.equal(cleanItem({ ...base }).opening, null);
 });
 
 test('a mail: Gmail id required, addresses lower-cased, a Gmail link only', () => {
@@ -103,10 +113,149 @@ test('Send back is one tab to the left; Bring back returns a row to where it was
   assert.equal(broughtBack(undefined, 4), 'costing');
   assert.equal(broughtBack(null, null), 'new');
   assert.equal(broughtBack('dropped', null), 'new');
-  // Undo keeps every column a desk change can touch — the status, the costing link, the prices, what was asked.
-  for (const k of ['status', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'quotation_id', 'quantities', 'product_name']) {
+  // Undo keeps every column a desk change can touch — the status, the costing link, the prices, what was asked, and what
+  // CI Plant could not do by itself (a person's costing clears it; Undo brings it back).
+  for (const k of ['status', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'quotation_id', 'quantities', 'product_name', 'auto_cost_why', 'reply_claim_at']) {
     assert.ok(UNDO_COLS.includes(k), k);
   }
+});
+
+// One reply per mail (owner, 20 Nov 2026: approval fixes the price, makes the quotation and saves the Gmail draft;
+// nothing is sent). Invented rows: an approved item is in To price, its costing approved, every quantity priced.
+// Approve stamps each final price it keeps or fills (final review I2): priceRows reads the stamp as `approved`.
+const PRICED = [{ qty: 10000, final: 2.41, approved: true }, { qty: 25000, final: 2.05, approved: true }];
+const item = (id, o = {}) => ({
+  id, enquiry_no: `CI-ENQ-${String(id).padStart(4, '0')}`, status: 'price_pending', stage: 'price_pending', costing_status: 'approved',
+  costing_complete: true, prices: PRICED, quotation_id: null, quotation_no: null, quotation_status: null, auto_cost_why: null, auto_cost_at: null, ...o,
+});
+
+test('mailReplyState: ready only when nothing of the mail waits', () => {
+  assert.deepEqual(mailReplyState([item(1), item(2)]), { ready: true, approved: [1, 2], waiting: [], quoted: [], resume: null });
+  const held = item(3, { status: 'costing', stage: 'costing', costing_status: 'draft', costing_complete: false,
+    prices: [{ qty: 10000, final: null }], auto_cost_why: 'needs pasting: side or lock?' });
+  assert.deepEqual(mailReplyState([item(1), held]),
+    { ready: false, approved: [1], waiting: [{ enquiry_no: 'CI-ENQ-0003', why: 'needs pasting: side or lock?' }], quoted: [], resume: null });
+  assert.deepEqual(mailReplyState([item(1), item(4, { status: 'dropped', stage: 'dropped', costing_status: 'draft' })]),
+    { ready: true, approved: [1], waiting: [], quoted: [], resume: null });
+  const quoted = mailReplyState([item(1), item(5, { status: 'quote_ready', stage: 'quote_ready', quotation_id: 9, quotation_no: 'CI-QTN-0003', quotation_status: 'queued' })]);
+  assert.deepEqual(quoted, { ready: false, approved: [1], waiting: [], quoted: ['CI-QTN-0003'], resume: null });
+});
+
+test('mailReplyState: why an item waits, and what counts as quoted', () => {
+  const now = Date.parse('2026-11-20T10:00:00Z');
+  const ago = min => new Date(now - min * 60_000).toISOString();
+  const why = (o, at = now) => mailReplyState([item(1), item(2, o)], { now: at }).waiting.map(w => w.why);
+  // A complete costing not approved yet; a row with no costing; an approved costing with a quantity still unpriced.
+  assert.deepEqual(why({ costing_status: 'draft' }), ['waiting for approval']);
+  assert.deepEqual(why({ status: 'ready', stage: 'ready', costing_status: null, costing_complete: false, prices: [{ qty: 10000, final: null }] }), ['not costed yet']);
+  assert.deepEqual(why({ prices: [{ qty: 10000, final: 2.41 }, { qty: 25000, final: null }] }), ['waiting for approval']);
+  // A hidden costing is no costing, even an approved one.
+  assert.deepEqual(why({ costing_complete: false }), ['not costed yet']);
+  // What CI Plant could not do by itself is the reason; a claim older than five minutes stopped part-way.
+  const tried = said => ({ status: 'new', stage: 'new', costing_status: null, costing_complete: false, prices: [{ qty: 10000, final: null }], auto_cost_why: said });
+  assert.deepEqual(why(tried('Could not cost it by itself: no size')), ['Could not cost it by itself: no size']);
+  assert.deepEqual(why({ ...tried('being costed'), auto_cost_at: ago(1) }), ['being costed']);
+  assert.deepEqual(why({ ...tried('being costed'), auto_cost_at: ago(6) }), ['costing stopped part-way — press Cost it for me']);
+  assert.deepEqual(why(tried('being costed')), ['being costed'], 'no claim time: not stale, as the SQL reads it');
+  // A cancelled or superseded quotation is not one; sent, ordered and a row finalised but not yet quoted are.
+  for (const s of ['cancelled', 'superseded']) {
+    assert.equal(mailReplyState([item(1), item(2, { quotation_id: 7, quotation_no: 'CI-QTN-0007', quotation_status: s })]).ready, true, s);
+  }
+  assert.deepEqual(mailReplyState([item(1), item(2, { status: 'sent', stage: 'sent', quotation_id: 7, quotation_no: 'CI-QTN-0007', quotation_status: 'sent' }),
+    item(3, { status: 'ordered', stage: 'ordered', quotation_id: 7, quotation_no: 'CI-QTN-0007', quotation_status: 'sent' })]).quoted, ['CI-QTN-0007']);
+  assert.deepEqual(mailReplyState([item(1), item(2, { status: 'quote_ready', stage: 'quote_ready', finalised_at: new Date(now - 5000).toISOString() })], { now }),
+    { ready: false, approved: [1], waiting: [], quoted: ['CI-ENQ-0002'], resume: null }, 'finalised just now, not quoted yet: the row itself is named');
+  // Nothing approved is no reply, even with nothing waiting; a deleted row is out like a dropped one.
+  assert.equal(mailReplyState([item(1, { status: 'deleted', stage: 'deleted' }), item(2, { status: 'dropped', stage: 'dropped' })]).ready, false);
+  assert.equal(mailReplyState([]).ready, false);
+});
+
+// A reply cut off part-way (R23, narrowed by final review I1): rows the claim itself finalised (reply_claim_at) that are on
+// no quotation yet. A finalise younger than REPLY_FRESH_MS may be another press still making it, so it reads as quoted
+// (R22); older, it resumes. A row finalised any other way, or on a quotation, is quoted.
+test('mailReplyState: a reply cut off part-way is resumed, one still being made is quoted', () => {
+  const now = Date.parse('2026-11-20T10:00:00Z');
+  const at = ms => new Date(now - ms).toISOString();
+  const cut = (id, o = {}) => item(id, { status: 'quote_ready', stage: 'quote_ready', finalised_at: at(10 * 60_000), reply_claim_at: at(10 * 60_000), ...o });
+  const state = list => mailReplyState(list, { now });
+  const resume = ids => ({ ids, why: 'Finalised, reply not finished — press Send quotation' });
+  assert.equal(RESUME_WHY, 'Finalised, reply not finished — press Send quotation', "Approve is offered on To price only: the Quoted tab's Send quotation finishes it");
+  assert.equal(REPLY_FRESH_MS, 35_000, 'a call has 30 s; the same margin as the client joins a write for');
+  assert.deepEqual(state([cut(1), cut(2)]), { ready: false, approved: [], waiting: [], quoted: [], resume: resume([1, 2]) });
+  // No finalise time at all reads as long ago.
+  assert.deepEqual(state([cut(1, { finalised_at: null }), cut(2)]).resume, resume([1, 2]));
+  // On a quotation (its own send step made one, 'ready' and not drafted): a quotation is there, so quoted — Send quotation
+  // drafts it.
+  assert.deepEqual(state([cut(1, { quotation_id: 4, quotation_no: 'CI-QTN-0004', quotation_status: 'ready' }), cut(2)]),
+    { ready: false, approved: [], waiting: [], quoted: ['CI-QTN-0004', 'CI-ENQ-0002'], resume: null });
+  // Finalised just now: another press may be sending it — quoted, never resumed.
+  assert.deepEqual(state([cut(1, { finalised_at: at(REPLY_FRESH_MS - 1000) }), cut(2)]),
+    { ready: false, approved: [], waiting: [], quoted: ['CI-ENQ-0001', 'CI-ENQ-0002'], resume: null });
+  assert.deepEqual(state([cut(1, { finalised_at: at(1000), quotation_id: 4, quotation_no: 'CI-QTN-0004', quotation_status: 'ready' })]).quoted, ['CI-QTN-0004']);
+  // Finalised the old way (no claim mark): quoted, however long ago.
+  assert.deepEqual(state([cut(1, { reply_claim_at: null }), cut(2, { reply_claim_at: null })]),
+    { ready: false, approved: [], waiting: [], quoted: ['CI-ENQ-0001', 'CI-ENQ-0002'], resume: null });
+  // A reply already made (a draft queued, saved or sent) is never made again: the rest are named with it.
+  assert.deepEqual(state([item(1, { status: 'quote_ready', stage: 'quote_ready', quotation_id: 4, quotation_no: 'CI-QTN-0004', quotation_status: 'drafted' }), cut(2)]),
+    { ready: false, approved: [], waiting: [], quoted: ['CI-QTN-0004', 'CI-ENQ-0002'], resume: null });
+  // What waits, or a row approved since, does not hold the cut-off rows back; only they are resumed.
+  const held = item(3, { status: 'costing', stage: 'costing', costing_status: 'draft', costing_complete: false, prices: [{ qty: 10000, final: null }] });
+  assert.deepEqual(state([cut(1), held, item(4)]),
+    { ready: false, approved: [4], waiting: [{ enquiry_no: 'CI-ENQ-0003', why: 'not costed yet' }], quoted: [], resume: resume([1]) });
+});
+
+// Final review I1 (the reviewer's case): A was finalised by hand days ago and its quotation then cancelled — cancel empties
+// quotation_id and the row waits in Quoted. B was just approved. A went the old way, so the mail's automatic reply is not
+// made (B is sent by hand, "part of this mail went on …"), and A is never quoted again by a claim.
+test("mailReplyState: a row whose quotation was cancelled or superseded counts as quoted, never as a reply to resume", () => {
+  const now = Date.parse('2026-11-25T10:00:00Z');
+  const daysAgo = new Date(now - 4 * 86_400_000).toISOString();
+  const A = item(1, { status: 'quote_ready', stage: 'quote_ready', costing_status: 'draft', finalised_at: daysAgo });
+  const B = item(2);
+  const st = mailReplyState([A, B], { now });
+  assert.deepEqual(st, { ready: false, approved: [2], waiting: [], quoted: ['CI-ENQ-0001'], resume: null });
+  assert.deepEqual(st.ready ? st.approved : st.resume?.ids || [], [], "what claimReply would finalise and send: nothing — A is not re-quoted");
+  // A superseded quotation's row: quoted too (it used to read as resumable for ever, with nothing the send step could do).
+  const sup = item(3, { status: 'quote_ready', stage: 'quote_ready', finalised_at: daysAgo, reply_claim_at: daysAgo,
+    quotation_id: 9, quotation_no: 'CI-QTN-0009', quotation_status: 'superseded' });
+  assert.deepEqual(mailReplyState([sup, B], { now }), { ready: false, approved: [2], waiting: [], quoted: ['CI-ENQ-0003'], resume: null });
+  // A row the claim finalised whose quotation a person then cancelled: the claim's mark went when its quotation was made,
+  // so it reads as any finalised row — and even a mark left behind is no resume while the row points at a quotation.
+  const cancelledClaim = item(5, { status: 'quote_ready', stage: 'quote_ready', finalised_at: daysAgo, reply_claim_at: daysAgo,
+    quotation_id: 11, quotation_no: 'CI-QTN-0011', quotation_status: 'cancelled' });
+  assert.deepEqual(mailReplyState([cancelledClaim, B], { now }).resume, null);
+  // The claim's own cut-off row, on no quotation and older than REPLY_FRESH_MS: still resumed.
+  const cut = item(4, { status: 'quote_ready', stage: 'quote_ready', finalised_at: daysAgo, reply_claim_at: daysAgo });
+  assert.deepEqual(mailReplyState([cut, B], { now }).resume, { ids: [4], why: RESUME_WHY });
+});
+
+// Final review I2: a row is approved for the automatic reply only when every final price carries Approve's stamp. A price
+// set after the approval (PUT prices, by any login) is not stamped: the mail's reply waits until a manager approves again.
+test('mailReplyState: a price changed after approval waits for Approve again', () => {
+  assert.equal(PRICE_CHANGED_WHY, 'price changed after approval — Approve again');
+  const changed = item(2, { prices: [{ qty: 10000, final: 2.55, approved: false }, { qty: 25000, final: 2.05, approved: true }] });
+  assert.deepEqual(mailReplyState([item(1), changed]),
+    { ready: false, approved: [1], waiting: [{ enquiry_no: 'CI-ENQ-0002', why: 'price changed after approval — Approve again' }], quoted: [], resume: null });
+  // never stamped at all (priced by hand, the costing approved on its own screen): the same — Approve stamps it
+  const unstamped = item(3, { prices: PRICED.map(({ approved, ...p }) => p) });
+  assert.deepEqual(mailReplyState([unstamped]).waiting, [{ enquiry_no: 'CI-ENQ-0003', why: 'price changed after approval — Approve again' }]);
+  assert.equal(mailReplyState([item(1)]).ready, true);
+});
+
+test("priceRows: each quantity says whether its final price is the one Approve stamped", () => {
+  const e = { quantities: [10000, 25000, 50000], final_prices: [
+    { qty: 10000, final: 2.41, proposed: 2.4, ok: true }, { qty: 25000, final: 2.1, proposed: 2.0 }, { qty: 50000, final: 1.9, proposed: 1.9, ok: 'yes' }] };
+  assert.deepEqual(priceRows(e, null).map(r => [r.qty, r.final, r.approved]), [[10000, 2.41, true], [25000, 2.1, false], [50000, 1.9, false]]);
+  assert.equal(priceRows({ quantities: [10000], final_prices: [] }, null)[0].approved, false);
+});
+
+test('one stale-claim threshold: the desk reads it, and the auto-costing\'s SQL uses the same minutes', async () => {
+  assert.equal(STALE_CLAIM_MINUTES, 5);
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./auto-costing.js', import.meta.url), 'utf8');
+  assert.match(src, /import \{[^}]*\bSTALE_CLAIM_MINUTES\b[^}]*\} from '\.\/enquiry-desk\.js'/);
+  assert.match(src, /auto_cost_at < now\(\) - make_interval\(mins => \$\{STALE_CLAIM_MINUTES\}\)/);
+  assert.doesNotMatch(src, /interval '5 minutes'/, 'no second copy of the threshold');
 });
 
 test('one quotation per customer: master first, else the address, else the name', () => {
@@ -270,4 +419,24 @@ test('a new quantity, another product or a nameless item is a new request', () =
   assert.equal(isRepeat(open, { product_name: '', quantities: [5000] }), false);
   assert.equal(isRepeat({ product_name: 'ALPHA 10 TAB CARTON', quantities: [] }, { product_name: 'ALPHA 10 TAB CARTON', quantities: [3000] }), false,
     'the first asked no quantity; a quantity now is new');
+});
+
+test('autoCostStopped: only a claim older than the shared threshold, never one with no time', () => {
+  const now = Date.parse('2026-11-20T10:00:00Z');
+  const at = mins => new Date(now - mins * 60_000).toISOString();
+  assert.equal(autoCostStopped({ auto_cost_why: 'being costed', auto_cost_at: at(STALE_CLAIM_MINUTES + 1) }, now), true);
+  assert.equal(autoCostStopped({ auto_cost_why: 'being costed', auto_cost_at: at(STALE_CLAIM_MINUTES - 1) }, now), false);
+  assert.equal(autoCostStopped({ auto_cost_why: 'being costed', auto_cost_at: null }, now), false);
+  assert.equal(autoCostStopped({ auto_cost_why: 'needs pasting: side or lock?', auto_cost_at: at(60) }, now), false);
+  assert.equal(autoCostStopped({ auto_cost_why: null, auto_cost_at: null }, now), false);
+});
+
+test('both robot skills read every artwork and ask for the opening', () => {
+  for (const f of ['avs-enquiries', 'enquiry-desk']) {
+    const text = readFileSync(new URL(`../../skills/${f}/SKILL.md`, import.meta.url), 'utf8');
+    for (const must of ['opening', 'every enquiry item', 'Pantone', 'artwork only as CDR']) {
+      assert.ok(text.includes(must), `${f} lacks "${must}"`);
+    }
+    assert.match(text, /Never send/, `${f} lost its never-send rule`);
+  }
 });

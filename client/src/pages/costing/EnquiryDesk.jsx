@@ -13,12 +13,12 @@
 // person sends it from Gmail. With the mailbox's Gmail connected (Settings › Connect Gmail, 11 Nov 2026) CI Plant's
 // server saves that draft itself the moment Send quotation is pressed — no robot for drafts. Finalise and Mark as sent need the Management right.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, Mail, PackageCheck, Plus, RefreshCw, RotateCcw, Send, Settings, Trash2, X } from 'lucide-react';
+import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, Mail, PackageCheck, Plus, RefreshCw, RotateCcw, Send, Settings, Trash2, X } from 'lucide-react';
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BACK_LABEL, DESK_TABS, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, dateText, fetchQueuedText, fetchWaitText, mailboxNote, mailboxTag,
-  quantitiesText, qtyText, rupees, whereText,
+  BACK_LABEL, DESK_TABS, PILL_TONE, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
+  moveSummary, moveTone, quantitiesText, replyLine, qtyText, rupees, startsFresh, whereText,
 } from '../../lib/enquiryUi.js';
 import COMPANY_ROUTINE_PROMPT from '../../lib/enquiry-robot/company-routine-prompt.md?raw';
 import EnquiryDetail from './EnquiryDetail.jsx';
@@ -150,6 +150,23 @@ export function mailGaps(pickedRows) {
   return [...by.values()].filter(g => g.picked < g.of);
 }
 
+// Under a row's costing: To price — whether it waits for approval, the costing's remarks, what its mail's reply waits on;
+// To cost — why CI Plant could not cost it by itself.
+function AutoNotes({ e, tab }) {
+  const pill = tab === 'price' ? autoPill(e) : null;
+  const line = tab === 'price' ? replyLine(e) : null;
+  const held = tab === 'cost' ? heldLine(e) : null;
+  if (!pill && !line && !held && !(tab === 'price' && e.costing_remarks)) return null;
+  return (
+    <div className="max-w-[16rem] space-y-1">
+      {pill && <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${PILL_TONE[pill.tone]}`}>{pill.text}</span>}
+      {tab === 'price' && e.costing_remarks && <div className="truncate text-[11px] text-slate-500" title={e.costing_remarks}>{e.costing_remarks}</div>}
+      {line && <div className="text-[11px] font-semibold text-sky-800">{line}</div>}
+      {held && <div className="text-[11px] font-semibold text-amber-800">{held}</div>}
+    </div>
+  );
+}
+
 function UndoBar({ last, onUndo, onClose }) {
   if (!last) return null;
   return (
@@ -279,12 +296,18 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const toggleMail = b => setPicked(p => (b.ids.every(id => p.includes(id)) ? p.filter(id => !b.ids.includes(id)) : [...new Set([...p, ...b.ids])]));
   const pickMail = mailId => { const b = buckets.find(x => x.mail_id === mailId); if (b) toggleMail(b); };
 
-  // A move's answer: { moved, skipped, undo }. What moved goes on the bar with Undo; what could not, in a note.
+  // A move's answer: { moved, skipped, undo } — and after a Management drop or delete, what the mail's reply did (replies,
+  // later, waiting), which the server makes once the mail has nothing left waiting (final review I5). What moved and the
+  // reply's lines go on the bar, with Undo when the server gave one; the reply's lines also in a toast, in Approve's tone;
+  // what could not move, in a note.
   const after = async (promise, say) => {
     const r = await promise;
     const moved = r?.moved || [];
     if (r?.skipped?.length) toast.info(`Not moved: ${r.skipped.map(s => `${s.enquiry_no} ${s.why}`).join('; ')}`);
-    if (moved.length) setLast({ text: say(moved), undo: r.undo || null });
+    const lines = moveSummary(r, moved.length ? say(moved) : null);
+    const tone = moveTone(r);
+    if (tone) toast[tone](lines.join(' · '));
+    if (lines.length) setLast({ text: lines.join(' · '), undo: r?.undo || null });
     setPicked([]);
     await reload();
     return r;
@@ -376,6 +399,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             {e.batch_no && e.costing_live && <div className="text-[10px] text-slate-500">bulk {e.batch_no}</div>}
           </div>
         ) : <div className="text-xs text-slate-400">none yet</div>}
+        <AutoNotes e={e} tab={tab} />
         {costButton(e)}
       </div>
     ),
@@ -450,6 +474,25 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     for (const e of list) for (const p of e.prices || []) typed.current.delete(`${e.id}|${p.qty}`);
     if (quiet) return r;
     setLast({ text: `Final prices saved for ${r.saved.join(', ')}.`, undo: r.undo });
+    setPicked([]);
+    await reload();
+  };
+  // Approve (Management): the costing approved, the price fixed, and a mail with nothing left waiting gets its ONE reply as a
+  // Gmail draft. Never sent. The answer is read line by line (approveSummary); an Undo only when no reply was made.
+  const approve = async () => {
+    const r = await api.post('/costing/enquiries/approve', { ids: picked });
+    const lines = approveSummary(r);
+    toast[approveTone(r)](lines.join(' · '));
+    // kept on the bar (it stays until closed), so the reasons outlive the toast; Undo only when the server gave one
+    setLast({ text: lines.join(' · '), undo: r.undo });
+    setPicked([]);
+    await reload();
+  };
+  const costForMe = async () => {
+    const r = await api.post('/costing/enquiries/auto-cost', { ids: picked });
+    const lines = autoCostLines(r);
+    toast[autoCostTone(r)](lines.join(' · '));
+    setLast({ text: lines.join(' · ') });
     setPicked([]);
     await reload();
   };
@@ -583,7 +626,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         summary={[[...new Set(pickedRows.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · '),
           ...mailGaps(pickedRows).map(g => `⚠ M${g.mail_id}: ${g.picked} of ${g.of} ticked`)].filter(Boolean).join(' · ')}>
         {tab === 'cost' && <>
-          {one && <Button size="sm" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />{one.costing_live ? 'Open costing' : 'Cost it'}</Button>}
+          {/* CI Plant's own incomplete draft opens as a fresh costing (startsFresh): "Cost it" */}
+          {one && <Button size="sm" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />{one.costing_live && !startsFresh(one) ? 'Open costing' : 'Cost it'}</Button>}
           {several && <Button size="sm" onClick={() => startOne(pickedRows.map(e => e.id))}><Calculator size={13} className="mr-1 inline" />Cost one by one</Button>}
           {several && <Button size="sm" variant="secondary" onClick={() => startTogether(pickedRows)}><Layers size={13} className="mr-1 inline" />Cost together (bulk)</Button>}
         </>}
@@ -593,6 +637,14 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         )}
         {tab === 'cost' && <Button size="sm" variant="secondary" onClick={() => move('to-price', m => `${nos(m)} sent to To price.`)}
           title="For rows whose costing is complete">Send to To price</Button>}
+        {tab === 'cost' && (
+          <Button size="sm" variant="secondary" onClick={costForMe}
+            title="CI Plant costs the ticked rows itself, as a draft a manager approves in To price"><Calculator size={13} className="mr-1 inline" />Cost it for me</Button>
+        )}
+        {tab === 'price' && mgmt && (
+          <Button size="sm" variant="success" onClick={approve}
+            title="Approves the costing and fixes the price; a mail with nothing left waiting gets its quotation and a Gmail draft — nothing is sent"><Check size={13} className="mr-1 inline" />Approve</Button>
+        )}
         {tab === 'price' && <>
           {one && <Button size="sm" variant="secondary" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />Open costing</Button>}
           <Select value={adjust.mode} onChange={e => setAdjust(a => ({ ...a, mode: e.target.value }))} className="!h-8 w-44">
@@ -711,6 +763,8 @@ function DeskSettings({ desk, onSaved }) {
         <Field label="Terms on every quotation"><Textarea rows={4} value={s.terms} onChange={e => setS({ ...s, terms: e.target.value })} /></Field>
         <Field label="First fetch looks back (days)"><Input inputMode="numeric" value={s.fetch_days} onChange={e => setS({ ...s, fetch_days: e.target.value })} /></Field>
       </div>
+      <Checkbox label="Cost new enquiries by themselves" checked={!!s.auto_cost} onChange={e => setS({ ...s, auto_cost: e.target.checked })} />
+      <p className="-mt-3 text-xs text-slate-500">Each new enquiry is costed by CI Plant as an Auto draft; a manager approves it in To price. What it cannot cost stays in To cost, with the reason.</p>
       <div className="text-xs text-slate-500">The robot that reads and drafts mail is Claude with the mailbox's own Gmail, running the enquiry desk skill — not the AVS photo-check routine.</div>
       <Button onClick={save}>Save settings</Button>
       <CloudLink mailbox="business" cloud={desk.cloud?.business} onSaved={onSaved} />

@@ -16,7 +16,9 @@ import { audit } from '../helpers.js';
 import { parseSize, normStyle } from '../costing-engine.js';
 import { mayCost, dieMasterMatches } from '../costing-match.js';
 import { registerMatches } from '../die-list.js';
-import { proposals, readings, cartonPlan, overRules, settingsProblem, cleanSettings } from '../../../client/src/lib/sizing.js';
+import { proposals, readings, sheetLadder, cartonPlan, overRules, settingsProblem, cleanSettings } from '../../../client/src/lib/sizing.js';
+import { dieSheet, stockedPiece } from '../../../client/src/lib/autoLayout.js';
+import { stockedSheets } from '../costing-store.js';
 import { kldPdf } from '../kld-pdf.js';
 import { accessToken, gmailConfigured } from '../gmail.js';
 import { driveAllowed, saveKldToDrive } from '../gdrive.js';
@@ -47,13 +49,19 @@ r.get('/costing/sizing/proposals', guard, async (req, res, next) => {
       return res.json({ size, style, unsupported: true, reason: 'Type the carton size as L × W × H in mm.', readings: [], dies: none });
     }
     const [boards, tools, register] = await Promise.all([
-      q(`SELECT id, name, sheet_l::float8 AS sheet_l, sheet_w::float8 AS sheet_w, grain FROM materials
-          WHERE category = 'board' AND active = 1 AND COALESCE(leftover, 0) = 0 AND sheet_l > 0 AND sheet_w > 0`),
+      stockedSheets(),
       q(`SELECT t.id, t.code, t.title, t.ups, t.sheet_size, t.carton_size, t.zone, t.location, t.condition, p.name AS product_name
            FROM tools t LEFT JOIN products p ON p.id = t.product_id WHERE t.family = 'die' AND t.active = 1 ORDER BY t.code`),
       registerMatches(size),
     ]);
-    res.json({ size, style, gsm, dies: { master: dieMasterMatches(size, tools), register }, ...proposals({ style, size, boards, gsm }) });
+    const ladder = sheetLadder(boards);
+    const master = dieMasterMatches(size, tools);
+    // each exact Die Master die: the stocked piece its sheet is costed on (autoLayout's rule), or null
+    master.exact = master.exact.map(d => {
+      const sheet = dieSheet(d.sheet_size);
+      return { ...d, costing_sheet: sheet ? stockedPiece(sheet, ladder) : null };
+    });
+    res.json({ size, style, gsm, dies: { master, register }, ...proposals({ style, size, boards, gsm }) });
   } catch (e) { next(e); }
 });
 

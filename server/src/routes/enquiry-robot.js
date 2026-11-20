@@ -31,6 +31,7 @@ import { plantDateStr } from '../plant-calendar.js';
 import { enquiryEvent, insertEnquiry, resolveCustomer, markEnquiriesSent, lockRows, recordCounter, newGroup, askedAgain } from './enquiries.js';
 import { jobOfPass, startFetch, CLOUD_RUNNER, TIMER_NAME } from '../enquiry-cloud.js';
 import { syncIntakeEnquiries, notifyNewEnquiriesSoft, sameMailOnDesk } from '../enquiry-intake.js';
+import { autoCostPendingSoft, CALL_DEADLINE_MS } from '../auto-costing.js';
 
 const r = Router();
 const ROBOT = 'Claude (AVS robot)';
@@ -155,6 +156,8 @@ r.post('/avs/robot/enquiry-jobs/:id/claim', async (req, res, next) => {
 // body_text, attachments: [{ name, mime, size }], view_url, summary, customer_name, contact_name, contact_email,
 // items: [{ product_name, size_text, style, board, gsm, colours, coating, specs, quantities, target_price, notes }] }]
 r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
+  // the costing's budget counts from here: the filing below takes part of the call's 30 s
+  const started = Date.now();
   try {
     const id = intOrNull(req.params.id) || 0;
     ownJob(req, id);
@@ -204,8 +207,13 @@ r.post('/avs/robot/enquiry-jobs/:id/mails', async (req, res, next) => {
       if (filed.length) await audit('enquiry_job', id, 'file', `Job ${id} — ${filed.length} mail${filed.length === 1 ? '' : 's'} filed`, qc, req.robotName);
       return { filed, skipped, refused, same_mail: sameMail };
     });
-    // The desk hears of it at once (bell + phone, the Costing logins) — never failing the filing.
-    if (out.filed.length) await notifyNewEnquiriesSoft();
+    // The desk costs what was filed by itself, then hears of it (bell + phone, the Costing logins) — neither ever fails the
+    // filing. At most 15 s of costing, and never past 25 s from the request's start (a call has 30 s); what is left is
+    // costed by the next call, and the alert waits for it.
+    if (out.filed.length) {
+      await autoCostPendingSoft({ budgetMs: 15000, deadline: started + CALL_DEADLINE_MS });
+      await notifyNewEnquiriesSoft();
+    }
     res.json(out);
   } catch (e) { next(e); }
 });
@@ -343,12 +351,17 @@ r.get('/enquiry-desk/waiting', async (req, res, next) => {
 // Called by the database (pg_net, migration 20261113180100_avs_enquiry_intake.sql) once per AVS call; safe to call any
 // number of times — each row is filed once, each mail announced once.
 r.post('/avs/robot/enquiries-notify', async (req, res, next) => {
+  // the costing's budget counts from here: the copying below takes part of the call's 30 s
+  const started = Date.now();
   try {
     markUncacheable();
     res.set('Cache-Control', 'no-store');
     if (!await keyOk(req)) return res.status(401).json({ error: 'Wrong or missing robot key (avs.settings robot_key).' });
     const out = await syncIntakeEnquiries();
-    res.json({ ...out, alert: await notifyNewEnquiriesSoft() });
+    // Cost what was filed (15 s at most, never past 25 s from the request's start; the rest by the next call or the poll),
+    // then announce it.
+    const auto_cost = await autoCostPendingSoft({ budgetMs: 15000, deadline: started + CALL_DEADLINE_MS });
+    res.json({ ...out, auto_cost, alert: await notifyNewEnquiriesSoft() });
   } catch (e) {
     if (MISSING.has(e?.code)) return res.status(404).json({ error: 'The enquiry intake is not set up on this database.' });
     next(e);

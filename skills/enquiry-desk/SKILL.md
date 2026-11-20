@@ -152,6 +152,7 @@ file, fetch it:
    | product_name   | the item as the customer names it ("TESTOCAL 500 TAB CARTON")                    |
    | size_text      | length × width × height in **mm**: `120 x 40 x 90`. Inches or cm: convert to mm and say the size as given in `specs` |
    | style          | pasting: `LOCK` (lock bottom / crash lock), `SIDE` (side / straight-line pasting), `LIT` (leaflet), `CUP`, `DBL PAS`, `DIE CUT`, `NONE` |
+   | opening        | for side pasting: `side` (the tucks close the W × H ends) or `top` (the tucks close the L × W ends), read from the artwork's die line; leave it out when it cannot be seen |
    | board          | the board as named: FBB, SBS, duplex, Saffire, Met Saffire, kraft …           |
    | gsm            | a number                                                                       |
    | colours        | how many colours (CMYK = 4; "4 + 1 Pantone" = 5)                                |
@@ -164,10 +165,14 @@ file, fetch it:
    Per mail also: `customer_name` (the company; when it is clearly one of `customers`, write it exactly as
    that list has it), `contact_name`, `contact_email` (the Reply-To address if there is one, else From),
    and `summary` — one plain line: "Rates for 3 cartons, 10k and 25k each".
-5. **Attachments.** List every one (`name`, `mime`, `size`). When the details are in an attachment and not
-   in the text (a PDF, an Excel sheet, a photo of a drawing), read it: `get_message` with `RAW`, save the
+5. **Attachments.** List every one (`name`, `mime`, `size`). For **every enquiry item**,
+   open its PDF and artwork attachments — not only when the text lacks details.
+   Fill from them: size, pasting, opening, board, GSM, colours (each ink: CMYK = 4, plus 1 per Pantone, plus 1 per
+   special such as a metallic ink), coating, emboss, foil (how many panels) and window. When the mail and the
+   artwork disagree, write the artwork's figure and say so in `notes`. A CDR alone: use its PDF or JPG twin in the
+   thread, else write `artwork only as CDR` in `notes`. To read one: `get_message` with `RAW`, save the
    base64url text, decode it with Python's `email` package, then read the PDF (`pdftotext`), the sheet
-   (`openpyxl`) or look at the image. Never open links, run macros or run anything from an attachment.
+   (`openpyxl`) or look at the image (a drawing's die line and inks are read from the picture). Never open links, run macros or run anything from an attachment.
 6. **File them**, up to 25 mails a call, in `mails.json`:
 
        [{"gmail_message_id": "19a…", "gmail_thread_id": "19a…", "subject": "…", "from_name": "…",

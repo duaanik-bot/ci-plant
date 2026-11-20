@@ -127,3 +127,31 @@ test('several mails: asked-again ones are named apart', () => {
     rows: [{ id: 9, product_name: 'OMEGA LABEL', enquiry_no: 'CI-ENQ-0009' }] }]);
   assert.match(a.body, /New: Example Pharma Ltd \(4 items\)\. Asked again: Sample Labs \(1 item\)\./);
 });
+
+// The desk costs what the robots file by itself (owner, 20 Nov 2026), so the alert says so.
+test('the alert says the items are costed and waiting for approval', () => {
+  const a = newEnquiryAlert([{ mail_id: 20, kind: 'enquiry', customer: 'Bluefin Labs', mailbox_email: 'desk@example.test',
+    rows: [{ id: 70, product_name: 'A', costed: true }, { id: 71, product_name: 'B', held: true }] }]);
+  assert.equal(a.title, 'New enquiry: Bluefin Labs — 1 item costed, waiting for your approval · 1 needs a person');
+  assert.match(a.body, /^A, B · to desk@example\.test\. Check and approve on the Enquiry desk\.$/);
+  const all = newEnquiryAlert([{ mail_id: 21, kind: 'enquiry', customer: 'Bluefin Labs', mailbox_email: 'desk@example.test',
+    rows: [{ id: 72, product_name: 'A', costed: true }, { id: 73, product_name: 'B', costed: true }] }]);
+  assert.equal(all.title, 'New enquiry: Bluefin Labs — 2 items costed, waiting for your approval');
+  const two = newEnquiryAlert([{ mail_id: 22, kind: 'enquiry', customer: 'Bluefin Labs', mailbox_email: 'desk@example.test',
+    rows: [{ id: 74, product_name: 'A', costed: true }, { id: 75, product_name: 'B', held: true }, { id: 76, product_name: 'C', held: true }] }]);
+  assert.match(two.title, /· 2 need a person$/);
+});
+
+test('no row costed: the words are today\'s, held rows or not', () => {
+  const a = newEnquiryAlert([mail({ rows: [{ id: 9, product_name: 'A', held: true }] })]);
+  assert.equal(a.title, 'New enquiry: Example Pharma Ltd — 1 item');
+  assert.match(a.body, /Cost it on the Enquiry desk/);
+});
+
+test('a batch marks each costed mail', () => {
+  const a = newEnquiryAlert([
+    mail({ customer: 'Bluefin Labs', rows: [{ id: 1, product_name: 'A', costed: true }, { id: 2, product_name: 'B', costed: true }] }),
+    mail({ mail_id: 8, customer: 'Sample Labs', rows: [{ id: 60, product_name: 'OMEGA LABEL' }] }),
+  ]);
+  assert.match(a.body, /New: Bluefin Labs \(2 items, costed\), Sample Labs \(1 item\)\./);
+});

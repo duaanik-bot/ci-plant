@@ -255,6 +255,30 @@ describe('Costing — through the real app', {
     assert.equal((await call('md', 'POST', `/costing/costings/${half.body.id}/approve`, {})).status, 409);
   });
 
+  // Final review I4: where each row's board rate came from (rule / common / product / row) is kept beside the rows, by row
+  // position, so a reopened batch knows which rows a common rate a person types may carry into. An unknown marker, or an
+  // old row, has none: the row's own.
+  test("each batch row's board-rate marker survives save and reopen, following its row", async () => {
+    const rows = [
+      { product_name: 'Test carton M1', size_text: '90x40x60', style: 'SIDE', inputs: { ...JOB }, board_from: 'rule' },
+      { product_name: 'Test carton M2', size_text: '95x40x60', style: 'LOCK', inputs: { ...JOB }, board_from: 'product' },
+      { product_name: 'Test carton M3', size_text: '99x40x60', style: 'LOCK', inputs: { ...JOB }, board_from: 'typed by a script' },
+      { product_name: 'Test carton M4', size_text: '99x41x60', style: 'LOCK', inputs: { ...JOB } },
+    ];
+    const made = await call('clerk', 'POST', '/costing/batches', { title: 'Test markers', common: { ...JOB, quantities: [] }, rows });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.deepEqual(made.body.rows.map(r => r.board_from), ['rule', 'product', null, null]);
+    // Saved again in another order with the markers changed: each marker follows its row.
+    const [m1, m2, m3, m4] = made.body.rows;
+    const marks = ['product', 'common', 'row', null];
+    const again = [m2, m1, m4, m3].map((r, i) => ({ id: r.id, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, board_from: marks[i] }));
+    const saved = await call('clerk', 'POST', `/costing/batches/${made.body.id}/save`, { title: 'Test markers', common: { ...JOB, quantities: [] }, rows: again });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    const back = (await call('clerk', 'GET', `/costing/batches/${made.body.id}`)).body;
+    assert.deepEqual(back.rows.map(r => [r.product_name, r.board_from]),
+      [['Test carton M2', 'product'], ['Test carton M1', 'common'], ['Test carton M4', 'row'], ['Test carton M3', null]]);
+  });
+
   test('a batch keeps its extra quantities, and approving it approves every complete row only', async () => {
     const rows = [
       { product_name: 'Test carton D1', size_text: '90x40x60', style: 'SIDE', inputs: { ...JOB } },
@@ -263,6 +287,10 @@ describe('Costing — through the real app', {
     ];
     const made = await call('clerk', 'POST', '/costing/batches', { title: 'Test RFQ 2', common: { ...JOB, quantities: [20000, '5,000', 0, 'x'] }, rows });
     assert.deepEqual(made.body.common.quantities, [5000, 20000]);
+    assert.equal(made.body.common.board_typed, false);
+    const typed = await call('clerk', 'POST', `/costing/batches/${made.body.id}/save`, { title: 'Test RFQ 2', common: { ...JOB, board_typed: true, quantities: [] }, rows });
+    assert.equal(typed.body.common.board_typed, true);
+    assert.equal((await call('clerk', 'GET', `/costing/batches/${made.body.id}`)).body.common.board_typed, true);
     assert.equal((await call('clerk', 'POST', `/costing/batches/${made.body.id}/approve`, {})).status, 403);
     const r = await call('md', 'POST', `/costing/batches/${made.body.id}/approve`, {});
     assert.equal(r.body.approved, 2);
@@ -319,5 +347,40 @@ describe('Costing — through the real app', {
     assert.equal(r.body.inputs.leaf_panels, 2);
     const want = computeCosting({ ...JOB, leaf_panels: 2, leaf_rate: 0.2, leaf_process: 5000 }).cost_per_unit;
     assert.ok(Math.abs(r.body.cost_per_unit - want) < 1e-4);
+  });
+
+  test('customer board rates are saved by an admin, refused to others, and come back in bootstrap', async () => {
+    const cur = (await call('admin', 'GET', '/costing/bootstrap')).body.settings;
+    const body = { defaults: cur.defaults, coatings: cur.coatings, alert_pct: cur.alert_pct,
+      customer_rates: [{ word: ' Northwind ', board_rate: 131 }, { word: '', board_rate: 5 }] };
+    assert.equal((await call('clerk', 'PUT', '/costing/settings', body)).status, 403);
+    assert.equal((await call('admin', 'PUT', '/costing/settings', body)).status, 200);
+    const back = (await call('admin', 'GET', '/costing/bootstrap')).body.settings;
+    assert.deepEqual(back.customer_rates, [{ word: 'Northwind', board_rate: 131 }]);
+  });
+
+  test('size-check also lists the stocked sheets', async () => {
+    for (const n of ['A', 'B']) {
+      await db.q(`INSERT INTO materials (name, category, unit, sheet_l, sheet_w, grade, gsm, active) VALUES ($1, 'board', 'sheets', 23, 36, 'FBB', 300, 1)`, [`TEST SHEETS ${n} 23x36`]);
+    }
+    const r = await call('clerk', 'GET', '/costing/size-check?size=120x40x90');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.sheets.filter(s => s.sheet_l === 23 && s.sheet_w === 36).length, 1, 'one row per size and grain');
+  });
+
+  test('a costing that follows the run is saved with its own run\'s wastage', async () => {
+    const r = await call('clerk', 'POST', '/costing/costings', {
+      customer_name: 'Test Pharma', product_name: 'Test carton run', size_text: '120x40x90', style: 'LOCK',
+      inputs: { ...JOB, qty: 40000, ups: 6, wastage: 250, wastage_by_run: 1 },
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.versions[0].inputs.wastage, 400);
+  });
+
+  test('the auto-cost columns exist after the replay', async () => {
+    const have = new Set((await db.q(`SELECT table_name || '.' || column_name AS c FROM information_schema.columns
+      WHERE table_name IN ('costings', 'costing_settings', 'enquiry_settings', 'enquiries')`)).map(r => r.c));
+    for (const c of ['costings.auto_costed', 'costing_settings.customer_rates', 'enquiry_settings.auto_cost',
+      'enquiries.opening', 'enquiries.auto_cost_at', 'enquiries.auto_cost_why']) assert.ok(have.has(c), c);
   });
 });

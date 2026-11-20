@@ -4,9 +4,11 @@ import { computeCosting } from './costing-engine.js';
 import {
   parsePaste, rankHistory, closestComparison, batchExportSpec, valueFromSaved, blankValue, stillNeeded, coatingWords, coatingLabel, coatingChoices, perUnit,
   recommend, markEdited, layoutOptions, gradeFor, pastingFromProduct, newLibraryEntry, libraryKey, libraryDeclined, savePayload,
-  bulkRowPatch, mergeBulkRow, savedTicks, rowWithTicks,
+  bulkRowPatch, mergeBulkRow, savedTicks, rowWithTicks, answeredNo,
 } from '../../client/src/lib/costingUi.js';
-import { newDieDefault } from '../../client/src/lib/costingRules.js';
+import { newDieDefault, chargeGrades } from '../../client/src/lib/costingRules.js';
+import { quantityBreaks } from '../../client/src/lib/costing.js';
+import { costingValueFromEnquiry } from '../../client/src/lib/enquiryUi.js';
 
 // Invented figures, not a customer's.
 const JOB = { qty: 10000, sheet_l: 18, sheet_w: 24, ups: 8, gsm: 300, board_rate: 95, wastage: 250, colours: 4, print_rate: 400, print_min: 1600, coat_factor: 6, dp_rate: 0.3, process: 2000, pf_pct: 5, margin: 0.05 };
@@ -156,6 +158,14 @@ test('a complete saved costing with no library entry was answered no; others wer
   assert.equal(libraryDeclined(valueFromSaved({ ...c, size_id: 5 })), false);
 });
 
+test('an auto-costing with no size entry is still asked about', () => {
+  // CI Plant never adds a size to the Size Library, so its costing says nothing of what a person would answer.
+  assert.equal(answeredNo({ complete: true, size_id: null, auto_costed: true }), false);
+  assert.equal(answeredNo({ complete: true, size_id: null, auto_costed: false }), true);
+  const c = { id: 2, complete: true, size_id: null, auto_costed: true, size_key: '70x47x74', style: 'LOCK', inputs: FORM.inputs };
+  assert.equal(libraryDeclined(valueFromSaved(c)), false, 'opening it asks "save this size?"');
+});
+
 test('money and coating in words', () => {
   assert.equal(coatingWords(6), '₹0.17 per 100 sq in');
   assert.equal(coatingWords(2), '₹0.50 per 100 sq in');
@@ -186,8 +196,8 @@ test('recommend: a picked product fills the form, each value with its source', (
   assert.equal(v.sources.gsm.kind, 'product');
   assert.equal(v.customer_name, 'Test Pharma');
   assert.equal(v.inputs.emb_rate, 0, 'not embossed on the master');
-  assert.equal(v.inputs.dp_rate, 0.3);
-  assert.equal(v.sources.dp_rate.kind, 'rule', 'house rule (11 Nov 2026): lock bottom ₹0.30');
+  assert.equal(v.inputs.dp_rate, 0.4);
+  assert.equal(v.sources.dp_rate.kind, 'rule', 'house rule (11 Nov 2026): lock bottom ₹0.40');
   assert.equal(v.inputs.process, 2000, 'house rule: an existing product, its die exists — ₹2,000');
   assert.equal(v.sources.wastage.kind, 'default');
   assert.equal(v.coat_choice, '', 'no costing to take the coating from, so it is left to choose');
@@ -211,7 +221,7 @@ test("recommend: coating and die & pasting come from the same product's last cos
   assert.equal(v.sources.coat_choice.kind, 'history');
   assert.match(v.sources.coat_choice.note, /^T-2, 2025-02-01/);
   // Die & pasting: the house rule comes before past costings (owner, 11 Nov 2026).
-  assert.equal(v.inputs.dp_rate, 0.3);
+  assert.equal(v.inputs.dp_rate, 0.4);
   assert.equal(v.sources.dp_rate.kind, 'rule');
 });
 
@@ -235,7 +245,7 @@ test('recommend: from the size\'s history, the most used rate — one odd recent
   const v = recommend({ ...blankValue(DEFAULTS), size_text: '120x40x90', style: 'LOCK' }, { check: { library: { exact: [] }, history }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES });
   assert.equal(v.coat_choice, '6');
   assert.match(v.sources.coat_choice.note, /^2 of 3 recent costings of this size/);
-  assert.equal(v.inputs.dp_rate, 0.3, 'house rule for lock bottom, not the history');
+  assert.equal(v.inputs.dp_rate, 0.4, 'house rule for lock bottom, not the history');
   assert.equal(v.inputs.board_rate, 120, 'house rule');
   // A pasting the rules do not price still follows the most used rate of the size.
   const cup = recommend({ ...blankValue(DEFAULTS), size_text: '120x40x90', style: 'CUP' },
@@ -262,6 +272,110 @@ test('recommend: values reopened from a saved costing (no recorded source) are k
   assert.equal(v.inputs.dp_rate, 0.45);
   assert.equal(v.inputs.ups, JOB.ups);
   assert.equal(v.sources.dp_rate, undefined);
+});
+
+// ── the shared fill: picker, customer rates, run wastage, assumed values (owner, 20 Nov 2026) ──────
+const BOARDS = [{ sheet_l: 23, sheet_w: 36 }];
+const ENQ = (o = {}) => ({ id: 41, enquiry_no: 'ENQ-41', customer_name: 'Bluefin Labs', product_name: 'Test Tablets', size_text: '60x40x100', style: 'LOCK', quantities: [20000], board: 'Saffire', ...o });
+const ENQ_GRADES = [{ grade: 'CFBB', rate_per_kg: 95 }, { grade: 'Met Saffire', rate_per_kg: 120 }];
+const fillEnquiry = (e, ctx = {}) => recommend(costingValueFromEnquiry(e, DEFAULTS), { check: { library: { exact: [] }, history: [] }, typical: TYPICAL, defaults: DEFAULTS, grades: ENQ_GRADES, boards: BOARDS, ...ctx });
+
+test("the fill takes the old die's layout and says so", () => {
+  const check = { library: { exact: [LAYOUT(1, 19, 25, 8, 5, 'LOCK')] }, dies: { exact: [{ id: 1, code: 'D-1', ups: 6, sheet_size: '17.5X22.5', condition: 'Good' }] }, history: [] };
+  const v = fillEnquiry(ENQ(), { check });
+  assert.equal(v.sources.ups.kind, 'die');
+  assert.deepEqual([v.inputs.sheet_l, v.inputs.sheet_w, v.inputs.ups], [18, 23, 6]);
+  assert.match(v.sources.ups.note, /Die Master D-1/);
+  assert.equal(v.layout_pick.kind, 'die');
+});
+
+test('the fill records why no layout was picked', () => {
+  const v = fillEnquiry(ENQ({ style: null }));
+  assert.equal(v.layout_pick.none, true);
+  assert.match(v.layout_pick.why, /needs pasting/);
+  assert.equal(v.inputs.ups, '');
+  assert.equal(recommend(blankValue(DEFAULTS), { defaults: DEFAULTS }).layout_pick, undefined, 'no boards given: no picker, no record');
+});
+
+test('a pasting nobody gave is the one most used by the past costings of the size, taken before the layout', () => {
+  const history = [HIST(1, 'A', JOB), HIST(2, 'B', JOB), HIST(3, 'C', JOB), HIST(4, 'D', JOB, { style: 'SIDE' })];
+  const v = fillEnquiry(ENQ({ style: null }), { check: { library: { exact: [] }, history } });
+  assert.equal(v.style, 'LOCK');
+  assert.equal(v.sources.style.kind, 'history');
+  assert.match(v.sources.style.note, /^3 of 4 recent costings of this size/);
+  assert.notEqual(v.layout_pick.none, true, 'the picker drew the carton in that pasting');
+  assert.equal(v.inputs.dp_rate, 0.4, 'and the house rate for it');
+  // The Size Library's pasting comes first.
+  const lib = fillEnquiry(ENQ({ style: null }), { check: { library: { exact: [LAYOUT(1, 19, 25, 6, 5, 'SIDE')] }, history } });
+  assert.deepEqual([lib.style, lib.sources.style.kind], ['SIDE', 'library']);
+  // With no past costing either, the picker asks.
+  assert.equal(fillEnquiry(ENQ({ style: null }), { check: { library: { exact: [] }, history: [] } }).layout_pick.why, 'needs pasting: side or lock?');
+});
+
+test("the fill charges the customer's rate on CFBB and notes it", () => {
+  const grades = chargeGrades(ENQ_GRADES, 107);
+  const v = fillEnquiry(ENQ(), { grades, customerRate: { word: 'bluefin', rate: 107 } });
+  assert.equal(v.board_grade, 'CFBB');
+  assert.equal(v.inputs.board_rate, 107);
+  assert.equal(v.sources.board_rate.kind, 'rule');
+  assert.match(v.sources.board_rate.note, /bluefin/);
+});
+
+test('the fill sets wastage by the run', () => {
+  const v = fillEnquiry(ENQ(), { check: { library: { exact: [LAYOUT(1, 19, 25, 6, 5, 'LOCK')] }, history: [] } });
+  assert.equal(v.inputs.ups, 6);
+  assert.equal(v.inputs.wastage, 300, '20,000 ÷ 6 up = 3,334 sheets');
+  assert.equal(v.inputs.wastage_by_run, 1);
+  assert.equal(v.sources.wastage.kind, 'rule');
+});
+
+test('a typed wastage is kept and does not follow the run; typed ups still drive the rule wastage', () => {
+  const check = { library: { exact: [LAYOUT(1, 19, 25, 6, 5, 'LOCK')] }, history: [] };
+  const base = costingValueFromEnquiry(ENQ(), DEFAULTS);
+  const typed = markEdited({ ...base, inputs: { ...base.inputs, wastage: 250, wastage_by_run: 1 } }, ['wastage']);
+  const v = recommend(typed, { check, typical: TYPICAL, defaults: DEFAULTS, grades: ENQ_GRADES, boards: BOARDS });
+  assert.equal(v.inputs.wastage, 250);
+  assert.equal(v.sources.wastage.kind, 'manual');
+  assert.notEqual(v.inputs.wastage_by_run, 1);
+  const full = { ...v.inputs, coat_factor: 3 };
+  for (const b of quantityBreaks(full, [10000, 50000])) assert.equal(b.cost_per_unit, computeCosting({ ...full, qty: b.qty }).cost_per_unit, 'the typed 250 at both breaks');
+  // typed ups 8, no typed wastage: 20,000 / 8 = 2,500 sheets -> 200, and it follows the run
+  const u = markEdited({ ...base, inputs: { ...base.inputs, ups: 8 } }, ['ups']);
+  const w = recommend(u, { check, typical: TYPICAL, defaults: DEFAULTS, grades: ENQ_GRADES, boards: BOARDS });
+  assert.equal(w.inputs.ups, 8);
+  assert.equal(w.inputs.wastage, 200);
+  assert.equal(w.inputs.wastage_by_run, 1);
+});
+
+test('an enquiry with no coating or GSM is filled as assumed, a typed one is kept', () => {
+  const v = fillEnquiry(ENQ());
+  assert.equal(v.inputs.coat_factor, 3);
+  assert.equal(v.inputs.gsm, 300);
+  assert.equal(v.sources.coat_factor.kind, 'assumed');
+  assert.equal(v.sources.gsm.kind, 'assumed');
+  const typed = costingValueFromEnquiry(ENQ({ gsm: 350 }), DEFAULTS);
+  const k = recommend(typed, { check: { library: { exact: [] }, history: [] }, typical: TYPICAL, defaults: DEFAULTS, grades: ENQ_GRADES, boards: BOARDS });
+  assert.equal(k.inputs.gsm, 350);
+  assert.equal(k.sources.gsm.kind, 'manual');
+});
+
+test('a past coating of the size and a Met Saffire board beat the assumed coating', () => {
+  const hist = [HIST(4, 'Old', { ...JOB, coat_factor: 2 })];
+  assert.equal(fillEnquiry(ENQ(), { check: { library: { exact: [] }, history: hist } }).sources.coat_factor.kind, 'history');
+  const met = fillEnquiry(ENQ({ board: 'Met Saffire' }));
+  assert.equal(met.inputs.coat_factor, 1.5);
+  assert.equal(met.sources.coat_factor.kind, 'rule');
+});
+
+test('a New costing with no enquiry gets no assumed values', () => {
+  const v = recommend({ ...blankValue(DEFAULTS), size_text: '120x40x90', style: 'LOCK' }, { check: { library: { exact: [] }, history: [] }, typical: TYPICAL, defaults: DEFAULTS, grades: GRADES, boards: BOARDS });
+  assert.equal(v.inputs.gsm, '');
+  assert.equal(v.coat_choice, '');
+});
+
+test('costingValueFromEnquiry carries the opening', () => {
+  assert.equal(costingValueFromEnquiry(ENQ({ opening: 'top' }), DEFAULTS).opening, 'top');
+  assert.equal(costingValueFromEnquiry(ENQ(), DEFAULTS).opening, null);
 });
 
 test('layoutOptions: every library layout priced as entered, the cheapest flagged', () => {
@@ -380,4 +494,105 @@ test('bulk row editor: on a typed row a size proposal charges the new die, and o
   // "Use this layout" on a proposal: the editor sets New die and empties the process box
   const picked = bulkRowPatch(base, { ...base, new_die: true, inputs: { ...base.inputs, sheet_l: 20, sheet_w: 28, ups: 6, process: '' }, autofill: true });
   assert.equal(picked.inputs.process, 3000);
+});
+
+// ---- Task 11: the form's input edits and a bulk row's grade (invented figures) ----
+import { inputsAfterEdit, rowBoardGrade } from '../../client/src/lib/costingUi.js';
+
+test('inputsAfterEdit: a typed wastage stops following the run; qty and ups rework a rule wastage', () => {
+  const base = { qty: 10000, ups: 4, wastage: 300, wastage_by_run: 1 };
+  assert.equal(inputsAfterEdit(base, 'wastage', 150).wastage, 150);
+  assert.equal(inputsAfterEdit(base, 'wastage', 150).wastage_by_run, '');
+  assert.equal(inputsAfterEdit(inputsAfterEdit(base, 'wastage', 150), 'qty', 40000).wastage, 150);
+  assert.equal(inputsAfterEdit(base, 'qty', 40000).wastage, 400);          // 10,000 sheets
+  assert.equal(inputsAfterEdit(base, 'ups', 8).wastage, 200);              // 1,250 sheets
+  assert.equal(inputsAfterEdit({ ...base, wastage_by_run: '' }, 'qty', 40000).wastage, 300); // typed: left
+  assert.equal(inputsAfterEdit(base, 'gsm', 280).gsm, 280);
+});
+
+test('rowBoardGrade: the rule fills a row with no grade of its own, never over a picked one', () => {
+  assert.equal(rowBoardGrade({ board_grade: '' }, 'CFBB'), 'CFBB');
+  assert.equal(rowBoardGrade({}, 'CFBB'), 'CFBB');
+  assert.equal(rowBoardGrade({ board_grade: 'Duplex' }, 'CFBB'), 'Duplex');
+  assert.equal(rowBoardGrade({ board_grade: '' }, null), '');
+});
+
+// ---- Task 11 fix round 1: R28 (typed common board rate wins) and R29 (why a customer-rate row is not saved) ----
+import { rowBoardRate } from '../../client/src/lib/costingUi.js';
+import { customerRateProblems, cleanCustomerRates } from '../../client/src/lib/costingRules.js';
+
+// Final review I4 (revises R28b): a common board rate a person typed wins over the RULE's rate only — the customer's rate,
+// the house ₹120, the ₹120 prefill — never over a matched Product Master grade's rate, nor a rate typed on the row itself.
+// `from` says where the row's rate came from: 'rule' | 'common' | 'product' | 'row'; a row with none (an old batch) is its own.
+test("rowBoardRate: a typed common rate wins over the rule's rate only", () => {
+  const typed = { commonTyped: true, commonRate: 130 };
+  assert.deepEqual(rowBoardRate({ from: 'rule', rate: 107, ...typed }), { board_rate: 130, board_from: 'common' }, 'a rule-rated CFBB row takes 130');
+  assert.deepEqual(rowBoardRate({ from: 'rule', rate: 120, ...typed }), { board_rate: 130, board_from: 'common' }, 'the ₹120 prefill is the rule too');
+  assert.deepEqual(rowBoardRate({ from: 'common', rate: 125, ...typed }), { board_rate: 130, board_from: 'common' }, 'a row on an earlier common rate follows it');
+  assert.deepEqual(rowBoardRate({ from: 'product', rate: 51, ...typed }), { board_rate: 51, board_from: 'product' }, 'a product row (grade ₹51) keeps 51');
+  assert.deepEqual(rowBoardRate({ from: 'row', rate: 99, ...typed }), { board_rate: 99, board_from: 'row' }, 'a row typed by hand keeps its figure');
+  assert.deepEqual(rowBoardRate({ from: undefined, rate: 125, ...typed }), { board_rate: 125, board_from: undefined }, 'an old row with no marker is left alone');
+  assert.deepEqual(rowBoardRate({ from: null, rate: 125, ...typed }), { board_rate: 125, board_from: null });
+  // nothing typed in common: the rule's rate; a rule that gives none takes the common box (the prefill)
+  assert.deepEqual(rowBoardRate({ from: 'rule', rate: 107, commonTyped: false, commonRate: 120 }), { board_rate: 107, board_from: 'rule' });
+  assert.deepEqual(rowBoardRate({ from: 'rule', rate: null, commonTyped: false, commonRate: 120 }), { board_rate: 120, board_from: 'rule' });
+  assert.deepEqual(rowBoardRate({ from: 'rule', rate: '', commonTyped: true, commonRate: 130 }), { board_rate: 130, board_from: 'common' });
+  // the common box blanked (not typed any more): every row keeps what it has
+  assert.deepEqual(rowBoardRate({ from: 'common', rate: 130, commonTyped: false, commonRate: '' }), { board_rate: 130, board_from: 'common' });
+});
+
+test("bulk row editor: a board rate changed in a row's full editor is the row's own", () => {
+  const row = bulkRow({ board_from: 'rule' });
+  const p = bulkRowPatch(row, { ...row, inputs: { ...row.inputs, board_rate: 99 }, sources: { board_rate: { kind: 'manual' } }, autofill: true });
+  assert.equal(p.board_from, 'row');
+  assert.equal(mergeBulkRow(row, p, styleRate).board_from, 'row');
+  const q = bulkRowPatch(row, { ...row, inputs: { ...row.inputs, qty: 5000 }, autofill: true });
+  assert.equal('board_from' in q, false, 'another edit leaves where the rate came from');
+  assert.equal(mergeBulkRow(row, q, styleRate).board_from, 'rule');
+});
+
+test('customerRateProblems: one reason per row that a save would drop, none for the rest', () => {
+  const rows = [
+    { word: 'a', board_rate: 100 }, { word: 'alpha', board_rate: 0 }, { word: 'beta', board_rate: 1001 },
+    { word: 'gamma', board_rate: 90 }, { word: 'GAMMA', board_rate: 95 }, { word: 'delta', board_rate: 110 },
+  ];
+  const p = customerRateProblems(rows);
+  assert.match(p[0], /2 to 40 characters/);
+  assert.match(p[1], /above 0/);
+  assert.match(p[2], /1,000/);
+  assert.equal(p[3], null);
+  assert.match(p[4], /already/);
+  assert.equal(p[5], null);
+  assert.equal(cleanCustomerRates(rows).length, rows.filter((_, i) => p[i] == null).length);
+});
+
+import { commonToSave, commonFromSaved, boardFromSaved } from '../../client/src/lib/costingUi.js';
+
+test('the common board_typed flag survives save and reopen, and is never inferred from the value', () => {
+  const common = { inputs: { board_rate: 130, colours: 4 }, quantities: [5000], board_typed: true };
+  const back = commonFromSaved(JSON.parse(JSON.stringify(commonToSave(common))));
+  assert.equal(back.board_typed, true);
+  assert.equal(back.inputs.board_rate, 130);
+  assert.deepEqual(back.quantities, [5000]);
+  assert.equal('board_typed' in back.inputs, false);
+  assert.equal(commonFromSaved({ board_rate: 130 }).board_typed, false);   // an old batch: 130 is not read as typed
+  assert.equal(commonToSave({ inputs: { board_rate: 120 }, quantities: [] }).board_typed, false);
+  // the rows' board-rate markers ride on the saved common too (I4, by row position): never read back as an input
+  const marked = commonFromSaved({ board_rate: 130, board_typed: true, board_from: ['rule', 'product'] });
+  assert.equal('board_from' in marked.inputs, false);
+});
+
+// Final review I4: each row's marker is sent with the row and comes back with it, so a reopened batch knows which rows a
+// typed common rate may carry into. An old row has none (null): its own.
+test('boardFromSaved: a known marker comes back as it was, anything else as none', () => {
+  for (const m of ['rule', 'common', 'product', 'row']) assert.equal(boardFromSaved(m), m);
+  for (const m of [null, undefined, '', 'typed', 7]) assert.equal(boardFromSaved(m), undefined, String(m));
+});
+
+test('customerRateProblems: only the first 50 rows are kept', () => {
+  const rows = Array.from({ length: 52 }, (_, i) => ({ word: `word${i}`, board_rate: 100 }));
+  const p = customerRateProblems(rows);
+  assert.equal(p.filter(x => x == null).length, 50);
+  assert.match(p[50], /first 50/);
+  assert.equal(cleanCustomerRates(rows).length, 50);
 });

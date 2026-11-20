@@ -64,6 +64,7 @@ export const INPUTS = Object.freeze([
   { key: 'gsm',            label: 'Board GSM',                unit: 'gsm',                              need: true },
   { key: 'board_rate',     label: 'Board rate',               unit: '₹ per kg',                         need: true },
   { key: 'wastage',        label: 'Wastage sheets',           unit: 'sheets' },
+  { key: 'wastage_by_run', label: 'Wastage by run length',    unit: '1 = 200 / 300 / 400 by the run' },
   { key: 'colours',        label: 'Colours',                  unit: 'colours' },
   { key: 'print_rate',     label: 'Printing rate',            unit: '₹ per 1,000 sheets, per colour' },
   { key: 'print_min',      label: 'Minimum printing charge',  unit: '₹' },
@@ -235,14 +236,23 @@ export function computeCosting(input = {}, formula = CURRENT_FORMULA) {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Wastage by run — planning's bands, by the sheets a run takes (cartons ÷ ups, rounded up).
+export const WASTAGE_BY_RUN = Object.freeze([{ upTo: 2500, sheets: 200 }, { upTo: 5000, sheets: 300 }, { upTo: Infinity, sheets: 400 }]);
+export function runWastage(runSheets) {
+  const n = num(runSheets);
+  return n > 0 ? WASTAGE_BY_RUN.find(b => n <= b.upTo).sheets : null;
+}
+
 // Quantity breaks — the same costing at other quantities, every other input as it is. Wastage stays
-// fixed (the plant's practice: a median 300 sheets whatever the run). Sheets to coat, when given, scale
-// with the sheets. Each answer is computeCosting's own, so a break can never disagree with a costing.
+// fixed (the plant's practice: a median 300 sheets whatever the run) unless the costing follows the
+// run (wastage_by_run = 1), when each break takes its own run's wastage. Sheets to coat, when given,
+// scale with the sheets. Each answer is computeCosting's own, so a break can never disagree with a costing.
 export function quantityBreaks(input = {}, quantities = [], formula = CURRENT_FORMULA) {
   const base = computeCosting(input, formula);
   return [...new Set(quantities.map(num).filter(q => q > 0))].sort((a, b) => a - b).map(qty => {
     const inp = { ...input, qty };
-    if (base.ok && num(input.coat_sheets) > 0) inp.coat_sheets = num(input.coat_sheets) * (qty / num(input.ups) + z(input.wastage)) / base.sheets;
+    if (num(input.wastage_by_run) === 1 && num(input.ups) > 0) inp.wastage = runWastage(Math.ceil(qty / num(input.ups)));
+    if (base.ok && num(input.coat_sheets) > 0) inp.coat_sheets = num(input.coat_sheets) * (qty / num(input.ups) + z(inp.wastage)) / base.sheets;
     const r = computeCosting(inp, formula);
     return r.ok
       ? { qty, ok: true, sheets: r.sheets, cost_per_unit: r.cost_per_unit, quote_per_unit: r.quote_per_unit, cost_value: r.cost_value,

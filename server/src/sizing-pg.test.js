@@ -126,6 +126,14 @@ describe('Size proposals and KLDs — through the real app', { skip: ENABLED ? f
     assert.equal(lit.body.unsupported, true);
   });
 
+  test('a Die Master die\'s sheet is shown as the stocked piece it is costed on', async () => {
+    await db.q(`INSERT INTO tools (family, code, title, carton_size, sheet_size, ups) VALUES ('die', 'T-961', 'Stocked die', '70X60X50', '17.5X22.5', 4)`);
+    const r = await call('clerk', 'GET', '/costing/sizing/proposals?size=70x60x50&style=LOCK&gsm=300');
+    assert.equal(r.status, 200);
+    const d = r.body.dies.master.exact.find(x => x.code === 'T-961');
+    assert.deepEqual(d.costing_sheet, { long: 23, short: 18 });
+  });
+
   let sizeId;
   test('Make KLD saves the drawing on the Size Library entry; a redraw is the next revision', async () => {
     const body = { size_text: '92 x 80 x 66', style: 'LOCK', reading: 'lock', option: { sheet: { long: 25, short: 15 }, ups: 4, m: 1, n: 4, acrossOn: 'short' } };

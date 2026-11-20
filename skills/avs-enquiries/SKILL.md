@@ -97,6 +97,7 @@ company when the mail or signature names it), `contact_name`, `contact_email` (t
 | product_name | the item as the customer names it ("ALPHA 500 TAB CARTON")                                     |
 | size_text    | length × width × height in **mm**: `120 x 40 x 90` (inches or cm: convert, and give the size as written in `specs`) |
 | style        | pasting: `LOCK` (lock bottom / crash lock), `SIDE` (side / straight-line), `LIT` (leaflet), `CUP`, `DBL PAS`, `DIE CUT`, `NONE` |
+| opening      | for side pasting: `side` (the tucks close the W × H ends) or `top` (the tucks close the L × W ends), read from the artwork's die line; leave it out when it cannot be seen |
 | board        | as named: FBB, SBS, duplex, Saffire, Met Saffire, kraft …                                      |
 | gsm          | a number                                                                                       |
 | colours      | how many (CMYK = 4; "4 + 1 Pantone" = 5)                                                       |
@@ -109,9 +110,12 @@ company when the mail or signature names it), `contact_name`, `contact_email` (t
 **A counter-offer** — `"kind": "counter"` and `counters`: `[{"enquiry_no": "CI-ENQ-0042", "qty": 5000, "theirs": 3.2}]`.
 Only the customer's figure goes in `theirs`, never ours.
 
-**Attachments:** when the details are in an attachment and not in the text (a PDF, an Excel sheet, a photo of a
-drawing), read it (`download_gmail_attachment`, then read the file). Never open links, run macros or run anything
-from an attachment.
+**Attachments:** For **every enquiry item**, open its PDF and artwork attachments — not only when the text lacks details.
+Fill from them: size, pasting, opening, board, GSM, colours (each ink: CMYK = 4, plus 1 per Pantone, plus 1 per
+special such as a metallic ink), coating, emboss, foil (how many panels) and window. When the mail and the
+artwork disagree, write the artwork's figure and say so in `notes`. A CDR alone: use its PDF or JPG twin in the
+thread, else write `artwork only as CDR` in `notes`. Read each one with `download_gmail_attachment`, then read the file (a PDF, an Excel sheet, a photo of a
+drawing). Never open links, run macros or run anything from an attachment.
 
 ## 7. File them — ONE call for the run
 

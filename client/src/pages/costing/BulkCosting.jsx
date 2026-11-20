@@ -19,15 +19,15 @@ import { api, fmt } from '../../api.js';
 import { Button, DataTable, ExportMenu, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
 import { computeCosting, parseSize, styleLabel, num, quantityBreaks } from '../../lib/costing.js';
 import {
-  answeredNo, batchExportSpec, bulkRowPatch, coatingChoices, coatingLabel, gradeFor, libraryDeclined, libraryKey, mergeBulkRow, newLibraryEntry, parsePaste,
-  pastingFromProduct, perUnit, plain, rowWithTicks, rupees, savedTicks, startingInputs,
+  answeredNo, batchExportSpec, boardFromSaved, bulkRowPatch, coatingChoices, coatingLabel, gradeFor, libraryDeclined, libraryKey, mergeBulkRow, newLibraryEntry, parsePaste,
+  pastingFromProduct, perUnit, commonFromSaved, commonToSave, plain, rowBoardGrade, rowBoardRate, rowWithTicks, rupees, savedTicks, startingInputs,
 } from '../../lib/costingUi.js';
 import CostingEditor, { NumField } from './CostingEditor.jsx';
 import QuoteProgress from './QuoteProgress.jsx';
 import CounterPanel from './CounterPanel.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
-import { bulkSeedFromEnquiry, extraQuantities } from '../../lib/enquiryUi.js';
-import { HOUSE_RULES, chargeGrades, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
+import { bulkSeedFromEnquiry, extraQuantities, startsFresh } from '../../lib/enquiryUi.js';
+import { HOUSE_RULES, chargeGrades, customerBoardRate, dpFor, gradeLabel, isMetSaffire, ruleInputsForRow } from '../../lib/costingRules.js';
 
 // The settings a batch shares. Size, layout and quantity are each product's own.
 const COMMON = [
@@ -50,8 +50,9 @@ const blank = v => v == null || String(v).trim() === '';
 let seq = 0;
 const rowKey = () => `r${++seq}`;
 // Die & pasting a row gets while the common box is blank: the house rule for its pasting style (side ₹0.20,
-// lock ₹0.30), else what the plant's costings usually charge for it.
+// lock ₹0.40), else what the plant's costings usually charge for it.
 const styleDp = (typical, style) => dpFor(style) ?? (style && typical?.dp_by_style?.[style]?.value) ?? '';
+// Its board rate is the common box's: a rate a person typed there, else the ₹120 prefill — the rule's (rowBoardRate).
 const newRow = (common, typical, extra = {}) => {
   const style = extra.style ?? common.style ?? null;
   const dpAuto = blank(common.inputs.dp_rate);
@@ -61,6 +62,7 @@ const newRow = (common, typical, extra = {}) => {
     inputs: { ...startingInputs({}), ...Object.fromEntries(COMMON.map(c => [c.key, common.inputs[c.key] ?? ''])),
       coat_factor: common.inputs.coat_factor ?? '', dp_rate: dpAuto ? styleDp(typical, style) : common.inputs.dp_rate },
     dp_auto: dpAuto,
+    board_from: common.board_typed && !blank(common.inputs.board_rate) ? 'common' : 'rule',
     ...extra,
   };
 };
@@ -72,6 +74,8 @@ const rowsFromServer = rows => rows.map(r => {
     complete: r.complete, product_id: r.product_id, product_name: r.product_name, size_text: r.size_text || r.size_key || '', style: r.style,
     inputs: { ...startingInputs({}), ...r.inputs }, coat_choice: coatChoiceOf(r.inputs), autofill: false, dp_auto: false, ...savedTicks(r.inputs),
     enquiry_id: r.enquiry_id ?? null, enquiry_no: r.enquiry_no ?? null,
+    // where its board rate came from, as the batch kept it (I4); none (an old row, a costing it was started from): its own
+    board_from: boardFromSaved(r.board_from),
   };
   return answeredNo(r) ? { ...row, skip_library: libraryKey(row) } : row;
 });
@@ -111,7 +115,6 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const toast = useToast();
   const defaults = boot?.settings?.defaults || {};
   const typical = boot?.typical || {};
-  const grades = useMemo(() => chargeGrades(boot?.board_grades || []), [boot?.board_grades]);
   const coatings = boot?.settings?.coatings || [];
   const [batch, setBatch] = useState(() => ({
     id: null, batch_no: null, title: '', customer_id: null, customer_name: '',
@@ -120,6 +123,9 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
     common: { inputs: { ...startingInputs(defaults), dp_rate: '', board_rate: HOUSE_RULES.board_rate }, coat_choice: '', style: null, board_grade: '', quantities: [] },
     rows: [],
   }));
+  // The batch customer's own board rate, charged for the CFBB family (Rates › Board rate by customer).
+  const customerRate = useMemo(() => customerBoardRate(batch.customer_name, boot?.settings?.customer_rates), [batch.customer_name, boot?.settings?.customer_rates]);
+  const grades = useMemo(() => chargeGrades(boot?.board_grades || [], customerRate?.rate), [boot?.board_grades, customerRate?.rate]);
   const [loading, setLoading] = useState(!!batchId);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState(null);       // row key open in the full editor
@@ -130,8 +136,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const seeded = useRef(false);
 
   const load = id => api.get(`/costing/batches/${id}`).then(b => {
-    const { quantities = [], ...saved } = b.common || {};
-    const common = { inputs: { ...startingInputs(defaults), ...saved }, coat_choice: b.rows.length ? coatChoiceOf(b.rows[0].inputs) : '', style: null, board_grade: '', quantities };
+    const common = { ...commonFromSaved(b.common, defaults), coat_choice: b.rows.length ? coatChoiceOf(b.rows[0].inputs) : '', style: null, board_grade: '' };
     // A row whose die & pasting is what its style usually carries, under a blank common box, still follows the style.
     const rows = rowsFromServer(b.rows).map(r => ({ ...r, dp_auto: blank(common.inputs.dp_rate) && String(r.inputs.dp_rate) === String(styleDp(typical, r.style)) }));
     setBatch({ id: b.id, batch_no: b.batch_no, title: b.title || '', customer_id: b.customer_id, customer_name: b.customer_name || '', common, rows });
@@ -151,8 +156,9 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         setBatch(b => ({ ...b, title: `Enquiries ${es.map(e => e.enquiry_no).join(', ')}`.slice(0, 200),
           common: { ...b.common, quantities: also.length ? also : b.common.quantities },
           ...(names.length === 1 ? { customer_name: names[0], customer_id: ids.length === 1 ? ids[0] : null } : {}) }));
-        // An enquiry costed before starts from its costing (nothing done is lost); the others from what was asked.
-        const costed = es.filter(e => e.costing_live && e.costing_id);
+        // An enquiry costed before starts from its costing (nothing done is lost); the others from what was asked — CI Plant's
+        // own incomplete draft too, which holds the Rates defaults no rule could replace (startsFresh, final review C1).
+        const costed = es.filter(e => e.costing_live && e.costing_id && !startsFresh(e));
         const fromCosting = await Promise.all(costed.map(e => api.get(`/costing/costings/${e.costing_id}`).catch(() => null)));
         const seeds = es.map(e => {
           const c = fromCosting[costed.indexOf(e)];
@@ -180,17 +186,28 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   // A row whose die & pasting follows its style takes the new style's figure (mergeBulkRow).
   const setRow = (key, patch) => update(b => ({ ...b, rows: b.rows.map(r => (r.key === key
     ? mergeBulkRow(r, patch, style => styleDp(typical, style) || defaults.dp_rate || '') : r)) }));
-  const setRowIn = (key, k, v) => update(b => ({ ...b, rows: b.rows.map(r => (r.key === key ? { ...r, ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: v } } : r)) }));
+  // a board rate typed on the row is the row's own (I4): a common rate typed later leaves it
+  const setRowIn = (key, k, v) => update(b => ({ ...b, rows: b.rows.map(r => (r.key === key ? { ...r, ...(k === 'dp_rate' ? { dp_auto: false } : {}),
+    ...(k === 'board_rate' ? { board_from: 'row' } : {}), inputs: { ...r.inputs, [k]: v } } : r)) }));
   // A common setting carries into the rows that still follow it — the box is blank, or holds the common
   // value as it was (die & pasting: or follows the style). A row given its own value keeps it.
   const follows = (r, k, commonWas) => blank(r.inputs[k]) || String(r.inputs[k]) === String(commonWas ?? '') || (k === 'dp_rate' && r.dp_auto);
   // A common box written over a row's charge takes back the tick that charge came from; the row editor then reads it
   // from the charge again (rowWithTicks).
   const untick = k => (k === 'dp_rate' ? { big_box: undefined } : k === 'process' ? { new_die: undefined } : {});
+  // The common board rate (final review I4, revising R28b): a rate a person types carries into the rows whose rate came from
+  // the rule (or the ₹120 prefill) or from an earlier common rate — never over a matched product's grade rate, a rate typed
+  // on the row, or an old row with no marker (rowBoardRate). Blanking it leaves every row at the rate it has; rows pasted
+  // later take their rules' rate. A grade picked in the common box goes the same way.
   const setCommon = (k, v) => update(b => ({
     ...b,
-    common: { ...b.common, inputs: { ...b.common.inputs, [k]: v } },
+    common: { ...b.common, inputs: { ...b.common.inputs, [k]: v }, ...(k === 'board_rate' ? { board_typed: !blank(v) } : {}) },
     rows: b.rows.map(r => {
+      if (k === 'board_rate') {
+        const x = rowBoardRate({ from: r.board_from, rate: r.inputs.board_rate, commonTyped: !blank(v), commonRate: v });
+        return x.board_rate === r.inputs.board_rate && x.board_from === r.board_from ? r
+          : { ...r, board_from: x.board_from, inputs: { ...r.inputs, board_rate: x.board_rate } };
+      }
       if (!follows(r, k, b.common.inputs[k])) return r;
       if (k === 'dp_rate' && blank(v)) return { ...r, ...untick(k), dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } };
       return { ...r, ...untick(k), ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: v } };
@@ -199,7 +216,8 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const applyAll = k => {
     update(b => ({ ...b, rows: b.rows.map(r => (k === 'dp_rate' && blank(b.common.inputs.dp_rate)
       ? { ...r, ...untick(k), dp_auto: true, inputs: { ...r.inputs, dp_rate: styleDp(typical, r.style) || defaults.dp_rate || '' } }
-      : { ...r, ...untick(k), ...(k === 'dp_rate' ? { dp_auto: false } : {}), inputs: { ...r.inputs, [k]: b.common.inputs[k] } })) }));
+      : { ...r, ...untick(k), ...(k === 'dp_rate' ? { dp_auto: false } : {}), ...(k === 'board_rate' ? { board_from: 'common' } : {}),
+        inputs: { ...r.inputs, [k]: b.common.inputs[k] } })) }));
     toast.info(`${COMMON.find(c => c.key === k)?.label || k} copied into all ${batch.rows.length} rows`);
   };
   const setCoat = v => update(b => {
@@ -333,8 +351,9 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
   const store = async named => {
     const body = {
       title: batch.title, customer_id: batch.customer_id, customer_name: batch.customer_name,
-      common: { ...batch.common.inputs, quantities: qs },
-      rows: named.map(r => ({ id: r.id || undefined, enquiry_id: r.enquiry_id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, save_size: !libraryDeclined(r) })),
+      common: commonToSave({ ...batch.common, quantities: qs }),
+      rows: named.map(r => ({ id: r.id || undefined, enquiry_id: r.enquiry_id || undefined, product_id: r.product_id || undefined, product_name: r.product_name, size_text: r.size_text, style: r.style, inputs: r.inputs, save_size: !libraryDeclined(r),
+        board_from: r.board_from ?? null })),
     };
     const b = batch.id ? await api.post(`/costing/batches/${batch.id}/save`, body) : await api.post('/costing/batches', body);
     toast.success(`${b.batch_no} saved — ${b.rows.length} products`);
@@ -381,16 +400,20 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         const asked = { ...(num(p.gsm) > 0 ? { gsm: num(p.gsm) } : {}), ...(num(p.colours) > 0 ? { colours: num(p.colours) } : {}) };
         const desk = p.enquiry_id ? { enquiry_id: p.enquiry_id, enquiry_no: p.enquiry_no } : {};
         // House rules: process (new die for a product not in the master), and from an enquiry's words the
-        // coating, embossing and leafing. Die & pasting keeps following the style; board follows common.
+        // coating, embossing and leafing. Die & pasting keeps following the style. Board: the rule's rate, or a common rate
+        // a person typed over it — a matched product's grade rate stands (I4).
+        const boardOf = (from, rate) => rowBoardRate({ from, rate, commonTyped: !!common.board_typed, commonRate: common.inputs.board_rate });
         const rulesOf = (row, emboss = null, grade = null) => {
-          const r = ruleInputsForRow({ style: row.style, product_id: row.product_id || null }, p.finish || null, emboss, grade);
-          const { dp_rate: _dp, board_rate: _board, ...ins } = r.inputs;
-          return { inputs: ins, coat_choice: r.coat_choice };
+          const r = ruleInputsForRow({ style: row.style, product_id: row.product_id || null }, p.finish || null, emboss, grade, { grades, customerRate });
+          const { dp_rate: _dp, board_rate: ruleRate, ...ins } = r.inputs;
+          return { inputs: ins, board_rate: ruleRate, coat_choice: r.coat_choice, board_grade: rowBoardGrade(row, r.board_grade) };
         };
         if (!m) {
           const row = newRow(common, typical, { product_name: p.product_name, size_text: p.size_text, ...(p.style ? { style: p.style } : {}), ...desk });
           const rules = rulesOf(row);
-          return { ...row, ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}), inputs: { ...row.inputs, ...rules.inputs, qty: p.qty ?? '', ...asked } };
+          const board = boardOf('rule', rules.board_rate);
+          return { ...row, ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}), ...(rules.board_grade ? { board_grade: rules.board_grade } : {}),
+            board_from: board.board_from, inputs: { ...row.inputs, ...rules.inputs, board_rate: board.board_rate, qty: p.qty ?? '', ...asked } };
         }
         matched++;
         const style = p.style || pastingFromProduct(m.pasting_type) || common.style || null;
@@ -398,16 +421,19 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
         const g = gradeFor(m.board_grade, grades);
         const layout = num(m.sheet_l) > 0 && num(m.sheet_w) > 0 && num(m.ups) > 1;
         const rules = rulesOf(row, +m.emboss, g?.grade || m.board_grade);
+        const board = g ? boardOf('product', g.rate_per_kg) : boardOf('rule', rules.board_rate);
         return {
           ...row,
           ...(rules.coat_choice ? { coat_choice: rules.coat_choice } : {}),
+          ...(rules.board_grade ? { board_grade: rules.board_grade } : {}),
+          board_from: board.board_from,
           layout_note: `from the Product Master (${m.code})`,
           inputs: {
             ...row.inputs, ...rules.inputs, qty: p.qty ?? '',
             ...(layout ? { sheet_l: num(m.sheet_l), sheet_w: num(m.sheet_w), ups: num(m.ups) } : {}),
             ...(num(m.gsm) > 0 ? { gsm: num(m.gsm) } : {}),
             ...(num(m.colours) > 0 ? { colours: num(m.colours) } : {}),
-            ...(g ? { board_rate: g.rate_per_kg } : {}),
+            board_rate: board.board_rate,
             ...(+m.emboss !== 1 ? { emb_rate: 0 } : {}),
             ...asked,
           },
@@ -477,7 +503,7 @@ export function BatchEditor({ boot, customers, batchId, seedIds = [], onClose, o
                 const grade = e.target.value;
                 update(b => ({ ...b, common: { ...b.common, board_grade: grade } }));
                 if (g) setCommon('board_rate', g.rate_per_kg);
-                // Met Saffire is coated at factor 1 (owner, 11 Nov 2026).
+                // Met Saffire is coated at factor 1.5 (owner, 20 Nov 2026).
                 if (isMetSaffire(grade)) { setCoat(String(HOUSE_RULES.coat.met_saffire)); applyCoatAll(); }
               }}>
                 <option value="">— type the rate —</option>

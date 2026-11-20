@@ -11,13 +11,14 @@ import { ChevronLeft, ChevronRight, Copy, ExternalLink, FilePlus2, Mail, Papercl
 import { api } from '../../api.js';
 import { Button, DataTable, Input, Modal } from '../../components/ui.jsx';
 import { styleLabel } from '../../lib/costing.js';
-import { STAGE_TONE, dateText, quantitiesText, rupees, whereText } from '../../lib/enquiryUi.js';
+import { STAGE_TONE, dateText, quantitiesText, rupees, startsFresh, whereText } from '../../lib/enquiryUi.js';
 import SingleCosting from './SingleCosting.jsx';
 import { BatchEditor } from './BulkCosting.jsx';
 
 // Which costing the form holds: the enquiry's own (revise it), a fresh one from what was asked, or a copy of
-// an earlier costing. `n` remounts the form when the same choice is made again.
-const defaultHow = (e, n = 0) => (e?.costing_live && e?.costing_id ? { kind: 'linked', costingId: e.costing_id, n } : { kind: 'fresh', n });
+// an earlier costing. `n` remounts the form when the same choice is made again. CI Plant's own incomplete draft opens
+// fresh (startsFresh, final review C1): it holds the Rates defaults no rule could replace, and saving hides it.
+const defaultHow = (e, n = 0) => (e?.costing_live && e?.costing_id && !startsFresh(e) ? { kind: 'linked', costingId: e.costing_id, n } : { kind: 'fresh', n });
 
 export default function DeskCosting({ boot, customers, work, statuses, onClose, onMoved, onEditEnquiry, reloadSignal = 0 }) {
   if (work.mode === 'together') {
@@ -117,7 +118,7 @@ function OneByOne({ boot, customers, work, statuses, onClose, onMoved, onEditEnq
         <CostingLine e={e} how={how} />
         <div className="ml-auto flex flex-wrap gap-1.5">
           {how.kind !== 'linked' && e.costing_live && (
-            <Button size="sm" variant="secondary" onClick={() => choose({ kind: 'linked' })}><PencilLine size={13} className="mr-1 inline" />Back to {e.costing_no}</Button>
+            <Button size="sm" variant="secondary" onClick={() => choose({ kind: 'linked' })}><PencilLine size={13} className="mr-1 inline" />{startsFresh(e) ? `Open CI Plant's draft ${e.costing_no}` : `Back to ${e.costing_no}`}</Button>
           )}
           {(how.kind !== 'fresh' || e.costing_live) && (
             <Button size="sm" variant="secondary" onClick={() => choose({ kind: 'fresh' })}><FilePlus2 size={13} className="mr-1 inline" />Start a fresh costing</Button>
@@ -196,7 +197,10 @@ function CostingLine({ e, how }) {
     );
   }
   if (how.kind === 'from') {
-    return <span><b>Started from {how.costingNo}</b> — saving makes a new costing for {e.enquiry_no}{e.costing_live ? ` in place of ${e.costing_no} (kept in Saved costings)` : ''}; {how.costingNo} is not changed.</span>;
+    return <span><b>Started from {how.costingNo}</b> — saving makes a new costing for {e.enquiry_no}{e.costing_live ? ` in place of ${e.costing_no} (${startsFresh(e) ? 'CI Plant\'s draft, hidden then' : 'kept in Saved costings'})` : ''}; {how.costingNo} is not changed.</span>;
+  }
+  if (e.costing_live && startsFresh(e)) {
+    return <span><b>A fresh costing</b> — {e.costing_no} is CI Plant's draft it could not finish{e.auto_cost_why ? ` (${e.auto_cost_why})` : ''}, so the form starts again from what the customer asked; saving puts the new costing on {e.enquiry_no} and hides {e.costing_no}.</span>;
   }
   return e.costing_live
     ? <span><b>A fresh costing</b> — saving it puts it on {e.enquiry_no} in place of {e.costing_no}, which stays in Saved costings.</span>

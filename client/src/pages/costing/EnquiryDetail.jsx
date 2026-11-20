@@ -12,13 +12,13 @@ import SendQuotePanel from './SendQuotePanel.jsx';
 const STYLE_OPTIONS = Object.keys(STYLES);
 const EMPTY = {
   customer_name: '', contact_name: '', contact_email: '', product_name: '', size_text: '', style: '', board: '', gsm: '',
-  colours: '', coating: '', specs: '', quantities: '', target_price: '', notes: '',
+  colours: '', coating: '', specs: '', quantities: '', target_price: '', notes: '', opening: '',
 };
 const formOf = e => ({
   customer_name: e.customer_name || '', contact_name: e.contact_name || '', contact_email: e.contact_email || '',
   product_name: e.product_name || '', size_text: e.size_text || '', style: e.style || '', board: e.board || '',
   gsm: e.gsm ?? '', colours: e.colours ?? '', coating: e.coating || '', specs: e.specs || '',
-  quantities: (e.quantities || []).join(', '), target_price: e.target_price ?? '', notes: e.notes || '',
+  quantities: (e.quantities || []).join(', '), target_price: e.target_price ?? '', notes: e.notes || '', opening: e.opening || '',
 });
 const EVENT_TEXT = {
   fetched: 'Read from the mailbox', added: 'Typed in by hand', details: 'What was asked changed', ready: 'Sent to costing',
@@ -31,7 +31,7 @@ const STAGE_WORD = { new: 'Inbox', ready: 'Costing', costing: 'Costing', costed:
 function eventDetail(ev) {
   const d = ev.detail || {};
   if (ev.action === 'price' && d.prices) return ` — ${d.prices.map(p => `${qtyText(p.qty)} at ${rupees(p.final)}`).join(', ')}`;
-  if (ev.action === 'costing' && d.costing_no) return ` — ${d.costing_no}${d.replaced ? ` in place of ${d.replaced}` : ''}`;
+  if (ev.action === 'costing' && d.costing_no) return ` — ${d.costing_no}${d.replaced ? ` in place of ${d.replaced}${d.replaced_hidden ? " (CI Plant's draft, now hidden)" : ''}` : ''}`;
   if ((ev.action === 'quotation' || ev.action === 'unquoted') && d.quotation_no) return ` — ${d.quotation_no}`;
   if (ev.action === 'back' && d.to) return ` — from ${STAGE_WORD[d.from] || d.from} to ${STAGE_WORD[d.to] || d.to}`;
   if (ev.action === 'undo' && d.undid) return ` — ${(EVENT_TEXT[d.undid] || d.undid).toLowerCase()}`;
@@ -57,7 +57,7 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setDirty(true); };
   const locked = e && ['quote_ready', 'sent'].includes(e.status);
   const save = async () => {
-    const body = { ...form, style: form.style || null, quantities: parseQuantities(form.quantities) };
+    const body = { ...form, style: form.style || null, opening: form.style === 'SIDE' ? form.opening || null : null, quantities: parseQuantities(form.quantities) };
     const saved = isNew ? await api.post('/costing/enquiries', body) : await api.put(`/costing/enquiries/${id}`, body);
     toast.success(isNew ? `${saved.enquiry_no} added to the Inbox` : `${saved.enquiry_no} saved`);
     setDirty(false);
@@ -115,6 +115,15 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
                 {STYLE_OPTIONS.map(s => <option key={s} value={s}>{styleLabel(s)}</option>)}
               </Select>
             </Field>
+            {form.style === 'SIDE' && (
+              <Field label="Opens at">
+                <Select value={form.opening} onChange={ev => set('opening', ev.target.value)} disabled={locked}>
+                  <option value="">Not known</option>
+                  <option value="side">Side (the tucks close the W × H ends)</option>
+                  <option value="top">Top (the tucks close the L × W ends)</option>
+                </Select>
+              </Field>
+            )}
             {field('board', 'Board', { placeholder: 'FBB, duplex…' })}
             {field('gsm', 'GSM', { inputMode: 'decimal' })}
             {field('colours', 'Colours', { inputMode: 'decimal' })}

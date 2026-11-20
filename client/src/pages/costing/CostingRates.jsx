@@ -8,7 +8,7 @@ import { Button, Field, Input, useToast } from '../../components/ui.jsx';
 import { styleLabel } from '../../lib/costing.js';
 import { coatingRate, plain } from '../../lib/costingUi.js';
 import { NumField } from './CostingEditor.jsx';
-import { HOUSE_RULES } from '../../lib/costingRules.js';
+import { HOUSE_RULES, customerRateProblems } from '../../lib/costingRules.js';
 
 const DEFAULTS = [
   { key: 'wastage', label: 'Wastage sheets', unit: 'sheets' },
@@ -44,11 +44,13 @@ export default function CostingRates({ boot, onSaved }) {
   const [f, setF] = useState(null);
   useEffect(() => {
     const s = boot?.settings || {};
-    setF({ defaults: { ...(s.defaults || {}) }, coatings: (s.coatings || []).map(c => ({ ...c })), alert_pct: s.alert_pct ?? 15 });
+    setF({ defaults: { ...(s.defaults || {}) }, coatings: (s.coatings || []).map(c => ({ ...c })), alert_pct: s.alert_pct ?? 15, customer_rates: (s.customer_rates || []).map(r => ({ ...r })) });
   }, [boot]);
   if (!f) return null;
+  const rateProblems = customerRateProblems(f.customer_rates);
   const setD = (k, v) => setF(x => ({ ...x, defaults: { ...x.defaults, [k]: v } }));
   const setC = (i, patch) => setF(x => ({ ...x, coatings: x.coatings.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
+  const setR = (i, patch) => setF(x => ({ ...x, customer_rates: x.customer_rates.map((r, j) => (j === i ? { ...r, ...patch } : r)) }));
   const save = async () => {
     // Stored as the sheet's factor (1 ÷ rate), so old and new costings read the same coating the same way.
     await api.put('/costing/settings', { ...f, coatings: f.coatings.map(({ rate, ...c }) => c) });
@@ -82,6 +84,23 @@ export default function CostingRates({ boot, onSaved }) {
               </div>
             ))}
             {canEdit && <Button size="sm" variant="secondary" onClick={() => setF(x => ({ ...x, coatings: [...x.coatings, { factor: '', rate: '', name: '' }] }))}><Plus size={14} className="mr-1 inline" />Add a coating</Button>}
+          </fieldset>
+        </div>
+        <div>
+          <h3 className="text-[15px] font-bold">Board rate by customer</h3>
+          <p className="text-xs text-slate-500">A costing for a customer whose name contains the word charges this rate for Saffire, ITC Cyber and FBB (costed as CFBB), never below the buying rate.</p>
+          <fieldset disabled={!canEdit} className="mt-2 space-y-2">
+            {f.customer_rates.map((r, i) => (
+              <div key={i}>
+              <div className="flex items-end gap-2">
+                <Field label="Word in the customer's name" className="flex-1"><Input value={r.word || ''} onChange={e => setR(i, { word: e.target.value })} placeholder="e.g. a word from the name" /></Field>
+                <NumField className="w-36" label="Rate" unit="₹ per kg" value={r.board_rate} onChange={v => setR(i, { board_rate: v })} />
+                {canEdit && <button type="button" onClick={() => setF(x => ({ ...x, customer_rates: x.customer_rates.filter((_, j) => j !== i) }))} className="mb-1.5 rounded-md p-1.5 text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>}
+              </div>
+              {rateProblems[i] && (r.word || r.board_rate !== '') && <div className="mt-0.5 text-xs font-semibold text-amber-700">Not saved — {rateProblems[i]}</div>}
+              </div>
+            ))}
+            {canEdit && <Button size="sm" variant="secondary" onClick={() => setF(x => ({ ...x, customer_rates: [...x.customer_rates, { word: '', board_rate: '' }] }))}><Plus size={14} className="mr-1 inline" />Add a customer rate</Button>}
           </fieldset>
         </div>
         <fieldset disabled={!canEdit}>

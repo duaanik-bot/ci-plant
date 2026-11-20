@@ -63,6 +63,8 @@ describe('draft sales orders from the AVS intake — through the real app', {
     await db.init();
     const { seedIfEmpty } = await import('./seed.js');
     await seedIfEmpty();
+    // Filing costs by itself since 20 Nov 2026; this suite tests the drafts without it (auto-costing-pg.test.js tests that).
+    await db.q(`UPDATE enquiry_settings SET auto_cost = false WHERE id = 1`);
 
     const { default: jwt } = await import('jsonwebtoken');
     const { JWT_SECRET } = await import('./auth.js');

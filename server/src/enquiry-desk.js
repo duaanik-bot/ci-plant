@@ -7,6 +7,7 @@
 //   priceRows     per quantity: the costing's proposed price per carton and the person's final price
 //   customerLine  THE ONLY way a quotation line is made: a whitelist of customer-facing fields. The PDF and
 //                 the e-mail are made from quotation rows and never read a costing (strict separation).
+//   mailReplyState  one reply per mail: is a mail ready for its reply, or which of its items still waits
 //   composeReply  the reply's subject, text and HTML, from a quotation row
 import { num, parseSize, normStyle, quantityBreaks, STYLES } from './costing-engine.js';
 
@@ -46,12 +47,14 @@ export const BACK_TO = Object.freeze({ ready: 'new', costing: 'new', costed: 're
 // Costing if it has a costing, else the Inbox).
 export const broughtBack = (was, costingId) => (['new', 'ready', 'costing', 'price_pending'].includes(was) ? was : costingId ? 'costing' : 'new');
 
-// The columns a desk change can touch. Each change keeps them as they were, so it can be undone.
+// The columns a desk change can touch. Each change keeps them as they were, so it can be undone. auto_cost_why too: a
+// person's costing clears what CI Plant could not do by itself, and Undo brings it back (20 Nov 2026). reply_claim_at: the
+// mark a mail's reply claim leaves on the rows it finalised (final review I1).
 export const UNDO_COLS = Object.freeze([
   'status', 'dropped_reason', 'costing_id', 'batch_id', 'final_prices', 'finalised_by', 'finalised_by_name', 'finalised_at',
   'quotation_id', 'customer_id', 'customer_name', 'contact_name', 'contact_email', 'product_id', 'product_name', 'size_text',
-  'size_key', 'style', 'board', 'gsm', 'colours', 'coating', 'specs', 'quantities', 'target_price', 'notes',
-  'counter', 'counter_mail_id', 'counter_at', 'counter_by_name', 'counter_round',
+  'size_key', 'style', 'opening', 'board', 'gsm', 'colours', 'coating', 'specs', 'quantities', 'target_price', 'notes',
+  'counter', 'counter_mail_id', 'counter_at', 'counter_by_name', 'counter_round', 'auto_cost_why', 'reply_claim_at',
 ]);
 
 const MAX = { text: 300, specs: 1000, body: 20000, items: 30, attachments: 30, quantities: 6 };
@@ -88,6 +91,7 @@ export function cleanItem(raw = {}) {
     size_text: size ? (size.kind === 'other' ? size.label : size.key) : null,
     size_key: size?.key ?? null,
     style: normStyle(raw.style ?? raw.pasting) || null,
+    opening: null,
     board: text(raw.board, 80),
     gsm: num(raw.gsm) > 0 ? num(raw.gsm) : null,
     colours: num(raw.colours ?? raw.colors) > 0 ? num(raw.colours ?? raw.colors) : null,
@@ -98,13 +102,16 @@ export function cleanItem(raw = {}) {
     notes: text(raw.notes, MAX.specs),
   };
   if (item.style && !STYLES[item.style]) item.style = null;
+  // How a side-pasted carton opens ("top open", "side opening"); said of no other pasting.
+  const way = String(raw.opening ?? '').toLowerCase();
+  if (item.style === 'SIDE') item.opening = /top/.test(way) ? 'top' : /side/.test(way) ? 'side' : null;
   return item.product_name || item.size_text ? item : null;
 }
 
 // A mail the robot files: the Gmail ids are required; everything else is kept as given, trimmed.
 // A mail read as an enquiry with no item made out still lands on the desk, as one row for a person to read.
 export const unreadItem = (subject, reader = 'Claude') => ({
-  product_name: subject || '(read the mail)', size_text: null, size_key: null, style: null, board: null, gsm: null,
+  product_name: subject || '(read the mail)', size_text: null, size_key: null, style: null, opening: null, board: null, gsm: null,
   colours: null, coating: null, specs: null, quantities: [], target_price: null,
   notes: `${reader} found no item in this mail — read it and fill in what is asked.`,
 });
@@ -142,7 +149,8 @@ const round2 = x => Math.round(x * 100) / 100;
 
 // Per quantity asked about (the costing's own quantity when none was): the proposed price per carton —
 // the costing's quote price at that quantity (CI-1) — and the final price the person set, with the
-// proposal it was set against. Proposed is null while the costing is incomplete.
+// proposal it was set against. Proposed is null while the costing is incomplete. `approved`: the final price carries
+// Approve's stamp (`ok: true` on its entry, final review I2) — a price set after the approval does not.
 export function priceRows(enquiry, costingInputs) {
   const asked = (enquiry.quantities || []).map(Number).filter(q => q > 0);
   const qs = asked.length ? asked : [num(costingInputs?.qty)].filter(q => q > 0);
@@ -163,6 +171,7 @@ export function priceRows(enquiry, costingInputs) {
       theirs: num(k?.theirs) > 0 ? num(k.theirs) : null,
       ours: num(k?.ours) > 0 ? num(k.ours) : null,
       final,
+      approved: f?.ok === true,
       suggested: ceilPaise(proposed),
       set_against: num(f?.proposed) ?? null,
       // the costing moved after the final price was set
@@ -259,6 +268,76 @@ export function groupByCustomer(enquiries) {
     groups.get(k).push(e);
   }
   return [...groups.values()];
+}
+
+// ── one reply per mail ───────────────────────────────────────────────────────────────────────────
+// Owner, 20 Nov 2026: approval fixes the price, makes the quotation and saves the Gmail draft; nothing is sent. A mail
+// gets ONE reply, made once no item of it still waits. Each of the mail's items falls in one group:
+//   out       dropped or deleted;
+//   quoted    on a live quotation (not cancelled or superseded), or finalised, sent or ordered: part of the mail went
+//             the old way (Send quotation), so no second reply is made and the rest go out from the desk by hand. A
+//             finalised row whose quotation a person cancelled, or that was superseded, is one of these (final review I1);
+//   approved  in To price, its costing approved, every quantity with a final price that carries Approve's stamp;
+//   waiting   the rest, with why: "price changed after approval — Approve again" for a final price set since the
+//             approval (I2), what CI Plant could not do by itself, else "waiting for approval" for a complete costing,
+//             else "not costed yet". A claim still "being costed" after STALE_CLAIM_MINUTES stopped part-way.
+// A reply begun and not finished is only one the claim itself finalised (claimReply marks its rows: reply_claim_at) that is
+// on no quotation yet — the mark goes when the quotation is made. While it is fresh another press may be sending it
+// (REPLY_FRESH_MS): quoted; after that it was cut off: `resume` names its rows, unless a reply of the mail is already made
+// — the Quoted tab's Send quotation finishes them. ready = an approved item, and nothing waiting, quoted or to resume.
+// `quoted` names the quotations (a row not on one yet: the row itself). Items are desk rows: id, enquiry_no, status, stage,
+// costing_status, costing_complete (else read from the stage), prices (priceRows), quotation_id/no/status, finalised_at,
+// reply_claim_at, auto_cost_why, auto_cost_at. `now`: the clock.
+// The one stale-claim threshold: auto-costing.js's SQL reads the same minutes.
+export const STALE_CLAIM_MINUTES = 5;
+const STALE_CLAIM_MS = STALE_CLAIM_MINUTES * 60_000;
+// A call has 30 s (vercel.json maxDuration): a press that finalised a mail longer ago than this has answered or stopped —
+// the same margin as the client's writeOnce JOIN_WINDOW_MS.
+export const REPLY_FRESH_MS = 35_000;
+// Approve is offered on To price only; a finalised row waits in Quoted, where Send quotation finishes it (final review I1).
+export const RESUME_WHY = 'Finalised, reply not finished — press Send quotation';
+export const PRICE_CHANGED_WHY = 'price changed after approval — Approve again';
+const OUT = new Set(['dropped', 'deleted']);
+const QUOTED = new Set(['quote_ready', 'sent', 'ordered']);
+const TO_PRICE = new Set(['costed', 'price_pending']);
+// A claim "being costed" for longer than STALE_CLAIM_MINUTES stopped part-way. Also sent to the desk as `auto_cost_stopped`,
+// so the screen never hard-codes the minutes. As auto-costing.js's STALE_CLAIM reads it: no claim time is no stale claim.
+export function autoCostStopped(e, now = Date.now()) {
+  if (e?.auto_cost_why !== 'being costed') return false;
+  const at = e.auto_cost_at ? new Date(e.auto_cost_at).getTime() : NaN;
+  return Number(now) - at > STALE_CLAIM_MS;
+}
+function waitingWhy(e, now) {
+  if (e.auto_cost_why === 'being costed') return autoCostStopped(e, now) ? 'costing stopped part-way — press Cost it for me' : 'being costed';
+  if (e.auto_cost_why) return e.auto_cost_why;
+  return (e.costing_complete ?? TO_PRICE.has(e.stage)) ? 'waiting for approval' : 'not costed yet';
+}
+export function mailReplyState(items, { now = Date.now() } = {}) {
+  const approved = [], waiting = [], quoted = new Set(), cut = [];
+  for (const e of items || []) {
+    if (OUT.has(e.status)) continue;
+    const live = !!e.quotation_id && !['cancelled', 'superseded'].includes(e.quotation_status);
+    const name = (live && e.quotation_no) || e.enquiry_no;
+    // the claim's own finalise, on no quotation yet: being sent while fresh, else cut off
+    if (e.status === 'quote_ready' && e.reply_claim_at && !e.quotation_id) {
+      const at = e.finalised_at ? new Date(e.finalised_at).getTime() : NaN;
+      if (Number(now) - at < REPLY_FRESH_MS) quoted.add(name); else cut.push({ id: e.id, name });
+      continue;
+    }
+    if (live || QUOTED.has(e.status)) { quoted.add(name); continue; }
+    const prices = Array.isArray(e.prices) ? e.prices : [];
+    if (TO_PRICE.has(e.stage) && e.costing_status === 'approved' && (e.costing_complete ?? true)
+      && prices.length && prices.every(p => num(p.final) > 0)) {
+      if (prices.every(p => p.approved === true)) approved.push(e.id);
+      else waiting.push({ enquiry_no: e.enquiry_no, why: PRICE_CHANGED_WHY });
+      continue;
+    }
+    waiting.push({ enquiry_no: e.enquiry_no, why: waitingWhy(e, now) });
+  }
+  // A reply made (or being made) is never made again: the cut-off rows are named with it.
+  if (quoted.size) for (const c of cut) quoted.add(c.name);
+  const resume = !quoted.size && cut.length ? { ids: cut.map(c => c.id), why: RESUME_WHY } : null;
+  return { ready: approved.length > 0 && !waiting.length && !quoted.size && !resume, approved, waiting, quoted: [...quoted], resume };
 }
 
 // ── the reply ────────────────────────────────────────────────────────────────────────────────────

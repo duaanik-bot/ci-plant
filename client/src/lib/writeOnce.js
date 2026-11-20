@@ -46,6 +46,11 @@ export const MINTING_POSTS = Object.freeze([
   '/costing/batches/:id/save',
   '/costing/costings',
   '/costing/enquiries',
+  // Approve, and a Management drop or delete, can make a mail's reply: its CI-QTN- quotation (20 Nov 2026).
+  '/costing/enquiries/approve',
+  '/costing/enquiries/auto-cost',
+  '/costing/enquiries/delete',
+  '/costing/enquiries/drop',
   '/costing/enquiries/order',
   '/costing/quotations',
   '/costing/quotations/send',

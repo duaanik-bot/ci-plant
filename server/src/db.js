@@ -2910,6 +2910,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Fluence readings in the "done by the system" notice (20 Nov 2026): fluence_mail_readings.notice_id. Idempotent;
   // after the notices and the readings, which it joins.
   await pool.query(migration('20261120100000_fluence_mail_notice.sql'));
+  // The desk costs an enquiry by itself: opening, customer board rates, the auto-cost switch and its trail (20 Nov 2026).
+  await pool.query(migration('20261120120000_enquiry_auto_cost.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

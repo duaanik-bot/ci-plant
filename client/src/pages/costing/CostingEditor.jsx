@@ -20,9 +20,9 @@ import SizeProposals from './SizeProposals.jsx';
 import KldPanel from './KldPanel.jsx';
 import {
   SOURCES, closestComparison, coatingChoices, coatingRate, layoutOptions, libraryDeclined, markEdited, newLibraryEntry, perUnit, pct, plain,
-  rankHistory, recommend, rupees, stillNeeded,
+  inputsAfterEdit, rankHistory, recommend, rupees, stillNeeded,
 } from '../../lib/costingUi.js';
-import { HOUSE_RULES, chargeGrades, gradeLabel, newDieDefault, masterDieOf, isUsableDie } from '../../lib/costingRules.js';
+import { HOUSE_RULES, chargeGrades, customerBoardRate, gradeLabel, newDieDefault, masterDieOf, isUsableDie, withRunWastage } from '../../lib/costingRules.js';
 import { dieName, dieFrom, dieFacts, listed, masterItem, listItem, noNewDieLabel } from '../../lib/die-check.js';
 
 // ── small pieces ─────────────────────────────────────────────────────────────────────────────────
@@ -535,11 +535,14 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   const inputs = value.inputs || {};
   const settings = boot?.settings || { coatings: [], alert_pct: 15, defaults: {} };
   // Grades at what a costing charges (FBB ₹120), not the warehouse's buying rate.
-  const grades = useMemo(() => chargeGrades(boot?.board_grades || []), [boot?.board_grades]);
+  // A customer's own board rate (Rates › Board rate by customer) is charged for the CFBB family, once, here.
+  const customerName = value.customer_name || value.product?.customer_name || '';
+  const customerRate = useMemo(() => customerBoardRate(customerName, boot?.settings?.customer_rates), [customerName, boot?.settings?.customer_rates]);
+  const grades = useMemo(() => chargeGrades(boot?.board_grades || [], customerRate?.rate), [boot?.board_grades, customerRate?.rate]);
   const src = f => value.sources?.[f];
   // A change the user made: the values, and the boxes it touched marked as typed.
   const set = (patch, edited = []) => onChange(markEdited({ ...value, ...patch, autofill: true }, edited));
-  const setIn = (key, x) => set({ inputs: { ...inputs, [key]: x } }, [key]);
+  const setIn = (key, x) => set({ inputs: inputsAfterEdit(inputs, key, x) }, [key]);
   const result = useMemo(() => computeCosting(inputs), [inputs]);
   const missing = stillNeeded(value);
   const size = parseSize(value.size_text);
@@ -559,14 +562,14 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
   // a Die Master die of exactly this size means no new die unless somebody ticks it (owner, 17 Nov 2026, "Die Master only")
   const masterDie = followDieCheck && checked ? masterDieOf(check.data) : null;
   const newDie = newDieDefault(value, { masterDie });
-  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}|${value.board_grade ?? ''}`;
+  const ctxKey = `${value.product?.id ?? ''}|${check.key ?? ''}|${check.data ? 1 : 0}|${value.style ?? ''}|${inputs.colours ?? ''}|${value.big_box ? 1 : 0}|${newDie ? 1 : 0}|${value.finish ? 1 : 0}|${value.board_grade ?? ''}|${value.customer_name ?? ''}|${value.opening ?? ''}`;
   const lastCtx = useRef(null);
   useEffect(() => {
     if (value.autofill === false || !boot) return;
     if (size?.key && check.key !== size.key) return;          // wait for this size's check
     if (lastCtx.current === ctxKey) return;
     lastCtx.current = ctxKey;
-    const next = recommend(value, { product: value.product, check: check.data, typical: boot.typical, defaults: settings.defaults, grades, masterDie });
+    const next = recommend(value, { product: value.product, check: check.data, typical: boot.typical, defaults: settings.defaults, grades, masterDie, boards: check.data?.sheets, customerRate });
     const pick = x => JSON.stringify([x.inputs, x.sources, x.size_text, x.style, x.board_grade, x.coat_choice, x.customer_name]);
     if (pick(next) !== pick(value)) onChange(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -605,10 +608,10 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
     if (o.new_die != null && o.new_die !== newDie) {
       const sources = { ...(value.sources || {}) };
       delete sources.process;
-      onChange(markEdited({ ...value, style: o.style || value.style, new_die: o.new_die, sources, inputs: { ...inputs, ...layout, process: '' }, autofill: true }, edited));
+      onChange(markEdited({ ...value, style: o.style || value.style, new_die: o.new_die, sources, inputs: withRunWastage({ ...inputs, ...layout, process: '' }), autofill: true }, edited));
       return;
     }
-    set({ style: o.style || value.style, inputs: { ...inputs, ...layout } }, edited);
+    set({ style: o.style || value.style, inputs: withRunWastage({ ...inputs, ...layout }) }, edited);
   };
   const showEmb = num(inputs.emb_rate) > 0 || +value.product?.emboss === 1 || value.show_emb;
   const showLeaf = num(inputs.leaf_panels) > 0 || value.show_leaf;
@@ -733,7 +736,7 @@ export default function CostingEditor({ boot, customers = [], value, onChange, e
             <NumField label="Minimum printing" unit="₹" source={src('print_min')} value={inputs.print_min} onChange={x => setIn('print_min', x)}
               help="A small run pays at least this for printing" />
             <NumField label="Die & pasting" unit="₹ per carton" source={src('dp_rate')} value={inputs.dp_rate} onChange={x => setIn('dp_rate', x)}
-              help="House rule: side pasting ₹0.20, lock bottom ₹0.30, big box ₹0.41" />
+              help={`House rule: side pasting ₹${HOUSE_RULES.dp.SIDE.toFixed(2)}, lock bottom ₹${HOUSE_RULES.dp.LOCK.toFixed(2)}, big box ₹${HOUSE_RULES.dp_big.toFixed(2)}`} />
             <NumField label="Process charge" unit="₹ for the job" source={src('process')} value={inputs.process} onChange={x => setIn('process', x)}
               help="House rule: ₹2,000 for the job, ₹3,000 with a new die" />
             <NumField label="P&F" unit="%" source={src('pf_pct')} value={inputs.pf_pct} onChange={x => setIn('pf_pct', x)} />
