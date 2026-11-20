@@ -1264,4 +1264,93 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     assert.match(res.body.error, /Kits/);
     assert.equal((await k.now()).total, 1000);
   });
+
+  // ── Fluence in the "done by the system" notice (owner, 20 Nov 2026: "Yes, add it"; design 2026-11-18 §4.3) ──────
+  const notices = () => import('./artwork-notice.js');
+  const drain = async () => { const { claimNotice } = await notices(); while (await claimNotice()) { /* what earlier steps left */ } };
+  const noticeText = async id => (await db.one('SELECT text_body FROM artwork_notices WHERE id = $1', [id])).text_body;
+
+  test('Fluence readings are told once in the "done by the system" notice, after their whole mail is saved', async () => {
+    const { claimNotice } = await notices();
+    await drain();
+    const k = await makeKit({ name: 'NT SHEET KIT', comps: [['F-NT1 CAPS', 1, 1000, 'item']] });
+    await fileFluence('nt-1', [
+      { source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1100, items: [] } },
+      { source: 'mrp_sheet', kit_name: 'NT NO SUCH KIT', sure: true, mrp: { kit_total: 500, items: [] } },
+      { source: 'po', kit_code: k.code, sure: true, mrp: { kit_total: 1000, items: [] } },     // the master's MRP: the same
+      { source: 'po', kit_code: k.code, sure: true, mrp: { items: [] } },                      // no kit MRP read: not compared
+    ]);
+    const { syncIntakeArtwork } = await import('./artwork-intake.js');
+    await syncIntakeArtwork({ fluenceBudgetMs: 0 });          // filed; nothing saved yet
+    await drain();                                            // the mail itself — nothing of it to tell yet
+    const queued = await db.q(`SELECT source, status, notice_id FROM fluence_mail_readings WHERE gmail_message_id = 'nt-1' ORDER BY id`);
+    assert.deepEqual(queued.map(x => [x.source, x.status, x.notice_id]),
+      [['mrp_sheet', 'queued', null], ['mrp_sheet', 'queued', null], ['po', 'compared', null], ['po', 'compared', null]],
+      'nothing of the mail told while any of it is being saved');
+    const { workFluenceMailSoft } = await import('./fluence-mail.js');
+    await workFluenceMailSoft({ budgetMs: 5000 });
+    const id = await claimNotice();
+    assert.ok(id, 'a notice for the saved sheet');
+    const n = await db.one('SELECT status, subject, text_body FROM artwork_notices WHERE id = $1', [id]);
+    assert.equal(n.status, 'waiting');
+    assert.match(n.subject, /^Fluence masters done by the system — 1 saved, 1 not matched, 1 PO line to check, 1 already the same \(/);
+    assert.match(n.text_body, /SAVED FROM FLUENCE'S MAIL[^\n]*\n• NT SHEET KIT \(RVK-\d+\) — kit MRP ₹1,000 → ₹1,100 \(carton too\) — MRP sheet of \d+ \w{3}\n/);
+    assert.match(n.text_body, /NOT MATCHED[^\n]*\n• NT NO SUCH KIT — no kit of that name or code in our masters — MRP sheet of /);
+    assert.match(n.text_body, /PO LINES TO CHECK[^\n]*\n• NT SHEET KIT \(RVK-\d+\) — not compared — no kit MRP read on the PO — PO of /);
+    assert.match(n.text_body, /ALREADY THE SAME[^\n]*\n• 1 kit — NT SHEET KIT \(RVK-\d+\)\n/);
+    const told = await db.q(`SELECT notice_id FROM fluence_mail_readings WHERE gmail_message_id = 'nt-1'`);
+    assert.ok(told.length === 4 && told.every(x => x.notice_id === id), 'every line of the mail in that one notice');
+    assert.equal(await claimNotice(), null, 'told once');
+  });
+
+  test('the two-minute poll saves a queued Fluence mail and tells it in the same round', async () => {
+    await drain();
+    const k = await makeKit({ name: 'NT POLL KIT', comps: [['F-NT2 CAPS', 1, 1000, 'item']] });
+    await fileFluence('nt-2', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 1080, items: [] } }]);
+    const { syncIntakeArtwork, syncIntakeArtworkSoft } = await import('./artwork-intake.js');
+    await syncIntakeArtwork({ fluenceBudgetMs: 0 });
+    await drain();                                            // its mail told already: only the reading is left
+    assert.equal((await reading('nt-2')).status, 'queued');
+    await syncIntakeArtworkSoft();                            // the poll, with nothing new to file
+    const r = await reading('nt-2');
+    assert.equal(r.status, 'saved', r.hold_reason || '');
+    assert.ok(r.notice_id, 'told in the same round');
+    assert.match(await noticeText(r.notice_id), /• NT POLL KIT \(RVK-\d+\) — kit MRP ₹1,000 → ₹1,080/);
+  });
+
+  test('an artwork\'s Fluence reading is told when the client\'s approval saves it, not when it is read', async () => {
+    const { claimNotice } = await notices();
+    await drain();
+    const k = await makeKit({ name: 'NT ART KIT', comps: [['F-NT4 CAPS', 1, 1000, 'item']] });
+    const { r } = await artworkFor(k, 'nt-4', { prescription: { general_instructions: 'After food.', lines: [{ item: 'F-NT4 CAPS', dosage: '1 cap', morning: 1 }] },
+      mrp: { kit_total: 1100, items: [] } });
+    assert.equal(r.status, 'waiting_approval', r.hold_reason || '');
+    await drain();
+    assert.equal((await reading('nt-4r')).notice_id, null, 'not told while it waits for the client');
+    await approve(r.artwork_version_id);
+    assert.equal((await reading('nt-4r')).status, 'saved');
+    const id = await claimNotice();
+    assert.ok(id);
+    assert.equal((await reading('nt-4r')).notice_id, id);
+    assert.match(await noticeText(id), /SAVED FROM FLUENCE'S MAIL[^\n]*\n• NT ART KIT \(RVK-\d+\) — [^\n]*prescription → revision 2[^\n]* — artwork of \d+ \w{3}\n/);
+  });
+
+  test('Fluence readings settled before the notice told them are not announced; one still waiting is left to tell; a replay adds nothing', async () => {
+    const mig = fs.readFileSync(new URL('../../supabase/migrations/20261120100000_fluence_mail_notice.sql', import.meta.url), 'utf8');
+    const waiting = await db.one(`INSERT INTO fluence_mail_readings (source, status, kit_name) VALUES ('artwork', 'waiting_approval', 'NT WAITING KIT') RETURNING id`);
+    try {
+      await db.q('ALTER TABLE fluence_mail_readings DROP COLUMN notice_id');    // as it stood before this change
+      await db.q(mig);
+      const left = await db.q('SELECT id, status FROM fluence_mail_readings WHERE notice_id IS NULL');
+      assert.ok(left.every(x => ['waiting_approval', 'queued'].includes(x.status)), JSON.stringify(left));
+      assert.ok(left.some(x => x.id === waiting.id), 'the waiting one is left to tell');
+      const old = await db.q('SELECT DISTINCT n.status, n.error FROM fluence_mail_readings r JOIN artwork_notices n ON n.id = r.notice_id');
+      assert.deepEqual(old.map(x => [x.status, x.error]), [['skipped', 'not announced']]);
+      const before = (await db.one('SELECT count(*)::int AS n FROM artwork_notices')).n;
+      await db.q(mig);
+      assert.equal((await db.one('SELECT count(*)::int AS n FROM artwork_notices')).n, before, 'a replay adds nothing');
+    } finally {
+      await db.q('DELETE FROM fluence_mail_readings WHERE id = $1', [waiting.id]);
+    }
+  });
 });

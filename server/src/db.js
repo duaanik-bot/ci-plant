@@ -2907,6 +2907,9 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // Fluence readings from Fluence's mails (18 Nov 2026): fluence_mail_readings, kit-total MRP trail. Idempotent; after
   // the Fluence tables and the artwork register, which it references.
   await pool.query(migration('20261118120000_fluence_mail.sql'));
+  // Fluence readings in the "done by the system" notice (20 Nov 2026): fluence_mail_readings.notice_id. Idempotent;
+  // after the notices and the readings, which it joins.
+  await pool.query(migration('20261120100000_fluence_mail_notice.sql'));
 
   // Finance ledger core — the thirteen fin_* tables: books, years, months,
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables

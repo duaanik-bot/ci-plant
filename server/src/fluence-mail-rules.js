@@ -4,6 +4,10 @@
 // Pure, so they are tested on their own; fluence-mail.js does the saving.
 import { nameKey, sameMrp } from '../../client/src/lib/fluence.js';
 
+// A reading whose outcome is known — what the bell (fluence-mail.js) and the "done by the system" notice
+// (artwork-notice.js) tell, once each.
+export const SETTLED = ['saved', 'same', 'held', 'not_matched', 'compared'];
+
 const text = v => (v == null ? null : String(v).replace(/\s+/g, ' ').trim() || null);
 // "₹ 1,250.00", "Rs. 450/-" → 1250, 450; '' / null → null; anything else unreadable → NaN (the reading becomes unsure)
 const money = v => {

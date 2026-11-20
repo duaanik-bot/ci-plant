@@ -14,12 +14,21 @@
 // 'waiting' (no try counted, tried on every filing and poll); Google trouble → 'failed', tried again after 10 minutes,
 // 'gave_up' after 5 tries; a send started and never confirmed → 'gave_up' at once (it may have gone: never sent blind
 // twice). The register shows every notice not sent, and a person can press Send again.
+//
+// Fluence (owner, 20 Nov 2026: "Yes, add it"; design 2026-11-18 §4.3): the same notice also says what the system did with
+// Fluence's mails (fluence-mail.js) — saved to the Fluence master (do not enter it again), held for a person and why,
+// not matched, a PO whose MRPs differ, already the same — in the words of Fluence › From Fluence mail. A reading is told
+// once (fluence_mail_readings.notice_id), when nothing of its mail is still being saved; an artwork's, when the client's
+// approval saves it. A run of only Fluence is a notice of its own.
 import { q, one, tx } from './db.js';
 import { gmailConfigured, accessToken, sendToOwnMailboxes } from './gmail.js';
+import { SETTLED } from './fluence-mail-rules.js';
+import { readingOutcome, poNotCompared } from '../../client/src/lib/fluence.js';
 
 export const MAX_TRIES = 5;
 const RETRY_MIN = 10;
 const text = v => String(v ?? '').trim();
+const list = v => (Array.isArray(v) ? v : []);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const base = () => (process.env.CI_PLANT_URL || 'https://motionci.in').replace(/\/+$/, '');
 
@@ -31,14 +40,74 @@ const when = (iso, withTime = true) => {
 };
 const jobName = it => [it.job_no, it.client_item_code, it.product_name].filter(Boolean).join(' ');
 
+// ── the Fluence part ──────────────────────────────────────────────────────────────────────────────────────────────
+const FLUENCE_CAP = 40;          // lines in a group; the rest are in the tab
+const SAME_CAP = 20;             // names on the "already the same" line
+const SOURCE_WORD = { artwork: 'artwork', mrp_sheet: 'MRP sheet', po: 'PO' };
+// the kit as the office knows it: the master's name (else what the mail called it) and its carton code — a new kit's
+// draft code is said once, in what it did
+const kitLabel = r => {
+  const name = text(r.kit) || text(r.kit_name) || 'a kit';
+  const code = r.created_product_code ? '' : text(r.product_code);
+  return code ? `${name} (${code})` : name;
+};
+const fromMail = r => [SOURCE_WORD[r.source] || 'mail', r.received_at ? `of ${when(r.received_at, false)}` : ''].filter(Boolean).join(' ');
+
+// Grouped by what the office must do with it. readings: [{ source, status, kit, kit_name, product_code,
+// created_product_code, created_kit_id, hold_reason, changes, reading: { mrp: { kit_total } }, sure, unsure,
+// received_at }]. → { lines, summary }. Pure.
+// A PO's MRPs are only compared, never saved (design §7.1): a PO line is "already the same" only when its kit MRP was
+// read, sure, and found the same; any other PO line — it differs, it names no kit we have, nothing was compared — is
+// one to check on the PO, never one to put in by hand.
+function fluencePart(readings, link) {
+  const poToCheck = r => r.status === 'compared' && (list(r.changes?.differs).length > 0 || !!r.hold_reason || poNotCompared(r));
+  const g = {
+    saved: readings.filter(r => r.status === 'saved'),
+    held: readings.filter(r => r.status === 'held'),
+    notMatched: readings.filter(r => r.status === 'not_matched'),
+    po: readings.filter(poToCheck),
+    same: readings.filter(r => r.status === 'same' || (r.status === 'compared' && !poToCheck(r))),
+  };
+  const L = [];
+  const group = (xs, head) => {
+    if (!xs.length) return;
+    L.push(head, ...xs.slice(0, FLUENCE_CAP).map(r => `• ${kitLabel(r)} — ${readingOutcome(r)} — ${fromMail(r)}`));
+    if (xs.length > FLUENCE_CAP) L.push(`…and ${xs.length - FLUENCE_CAP} more — all in Fluence › From Fluence mail`);
+    L.push('');
+  };
+  group(g.saved, "FLUENCE MASTER — SAVED FROM FLUENCE'S MAIL — do not enter these again");
+  group(g.held, 'FLUENCE MASTER — HELD, NOT SAVED — a person decides: Apply, or Keep the master');
+  group(g.notMatched, 'FLUENCE MASTER — NOT MATCHED — no kit of that name or code: put it in by hand, or Keep the master');
+  group(g.po, "FLUENCE MASTER — PO LINES TO CHECK — a PO's MRPs are only compared, never saved: check these on the PO");
+  if (g.same.length) {
+    const more = g.same.length > SAME_CAP ? ` and ${g.same.length - SAME_CAP} more` : '';
+    L.push('FLUENCE MASTER — CHECKED, ALREADY THE SAME AS THE MASTER — nothing to do',
+      `• ${plural(g.same.length, 'kit')} — ${g.same.slice(0, SAME_CAP).map(kitLabel).join(', ')}${more}`, '');
+  }
+  if (L.length) L.push(`Fluence › From Fluence mail (management acknowledges what was saved): ${link}`, '');
+  const made = g.saved.filter(r => r.created_kit_id || r.created_product_code).length;
+  const summary = [
+    g.saved.length && `${g.saved.length} saved${made ? ` (${plural(made, 'new kit')})` : ''}`,
+    g.held.length && `${g.held.length} held`,
+    g.notMatched.length && `${g.notMatched.length} not matched`,
+    g.po.length && `${plural(g.po.length, 'PO line')} to check`,
+    g.same.length && `${g.same.length} already the same`,
+  ].filter(Boolean).join(', ');
+  return { lines: L, summary };
+}
+
 // The mail's words. items: [{ action: 'received' | 'received_again', job_no, client_item_code, product_name, customer,
-// label, fresh, to_sort, designer_reply_at, view_url, files: [{ file_name, drive_url, link_url, saved_by }] }]. Pure.
-export function noticeMail({ items, at = new Date().toISOString(), link = `${base()}/artwork?tab=register` }) {
+// label, fresh, to_sort, designer_reply_at, view_url, files: [{ file_name, drive_url, link_url, saved_by }] }];
+// fluence: the Fluence readings told with it (fluencePart). Pure.
+export function noticeMail({ items, fluence = [], at = new Date().toISOString(), link = `${base()}/artwork?tab=register`,
+  fluenceLink = `${base()}/fluence?tab=mail` }) {
   const did = items.filter(i => i.action === 'received');
   const again = items.filter(i => i.action === 'received_again');
   const designer = did.filter(i => i.designer_reply_at || i.files.some(f => f.saved_by === 'designer'));
+  const fl = fluencePart(fluence, fluenceLink);
+  const n = did.length + again.length;
   const L = [];
-  L.push('Artwork the system has already handled — please do not do these again.', '');
+  L.push(`${[n && 'Artwork', fl.lines.length && 'Fluence masters'].filter(Boolean).join(' and ') || 'Artwork'} the system has already handled — please do not do these again.`, '');
   if (did.length) {
     L.push('DONE BY THE SYSTEM');
     for (const i of did) {
@@ -68,26 +137,52 @@ export function noticeMail({ items, at = new Date().toISOString(), link = `${bas
     for (const i of again) L.push(`• ${jobName(i)} ${i.label} — ${i.customer || ''}`.replace(/ — $/, ''));
     L.push('');
   }
-  L.push(`Open the register: ${link}`, '',
+  if (n || !fl.lines.length) L.push(`Open the register: ${link}`, '');
+  L.push(...fl.lines,
     'CI Plant never sends mail to clients: anything for a client is left as a draft in Drafts for a person to check and send.',
     'This notice goes only to the two company mailboxes.');
-  const n = did.length + again.length;
-  const subject = `Artwork done by the system — ${plural(n, 'item')}${designer.length ? `, ${designer.length} already done by the designer` : ''} (${when(at)})`;
+  const parts = [];
+  if (n || !fl.summary) parts.push(`Artwork done by the system — ${plural(n, 'item')}${designer.length ? `, ${designer.length} already done by the designer` : ''}`);
+  if (fl.summary) parts.push(`${n ? 'Fluence masters' : 'Fluence masters done by the system'} — ${fl.summary}`);
+  const subject = `${parts.join('; ')} (${when(at)})`;
   const textBody = L.join('\n');
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap">${esc(textBody)
     .replace(/https?:\/\/[^\s<]+/g, u => `<a href="${u}">${u}</a>`)
-    .replace(/^(DONE BY THE SYSTEM|ALREADY DONE BY THE DESIGNER[^\n]*|SENT AGAIN[^\n]*)$/gm, '<b>$1</b>')}</div>`;
+    .replace(/^(DONE BY THE SYSTEM|ALREADY DONE BY THE DESIGNER[^\n]*|SENT AGAIN[^\n]*|FLUENCE MASTER — [^\n]*)$/gm, '<b>$1</b>')}</div>`;
   return { subject, text: textBody, html };
 }
 
-// Claims the mails nobody has been told about into one notice. → the notice id, or null when there is nothing.
+// Fluence readings join the notice once their table has its notice column (20261120100000_fluence_mail_notice.sql);
+// until then the notice is the artwork's alone, as before — never stopped by a migration not yet applied.
+let fluenceReady = false;
+const fluenceOn = async get => {
+  if (!fluenceReady) {
+    fluenceReady = !!(await get(`SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.fluence_mail_readings')
+                                   AND attname = 'notice_id' AND NOT attisdropped) AS ok`))?.ok;
+  }
+  return fluenceReady;
+};
+// a settled reading nobody has been told about, none of whose mail is still being saved (a sheet is told whole)
+const FLUENCE_UNTOLD = `r.notice_id IS NULL AND r.status = ANY($1::text[])
+   AND NOT EXISTS (SELECT 1 FROM fluence_mail_readings x WHERE x.intake_id = r.intake_id AND x.status = 'queued')`;
+
+// Claims the mails and Fluence readings nobody has been told about into one notice. → the notice id, or null when
+// there is nothing.
 export async function claimNotice() {
-  return tx(async (qc) => {
+  return tx(async (qc, oc) => {
     const mails = await qc(`SELECT id, view_url FROM artwork_mails WHERE notice_id IS NULL ORDER BY id LIMIT 200 FOR UPDATE SKIP LOCKED`);
-    if (!mails.length) return null;
+    const readings = await fluenceOn(oc) ? await qc(`
+      SELECT r.id, r.source, r.status, r.kit_name, r.hold_reason, r.changes, r.received_at, r.created_kit_id, r.sure, r.unsure,
+             jsonb_build_object('mrp', jsonb_build_object('kit_total', r.reading->'mrp'->'kit_total')) AS reading,
+             k.kit_name AS kit, p.code AS product_code, cp.code AS created_product_code
+        FROM fluence_mail_readings r LEFT JOIN fluence_kits k ON k.id = r.kit_id LEFT JOIN products p ON p.id = r.product_id
+        LEFT JOIN products cp ON cp.id = r.created_product_id
+       WHERE ${FLUENCE_UNTOLD}
+       ORDER BY r.id LIMIT 3000 FOR UPDATE OF r SKIP LOCKED`, [SETTLED]) : [];
+    if (!mails.length && !readings.length) return null;
     const ids = mails.map(m => m.id);
-    const rows = await qc(`
+    const rows = !ids.length ? [] : await qc(`
       SELECT e.id AS event_id, e.mail_id, e.action, v.id AS version_id, v.label, v.designer_reply_at, j.job_no, j.client_item_code,
              j.product_name, j.customer_name, j.to_sort, v.id = (SELECT min(x.id) FROM artwork_versions x WHERE x.job_id = j.id) AS fresh
         FROM artwork_events e JOIN artwork_versions v ON v.id = e.version_id JOIN artwork_jobs j ON j.id = v.job_id
@@ -100,10 +195,11 @@ export async function claimNotice() {
       label: r.label, fresh: r.fresh && r.action === 'received', to_sort: r.to_sort, designer_reply_at: r.designer_reply_at,
       view_url: view.get(r.mail_id) || null, files: r.action === 'received' ? files.filter(f => f.version_id === r.version_id) : [],
     }));
-    const n = items.length ? noticeMail({ items }) : null;
+    const n = items.length || readings.length ? noticeMail({ items, fluence: readings }) : null;
     const notice = await qc(`INSERT INTO artwork_notices (status, mail_ids, subject, text_body, html_body, error) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [n ? 'waiting' : 'skipped', ids, n?.subject ?? null, n?.text ?? null, n?.html ?? null, n ? null : 'nothing to tell']);
-    await qc('UPDATE artwork_mails SET notice_id = $2 WHERE id = ANY($1::int[])', [ids, notice[0].id]);
+    if (ids.length) await qc('UPDATE artwork_mails SET notice_id = $2 WHERE id = ANY($1::int[])', [ids, notice[0].id]);
+    if (readings.length) await qc('UPDATE fluence_mail_readings SET notice_id = $2 WHERE id = ANY($1::int[])', [readings.map(r => r.id), notice[0].id]);
     return notice[0].id;
   });
 }
@@ -205,5 +301,6 @@ export async function artworkNoticeSoft() {
 // The poll's cheap check: anything to claim or to send?
 export async function noticeWorkWaiting() {
   return !!(await one(`SELECT 1 AS y FROM artwork_mails WHERE notice_id IS NULL LIMIT 1`)
-    || await one(`SELECT 1 AS y FROM artwork_notices WHERE status IN ('waiting', 'failed', 'sending') LIMIT 1`));
+    || await one(`SELECT 1 AS y FROM artwork_notices WHERE status IN ('waiting', 'failed', 'sending') LIMIT 1`)
+    || (await fluenceOn(one) && await one(`SELECT 1 AS y FROM fluence_mail_readings r WHERE ${FLUENCE_UNTOLD} LIMIT 1`, [SETTLED])));
 }

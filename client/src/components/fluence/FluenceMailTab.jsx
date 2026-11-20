@@ -7,7 +7,7 @@ import { api, fmt } from '../../api.js';
 import { Button, useToast } from '../ui.jsx';
 import { FilterChip, FilterGroup, FilterRail } from '../FilterChip.jsx';
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
-import { mrpText } from '../../lib/fluence.js';
+import { mrpText, readingOutcome } from '../../lib/fluence.js';
 
 const SOURCE = { artwork: 'Artwork', mrp_sheet: 'MRP sheet', po: 'PO' };
 const STATUS = {
@@ -22,24 +22,6 @@ const STATUS = {
   dismissed: ['Kept as it was', 'bg-slate-100 text-slate-500'],
 };
 const ACKABLE = ['saved', 'compared'];
-
-function what(r) {
-  const c = r.changes || {};
-  const bits = [];
-  if (r.status === 'waiting_approval') bits.push('saved when the client approves this artwork — or use Approved by hand in the artwork window');
-  if (r.status === 'queued') bits.push('being saved to the master');
-  if (r.created_product_code) bits.push(`new kit — draft carton ${r.created_product_code} made`);
-  if (c.rx_changed) bits.push(`prescription → revision ${c.revision}`);
-  if (c.components_changed) bits.push('items / item MRPs changed');
-  if (c.kit_total) bits.push(c.kit_total.old == null ? `kit MRP set to ${mrpText(c.kit_total.new)} (carton too)` : `kit MRP ${mrpText(c.kit_total.old)} → ${mrpText(c.kit_total.new)} (carton too)`);
-  if (c.inner_added?.length) bits.push(`new items added: ${c.inner_added.join(', ')}`);
-  if (c.differs?.length) bits.push(c.differs.join('; '));
-  if (r.status === 'compared' && !c.differs?.length) bits.push('matches the master');
-  if (r.hold_reason) bits.push(r.hold_reason);
-  if (r.status === 'dismissed') bits.push(`the master kept as it was — by ${r.dismissed_by}`);
-  if (r.status === 'undone') bits.push(`undone by ${r.undone_by}`);
-  return bits.join(' · ') || '—';
-}
 
 function Reading({ x }) {
   const rx = x.reading?.prescription;
@@ -134,7 +116,7 @@ export default function FluenceMailTab() {
                       {x.kit_name && (x.kit || x.product_name) && x.kit_name !== (x.kit || x.product_name) && <div className="text-[11px] text-slate-500">read as “{x.kit_name}”</div>}</td>
                     <td className="p-2"><span className={`inline-block rounded-xl px-2 py-0.5 text-[11px] font-semibold leading-snug ${tone}`}>{label}</span>
                       {x.ack_at && <div className="mt-0.5 text-[11px] text-slate-500">read by {x.ack_by}</div>}</td>
-                    <td className="p-2 text-[12px] text-slate-700">{what(x)}</td>
+                    <td className="p-2 text-[12px] text-slate-700">{readingOutcome(x)}</td>
                     <td className="whitespace-nowrap p-2 text-right">
                       {data.can_edit && x.status === 'held' && (
                         <Button size="sm" disabled={!!busy} onClick={() => act(x.id, `${x.id}/apply`, appliedSays, 'Save what was read to the Fluence master now, over the hold? It is signed with your name.')}>Apply</Button>)}

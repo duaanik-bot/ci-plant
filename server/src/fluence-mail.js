@@ -24,7 +24,7 @@ import { audit, notify } from './helpers.js';
 import { PLANNING_ROLES } from './auth.js';
 import { canAccess, fluenceTabsOf, isFluenceOnly } from '../../client/src/modules.js';
 import { saveKitAndRx, rxSnapshot, componentsSnapshot, setKitTotalMrp, recordMrpChanges, kitIdOf, kitForProduct } from './routes/fluence.js';
-import { normaliseReading, matchKit, namedKits, innerFor, holdsFor, contentsDiffer, payloadFor } from './fluence-mail-rules.js';
+import { normaliseReading, matchKit, namedKits, innerFor, holdsFor, contentsDiffer, payloadFor, SETTLED } from './fluence-mail-rules.js';
 import { createDraftProduct, fluenceKitFor } from './artwork-masters.js';
 import { nameKey, sameMrp, mrpValue, componentsSignature } from '../../client/src/lib/fluence.js';
 
@@ -32,7 +32,6 @@ const FROM = 'fluence_mail';
 const MAX_TRIES = 5;
 const QUEUE_LOCK = 727101;            // pg advisory lock: one Fluence reading saved at a time, oldest first
 const PASSING = new Set(['40001', '40P01', '55P03', '57014']);
-const SETTLED = ['saved', 'same', 'held', 'not_matched', 'compared'];
 const SOURCE_WORD = { artwork: 'artwork', mrp_sheet: 'MRP sheet', po: 'PO' };
 const day = iso => new Date(Number.isFinite(Date.parse(iso)) ? iso : Date.now()).toISOString().slice(0, 10);
 // a mail's reading: from outside (waits for management), and quiet — its mail is told once, not kit by kit

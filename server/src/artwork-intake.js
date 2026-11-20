@@ -365,10 +365,10 @@ export async function syncIntakeArtworkSoft() {
   try {
     await settleProofMailsSoft();               // what really happened to approval mails, before replies are read
     if (!await one(`SELECT 1 AS y FROM avs.artwork_intake WHERE status = 'new' LIMIT 1`)) {
-      // nothing new to file — but a notice may still be waiting for mppchd's Gmail, or due a retry; and a Fluence
-      // sheet's readings may still be being saved
-      if (await noticeWorkWaiting()) await artworkNoticeSoft();
+      // nothing new to file — but a Fluence sheet's readings may still be being saved (first, so what this round saves
+      // is in this round's notice), and a notice may still be waiting for mppchd's Gmail, or due a retry
       await workFluenceMailSoft({ budgetMs: SOFT_FLUENCE_MS });
+      if (await noticeWorkWaiting()) await artworkNoticeSoft();
       return none;
     }
     const out = await syncIntakeArtwork({ max: SOFT_MAX, fluenceBudgetMs: SOFT_FLUENCE_MS });

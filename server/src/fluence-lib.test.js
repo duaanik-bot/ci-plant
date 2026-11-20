@@ -7,6 +7,7 @@ import {
   lineHasDose, rxHasContent, normaliseRxPayload, normaliseComponentsPayload,
   normaliseDims, formatDims, kitListPrice, partLabel, kitCartons, rxState, RX_SLOTS, FLUENCE_CONTEXTS, REVIEW_CONTEXTS,
   rxChangedAfterFinalise, RX_FROM_CUSTOMER_MASTER, rxLinesInStep, bareRxLine, componentsSignature, RX_LINE_KEYS, kitChangeSummary,
+  readingOutcome,
 } from '../../client/src/lib/fluence.js';
 
 test('nameKey: spacing, hyphens and case do not make two kits — a plus sign does', () => {
@@ -310,4 +311,32 @@ test('kitChangeSummary: what a notification to management says a customer change
   const many = { components: Array.from({ length: 60 }, (_, i) => ({ inner_product_id: i + 10, name: `ITEM NUMBER ${i}`, qty_per_kit: 1 })) };
   const long = kitChangeSummary({ components: [] }, many);
   assert.ok(long.length <= 480 && long.endsWith('…'), long.length);
+});
+
+// What a reading from Fluence's mail did — one set of words for Fluence › From Fluence mail and the "done by the
+// system" notice mail (20 Nov 2026). Invented kits and MRPs.
+test('readingOutcome: what a Fluence mail reading did, in the words the tab and the notice mail share', () => {
+  assert.equal(readingOutcome({ status: 'saved', changes: { components_changed: true, kit_total: { old: 1000, new: 1100 } } }),
+    'items / item MRPs changed · kit MRP ₹1,000 → ₹1,100 (carton too)');
+  assert.equal(readingOutcome({ status: 'saved', created_product_code: 'FPT-0900',
+    changes: { rx_changed: true, revision: 1, kit_total: { old: null, new: 950 }, inner_added: ['F-ORBIT BALM'] } }),
+  'new kit — draft carton FPT-0900 made · prescription → revision 1 · kit MRP set to ₹950 (carton too) · new items added: F-ORBIT BALM');
+  assert.equal(readingOutcome({ status: 'held', changes: null, hold_reason: 'kit MRP 1100 → 700 is more than 25 % lower' }),
+    'kit MRP 1100 → 700 is more than 25 % lower');
+  assert.equal(readingOutcome({ status: 'compared', changes: { differs: ['carton MRP: master 1100, PO 1050'] } }), 'carton MRP: master 1100, PO 1050');
+  assert.equal(readingOutcome({ status: 'compared', changes: { differs: [] }, reading: { mrp: { kit_total: 1100 } }, sure: true }), 'matches the master');
+  assert.equal(readingOutcome({ status: 'same', changes: {} }), '—');
+  assert.equal(readingOutcome({ status: 'dismissed', dismissed_by: 'Asha' }), 'the master kept as it was — by Asha');
+});
+
+test('readingOutcome: a PO naming no kit was compared with nothing — it never "matches the master"', () => {
+  assert.equal(readingOutcome({ status: 'compared', changes: null, hold_reason: 'no kit of that name or code' }), 'no kit of that name or code');
+});
+
+test('readingOutcome: a PO line whose kit MRP was not read, or read unsure, was compared with nothing — never "matches the master"', () => {
+  assert.equal(readingOutcome({ status: 'compared', changes: { differs: [] }, reading: { mrp: { kit_total: null, items: [] } }, sure: true }),
+    'not compared — no kit MRP read on the PO');
+  assert.equal(readingOutcome({ status: 'compared', changes: { differs: [] }, reading: { mrp: { kit_total: 1050 } }, sure: false, unsure: ['mrp.kit_total'] }),
+    'not compared — the robot was not sure of: mrp.kit_total');
+  assert.equal(readingOutcome({ status: 'compared', changes: { differs: [] }, reading: {}, sure: true }), 'not compared — no kit MRP read on the PO');
 });
