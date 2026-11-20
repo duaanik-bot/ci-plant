@@ -281,12 +281,10 @@ export async function lightForJobCards(cards, oc) {
   const ids = [...new Set(rows.map(c => +c.id))];
   const productIds = [...new Set(rows.map(c => c.product_id).filter(x => x != null).map(Number))];
 
-  const cut = await oc(`
-    SELECT COALESCE(json_agg(json_build_object('job_card_id', js.job_card_id, 'status', js.status)), '[]'::json) AS list
-    FROM job_stages js
-    WHERE js.job_card_id = ANY($1) AND js.stage='cutting'`, [ids]);
-
-  // The newest live card per product. No requirement columns to join any more —
+  // The three lookups are keyed by the cards alone, so they go together — one
+  // round trip when the pool can overlap them (docs/perf/2026-11-20-pool-size.md).
+  //
+  // shade — the newest live card per product. No requirement columns to join any more —
   // the gate is one rule, so the verdict needs nothing but the card.
   //
   // `s.active` is selected even though the WHERE clause already guarantees it is
@@ -296,22 +294,28 @@ export async function lightForJobCards(cards, oc) {
   // The old query filtered `status NOT IN ('superseded','archived')` — those
   // statuses no longer exist, and cards that held them were set `active = 0` by
   // the migration, so `active = 1` covers the same ground.
-  const shade = productIds.length ? await oc(`
+  //
+  // spec — whether each product is still half-known. One row per product, same shape
+  // as the shade fetch above — never per card, or Print Planning's hundred
+  // cards become a hundred round trips.
+  const [cut, shade, spec] = await Promise.all([
+    oc(`
+    SELECT COALESCE(json_agg(json_build_object('job_card_id', js.job_card_id, 'status', js.status)), '[]'::json) AS list
+    FROM job_stages js
+    WHERE js.job_card_id = ANY($1) AND js.stage='cutting'`, [ids]),
+    productIds.length ? oc(`
     SELECT COALESCE(json_agg(sc), '[]'::json) AS list FROM (
       SELECT DISTINCT ON (s.product_id) s.product_id, s.sc_number, s.status,
              s.creation_date, s.active
       FROM shade_cards s
       WHERE s.product_id = ANY($1) AND s.active = 1
       ORDER BY s.product_id, s.id DESC
-    ) sc`, [productIds]) : null;
-
-  // Whether each product is still half-known. One row per product, same shape
-  // as the shade fetch above — never per card, or Print Planning's hundred
-  // cards become a hundred round trips.
-  const spec = productIds.length ? await oc(`
+    ) sc`, [productIds]) : null,
+    productIds.length ? oc(`
     SELECT COALESCE(json_agg(json_build_object(
       'product_id', p.id, 'spec_incomplete', COALESCE(p.spec_incomplete, 0))), '[]'::json) AS list
-    FROM products p WHERE p.id = ANY($1)`, [productIds]) : null;
+    FROM products p WHERE p.id = ANY($1)`, [productIds]) : null,
+  ]);
 
   const cutByCard = new Map();
   for (const s of cut?.list ?? []) cutByCard.set(+s.job_card_id, s.status);

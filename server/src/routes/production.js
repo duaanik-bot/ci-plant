@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, lineIdsClosedBy, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState, splitGangReverseBlock, pastingCardPullBackRefusal } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, lineIdsClosedBy, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, cuttingParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState, stampPlateState, loadPlateState, splitGangReverseBlock, pastingCardPullBackRefusal } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { effectiveProduct } from '../helpers.js';
 import { overIssueAuditText, overIssueRefusal } from '../over-issue-gate.js';
@@ -577,11 +577,22 @@ export async function jobCardRegister(scope, deps = {}, { idle: idleMode = null 
   // long ago and would read covered anyway.
   const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null && !hidden?.has(jc.id));
   const jcAnchorIds = [...new Set(live.map(jc => jc.anchor_line_id))];
-  const jcAnchors = jcAnchorIds.length
-    ? await qq('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
-    : [];
+  // Plate state is keyed by the cards alone, so its query runs beside the anchors +
+  // readiness chain; it is STAMPED after board state, as before.
+  const [[jcAnchors, jcRctx], applyJcPlates] = await Promise.all([
+    (async () => {
+      const anchors = jcAnchorIds.length
+        ? await qq('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
+        : [];
+      return [anchors, await readyBatch(anchors)];
+    })(),
+    loadPlateState(live, {
+      jobCardIdOf: jc => jc.id,
+      gangIdOf: jc => jc.gang_run_id,
+      qc: qq,
+    }),
+  ]);
   const jcAnchorById = new Map(jcAnchors.map(l => [l.id, l]));
-  const jcRctx = await readyBatch(jcAnchors);
   const jcGates = new Map();
   for (const jc of live) {
     const line = jcAnchorById.get(jc.anchor_line_id);
@@ -593,11 +604,7 @@ export async function jobCardRegister(scope, deps = {}, { idle: idleMode = null 
     gatesOf: jc => jcGates.get(jc.id),
     qc: qq,
   });
-  await stampPlateState(live, {
-    jobCardIdOf: jc => jc.id,
-    gangIdOf: jc => jc.gang_run_id,
-    qc: qq,
-  });
+  applyJcPlates();  // stamped after board state, as always — keys keep their order
   const cards = inScope.map(jc => {
     const card = { ...jc, stages: withReceipts(jc, byJc[jc.id] || []).map(leanStage) };
     for (const k of JOB_CARD_LIST_DROPS) delete card[k];
@@ -1910,12 +1917,22 @@ r.get('/print-planning', async (req, res, next) => {
     // and its shade verdict); a press day is a hundred cards, and a query per
     // card would put the board's latency on a remote DB in the seconds.
     const anchorIds = [...new Set(cards.map(c => c.anchor_line_id).filter(x => x != null))];
-    const anchors = anchorIds.length
-      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
-      : [];
+    // The light's lookups and plate state's query are keyed by the cards alone, so
+    // they run beside the anchors + readiness chain; plates are stamped later.
+    const [[anchors, rctx], lightExtras, applyPlates] = await Promise.all([
+      (async () => {
+        const rows = anchorIds.length
+          ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
+          : [];
+        return [rows, await readinessBatch(rows)];
+      })(),
+      lightForJobCards(cards, one),
+      loadPlateState(cards, {
+        jobCardIdOf: c => c.id,
+        gangIdOf: c => c.gang_run_id,
+      }),
+    ]);
     const anchorById = new Map(anchors.map(l => [l.id, l]));
-    const rctx = await readinessBatch(anchors);
-    const lightExtras = await lightForJobCards(cards, one);
     // The board verdict every card wears, in the SAME vocabulary Planning uses:
     // covered (board is here — stock, an alternate board, or moved to this job)
     // / on_order (a PR names this job and the board is still coming) / short.
@@ -1934,10 +1951,7 @@ r.get('/print-planning', async (req, res, next) => {
       gangIdOf: c => c.gang_run_id,
       gatesOf: c => gatesByCard.get(c.id),
     });
-    await stampPlateState(cards, {
-      jobCardIdOf: c => c.id,
-      gangIdOf: c => c.gang_run_id,
-    });
+    applyPlates();  // stamped after board state, as always — keys keep their order
     for (const cRow of cards) {
       const gates = gatesByCard.get(cRow.id);
       if (!gates) continue;
