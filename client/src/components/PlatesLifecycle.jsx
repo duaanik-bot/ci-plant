@@ -1380,9 +1380,23 @@ export default function PlatesLifecycle() {
   const [issuing, setIssuing] = useState(null);
   const [openJobs, setOpenJobs] = useState([]);
   const [requirements, setRequirements] = useState([]);
+  // Settled PRs (plates back on the rack, card closed, 14+ days, nothing waiting)
+  // are not shipped unless asked for — server/src/plate-settled.js. The choice
+  // lives in a ref so a realtime wave's load() keeps it instead of snapping back.
+  const [settledHidden, setSettledHidden] = useState(0);
+  const showSettledRef = useRef(false);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
   const [warehouse, setWarehouse] = useState([]);
+  // Retired sets (scrapped, lost, damaged) are not shipped with the warehouse —
+  // server/src/plate-retired.js. Their count comes with every load so the Set
+  // aside chip is right before anyone opens it; the sets themselves are fetched
+  // when that view opens, and refreshed with the rest only while it is open.
+  const [retiredSets, setRetiredSets] = useState(null);
+  const [retiredCount, setRetiredCount] = useState(0);
+  const warehouseViewRef = useRef(warehouseView);
+  warehouseViewRef.current = warehouseView;
+  const loadRetired = () => api.get('/plates/warehouse?retired=only').then(sets => { setRetiredSets(sets); return sets; });
   const [returns, setReturns] = useState([]);
   // The movement ledger (~1 MB) loads only while the History tab is open — null
   // until it first has. The tab's badge reads its own count, so it is right from
@@ -1435,20 +1449,28 @@ export default function PlatesLifecycle() {
     if (historyGate.current.accept(seq)) setHistory(rows);
   };
   const load = async () => {
-    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistoryCount,nextMasters,nextVendors,nextPlateRates,nextPendency] = await Promise.all([
-      api.get('/plates/requirements'), api.get('/plates/purchase-orders'), api.get('/plates/grns'),
-      api.get('/plates/warehouse'), api.get('/plates/returns'), api.get('/plates/history/count'),
+    const [requirementAnswer,nextPos,nextGrns,warehouseAnswer,nextReturns,nextHistoryCount,nextMasters,nextVendors,nextPlateRates,nextPendency,,nextRetired] = await Promise.all([
+      api.get(showSettledRef.current ? '/plates/requirements' : '/plates/requirements?settled=hide'),
+      api.get('/plates/purchase-orders'), api.get('/plates/grns'),
+      api.get('/plates/warehouse?retired=hide'), api.get('/plates/returns'), api.get('/plates/history/count'),
       api.get('/plate-masters'), api.get('/vendors'), api.get('/plate-rates'),
       api.get('/tooling/procurement/plate/pendency'),
       // The ledger itself only while somebody is looking at it — then a realtime
       // change or an issue/retire/verify on this screen refreshes it like the rest.
       tabRef.current === 'history' ? loadHistory() : null,
+      warehouseViewRef.current === 'aside' ? loadRetired() : null,
     ]);
+    const nextWarehouse = warehouseAnswer.rows;
+    setRetiredCount(warehouseAnswer.retired_count);
+    // ?settled=hide answers { rows, settled_hidden }; the full list is the bare array.
+    const nextRequirements = Array.isArray(requirementAnswer) ? requirementAnswer : requirementAnswer.rows;
+    setSettledHidden(Array.isArray(requirementAnswer) ? 0 : requirementAnswer.settled_hidden);
     setRequirements(nextRequirements); setPos(nextPos); setGrns(nextGrns); setWarehouse(nextWarehouse);
     setReturns(nextReturns); setHistoryCount(nextHistoryCount.count); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
     setPendency(nextPendency);
     setSelectedIds(current => current.filter(id => nextRequirements.some(row => row.id === id)));
-    setRackPicked(current => current.filter(id => nextWarehouse.some(row => row.id === id)));
+    setRackPicked(current => current.filter(id => nextWarehouse.some(row => row.id === id)
+      || (nextRetired || retiredSets || []).some(row => row.id === id)));
     if (detail) setDetail(nextRequirements.find(row => row.id === detail.id) || null);
   };
   // Job cards for the ad-hoc issue picker. Fetched separately and tolerantly: the
@@ -1490,6 +1512,10 @@ export default function PlatesLifecycle() {
   useEffect(() => {
     if (tab === 'history') loadHistory().catch(error => toast.error(error.message || 'Could not load plate history'));
   }, [tab]);
+  // Opening Set aside fetches the retired sets (re-fetched on every re-open, like History).
+  useEffect(() => {
+    if (warehouseView === 'aside') loadRetired().catch(error => toast.error(error.message || 'Could not load set-aside plates'));
+  }, [warehouseView]);
   useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 650 });
 
   const counts = useMemo(() => ({
@@ -1581,7 +1607,9 @@ export default function PlatesLifecycle() {
   // both keyed on status === 'available', so without this list a set-aside plate
   // renders nowhere at all and can never be brought back.
   const ASIDE_STATUSES = ['damaged', 'lost', 'awaiting_verification', 'scrapped'];
-  const asideRows = warehouse.filter(row => ASIDE_STATUSES.includes(row.status));
+  const asideOnRack = warehouse.filter(row => ASIDE_STATUSES.includes(row.status));
+  const asideRows = [...asideOnRack, ...(retiredSets || [])];
+  const asideCount = asideOnRack.length + retiredCount;
   const rackRows = warehouseView === 'aside'
     ? asideRows
     : warehouse.filter(row => row.status === 'available'
@@ -2434,6 +2462,13 @@ export default function PlatesLifecycle() {
           {key:'ready',label:'Ready',count:reqGroups.ready.length},
           {key:'all',label:'All',count:requirements.length},
         ]}/>
+        {settledHidden > 0 && reqView !== 'open' && (
+          <button type="button"
+            onClick={() => { showSettledRef.current = true; load().catch(error => toast.error(error.message || 'Could not load settled PRs')); }}
+            className="whitespace-nowrap rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:border-slate-400 hover:text-slate-700">
+            {settledHidden} settled PRs (returned, card closed, 14+ days) hidden · <span className="underline">Show</span>
+          </button>
+        )}
         {reqView !== 'converted' && (
           <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-0.5">
             {[
@@ -2721,7 +2756,7 @@ export default function PlatesLifecycle() {
         <SubTabs active={warehouseView} onChange={value=>{setWarehouseView(value);setRackPicked([]);}} views={[
           {key:'fresh',label:'Fresh',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===FRESH_PLATES_RACK).length},
           {key:'used',label:'Used',count:warehouse.filter(row=>row.status==='available'&&row.rack_location===USED_PLATES_RACK).length},
-          {key:'aside',label:'Set aside',count:asideRows.length},
+          {key:'aside',label:'Set aside',count:asideCount},
         ]}/>
         {/* Size sits BESIDE the rack switch, not on a rail of its own — a second full
             band of chips is what made this page read as clutter. Lighter weight than

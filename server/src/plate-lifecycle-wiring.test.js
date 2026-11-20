@@ -482,3 +482,18 @@ test('a structured refusal no caller renders still reaches the user', () => {
   // is the pairing the previous test proves for all three pages.
   assert.match(api, /'PLATES_NOT_READY'/);
 });
+
+// Settled Plate PRs (plate-settled.js): the route takes ?settled=, the screen asks
+// for hide by default, keeps "Show" across a realtime wave, and says what it hid.
+test('the Plate PR list hides settled history behind a chip', () => {
+  const route = read('server/src/routes/plates.js');
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(route, /import \{[^}]*settledMode[^}]*\} from '\.\.\/plate-settled\.js'/);
+  assert.match(route, /settledMode\(req\.query\.settled\)/);
+  assert.match(route, /settled_hidden/);
+  // The legacy answer — no parameter — is still the bare array.
+  assert.match(route, /mode === 'hide' \? \{ rows, settled_hidden[^}]*\} : rows/);
+  assert.match(screen, /\/plates\/requirements\?settled=hide/);
+  assert.match(screen, /showSettledRef\.current/);
+  assert.match(screen, /settled PRs \(returned, card closed, 14\+ days\) hidden/);
+});

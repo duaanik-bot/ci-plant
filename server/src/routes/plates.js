@@ -24,6 +24,8 @@ import {
 // One home for the Sync Master? rule, shared with the form that offers it.
 import { masterOutputSync } from '../../../client/src/lib/plateRack.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
+import { settledMode, settledClause, SETTLED_PR_SQL } from '../plate-settled.js';
+import { retiredMode, splitRetiredSets } from '../plate-retired.js';
 
 const r = Router();
 const canBuy = requireRole('planner');
@@ -324,7 +326,19 @@ const ASSET_OUTPUT_NUMBER = spec => `COALESCE(
   CASE WHEN COALESCE((${spec}.specification->>'is_gang')::boolean,false)
        THEN NULL ELSE NULLIF(p.output_number,'') END)`;
 
-async function requirementRows(id = null) {
+// The FROM every Plate PR list reads — shared so the settled count below counts
+// exactly the rows requirementRows would have shipped.
+const REQUIREMENT_FROM = `FROM tooling_requests tr
+    JOIN job_cards jc ON jc.id=tr.job_card_id
+    JOIN products p ON p.id=tr.product_id
+    JOIN customers c ON c.id=p.customer_id
+    LEFT JOIN machines m ON m.id=jc.machine_id
+    LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
+    LEFT JOIN order_lines ol ON ol.id=tr.order_line_id
+    LEFT JOIN orders o ON o.id=ol.order_id`;
+
+// settled: 'all' (legacy) | 'hide' | 'only' — see plate-settled.js.
+async function requirementRows(id = null, { settled = 'all' } = {}) {
   const values = [];
   const idWhere = id ? (values.push(id), `AND tr.id=$${values.length}`) : '';
   const rows = await q(`SELECT tr.*,jc.jc_number,jc.machine_id,m.name AS machine_name,
@@ -343,15 +357,8 @@ async function requirementRows(id = null) {
       p.metallic_colours AS master_metallic_colours,p.metallic_details AS master_metallic_details,
       p.coating AS master_coating,
       c.name AS customer_name,o.po_number AS sales_po_number,o.delivery_date
-    FROM tooling_requests tr
-    JOIN job_cards jc ON jc.id=tr.job_card_id
-    JOIN products p ON p.id=tr.product_id
-    JOIN customers c ON c.id=p.customer_id
-    LEFT JOIN machines m ON m.id=jc.machine_id
-    LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
-    LEFT JOIN order_lines ol ON ol.id=tr.order_line_id
-    LEFT JOIN orders o ON o.id=ol.order_id
-    WHERE tr.family='plate' ${idWhere}
+    ${REQUIREMENT_FROM}
+    WHERE tr.family='plate' ${idWhere} ${settledClause(settled)}
     -- NEWEST FIRST. A Plate PR that was just raised is the one being looked
     -- for, so it leads. The status buckets and the delivery date stay on as
     -- tie-breakers rather than as the primary key: they sorted a new PR into
@@ -563,8 +570,16 @@ r.delete('/plate-masters/:id', canBuy, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-r.get('/plates/requirements', async (_req, res, next) => {
-  try { res.json(await requirementRows()); } catch (error) { next(error); }
+r.get('/plates/requirements', async (req, res, next) => {
+  try {
+    const mode = settledMode(req.query.settled);
+    const rows = await requirementRows(null, { settled: mode });
+    const settledHidden = mode === 'hide'
+      ? (await q(`SELECT COUNT(*)::int AS n ${REQUIREMENT_FROM}
+          WHERE tr.family='plate' AND (${SETTLED_PR_SQL})`))[0].n
+      : 0;
+    res.json(mode === 'hide' ? { rows, settled_hidden: settledHidden } : rows);
+  } catch (error) { next(error); }
 });
 
 r.get('/plates/requirements/:id', async (req, res, next) => {
@@ -1792,8 +1807,9 @@ r.post('/plates/warehouse/assets', canBuy, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-r.get('/plates/warehouse', async (_req, res, next) => {
+r.get('/plates/warehouse', async (req, res, next) => {
   try {
+    const mode = retiredMode(req.query.retired);
     const rows = await q(`SELECT pa.*,pm.plate_size,
         str.id AS tooling_request_id,str.request_number,str.job_card_id,
         COALESCE(NULLIF(str.specification->>'product_name',''),p.name) AS product_name,
@@ -1820,7 +1836,9 @@ r.get('/plates/warehouse', async (_req, res, next) => {
         WHEN 'issued_to_printing' THEN 2 WHEN 'issued_to_coating' THEN 2
         WHEN 'returned_pending_verification' THEN 3 ELSE 4 END,
         pa.id DESC`);
-    res.json(groupPlateSets(rows, row => [
+    // ?retired= — see plate-retired.js. The status is part of the key, so a set is
+    // wholly retired or not, and splitting after grouping counts sets exactly.
+    res.json(splitRetiredSets(groupPlateSets(rows, row => [
       row.status,
       row.rack_location || '',
       row.source_grn_id || '',
@@ -1828,7 +1846,7 @@ r.get('/plates/warehouse', async (_req, res, next) => {
       row.output_number || '',
       row.artwork_version || '',
       row.plate_master_id,
-    ].join('|')));
+    ].join('|')), mode));
   } catch (error) { next(error); }
 });
 
