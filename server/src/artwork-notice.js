@@ -69,15 +69,20 @@ function fluencePart(readings, link) {
     same: readings.filter(r => r.status === 'same' || (r.status === 'compared' && !poToCheck(r))),
   };
   const L = [];
+  // a reading whose words cannot be made is still listed — it never stops the notice
+  const line = r => {
+    try { return `• ${kitLabel(r)} — ${readingOutcome(r)} — ${fromMail(r)}`; } catch { return `• ${kitLabel(r)} — see Fluence › From Fluence mail`; }
+  };
   const group = (xs, head) => {
     if (!xs.length) return;
-    L.push(head, ...xs.slice(0, FLUENCE_CAP).map(r => `• ${kitLabel(r)} — ${readingOutcome(r)} — ${fromMail(r)}`));
+    L.push(head, ...xs.slice(0, FLUENCE_CAP).map(line));
     if (xs.length > FLUENCE_CAP) L.push(`…and ${xs.length - FLUENCE_CAP} more — all in Fluence › From Fluence mail`);
     L.push('');
   };
   group(g.saved, "FLUENCE MASTER — SAVED FROM FLUENCE'S MAIL — do not enter these again");
   group(g.held, 'FLUENCE MASTER — HELD, NOT SAVED — a person decides: Apply, or Keep the master');
-  group(g.notMatched, 'FLUENCE MASTER — NOT MATCHED — no kit of that name or code: put it in by hand, or Keep the master');
+  // no kit of that name or code, or two kits of that name: each line's reason says which
+  group(g.notMatched, 'FLUENCE MASTER — NOT MATCHED TO ONE KIT — put the MRP in by hand, or press Keep the master');
   group(g.po, "FLUENCE MASTER — PO LINES TO CHECK — a PO's MRPs are only compared, never saved: check these on the PO");
   if (g.same.length) {
     const more = g.same.length > SAME_CAP ? ` and ${g.same.length - SAME_CAP} more` : '';
@@ -93,8 +98,11 @@ function fluencePart(readings, link) {
     g.po.length && `${plural(g.po.length, 'PO line')} to check`,
     g.same.length && `${g.same.length} already the same`,
   ].filter(Boolean).join(', ');
-  return { lines: L, summary };
+  // the groups that need a person, for the mail's first line
+  const todo = [g.held.length && 'HELD', g.notMatched.length && 'NOT MATCHED', g.po.length && 'PO LINES TO CHECK'].filter(Boolean);
+  return { lines: L, summary, todo };
 }
+const orList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}`);
 
 // The mail's words. items: [{ action: 'received' | 'received_again', job_no, client_item_code, product_name, customer,
 // label, fresh, to_sort, designer_reply_at, view_url, files: [{ file_name, drive_url, link_url, saved_by }] }];
@@ -107,7 +115,8 @@ export function noticeMail({ items, fluence = [], at = new Date().toISOString(),
   const fl = fluencePart(fluence, fluenceLink);
   const n = did.length + again.length;
   const L = [];
-  L.push(`${[n && 'Artwork', fl.lines.length && 'Fluence masters'].filter(Boolean).join(' and ') || 'Artwork'} the system has already handled — please do not do these again.`, '');
+  L.push(`${[n && 'Artwork', fl.lines.length && 'Fluence masters'].filter(Boolean).join(' and ') || 'Artwork'} the system has already handled — please do not do these again.${
+    fl.todo.length ? ` The Fluence lines under ${orList(fl.todo)} need a person.` : ''}`, '');
   if (did.length) {
     L.push('DONE BY THE SYSTEM');
     for (const i of did) {
@@ -153,33 +162,42 @@ export function noticeMail({ items, fluence = [], at = new Date().toISOString(),
   return { subject, text: textBody, html };
 }
 
-// Fluence readings join the notice once their table has its notice column (20261120100000_fluence_mail_notice.sql);
-// until then the notice is the artwork's alone, as before — never stopped by a migration not yet applied.
-let fluenceReady = false;
-const fluenceOn = async get => {
-  if (!fluenceReady) {
-    fluenceReady = !!(await get(`SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.fluence_mail_readings')
-                                   AND attname = 'notice_id' AND NOT attisdropped) AS ok`))?.ok;
-  }
-  return fluenceReady;
-};
+// One claim at a time (pg advisory lock), so one mail's readings are never split between two notices; a claim that finds
+// another at work makes none — the next filing or poll does.
+export const NOTICE_LOCK = 727102;
+const PASSING = new Set(['40001', '40P01', '55P03', '57014']);   // tried again on the next call (as artwork-intake.js)
 // a settled reading nobody has been told about, none of whose mail is still being saved (a sheet is told whole)
 const FLUENCE_UNTOLD = `r.notice_id IS NULL AND r.status = ANY($1::text[])
    AND NOT EXISTS (SELECT 1 FROM fluence_mail_readings x WHERE x.intake_id = r.intake_id AND x.status = 'queued')`;
 
 // Claims the mails and Fluence readings nobody has been told about into one notice. → the notice id, or null when
-// there is nothing.
+// there is nothing (or another claim is at work).
 export async function claimNotice() {
   return tx(async (qc, oc) => {
+    if (!(await oc(`SELECT pg_try_advisory_xact_lock(${NOTICE_LOCK}) AS ok`))?.ok) return null;
     const mails = await qc(`SELECT id, view_url FROM artwork_mails WHERE notice_id IS NULL ORDER BY id LIMIT 200 FOR UPDATE SKIP LOCKED`);
-    const readings = await fluenceOn(oc) ? await qc(`
-      SELECT r.id, r.source, r.status, r.kit_name, r.hold_reason, r.changes, r.received_at, r.created_kit_id, r.sure, r.unsure,
-             jsonb_build_object('mrp', jsonb_build_object('kit_total', r.reading->'mrp'->'kit_total')) AS reading,
-             k.kit_name AS kit, p.code AS product_code, cp.code AS created_product_code
-        FROM fluence_mail_readings r LEFT JOIN fluence_kits k ON k.id = r.kit_id LEFT JOIN products p ON p.id = r.product_id
-        LEFT JOIN products cp ON cp.id = r.created_product_id
-       WHERE ${FLUENCE_UNTOLD}
-       ORDER BY r.id LIMIT 3000 FOR UPDATE OF r SKIP LOCKED`, [SETTLED]) : [];
+    // The Fluence readings, in a savepoint: whatever stops them being read (no readings table or notice column yet —
+    // 20261120100000_fluence_mail_notice.sql — or anything else) leaves this notice the artwork's alone, and the log
+    // says why; the artwork notice is never stopped by it. A held line names its kit's carton (hold() writes the kit only).
+    let readings = [];
+    await qc('SAVEPOINT notice_fluence');
+    try {
+      readings = await qc(`
+        SELECT r.id, r.source, r.status, r.kit_name, r.hold_reason, r.changes - 'before' - 'after' AS changes, r.received_at,
+               r.created_kit_id, r.sure, r.unsure,
+               jsonb_build_object('mrp', jsonb_build_object('kit_total', r.reading->'mrp'->'kit_total')) AS reading,
+               k.kit_name AS kit, p.code AS product_code, cp.code AS created_product_code
+          FROM fluence_mail_readings r LEFT JOIN fluence_kits k ON k.id = r.kit_id
+          LEFT JOIN products p ON p.id = COALESCE(r.product_id, k.product_id)
+          LEFT JOIN products cp ON cp.id = r.created_product_id
+         WHERE ${FLUENCE_UNTOLD}
+         ORDER BY r.id LIMIT 3000 FOR UPDATE OF r SKIP LOCKED`, [SETTLED]);
+      await qc('RELEASE SAVEPOINT notice_fluence');
+    } catch (e) {
+      if (PASSING.has(e?.code)) throw e;
+      await qc('ROLLBACK TO SAVEPOINT notice_fluence');
+      console.warn(`[artwork-notice] Fluence readings left out of this notice: ${e.message}`);
+    }
     if (!mails.length && !readings.length) return null;
     const ids = mails.map(m => m.id);
     const rows = !ids.length ? [] : await qc(`
@@ -300,7 +318,11 @@ export async function artworkNoticeSoft() {
 
 // The poll's cheap check: anything to claim or to send?
 export async function noticeWorkWaiting() {
-  return !!(await one(`SELECT 1 AS y FROM artwork_mails WHERE notice_id IS NULL LIMIT 1`)
-    || await one(`SELECT 1 AS y FROM artwork_notices WHERE status IN ('waiting', 'failed', 'sending') LIMIT 1`)
-    || (await fluenceOn(one) && await one(`SELECT 1 AS y FROM fluence_mail_readings r WHERE ${FLUENCE_UNTOLD} LIMIT 1`, [SETTLED])));
+  if (await one(`SELECT 1 AS y FROM artwork_mails WHERE notice_id IS NULL LIMIT 1`)
+    || await one(`SELECT 1 AS y FROM artwork_notices WHERE status IN ('waiting', 'failed', 'sending') LIMIT 1`)) return true;
+  try {
+    return !!(await one(`SELECT 1 AS y FROM fluence_mail_readings r WHERE ${FLUENCE_UNTOLD} LIMIT 1`, [SETTLED]));
+  } catch {
+    return false;   // the readings cannot be read (no table or notice column yet): the claim says why in the log
+  }
 }

@@ -516,7 +516,7 @@ export async function ackReadings(ids, user) {
 export async function listReadings({ view = 'all' } = {}) {
   return q(`
     SELECT r.id, r.source, r.status, r.hold_reason, r.kit_name, r.kit_code, r.subject, r.from_email, r.received_at, r.read_from, r.sure, r.unsure,
-           r.changes, r.saved_at, r.saved_by, r.ack_at, r.ack_by, r.undone_at, r.undone_by, r.dismissed_at, r.dismissed_by, r.artwork_version_id, r.reading,
+           r.changes, r.saved_at, r.saved_by, r.ack_at, r.ack_by, r.undone_at, r.undone_by, r.dismissed_at, r.dismissed_by, r.artwork_version_id, r.reading, r.created_kit_id,
            k.kit_name AS kit, p.code AS product_code, p.name AS product_name, cp.code AS created_product_code, m.view_url
       FROM fluence_mail_readings r LEFT JOIN fluence_kits k ON k.id = r.kit_id LEFT JOIN products p ON p.id = r.product_id
       LEFT JOIN products cp ON cp.id = r.created_product_id LEFT JOIN artwork_mails m ON m.id = r.mail_id

@@ -423,28 +423,32 @@ export function mrpLine(c) {
 
 // A PO line compared with nothing although it names a kit we have: no kit MRP was read on it, or the robot was not sure
 // of what it read (fluence-mail.js comparePo compares only a read kit total). Never "the same as the master".
-export const poNotCompared = r => r.status === 'compared' && !r.changes?.differs?.length && !r.hold_reason
+const listOf = v => (Array.isArray(v) ? v : []);
+export const poNotCompared = r => r.status === 'compared' && !listOf(r.changes?.differs).length && !r.hold_reason
   && (r.reading?.mrp?.kit_total == null || r.sure === false);
 
-// What a reading from Fluence's mail did (fluence_mail_readings: status, changes, hold_reason, reading, sure …) — the one
-// set of words for Fluence › From Fluence mail and the "done by the system" notice mail (server/src/artwork-notice.js).
+// What a reading from Fluence's mail did (fluence_mail_readings: status, changes, hold_reason, reading, sure,
+// created_kit_id …) — the one set of words for Fluence › From Fluence mail and the "done by the system" notice mail
+// (server/src/artwork-notice.js). Never throws on a reading whose lists are not lists.
 export function readingOutcome(r) {
   const c = r.changes || {};
+  const differs = listOf(c.differs), added = listOf(c.inner_added);
   const bits = [];
   if (r.status === 'waiting_approval') bits.push('saved when the client approves this artwork — or use Approved by hand in the artwork window');
   if (r.status === 'queued') bits.push('being saved to the master');
   if (r.created_product_code) bits.push(`new kit — draft carton ${r.created_product_code} made`);
+  else if (r.created_kit_id) bits.push('new kit made for its carton');     // the carton the artwork job is linked to
   if (c.rx_changed) bits.push(`prescription → revision ${c.revision}`);
   if (c.components_changed) bits.push('items / item MRPs changed');
   if (c.kit_total) bits.push(c.kit_total.old == null ? `kit MRP set to ${mrpText(c.kit_total.new)} (carton too)` : `kit MRP ${mrpText(c.kit_total.old)} → ${mrpText(c.kit_total.new)} (carton too)`);
-  if (c.inner_added?.length) bits.push(`new items added: ${c.inner_added.join(', ')}`);
-  if (c.differs?.length) bits.push(c.differs.join('; '));
+  if (added.length) bits.push(`new items added: ${added.join(', ')}`);
+  if (differs.length) bits.push(differs.join('; '));
   // a PO naming no kit was compared with nothing (its reason says so); nor was one whose kit MRP was not read, or unsure
   if (poNotCompared(r)) {
     bits.push(r.sure === false
-      ? `not compared — the robot was not sure of: ${Array.isArray(r.unsure) && r.unsure.length ? r.unsure.join(', ') : 'what it read'}`
+      ? `not compared — the robot was not sure of: ${listOf(r.unsure).length ? listOf(r.unsure).join(', ') : 'what it read'}`
       : 'not compared — no kit MRP read on the PO');
-  } else if (r.status === 'compared' && !c.differs?.length && !r.hold_reason) bits.push('matches the master');
+  } else if (r.status === 'compared' && !differs.length && !r.hold_reason) bits.push('matches the master');
   if (r.hold_reason) bits.push(r.hold_reason);
   if (r.status === 'dismissed') bits.push(`the master kept as it was — by ${r.dismissed_by}`);
   if (r.status === 'undone') bits.push(`undone by ${r.undone_by}`);

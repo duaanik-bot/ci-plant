@@ -110,3 +110,32 @@ test('a PO line is "already the same" only when its MRP was read and compared �
   assert.match(m.text, /CHECKED, ALREADY THE SAME[^\n]*\n• 1 kit — REST KIT \(FPT-504\)\n/);
   assert.doesNotMatch(m.text, /NOT MATCHED|put it in by hand|Keep the master|matches the master/);
 });
+
+// Review M3, M4, M6, M12 (20 Nov 2026). Invented kits.
+test('the opening line names the Fluence groups that need a person; the not-matched heading fits every reason', () => {
+  const m = noticeMail({ items: [], fluence: [
+    fr({ status: 'held', changes: null, hold_reason: 'kit MRP 1100 → 700 is more than 25 % lower' }),
+    fr({ status: 'not_matched', kit: null, kit_name: 'TWIN KIT', product_code: null, changes: null, hold_reason: 'two kits are named TWIN KIT — put the MRP in the right one by hand' }),
+  ] });
+  assert.match(m.text, /^Fluence masters the system has already handled — please do not do these again\. The Fluence lines under HELD or NOT MATCHED need a person\.\n/);
+  assert.match(m.text, /FLUENCE MASTER — NOT MATCHED TO ONE KIT — put the MRP in by hand, or press Keep the master\n• TWIN KIT — two kits are named TWIN KIT/);
+  assert.match(noticeMail({ items: [], fluence: [fr({ source: 'po', status: 'compared', changes: { differs: ['carton MRP: master 1100, PO 1050'] } })] }).text,
+    /^Fluence masters the system has already handled — please do not do these again\. The Fluence lines under PO LINES TO CHECK need a person\.\n/);
+  assert.match(noticeMail({ items: [item()], fluence: [fr()] }).text, /^Artwork and Fluence masters the system has already handled — please do not do these again\.\n/);
+});
+
+test('a kit made for a job\'s carton is counted as new and called new in its line', () => {
+  const m = noticeMail({ items: [], fluence: [fr({ created_kit_id: 7, changes: { rx_changed: true, revision: 1 } })] });
+  assert.match(m.subject, /— 1 saved \(1 new kit\) \(/);
+  assert.match(m.text, /• NOVA CALM KIT \(FPT-501\) — new kit made for its carton · prescription → revision 1 — MRP sheet of 20 Nov\n/);
+});
+
+test('a reading with malformed changes is still told, and never stops the notice', () => {
+  const m = noticeMail({ items: [item()], fluence: [
+    fr({ changes: { differs: 'not a list', inner_added: 'F-X CAPS', kit_total: 'x' } }),
+    fr({ source: 'po', status: 'compared', kit: 'ODD KIT', changes: { differs: 'bad' } }),
+  ] });
+  assert.match(m.text, /DONE BY THE SYSTEM/);
+  assert.match(m.text, /• NOVA CALM KIT \(FPT-501\) — /);
+  assert.match(m.text, /ODD KIT/);
+});

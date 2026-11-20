@@ -340,3 +340,9 @@ test('readingOutcome: a PO line whose kit MRP was not read, or read unsure, was 
     'not compared — the robot was not sure of: mrp.kit_total');
   assert.equal(readingOutcome({ status: 'compared', changes: { differs: [] }, reading: {}, sure: true }), 'not compared — no kit MRP read on the PO');
 });
+
+// Review M3 (20 Nov 2026): a kit made for the carton an artwork job is linked to is a new kit too — say so.
+test('readingOutcome: a kit made for the carton a job is linked to is called a new kit', () => {
+  assert.equal(readingOutcome({ status: 'saved', created_kit_id: 7, changes: { rx_changed: true, revision: 1, kit_total: { old: null, new: 550 } } }),
+    'new kit made for its carton · prescription → revision 1 · kit MRP set to ₹550 (carton too)');
+});

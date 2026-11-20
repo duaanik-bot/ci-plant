@@ -1335,6 +1335,101 @@ describe('Artwork workflow — through the real app', { skip: ENABLED ? false : 
     assert.match(await noticeText(id), /SAVED FROM FLUENCE'S MAIL[^\n]*\n• NT ART KIT \(RVK-\d+\) — [^\n]*prescription → revision 2[^\n]* — artwork of \d+ \w{3}\n/);
   });
 
+  // Review M2, M3, M5, M6/M10/M11a, M11b (20 Nov 2026)
+  test('a held Fluence line in the notice names its carton code, as a saved one does', async () => {
+    const { claimNotice } = await notices();
+    await drain();
+    const k = await makeKit({ name: 'NT HELD KIT', comps: [['F-NT5 CAPS', 1, 1000, 'item']] });
+    await fileFluence('nt-5', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 600, items: [] } }]);
+    await sync();
+    assert.equal((await reading('nt-5')).status, 'held');
+    const id = await claimNotice();
+    assert.match(await noticeText(id), /HELD, NOT SAVED[^\n]*\n• NT HELD KIT \(RVK-\d+\) — kit MRP 1000 → 600 is more than 25 % lower — MRP sheet of /);
+  });
+
+  test('a kit made for the carton an artwork job is linked to is called a new kit, in the tab and in the notice', async () => {
+    const { claimNotice } = await notices();
+    const { readingOutcome } = await import('../../client/src/lib/fluence.js');
+    await fluenceSetup();
+    await drain();
+    const board = await db.one(`SELECT id FROM materials WHERE category = 'board' ORDER BY id LIMIT 1`);
+    const bare = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id, mrp) VALUES ($1, 'NT BARE KIT', 'RVB-801', $2, 500) RETURNING id`, [fx.cust, board.id]);
+    const a = await artworkFor({ name: 'NT BARE KIT', prod: bare.id }, 'nt-6', { prescription: { lines: [{ item: 'F-NT6 CAPS', dosage: '1', morning: 1 }] },
+      mrp: { kit_total: 550, items: [{ item: 'F-NT6 CAPS', mrp: 550 }] } });
+    await approve(a.r.artwork_version_id);
+    const r = await reading('nt-6r');
+    assert.equal(r.status, 'saved', r.hold_reason || '');
+    assert.ok(r.created_kit_id && !r.created_product_id, 'a kit made, no carton master');
+    const row = (await call('boss', 'GET', '/fluence/mail-readings?view=all')).body.rows.find(x => x.id === r.id);
+    assert.match(readingOutcome(row), /^new kit made for its carton · /, 'the tab');
+    const id = await claimNotice();
+    assert.match(await noticeText(id), /• NT BARE KIT \(RVB-801\) — new kit made for its carton · /);
+    assert.match((await db.one('SELECT subject FROM artwork_notices WHERE id = $1', [id])).subject, /Fluence masters — 1 saved \(1 new kit\)/);
+  });
+
+  test('two claims take turns: while one is making a notice, another makes none', async () => {
+    const { claimNotice, NOTICE_LOCK } = await notices();
+    assert.equal(typeof NOTICE_LOCK, 'number', 'the claim has a lock of its own');
+    await drain();
+    await fileMails([mailOf('nt-7', [{ product_name: 'NT TURN KIT', pack_type: 'carton', files: [f('NT TURN KIT.cdr', 'nt7')] }], { received_at: new Date().toISOString() })]);
+    await sync();
+    const { default: pg } = await import('pg');
+    const other = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await other.connect();
+    try {
+      await other.query('BEGIN');
+      await other.query('SELECT pg_advisory_xact_lock($1)', [NOTICE_LOCK]);    // another claim at work
+      assert.equal(await claimNotice(), null, 'none made while the other claim runs');
+      await other.query('COMMIT');
+    } finally {
+      await other.end();
+    }
+    const id = await claimNotice();
+    assert.ok(id, 'made once the other is done');
+    assert.match(await noticeText(id), /NT TURN KIT/);
+  });
+
+  test('the artwork notice still goes when the Fluence readings cannot be read, and the log says why', async () => {
+    const { claimNotice, noticeWorkWaiting } = await notices();
+    await drain();
+    await fileMails([mailOf('nt-8', [{ product_name: 'NT LONE KIT', pack_type: 'carton', files: [f('NT LONE KIT.cdr', 'nt8')] }], { received_at: new Date().toISOString() })]);
+    await sync();
+    const warned = [];
+    const warn = console.warn;
+    console.warn = (...a) => { warned.push(a.join(' ')); };
+    await db.q('ALTER TABLE fluence_mail_readings RENAME COLUMN notice_id TO notice_id_away');   // as before its migration
+    try {
+      assert.equal(await noticeWorkWaiting(), true, 'the artwork mail still waits to be told');
+      const id = await claimNotice();
+      assert.ok(id, 'the artwork notice is made');
+      const t = await noticeText(id);
+      assert.match(t, /NT LONE KIT/);
+      assert.doesNotMatch(t, /FLUENCE MASTER/);
+      assert.ok(warned.some(w => /Fluence/.test(w)), warned.join('\n') || 'nothing logged');
+    } finally {
+      console.warn = warn;
+      await db.q('ALTER TABLE fluence_mail_readings RENAME COLUMN notice_id_away TO notice_id');
+    }
+  });
+
+  test('a held reading a person sets aside before the notice is never told, and leaves nothing to claim', async () => {
+    const { claimNotice } = await notices();
+    await drain();
+    const k = await makeKit({ name: 'NT KEPT KIT', comps: [['F-NT9 CAPS', 1, 1000, 'item']] });
+    await fileFluence('nt-9', [{ source: 'mrp_sheet', kit_code: k.code, sure: true, mrp: { kit_total: 600, items: [] } }]);
+    await sync();
+    const r = await reading('nt-9');
+    assert.equal(r.status, 'held');
+    const keep = await call('artist', 'POST', `/fluence/mail-readings/${r.id}/keep`);
+    assert.equal(keep.status, 200, JSON.stringify(keep.body));
+    const ids = [];
+    for (let id = await claimNotice(); id; id = await claimNotice()) ids.push(id);
+    for (const id of ids) assert.doesNotMatch(await noticeText(id) || '', /NT KEPT KIT/);
+    const after = await reading('nt-9');
+    assert.deepEqual([after.status, after.notice_id], ['dismissed', null], 'never told');
+    assert.equal(await claimNotice(), null, 'nothing left to claim');
+  });
+
   test('Fluence readings settled before the notice told them are not announced; one still waiting is left to tell; a replay adds nothing', async () => {
     const mig = fs.readFileSync(new URL('../../supabase/migrations/20261120100000_fluence_mail_notice.sql', import.meta.url), 'utf8');
     const waiting = await db.one(`INSERT INTO fluence_mail_readings (source, status, kit_name) VALUES ('artwork', 'waiting_approval', 'NT WAITING KIT') RETURNING id`);
