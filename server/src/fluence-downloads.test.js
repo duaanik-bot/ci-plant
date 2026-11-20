@@ -103,7 +103,8 @@ test('the PDF: the name across every page, whose copy it is under the footer', (
 test('every way a file leaves the module asks first', () => {
   // The ERP's tables: the export menu runs the gate before it makes the file.
   const ui = read('client/src/components/ui.jsx');
-  assert.match(ui, /const file = gate \? await gate\(kind, spec\) : spec;\s*if \(kind === 'pdf'\) await exportPDF\(file\); else await exportXLSX\(file\);/);
+  // Print is a PDF too: the gate is asked as for 'pdf' before the file is made.
+  assert.match(ui, /const file = gate \? await gate\(kind === 'print' \? 'pdf' : kind, spec\) : spec;\s*if \(kind === 'print'\) await exportPDF\(file, \{ printWindow \}\);\s*else if \(kind === 'pdf'\) await exportPDF\(file\); else await exportXLSX\(file\);/);
   assert.equal((ui.match(/<ExportMenu build=\{buildExport\} gate=\{exportGate\} \/>/g) || []).length, 2);
   const page = read('client/src/pages/Fluence.jsx');
   assert.equal((page.match(/exportGate=\{GATE\.(products|customer|changes)\}/g) || []).length, 3, 'all three lists');

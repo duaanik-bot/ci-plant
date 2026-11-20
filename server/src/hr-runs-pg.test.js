@@ -307,6 +307,24 @@ describe('payroll runs on a real Postgres', {
     await db.q('DELETE FROM hr.advance_txns WHERE id = $1', [extra]);
   });
 
+  test('finalise goes through when only a line\'s fingerprint moved, not its money, and brings the line up to date', T, async () => {
+    const real = (await db.one('SELECT inputs_hash FROM hr.run_lines WHERE run_id = $1 AND person_id = $2', [august.id, B])).inputs_hash;
+    await db.q(`UPDATE hr.run_lines SET inputs_hash = 'stale' WHERE run_id = $1 AND person_id = $2`, [august.id, B]);
+    try {
+      await db.tx(async (qc) => {
+        const done = await runs.finaliseRun(qc, august, req);
+        assert.equal(done.status, 'finalised');
+        const [line] = await qc('SELECT inputs_hash FROM hr.run_lines WHERE run_id = $1 AND person_id = $2', [august.id, B]);
+        assert.equal(line.inputs_hash, real, 'the line carries the fresh fingerprint');
+        const [audit] = await qc(`SELECT detail FROM hr.audit_log WHERE entity = 'run' AND action = 'finalise' ORDER BY id DESC LIMIT 1`);
+        assert.deepEqual(audit.detail.lines_refreshed_same_pay, [B]);
+        throw new Error('ROLLBACK');
+      });
+    } catch (e) { if (e.message !== 'ROLLBACK') throw e; }
+    assert.equal((await runRow(august)).status, 'approved');
+    await db.q('UPDATE hr.run_lines SET inputs_hash = $3 WHERE run_id = $1 AND person_id = $2', [august.id, B, real]);
+  });
+
   test('finalise refuses while a line is blocked (409 RUN_BLOCKED)', T, async () => {
     await status(august, 'draft');
     await db.q('UPDATE hr.run_inputs SET include = true WHERE run_id = $1 AND person_id = $2', [august.id, C]);

@@ -656,11 +656,18 @@ export async function recalcRun(qc, run, { personIds, submitted = false } = {}) 
 const recoveriesKey = (list) => (Array.isArray(list) ? list : [])
   .map((r) => `${r.loan_id}:${paise(r.amount)}`).join('|');
 
-const sameLine = (stored, fresh) => stored.inputs_hash === fresh.inputs_hash
-  && paise(stored.payable) === paise(fresh.payable)
+// What a sub-account's pay left to its main account (the ADJ:SUB… deductions finalise posts to the sub's ledgers).
+const subKey = (breakdown) => (Array.isArray(breakdown) ? breakdown : [])
+  .filter((b) => subCodeOf(b?.code)).map((b) => `${b.code}:${paise(b.amount)}`).sort().join('|');
+
+// The money a line pays and posts. A line whose money is the same as approved is finalised as approved even when
+// its fingerprint (inputs_hash) moved — a pay channel move, a pay setup re-saved with no effect on the month, a loan
+// that starts later (2026-11-20: "16 lines have changed since approval" when only 1 had a different amount).
+const sameMoney = (stored, fresh) => paise(stored.payable) === paise(fresh.payable)
   && paise(stored.advance_given) === paise(fresh.advance_given)
   && paise(stored.advance_recovery) === paise(fresh.advance_recovery)
-  && recoveriesKey(stored.loan_recoveries) === recoveriesKey(fresh.loan_recoveries);
+  && recoveriesKey(stored.loan_recoveries) === recoveriesKey(fresh.loan_recoveries)
+  && subKey(stored.breakdown) === subKey(fresh.breakdown);
 
 const POSTED_ONCE = new Set(['advance_txns_run_once_uq', 'loan_txns_recovery_once_uq']);
 
@@ -765,18 +772,41 @@ export async function finaliseRun(qc, run, req) {
     [locked.id],
   );
   const changed = new Set([...fresh.keys()].filter((id) => !stored.some((s) => s.person_id === id)));
-  for (const s of stored) if (!fresh.has(s.person_id) || !sameLine(s, fresh.get(s.person_id))) changed.add(s.person_id);
+  const restamp = [];
+  for (const s of stored) {
+    const f = fresh.get(s.person_id);
+    if (!f || !sameMoney(s, f)) changed.add(s.person_id);
+    else if (s.inputs_hash !== f.inputs_hash) restamp.push(f);
+  }
   if (changed.size) {
     const ids = [...changed].sort((a, b) => a - b);
+    const differences = ids.map((id) => {
+      const s = stored.find((x) => x.person_id === id);
+      const f = fresh.get(id);
+      return { person_id: id, approved: s ? money(s.payable) : null, now: f ? money(f.payable) : null };
+    });
     throw fail(409, 'RUN_CHANGED_SINCE_APPROVAL',
-      `${ids.length} line${ids.length === 1 ? ' has' : 's have'} changed since approval (inputs, pay setups or balances `
-      + 'moved): send the run back, recalculate it and approve it again', { person_ids: ids });
+      `${ids.length} line${ids.length === 1 ? '\'s pay has' : 's\' pay has'} changed since approval: `
+      + 'send the run back, recalculate it and approve it again', { person_ids: ids, differences });
   }
   const blocked = [...fresh.values()].filter((l) => isBlocked(l.flags)).map((l) => l.person_id);
   if (blocked.length) {
     throw fail(409, 'RUN_BLOCKED',
       `${blocked.length} line${blocked.length === 1 ? ' is' : 's are'} still blocked: resolve ${blocked.length === 1 ? 'it' : 'them'} before finalising`,
       { person_ids: blocked });
+  }
+  // Same money, newer fingerprint: the line is brought up to date (fingerprint, pay setup, channel, flags) and
+  // finalised with the amounts that were approved.
+  if (restamp.length) {
+    await qc(
+      `UPDATE hr.run_lines l SET inputs_hash = x.inputs_hash, pay_setup_id = x.pay_setup_id, pay_channel = x.pay_channel,
+              flags = x.flags, computed_at = now()
+         FROM jsonb_to_recordset($2::jsonb) AS x(person_id integer, inputs_hash text, pay_setup_id integer,
+              pay_channel text, flags jsonb)
+        WHERE l.run_id = $1 AND l.person_id = x.person_id`,
+      [locked.id, JSON.stringify(restamp.map((f) => ({ person_id: f.person_id, inputs_hash: f.inputs_hash,
+        pay_setup_id: f.pay_setup_id, pay_channel: f.pay_channel, flags: f.flags })))],
+    );
   }
 
   // The approved lines, which the recompute has just matched, are what is posted. What a main account's pay
@@ -837,6 +867,7 @@ export async function finaliseRun(qc, run, req) {
     advance_txns: advances.length,
     loan_txns: recoveries.length,
     loans_closed: closed.map((l) => l.loan_no),
+    ...(restamp.length ? { lines_refreshed_same_pay: restamp.map((f) => f.person_id) } : {}),
   });
   for (const l of closed) {
     await hrAudit(qc, req, 'loan', l.id, 'close', {
