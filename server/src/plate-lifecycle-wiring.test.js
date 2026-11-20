@@ -497,3 +497,37 @@ test('the Plate PR list hides settled history behind a chip', () => {
   assert.match(screen, /showSettledRef\.current/);
   assert.match(screen, /settled PRs \(returned, card closed, 14\+ days\) hidden/);
 });
+
+// The settled rule reads now(). The browser's response cache answers a repeat GET
+// from memory until a table it read changes — it never learns that a day passed,
+// so a PR could stay listed past day 14 on a quiet day. The day rides in the URL:
+// each plant day is its own cache entry (found in review, 20 Nov 2026).
+test('the settled list asks per plant day, so the cache cannot outlive the 14-day rule', () => {
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(screen, /import \{ dayOf \} from '\.\.\/lib\/dayOf\.js'/);
+  assert.match(screen, /\/plates\/requirements\?settled=hide&day=\$\{dayOf\(new Date\(\)\)\}/);
+});
+
+
+// Set aside fetches the retired sets on open AND with every realtime load() while
+// it is open — two fetches can be in flight, and the older one must never land
+// last. Leaving the view forgets the list, so re-opening never flashes a stale one
+// beside a fresh count (found in review, 20 Nov 2026).
+test('retired sets go through a newest-answer gate and are forgotten on leaving Set aside', () => {
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  const load = screen.slice(screen.indexOf('const loadRetired'), screen.indexOf('const loadRetired') + 400);
+  assert.match(load, /retiredGate\.current\.begin\(\)/);
+  assert.match(load, /if \(retiredGate\.current\.accept\(seq\)\) setRetiredSets\(sets\)/);
+  assert.match(screen, /if \(warehouseView === 'aside'\) loadRetired\(\)[\s\S]{0,400}else setRetiredSets\(null\)/);
+});
+
+// "Show" was one-way for the page's life: after it, every realtime wave pulled
+// the full list. Showing them now offers the way back (found in review, 20 Nov 2026).
+test('settled PRs, once shown, can be hidden again', () => {
+  const screen = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(screen, /const \[showSettled, setShowSettled\] = useState\(false\)/);
+  assert.match(screen, /const toggleSettled = show => \{\s*showSettledRef\.current = show;\s*setShowSettled\(show\);/);
+  assert.match(screen, /onClick=\{\(\) => toggleSettled\(true\)\}/);
+  assert.match(screen, /onClick=\{\(\) => toggleSettled\(false\)\}/);
+  assert.match(screen, /Settled PRs shown/);
+});

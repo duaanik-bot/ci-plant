@@ -114,6 +114,15 @@ describe('settled Plate PR rule on a real Postgres', {
     await settled(await pr({ components: ['returned_to_rack', 'scrapped'] }), 'scrapped on return');
   });
 
+  // NOT (… NULL …) is NULL, and a NULL WHERE drops the row — from BOTH lists. The
+  // rule's columns are NOT NULL today; the rule must not depend on it (found in
+  // review, 20 Nov 2026). Unknown is not settled: the row stays in the default list.
+  test('a NULL in any term keeps the PR in the default list, never in neither', async () => {
+    await kept(await pr({ days: null }), 'NULL updated_at');
+    await kept(await pr({ approval: null }), 'NULL approval_status');
+    await kept(await pr({ status: null }), 'NULL status');
+  });
+
   test('a returned PR on a card still in progress is kept', async () => {
     await kept(await pr({ card: 'in_progress' }), 'card in progress');
   });

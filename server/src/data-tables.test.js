@@ -264,3 +264,21 @@ test('a request with no queries reports db;dur=0.0', async () => {
     assert.equal(res.headers['Server-Timing'], 'db;dur=0.0;desc="0 q", app;dur=2.0');
   } finally { setTimingClock(null); }
 });
+
+// Login and session checks say nothing about where their time went: how many
+// statements a login ran (unknown user vs wrong password) is a hint worth
+// denying to whoever is guessing (found in review, 20 Nov 2026).
+test('no server-timing on /auth routes; every other route keeps it', async () => {
+  const run = req => new Promise(resolve => {
+    const res = { headersSent: false, statusCode: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, end() { resolve(this.headers); } };
+    dataTablesMiddleware(req, res, () => res.end('{}'));
+  });
+  for (const url of ['/api/auth/login', '/api/auth/me']) {
+    const h = await run({ method: url.endsWith('login') ? 'POST' : 'GET', originalUrl: url, url: url.slice(4) });
+    assert.equal(h['Server-Timing'], undefined, url);
+  }
+  const other = await run({ method: 'GET', originalUrl: '/api/job-cards?scope=live', url: '/job-cards?scope=live' });
+  assert.match(other['Server-Timing'], /^db;dur=/);
+  const authorish = await run({ method: 'GET', originalUrl: '/api/authors', url: '/authors' });
+  assert.match(authorish['Server-Timing'], /^db;dur=/, 'only the /auth/ prefix, not every path starting with "auth"');
+});

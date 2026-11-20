@@ -221,12 +221,18 @@ export function ledgerHeaders(ledger, { method = 'GET', status = 200 } = {}) {
 // A body already streamed (headers sent before end) makes no claim: its headers went
 // out before every query had run. A 304 carries the header too, refreshing the
 // dependency list the browser keeps with its stored copy.
+// Login and the session check carry no timing: how many statements a login ran
+// (unknown user vs wrong password) is a hint worth denying to whoever is guessing.
+const UNTIMED = /^\/api\/auth\//;
+
 export function dataTablesMiddleware(req, res, next) {
   const ledger = newLedger();
+  const timed = !UNTIMED.test(req.originalUrl || '');
   const end = res.end;
   res.end = function endWithLedger(...args) {
     if (!this.headersSent) {
-      const h = { ...ledgerHeaders(ledger, { method: req.method, status: this.statusCode }), 'Server-Timing': timingHeader(ledger) };
+      const h = ledgerHeaders(ledger, { method: req.method, status: this.statusCode });
+      if (timed) h['Server-Timing'] = timingHeader(ledger);
       for (const [k, v] of Object.entries(h)) this.setHeader(k, v);
     }
     return end.apply(this, args);

@@ -574,6 +574,9 @@ r.get('/plates/requirements', async (req, res, next) => {
   try {
     const mode = settledMode(req.query.settled);
     const rows = await requirementRows(null, { settled: mode });
+    // AFTER the rows, not beside them: requirementRows can backfill a legacy PR's
+    // plate components (a write), and whether a PR is settled depends on those
+    // components — counted earlier, the chip could disagree with the list.
     const settledHidden = mode === 'hide'
       ? (await q(`SELECT COUNT(*)::int AS n ${REQUIREMENT_FROM}
           WHERE tr.family='plate' AND (${SETTLED_PR_SQL})`))[0].n

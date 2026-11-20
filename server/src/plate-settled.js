@@ -18,14 +18,18 @@
 // Opt-in, like ?idle=hide on job cards: no parameter is the legacy answer, so an
 // older bundle on a plant tablet keeps working. Aliases: tr = tooling_requests,
 // jc = job_cards.
-export const SETTLED_PR_SQL = `tr.status = 'returned_to_rack'
+//
+// COALESCE(…, false): a NULL anywhere in the rule makes it NULL, and NOT NULL is
+// NULL too — the row would drop out of BOTH ?settled=hide and ?settled=only.
+// Unknown is not settled, so it stays in the default list.
+export const SETTLED_PR_SQL = `COALESCE((tr.status = 'returned_to_rack'
   AND (tr.approval_status = 'converted' OR tr.po_number IS NOT NULL)
   AND jc.status IN ('closed','split')
   AND tr.updated_at < now() - interval '14 days'
   AND NOT EXISTS (SELECT 1 FROM plate_request_components sprc
     WHERE sprc.tooling_request_id = tr.id
       AND sprc.status IN ('verification_required','pr_required','replacement_required',
-        'returned_pending_verification','not_found'))`;
+        'returned_pending_verification','not_found'))), false)`;
 
 // ?settled= → 'hide' | 'only' | 'all'. Anything else (absent, mis-cased, repeated)
 // is the legacy answer.

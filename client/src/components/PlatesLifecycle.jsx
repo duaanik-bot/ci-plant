@@ -16,6 +16,7 @@ import { masterOutputSync, plateRackSummary, PLATE_SIZES_IN_ORDER, PLATE_RETIRE_
 const UNDOABLE_SET_ASIDE_ACTIONS = PLATE_SET_ASIDE_REASONS.map(row => row.action);
 import { resolvePlateRate } from '../lib/plateRates.js';
 import { newestAnswerGate } from '../lib/newestAnswer.js';
+import { dayOf } from '../lib/dayOf.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
   KpiCard, Modal, PageHeader, SearchableSelect, searchText, Select, SelectionDock, SubTabs, Tabs,
@@ -1385,6 +1386,7 @@ export default function PlatesLifecycle() {
   // lives in a ref so a realtime wave's load() keeps it instead of snapping back.
   const [settledHidden, setSettledHidden] = useState(0);
   const showSettledRef = useRef(false);
+  const [showSettled, setShowSettled] = useState(false);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
   const [warehouse, setWarehouse] = useState([]);
@@ -1396,7 +1398,16 @@ export default function PlatesLifecycle() {
   const [retiredCount, setRetiredCount] = useState(0);
   const warehouseViewRef = useRef(warehouseView);
   warehouseViewRef.current = warehouseView;
-  const loadRetired = () => api.get('/plates/warehouse?retired=only').then(sets => { setRetiredSets(sets); return sets; });
+  // Two fetches can be in flight — the view's open and a realtime load() — so the
+  // newest-asked answer wins, exactly as History's does (lib/newestAnswer.js).
+  const retiredGate = useRef(null);
+  if (!retiredGate.current) retiredGate.current = newestAnswerGate();
+  const loadRetired = async () => {
+    const seq = retiredGate.current.begin();
+    const sets = await api.get('/plates/warehouse?retired=only');
+    if (retiredGate.current.accept(seq)) setRetiredSets(sets);
+    return sets;
+  };
   const [returns, setReturns] = useState([]);
   // The movement ledger (~1 MB) loads only while the History tab is open — null
   // until it first has. The tab's badge reads its own count, so it is right from
@@ -1450,7 +1461,9 @@ export default function PlatesLifecycle() {
   };
   const load = async () => {
     const [requirementAnswer,nextPos,nextGrns,warehouseAnswer,nextReturns,nextHistoryCount,nextMasters,nextVendors,nextPlateRates,nextPendency,,nextRetired] = await Promise.all([
-      api.get(showSettledRef.current ? '/plates/requirements' : '/plates/requirements?settled=hide'),
+      // The plant day rides in the URL: the settled rule reads now(), and the response
+      // cache only refetches when a table changes — each day must be its own entry.
+      api.get(showSettledRef.current ? '/plates/requirements' : `/plates/requirements?settled=hide&day=${dayOf(new Date())}`),
       api.get('/plates/purchase-orders'), api.get('/plates/grns'),
       api.get('/plates/warehouse?retired=hide'), api.get('/plates/returns'), api.get('/plates/history/count'),
       api.get('/plate-masters'), api.get('/vendors'), api.get('/plate-rates'),
@@ -1506,6 +1519,13 @@ export default function PlatesLifecycle() {
     setRetiring(null); setRackPicked([]);
     await load();
   };
+  // Show or hide the settled PRs. The choice lives in a ref (so a realtime wave's
+  // load() keeps it) and in state (so the chip re-renders); either way re-loads.
+  const toggleSettled = show => {
+    showSettledRef.current = show;
+    setShowSettled(show);
+    load().catch(error => toast.error(error.message || 'Could not load settled PRs'));
+  };
   useEffect(() => { load().catch(error => toast.error(error.message || 'Could not load Plates')); }, []);
   // Opening History fetches the ledger (and re-fetches it on every re-open, so
   // what was loaded an hour ago is not what somebody reads).
@@ -1515,6 +1535,9 @@ export default function PlatesLifecycle() {
   // Opening Set aside fetches the retired sets (re-fetched on every re-open, like History).
   useEffect(() => {
     if (warehouseView === 'aside') loadRetired().catch(error => toast.error(error.message || 'Could not load set-aside plates'));
+    // Leaving forgets the list: re-opening shows nothing until the fresh answer,
+    // never yesterday's sets beside today's count.
+    else setRetiredSets(null);
   }, [warehouseView]);
   useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 650 });
 
@@ -2462,11 +2485,18 @@ export default function PlatesLifecycle() {
           {key:'ready',label:'Ready',count:reqGroups.ready.length},
           {key:'all',label:'All',count:requirements.length},
         ]}/>
-        {settledHidden > 0 && reqView !== 'open' && (
+        {settledHidden > 0 && !showSettled && reqView !== 'open' && (
           <button type="button"
-            onClick={() => { showSettledRef.current = true; load().catch(error => toast.error(error.message || 'Could not load settled PRs')); }}
+            onClick={() => toggleSettled(true)}
             className="whitespace-nowrap rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:border-slate-400 hover:text-slate-700">
             {settledHidden} settled PRs (returned, card closed, 14+ days) hidden · <span className="underline">Show</span>
+          </button>
+        )}
+        {showSettled && reqView !== 'open' && (
+          <button type="button"
+            onClick={() => toggleSettled(false)}
+            className="whitespace-nowrap rounded-full border border-dashed border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-slate-400 hover:text-slate-800">
+            Settled PRs shown · <span className="underline">Hide</span>
           </button>
         )}
         {reqView !== 'converted' && (
