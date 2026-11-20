@@ -131,12 +131,7 @@ test('a member line still finds its OWN hold when asked line-wise', () => {
 // anywhere. Cheap to break, invisible when broken, so it is pinned here.
 test('the holds context must carry gang_run_id or the badge goes blind', () => {
   const src = readFileSync(new URL('./helpers.js', import.meta.url), 'utf8');
-  // Anchored on the holds query's own WHERE clause and read backwards to its
-  // SELECT — readinessBatch runs it inside its second parallel wave now, so it is
-  // no longer a `const holdRows = …` statement of its own.
-  const at = src.indexOf("WHERE a.material_id = ANY($1) AND a.status='active'");
-  assert.ok(at > 0, 'the holds query is still in helpers.js');
-  const q = src.slice(at - 300, at);
+  const q = src.slice(src.indexOf('const holdRows'), src.indexOf('const holdRows') + 600);
   assert.match(q, /ol\.gang_run_id/,
     'the holds query must select ol.gang_run_id — claimableQty\'s run rule is dead without it');
   assert.match(q, /LEFT JOIN order_lines/,

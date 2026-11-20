@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, loadPlateState, ownHoldQty, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, stampPlateState, ownHoldQty, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, BOARD_MIX_POSITION_LATERAL, outputNumberSql } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -546,17 +546,13 @@ r.get('/floor', async (req, res, next) => {
     // slower the busier the plant gets.
     const cardRows = Object.values(byJc).map(list => list[0]);
     const anchorIds = [...new Set(cardRows.map(s => s.anchor_line_id).filter(x => x != null))];
-    // The light's lookups are keyed by the cards alone: beside the readiness chain.
-    const [[anchors, rctx], lightExtras] = await Promise.all([
-      (async () => {
-        const rows = anchorIds.length
-          ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
-          : [];
-        return [rows, await readinessBatch(rows)];
-      })(),
-      lightForJobCards(cardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one),
-    ]);
+    const anchors = anchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
+      : [];
     const anchorById = new Map(anchors.map(l => [l.id, l]));
+    const rctx = await readinessBatch(anchors);
+    const lightExtras = await lightForJobCards(
+      cardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one);
     // The card-level half of the light — the expensive half — still computed
     // once per card, exactly as before.
     const baseByJc = new Map();
@@ -1210,22 +1206,13 @@ r.get('/floor/:section', async (req, res, next) => {
     // different one on its own station page.
     const secCardRows = Object.values(byJc).map(list => list[0]);
     const secAnchorIds = [...new Set(secCardRows.map(s => s.anchor_line_id).filter(x => x != null))];
-    // The light's lookups and plate state's query are keyed by the cards alone, so
-    // they run beside the readiness chain; plates are stamped where they always were.
-    const [[secAnchors, secRctx], secExtras, applySecPlates] = await Promise.all([
-      (async () => {
-        const rows = secAnchorIds.length
-          ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [secAnchorIds])
-          : [];
-        return [rows, await readinessBatch(rows)];
-      })(),
-      lightForJobCards(secCardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one),
-      loadPlateState(secCardRows, {
-        jobCardIdOf: s => s.job_card_id,
-        gangIdOf: s => s.gang_run_id,
-      }),
-    ]);
+    const secAnchors = secAnchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [secAnchorIds])
+      : [];
     const secAnchorById = new Map(secAnchors.map(l => [l.id, l]));
+    const secRctx = await readinessBatch(secAnchors);
+    const secExtras = await lightForJobCards(
+      secCardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one);
     const secBase = new Map();
     for (const s of secCardRows) {
       const line = secAnchorById.get(s.anchor_line_id);
@@ -1258,8 +1245,11 @@ r.get('/floor/:section', async (req, res, next) => {
     // way. The press is the station that cannot start without them, and cutting is
     // where the job is being prepared FOR the press — both want to know before the
     // sheets are on the machine, not when Start refuses.
-    applySecPlates();  // fetched beside the readiness chain above; stamped here, as always
     const secPlateStates = new Map();
+    await stampPlateState(secCardRows, {
+      jobCardIdOf: s => s.job_card_id,
+      gangIdOf: s => s.gang_run_id,
+    });
     for (const s of secCardRows) secPlateStates.set(s.job_card_id, s.plate_state);
 
     // Board FROZEN for each card — its own side of the very partition

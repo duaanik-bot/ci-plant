@@ -7,7 +7,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, qtyBelowDispatchedWarning, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, loadPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS, partLinesOf, hasPartLines } from '../helpers.js';
+import { audit, removedLineDetail, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, planLockParent, pinParentOnMasterClear, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, qtyBelowDispatchedWarning, rollbackLine, lockGangsFirst, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, releasePlanLockHolds, stampBoardState, stampPlateState, boardDrawnLineIds, boardHoldCaps, DEFAULT_WASTAGE_SHEETS, partLinesOf, hasPartLines } from '../helpers.js';
 import { syncPartLines } from '../carton-parts-db.js';
 import { CARTON_STATUS_SQL } from '../carton-status.js';
 import { partsChangeBlock, cartonLineBlock, cartonPrintState } from '../carton-parts.js';
@@ -1854,14 +1854,12 @@ r.get('/planning', async (req, res, next) => {
 // splits a run — so a line reads the same whether it was asked for alone in its
 // scope or with the whole list.
 async function planningRows(rows) {
-  // Every lookup below is keyed by the queue's rows alone, so they go together —
-  // one round trip per wave when the pool can overlap them
-  // (docs/perf/2026-11-20-pool-size.md).
-  //
-  // readiness — one batch of lookups for the whole queue instead of six per
-  // line. fg_available is the verified FG matching each line (Internal Carton →
-  // Party Artwork → Product Code), driving the queue's "FG Stock Available" column.
-  // light — the traffic light over those same gates, so Planning and the floor can
+  // One batch of lookups for the whole queue instead of six per line — the
+  // page cost no longer scales with how many lines are waiting. fg_available
+  // is the verified FG matching each line (Internal Carton → Party Artwork →
+  // Product Code), driving the queue's "FG Stock Available" column.
+  const ctx = await readinessBatch(rows);
+  // The traffic light over those same gates, so Planning and the floor can
   // never hold two opinions about one job. A planning LINE is not a job card:
   // it has no cutting stage of its own, so it is keyed negatively here — no
   // job_stages row can ever match, which leaves "Board cut" not-applicable
@@ -1870,28 +1868,26 @@ async function planningRows(rows) {
   // only its release stamp is read: the parent's manual override is
   // deliberately NOT applied, so a gang member's own readiness is never
   // silently rewritten by the press run it shares.
-  // released — jc.id rides along with finalised_at now: Planning's one-click Issue
+  const lightExtras = await lightForJobCards(
+    rows.map(l => ({ id: -l.id, product_id: l.product_id })), one);
+  // jc.id rides along with finalised_at now: Planning's one-click Issue
   // action needs the job card id so a card issued against an already-pushed
   // line can auto-return when printing completes (production.js keys the
   // auto-return off shade_card_issues.job_card_id).
-  // shadeCards / shadeOpen — shade card status for Planning's one-click Issue action: the module's
-  // live card per product (shadeCardsFor already carries shade_card_id +
-  // status), plus which cards are currently OUT so the button hides once a
-  // card is already with printing.
-  const [ctx, lightExtras, releasedRows, shadeCards, shadeOpen] = await Promise.all([
-    readinessBatch(rows),
-    lightForJobCards(rows.map(l => ({ id: -l.id, product_id: l.product_id })), one),
-    rows.length ? q(`
+  const released = new Map((rows.length ? await q(`
     SELECT ol.id AS line_id, jc.finalised_at, jc.id AS job_card_id
     FROM order_lines ol
     JOIN job_cards jc ON (jc.order_line_id = ol.id
          OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
              AND jc.order_line_id IS NULL))
-    WHERE ol.id = ANY($1::int[])`, [rows.map(l => l.id)]) : [],
-    shadeCardsFor(rows.map(l => l.product_id)),
-    q(`SELECT shade_card_id FROM shade_card_issues WHERE returned_at IS NULL`),
-  ]);
-  const released = new Map(releasedRows.map(c => [c.line_id, c]));
+    WHERE ol.id = ANY($1::int[])`, [rows.map(l => l.id)]) : [])
+    .map(c => [c.line_id, c]));
+  // Shade card status for Planning's one-click Issue action: the module's
+  // live card per product (shadeCardsFor already carries shade_card_id +
+  // status), plus which cards are currently OUT so the button hides once a
+  // card is already with printing.
+  const shadeCards = await shadeCardsFor(rows.map(l => l.product_id));
+  const shadeOpen = await q(`SELECT shade_card_id FROM shade_card_issues WHERE returned_at IS NULL`);
   const openSet = new Set(shadeOpen.map(x => x.shade_card_id));
   // Board on order per line — ONE query for the whole queue. Feeds the
   // three-state board verdict the chips filter on (covered / on_order /
@@ -3503,19 +3499,7 @@ r.get('/artwork', async (_req, res, next) => {
     // the last queue where "nobody has bought this board" is news rather than
     // an emergency. One batch of lookups for the page, exactly as /planning
     // does it — the cost does not scale with how many lines are waiting.
-    // This queue never carried a job card ID — only the number, for display. The
-    // plate verdict is keyed by card, so the id is fetched alongside it above —
-    // and plate state's query needs nothing else, so it runs beside readiness;
-    // it is stamped after board state, as before.
-    const cardIdByLine = new Map(ownCards.map(c => [c.order_line_id, c.id]));
-    const cardIdByRun = new Map(runCards.map(c => [c.gang_run_id, c.id]));
-    const [ctx, applyArtPlates] = await Promise.all([
-      readinessBatch(rows),
-      loadPlateState(rows, {
-        jobCardIdOf: l => cardIdByLine.get(l.id) ?? cardIdByRun.get(l.gang_run_id) ?? null,
-        gangIdOf: l => l.gang_run_id,
-      }),
-    ]);
+    const ctx = await readinessBatch(rows);
     const artGates = new Map();
     for (const l of rows) artGates.set(l.id, await readiness(l, one, ctx));
     // Same one rule as /planning and the floor. The drawn clause carries more
@@ -3527,7 +3511,14 @@ r.get('/artwork', async (_req, res, next) => {
       gangIdOf: l => l.gang_run_id,
       gatesOf: l => artGates.get(l.id),
     });
-    applyArtPlates();  // stamped after board state, as always — keys keep their order
+    // This queue never carried a job card ID — only the number, for display. The
+    // plate verdict is keyed by card, so the id is fetched alongside it above.
+    const cardIdByLine = new Map(ownCards.map(c => [c.order_line_id, c.id]));
+    const cardIdByRun = new Map(runCards.map(c => [c.gang_run_id, c.id]));
+    await stampPlateState(rows, {
+      jobCardIdOf: l => cardIdByLine.get(l.id) ?? cardIdByRun.get(l.gang_run_id) ?? null,
+      gangIdOf: l => l.gang_run_id,
+    });
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
       l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);

@@ -2792,50 +2792,39 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
 
-  // TWO waves, each one round trip when the pool can overlap them
-  // (docs/perf/2026-11-20-pool-size.md). Wave 1 is keyed by what the lines
-  // already carry; wave 2 by what wave 1 resolved. The SQL is unchanged.
-  //
-  // Wave 1: masters (so spec overrides can resolve the effective board and tool),
-  // plate counts, and the mix — the mix BEFORE wave 2, because a substitute
-  // board's stock is never fetched unless its material id joins materialIds.
+  // Wave 1: masters, so spec overrides can resolve the effective board and tool.
+  for (const p of await qc('SELECT * FROM products WHERE id = ANY($1)', [productIds])) {
+    ctx.products.set(p.id, p);
+  }
+  const effective = lines.map(l => effectiveProduct(ctx.products.get(l.product_id), l));
+  const materialIds = [...new Set(effective.map(p => p?.board_material_id).filter(x => x != null))];
+  const toolIds = [...new Set(effective.map(p => p?.tool_id).filter(x => x != null))];
+
+  // Wave 1.5: the mix, before wave 2 — a substitute board's stock is never
+  // fetched unless its material id joins materialIds here.
   const lineIds = lines.map(l => l.id).filter(x => x != null);
-  const [productRows, plateRows, mixAll] = await Promise.all([
-    qc('SELECT * FROM products WHERE id = ANY($1)', [productIds]),
-    lineIds.length
-      ? qc(`SELECT tr.order_line_id,
+  if (lineIds.length) {
+    const plateRows = await qc(`SELECT tr.order_line_id,
         COUNT(prc.id)::int AS required,
         COUNT(prc.id) FILTER (WHERE prc.status IN
           ('verified_existing','available','reserved','issued'))::int AS ready
       FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
       WHERE tr.family='plate' AND tr.order_line_id=ANY($1::int[]) AND prc.status<>'cancelled'
-      GROUP BY tr.order_line_id`, [lineIds])
-      : [],
-    lineIds.length
-      ? qc(`SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
+      GROUP BY tr.order_line_id`, [lineIds]);
+    for (const row of plateRows) ctx.plates.set(row.order_line_id, row);
+  }
+  const mixAll = lineIds.length
+    ? await qc(`SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
                 ORDER BY (role='planned') DESC, id`, [lineIds])
-      : [],
-  ]);
-  for (const p of productRows) ctx.products.set(p.id, p);
-  for (const row of plateRows) ctx.plates.set(row.order_line_id, row);
-  const effective = lines.map(l => effectiveProduct(ctx.products.get(l.product_id), l));
-  const materialIds = [...new Set(effective.map(p => p?.board_material_id).filter(x => x != null))];
-  const toolIds = [...new Set(effective.map(p => p?.tool_id).filter(x => x != null))];
+    : [];
   for (const r of mixAll) {
     if (!ctx.mix.has(r.order_line_id)) ctx.mix.set(r.order_line_id, []);
     ctx.mix.get(r.order_line_id).push(r);
   }
   for (const r of mixAll) if (!materialIds.includes(r.material_id)) materialIds.push(r.material_id);
 
-  // Wave 2: everything keyed off those ids, in parallel — the stock holds too.
-  // Board already EARMARKED for a named job — every active stock hold on these
-  // boards, with the job that holds it. Stock a planner tied to another job (or
-  // that procurement's Cover action tied to the job that bought it) is not
-  // available to this one; counting it would tell every job on the board that
-  // one delivery covered them all. Only the LIST views resolve holds this way
-  // (they alone pass a ctx) — the job-card release gate keeps reading raw
-  // stock, so no card that releases today starts refusing.
-  const [materials, batches, tools, shades, incoming, fg, holdRows] = await Promise.all([
+  // Wave 2: everything keyed off those ids, in parallel.
+  const [materials, batches, tools, shades, incoming, fg] = await Promise.all([
     qc('SELECT * FROM materials WHERE id = ANY($1)', [materialIds]),
     qc(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM stock_batches
         WHERE material_id = ANY($1) AND status='available' GROUP BY material_id`, [materialIds]),
@@ -2866,13 +2855,20 @@ export async function readinessBatch(lines, oc = one, qc = q) {
              AND (fl.qty - fl.consumed_qty) > 0
         WHERE p.id = ANY($1)
         GROUP BY p.id`, [productIds]),
-    materialIds.length
-      ? qc(`SELECT a.material_id, a.order_line_id, a.qty, a.source, ol.gang_run_id
+  ]);
+  // Board already EARMARKED for a named job — every active stock hold on these
+  // boards, with the job that holds it. Stock a planner tied to another job (or
+  // that procurement's Cover action tied to the job that bought it) is not
+  // available to this one; counting it would tell every job on the board that
+  // one delivery covered them all. Only the LIST views resolve holds this way
+  // (they alone pass a ctx) — the job-card release gate keeps reading raw
+  // stock, so no card that releases today starts refusing.
+  const holdRows = materialIds.length
+    ? await qc(`SELECT a.material_id, a.order_line_id, a.qty, a.source, ol.gang_run_id
                 FROM board_allocations a
                 LEFT JOIN order_lines ol ON ol.id = a.order_line_id
                 WHERE a.material_id = ANY($1) AND a.status='active'`, [materialIds])
-      : [],
-  ]);
+    : [];
   for (const h of holdRows) {
     // Stock holds feed claimableQty as before; the requisition mirrors ride
     // alongside so a fresh_pr line can read its OWN incoming (not the board's).
@@ -3222,18 +3218,9 @@ export function plateCountsOf(components = []) {
 // Stamp `plate_state` onto a page of rows in ONE query. Twin of stampBoardState:
 // per-row lookups are what turn a queue into a hundred round trips, and the floor
 // queues this feeds are the busiest reads in the app.
-export async function stampPlateState(rows, opts) {
-  (await loadPlateState(rows, opts))();
-  return rows;
-}
-
-// The same, in two halves: the ONE query now, the stamping when apply() is
-// called. A board fetches plate state beside its readiness lookups but stamps it
-// where it always did — after board state — so each row's keys keep their order
-// and the answer stays byte-identical (docs/perf/2026-11-20-pool-size.md).
-export async function loadPlateState(rows, { jobCardIdOf, gangIdOf = () => null, qc = q }) {
+export async function stampPlateState(rows, { jobCardIdOf, gangIdOf = () => null, qc = q }) {
   const ids = [...new Set((rows || []).map(jobCardIdOf).filter(id => id != null))];
-  if (!ids.length) return () => {};
+  if (!ids.length) return rows;
   const components = await qc(
     `SELECT tr.job_card_id, prc.status, prc.component_type, prc.component_label,
             prc.matched_asset_id, prc.proposed_asset_id,
@@ -3246,10 +3233,6 @@ export async function loadPlateState(rows, { jobCardIdOf, gangIdOf = () => null,
        LEFT JOIN plate_assets ma ON ma.id = prc.matched_asset_id
        LEFT JOIN plate_assets pa ON pa.id = prc.proposed_asset_id
       WHERE tr.family = 'plate' AND tr.job_card_id = ANY($1::int[])`, [ids]);
-  return () => applyPlateState(rows, components, { jobCardIdOf, gangIdOf });
-}
-
-function applyPlateState(rows, components, { jobCardIdOf, gangIdOf }) {
   const byJob = new Map();
   for (const row of components) {
     const list = byJob.get(Number(row.job_card_id)) || [];
