@@ -1081,7 +1081,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">Still to be costed: new enquiries (<b>orange rows</b>) and those in costing. <b>Cost it</b> opens the costing here, or <b>Cost it for me</b>; once a costing is complete the row moves to <b>Pending for finalisation</b>.</p>
       )}
       {tab === 'finalise' && (
-        <p className="mb-2 text-xs text-slate-500">Costed, waiting for our final price, approval or the quotation — and customers' counter-offers, worked in their own row: type <b>ask</b> (their price) and <b>revised</b> (ours), each against our cost. Tick rows: <b>Approve</b>, <b>Send quotation</b> (asked whether it goes to Gmail as a draft), <b>Mark as sent</b> when you mailed it yourself, or <b>Order lost</b>.</p>
+        <p className="mb-2 text-xs text-slate-500">Everything costed and not decided yet — waiting for our final price, approval or the quotation, quotations already sent to the party (they stay here until the order is finalised, lost or dropped), and customers' counter-offers, worked in their own row: type <b>ask</b> (their price) and <b>revised</b> (ours), each against our cost. Tick rows: <b>Approve</b>, <b>Send quotation</b> (asked whether it goes to Gmail as a draft), <b>Mark as sent</b> when you mailed it yourself, or <b>Order lost</b>.</p>
       )}
       {tab === 'won' && <p className="mb-2 text-xs text-slate-500">Orders the customer agreed — each with the rate finalised and, once its sales order is in and checked on <b>Orders</b>, the actual rate.</p>}
       {tab === 'lost' && <p className="mb-2 text-xs text-slate-500">Quotes the customer did not take, with the reason. <b>Bring back</b> returns a row to where it was.</p>}

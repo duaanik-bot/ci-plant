@@ -45,16 +45,18 @@ export function bandOf(e) {
 // Tabs (owner, 21 Nov 2026: "Pending, then pending for finalisation, then these are sent … finalised, order lost … all
 // should be in the last"). Each takes the rows its `match` says:
 //   Pending                    still to be costed
-//   Pending for finalisation   costed — waiting for our final price, approval or the quotation; a counter waiting for our
-//                              revised price
-//   Sent                       with the customer: the quotation's draft in Gmail, or mailed
+//   Pending for finalisation   costed and not decided yet: waiting for our final price, approval or the quotation, a
+//                              counter waiting for our revised price — AND a quotation already sent to the party (owner,
+//                              21 Nov 2026: "sent but not yet finalised … should be kept in pending for finalisation"),
+//                              until it is Finalised, Order lost or dropped
+//   Sent                       what has been mailed to the party (or sits in Gmail as a draft), not decided yet
 //   Finalised                  the order is won     ·   Order lost  the customer did not order   ·   All  everything
 export const DESK_TABS = [
   // the desk's front page (owner, 21 Nov 2026: "before pending, we should have a dashboard … with their number. Then we
   // should be able to reach that chip") — it lists no rows of its own
   { key: 'dashboard', label: 'Dashboard', match: () => false, dashboard: true },
   { key: 'pending', label: 'Pending', match: e => COST_STAGES.includes(e.stage) },
-  { key: 'finalise', label: 'Pending for finalisation', match: e => bandOf(e) === 'counter' || (bandOf(e) === 'pending' && !COST_STAGES.includes(e.stage)) },
+  { key: 'finalise', label: 'Pending for finalisation', match: e => ['counter', 'sent', 'mailed'].includes(bandOf(e)) || (bandOf(e) === 'pending' && !COST_STAGES.includes(e.stage)) },
   { key: 'sent', label: 'Sent', match: e => ['sent', 'mailed'].includes(bandOf(e)) },
   { key: 'won', label: 'Finalised', match: e => e.stage === 'ordered' },
   { key: 'lost', label: 'Order lost', match: e => e.stage === 'lost' },

@@ -25,7 +25,8 @@ test('rowsOfTab: Pending · Pending for finalisation · Sent · Finalised · Ord
     row(4, 'sent'), row(5, 'ordered'), row(6, 'dropped'), row(7, 'price_pending'), row(8, 'costing'), row(9, 'quote_ready'), row(10, 'lost')];
   const ids = t => rowsOfTab(t, rows).map(r => r.id);
   assert.deepEqual(ids('pending'), [1, 8]);
-  assert.deepEqual(ids('finalise'), [2, 7, 9]);
+  // sent to the party but not decided stays here too (21 Nov 2026) — and shows on Sent
+  assert.deepEqual(ids('finalise'), [2, 3, 4, 7, 9]);
   assert.deepEqual(ids('sent'), [3, 4]);
   assert.deepEqual(ids('won'), [5]);
   assert.deepEqual(ids('lost'), [10]);
@@ -181,9 +182,9 @@ test('dashboardOf: a tile per tab with its count and money; attention points at 
   const d = dashboardOf(rows);
   const t = Object.fromEntries(d.tiles.map(x => [x.key, x]));
   assert.deepEqual(d.tiles.map(x => x.key), ['pending', 'finalise', 'sent', 'won', 'lost', 'all']);
-  assert.deepEqual([t.pending.n, t.finalise.n, t.sent.n, t.won.n, t.lost.n, t.all.n], [1, 2, 1, 1, 1, 6]);
-  assert.equal(t.finalise.value, 9000 + 500);
-  assert.equal(t.finalise.profit, 9500 - 10400);
+  assert.deepEqual([t.pending.n, t.finalise.n, t.sent.n, t.won.n, t.lost.n, t.all.n], [1, 3, 1, 1, 1, 6]);
+  assert.equal(t.finalise.value, 9000 + 500 + 300);
+  assert.equal(t.finalise.profit, 9800 - 10600);
   assert.equal(t.won.value, 9500, 'a won row at its sales order\'s actual rate');
   assert.equal(t.won.profit, -500);
   const a = Object.fromEntries(d.attention.map(x => [x.key, x]));
