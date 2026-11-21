@@ -242,11 +242,15 @@ export function OrdersList({ canSend, signal }) {
       if (r) { toast.success(confirmSaid(r, o.order_no)); await load(); }
     } catch { /* the error is already shown */ } finally { setBusy(null); }
   };
+  // Send to the team (owner, 21 Nov 2026: "we should be able to send even those mails which are already finalised … send this
+  // to your team with all the relevant details, the attachments … the output sizes … at what rate it is finalised").
+  const [teamFor, setTeamFor] = useState(null);
   const again = async (o) => {
+    setTeamFor(null);
     setBusy(o.id);
     try {
-      const r = await api.post(`/costing/enquiry-orders/${o.id}/mail`);
-      (r.mail?.status === 'sent' ? toast.success : toast.error)(r.mail?.status === 'sent' ? `${o.order_no}: the order sheet went to ${r.mail.to}` : `${o.order_no}: not sent — ${r.mail?.error}`);
+      const r = await api.post(`/costing/enquiry-orders/${o.id}/mail`, o.mail_status === 'sent' ? { again: true } : {});
+      (r.mail?.status === 'sent' ? toast.success : toast.error)(r.mail?.status === 'sent' ? `${o.order_no}: the order sheet went to ${r.mail.to}${o.mail_status === 'sent' ? ' again' : ''}` : `${o.order_no}: not sent — ${r.mail?.error}`);
       await load();
     } catch { /* the error is already shown */ } finally { setBusy(null); }
   };
@@ -262,10 +266,10 @@ export function OrdersList({ canSend, signal }) {
     { key: 'mail_status', label: 'Order sheet', render: o => (
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${MAIL_TONE[o.mail_status]}`} title={o.mail_error || o.mail_to || ''}><Mail size={11} className="mr-1 inline" />{MAIL_LABEL[o.mail_status]}</span>
-        {canSend && o.mail_status !== 'sent' && (
-          <button type="button" disabled={busy === o.id} onClick={ev => { ev.stopPropagation(); again(o); }}
+        {canSend && (
+          <button type="button" disabled={busy === o.id} onClick={ev => { ev.stopPropagation(); setTeamFor(o); }}
             className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100 disabled:opacity-50">
-            <RotateCcw size={11} />{busy === o.id ? 'Sending…' : o.mail_status === 'failed' ? 'Send again' : 'Send'}</button>
+            <RotateCcw size={11} />{busy === o.id ? 'Sending…' : o.mail_status === 'none' || !o.mail_status ? 'Send to the team' : 'Send again'}</button>
         )}
       </div>
     ) },
@@ -301,6 +305,16 @@ export function OrdersList({ canSend, signal }) {
       <DataTable rows={orders || []} columns={cols} onRowClick={setView} defaultSort={{ key: 'when', dir: 'desc' }} serialNumber={false}
         empty={orders ? 'No order finalised yet — press Order finalised on a quoted row.' : 'Loading…'} />
       <OrderView order={view} onClose={() => setView(null)} />
+      <Modal open={!!teamFor} onClose={() => setTeamFor(null)} title={`${teamFor?.order_no || ''} — send to the team?`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setTeamFor(null)}>Cancel</Button>
+          <Button variant="success" onClick={() => again(teamFor)}><Mail size={13} className="mr-1 inline" />{teamFor?.mail_status === 'sent' ? 'Send it again' : 'Send to the team'}</Button>
+        </>}>
+        <p className="text-sm text-slate-600">The order sheet for <b>{teamFor?.customer_name}</b> to the company mailbox: every item with the rate it was finalised at
+          {(teamFor?.lines || []).some(l => l.actual_rate != null) ? ' and the sales order\'s rate' : ''}, the quantity, the output sheet and ups, the board, the die (new or existing),
+          the art details — and each drawn KLD attached as a PDF. Rates only: cost and loss stay here.
+          {teamFor?.mail_status === 'sent' && <> It went to {teamFor.mail_to} on {dateText(teamFor.mail_sent_at)}; this sends it once more, marked “sent again”.</>}</p>
+      </Modal>
       <SalesOrderCheck order={checking} canApply={canSend} onClose={() => setChecking(null)} onApplied={() => { setChecking(null); load(); }} />
     </div>
   );

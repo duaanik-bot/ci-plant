@@ -68,3 +68,21 @@ test('row by row: pick takes only those lines; autoPick finds marked lines whose
   assert.equal(orderLine(e, { edits: { so_auto: true } }).rate_from_so, true);
   assert.equal(orderLine(e, { edits: { qty: 1000, rate: 2 } }).rate_from_so, undefined);
 });
+
+import { orderMail } from './order-finalise.js';
+
+test('orderMail: sent again says so; a line taken from its sales order shows that rate beside the finalised one', () => {
+  const lines = [
+    { enquiry_no: 'E1', product: 'ALPHA CARTON', size: '100 × 40 × 40', qty: 1000, rate: 7.5, value: 7500, ups: 2, sheet: { l: 15, w: 20 }, new_die: false, actual_rate: 7.1, actual_qty: 1200, actual_po: 'P-1', cost: 6 },
+    { enquiry_no: 'E2', product: 'BETA CARTON', qty: 500, rate: 3, value: 1500, new_die: true, cost: 2 },
+  ];
+  const m = orderMail({ order_no: 'CI-OF-0009', customer: 'Acme', lines, by: 'A Person', at: '2026-11-21T10:00:00Z', again: true });
+  assert.match(m.subject, /CI-OF-0009 \(sent again\)$/);
+  assert.match(m.text, /Sales order P-1: 1,200 at .*7\.10 a carton/);
+  assert.match(m.html, /Sales order<\/th>/);
+  assert.match(m.html, /1,200 @ .*7\.10 \(P-1\)/);
+  assert.doesNotMatch(m.text + m.html, /6\.00|cost|margin/i, 'the team sees rates, never our cost');
+  const first = orderMail({ order_no: 'CI-OF-0009', customer: 'Acme', lines: [lines[1]], by: 'A', at: '2026-11-21T10:00:00Z' });
+  assert.doesNotMatch(first.subject, /again/);
+  assert.doesNotMatch(first.html, /Sales order<\/th>/, 'no column when no line has one');
+});

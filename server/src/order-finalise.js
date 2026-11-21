@@ -101,10 +101,13 @@ const kldText = l => (l.kld ? `KLD rev ${l.kld.rev} attached` : 'KLD not drawn y
 const istDate = d => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(d));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-export function orderMail({ order_no, customer, quotation_no = null, lines, by, at }) {
+// `again` (owner, 21 Nov 2026: "we should be able to send even those mails which are already finalised"): the same sheet sent
+// once more, said so in the subject. A line whose sales order's rate was taken in carries it beside the rate finalised.
+export function orderMail({ order_no, customer, quotation_no = null, lines, by, at, again = false }) {
   const n = lines.length;
   const dies = lines.filter(l => l.new_die).length;
-  const subject = `Order finalised — ${customer || 'customer'} — ${plural(n, 'item')}${dies ? `, ${plural(dies, 'new die')}` : ''} — ${order_no}`;
+  const subject = `Order finalised — ${customer || 'customer'} — ${plural(n, 'item')}${dies ? `, ${plural(dies, 'new die')}` : ''} — ${order_no}${again ? ' (sent again)' : ''}`;
+  const so = lines.some(l => l.actual_rate != null);
   const head = [`Customer: ${customer || '—'}`, quotation_no ? `Quotation: ${quotation_no}` : null, `Finalised by ${by || '—'} on ${istDate(at)}`]
     .filter(Boolean).join(' · ');
   const ask = dies
@@ -118,6 +121,7 @@ export function orderMail({ order_no, customer, quotation_no = null, lines, by, 
       `${i + 1}. ${l.product}${l.size ? ` — ${l.size} mm` : ''}${l.style ? `, ${l.style}` : ''}`,
       `   Art: ${l.art || '—'}`,
       `   Quantity ${plain(l.qty)} · Rate ${rate2(l.rate)} a carton · Value ₹${plain(l.value)}`,
+      ...(l.actual_rate != null ? [`   Sales order ${l.actual_po || ''}: ${plain(l.actual_qty)} at ${rate2(l.actual_rate)} a carton`] : []),
       `   Output sheet ${sheetText(l)} · ${l.ups ? `${l.ups} ups` : 'ups —'} · Board ${boardText(l)}`,
       `   ${dieText(l)} · ${kldText(l)}`,
       '',
@@ -135,6 +139,7 @@ export function orderMail({ order_no, customer, quotation_no = null, lines, by, 
     td(l.art || '—'),
     td(plain(l.qty), right),
     td(rate2(l.rate), right),
+    ...(so ? [td(l.actual_rate != null ? `${plain(l.actual_qty)} @ ${rate2(l.actual_rate)} (${l.actual_po || 'SO'})` : '—', ';white-space:nowrap')] : []),
     td(`₹${plain(l.value)}`, right),
     td(sheetText(l), ';white-space:nowrap'),
     td(l.ups ?? '—', right),
@@ -146,7 +151,7 @@ export function orderMail({ order_no, customer, quotation_no = null, lines, by, 
 <p style="font-size:15px"><b>Order finalised — ${esc(order_no)}</b><br><span style="color:#475569">${esc(head)}</span></p>
 <p>${esc(intro)}</p>
 <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
-<tr>${['#', 'Product', 'Size', 'Art details', 'Quantity', 'Rate a carton', 'Value', 'Output sheet', 'Ups', 'Board', 'Die', 'KLD'].map(th).join('')}</tr>
+<tr>${['#', 'Product', 'Size', 'Art details', 'Quantity', 'Rate a carton', ...(so ? ['Sales order'] : []), 'Value', 'Output sheet', 'Ups', 'Board', 'Die', 'KLD'].map(th).join('')}</tr>
 ${rows}
 </table>
 <p style="color:#475569">— ${esc(by || 'CI Plant')}, via CI Plant</p>

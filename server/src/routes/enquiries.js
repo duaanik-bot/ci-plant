@@ -1164,14 +1164,14 @@ const orderById = id => one(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOI
 
 // Send the order sheet (the table, and each drawn KLD as its PDF) to the company mailbox. Never throws: the answer and
 // the order say 'sent', or 'failed' with the reason.
-async function mailOrder(id, u) {
+async function mailOrder(id, u, { again = false } = {}) {
   const o = await one('SELECT * FROM enquiry_orders WHERE id = $1', [id]);
   const st = await orderMailState();
   try {
     if (!st.company) throw fail(409, 'No company mailbox address — set the business mailbox in the desk settings, then Send again.');
     if (!st.link) throw fail(409, `The mailbox in use (${st.sender || '—'}) has no Gmail connected — an admin presses Connect Gmail in the desk settings, then Send again.`);
     const qtNo = o.quotation_id ? (await one('SELECT quotation_no FROM quotations WHERE id = $1', [o.quotation_id]))?.quotation_no : null;
-    const mail = orderMail({ order_no: o.order_no, customer: o.customer_name, quotation_no: qtNo, lines: o.lines, by: u.name, at: o.created_at });
+    const mail = orderMail({ order_no: o.order_no, customer: o.customer_name, quotation_no: qtNo, lines: o.lines, by: u.name, at: o.created_at, again });
     const attachments = [];
     for (const l of o.lines.filter(x => x.kld?.size_id)) {
       const row = await one('SELECT id, size_key, style, kld FROM costing_sizes WHERE id = $1 AND kld IS NOT NULL', [l.kld.size_id]);
@@ -1184,15 +1184,17 @@ async function mailOrder(id, u) {
     await q(`UPDATE enquiry_orders SET mail_status = 'sent', mail_to = $2, mail_subject = $3, mail_message_id = $4, mail_error = NULL, mail_sent_at = now()
               WHERE id = $1`, [id, st.company, mail.subject, sent.message_id]);
     await q('UPDATE gmail_links SET last_used_at = now(), last_error = NULL, last_error_at = NULL WHERE mailbox = $1', [st.box.key]);
-    await enquiryEvent(q, { action: 'order_mail', detail: { order_no: o.order_no, to: st.company, klds: attachments.length } }, u);
-    await audit('enquiry_order', id, 'mail', `${o.order_no} — order sheet sent to the company mailbox`, q, u.name);
+    await enquiryEvent(q, { action: 'order_mail', detail: { order_no: o.order_no, to: st.company, klds: attachments.length, ...(again ? { again: true } : {}) } }, u);
+    await audit('enquiry_order', id, 'mail', `${o.order_no} — order sheet sent to the company mailbox${again ? ' again' : ''}`, q, u.name);
     return { status: 'sent', to: st.company };
   } catch (e) {
     const why = String(e?.message || e).slice(0, 500);
     const fromGmail = e?.gmailStatus != null || e?.expired;
     if (e?.expired && st.box) forgetToken(st.box.key);
     if (fromGmail && st.box) await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [st.box.key, why]);
-    await q(`UPDATE enquiry_orders SET mail_status = 'failed', mail_error = $2 WHERE id = $1`, [id, why]);
+    // a repeat that fails leaves the record of the sheet that did go; a first send that fails says so
+    if (again && o.mail_status === 'sent') await q(`UPDATE enquiry_orders SET mail_error = $2 WHERE id = $1`, [id, why]);
+    else await q(`UPDATE enquiry_orders SET mail_status = 'failed', mail_error = $2 WHERE id = $1`, [id, why]);
     await audit('enquiry_order', id, 'mail_failed', `${o.order_no} — order sheet not sent`, q, u.name);
     return { status: 'failed', error: why };
   }
@@ -1420,8 +1422,10 @@ r.post('/costing/enquiry-orders/:id(\\d+)/mail', async (req, res, next) => {
     const id = intOrNull(req.params.id) || 0;
     const o = await orderById(id);
     if (!o) throw fail(404, 'No such order.');
-    if (o.mail_status === 'sent') throw fail(409, `${o.order_no}: the order sheet went to ${o.mail_to} already.`);
-    const mail = await mailOrder(id, u);
+    // Sent already: only when asked to send it again (21 Nov 2026 — the team may need it once more, or with the sales order's rates).
+    const again = o.mail_status === 'sent';
+    if (again && !req.body?.again) throw fail(409, `${o.order_no}: the order sheet went to ${o.mail_to} already — press Send again to send it once more.`);
+    const mail = await mailOrder(id, u, { again });
     res.json({ ...(await orderById(id)), mail });
   } catch (e) { next(e); }
 });

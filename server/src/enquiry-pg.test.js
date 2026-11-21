@@ -1041,9 +1041,21 @@ describe('Enquiry desk — through the real app', {
       const again = await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`);
       assert.equal(again.status, 200, JSON.stringify(again.body));
       assert.equal(again.body.mail_status, 'sent');
-      assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`)).status, 409, 'sent once, never twice');
-      assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`)).status, 403);
+      assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`)).status, 409, 'sent once — again only when asked');
+      assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`, { again: true })).status, 403);
       assert.equal(G.sends.length, 2);
+      // Send again (21 Nov 2026): the same sheet once more, said so in its subject; still sent.
+      const twice = await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`, { again: true });
+      assert.equal(twice.status, 200, JSON.stringify(twice.body));
+      assert.equal(twice.body.mail_status, 'sent');
+      assert.equal(G.sends.length, 3);
+      assert.match(twice.body.mail_subject, /\(sent again\)$/);
+      // A repeat that fails keeps the record of the sheet that went.
+      G.refuse = true;
+      const failedAgain = await call('md', 'POST', `/costing/enquiry-orders/${f.body.order.id}/mail`, { again: true });
+      assert.equal(failedAgain.body.mail.status, 'failed');
+      assert.equal(failedAgain.body.mail_status, 'sent', 'still recorded as sent');
+      G.refuse = false;
 
       // The Orders list, under the Costing tick.
       const list = await call('clerk', 'GET', '/costing/enquiry-orders');
