@@ -92,3 +92,31 @@ test('the Order finalised panel: profit or loss as a % of cost, line and order',
   assert.equal(t.net, 500);
   assert.equal(t.net_pct, (500 / 15000) * 100);
 });
+
+import { batchesOf, customersOf } from '../../client/src/lib/enquiryUi.js';
+
+test('batchesOf: one batch per mail, typed-in rows by customer and day; counts and money at the first quantity', () => {
+  const rows = [
+    row(1, 'new', { mail_id: 7, customer_name: 'Acme', mail_received_at: '2026-11-20T10:00:00Z', mail_items: 3 }),
+    row(2, 'costed', { mail_id: 7, customer_name: 'Acme', mail_received_at: '2026-11-20T10:00:00Z', mail_items: 3,
+      prices: [{ qty: 1000, final: 11, cost: 10 }, { qty: 5000, final: 9, cost: 8 }] }),
+    row(3, 'countered', { mail_id: 7, customer_name: 'Acme', mail_received_at: '2026-11-20T10:00:00Z', mail_items: 3,
+      prices: [{ qty: 2000, final: 5, cost: 4, theirs: 4.5 }] }),
+    row(4, 'sent', { customer_name: 'Bolt', created_at: '2026-11-21T09:00:00Z', prices: [{ qty: 100, final: 2, cost: 1 }] }),
+    row(5, 'new', { customer_name: 'Bolt', created_at: '2026-11-21T11:00:00Z' }),
+  ];
+  const [bolt, acme] = batchesOf(rows);
+  assert.equal(bolt.key, 'tbolt|2026-11-21');
+  assert.deepEqual(bolt.rows.map(r => r.id), [4, 5]);
+  assert.equal(bolt.counts.mailed, 1);
+  assert.equal(bolt.counts.to_cost, 1);
+  assert.equal(acme.mail_id, 7);
+  assert.deepEqual(acme.counts, { to_cost: 1, to_price: 1, counter: 1, quoted: 0, mailed: 0, won: 0, lost: 0 });
+  assert.equal(acme.pending, 3);
+  assert.equal(acme.value, 11000 + 10000);
+  assert.equal(acme.cost, 10000 + 8000);
+  assert.equal(acme.profit, 3000);
+  assert.equal(acme.pct, (3000 / 18000) * 100);
+  assert.equal(acme.asked_pct, -10, 'they ask 4.5 against our 5');
+  assert.deepEqual(customersOf(rows), [{ name: 'Acme', n: 3 }, { name: 'Bolt', n: 2 }]);
+});

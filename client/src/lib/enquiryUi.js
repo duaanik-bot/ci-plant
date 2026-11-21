@@ -92,6 +92,57 @@ export function decisionSummary(rows = []) {
   };
 }
 
+// Batches (owner, 21 Nov 2026: "the whole batch on page 1, and then the list view of the products … batch-wise
+// calculation … which customer, what products it is having pending"): one batch per mail — a customer's whole enquiry —
+// and, for enquiries typed in by hand, one per customer and day. Each batch counts its rows by where they stand and adds up
+// its money at each row's first quantity: our price, our cost, the profit between, and what they ask where they countered.
+const firstPrice = e => (e.prices || [])[0] || null;
+export function batchesOf(rows = []) {
+  const by = new Map();
+  for (const e of rows) {
+    const day = String(e.created_at || '').slice(0, 10);
+    const key = e.mail_id ? `m${e.mail_id}` : `t${(e.customer_name || e.contact_email || '').toLowerCase()}|${day}`;
+    let b = by.get(key);
+    if (!b) {
+      b = { key, mail_id: e.mail_id || null, customer: e.customer_name || e.contact_email || 'Customer', subject: e.mail_subject || (e.mail_id ? '' : 'typed in'),
+        received: e.mail_received_at || e.created_at, of: e.mail_items || null, rows: [],
+        counts: { to_cost: 0, to_price: 0, counter: 0, quoted: 0, mailed: 0, won: 0, lost: 0 },
+        value: 0, cost: 0, priced: 0, theirs: 0, theirs_base: 0 };
+      by.set(key, b);
+    }
+    b.rows.push(e);
+    const band = bandOf(e);
+    if (COST_STAGES.includes(e.stage)) b.counts.to_cost++;
+    else if (PRICE_STAGES.includes(e.stage)) b.counts.to_price++;
+    else if (band === 'counter') b.counts.counter++;
+    else if (band === 'finalised') b.counts.won++;
+    else if (band === 'lost') b.counts.lost++;
+    else if (band === 'mailed') b.counts.mailed++;
+    else if (e.stage === 'quote_ready') b.counts.quoted++;
+    const p = firstPrice(e);
+    const price = p ? Number(p.final ?? p.ours ?? p.proposed) : NaN;
+    const cost = p ? Number(p.cost) : NaN;
+    const qty = p ? Number(p.qty) || 0 : 0;
+    if (Number.isFinite(price) && price > 0 && Number.isFinite(cost) && cost > 0) {
+      b.value += price * qty; b.cost += cost * qty; b.priced++;
+      if (p.theirs != null && Number(p.theirs) > 0) { b.theirs += Number(p.theirs) * qty; b.theirs_base += price * qty; }
+    }
+  }
+  return [...by.values()].map(b => ({
+    ...b,
+    profit: b.priced ? b.value - b.cost : null,
+    pct: b.cost ? ((b.value - b.cost) / b.cost) * 100 : null,
+    // what their counter asks off our price, over the rows they countered
+    asked_pct: b.theirs_base ? ((b.theirs - b.theirs_base) / b.theirs_base) * 100 : null,
+    pending: b.counts.to_cost + b.counts.to_price + b.counts.counter,
+  })).sort((x, y) => String(y.received).localeCompare(String(x.received)));
+}
+// The customers on the desk, most rows first: [{ name, n }].
+export const customersOf = (rows = []) => [...rows.reduce((m, e) => {
+  const k = e.customer_name || e.contact_email || 'Customer';
+  return m.set(k, (m.get(k) || 0) + 1);
+}, new Map())].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+
 export const rowsOfTab = (tab, rows) => {
   const t = DESK_TABS.find(x => x.key === tab);
   if (!t || !rows) return rows || [];

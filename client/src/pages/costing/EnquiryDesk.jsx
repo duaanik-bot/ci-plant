@@ -20,7 +20,7 @@ import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, M
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, bookedPL, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
+  BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, batchesOf, bookedPL, customersOf, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, STAGE_TONE, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
   moveSummary, moveTone, quantitiesText, replyLine, qtyText, rupees, startsFresh, whereText,
 } from '../../lib/enquiryUi.js';
 import COMPANY_ROUTINE_PROMPT from '../../lib/enquiry-robot/company-routine-prompt.md?raw';
@@ -182,6 +182,102 @@ function AutoNotes({ e }) {
   );
 }
 
+// View and customer chips (21 Nov 2026): Batches · List, then each customer on this tab with its count.
+function ViewChips({ view, onView, customers, customer, onCustomer, batchKey, onClearBatch }) {
+  const chip = (on, label, onClick, key) => (
+    <button key={key} type="button" onClick={onClick}
+      className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${on ? 'bg-[#1D1D1F] text-white ring-[#1D1D1F]' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}>{label}</button>
+  );
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-xs font-semibold text-slate-500">View:</span>
+      {chip(view === 'batch', 'Batches', () => onView('batch'), 'vb')}
+      {chip(view === 'list', 'List', () => onView('list'), 'vl')}
+      {batchKey && (
+        <button type="button" onClick={onClearBatch} className="rounded-full bg-brand-600 px-3 py-1 text-xs font-bold text-white">
+          One batch only · <X size={11} className="inline" />
+        </button>
+      )}
+      {customers.length > 1 && <>
+        <span className="ml-3 mr-1 text-xs font-semibold text-slate-500">Customer:</span>
+        {chip(!customer, `All · ${customers.reduce((s, c) => s + c.n, 0)}`, () => onCustomer(null), 'call')}
+        {customers.map(c => chip(customer === c.name, `${c.name} · ${c.n}`, () => onCustomer(customer === c.name ? null : c.name), `c${c.name}`))}
+      </>}
+    </div>
+  );
+}
+
+// The batch view: one card per batch — the customer, the mail, how many of its products wait for costing, a price or a
+// counter, and the batch's money at each product's first quantity (our price, our cost, the profit; what they ask). Each
+// product is a line that opens its drawer; "Tick the batch" ticks them all for the buttons below.
+const COUNT_CHIP = [
+  ['to_cost', 'to cost', 'bg-orange-100 text-orange-800'], ['to_price', 'to price', 'bg-amber-100 text-amber-900'],
+  ['counter', 'counter', 'bg-amber-200 text-amber-900'], ['quoted', 'quoted', 'bg-indigo-100 text-indigo-800'],
+  ['mailed', 'mailed', 'bg-sky-100 text-sky-800'], ['won', 'won', 'bg-emerald-100 text-emerald-800'], ['lost', 'lost', 'bg-red-100 text-red-800'],
+];
+function BatchCards({ batches, picked, statuses, flash, onTick, onOpen, onList, empty }) {
+  if (!batches.length) return <div className="glass rounded-2xl p-6 text-center text-sm text-slate-500">{empty}</div>;
+  return (
+    <div className="grid gap-3 xl:grid-cols-2">
+      {batches.map(b => {
+        const n = b.rows.filter(r => picked.includes(r.id)).length;
+        const all = n === b.rows.length;
+        return (
+          <section key={b.key} className={`glass rounded-2xl p-3 ring-1 ${all ? 'ring-brand-400' : 'ring-transparent'}`}>
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold text-[#1D1D1F]">{b.customer}</div>
+                <div className="truncate text-[11px] text-slate-500">{b.mail_id ? `M${b.mail_id} · ` : ''}{b.subject ? `“${b.subject}” · ` : ''}{dateText(b.received)}
+                  {' · '}{b.rows.length} product{b.rows.length === 1 ? '' : 's'}{b.of && b.of > b.rows.length ? ` here of ${b.of}` : ''}</div>
+              </div>
+              <button type="button" onClick={() => onTick(b)}
+                className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${all ? 'bg-brand-600 text-white ring-brand-600' : 'bg-white text-brand-700 ring-brand-200 hover:bg-brand-50'}`}>
+                {all ? 'Batch ticked' : n ? `${n} of ${b.rows.length} ticked · tick all` : 'Tick the batch'}
+              </button>
+              <button type="button" onClick={() => onList(b)} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">Open as a list</button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {COUNT_CHIP.filter(([k]) => b.counts[k]).map(([k, label, cls]) => (
+                <span key={k} className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${cls}`}>{b.counts[k]} {label}</span>
+              ))}
+            </div>
+            {b.priced > 0 && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <span><span className="text-slate-500">Our price</span> <b>{rupees(b.value, 0)}</b></span>
+                <span><span className="text-slate-500">Our cost</span> <b>{rupees(b.cost, 0)}</b></span>
+                <span className={b.profit < 0 ? 'text-red-700' : 'text-emerald-700'}><span className="text-slate-500">{b.profit < 0 ? 'Loss' : 'Profit'}</span> <b>{b.profit < 0 ? '−' : '+'}{rupees(Math.abs(b.profit), 0)}</b>{b.pct != null && ` · ${b.pct < 0 ? '−' : '+'}${Math.abs(b.pct).toFixed(1)}%`}</span>
+                {b.asked_pct != null && <span className="text-amber-800"><span className="text-slate-500">They ask</span> <b>{rupees(b.theirs, 0)}</b> · {b.asked_pct.toFixed(1)}% on our price</span>}
+                <span className="text-[10px] text-slate-400">{b.priced} of {b.rows.length} priced · at each product's first quantity</span>
+              </div>
+            )}
+            <ul className="mt-2 divide-y divide-slate-100 rounded-xl bg-white/60 ring-1 ring-slate-100">
+              {b.rows.map(e => {
+                const p = (e.prices || [])[0];
+                const price = p ? Number(p.final ?? p.ours ?? p.proposed) : null;
+                const cost = p ? Number(p.cost) : null;
+                const pct = price > 0 && cost > 0 ? ((price - cost) / cost) * 100 : null;
+                return (
+                  <li key={e.id}>
+                    <button type="button" onClick={() => onOpen(e.id)}
+                      className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-brand-50/60 ${DECISION_ROW[decisionOf(e)] || ''} ${e.id === flash ? 'desk-flash-row ring-2 ring-inset ring-brand-400' : ''}`}>
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${picked.includes(e.id) ? 'bg-brand-600' : 'bg-slate-200'}`} />
+                      <span className="min-w-0 flex-1 truncate font-semibold text-[#1D1D1F]" title={e.product_name}>{e.product_name || '—'}</span>
+                      <span className="w-20 text-right tabular-nums text-slate-600">{quantitiesText((e.quantities || []).slice(0, 1))}</span>
+                      <span className="w-16 text-right font-bold tabular-nums">{price > 0 ? rupees(price, 2) : '—'}</span>
+                      <span className={`w-14 text-right text-[10px] font-semibold ${pct == null ? 'text-slate-300' : pct < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{pct == null ? '' : `${pct < 0 ? '−' : '+'}${Math.abs(pct).toFixed(1)}%`}</span>
+                      <span className={`w-36 truncate rounded-full px-2 py-0.5 text-center text-[10px] font-bold ${STAGE_TONE[e.stage] || 'bg-slate-100 text-slate-600'}`}>{statuses?.[e.stage] || e.stage}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 // The status band (21 Nov 2026): where a row stands — Pending · Sent · Mailed · Counter · Finalised — as a coloured pill
 // over five steps, and under it the finer word (Costing in progress, the quotation's number, the order's number).
 function StatusBand({ e, statuses }) {
@@ -271,6 +367,12 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [decision, setDecision] = useState('any'); // All: any · open · won · lost
   const [losing, setLosing] = useState(null);     // Order lost: { ids, reason }
   const [flash, setFlash] = useState(null);
+  // Batches or the list (owner, 21 Nov 2026: "the whole batch on page 1, and then the list view of the products … in the chip
+  // system"); kept for the next visit. A customer chip and a batch's "Open as a list" filter either view.
+  const [view, setView] = useState(() => (typeof localStorage !== 'undefined' && localStorage.getItem('ci_enq_view')) || 'batch');
+  const [customer, setCustomer] = useState(null);
+  const [batchKey, setBatchKey] = useState(null);
+  const pickView = v => { setView(v); try { localStorage.setItem('ci_enq_view', v); } catch { /* private mode */ } };
   // Before any mail draft is made (21 Nov 2026: "do we want to send this as the mail or not?"): { title, text, run(draft) }
   const [asking, setAsking] = useState(null);
   // A price changed on a quotation not yet sent: { e, changes: [{ qty, from, to }] } — "change the draft too?"
@@ -382,11 +484,13 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const shown = useMemo(() => {
     const s = search.trim().toLowerCase();
-    const inTab = rowsOfTab(tab, rows).filter(e => tab !== 'all' || decision === 'any' || decisionOf(e) === decision);
+    const inTab = rowsOfTab(tab, rows).filter(e => (tab !== 'all' || decision === 'any' || decisionOf(e) === decision)
+      && (!customer || (e.customer_name || e.contact_email || 'Customer') === customer)
+      && (!batchKey || batchesOf([e])[0]?.key === batchKey));
     if (!s) return inTab;
     return inTab.filter(e => [e.enquiry_no, e.customer_name, e.product_name, e.size_text, e.contact_email, e.mail_subject, e.quotation_no, e.costing_no]
       .some(x => String(x || '').toLowerCase().includes(s)));
-  }, [rows, search, tab, decision]);
+  }, [rows, search, tab, decision, customer, batchKey]);
   const pickedRows = shown.filter(e => picked.includes(e.id));
   const toggle = (r, on) => setPicked(p => (on ? [...new Set([...p, r.id])] : p.filter(x => x !== r.id)));
   const toggleAll = (rs, on) => setPicked(on ? rs.map(r => r.id) : []);
@@ -894,8 +998,18 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <p className="mb-2 text-xs text-slate-500">Orders the customer agreed. <b>Order finalised</b> keeps the order with the rate agreed and the loss where it was booked below our cost, and sends the order sheet — the table of items, rates, output sheets, ups, boards and dies, with the KLDs — to the company mailbox. Click an order to see it line by line.</p>
       )}
       {tab === 'orders' && <OrdersList canSend={!!mgmt} signal={ordersSignal} />}
-      {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
-      {stages && (
+      {stages && tab !== 'dropped' && rows && (
+        <ViewChips view={view} onView={pickView} customers={customersOf(rowsOfTab(tab, rows))} customer={customer}
+          onCustomer={c => { setCustomer(c); setBatchKey(null); }} batchKey={batchKey} onClearBatch={() => setBatchKey(null)} />
+      )}
+      {stages && tab !== 'dropped' && view === 'batch' && rows && (
+        <BatchCards batches={batchesOf(tableRows)} picked={picked} statuses={desk.statuses} flash={flash}
+          onTick={b => toggleMail({ ids: b.rows.map(r => r.id) })} onOpen={id => setOpen(id)}
+          onList={b => { setBatchKey(b.key); pickView('list'); }}
+          empty={tab === 'pending' ? 'Nothing pending. Press "Fetch from mail" for new enquiries.' : 'Nothing here.'} />
+      )}
+      {stages && (tab === 'dropped' || view === 'list') && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
+      {stages && (tab === 'dropped' || view === 'list') && (
         <DataTable rows={tableRows} columns={columns} onRowClick={e => setOpen(e.id)}
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
           rowClass={e => [DECISION_ROW[decisionOf(e)] || (e.status === 'new' ? NEW_ENQUIRY_ROW : ''), e.id === flash ? 'desk-flash-row ring-2 ring-inset ring-brand-400' : ''].filter(Boolean).join(' ')}
