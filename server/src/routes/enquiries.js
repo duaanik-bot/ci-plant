@@ -216,6 +216,12 @@ const linkOf = key => one('SELECT * FROM gmail_links WHERE mailbox = $1', [key])
 const LINK_VIEW = `mailbox, email, connected_at, connected_by_name, last_used_at, last_error, last_error_at, scope`;
 // What the settings show of a link: may it read mail (artwork threads, 18 Nov 2026)? The scope list itself stays here.
 const linkShown = ({ scope, ...l }) => ({ ...l, can_read: readAllowed({ scope }) });
+// A reply saved in a mailbox the customer's mail did not come in to finds the customer's thread there by SEARCHING that
+// Gmail (threadOfMessageId). A link connected with "metadata only" access may not search — Google refuses it — and the
+// draft would quietly start a new conversation (seen live 21 Nov 2026, dua.anik). So it is refused, with what to do.
+const searchOrRefuse = link => {
+  if (!readAllowed(link)) throw fail(409, `${link.email}'s Gmail was connected with limited access, so its reply cannot be put in the customer's thread. Open the desk Settings, press Connect Gmail for ${link.email} again and allow reading mail — then send again.`);
+};
 
 // Drafts the person has since sent from Gmail → Sent. At most once a minute per server, a few seconds at most, and
 // never in the way of the desk: any trouble is only noted on the link.
@@ -361,10 +367,10 @@ r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
 const SENDERS = ['business', 'trial'];
 async function senders() {
   const on = gmailConfigured();
-  const links = on ? await q('SELECT mailbox, email FROM gmail_links') : [];
+  const links = on ? await q('SELECT mailbox, email, scope FROM gmail_links') : [];
   return (await mailboxes()).filter(b => SENDERS.includes(b.key)).map(b => {
     const link = links.find(l => l.mailbox === b.key);
-    return { key: b.key, email: link?.email || b.email, label: b.label, send_to: b.send_to, connected: !!link };
+    return { key: b.key, email: link?.email || b.email, label: b.label, send_to: b.send_to, connected: !!link, can_read: !!link && readAllowed(link) };
   });
 }
 r.get('/costing/enquiry-desk/senders', async (_req, res, next) => {
@@ -1299,9 +1305,10 @@ r.post('/costing/enquiry-orders/:id(\\d+)/confirm-draft', async (req, res, next)
     // The same draft again when it is in the same mailbox; a fresh one when the person chose another mailbox.
     const draftId = o.customer_draft_mailbox === box.key ? o.customer_draft_id : null;
     let d, to = [recipient.to], cc = [];
+    const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
+    if (elsewhere) searchOrRefuse(link);
     try {
       const token = await accessToken(link);
-      const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
       let hdr;
       if (elsewhere) {
         const home = gmailConfigured() ? await linkOf(mail.mailbox) : null;
@@ -1450,7 +1457,10 @@ async function sendQuotations(list, u, { draft = true, from = null } = {}) {
     const toQuote = rows.filter(e => e.status === 'quote_ready' && (!e.quotation_id || e.q_status === 'cancelled')).map(e => e.id);
     const made = toQuote.length ? await makeQuotations(toQuote, u, { supersedes }) : [];
     // 3. A Gmail draft for each new quotation, and for an earlier quotation of these enquiries still without one.
-    const quoteIds = !draft ? [] : [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
+    // A quotation already drafted is drafted again when the person chose the mailbox on this press (owner, 21 Nov 2026:
+    // drafted from dua.anik, then Send from mppchd "left out" — it is saved again there; the same mailbox updates its draft).
+    const again = e => e.quotation_id && (e.q_status === 'ready' || (from && e.q_status === 'drafted'));
+    const quoteIds = !draft ? [] : [...new Set([...made.map(x => x.id), ...rows.filter(again).map(e => e.quotation_id)])];
     const drafted = [], failed = [];
     for (const id of quoteIds) {
       try { const j = await queueDraft(id, u, { from }); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id, now: !!j.drafted_now, view_url: j.view_url || null }); }
@@ -1458,7 +1468,7 @@ async function sendQuotations(list, u, { draft = true, from = null } = {}) {
     }
     for (const e of rows) {
       if (!draft && e.quotation_id && e.q_status === 'ready') skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} already — no mail draft made` });
-      if (e.quotation_id && ['queued', 'drafted', 'sent'].includes(e.q_status)) skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} (${e.q_status})` });
+      if (e.quotation_id && ['queued', 'drafted', 'sent'].includes(e.q_status) && !(draft && again(e))) skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} (${e.q_status})` });
     }
     return { quotations: made, drafted, failed, skipped, undo: group };
 }
@@ -1602,11 +1612,12 @@ async function queueDraft(id, u, { from = null } = {}) {
 // and the reason is shown; nothing is half-done.
 async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u, moved = null }) {
   let d;
+  // The customer's mail came in to ANOTHER mailbox (the reply goes out from the one the person chose): its headers are
+  // read there, and the reply joins the same conversation here by the mail's own Message-ID (threadOfMessageId).
+  const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
+  if (elsewhere) searchOrRefuse(link);
   try {
     const token = await accessToken(link);
-    // The customer's mail came in to ANOTHER mailbox (the reply goes out from the one the person chose): its headers are
-    // read there, and the reply joins the same conversation here by the mail's own Message-ID (threadOfMessageId).
-    const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
     let hdr;
     if (elsewhere) {
       const home = gmailConfigured() ? await linkOf(mail.mailbox) : null;
@@ -1621,7 +1632,7 @@ async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u, moved = 
     const raw = rawOf(buildMime({ from: link.email, to: brief.to, cc: brief.cc || [], subject: brief.subject, text: brief.text, html: brief.html,
       inReplyTo: hdr.inReplyTo, references: hdr.references }));
     d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || (elsewhere ? null : mail?.gmail_thread_id) || null, draftId: qt.gmail_draft_id });
-    brief.threaded = !!hdr.inReplyTo;
+    brief.threaded = elsewhere ? !!hdr.threadId : !!hdr.inReplyTo; // from elsewhere: only when the thread was found there
   } catch (e) {
     if (e.expired) forgetToken(box.key);
     await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [box.key, String(e.message).slice(0, 500)]);

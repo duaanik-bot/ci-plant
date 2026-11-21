@@ -26,6 +26,9 @@ export default function SenderPicker() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold text-[#1D1D1F]">{s.email}</span>
               <span className="block text-xs text-[#86868B]">{s.key === 'business' ? 'Company mailbox' : 'Your own mailbox'}{s.key === ask.current ? ' · the enquiry came here' : ''}</span>
+              {s.can_read === false && (
+                <span className="block text-xs text-[#B25000]">Limited Gmail access — press Connect Gmail for it again in Settings to reply in the customer's thread</span>
+              )}
             </span>
           </button>
         ))}

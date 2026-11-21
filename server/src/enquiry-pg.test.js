@@ -1283,6 +1283,10 @@ describe('Enquiry desk — through the real app', {
           const m = JSON.parse(body).message; G.raws.push(m.raw); G.posted.push(m);
           return send(200, { id: 'td-1', message: { id: 'tmsg-1', threadId: m.threadId || 't-new' } });
         }
+        if (p === '/drafts' && req.method === 'POST' && who === 'Bearer at-biz') {
+          const m = JSON.parse(body).message; G.bizPosted = [...(G.bizPosted || []), m];
+          return send(200, { id: 'bd-1', message: { id: 'bmsg-1', threadId: m.threadId || 'b-new' } });
+        }
         return send(404, { error: { message: `no fake for ${who} ${req.method} ${p}` } });
       });
     });
@@ -1309,11 +1313,21 @@ describe('Enquiry desk — through the real app', {
       assert.match(notYet.body.error, /Connect .*Gmail in the desk Settings first/);
 
       const trialEmail = (await db.one(`SELECT email FROM enquiry_mailboxes WHERE key = 'trial'`)).email;
-      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ('business', 'mppchd@gmail.com', $1, 'T'), ('trial', $2, $3, 'T')`,
-        [sealToken('1//biz'), trialEmail, sealToken('1//trial')]);
+      // As on live (21 Nov 2026): the trial mailbox connected with "metadata only" read access — it may not search.
+      const FULL = 'https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.readonly';
+      const META = 'https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.metadata';
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name, scope) VALUES ('business', 'mppchd@gmail.com', $1, 'T', $4), ('trial', $2, $3, 'T', $5)`,
+        [sealToken('1//biz'), trialEmail, sealToken('1//trial'), FULL, META]);
       await db.q(`UPDATE enquiry_mailboxes SET send_to = 'customers' WHERE key = 'trial'`); // as on live (21 Nov 2026)
       s = await call('clerk', 'GET', '/costing/enquiry-desk/senders');
-      assert.deepEqual(s.body.senders.map(x => [x.key, x.connected]).sort(), [['business', true], ['trial', true]]);
+      assert.deepEqual(s.body.senders.map(x => [x.key, x.connected, x.can_read]).sort(), [['business', true, true], ['trial', true, false]]);
+      // It cannot find the customer's thread, so it refuses — never a draft that quietly starts a new conversation.
+      const limited = await call('clerk', 'POST', `/costing/quotations/${qt0.id}/draft`, { from: 'trial' });
+      assert.equal(limited.status, 409);
+      assert.match(limited.body.error, /limited access.*Connect Gmail .* again/);
+      assert.equal(G.posted.length, 0, 'no draft made');
+      assert.equal((await db.one('SELECT mailbox, status FROM quotations WHERE id = $1', [qt0.id])).mailbox, 'business', 'the quotation is as it was');
+      await db.q(`UPDATE gmail_links SET scope = $1 WHERE mailbox = 'trial'`, [FULL]); // connected again, reading allowed
 
       // Sent from the trial mailbox: saved there now, to the customer (reply-all), threaded under their mail.
       const r = await call('clerk', 'POST', `/costing/quotations/${qt0.id}/draft`, { from: 'trial' });
@@ -1336,6 +1350,22 @@ describe('Enquiry desk — through the real app', {
       assert.equal(ev.detail.from, trialEmail);
       assert.equal(ev.detail.moved_from, 'business');
       assert.equal(ev.detail.threaded, true);
+
+      // Then Send quotation from the company mailbox on the same enquiry (owner, 21 Nov 2026: it said "left out"): the
+      // drafted quotation is drafted again there, in the customer's thread — not left out.
+      const enq = await db.one('SELECT id FROM enquiries WHERE quotation_id = $1 ORDER BY id LIMIT 1', [qt0.id]);
+      const back = await call('md', 'POST', '/costing/quotations/send', { ids: [enq.id], from: 'business' });
+      assert.equal(back.status, 201, JSON.stringify(back.body));
+      assert.deepEqual(back.body.skipped, [], 'nothing left out');
+      assert.equal(back.body.drafted.length, 1);
+      assert.equal(G.bizPosted?.length, 1, 'the draft is saved in the company mailbox');
+      assert.equal(G.bizPosted[0].threadId, 'avs-t1', 'in the customer\'s own thread there');
+      const after = await db.one('SELECT mailbox, gmail_draft_id FROM quotations WHERE id = $1', [qt0.id]);
+      assert.deepEqual([after.mailbox, after.gmail_draft_id], ['business', 'bd-1']);
+      // With no mailbox chosen (one connected, or the old client) a drafted quotation is still left out, as before.
+      const plain = await call('md', 'POST', '/costing/quotations/send', { ids: [enq.id] });
+      assert.equal(plain.body.drafted.length, 0);
+      assert.match(plain.body.skipped[0]?.why || '', /\(drafted\)/);
     } finally {
       await db.q(`UPDATE enquiry_mailboxes SET send_to = $1 WHERE key = 'trial'`, [trialWas]);
       await db.q('DELETE FROM gmail_links');
