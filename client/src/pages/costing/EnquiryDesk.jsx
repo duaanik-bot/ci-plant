@@ -506,25 +506,75 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     await savePrices([e]);
     setUnlocked(u => { const n = new Set(u); n.delete(e.id); return n; });
   };
-  // The price boxes, on a row waiting for its price.
-  const priceCell = e => {
+  // A counter, in its row (owner, 21 Nov 2026: "integrate that into the row level … we don't need this completely different
+  // block"): per quantity, what we quoted, what they ask, our revised price — and each against our actual cost.
+  const counterRow = e => ({ ...e, prices: (e.prices || []).map(p => {
+    const t = theirs[keyOf(e.id, p.qty)];
+    return t === undefined ? p : { ...p, theirs: t === '' ? null : Number(t) };
+  }) });
+  const counterOf = list => counterLines(list.map(counterRow), Object.fromEntries(list.flatMap(e => (e.prices || []).map(p => [keyOf(e.id, p.qty), prices[keyOf(e.id, p.qty)]])).filter(([, v]) => v !== undefined)));
+  // Three columns, one line per quantity, lined up across them (owner, 21 Nov 2026: "in the columns … what we calculate,
+  // what we want to give, what the customer asks us to finalise at … everything at the row level"). Every price is shown
+  // against our actual cost a carton: ₹ and %.
+  const qtyLines = e => ((e.prices || []).length ? e.prices : (e.quantities || []).map(q => ({ qty: q })));
+  const LINE = 'flex h-9 items-center gap-1.5 whitespace-nowrap text-xs';
+  const vsCost = (price, cost) => {
+    const pr = Number(price), c = Number(cost);
+    if (!(pr > 0) || !(c > 0)) return null;
+    const unit = pr - c;
+    return <span className={`text-[10px] font-semibold ${plTone(unit)}`} title="Against our actual cost a carton">{signedRs(unit, 3)} · {signedPct((unit / c) * 100)}</span>;
+  };
+  const box = (e, p, { value, onChange, onBlur, tone = '', readOnly = false, title, label }) => (
+    <Input className={`!h-8 !w-20 text-right text-xs ${tone}`} inputMode="decimal" value={value} readOnly={readOnly} title={title}
+      onChange={onChange} onBlur={onBlur} onKeyDown={onBlur ? ev => { if (ev.key === 'Enter') ev.currentTarget.blur(); } : undefined}
+      aria-label={`${label}, ${e.enquiry_no} ${p.qty}`} />
+  );
+  const setPrice = k => ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); };
+
+  // 1. What we calculate: the costing's price to quote (should-cost), and our actual cost under it.
+  const calcCol = { key: 'calc', label: 'We calculate', render: e => {
+    const ls = qtyLines(e);
+    if (!ls.length) return <span className="text-xs text-slate-400">—</span>;
+    return (
+      <div>{ls.map(p => (
+        <div key={p.qty} className={LINE}>
+          <b className="w-14 text-right">{qtyText(p.qty)}</b>
+          <span className="font-semibold" title="What the costing works out to quote (should-cost)">{p.proposed != null ? rupees(p.proposed, 3) : '—'}</span>
+          {p.cost != null && <span className="text-[10px] text-slate-500" title="Our actual cost a carton, before margin">cost {rupees(p.cost, 3)}</span>}
+        </div>
+      ))}</div>
+    );
+  } };
+
+  // 2. What we give: the price box while it is being set (or revised after a counter, or changed on an unsent quotation),
+  // the price quoted after, and — once ordered — the rate booked with its profit or loss.
+  const giveCol = { key: 'give', label: 'We give', render: e => {
+    const pl = e.stage === 'ordered' ? bookedPL(e) : null;
+    if (pl) {
+      return (
+        <div className="space-y-0.5 text-xs">
+          <div><b>{qtyText(pl.qty)}</b> @ <b>{rupees(pl.rate, 2)}</b> <span className="text-slate-500">booked</span></div>
+          <div className={`font-bold ${plTone(pl.total)}`}>{pl.total < 0 ? 'Loss' : 'Profit'} {signedRs(pl.total)} · {signedPct(pl.pct)}</div>
+          <div className={`text-[10px] ${plTone(pl.unit)}`}>{signedRs(pl.unit, 3)} a carton, on cost</div>
+        </div>
+      );
+    }
+    const ls = (e.prices || []);
+    if (!ls.length) return <span className="text-xs text-slate-400">—</span>;
+    const k = p => keyOf(e.id, p.qty);
+    if (PRICE_STAGES.includes(e.stage)) {
       const locked = isLocked(e);
       return (
-        <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
-          {(e.prices || []).map(p => {
-            const k = `${e.id}|${p.qty}`;
-            return (
-              <div key={p.qty} className="flex items-center gap-2 text-xs">
-                <span className="w-16 text-right font-semibold">{qtyText(p.qty)}</span>
-                <span className="w-20 text-right text-slate-500" title="Worked out by the costing — the box starts at it">{rupees(p.proposed, 3)}</span>
-                <Input className={`!h-8 w-24 text-right ${locked ? '!bg-emerald-50 font-bold text-emerald-900' : ''}`} inputMode="decimal" value={prices[k] ?? ''} readOnly={locked}
-                  title={locked ? 'Locked — press Unlock to change it' : 'Type the price to quote'}
-                  onChange={ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); }} />
-                {p.changed && <span className="font-semibold text-amber-700" title={`Set against ${rupees(p.set_against, 3)}`}>costing changed</span>}
-              </div>
-            );
-          })}
-          {(e.prices || []).length > 0 && (locked ? (
+        <div onClick={ev => ev.stopPropagation()}>
+          {ls.map(p => (
+            <div key={p.qty} className={LINE}>
+              {box(e, p, { value: prices[k(p)] ?? '', onChange: setPrice(k(p)), readOnly: locked, label: 'Price to quote',
+                tone: locked ? '!bg-emerald-50 font-bold text-emerald-900' : '', title: locked ? 'Locked — press Unlock to change it' : 'Type the price to quote' })}
+              {vsCost(prices[k(p)], p.cost)}
+              {p.changed && <span className="font-semibold text-amber-700" title={`Set against ${rupees(p.set_against, 3)}`}>costing changed</span>}
+            </div>
+          ))}
+          {locked ? (
             <button type="button" onClick={() => setUnlocked(u => new Set(u).add(e.id))}
               className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-200">
               <Lock size={11} />Locked · Unlock
@@ -534,105 +584,114 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
               className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100">
               <LockOpen size={11} />Lock this price
             </button>
-          ))}
-        </div>
-      );
-  };
-  // A counter, in its row (owner, 21 Nov 2026: "integrate that into the row level … we don't need this completely different
-  // block"): per quantity, what we quoted, what they ask, our revised price — and each against our actual cost.
-  const counterRow = e => ({ ...e, prices: (e.prices || []).map(p => {
-    const t = theirs[keyOf(e.id, p.qty)];
-    return t === undefined ? p : { ...p, theirs: t === '' ? null : Number(t) };
-  }) });
-  const counterOf = list => counterLines(list.map(counterRow), Object.fromEntries(list.flatMap(e => (e.prices || []).map(p => [keyOf(e.id, p.qty), prices[keyOf(e.id, p.qty)]])).filter(([, v]) => v !== undefined)));
-  const counterCell = e => (
-    <div className="space-y-1.5" onClick={ev => ev.stopPropagation()}>
-      {counterOf([e]).map(l => {
-        const k = keyOf(e.id, l.qty);
-        const tc = l.theirs_vs.cost;
-        const rc = l.revised_vs.cost;
-        return (
-          <div key={l.qty} className="text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="w-14 text-right font-semibold">{qtyText(l.qty)}</span>
-              <span className="w-16 text-right text-slate-500" title="What we quoted">{rupees(l.ours, 2)}</span>
-              <label className="flex items-center gap-1 text-[10px] font-bold uppercase text-amber-800">ask
-                <Input className="!h-7 !w-16 text-right text-xs" inputMode="decimal" value={theirs[k] ?? (l.theirs != null ? String(l.theirs) : '')} placeholder="—"
-                  onChange={ev => setTheirs(x => ({ ...x, [k]: ev.target.value }))} aria-label={`Their price, ${e.enquiry_no} ${l.qty}`} />
-              </label>
-              <label className="flex items-center gap-1 text-[10px] font-bold uppercase text-brand-700">revised
-                <Input className={`!h-7 !w-16 text-right text-xs font-bold ${l.revised_below_cost ? '!text-red-700' : ''}`} inputMode="decimal" value={prices[k] ?? ''}
-                  onChange={ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); }} aria-label={`Revised price, ${e.enquiry_no} ${l.qty}`} />
-              </label>
-            </div>
-            <div className="mt-0.5 flex gap-3 pl-[8.5rem] text-[10px]">
-              <span className={plTone(tc?.unit)} title="Their price against our actual cost">ask vs cost {tc ? `${signedRs(tc.unit, 3)} · ${signedPct(tc.pct)}` : '—'}</span>
-              <span className={`font-bold ${plTone(rc?.unit)}`} title="Our revised price against our actual cost">revised vs cost {rc ? `${signedRs(rc.unit, 3)} · ${signedPct(rc.pct)}` : '—'}</span>
-            </div>
-          </div>
-        );
-      })}
-      {e.counter_subject && (
-        <div className="text-[10px] text-slate-500">“{e.counter_subject}”{e.counter_view_url && <> · <a href={e.counter_view_url} target="_blank" rel="noreferrer" className="font-semibold text-brand-700 hover:underline">open the mail</a></>}</div>
-      )}
-    </div>
-  );
-  // Quantities — and, from costed on, the prices: boxes while the price is being set, the quoted price after.
-  const priceCol = { key: 'prices', label: 'Quantity · costing proposes · price a carton', render: e => {
-    if (PRICE_STAGES.includes(e.stage)) return priceCell(e);
-    if (e.stage === 'countered') return counterCell(e);
-    const pl = e.stage === 'ordered' ? bookedPL(e) : null;
-    if (pl) {
-      return (
-        <div className="space-y-0.5 text-xs">
-          <div><b>{qtyText(pl.qty)}</b> @ <b>{rupees(pl.rate, 2)}</b> <span className="text-slate-500">booked · cost {rupees(pl.cost, 3)}</span></div>
-          <div className={`font-bold ${plTone(pl.total)}`}>{pl.total < 0 ? 'Loss' : 'Profit'} {signedRs(pl.total)} · {signedPct(pl.pct)} <span className="font-normal">on cost</span></div>
-          <div className={`text-[11px] ${plTone(pl.unit)}`}>{signedRs(pl.unit, 3)} a carton</div>
+          )}
         </div>
       );
     }
-    const fin = (e.prices || []).filter(p => p.final != null);
+    if (e.stage === 'countered') {
+      return (
+        <div onClick={ev => ev.stopPropagation()}>
+          {ls.map(p => (
+            <div key={p.qty} className={LINE}>
+              <span className="w-12 text-right text-[10px] text-slate-500" title="What we quoted before their counter">was {rupees(p.ours ?? p.final, 2)}</span>
+              {box(e, p, { value: prices[k(p)] ?? '', onChange: setPrice(k(p)), label: 'Revised price', title: 'Our revised price',
+                tone: Number(prices[k(p)]) < Number(p.cost) ? 'font-bold !text-red-700' : 'font-bold' })}
+              {vsCost(prices[k(p)], p.cost)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    const fin = ls.filter(p => p.final != null);
     // On a quotation not yet sent (made, or a draft in Gmail): the price can still change — leaving the box asks whether the
     // draft changes too (21 Nov 2026).
     if (mgmt && e.stage === 'quote_ready' && ['ready', 'drafted'].includes(e.quotation_status) && fin.length) {
       const check = () => {
-        const changes = fin.map(p => ({ qty: p.qty, from: Number(p.final), to: Number(prices[keyOf(e.id, p.qty)]) }))
+        const changes = fin.map(p => ({ qty: p.qty, from: Number(p.final), to: Number(prices[k(p)]) }))
           .filter(c => Number.isFinite(c.to) && c.to !== c.from);
         if (changes.some(c => !(c.to > 0))) { toast.error('A price must be more than zero.'); return; }
         if (changes.length) setRepricing({ e, changes });
       };
       return (
-        <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
+        <div onClick={ev => ev.stopPropagation()}>
           {fin.map(p => (
-            <div key={p.qty} className="flex items-center gap-2 text-xs">
-              <span className="w-16 text-right font-semibold">{qtyText(p.qty)}</span>
-              <Input className="!h-8 w-24 text-right" inputMode="decimal" value={prices[keyOf(e.id, p.qty)] ?? String(p.final)}
-                title={e.quotation_status === 'drafted' ? 'Change the price — you will be asked whether the Gmail draft changes too' : 'Change the price on this quotation'}
-                onChange={ev => { typed.current.add(keyOf(e.id, p.qty)); setPrices(x => ({ ...x, [keyOf(e.id, p.qty)]: ev.target.value })); }}
-                onBlur={check} onKeyDown={ev => { if (ev.key === 'Enter') ev.currentTarget.blur(); }} />
+            <div key={p.qty} className={LINE}>
+              {box(e, p, { value: prices[k(p)] ?? String(p.final), onChange: setPrice(k(p)), onBlur: check, label: 'Price on the quotation',
+                title: e.quotation_status === 'drafted' ? 'Change the price — you will be asked whether the Gmail draft changes too' : 'Change the price on this quotation' })}
+              {vsCost(prices[k(p)] ?? p.final, p.cost)}
             </div>
           ))}
           <div className="text-[10px] text-slate-500">{e.quotation_status === 'drafted' ? 'Draft in Gmail — change a price to update it' : 'Quotation made, no mail yet'}</div>
         </div>
       );
     }
-    if (!fin.length) return quantitiesText(e.quantities);
-    return <div className="space-y-0.5 text-xs">{fin.map(p => <div key={p.qty}><b>{qtyText(p.qty)}</b> @ {rupees(p.final, 3)}</div>)}</div>;
+    if (!fin.length) return <span className="text-xs text-slate-400">—</span>;
+    return <div>{fin.map(p => <div key={p.qty} className={LINE}><b>{rupees(p.final, 3)}</b>{vsCost(p.final, p.cost)}</div>)}</div>;
   } };
+
+  // 3. What the customer asks: their counter (typed on a counter row), else the target price their enquiry named.
+  const askCol = { key: 'ask', label: 'They ask', render: e => {
+    const ls = e.prices || [];
+    if (e.stage === 'countered') {
+      return (
+        <div onClick={ev => ev.stopPropagation()}>
+          {ls.map(p => {
+            const k = keyOf(e.id, p.qty);
+            const v = theirs[k] ?? (p.theirs != null ? String(p.theirs) : '');
+            return (
+              <div key={p.qty} className={LINE}>
+                {box(e, p, { value: v, onChange: ev => setTheirs(x => ({ ...x, [k]: ev.target.value })), label: 'Their price', title: 'What the customer asks',
+                  tone: '!bg-amber-50' })}
+                {vsCost(v, p.cost)}
+              </div>
+            );
+          })}
+          {e.counter_subject && (
+            <div className="max-w-[12rem] truncate text-[10px] text-slate-500" title={e.counter_subject}>“{e.counter_subject}”{e.counter_view_url && <> · <a href={e.counter_view_url} target="_blank" rel="noreferrer" className="font-semibold text-brand-700 hover:underline">open the mail</a></>}</div>
+          )}
+        </div>
+      );
+    }
+    const asked = ls.filter(p => p.theirs != null);
+    if (asked.length) return <div>{ls.map(p => <div key={p.qty} className={LINE}>{p.theirs != null ? <><b className="text-amber-800">{rupees(p.theirs, 3)}</b>{vsCost(p.theirs, p.cost)}</> : <span className="text-slate-400">—</span>}</div>)}</div>;
+    if (Number(e.target_price) > 0) return <div className={LINE}><span className="text-[10px] text-slate-500">target</span><b className="text-amber-800">{rupees(e.target_price, 3)}</b>{vsCost(e.target_price, ls[0]?.cost)}</div>;
+    return <span className="text-xs text-slate-400">—</span>;
+  } };
+
   // Order finalised, on the row (Management): from Final price on, a row with a complete costing (13 Nov 2026).
   // Order finalised waits for the customer's decision (owner, 21 Nov 2026): only once the quotation has gone out — Sent,
   // Mailed or Counter on the band — never on a row still pending with us.
-  const orderButton = e => (desk?.can_finalise && orderable(e) ? (
-    <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([e.id]); }}
-      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
-      <PackageCheck size={12} />Order finalised
-    </button>
-  ) : null);
+  // "Order finalised at this price" (21 Nov 2026): the price the row stands at now — the revised one on a counter, else the
+  // quoted one — and what it makes over our cost; the panel opens on it, the rate still editable, and finalising updates the
+  // status by itself.
+  const orderAt = e => {
+    const p = (e.prices || [])[0];
+    if (!p) return null;
+    const price = Number(e.stage === 'countered' ? prices[keyOf(e.id, p.qty)] : p.final);
+    const cost = Number(p.cost);
+    return price > 0 ? { price, pct: cost > 0 ? ((price - cost) / cost) * 100 : null, total: cost > 0 ? (price - cost) * Number(p.qty) : null } : null;
+  };
+  const orderButton = e => {
+    if (!(desk?.can_finalise && orderable(e))) return null;
+    const at = orderAt(e);
+    return (
+      <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([e.id]); }}
+        title="The customer agreed: finalise the order at this price — the rate stays editable in the panel"
+        className="inline-flex flex-col items-start whitespace-nowrap rounded-xl bg-emerald-50 px-2.5 py-1 text-left text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
+        <span className="inline-flex items-center gap-1"><PackageCheck size={12} />Order at {at ? rupees(at.price, 2) : 'this price'}</span>
+        {at?.pct != null && <span className={`text-[10px] ${plTone(at.total)}`}>{at.total < 0 ? 'loss' : 'profit'} {signedRs(at.total)} · {signedPct(at.pct)}</span>}
+      </button>
+    );
+  };
   const orderCol = { key: 'order', label: '', render: orderButton };
   const whyCol = { key: 'dropped_reason', label: 'Why', render: e => <span className="text-xs text-slate-600">{e.dropped_reason || '—'}</span> };
+  // No. carries the date received (and sorts by it), so the three money columns have the room.
+  const noCol = { ...baseCols[0], sortValue: baseCols[1].sortValue, render: e => (
+    <div>{baseCols[0].render(e)}<div className="mt-0.5 text-[10px] text-slate-500">{dateText(e.mail_received_at || e.created_at)}</div></div>
+  ) };
   const columns = tab === 'dropped' ? [...baseCols.slice(0, 5), whyCol]
-    : tab === 'sent' ? [...baseCols.slice(0, 4), priceCol, baseCols[5], orderCol]
-      : [...baseCols.slice(0, 4), priceCol, costingCol, baseCols[5], orderCol];
+    : tab === 'sent' ? [noCol, baseCols[2], baseCols[3], calcCol, giveCol, askCol, baseCols[5], orderCol]
+      : [noCol, baseCols[2], baseCols[3], calcCol, giveCol, askCol, costingCol, baseCols[5], orderCol];
   const tableRows = shown;
 
   const savePrices = async (list, { quiet = false } = {}) => {
@@ -840,7 +899,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         <DataTable rows={tableRows} columns={columns} onRowClick={e => setOpen(e.id)}
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
           rowClass={e => [DECISION_ROW[decisionOf(e)] || (e.status === 'new' ? NEW_ENQUIRY_ROW : ''), e.id === flash ? 'desk-flash-row ring-2 ring-inset ring-brand-400' : ''].filter(Boolean).join(' ')}
-          defaultSort={{ key: 'received', dir: 'desc' }} serialNumber={false}
+          defaultSort={{ key: tab === 'dropped' ? 'received' : 'enquiry_no', dir: 'desc' }} serialNumber={false}
           empty={rows ? (tab === 'pending' ? 'Nothing pending. Press "Fetch from mail" for new enquiries.' : 'Nothing here.') : 'Loading…'} />
       )}
 

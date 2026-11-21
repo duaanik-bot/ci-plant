@@ -2,9 +2,11 @@
 // prices and its history. Also the form for an enquiry typed in by hand (phone, WhatsApp): id = 'new'.
 // From here: cost it (on the desk, in place), send it back one tab, and undo its latest change.
 import { useEffect, useState } from 'react';
-import { Calculator, ExternalLink, Mail, Paperclip, RotateCcw } from 'lucide-react';
+import { Calculator, ExternalLink, FileText, Mail, Paperclip, RotateCcw } from 'lucide-react';
 import { api } from '../../api.js';
-import { Button, Field, Input, Modal, Select, Textarea, useToast } from '../../components/ui.jsx';
+import { Button, Field, Input, Select, Textarea, useToast } from '../../components/ui.jsx';
+import SideDrawer from '../../components/SideDrawer.jsx';
+import EnquiryInsight from './EnquiryInsight.jsx';
 import { STYLES, styleLabel } from '../../lib/costing.js';
 import { STAGE_BACKWARD, STAGE_TONE, dateText, parseQuantities, quantitiesText, qtyText, rupees, whereText } from '../../lib/enquiryUi.js';
 import SendQuotePanel from './SendQuotePanel.jsx';
@@ -77,16 +79,19 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
   );
 
   return (
-    <Modal open={!!id} onClose={onClose} wide
+    // A drawer, not a pop-up (owner, 21 Nov 2026: "an openable drawer once we click it … like we have in HR when we click
+    // into the person, so that we get the room to breathe"): the calculation on top, then what was asked, the mail, history.
+    <SideDrawer open={!!id} onClose={onClose} icon={<FileText size={16} />}
       title={isNew ? 'Add an enquiry by hand' : e ? `${e.enquiry_no} — ${e.product_name || 'enquiry'}` : 'Opening…'}
-      footer={<>
-        <Button variant="secondary" onClick={onClose}>Close</Button>
+      sub={e ? [e.customer_name, e.size_text && `${e.size_text} mm`, quantitiesText(e.quantities)].filter(Boolean).join(' · ') : null}
+      actions={<>
         {backTo && onMove && <Button variant="secondary" onClick={() => onMove('back', e)}>Send back to {statuses?.[backTo] || whereText(backTo)}</Button>}
         {canCost && onCost && <Button variant="secondary" disabled={dirty} title={dirty ? 'Save what was asked first' : ''} onClick={() => onCost(e)}>
           <Calculator size={14} className="mr-1 inline" />{e.costing_live ? 'Open costing' : 'Cost it'}
         </Button>}
         {!locked && <Button onClick={save} disabled={!dirty || !(form.product_name.trim() || form.size_text.trim())}>{isNew ? 'Add to the Inbox' : 'Save details'}</Button>}
       </>}>
+      {e && !isNew && <EnquiryInsight e={e} onOpenCosting={canCost && onCost && !dirty ? () => onCost(e) : null} />}
       {e && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <span className={`rounded-full px-2 py-0.5 font-bold ${STAGE_TONE[e.stage]}`}>{statuses?.[e.stage] || e.stage}</span>
@@ -97,7 +102,7 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
           {locked && <span className="text-amber-700">Prices are finalised — send it back to Final price to change what was asked.</span>}
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-4">
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-3">
             {field('customer_name', 'Customer')}
@@ -182,6 +187,6 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
           {e && <div className="text-[11px] text-slate-400">Quantities: {quantitiesText(e.quantities)} · added by {e.created_by_name || 'Claude'} {dateText(e.created_at)}</div>}
         </div>
       </div>
-    </Modal>
+    </SideDrawer>
   );
 }
