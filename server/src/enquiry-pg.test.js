@@ -1685,11 +1685,23 @@ describe('Enquiry desk — through the real app', {
     assert.equal(chk.status, 200, JSON.stringify(chk.body));
     assert.equal(chk.body.summary.found, 0);
     assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true })).status, 409);
+    // Row level: this line is marked "take from the sales order when it comes" (Management only).
+    assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { auto: { 0: true } })).status, 403);
+    const marked = await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { auto: { 0: true } });
+    assert.equal(marked.body.order.lines[0].rate_from_so, true);
+    assert.equal((await call('clerk', 'GET', '/costing/enquiry-orders')).body.find(o => o.id === oid).so.waiting, 1, 'waiting for its sales order');
     // The customer's sales order comes in: same product, a different rate and quantity.
     const so = await db.one(`INSERT INTO orders (po_number, customer_id, po_date) VALUES ('PO-TEST-77', $1, '2026-11-22') RETURNING id`, [prod.cid]);
     await db.q(`INSERT INTO order_lines (order_id, product_id, qty, rate) VALUES ($1, $2, 5200, 3.45)`, [so.id, prod.id]);
     const list = (await call('clerk', 'GET', '/costing/enquiry-orders')).body.find(o => o.id === oid);
     assert.deepEqual([list.so.found, list.so.of, list.so.differ, list.so.pos], [1, 1, 1, ['PO-TEST-77']], 'tracked on the Orders list');
+    assert.equal(list.lines[0].actual_rate, 3.45, 'the marked line took its rate by itself once the sales order was in');
+    assert.equal(list.so_checked_by, 'CI Plant (sales order in)');
+    assert.equal(list.lines[0].rate, 3.5, 'still finalised at its rate');
+    // Row level take: only the ticked line; a line index out of range is ignored, none left = refused.
+    assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true, lines: [5] })).status, 409);
+    const row0 = await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true, lines: [0] });
+    assert.equal(row0.body.taken, 1);
     chk = await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, {});
     assert.equal(chk.body.matched[0].rate_diff, -0.05);
     assert.equal(chk.body.matched[0].qty_diff, 200);

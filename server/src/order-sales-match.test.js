@@ -28,13 +28,13 @@ test('matchSalesOrder: by product name, newest sales order first, each sales-ord
   assert.equal(m[1].rate_diff, 0);
   assert.equal(m[2].so, null, 'no sales order yet');
   // actuals ride beside the finalised rate, which stays
-  const withA = withActuals([{ ...lines[0], cost: 7 }, { ...lines[2], cost: 1.5 }], m);
+  const withA = withActuals([{ ...lines[0], cost: 7 }, lines[1], { ...lines[2], cost: 1.5 }], m);
   assert.equal(withA[0].rate, 7.5, 'still finalised at its rate');
   assert.equal(withA[0].actual_rate, 7.4);
   assert.equal(withA[0].actual_qty, 2100);
   assert.equal(withA[0].actual_po, 'P-NEW');
   assert.equal(withA[0].actual_margin_total, 840);
-  assert.equal(withA[1].actual_rate, undefined, 'unmatched: unchanged');
+  assert.equal(withA[2].actual_rate, undefined, 'unmatched: unchanged');
 });
 
 test('orderLine starts at our final given rate, before the quotation\'s', () => {
@@ -42,4 +42,29 @@ test('orderLine starts at our final given rate, before the quotation\'s', () => 
   assert.equal(orderLine(e, { quotationLine: { qty: 1000, rate: 7.5 } }).rate, 7.2);
   assert.equal(orderLine(e, { quotationLine: { qty: 1000, rate: 7.5 } }).final, 7.2);
   assert.equal(orderLine({ ...e, final_prices: [] }, { quotationLine: { qty: 1000, rate: 7.5 } }).rate, 7.5);
+});
+
+import { autoPick } from './order-finalise.js';
+
+test('row by row: pick takes only those lines; autoPick finds marked lines whose sales order is in', () => {
+  const lines = [
+    { enquiry_id: 1, product: 'ALPHA CARTON', qty: 100, rate: 5, cost: 4, rate_from_so: true },
+    { enquiry_id: 2, product: 'BETA CARTON', qty: 100, rate: 3, cost: 2 },
+    { enquiry_id: 3, product: 'GAMMA CARTON', qty: 100, rate: 2, cost: 1, rate_from_so: true },
+  ];
+  const so = [
+    { order_id: 1, po_number: 'P1', line_id: 1, product: 'ALPHA CARTON', qty: 100, rate: 4.8, created_at: '2026-11-22' },
+    { order_id: 1, po_number: 'P1', line_id: 2, product: 'BETA CARTON', qty: 100, rate: 2.9, created_at: '2026-11-22' },
+  ];
+  const m = matchSalesOrder(lines, so);
+  assert.deepEqual(autoPick(lines, m), [0], 'GAMMA is marked but its sales order is not in yet');
+  const one = withActuals(lines, m, { pick: [1] });
+  assert.equal(one[0].actual_rate, undefined);
+  assert.equal(one[1].actual_rate, 2.9);
+  const all = withActuals(lines, m);
+  assert.deepEqual(all.map(l => l.actual_rate), [4.8, 2.9, undefined], 'the whole batch: every line found');
+  assert.deepEqual(autoPick(all, m), [], 'taken once');
+  const e = { id: 9, enquiry_no: 'E9', product_name: 'X', quantities: [1000], final_prices: [{ qty: 1000, final: 2 }] };
+  assert.equal(orderLine(e, { edits: { so_auto: true } }).rate_from_so, true);
+  assert.equal(orderLine(e, { edits: { qty: 1000, rate: 2 } }).rate_from_so, undefined);
 });

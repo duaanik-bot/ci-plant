@@ -75,6 +75,8 @@ export function orderLine(e, { inputs = null, quotationLine = null, kld = null, 
     quoted: num(quotationLine?.rate) > 0 ? num(quotationLine.rate) : null,
     final: num(f?.final) > 0 ? num(f.final) : null,
     counter: num(counter?.theirs) > 0 ? num(counter.theirs) : null,
+    // its rate to be taken from the customer's sales order once it is in (owner, 21 Nov 2026) — the rate above stands till then
+    ...(edits?.so_auto ? { rate_from_so: true } : {}),
   };
 }
 
@@ -179,14 +181,22 @@ export function matchSalesOrder(orderLines = [], soLines = []) {
   });
 }
 // The order's lines with the sales order's actual rate and quantity beside the finalised ones (never replacing them): the
-// order stays finalised at its rate; `actual_*` and the margin at the actual rate are what the sales order says.
-export function withActuals(orderLines = [], matched = []) {
-  return orderLines.map(l => {
-    const m = matched.find(x => x.so && (x.enquiry_id ?? null) === (l.enquiry_id ?? null) && x.product === l.product);
-    if (!m) return l;
+// order stays finalised at its rate; `actual_*` and the margin at the actual rate are what the sales order says. `matched` is
+// matchSalesOrder's answer for these same lines, in their order; `pick` = the line indexes to take (all found when null) —
+// the whole batch, or row by row (owner, 21 Nov 2026).
+export function withActuals(orderLines = [], matched = [], { pick = null } = {}) {
+  const chosen = pick ? new Set(pick.map(Number)) : null;
+  return orderLines.map((l, i) => {
+    const m = matched[i];
+    if (!m?.so || (chosen && !chosen.has(i))) return l;
     const cost = num(l.cost);
     const gap = cost != null && m.so.rate != null ? m.so.rate - cost : null;
     return { ...l, actual_rate: m.so.rate, actual_qty: m.so.qty, actual_po: m.so.po_number, actual_order_id: m.so.order_id,
       actual_margin: gap != null ? Math.round(gap * 10000) / 10000 : null, actual_margin_total: gap != null && m.so.qty ? r2(gap * m.so.qty) : null };
   });
 }
+
+// The lines marked "take from the sales order" whose sales order has now come in and that have no actual rate yet:
+// their indexes, for withActuals' `pick` (taken by themselves when the order is looked at — owner, 21 Nov 2026).
+export const autoPick = (orderLines = [], matched = []) => orderLines
+  .map((l, i) => (l.rate_from_so && l.actual_rate == null && matched[i]?.so ? i : null)).filter(i => i != null);

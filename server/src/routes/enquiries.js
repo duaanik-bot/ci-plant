@@ -64,7 +64,7 @@ import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
   sendToCompany, readAllowed, threadOfMessageId,
 } from '../gmail.js';
-import { orderLine, orderTotals, orderMail, matchSalesOrder, withActuals, customerWord } from '../order-finalise.js';
+import { orderLine, orderTotals, orderMail, matchSalesOrder, withActuals, customerWord, autoPick } from '../order-finalise.js';
 import { kldPdf } from '../kld-pdf.js';
 import { redirectUri, signState } from './gmail-link.js';
 import { startFetch, cloudLinks, cloudView, saveCloudLink, CLOUD_MAILBOXES } from '../enquiry-cloud.js';
@@ -1141,7 +1141,7 @@ async function orderRows(qc, list, lock = false) {
     return { ...e, stage, why, quotationLine: ql, kld: e.kld_rev ? { rev: Number(e.kld_rev), size_id: e.size_id } : null };
   });
 }
-const editsOf = it => (it ? { qty: it.qty, rate: it.rate, new_die: typeof it.new_die === 'boolean' ? it.new_die : undefined } : null);
+const editsOf = it => (it ? { qty: it.qty, rate: it.rate, new_die: typeof it.new_die === 'boolean' ? it.new_die : undefined, so_auto: it.so_auto === true } : null);
 const lineFor = (e, edits) => ({
   ...orderLine(e, { inputs: e.costing_inputs, quotationLine: e.quotationLine, kld: e.kld, edits }),
   quotation_no: e.quotationLine ? e.quotation_no : null,
@@ -1271,7 +1271,18 @@ r.get('/costing/enquiry-orders', async (req, res, next) => {
                        ORDER BY o.created_at DESC, o.id DESC LIMIT 200`);
     // Tracked (21 Nov 2026): the newest 40 orders each say whether their sales order has come in, and whether its rates differ.
     for (const o of orders.slice(0, 40)) {
-      try { o.so = soSummary(matchSalesOrder(o.lines || [], await salesOrderLines(o))); } catch { o.so = null; }
+      try {
+        const matched = matchSalesOrder(o.lines || [], await salesOrderLines(o));
+        // Lines marked "take from the sales order": taken by themselves the first time their sales order is seen in.
+        const pick = autoPick(o.lines || [], matched);
+        if (pick.length) {
+          o.lines = withActuals(o.lines, matched, { pick });
+          await q(`UPDATE enquiry_orders SET lines = $2, so_checked_at = now(), so_checked_by = 'CI Plant (sales order in)' WHERE id = $1`, [o.id, JSON.stringify(o.lines)]);
+          await audit('enquiry_order', o.id, 'sales_order', `${o.order_no} — ${pick.length} line(s) took their rate from the sales order by themselves`, q, 'CI Plant');
+          o.so_checked_at = new Date().toISOString(); o.so_checked_by = 'CI Plant (sales order in)';
+        }
+        o.so = { ...soSummary(matched), waiting: (o.lines || []).filter((l, i) => l.rate_from_so && l.actual_rate == null && !matched[i]?.so).length };
+      } catch { o.so = null; }
     }
     res.json(orders);
   } catch (e) { next(e); }
@@ -1303,18 +1314,37 @@ r.post('/costing/enquiry-orders/:id(\\d+)/sales-order', async (req, res, next) =
     const id = intOrNull(req.params.id) || 0;
     const o = await orderById(id);
     if (!o) throw fail(404, 'No such order.');
-    const matched = matchSalesOrder(o.lines || [], await salesOrderLines(o));
-    if (req.body?.apply) {
-      needMgmt(u);
-      if (!matched.some(m => m.so)) throw fail(409, `${o.order_no}: no sales order found for it yet.`);
-      const lines = withActuals(o.lines || [], matched);
-      await tx(async (qc) => {
-        await qc(`UPDATE enquiry_orders SET lines = $2, so_checked_at = now(), so_checked_by = $3 WHERE id = $1`, [id, JSON.stringify(lines), u.name]);
-        const s = soSummary(matched);
-        await audit('enquiry_order', id, 'sales_order', `${o.order_no} — actual rates from ${s.pos.join(', ')} (${s.found} of ${s.of} lines, ${s.differ} differ)`, qc, u.name);
+    let lines = o.lines || [];
+    const matched = matchSalesOrder(lines, await salesOrderLines(o));
+    // Row by row (21 Nov 2026): `auto` = { line index: true/false } — "take this line's rate from the sales order once it
+    // is in"; `lines` = the line indexes to take now (the whole batch when left out).
+    const auto = req.body?.auto && typeof req.body.auto === 'object' ? req.body.auto : null;
+    if (auto || req.body?.apply) needMgmt(u);
+    if (auto) {
+      lines = lines.map((l, i) => {
+        if (auto[i] === undefined) return l;
+        const { rate_from_so, ...rest } = l;
+        return auto[i] ? { ...rest, rate_from_so: true } : rest;
       });
     }
-    res.json({ order: await orderById(id), matched, summary: soSummary(matched) });
+    let taken = 0;
+    if (req.body?.apply) {
+      const pick = Array.isArray(req.body.lines) ? req.body.lines.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < lines.length) : null;
+      const can = (pick || lines.map((_, i) => i)).filter(i => matched[i]?.so);
+      if (!can.length) throw fail(409, `${o.order_no}: no sales order found for ${pick ? 'the ticked lines' : 'it'} yet.`);
+      lines = withActuals(lines, matched, { pick: can });
+      taken = can.length;
+    }
+    if (auto || taken) {
+      await tx(async (qc) => {
+        if (taken) await qc(`UPDATE enquiry_orders SET lines = $2, so_checked_at = now(), so_checked_by = $3 WHERE id = $1`, [id, JSON.stringify(lines), u.name]);
+        else await qc(`UPDATE enquiry_orders SET lines = $2 WHERE id = $1`, [id, JSON.stringify(lines)]);
+        const s = soSummary(matched);
+        if (taken) await audit('enquiry_order', id, 'sales_order', `${o.order_no} — actual rates from ${s.pos.join(', ')} on ${taken} of ${s.of} lines`, qc, u.name);
+        if (auto) await audit('enquiry_order', id, 'sales_order_auto', `${o.order_no} — take from the sales order: ${Object.entries(auto).map(([i, v]) => `line ${Number(i) + 1} ${v ? 'on' : 'off'}`).join(', ')}`, qc, u.name);
+      });
+    }
+    res.json({ order: await orderById(id), matched, summary: soSummary(matched), taken });
   } catch (e) { next(e); }
 });
 

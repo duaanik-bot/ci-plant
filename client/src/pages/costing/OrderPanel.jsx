@@ -73,7 +73,7 @@ export default function OrderPanel({ ids, onClose, onDone }) {
     setBusy(true);
     try {
       const r = await api.post('/costing/enquiries/order', {
-        items: lines.map(l => ({ id: l.enquiry_id, qty: l.qty, rate: l.rate, new_die: l.new_die })), mail,
+        items: lines.map(l => ({ id: l.enquiry_id, qty: l.qty, rate: l.rate, new_die: l.new_die, so_auto: !!edits[l.enquiry_id]?.so_auto })), mail,
       });
       const tail = r.mail?.status === 'sent' ? ` — the order sheet went to ${r.mail.to}`
         : r.mail?.status === 'failed' ? ` — the order sheet was NOT sent (${r.mail.error}). Send again from the Orders tab.` : '';
@@ -157,6 +157,10 @@ export default function OrderPanel({ ids, onClose, onDone }) {
                       <div className="mt-1 flex flex-wrap gap-1">
                         {l.final != null && l.final !== l.quoted && <button type="button" className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700 hover:bg-brand-100" onClick={() => edit(l.enquiry_id, 'rate', String(l.final))}>Our final {rupees(l.final)}</button>}
                         {l.quoted != null && <button type="button" className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-200" onClick={() => edit(l.enquiry_id, 'rate', String(l.quoted))}>Quoted {rupees(l.quoted)}</button>}
+                        <label className="mt-0.5 flex w-full cursor-pointer items-center gap-1 text-[10px] font-semibold text-sky-800" title="Finalised at the rate above; once the customer's sales order is in, its rate and quantity are taken onto this line by themselves">
+                          <input type="checkbox" className="h-3 w-3 accent-sky-600" checked={!!edits[l.enquiry_id]?.so_auto} onChange={e => edit(l.enquiry_id, 'so_auto', e.target.checked)} />
+                          Take from the sales order when it comes
+                        </label>
                         {l.counter != null && <button type="button" className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 hover:bg-amber-200" onClick={() => edit(l.enquiry_id, 'rate', String(l.counter))}>Their {rupees(l.counter)}</button>}
                       </div>
                     </td>
@@ -272,7 +276,7 @@ export function OrdersList({ canSend, signal }) {
         title={o.so_checked_at ? `Actual rates taken ${dateText(o.so_checked_at)} by ${o.so_checked_by || ''}` : 'Check the rates against the sales order'}>
         {o.so_checked_at ? `Actual rates in${o.so?.pos?.length ? ` · PO ${o.so.pos.join(', ')}` : ''}`
           : o.so?.found ? `PO ${o.so.pos.join(', ')} found · ${o.so.found}/${o.so.of}${o.so.differ ? ` · ${o.so.differ} differ` : ''} — check`
-            : 'Not in yet · check'}
+            : o.so?.waiting ? `Waiting for the sales order · ${o.so.waiting} line${o.so.waiting === 1 ? '' : 's'}` : 'Not in yet · check'}
       </button>
     ) },
     { key: 'customer_draft', label: 'To the customer', render: o => (
@@ -309,19 +313,32 @@ function SalesOrderCheck({ order, canApply, onClose, onApplied }) {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [ticked, setTicked] = useState(() => new Set());   // line indexes to take now
   useEffect(() => {
     setData(null);
     if (!order) return;
-    api.post(`/costing/enquiry-orders/${order.id}/sales-order`, {}).then(setData).catch(() => onClose());
+    api.post(`/costing/enquiry-orders/${order.id}/sales-order`, {}).then(d => {
+      setData(d);
+      // ticked to start: the found lines not taken yet
+      setTicked(new Set(d.matched.map((m, i) => (m.so && d.order.lines[i]?.actual_rate == null ? i : null)).filter(i => i != null)));
+    }).catch(() => onClose());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
-  const apply = async () => {
+  // Take now — the ticked rows, or the whole batch (owner, 21 Nov 2026: "for the whole batch … even at the row level").
+  const apply = async pick => {
     setBusy(true);
     try {
-      const r = await api.post(`/costing/enquiry-orders/${order.id}/sales-order`, { apply: true });
-      toast.success(`${order.order_no}: actual rates taken from PO ${r.summary.pos.join(', ')} — the order stays finalised`);
+      const r = await api.post(`/costing/enquiry-orders/${order.id}/sales-order`, { apply: true, ...(pick ? { lines: [...pick] } : {}) });
+      toast.success(`${order.order_no}: actual rates taken on ${r.taken} line${r.taken === 1 ? '' : 's'} from PO ${r.summary.pos.join(', ')} — the order stays finalised`);
       onApplied?.();
     } catch { /* shown */ } finally { setBusy(false); }
+  };
+  // "Take from the sales order when it comes", per row — saved at once.
+  const setAuto = async (i, on) => {
+    try {
+      const r = await api.post(`/costing/enquiry-orders/${order.id}/sales-order`, { auto: { [i]: on } });
+      setData(r);
+    } catch { /* shown */ }
   };
   const lines = data?.matched || [];
   const costOf = m => (order?.lines || []).find(l => (l.enquiry_id ?? null) === (m.enquiry_id ?? null) && l.product === m.product)?.cost;
@@ -330,7 +347,8 @@ function SalesOrderCheck({ order, canApply, onClose, onApplied }) {
     <Modal open={!!order} onClose={onClose} size="xl" title={order ? `${order.order_no} — rates against the sales order` : ''}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        {canApply && data?.summary?.found > 0 && <Button variant="success" disabled={busy} onClick={apply}>{busy ? 'Taking…' : "Take the sales order's rates — stays finalised"}</Button>}
+        {canApply && data?.summary?.found > 0 && <Button variant="secondary" disabled={busy || !ticked.size} onClick={() => apply(ticked)}>Take the ticked rows ({ticked.size})</Button>}
+        {canApply && data?.summary?.found > 0 && <Button variant="success" disabled={busy} onClick={() => apply(null)}>{busy ? 'Taking…' : 'Take the whole batch — stays finalised'}</Button>}
       </>}>
       {!data ? <div className="p-6 text-sm text-slate-400">Looking for the sales order…</div> : (
         <div className="space-y-3 text-xs">
@@ -341,7 +359,7 @@ function SalesOrderCheck({ order, canApply, onClose, onApplied }) {
           <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
             <table className="w-full min-w-[820px]">
               <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                <tr>{['Item', 'Finalised', 'Sales order', 'Rate difference', 'Qty difference', 'Profit at the actual rate'].map(h => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}</tr>
+                <tr>{['Take', 'Item', 'Finalised', 'Sales order', 'Rate difference', 'Qty difference', 'Profit at the actual rate', 'When it comes'].map(h => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {lines.map((m, i) => {
@@ -349,12 +367,21 @@ function SalesOrderCheck({ order, canApply, onClose, onApplied }) {
                   const at = m.so && cost != null ? (m.so.rate - cost) * m.so.qty : null;
                   return (
                     <tr key={`${m.enquiry_id}|${i}`} className="border-t border-slate-100 align-top">
-                      <td className="px-2 py-2"><div className="font-semibold">{m.product}</div><div className="text-[11px] text-slate-500">{m.enquiry_no}</div></td>
+                      <td className="px-2 py-2">{m.so && <input type="checkbox" className="h-4 w-4 accent-emerald-600" disabled={!canApply} checked={ticked.has(i)}
+                        onChange={e => setTicked(t => { const n = new Set(t); if (e.target.checked) n.add(i); else n.delete(i); return n; })} aria-label={`Take line ${i + 1}`} />}</td>
+                      <td className="px-2 py-2"><div className="font-semibold">{m.product}</div><div className="text-[11px] text-slate-500">{m.enquiry_no}
+                        {data.order.lines[i]?.actual_rate != null && <span className="ml-1 font-bold text-emerald-700">· taken @ {rupees(data.order.lines[i].actual_rate)}</span>}</div></td>
                       <td className="px-2 py-2 tabular-nums">{qtyText(m.qty)} @ <b>{rupees(m.rate)}</b></td>
                       <td className="px-2 py-2 tabular-nums">{m.so ? <>{qtyText(m.so.qty)} @ <b>{rupees(m.so.rate)}</b><div className="text-[11px] text-slate-500">PO {m.so.po_number} · {m.so.po_date} · {m.so.customer}</div></> : <span className="text-slate-400">not in yet</span>}</td>
                       <td className={`px-2 py-2 font-bold tabular-nums ${m.rate_diff ? (m.rate_diff < 0 ? 'text-red-700' : 'text-emerald-700') : 'text-slate-500'}`}>{diff(m.rate_diff)}</td>
                       <td className={`px-2 py-2 tabular-nums ${m.qty_diff ? 'font-bold text-amber-800' : 'text-slate-500'}`}>{diff(m.qty_diff, 0)}</td>
                       <td className={`px-2 py-2 font-bold tabular-nums ${tone(at)}`}>{at == null ? '—' : signed(at, 0)}</td>
+                      <td className="px-2 py-2">
+                        <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-sky-800" title="Take this line's rate from the sales order by itself once it is in">
+                          <input type="checkbox" className="h-3.5 w-3.5 accent-sky-600" disabled={!canApply} checked={!!data.order.lines[i]?.rate_from_so} onChange={e => setAuto(i, e.target.checked)} />
+                          Take from the sales order
+                        </label>
+                      </td>
                     </tr>
                   );
                 })}
