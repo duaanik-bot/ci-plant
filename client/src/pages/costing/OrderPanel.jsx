@@ -35,7 +35,9 @@ export default function OrderPanel({ ids, onClose, onDone }) {
   const toast = useToast();
   const [data, setData] = useState(null);
   const [edits, setEdits] = useState({});
-  const [mail, setMail] = useState(false);
+  // Asked on Finalise (owner, 21 Nov 2026: "whenever we finalise the order, you ask me to send the mail … to mppchd … attach
+  // the KLDs and the output sizes … and the final rates"), not a box ticked beforehand.
+  const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const open = Array.isArray(ids) && ids.length > 0;
   const key = open ? ids.join(',') : '';
@@ -44,7 +46,7 @@ export default function OrderPanel({ ids, onClose, onDone }) {
     if (!open) return undefined;
     let live = true;
     api.post('/costing/enquiries/order-preview', { ids })
-      .then(d => { if (!live) return; setData(d); setMail(!!d.mail_default && !!d.can_send); })
+      .then(d => { if (!live) return; setData(d); })
       .catch(() => { if (live) onClose?.(); });
     return () => { live = false; };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -66,7 +68,8 @@ export default function OrderPanel({ ids, onClose, onDone }) {
   const bad = lines.find(l => l.bad);
   const customers = [...new Set(lines.map(l => l.customer_name).filter(Boolean))];
 
-  const finalise = async () => {
+  const finalise = async mail => {
+    setAsking(false);
     setBusy(true);
     try {
       const r = await api.post('/costing/enquiries/order', {
@@ -83,19 +86,30 @@ export default function OrderPanel({ ids, onClose, onDone }) {
   const footer = data && (
     <div className="flex w-full flex-wrap items-center gap-3">
       <div className="min-w-0 flex-1 text-xs">
-        {data.can_send ? (
-          <Checkbox checked={mail} onChange={e => setMail(e.target.checked)}
-            label={<span>Send the order sheet to the team — <b>{data.company}</b> <span className="text-slate-500">(rates only; cost and loss stay here)</span></span>} />
+        {asking ? (
+          <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-950 ring-1 ring-emerald-200">
+            <b>Send the order sheet to {data.company} now?</b> Every item with its final rate and quantity, the output sheet and ups, the board,
+            the die (new or existing) and the art details — each drawn KLD attached as a PDF. Rates only: cost and loss stay here.
+            {t.newDies > 0 && <div className="mt-1 font-semibold text-amber-800">A new die is on this order — the team usually needs the sheet.</div>}
+          </div>
+        ) : data.can_send ? (
+          <span className="text-slate-500">On Finalise you are asked whether the order sheet goes to <b>{data.company}</b>.</span>
         ) : (
           <span className="text-amber-800">The order sheet cannot go by mail yet: {data.company ? `the mailbox in use (${data.sender || '—'}) has no Gmail connected` : 'no business mailbox address is set'}. The order is still kept.</span>
         )}
-        {data.can_send && !mail && t.newDies > 0 && <div className="mt-1 text-amber-800">A new die is on this order — the team usually needs the sheet.</div>}
       </div>
-      <Button variant="secondary" onClick={onClose}>Cancel</Button>
-      <Button variant="success" disabled={busy || !lines.length || !!bad || !data.can_finalise} onClick={finalise}
-        title={!data.can_finalise ? 'Finalising an order needs the Management right' : bad ? `A line needs a ${bad.bad}` : ''}>
-        <PackageCheck size={15} className="mr-1.5 inline" />{busy ? 'Finalising…' : 'Finalise order'}
-      </Button>
+      {asking ? <>
+        <Button variant="secondary" onClick={() => setAsking(false)}>Back</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => finalise(false)}>Finalise only — no mail</Button>
+        <Button variant="success" disabled={busy} onClick={() => finalise(true)}><Mail size={14} className="mr-1.5 inline" />Yes — finalise and send</Button>
+      </> : <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="success" disabled={busy || !lines.length || !!bad || !data.can_finalise}
+          onClick={() => (data.can_send ? setAsking(true) : finalise(false))}
+          title={!data.can_finalise ? 'Finalising an order needs the Management right' : bad ? `A line needs a ${bad.bad}` : ''}>
+          <PackageCheck size={15} className="mr-1.5 inline" />{busy ? 'Finalising…' : 'Finalise order'}
+        </Button>
+      </>}
     </div>
   );
 
