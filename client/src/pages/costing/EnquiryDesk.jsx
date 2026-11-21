@@ -31,6 +31,9 @@ import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import CounterPanel from './CounterPanel.jsx';
 import OrderPanel, { OrdersList } from './OrderPanel.jsx';
 import { canOrder } from '../../lib/orderUi.js';
+
+// A row the customer can decide on: its quotation has gone out (band Sent, Mailed or Counter) and it can go on an order.
+const orderable = e => canOrder(e) && ['sent', 'mailed', 'counter'].includes(bandOf(e));
 import { NEW_ENQUIRY_ROW } from '../../components/EnquiryBadge.jsx';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
@@ -471,7 +474,9 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     return <div className="space-y-0.5 text-xs">{fin.map(p => <div key={p.qty}><b>{qtyText(p.qty)}</b> @ {rupees(p.final, 3)}</div>)}</div>;
   } };
   // Order finalised, on the row (Management): from Final price on, a row with a complete costing (13 Nov 2026).
-  const orderButton = e => (desk?.can_finalise && canOrder(e) ? (
+  // Order finalised waits for the customer's decision (owner, 21 Nov 2026): only once the quotation has gone out — Sent,
+  // Mailed or Counter on the band — never on a row still pending with us.
+  const orderButton = e => (desk?.can_finalise && orderable(e) ? (
     <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([e.id]); }}
       className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100">
       <PackageCheck size={12} />Order finalised
@@ -554,6 +559,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const pPrice = has(PRICE_STAGES);
   const pQuote = has(['quote_ready']);
   const pAnswered = has(['costed', 'price_pending', 'quote_ready', 'sent']);
+  const pOrder = pickedRows.some(orderable);
   const pBack = pickedRows.some(e => STAGE_BACKWARD[e.stage]);
   const pDelete = has(['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped']);
   const detail = (
@@ -710,11 +716,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
               setTab('pending');
             }}>Customer counter</Button>
         )}
-        {pAnswered && mgmt && (
+        {pOrder && mgmt && (
           <Button size="sm" variant="success" title="The customer agreed: keep the order with its rates and any loss, and send the order sheet to the team"
             onClick={() => {
-              const list = pickedRows.filter(canOrder).map(e => e.id);
-              if (!list.length) { toast.info('None of the ticked rows can go on an order — each needs a complete costing.'); return; }
+              const list = pickedRows.filter(orderable).map(e => e.id);
+              if (!list.length) { toast.info('None of the ticked rows can go on an order — its quotation must go to the customer first.'); return; }
               setOrdering(list);
             }}><PackageCheck size={13} className="mr-1 inline" />Order finalised</Button>
         )}
