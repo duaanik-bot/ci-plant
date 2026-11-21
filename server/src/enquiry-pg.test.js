@@ -1665,6 +1665,47 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await enquiry(costedOnly.id)).stage, 'costed', 'back to costed, not to Sent');
   });
 
+  test('sales order against a finalised order: found by customer word and product name; Take keeps it finalised with the actual rates', async () => {
+    // A product of its own (a copy of a seeded one), so no sales order has it yet.
+    const made = await db.one(`INSERT INTO products (customer_id, name, code, board_material_id, gsm, size, ups, wastage_pct, colors, coating, special, rate)
+                                SELECT customer_id, 'SALES MATCH TEST CARTON (10X10) SALE-R0', 'SOT-0001', board_material_id, gsm, size, ups, wastage_pct, colors, coating, special, rate
+                                  FROM products ORDER BY id LIMIT 1 RETURNING id`);
+    const prod = await db.one(`SELECT p.id, p.name, c.id AS cid, c.name AS cname FROM products p JOIN customers c ON c.id = p.customer_id WHERE p.id = $1`, [made.id]);
+    assert.ok(prod, 'the seed has a product');
+    // The desk names the customer by its first word only, the product with other spacing.
+    const word = prod.cname.trim().split(/\s+/)[0];
+    const x = await typed(prod.name.replace(/\s+/g, '  ').toLowerCase(), { customer_name: word });
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.5 }] }] });
+    const ord = await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: x.id, qty: 5000, rate: 3.5 }], mail: false });
+    assert.equal(ord.status, 201, JSON.stringify(ord.body));
+    const oid = ord.body.order.id;
+    // No sales order yet.
+    let chk = await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, {});
+    assert.equal(chk.status, 200, JSON.stringify(chk.body));
+    assert.equal(chk.body.summary.found, 0);
+    assert.equal((await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true })).status, 409);
+    // The customer's sales order comes in: same product, a different rate and quantity.
+    const so = await db.one(`INSERT INTO orders (po_number, customer_id, po_date) VALUES ('PO-TEST-77', $1, '2026-11-22') RETURNING id`, [prod.cid]);
+    await db.q(`INSERT INTO order_lines (order_id, product_id, qty, rate) VALUES ($1, $2, 5200, 3.45)`, [so.id, prod.id]);
+    const list = (await call('clerk', 'GET', '/costing/enquiry-orders')).body.find(o => o.id === oid);
+    assert.deepEqual([list.so.found, list.so.of, list.so.differ, list.so.pos], [1, 1, 1, ['PO-TEST-77']], 'tracked on the Orders list');
+    chk = await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, {});
+    assert.equal(chk.body.matched[0].rate_diff, -0.05);
+    assert.equal(chk.body.matched[0].qty_diff, 200);
+    assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true })).status, 403, 'Management takes the rates');
+    const took = await call('md', 'POST', `/costing/enquiry-orders/${oid}/sales-order`, { apply: true });
+    assert.equal(took.status, 200, JSON.stringify(took.body));
+    const line = took.body.order.lines[0];
+    assert.deepEqual([line.rate, line.actual_rate, line.actual_qty, line.actual_po], [3.5, 3.45, 5200, 'PO-TEST-77'], 'finalised rate kept, actuals beside it');
+    assert.ok(took.body.order.so_checked_at);
+    assert.equal((await enquiry(x.id)).status, 'ordered', 'still finalised');
+    assert.equal((await call('clerk', 'GET', `/costing/enquiries?ids=${x.id}`)).body[0].order_line.actual_rate, 3.45, 'the desk row sees it');
+    // tidy: this test's sales order and order out of the way
+    await db.q('DELETE FROM order_lines WHERE order_id = $1', [so.id]);
+    await db.q('DELETE FROM orders WHERE id = $1', [so.id]);
+  });
+
   test('the robot files the opening and a details edit without it keeps it', async () => {
     const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
     const job = f.body.job;

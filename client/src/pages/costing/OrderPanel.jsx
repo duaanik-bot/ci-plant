@@ -104,7 +104,8 @@ export default function OrderPanel({ ids, onClose, onDone }) {
       title={customers.length ? `Order finalised — ${customers.join(' · ')}` : 'Order finalised'}>
       {!data ? <div className="p-6 text-sm text-slate-400">Loading the order…</div> : (
         <div className="space-y-3">
-          <p className="text-xs text-slate-500">The quantity and rate start at what the customer was quoted — change them to what was agreed.
+          <p className="text-xs text-slate-500"><b>At what rate was the order finalised?</b> Each line starts at our final given rate — change any that differ from what was agreed.
+            When the customer's sales order comes in, <b>Orders</b> checks its rates against these and can take the actual ones in; the order stays finalised.
             Our cost a carton comes from the costing (a new quantity is costed again). A rate under our cost is booked as a loss on the order.</p>
           <div className="flex flex-wrap gap-2">
             <Tile label="Order value" value={rupees(t.total, 0)} sub={`${lines.length} item${lines.length === 1 ? '' : 's'}`} />
@@ -140,6 +141,7 @@ export default function OrderPanel({ ids, onClose, onDone }) {
                       <Input className={`!h-8 w-24 text-right ${l.bad === 'rate' ? 'ring-2 ring-red-300' : ''}`} inputMode="decimal"
                         value={edits[l.enquiry_id]?.rate ?? String(l.rate ?? '')} onChange={e => edit(l.enquiry_id, 'rate', e.target.value)} />
                       <div className="mt-1 flex flex-wrap gap-1">
+                        {l.final != null && l.final !== l.quoted && <button type="button" className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700 hover:bg-brand-100" onClick={() => edit(l.enquiry_id, 'rate', String(l.final))}>Our final {rupees(l.final)}</button>}
                         {l.quoted != null && <button type="button" className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-200" onClick={() => edit(l.enquiry_id, 'rate', String(l.quoted))}>Quoted {rupees(l.quoted)}</button>}
                         {l.counter != null && <button type="button" className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 hover:bg-amber-200" onClick={() => edit(l.enquiry_id, 'rate', String(l.counter))}>Their {rupees(l.counter)}</button>}
                       </div>
@@ -176,7 +178,7 @@ function OrderView({ order, onClose }) {
           <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
             <table className="w-full min-w-[900px]">
               <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                <tr>{['Item', 'Quantity', 'Rate', 'Our cost', 'On the order', 'Output sheet · ups', 'Board', 'Die', 'KLD'].map(h => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}</tr>
+                <tr>{['Item', 'Quantity', 'Rate', 'Sales order', 'Our cost', 'On the order', 'Output sheet · ups', 'Board', 'Die', 'KLD'].map(h => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {order.lines.map(l => (
@@ -184,6 +186,7 @@ function OrderView({ order, onClose }) {
                     <td className="px-2 py-2"><div className="font-semibold">{l.product}</div><div className="text-[11px] text-slate-500">{[l.enquiry_no, l.size && `${l.size} mm`].filter(Boolean).join(' · ')}</div></td>
                     <td className="px-2 py-2 tabular-nums">{qtyText(l.qty)}</td>
                     <td className="px-2 py-2 tabular-nums">{rupees(l.rate)}</td>
+                    <td className="px-2 py-2 tabular-nums">{l.actual_rate != null ? <><b>{qtyText(l.actual_qty)} @ {rupees(l.actual_rate)}</b><div className="text-[10px] text-slate-500">PO {l.actual_po}</div></> : <span className="text-slate-400">—</span>}</td>
                     <td className="px-2 py-2 tabular-nums text-slate-600">{rupees(l.cost, 3)}</td>
                     <td className={`px-2 py-2 font-bold tabular-nums ${tone(l.margin_total)}`}>{signed(l.margin_total, 0)}
                       <div className="text-[10px] font-normal">{l.cost ? pctSigned(((l.rate - l.cost) / l.cost) * 100) : ''}</div></td>
@@ -212,6 +215,7 @@ export function OrdersList({ canSend, signal }) {
   const [busy, setBusy] = useState(null);
   const load = () => api.get('/costing/enquiry-orders').then(setOrders).catch(() => setOrders([]));
   useEffect(() => { load(); }, [signal]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [checking, setChecking] = useState(null);   // the sales-order check open for an order
   // The order confirmation to the customer, as a Gmail draft in their thread (21 Nov 2026).
   const confirm = async (o) => {
     setBusy(`c${o.id}`);
@@ -247,6 +251,16 @@ export function OrdersList({ canSend, signal }) {
         )}
       </div>
     ) },
+    { key: 'so', label: 'Sales order', render: o => (
+      <button type="button" onClick={ev => { ev.stopPropagation(); setChecking(o); }}
+        className={`rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${o.so_checked_at ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+          : o.so?.found ? 'bg-amber-50 text-amber-900 ring-amber-200' : 'bg-slate-50 text-slate-500 ring-slate-200'}`}
+        title={o.so_checked_at ? `Actual rates taken ${dateText(o.so_checked_at)} by ${o.so_checked_by || ''}` : 'Check the rates against the sales order'}>
+        {o.so_checked_at ? `Actual rates in${o.so?.pos?.length ? ` · PO ${o.so.pos.join(', ')}` : ''}`
+          : o.so?.found ? `PO ${o.so.pos.join(', ')} found · ${o.so.found}/${o.so.of}${o.so.differ ? ` · ${o.so.differ} differ` : ''} — check`
+            : 'Not in yet · check'}
+      </button>
+    ) },
     { key: 'customer_draft', label: 'To the customer', render: o => (
       <div className="flex flex-wrap items-center gap-1.5">
         {o.customer_draft_id
@@ -269,6 +283,72 @@ export function OrdersList({ canSend, signal }) {
       <DataTable rows={orders || []} columns={cols} onRowClick={setView} defaultSort={{ key: 'when', dir: 'desc' }} serialNumber={false}
         empty={orders ? 'No order finalised yet — press Order finalised on a quoted row.' : 'Loading…'} />
       <OrderView order={view} onClose={() => setView(null)} />
+      <SalesOrderCheck order={checking} canApply={canSend} onClose={() => setChecking(null)} onApplied={() => { setChecking(null); load(); }} />
     </div>
+  );
+}
+
+// The sales order against a finalised order (owner, 21 Nov 2026): line by line, what was finalised beside what the customer's
+// sales order says — and, on Take, the actual rate and quantity kept on the order beside the finalised ones. The order stays
+// finalised; its profit is shown at the actual rate too.
+function SalesOrderCheck({ order, canApply, onClose, onApplied }) {
+  const toast = useToast();
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setData(null);
+    if (!order) return;
+    api.post(`/costing/enquiry-orders/${order.id}/sales-order`, {}).then(setData).catch(() => onClose());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id]);
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/costing/enquiry-orders/${order.id}/sales-order`, { apply: true });
+      toast.success(`${order.order_no}: actual rates taken from PO ${r.summary.pos.join(', ')} — the order stays finalised`);
+      onApplied?.();
+    } catch { /* shown */ } finally { setBusy(false); }
+  };
+  const lines = data?.matched || [];
+  const costOf = m => (order?.lines || []).find(l => (l.enquiry_id ?? null) === (m.enquiry_id ?? null) && l.product === m.product)?.cost;
+  const diff = (v, dp = 2) => (v == null ? '' : v === 0 ? 'same' : `${v < 0 ? '−' : '+'}${dp ? rupees(Math.abs(v), dp) : Math.abs(v).toLocaleString('en-IN')}`);
+  return (
+    <Modal open={!!order} onClose={onClose} size="xl" title={order ? `${order.order_no} — rates against the sales order` : ''}
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+        {canApply && data?.summary?.found > 0 && <Button variant="success" disabled={busy} onClick={apply}>{busy ? 'Taking…' : "Take the sales order's rates — stays finalised"}</Button>}
+      </>}>
+      {!data ? <div className="p-6 text-sm text-slate-400">Looking for the sales order…</div> : (
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-600">{data.summary.found
+            ? <>Found in <b>PO {data.summary.pos.join(', ')}</b>: {data.summary.found} of {data.summary.of} lines{data.summary.differ ? <>, <b className="text-amber-800">{data.summary.differ} differ</b></> : ', every rate and quantity the same'}.</>
+            : <>No sales order for these products yet — it is looked for among {order.customer_name}'s sales orders entered from two weeks before this order on, matched by product name.</>}
+            {order.so_checked_at && <> Actual rates were taken {dateText(order.so_checked_at)} by {order.so_checked_by}.</>}</p>
+          <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200">
+            <table className="w-full min-w-[820px]">
+              <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                <tr>{['Item', 'Finalised', 'Sales order', 'Rate difference', 'Qty difference', 'Profit at the actual rate'].map(h => <th key={h} className="px-2 py-2 font-semibold">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {lines.map((m, i) => {
+                  const cost = costOf(m);
+                  const at = m.so && cost != null ? (m.so.rate - cost) * m.so.qty : null;
+                  return (
+                    <tr key={`${m.enquiry_id}|${i}`} className="border-t border-slate-100 align-top">
+                      <td className="px-2 py-2"><div className="font-semibold">{m.product}</div><div className="text-[11px] text-slate-500">{m.enquiry_no}</div></td>
+                      <td className="px-2 py-2 tabular-nums">{qtyText(m.qty)} @ <b>{rupees(m.rate)}</b></td>
+                      <td className="px-2 py-2 tabular-nums">{m.so ? <>{qtyText(m.so.qty)} @ <b>{rupees(m.so.rate)}</b><div className="text-[11px] text-slate-500">PO {m.so.po_number} · {m.so.po_date} · {m.so.customer}</div></> : <span className="text-slate-400">not in yet</span>}</td>
+                      <td className={`px-2 py-2 font-bold tabular-nums ${m.rate_diff ? (m.rate_diff < 0 ? 'text-red-700' : 'text-emerald-700') : 'text-slate-500'}`}>{diff(m.rate_diff)}</td>
+                      <td className={`px-2 py-2 tabular-nums ${m.qty_diff ? 'font-bold text-amber-800' : 'text-slate-500'}`}>{diff(m.qty_diff, 0)}</td>
+                      <td className={`px-2 py-2 font-bold tabular-nums ${tone(at)}`}>{at == null ? '—' : signed(at, 0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

@@ -103,6 +103,14 @@ export default function EnquiryInsight({ e, onOpenCosting }) {
             <div><div className="text-[10px] uppercase text-slate-500">Order value</div><b>{rupees(pl.value, 0)}</b></div>
             <div><div className="text-[10px] uppercase text-slate-500">{pl.total < 0 ? 'Loss' : 'Profit'}</div><b className={tone(pl.total)}>{sRs(pl.total, 0)} · {sPct(pl.pct)}</b></div>
           </div>
+          {pl.actual && (
+            <div className="mt-2 flex flex-wrap gap-4 rounded-xl bg-sky-50 px-3 py-2 text-sm text-sky-900">
+              <div><div className="text-[10px] uppercase">Sales order</div><b>PO {pl.actual.po}</b></div>
+              <div><div className="text-[10px] uppercase">Actual quantity</div><b>{qtyText(pl.actual.qty)}</b></div>
+              <div><div className="text-[10px] uppercase">Actual rate</div><b>{rupees(pl.actual.rate, 2)}</b></div>
+              <div><div className="text-[10px] uppercase">{pl.actual.total < 0 ? 'Loss' : 'Profit'} at it</div><b className={tone(pl.actual.total)}>{sRs(pl.actual.total, 0)} · {sPct(pl.actual.pct)}</b></div>
+            </div>
+          )}
         </Box>
       )}
 

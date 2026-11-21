@@ -2902,6 +2902,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261121120000_enquiry_lost.sql'));
   // The order confirmation draft (21 Nov 2026): enquiry_orders.customer_draft_*. Additive; idempotent.
   await pool.query(migration('20261121150000_enquiry_order_confirm_draft.sql'));
+  // The sales-order check on an enquiry order (21 Nov 2026): enquiry_orders.so_checked_at / so_checked_by. Idempotent.
+  await pool.query(migration('20261121170000_enquiry_order_sales_check.sql'));
   // The artwork register (Artwork Manager P1, 15 Nov 2026): artwork_mails, _jobs, _versions, _files, _events. Idempotent.
   await pool.query(migration('20261115100000_artwork_register.sql'));
   // No artwork work done twice + the "already done" notice (17 Nov 2026): saved_by, designer_reply_at, artwork_notices.

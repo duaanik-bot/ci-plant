@@ -16,8 +16,10 @@ const ENQ = {
 };
 const at = qty => quantityBreaks(COSTING, [qty])[0];
 
-test('the rate is pre-filled from the quotation, else the final price, else the costing\'s proposal', () => {
-  assert.equal(orderLine(ENQ, { inputs: COSTING, quotationLine: { qty: 10000, rate: 2.05 } }).rate, 2.05);
+// Owner, 21 Nov 2026: "pre-autofill my final given rates" — our final price first, then the quotation's, then the costing.
+test('the rate is pre-filled from our final price, else the quotation, else the costing\'s proposal', () => {
+  assert.equal(orderLine(ENQ, { inputs: COSTING, quotationLine: { qty: 10000, rate: 2.05 } }).rate, 1.95);
+  assert.equal(orderLine({ ...ENQ, final_prices: [] }, { inputs: COSTING, quotationLine: { qty: 10000, rate: 2.05 } }).rate, 2.05);
   assert.equal(orderLine(ENQ, { inputs: COSTING }).rate, 1.95);
   const proposed = at(25000).quote_per_unit;
   const noFinal = orderLine({ ...ENQ, final_prices: [], quantities: [25000] }, { inputs: COSTING });

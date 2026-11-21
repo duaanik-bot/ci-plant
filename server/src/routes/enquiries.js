@@ -64,7 +64,7 @@ import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
   sendToCompany, readAllowed, threadOfMessageId,
 } from '../gmail.js';
-import { orderLine, orderTotals, orderMail } from '../order-finalise.js';
+import { orderLine, orderTotals, orderMail, matchSalesOrder, withActuals, customerWord } from '../order-finalise.js';
 import { kldPdf } from '../kld-pdf.js';
 import { redirectUri, signState } from './gmail-link.js';
 import { startFetch, cloudLinks, cloudView, saveCloudLink, CLOUD_MAILBOXES } from '../enquiry-cloud.js';
@@ -1158,7 +1158,8 @@ async function orderMailState() {
 
 const ORDER_COLS = `o.id, o.order_no, o.mailbox, o.customer_id, o.customer_name, o.quotation_id, qt.quotation_no, o.lines, o.total::float8 AS total,
   o.loss::float8 AS loss, o.items_at_loss, o.new_dies, o.mail_wanted, o.mail_status, o.mail_to, o.mail_subject, o.mail_error, o.mail_sent_at,
-  o.created_by_name, o.created_at, o.customer_draft_id, o.customer_draft_url, o.customer_draft_mailbox, o.customer_drafted_at`;
+  o.created_by_name, o.created_at, o.customer_draft_id, o.customer_draft_url, o.customer_draft_mailbox, o.customer_drafted_at,
+  o.so_checked_at, o.so_checked_by`;
 const orderById = id => one(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id WHERE o.id = $1`, [id]);
 
 // Send the order sheet (the table, and each drawn KLD as its PDF) to the company mailbox. Never throws: the answer and
@@ -1266,8 +1267,54 @@ r.post('/costing/enquiries/order', async (req, res, next) => {
 
 r.get('/costing/enquiry-orders', async (req, res, next) => {
   try {
-    res.json(await q(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id
-                       ORDER BY o.created_at DESC, o.id DESC LIMIT 200`));
+    const orders = await q(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id
+                       ORDER BY o.created_at DESC, o.id DESC LIMIT 200`);
+    // Tracked (21 Nov 2026): the newest 40 orders each say whether their sales order has come in, and whether its rates differ.
+    for (const o of orders.slice(0, 40)) {
+      try { o.so = soSummary(matchSalesOrder(o.lines || [], await salesOrderLines(o))); } catch { o.so = null; }
+    }
+    res.json(orders);
+  } catch (e) { next(e); }
+});
+
+// The sales order against a finalised order (owner, 21 Nov 2026: "an option to check the rates with the sales order so that,
+// once the sales order comes, it can track it and fill the actual rates … but still keep it finalised"). The sales orders of
+// the same customer — its master when the order has one, else every master whose name starts with the same word ("Swiss
+// Garnier" → Life Sciences and Biotech) — entered from two weeks before the order on, not cancelled; matched line by line on
+// the product's name (matchSalesOrder).
+async function salesOrderLines(o) {
+  const word = customerWord(o.customer_name);
+  return q(`SELECT ol.id AS line_id, so.id AS order_id, so.po_number, so.po_date, so.created_at, p.name AS product, ol.qty,
+                   ol.rate::float8 AS rate, c.name AS customer
+              FROM orders so JOIN order_lines ol ON ol.order_id = so.id JOIN products p ON p.id = ol.product_id
+              JOIN customers c ON c.id = so.customer_id
+             WHERE so.status <> 'cancelled' AND ol.status <> 'cancelled' AND so.created_at >= $1::timestamptz - interval '14 days'
+               AND (c.id = $2 OR ($3 <> '' AND regexp_replace(upper(split_part(trim(c.name), ' ', 1)), '[^A-Z0-9]', '', 'g') = $3))
+             ORDER BY so.created_at DESC, ol.id DESC LIMIT 2000`, [o.created_at, o.customer_id ?? 0, word]);
+}
+const soSummary = matched => {
+  const found = matched.filter(m => m.so);
+  return { found: found.length, of: matched.length, differ: found.filter(m => m.rate_diff || m.qty_diff).length,
+    pos: [...new Set(found.map(m => m.so.po_number))] };
+};
+r.post('/costing/enquiry-orders/:id(\\d+)/sales-order', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    const id = intOrNull(req.params.id) || 0;
+    const o = await orderById(id);
+    if (!o) throw fail(404, 'No such order.');
+    const matched = matchSalesOrder(o.lines || [], await salesOrderLines(o));
+    if (req.body?.apply) {
+      needMgmt(u);
+      if (!matched.some(m => m.so)) throw fail(409, `${o.order_no}: no sales order found for it yet.`);
+      const lines = withActuals(o.lines || [], matched);
+      await tx(async (qc) => {
+        await qc(`UPDATE enquiry_orders SET lines = $2, so_checked_at = now(), so_checked_by = $3 WHERE id = $1`, [id, JSON.stringify(lines), u.name]);
+        const s = soSummary(matched);
+        await audit('enquiry_order', id, 'sales_order', `${o.order_no} — actual rates from ${s.pos.join(', ')} (${s.found} of ${s.of} lines, ${s.differ} differ)`, qc, u.name);
+      });
+    }
+    res.json({ order: await orderById(id), matched, summary: soSummary(matched) });
   } catch (e) { next(e); }
 });
 

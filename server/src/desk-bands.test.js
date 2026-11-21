@@ -140,3 +140,15 @@ test('composeOrderConfirmation: a reply in the thread — items, quantity, rate 
   }
   assert.equal(composeOrderConfirmation(o).subject, 'Order CI-OF-0001 — Colour Impressions', 'no mail: a subject of its own');
 });
+
+test('bookedPL: the sales order\'s actual rate beside the finalised one; the summary counts the actual', () => {
+  const won = row(1, 'ordered', { order_line: { qty: 1000, rate: 11, cost: 10, actual_rate: 10.5, actual_qty: 1200, actual_po: 'P-9' } });
+  const p = bookedPL(won);
+  assert.equal(p.rate, 11, 'still finalised at its rate');
+  assert.equal(p.actual.rate, 10.5);
+  assert.equal(p.actual.total, 600);
+  assert.equal(p.actual.po, 'P-9');
+  const d = decisionSummary([won]);
+  assert.equal(d.booked, 600);
+  assert.equal(d.won_value, 12600);
+});

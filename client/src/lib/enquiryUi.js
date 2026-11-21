@@ -66,8 +66,14 @@ export function bookedPL(e) {
   const cost = l.cost != null ? Number(l.cost) : null;
   const qty = Number(l.qty) || 0;
   const unit = rate != null && cost != null ? rate - cost : null;
+  // The sales order's actual rate and quantity, once taken in (21 Nov 2026) — the order stays finalised at `rate`.
+  const aRate = l.actual_rate != null ? Number(l.actual_rate) : null;
+  const aQty = l.actual_qty != null ? Number(l.actual_qty) : qty;
+  const aUnit = aRate != null && cost != null ? aRate - cost : null;
+  const actual = aRate != null ? { po: l.actual_po || null, rate: aRate, qty: aQty, unit: aUnit, total: aUnit != null ? aUnit * aQty : null,
+    value: aRate * aQty, pct: aUnit != null && cost ? (aUnit / cost) * 100 : null } : null;
   return { qty, rate, cost, unit, total: unit != null ? unit * qty : null, value: rate != null ? rate * qty : null,
-    pct: unit != null && cost ? (unit / cost) * 100 : null };
+    pct: unit != null && cost ? (unit / cost) * 100 : null, actual };
 }
 // A row's quoted value: its first quantity at its final (else our quoted) price.
 const quotedValue = e => {
@@ -80,7 +86,8 @@ export function decisionSummary(rows = []) {
   const quoted = rows.filter(e => ['sent', 'mailed', 'counter', 'finalised', 'lost'].includes(bandOf(e)));
   const won = quoted.filter(e => decisionOf(e) === 'won');
   const lost = quoted.filter(e => decisionOf(e) === 'lost');
-  const pls = won.map(bookedPL).filter(Boolean);
+  // what the sales order says, once taken in; else what was finalised
+  const pls = won.map(bookedPL).filter(Boolean).map(x => (x.actual ? { ...x, ...x.actual, cost: x.cost } : x));
   const wonValue = pls.reduce((s, x) => s + (x.value || 0), 0);
   const wonCost = pls.filter(x => x.cost != null).reduce((s, x) => s + x.cost * x.qty, 0);
   const booked = pls.reduce((s, x) => s + (x.total || 0), 0);

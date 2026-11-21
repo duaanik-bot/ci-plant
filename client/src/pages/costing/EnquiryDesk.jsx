@@ -663,6 +663,12 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           <div><b>{qtyText(pl.qty)}</b> @ <b>{rupees(pl.rate, 2)}</b> <span className="text-slate-500">booked</span></div>
           <div className={`font-bold ${plTone(pl.total)}`}>{pl.total < 0 ? 'Loss' : 'Profit'} {signedRs(pl.total)} · {signedPct(pl.pct)}</div>
           <div className={`text-[10px] ${plTone(pl.unit)}`}>{signedRs(pl.unit, 3)} a carton, on cost</div>
+          {pl.actual && (
+            <div className="mt-1 rounded-lg bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-900" title="The customer's sales order — the order stays finalised at the rate above">
+              PO {pl.actual.po}: <b>{qtyText(pl.actual.qty)} @ {rupees(pl.actual.rate, 2)}</b>
+              {pl.actual.rate !== pl.rate && <> ({signedRs(pl.actual.rate - pl.rate, 2)})</>} · <span className={plTone(pl.actual.total)}>{signedRs(pl.actual.total)} {signedPct(pl.actual.pct)}</span>
+            </div>
+          )}
         </div>
       );
     }

@@ -41,8 +41,10 @@ export function orderLine(e, { inputs = null, quotationLine = null, kld = null, 
   const rawCost = b?.ok ? b.cost_per_unit : null;
   const finals = Array.isArray(e.final_prices) ? e.final_prices : [];
   const f = finals.find(x => Number(x.qty) === qty);
-  let rate = num(quotationLine?.rate) > 0 ? num(quotationLine.rate)
-    : num(f?.final) > 0 ? num(f.final)
+  // Our final given rate first (owner, 21 Nov 2026: "pre-autofill my final given rates"): the latest price set for this
+  // quantity — a revised one after a counter included — then the quotation's rate, then the costing's quote.
+  let rate = num(f?.final) > 0 ? num(f.final)
+    : num(quotationLine?.rate) > 0 ? num(quotationLine.rate)
       : b?.ok ? ceilPaise(b.quote_per_unit) : null;
   if (edits && edits.rate !== undefined && edits.rate !== null) {
     const v = r2(num(edits.rate) || 0);
@@ -71,6 +73,7 @@ export function orderLine(e, { inputs = null, quotationLine = null, kld = null, 
     new_die: edits && typeof edits.new_die === 'boolean' ? edits.new_die : newDieFromInputs(inputs),
     kld: num(kld?.rev) > 0 ? { rev: num(kld.rev), size_id: kld.size_id ?? null } : null,
     quoted: num(quotationLine?.rate) > 0 ? num(quotationLine.rate) : null,
+    final: num(f?.final) > 0 ? num(f.final) : null,
     counter: num(counter?.theirs) > 0 ? num(counter.theirs) : null,
   };
 }
@@ -147,4 +150,43 @@ ${rows}
 <p style="color:#475569">— ${esc(by || 'CI Plant')}, via CI Plant</p>
 </div>`;
   return { subject, text, html };
+}
+
+// ── The sales order, against the order finalised (owner, 21 Nov 2026: "an option to check the rates with the sales order
+// so that, once the sales order comes, it can track it and fill the actual rates … but still keep it finalised") ──────────
+// A product's name as both sides spell it: case, spaces and punctuation ignored ("CARTON(10X15)SALES" = "CARTON (10X15) SALES").
+export const productKey = name => String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+// A customer as the desk names it against the Customer Master: the first word ("Swiss Garnier" → both Swiss Garnier masters).
+export const customerWord = name => (String(name || '').trim().split(/\s+/)[0] || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Each line of a finalised order matched to a sales-order line: the same product (by name), the newest sales order first.
+// `soLines`: [{ order_id, po_number, po_date, line_id, product, qty, rate, customer, created_at }]. A sales-order line is
+// used once. Answers one entry per order line: what was finalised, the sales order's line (or null), and the difference.
+export function matchSalesOrder(orderLines = [], soLines = []) {
+  const used = new Set();
+  const newest = [...soLines].sort((a, b) => String(b.created_at || b.po_date || '').localeCompare(String(a.created_at || a.po_date || '')) || b.line_id - a.line_id);
+  return orderLines.map(l => {
+    const k = productKey(l.product);
+    const hit = k.length >= 6 ? newest.find(s => !used.has(s.line_id) && productKey(s.product) === k) : null;
+    if (hit) used.add(hit.line_id);
+    const rate = num(l.rate), soRate = hit ? num(hit.rate) : null;
+    return {
+      enquiry_id: l.enquiry_id ?? null, enquiry_no: l.enquiry_no || null, product: l.product, qty: num(l.qty), rate,
+      so: hit ? { order_id: hit.order_id, po_number: hit.po_number, po_date: hit.po_date, line_id: hit.line_id, customer: hit.customer, qty: num(hit.qty), rate: soRate } : null,
+      rate_diff: hit && rate != null && soRate != null ? r2(soRate - rate) : null,
+      qty_diff: hit ? num(hit.qty) - num(l.qty) : null,
+    };
+  });
+}
+// The order's lines with the sales order's actual rate and quantity beside the finalised ones (never replacing them): the
+// order stays finalised at its rate; `actual_*` and the margin at the actual rate are what the sales order says.
+export function withActuals(orderLines = [], matched = []) {
+  return orderLines.map(l => {
+    const m = matched.find(x => x.so && (x.enquiry_id ?? null) === (l.enquiry_id ?? null) && x.product === l.product);
+    if (!m) return l;
+    const cost = num(l.cost);
+    const gap = cost != null && m.so.rate != null ? m.so.rate - cost : null;
+    return { ...l, actual_rate: m.so.rate, actual_qty: m.so.qty, actual_po: m.so.po_number, actual_order_id: m.so.order_id,
+      actual_margin: gap != null ? Math.round(gap * 10000) / 10000 : null, actual_margin_total: gap != null && m.so.qty ? r2(gap * m.so.qty) : null };
+  });
 }
