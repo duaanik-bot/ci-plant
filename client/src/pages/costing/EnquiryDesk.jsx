@@ -20,7 +20,7 @@ import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, M
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, batchesOf, bookedPL, customersOf, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, STAGE_TONE, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
+  BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, batchesOf, bookedPL, customersOf, dashboardOf, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, STAGE_TONE, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
   moveSummary, moveTone, quantitiesText, replyLine, qtyText, rupees, startsFresh, whereText,
 } from '../../lib/enquiryUi.js';
 import COMPANY_ROUTINE_PROMPT from '../../lib/enquiry-robot/company-routine-prompt.md?raw';
@@ -180,6 +180,78 @@ function AutoNotes({ e }) {
       {priced && e.costing_remarks && <div className="truncate text-[11px] text-slate-500" title={e.costing_remarks}>{e.costing_remarks}</div>}
       {line && <div className="text-[11px] font-semibold text-sky-800">{line}</div>}
       {held && <div className="text-[11px] font-semibold text-amber-800">{held}</div>}
+    </div>
+  );
+}
+
+// The desk's front page (owner, 21 Nov 2026: "before pending, we should have a dashboard … pending for finalisation with
+// their number. Then we should be able to reach that chip"): a tile per tab — how many, for how many customers, and the money
+// at each row's first quantity — then what needs a person now, then the decisions taken. Every tile and line opens its tab.
+const TILE_TONE = {
+  pending: 'ring-orange-200 bg-orange-50/70', finalise: 'ring-amber-200 bg-amber-50/70', sent: 'ring-sky-200 bg-sky-50/70',
+  won: 'ring-emerald-200 bg-emerald-50/70', lost: 'ring-red-200 bg-red-50/70', all: 'ring-slate-200 bg-white/70',
+};
+function Dashboard({ rows, onOpen }) {
+  const d = dashboardOf(rows);
+  const dec = d.decisions;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {d.tiles.map(t => (
+          <button key={t.key} type="button" onClick={() => onOpen(t.key)}
+            className={`rounded-2xl p-3 text-left ring-1 transition hover:-translate-y-0.5 hover:shadow-[0_6px_18px_rgba(29,29,31,0.10)] ${TILE_TONE[t.key]}`}>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{t.label}</div>
+            <div className="mt-1 text-3xl font-black tabular-nums text-[#1D1D1F]">{t.n}</div>
+            <div className="text-[11px] text-slate-500">{t.n ? `${t.customers} customer${t.customers === 1 ? '' : 's'}` : 'nothing here'}</div>
+            {t.priced > 0 && (
+              <div className="mt-2 text-xs">
+                <div><b>{rupees(t.value, 0)}</b> <span className="text-slate-500">at our price</span></div>
+                <div className={t.profit < 0 ? 'font-bold text-red-700' : 'font-bold text-emerald-700'}>
+                  {t.profit < 0 ? '−' : '+'}{rupees(Math.abs(t.profit), 0)}{t.pct != null && ` · ${t.pct < 0 ? '−' : '+'}${Math.abs(t.pct).toFixed(1)}%`}
+                  <span className="font-normal text-slate-500"> on cost</span>
+                </div>
+              </div>
+            )}
+            <div className="mt-2 text-[11px] font-semibold text-brand-700">Open →</div>
+          </button>
+        ))}
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <section className="glass rounded-2xl p-3">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Needs a person now</div>
+          {d.attention.length ? (
+            <ul className="divide-y divide-slate-100">
+              {d.attention.map(a => (
+                <li key={a.key}>
+                  <button type="button" onClick={() => onOpen(a.tab)} className="flex w-full items-center gap-3 px-1 py-2 text-left text-sm hover:bg-brand-50/50">
+                    <span className={`w-10 rounded-full px-2 py-0.5 text-center text-xs font-black ${a.key === 'soloss' || a.key === 'below' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-900'}`}>{a.n}</span>
+                    <span className="flex-1 text-[#1D1D1F]">{a.text}</span>
+                    <span className="text-[11px] font-semibold text-brand-700">{DESK_TABS.find(t => t.key === a.tab)?.label} →</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-slate-500">Nothing waiting on a person.</p>}
+        </section>
+        <section className="glass rounded-2xl p-3">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Decisions</div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <button type="button" onClick={() => onOpen('won')} className="rounded-xl bg-emerald-50 p-2 text-left ring-1 ring-emerald-200">
+              <div className="text-[11px] uppercase text-emerald-800">Won</div><div className="text-xl font-black">{dec.won}</div>
+              <div className="text-xs">{rupees(dec.won_value, 0)}</div></button>
+            <button type="button" onClick={() => onOpen('lost')} className="rounded-xl bg-red-50 p-2 text-left ring-1 ring-red-200">
+              <div className="text-[11px] uppercase text-red-800">Lost</div><div className="text-xl font-black">{dec.lost}</div>
+              <div className="text-xs">{rupees(dec.lost_value, 0)}</div></button>
+            <div className="rounded-xl bg-white/70 p-2 ring-1 ring-slate-200">
+              <div className="text-[11px] uppercase text-slate-500">Win rate</div><div className="text-xl font-black">{dec.win_rate != null ? `${dec.win_rate.toFixed(0)}%` : '—'}</div>
+              <div className="text-xs text-slate-500">{dec.won} of {dec.won + dec.lost} decided · {dec.open} open</div></div>
+            <div className="rounded-xl bg-white/70 p-2 ring-1 ring-slate-200">
+              <div className="text-[11px] uppercase text-slate-500">{dec.booked < 0 ? 'Loss' : 'Profit'} on won orders</div>
+              <div className={`text-xl font-black ${dec.booked < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{dec.booked < 0 ? '−' : '+'}{rupees(Math.abs(dec.booked), 0)}</div>
+              <div className="text-xs text-slate-500">{dec.booked_pct != null ? `${dec.booked_pct.toFixed(1)}% on cost · ` : ''}at the sales order's rate where taken in</div></div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -357,7 +429,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const toast = useToast();
   const [desk, setDesk] = useState(null);
   // Pending · Sent · All (21 Nov 2026); Orders, Dropped and Settings to the side.
-  const [tab, setTab] = useState('pending');
+  // The desk opens on its Dashboard (21 Nov 2026).
+  const [tab, setTab] = useState('dashboard');
   const [deleting, setDeleting] = useState(null);   // Delete: { ids, reason }
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState([]);
@@ -397,7 +470,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const loadDesk = useCallback(() => api.get('/costing/enquiry-desk').then(setDesk), []);
   // Every tab reads the one list (every live stage and Dropped); a tab is a filter of it, so the counts are always right.
-  const stages = DESK_TABS.find(t => t.key === tab) || null;
+  const stages = DESK_TABS.find(t => t.key === tab && !t.dashboard) || null;
   const loadRows = useCallback(() => {
     return api.get(`/costing/enquiries?stage=${[...DESK_STAGES, 'dropped'].join(',')}`).then(rs => {
       setRows(rs);
@@ -456,7 +529,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     if (!flash || !rows) return;
     const e = rows.find(x => x.id === flash);
     if (!e) return;
-    const where = DESK_TABS.find(t => t.key !== 'all' && rowsOfTab(t.key, [e]).length)?.key || 'all';
+    const where = DESK_TABS.find(t => t.key !== 'all' && !t.dashboard && rowsOfTab(t.key, [e]).length)?.key || 'all';
     setTab(where);
     const t = setTimeout(() => document.querySelector('.desk-flash-row')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
     const off = setTimeout(() => setFlash(null), 6000);
@@ -566,7 +639,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const counts = desk?.counts || {};
   // Pending and Sent count their rows; All carries no count.
-  const views = DESK_TABS.filter(t => !t.side).map(t => ({ key: t.key, label: t.label, count: (t.key !== 'all' && rows && rowsOfTab(t.key, rows).length) || null }));
+  const views = DESK_TABS.filter(t => !t.side).map(t => ({ key: t.key, label: t.label, count: (t.key !== 'all' && !t.dashboard && rows && rowsOfTab(t.key, rows).length) || null }));
   const stageName = st => desk?.statuses?.[st] || whereText(st);
 
   const costButton = e => (
@@ -1001,6 +1074,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
       {tab === 'settings' && <DeskSettings desk={desk} onSaved={loadDesk} />}
 
+      {tab === 'dashboard' && (rows ? <Dashboard rows={rows} onOpen={k => { setTab(k); setSearch(''); }} /> : <div className="p-6 text-sm text-slate-400">Loading…</div>)}
       {tab === 'pending' && (
         <p className="mb-2 text-xs text-slate-500">Still to be costed: new enquiries (<b>orange rows</b>) and those in costing. <b>Cost it</b> opens the costing here, or <b>Cost it for me</b>; once a costing is complete the row moves to <b>Pending for finalisation</b>.</p>
       )}

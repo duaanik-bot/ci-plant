@@ -50,6 +50,9 @@ export function bandOf(e) {
 //   Sent                       with the customer: the quotation's draft in Gmail, or mailed
 //   Finalised                  the order is won     ·   Order lost  the customer did not order   ·   All  everything
 export const DESK_TABS = [
+  // the desk's front page (owner, 21 Nov 2026: "before pending, we should have a dashboard … with their number. Then we
+  // should be able to reach that chip") — it lists no rows of its own
+  { key: 'dashboard', label: 'Dashboard', match: () => false, dashboard: true },
   { key: 'pending', label: 'Pending', match: e => COST_STAGES.includes(e.stage) },
   { key: 'finalise', label: 'Pending for finalisation', match: e => bandOf(e) === 'counter' || (bandOf(e) === 'pending' && !COST_STAGES.includes(e.stage)) },
   { key: 'sent', label: 'Sent', match: e => ['sent', 'mailed'].includes(bandOf(e)) },
@@ -157,6 +160,42 @@ export const customersOf = (rows = []) => [...rows.reduce((m, e) => {
   const k = e.customer_name || e.contact_email || 'Customer';
   return m.set(k, (m.get(k) || 0) + 1);
 }, new Map())].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+
+// The dashboard (21 Nov 2026): per tab, how many rows and their money at each row's first quantity — our price, our cost and
+// the profit between (a won row at its sales order's actual rate once taken in) — and what needs a person now, each with the
+// tab it opens.
+const moneyOf = e => {
+  const pl = bookedPL(e);
+  if (pl) {
+    const x = pl.actual || pl;
+    return x.value != null && pl.cost != null ? { value: x.value, cost: pl.cost * (x.qty ?? pl.qty) } : null;
+  }
+  const p = (e.prices || [])[0];
+  const price = p ? Number(p.final ?? p.ours ?? p.proposed) : NaN;
+  const cost = p ? Number(p.cost) : NaN;
+  return price > 0 && cost > 0 ? { value: price * Number(p.qty || 0), cost: cost * Number(p.qty || 0) } : null;
+};
+export function dashboardOf(rows = []) {
+  const tiles = DESK_TABS.filter(t => !t.side && !t.dashboard).map(t => {
+    const rs = rows.filter(t.match);
+    let value = 0, cost = 0, priced = 0;
+    for (const e of rs) { const m = moneyOf(e); if (m) { value += m.value; cost += m.cost; priced++; } }
+    return { key: t.key, label: t.label, n: rs.length, priced, value, cost, profit: priced ? value - cost : null,
+      pct: cost ? ((value - cost) / cost) * 100 : null, customers: new Set(rs.map(e => e.customer_name || e.contact_email)).size };
+  });
+  const lossOnSO = rows.filter(e => (bookedPL(e)?.actual?.total ?? 0) < 0);
+  const attention = [
+    { key: 'new', tab: 'pending', n: rows.filter(e => e.status === 'new').length, text: 'new enquiries nobody has started on' },
+    { key: 'held', tab: 'pending', n: rows.filter(e => COST_STAGES.includes(e.stage) && e.auto_cost_why).length, text: 'could not be costed by themselves — need a person' },
+    { key: 'approve', tab: 'finalise', n: rows.filter(e => PRICE_STAGES.includes(e.stage) && e.costing_status !== 'approved').length, text: 'costings waiting for approval' },
+    { key: 'counter', tab: 'finalise', n: rows.filter(e => e.stage === 'countered').length, text: 'counter-offers waiting for our revised price' },
+    { key: 'nomail', tab: 'finalise', n: rows.filter(e => e.stage === 'quote_ready' && bandOf(e) === 'pending').length, text: 'quotations made, no mail yet' },
+    { key: 'below', tab: 'finalise', n: rows.filter(e => PRICE_STAGES.includes(e.stage) && (e.prices || []).some(p => Number(p.final) > 0 && Number(p.cost) > 0 && Number(p.final) < Number(p.cost))).length, text: 'priced below our cost' },
+    { key: 'draft', tab: 'sent', n: rows.filter(e => bandOf(e) === 'sent').length, text: 'drafts in Gmail, not sent yet' },
+    { key: 'soloss', tab: 'won', n: lossOnSO.length, text: 'won orders losing money at the sales order\'s rate' },
+  ].filter(a => a.n > 0);
+  return { tiles, attention, decisions: decisionSummary(rows.filter(e => !!bandOf(e))) };
+}
 
 export const rowsOfTab = (tab, rows) => {
   const t = DESK_TABS.find(x => x.key === tab);

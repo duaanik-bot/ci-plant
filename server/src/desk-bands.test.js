@@ -31,7 +31,7 @@ test('rowsOfTab: Pending · Pending for finalisation · Sent · Finalised · Ord
   assert.deepEqual(ids('lost'), [10]);
   assert.deepEqual(ids('all'), [1, 2, 3, 4, 5, 7, 8, 9, 10]);
   assert.deepEqual(ids('dropped'), [6]);
-  assert.deepEqual(DESK_TABS.filter(t => !t.side).map(t => t.label), ['Pending', 'Pending for finalisation', 'Sent', 'Finalised', 'Order lost', 'All']);
+  assert.deepEqual(DESK_TABS.filter(t => !t.side).map(t => t.label), ['Dashboard', 'Pending', 'Pending for finalisation', 'Sent', 'Finalised', 'Order lost', 'All']);
   assert.deepEqual(rowsOfTab('pending', null), []);
 });
 
@@ -164,4 +164,29 @@ test('replyLines: a quotation made without a draft (by choice) is no error; a fa
     drafted: [{ id: 1 }], failed: [{ id: 2, why: 'Gmail refused' }] }] };
   assert.deepEqual(replyLines(r), ['Quotation Q1 made · draft saved', 'Quotation Q2 made · draft not made: Gmail refused',
     'Quotation Q3 made · no mail draft — Send quotation or Mark as sent when it goes']);
+});
+
+import { dashboardOf } from '../../client/src/lib/enquiryUi.js';
+
+test('dashboardOf: a tile per tab with its count and money; attention points at the tab to open', () => {
+  const rows = [
+    row(1, 'new', { status: 'new', customer_name: 'A' }),
+    row(2, 'price_pending', { customer_name: 'A', costing_status: 'draft', prices: [{ qty: 1000, final: 9, cost: 10 }] }),
+    row(3, 'countered', { customer_name: 'B', prices: [{ qty: 100, final: 5, cost: 4, theirs: 4.5 }] }),
+    row(4, 'sent', { customer_name: 'B', prices: [{ qty: 100, final: 3, cost: 2 }] }),
+    row(5, 'ordered', { customer_name: 'C', order_line: { qty: 1000, rate: 11, cost: 10, actual_rate: 9.5, actual_qty: 1000, actual_po: 'P' } }),
+    row(6, 'lost', { customer_name: 'D' }),
+    row(7, 'dropped', { customer_name: 'E' }),
+  ];
+  const d = dashboardOf(rows);
+  const t = Object.fromEntries(d.tiles.map(x => [x.key, x]));
+  assert.deepEqual(d.tiles.map(x => x.key), ['pending', 'finalise', 'sent', 'won', 'lost', 'all']);
+  assert.deepEqual([t.pending.n, t.finalise.n, t.sent.n, t.won.n, t.lost.n, t.all.n], [1, 2, 1, 1, 1, 6]);
+  assert.equal(t.finalise.value, 9000 + 500);
+  assert.equal(t.finalise.profit, 9500 - 10400);
+  assert.equal(t.won.value, 9500, 'a won row at its sales order\'s actual rate');
+  assert.equal(t.won.profit, -500);
+  const a = Object.fromEntries(d.attention.map(x => [x.key, x]));
+  assert.deepEqual([a.new.tab, a.approve.n, a.counter.n, a.below.n, a.soloss.tab], ['pending', 1, 1, 1, 'won']);
+  assert.equal(a.draft, undefined, 'nothing to show is left out');
 });
