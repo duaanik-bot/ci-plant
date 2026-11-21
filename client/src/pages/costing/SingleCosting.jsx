@@ -41,6 +41,11 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   const [saved, setSaved] = useState(null);       // meta() once saved / opened
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+  // A costing (or an enquiry) that could not be opened (owner, 21 Nov 2026: CI-CST-0047 opened as an empty form — the
+  // failed read was swallowed and the blank new-costing form stood in its place, looking as if auto-fill had failed).
+  // Now: one quiet retry, then the reason and Try again — never a blank form in its place.
+  const [loadError, setLoadError] = useState(null);
+  const [tries, setTries] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [asking, setAsking] = useState(null);     // the library entry put to the user on saving
   const [saves, setSaves] = useState(0);          // the editor looks the size up again after each save
@@ -49,10 +54,18 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   useEffect(() => {
     const id = openId || fromId;
     let live = true;
+    setLoadError(null);
+    // A read that fails is tried once more after a moment (a dropped connection, a cold server), then reported.
+    const read = url => api.get(url).catch(e => new Promise((ok, no) => setTimeout(() => (live ? api.get(url).then(ok, no) : no(e)), 1200)));
+    const failed = (what, e) => {
+      if (!live) return;
+      console.error(`[costing] could not open ${what}:`, e);
+      setLoadError({ what, why: e?.message || 'no answer from the server' });
+    };
     // For an enquiry: what the customer asked, then the module's own auto-fill.
     if (!id && (enquiryId || enquiry)) {
       setLoading(true);
-      (enquiry ? Promise.resolve(enquiry) : api.get(`/costing/enquiries/${enquiryId}`)).then(async e => {
+      (enquiry ? Promise.resolve(enquiry) : read(`/costing/enquiries/${enquiryId}`)).then(async e => {
         const v = costingValueFromEnquiry(e, defaults);
         if (e.product_id && e.product_name) {
           const hits = await api.get(`/costing/products?search=${encodeURIComponent(e.product_name)}`).catch(() => []);
@@ -60,12 +73,12 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
         }
         if (!live) return;
         setValue(v); setSaved(null); setDirty(true);
-      }).catch(() => {}).finally(() => live && setLoading(false));
+      }).catch(e => failed('the enquiry', e)).finally(() => live && setLoading(false));
       return () => { live = false; };
     }
     if (!id) { setValue(blankValue(defaults, startSize)); setSaved(null); setDirty(false); return undefined; }
     setLoading(true);
-    api.get(`/costing/costings/${id}`).then(c => {
+    read(`/costing/costings/${id}`).then(c => {
       if (!live) return;
       const editable = openId && c.source === 'erp';
       // As saved: nothing is re-suggested until the product or the size is changed.
@@ -78,10 +91,11 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
       setSaved(editable ? meta(c) : null);
       setDirty(!editable);
       if (openId && !editable) toast.info(`${c.costing_no} is from the old cost sheet — opened as a new costing to cost again.`);
-    }).catch(() => {}).finally(() => live && setLoading(false));
+    }).catch(e => failed(enquiry?.costing_no && String(enquiry.costing_id) === String(id) ? enquiry.costing_no : 'the costing', e))
+      .finally(() => live && setLoading(false));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId, fromId, startSize, enquiryId, enquiry?.id]);
+  }, [openId, fromId, startSize, enquiryId, enquiry?.id, tries]);
 
   const change = v => { setValue(v); setDirty(true); };
   const missing = stillNeeded(value);
@@ -146,6 +160,15 @@ export default function SingleCosting({ boot, customers, openId, fromId, startSi
   const approved = saved?.status === 'approved' && !dirty;
 
   if (loading) return <div className="p-8 text-sm text-slate-400">Opening the costing…</div>;
+  if (loadError) {
+    return (
+      <div className="glass rounded-2xl p-6 text-sm" role="alert">
+        <div className="font-bold text-red-700">Could not open {loadError.what}</div>
+        <p className="mt-1 text-slate-600">{String(loadError.why).replace(/\.+$/, '')}. Nothing was changed — the form is not shown empty in its place.</p>
+        <Button size="sm" className="mt-3" onClick={() => setTries(n => n + 1)}>Try again</Button>
+      </div>
+    );
+  }
 
   return (
     <div>
