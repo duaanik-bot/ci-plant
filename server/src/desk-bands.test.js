@@ -1,7 +1,7 @@
 // The desk's one list (owner, 21 Nov 2026): Pending · Sent · All tabs, and the status band on every row.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bandOf, rowsOfTab, whereText } from '../../client/src/lib/enquiryUi.js';
+import { DESK_TABS, bandOf, rowsOfTab, whereText } from '../../client/src/lib/enquiryUi.js';
 
 const row = (id, stage, o = {}) => ({ id, stage, ...o });
 
@@ -20,14 +20,18 @@ test('bandOf: every live stage has a band', () => {
   assert.equal(bandOf(row(1, 'dropped')), null);
 });
 
-test('rowsOfTab: Pending holds counters, Sent holds drafts and mailed, All everything but dropped', () => {
+test('rowsOfTab: Pending · Pending for finalisation · Sent · Finalised · Order lost · All (21 Nov 2026)', () => {
   const rows = [row(1, 'new'), row(2, 'countered'), row(3, 'quote_ready', { quotation_id: 9, quotation_status: 'drafted' }),
-    row(4, 'sent'), row(5, 'ordered'), row(6, 'dropped'), row(7, 'price_pending')];
+    row(4, 'sent'), row(5, 'ordered'), row(6, 'dropped'), row(7, 'price_pending'), row(8, 'costing'), row(9, 'quote_ready'), row(10, 'lost')];
   const ids = t => rowsOfTab(t, rows).map(r => r.id);
-  assert.deepEqual(ids('pending'), [1, 2, 7]);
+  assert.deepEqual(ids('pending'), [1, 8]);
+  assert.deepEqual(ids('finalise'), [2, 7, 9]);
   assert.deepEqual(ids('sent'), [3, 4]);
-  assert.deepEqual(ids('all'), [1, 2, 3, 4, 5, 7]);
+  assert.deepEqual(ids('won'), [5]);
+  assert.deepEqual(ids('lost'), [10]);
+  assert.deepEqual(ids('all'), [1, 2, 3, 4, 5, 7, 8, 9, 10]);
   assert.deepEqual(ids('dropped'), [6]);
+  assert.deepEqual(DESK_TABS.filter(t => !t.side).map(t => t.label), ['Pending', 'Pending for finalisation', 'Sent', 'Finalised', 'Order lost', 'All']);
   assert.deepEqual(rowsOfTab('pending', null), []);
 });
 
@@ -151,4 +155,13 @@ test('bookedPL: the sales order\'s actual rate beside the finalised one; the sum
   const d = decisionSummary([won]);
   assert.equal(d.booked, 600);
   assert.equal(d.won_value, 12600);
+});
+
+import { replyLines } from '../../client/src/lib/enquiryUi.js';
+
+test('replyLines: a quotation made without a draft (by choice) is no error; a failed draft says why', () => {
+  const r = { replies: [{ quotations: [{ id: 1, quotation_no: 'Q1' }, { id: 2, quotation_no: 'Q2' }, { id: 3, quotation_no: 'Q3' }],
+    drafted: [{ id: 1 }], failed: [{ id: 2, why: 'Gmail refused' }] }] };
+  assert.deepEqual(replyLines(r), ['Quotation Q1 made · draft saved', 'Quotation Q2 made · draft not made: Gmail refused',
+    'Quotation Q3 made · no mail draft — Send quotation or Mark as sent when it goes']);
 });

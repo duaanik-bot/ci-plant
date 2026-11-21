@@ -379,7 +379,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [asking, setAsking] = useState(null);
   // A price changed on a quotation not yet sent: { e, changes: [{ qty, from, to }] } — "change the draft too?"
   const [repricing, setRepricing] = useState(null);
-  const [confirming, setConfirming] = useState(null);  // an order just finalised: "draft the order confirmation?"       // the row an alert's link points at — highlighted, no pop-up
+  const [confirming, setConfirming] = useState(null);
+  const [marking, setMarking] = useState(null);       // Mark as sent: the ticked rows that can be  // an order just finalised: "draft the order confirmation?"       // the row an alert's link points at — highlighted, no pop-up
   const [picked, setPicked] = useState([]);
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
   const [openQuote, setOpenQuote] = useState(null);
@@ -396,7 +397,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const loadDesk = useCallback(() => api.get('/costing/enquiry-desk').then(setDesk), []);
   // Every tab reads the one list (every live stage and Dropped); a tab is a filter of it, so the counts are always right.
-  const stages = ['pending', 'sent', 'all', 'dropped'].includes(tab) ? DESK_TABS.find(t => t.key === tab) : null;
+  const stages = DESK_TABS.find(t => t.key === tab) || null;
   const loadRows = useCallback(() => {
     return api.get(`/costing/enquiries?stage=${[...DESK_STAGES, 'dropped'].join(',')}`).then(rs => {
       setRows(rs);
@@ -455,7 +456,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     if (!flash || !rows) return;
     const e = rows.find(x => x.id === flash);
     if (!e) return;
-    const where = ['pending', 'sent'].find(t => rowsOfTab(t, [e]).length) || (e.stage === 'dropped' ? 'dropped' : 'all');
+    const where = DESK_TABS.find(t => t.key !== 'all' && rowsOfTab(t.key, [e]).length)?.key || 'all';
     setTab(where);
     const t = setTimeout(() => document.querySelector('.desk-flash-row')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
     const off = setTimeout(() => setFlash(null), 6000);
@@ -930,6 +931,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     return `They ask ${rupees(t.value_theirs, 0)} (${signedPct(-t.disc_asked_pct)} on our quote) · revised ${rupees(t.value_revised, 0)}${rc ? ` · vs cost ${signedRs(rc.line)} ${signedPct(rc.pct)}` : ''}`;
   })();
   const pLose = pickedRows.some(e => LOSABLE.includes(e.stage));
+  // Mark as sent (owner, 21 Nov 2026: "sometimes I may send the mail manually"): a row on a quotation not yet sent, or a
+  // priced row with none yet (quoted by hand) — its quotation is made first, without a draft.
+  const markable = e => (e.stage === 'quote_ready' && (!e.quotation_id || ['ready', 'drafted'].includes(e.quotation_status))) || PRICE_STAGES.includes(e.stage);
+  const pMark = mgmt && pickedRows.some(markable);
   const pDelete = has(['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped']);
   const detail = (
     <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload} canSend={!!desk.can_finalise}
@@ -997,10 +1002,15 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {tab === 'settings' && <DeskSettings desk={desk} onSaved={loadDesk} />}
 
       {tab === 'pending' && (
-        <p className="mb-2 text-xs text-slate-500">Everything waiting on us, in one list: new enquiries (<b>orange rows</b>), costing, pricing, approval — and customers' counter-offers, worked in their own row: type <b>ask</b> (their price) and <b>revised</b> (ours), each shown against our cost. The <b>Status</b> band says where each row stands; tick rows and the buttons below are the ones their stage allows: <b>Cost it</b>, <b>Approve</b>, <b>Send quotation</b> (the reply goes to Gmail as a draft), <b>Customer counter</b>, <b>Order finalised</b>.</p>
+        <p className="mb-2 text-xs text-slate-500">Still to be costed: new enquiries (<b>orange rows</b>) and those in costing. <b>Cost it</b> opens the costing here, or <b>Cost it for me</b>; once a costing is complete the row moves to <b>Pending for finalisation</b>.</p>
       )}
+      {tab === 'finalise' && (
+        <p className="mb-2 text-xs text-slate-500">Costed, waiting for our final price, approval or the quotation — and customers' counter-offers, worked in their own row: type <b>ask</b> (their price) and <b>revised</b> (ours), each against our cost. Tick rows: <b>Approve</b>, <b>Send quotation</b> (asked whether it goes to Gmail as a draft), <b>Mark as sent</b> when you mailed it yourself, or <b>Order lost</b>.</p>
+      )}
+      {tab === 'won' && <p className="mb-2 text-xs text-slate-500">Orders the customer agreed — each with the rate finalised and, once its sales order is in and checked on <b>Orders</b>, the actual rate.</p>}
+      {tab === 'lost' && <p className="mb-2 text-xs text-slate-500">Quotes the customer did not take, with the reason. <b>Bring back</b> returns a row to where it was.</p>}
       {tab === 'sent' && (
-        <p className="mb-2 text-xs text-slate-500">With the customer. <b>Sent</b> = the quotation's reply is a draft in Gmail, to be sent from there; <b>Mailed</b> = it went to the customer. When they answer with their own prices, tick and press <b>Customer counter</b> — the rows go back to Pending; when they agree, <b>Order finalised</b> (green); when they don't, <b>Order lost</b> (red). The quotations are listed below.</p>
+        <p className="mb-2 text-xs text-slate-500">With the customer. <b>Sent</b> = the quotation's reply is a draft in Gmail, to be sent from there; <b>Mailed</b> = it went to the customer. When they answer with their own prices, tick and press <b>Customer counter</b> — the rows go to Pending for finalisation; when they agree, <b>Order finalised</b> (green); when they don't, <b>Order lost</b> (red). The quotations are listed below.</p>
       )}
       {tab === 'all' && rows && <Decisions rows={rowsOfTab('all', rows)} decision={decision} onDecision={setDecision} />}
       {tab === 'orders' && (
@@ -1096,7 +1106,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
               await after(api.put('/costing/enquiries/counter', { items: picked.map(id => ({ id, prices: [] })) })
                 .then(r => ({ moved: (r.saved || []).map(no => ({ enquiry_no: no, to: 'countered' })), skipped: r.skipped, undo: r.undo })),
               m => `${nos(m)} moved to the counter-offers on Pending — type the customer's prices there.`);
-              setTab('pending');
+              setTab('finalise');
             }}>Customer counter</Button>
         )}
         {pOrder && mgmt && (
@@ -1110,6 +1120,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         {pBack && <Button size="sm" variant="secondary" title="One step back — the costing and prices stay with it"
           onClick={() => move('back', m => `${nos(m)} sent back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Send back a step</Button>}
         {(pCost || pPrice) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
+        {pMark && (
+          <Button size="sm" variant="secondary" title="You mailed it yourself: the quotation is recorded as sent (made first, without a draft, where there is none)"
+            onClick={() => setMarking(pickedRows.filter(markable))}><Mail size={13} className="mr-1 inline" />Mark as sent</Button>
+        )}
         {pLose && mgmt && (
           <Button size="sm" variant="danger" title="The customer did not order: the row turns red, kept with the reason — Bring back undoes it"
             onClick={() => setLosing({ ids: pickedRows.filter(e => LOSABLE.includes(e.stage)).map(e => e.id), reason: 'Lost on price' })}>Order lost</Button>
@@ -1177,6 +1191,34 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       <QuotationPanel id={openQuote} canMarkSent={mgmt} onClose={() => setOpenQuote(null)} onChanged={reload} />
       <OrderPanel ids={ordering} onClose={() => setOrdering(null)}
         onDone={r => { setOrdering(null); setPicked([]); setOrdersSignal(s => s + 1); setTab('orders'); reload(); if (r?.order?.id && mgmt) setConfirming(r.order); }} />
+      <Modal open={!!marking} onClose={() => setMarking(null)} title={`Mark ${marking?.length === 1 ? marking[0].enquiry_no : `${marking?.length || 0} enquiries`} as sent?`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setMarking(null)}>Cancel</Button>
+          <Button variant="success" onClick={async () => {
+            const list = marking;
+            setMarking(null);
+            try {
+              // locked prices first where the boxes changed, then a quotation (no draft) for rows without one
+              await saveTheirs(list);
+              const open = list.filter(e => PRICE_STAGES.includes(e.stage) && !isLocked(e));
+              if (open.length) await savePrices(open, { quiet: true });
+              const need = list.filter(e => !e.quotation_id || !['ready', 'drafted'].includes(e.quotation_status));
+              const made = need.length ? await quoteAndDraft(api, need.map(e => e.id), { draft: false }) : { quotations: [], failed: [], skipped: [] };
+              if (made.failed?.length) toast.error(made.failed.join('; '));
+              const ids = [...new Set([...list.filter(e => e.quotation_id && ['ready', 'drafted'].includes(e.quotation_status)).map(e => e.quotation_id),
+                ...(made.quotations || []).map(q => q.id)])];
+              const done = [];
+              for (const id of ids) { const q = await api.post(`/costing/quotations/${id}/mark-sent`, {}); done.push(q.quotation_no); }
+              if (made.skipped?.length) toast.info(`Not marked: ${made.skipped.map(x => `${x.enquiry_no} ${x.why}`).join('; ')}`);
+              if (done.length) { toast.success(`${done.join(', ')} marked as sent — the rows are in Sent`); setLast({ text: `${done.join(', ')} marked as sent.` }); }
+            } catch { /* the error is already shown */ }
+            setPicked([]); await reload();
+          }}><Mail size={13} className="mr-1 inline" />Yes — it was sent</Button>
+        </>}>
+        <p className="text-sm text-slate-600">For <b>{[...new Set((marking || []).map(e => e.customer_name).filter(Boolean))].join(' · ') || 'the customer'}</b> — you mailed the quotation yourself.
+          It is recorded as <b>sent</b> and the rows move to <b>Sent</b>. A row with no quotation yet gets one first (at the prices in its boxes), without a Gmail draft.
+          A draft left in Gmail is not touched — discard it there if you sent your own mail.</p>
+      </Modal>
       <Modal open={!!confirming} onClose={() => setConfirming(null)} title={`${confirming?.order_no || ''} — draft the order confirmation?`}
         footer={<>
           <Button variant="secondary" onClick={() => setConfirming(null)}>No, not now</Button>

@@ -42,14 +42,22 @@ export function bandOf(e) {
   return 'pending';
 }
 
+// Tabs (owner, 21 Nov 2026: "Pending, then pending for finalisation, then these are sent … finalised, order lost … all
+// should be in the last"). Each takes the rows its `match` says:
+//   Pending                    still to be costed
+//   Pending for finalisation   costed — waiting for our final price, approval or the quotation; a counter waiting for our
+//                              revised price
+//   Sent                       with the customer: the quotation's draft in Gmail, or mailed
+//   Finalised                  the order is won     ·   Order lost  the customer did not order   ·   All  everything
 export const DESK_TABS = [
-  // waits on us: costing, pricing, approval, a counter to answer
-  { key: 'pending', label: 'Pending', bands: ['pending', 'counter'] },
-  // with the customer: a draft in Gmail, or mailed
-  { key: 'sent', label: 'Sent', bands: ['sent', 'mailed'] },
-  { key: 'all', label: 'All', bands: BANDS.map(b => b.key) },
+  { key: 'pending', label: 'Pending', match: e => COST_STAGES.includes(e.stage) },
+  { key: 'finalise', label: 'Pending for finalisation', match: e => bandOf(e) === 'counter' || (bandOf(e) === 'pending' && !COST_STAGES.includes(e.stage)) },
+  { key: 'sent', label: 'Sent', match: e => ['sent', 'mailed'].includes(bandOf(e)) },
+  { key: 'won', label: 'Finalised', match: e => e.stage === 'ordered' },
+  { key: 'lost', label: 'Order lost', match: e => e.stage === 'lost' },
+  { key: 'all', label: 'All', match: e => !!bandOf(e) },
   // off to the side, with Settings
-  { key: 'dropped', label: 'Dropped', stages: ['dropped'], side: true },
+  { key: 'dropped', label: 'Dropped', match: e => e.stage === 'dropped', side: true },
 ];
 // The decision on a quoted row (21 Nov 2026): won (green), lost (red), or still open.
 export const decisionOf = e => (e?.stage === 'ordered' ? 'won' : e?.stage === 'lost' ? 'lost' : 'open');
@@ -153,7 +161,7 @@ export const customersOf = (rows = []) => [...rows.reduce((m, e) => {
 export const rowsOfTab = (tab, rows) => {
   const t = DESK_TABS.find(x => x.key === tab);
   if (!t || !rows) return rows || [];
-  return t.stages ? rows.filter(e => t.stages.includes(e.stage)) : rows.filter(e => t.bands.includes(bandOf(e)));
+  return rows.filter(t.match);
 };
 // "CI-ENQ-0003 → Pending": where a stage sits on the desk, for the undo bar and the costing's header.
 export const whereText = stage => (stage === 'dropped' ? 'Dropped' : BAND_LABEL[bandOf({ stage })] || stage);
@@ -356,7 +364,8 @@ export function replyLines(r) {
     const failed = new Map((rep.failed || []).map(f => [f.id, f.why]));
     const drafted = new Set((rep.drafted || []).map(d => d.id));
     for (const q of rep.quotations || []) {
-      lines.push(`Quotation ${q.quotation_no} made · ${drafted.has(q.id) ? 'draft saved' : `draft not made: ${failed.get(q.id) || 'no reason given'}`}`);
+      // no draft and no failure = the person chose "quotation only" (21 Nov 2026) — not an error
+      lines.push(`Quotation ${q.quotation_no} made · ${drafted.has(q.id) ? 'draft saved' : failed.has(q.id) ? `draft not made: ${failed.get(q.id)}` : 'no mail draft — Send quotation or Mark as sent when it goes'}`);
     }
     // a failure with no quotation of its own (the reply itself stopped)
     for (const [id, why] of failed) if (!(rep.quotations || []).some(q => q.id === id)) lines.push(`Reply not made: ${why}`);
