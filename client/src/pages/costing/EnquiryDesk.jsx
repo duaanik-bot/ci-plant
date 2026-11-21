@@ -1,9 +1,12 @@
 // Costing → Enquiry desk: customer enquiries from the mailbox, through costing and a person's final price,
 // to a quotation answered in the customer's own thread (docs/superpowers/specs/2026-11-03-enquiry-desk-design.md).
 //
-//   Inbox · Costing · Final price · Quotations · Sent · Dropped · Settings (admin)
+//   Pending · Sent · All — and, to the side, Orders · Dropped · Settings (admin)
 //
-// A row moves right when its work is done and "Send back" moves it one tab left, keeping its costing and
+// One list (owner, 21 Nov 2026: "consolidation required — enquiries land in one, being costed there itself, there only we
+// get the counters"): a row stays in Pending while it is costed, priced, approved and countered, and its STATUS BAND says
+// where it stands — Pending · Sent · Mailed · Counter · Finalised. The buttons under a ticked row are the ones its own
+// stage allows, so nothing hops tabs. "Send back" moves a row one step back, keeping its costing and
 // prices; every move can be undone from the bar above the table (owner, 5 Nov 2026). Costing happens here,
 // in place: "Cost it" opens the enquiry and its costing on this screen, one at a time with Previous / Next,
 // or several together in one bulk costing — nothing moves until a costing is saved for it.
@@ -17,7 +20,7 @@ import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, M
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BACK_LABEL, DESK_TABS, PILL_TONE, QUOTE_LABEL, QUOTE_TONE, STAGE_TONE, adjustPrice, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
+  BANDS, COST_STAGES, DESK_STAGES, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
   moveSummary, moveTone, quantitiesText, replyLine, qtyText, rupees, startsFresh, whereText,
 } from '../../lib/enquiryUi.js';
 import COMPANY_ROUTINE_PROMPT from '../../lib/enquiry-robot/company-routine-prompt.md?raw';
@@ -150,19 +153,39 @@ export function mailGaps(pickedRows) {
   return [...by.values()].filter(g => g.picked < g.of);
 }
 
-// Under a row's costing: To price — whether it waits for approval, the costing's remarks, what its mail's reply waits on;
-// To cost — why CI Plant could not cost it by itself.
-function AutoNotes({ e, tab }) {
-  const pill = tab === 'price' ? autoPill(e) : null;
-  const line = tab === 'price' ? replyLine(e) : null;
-  const held = tab === 'cost' ? heldLine(e) : null;
-  if (!pill && !line && !held && !(tab === 'price' && e.costing_remarks)) return null;
+// Under a row's costing: a priced row — whether it waits for approval, the costing's remarks, what its mail's reply waits
+// on; a row still to be costed — why CI Plant could not cost it by itself.
+function AutoNotes({ e }) {
+  const priced = PRICE_STAGES.includes(e.stage);
+  const pill = priced ? autoPill(e) : null;
+  const line = priced ? replyLine(e) : null;
+  const held = COST_STAGES.includes(e.stage) ? heldLine(e) : null;
+  if (!pill && !line && !held && !(priced && e.costing_remarks)) return null;
   return (
     <div className="max-w-[16rem] space-y-1">
       {pill && <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${PILL_TONE[pill.tone]}`}>{pill.text}</span>}
-      {tab === 'price' && e.costing_remarks && <div className="truncate text-[11px] text-slate-500" title={e.costing_remarks}>{e.costing_remarks}</div>}
+      {priced && e.costing_remarks && <div className="truncate text-[11px] text-slate-500" title={e.costing_remarks}>{e.costing_remarks}</div>}
       {line && <div className="text-[11px] font-semibold text-sky-800">{line}</div>}
       {held && <div className="text-[11px] font-semibold text-amber-800">{held}</div>}
+    </div>
+  );
+}
+
+// The status band (21 Nov 2026): where a row stands — Pending · Sent · Mailed · Counter · Finalised — as a coloured pill
+// over five steps, and under it the finer word (Costing in progress, the quotation's number, the order's number).
+function StatusBand({ e, statuses }) {
+  const band = bandOf(e);
+  const at = BANDS.findIndex(b => b.key === band);
+  const b = BANDS[at];
+  const fine = band === 'finalised' ? e.order_no : ['sent', 'mailed'].includes(band) ? e.quotation_no : statuses?.[e.stage];
+  if (!b) return <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{statuses?.[e.stage] || e.stage}</span>;
+  return (
+    <div className="w-28 space-y-1" title={BANDS.map(x => x.label).join(' → ')}>
+      <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${b.on}`}>{b.label}</span>
+      <div className="flex gap-0.5">
+        {BANDS.map((x, i) => <span key={x.key} className={`h-1.5 flex-1 rounded-full ${i <= at ? b.on.split(' ')[0] : 'bg-slate-200'}`} />)}
+      </div>
+      {fine && <div className="truncate text-[10px] text-slate-500">{fine}</div>}
     </div>
   );
 }
@@ -186,8 +209,8 @@ function UndoBar({ last, onUndo, onClose }) {
 export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const toast = useToast();
   const [desk, setDesk] = useState(null);
-  // Four working tabs (14 Nov 2026): To cost · To price · Quoted · Orders; Dropped and Settings to the side.
-  const [tab, setTab] = useState('cost');
+  // Pending · Sent · All (21 Nov 2026); Orders, Dropped and Settings to the side.
+  const [tab, setTab] = useState('pending');
   const [deleting, setDeleting] = useState(null);   // Delete: { ids, reason }
   const [rows, setRows] = useState(null);
   const [quotes, setQuotes] = useState([]);
@@ -210,10 +233,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const poll = useRef(null);
 
   const loadDesk = useCallback(() => api.get('/costing/enquiry-desk').then(setDesk), []);
-  const stages = DESK_TABS.find(t => t.key === tab)?.stages;
+  // Every tab reads the one list (every live stage and Dropped); a tab is a filter of it, so the counts are always right.
+  const stages = ['pending', 'sent', 'all', 'dropped'].includes(tab) ? DESK_TABS.find(t => t.key === tab) : null;
   const loadRows = useCallback(() => {
-    if (!stages) return Promise.resolve();
-    return api.get(`/costing/enquiries?stage=${stages.join(',')}`).then(rs => {
+    return api.get(`/costing/enquiries?stage=${[...DESK_STAGES, 'dropped'].join(',')}`).then(rs => {
       setRows(rs);
       setPrices(cur => {
         const next = { ...cur };
@@ -224,10 +247,9 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         return next;
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, []);
   const loadQuotes = useCallback(() => {
-    if (tab === 'quoted') return api.get('/costing/quotations?status=ready,queued,drafted,sent').then(setQuotes);
+    if (tab === 'sent') return api.get('/costing/quotations?status=ready,queued,drafted,sent').then(setQuotes);
     return Promise.resolve();
   }, [tab]);
   const reload = useCallback(() => {
@@ -256,7 +278,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     window.history.replaceState(null, '', '/costing?tab=enquiries');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { setRows(null); setPicked([]); loadRows().catch(() => setRows([])); loadQuotes().catch(() => {}); }, [loadRows, loadQuotes]);
+  useEffect(() => { loadRows().catch(() => setRows([])); }, [loadRows]);
+  useEffect(() => { setPicked([]); loadQuotes().catch(() => {}); }, [tab, loadQuotes]);
   // Opened from a costing (Saved costings → its enquiry): that enquiry's card.
   useEffect(() => { if (focus) setOpen(Number(focus)); }, [focus]);
 
@@ -284,10 +307,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const shown = useMemo(() => {
     const s = search.trim().toLowerCase();
-    if (!s || !rows) return rows || [];
-    return rows.filter(e => [e.enquiry_no, e.customer_name, e.product_name, e.size_text, e.contact_email, e.mail_subject, e.quotation_no, e.costing_no]
+    const inTab = rowsOfTab(tab, rows);
+    if (!s) return inTab;
+    return inTab.filter(e => [e.enquiry_no, e.customer_name, e.product_name, e.size_text, e.contact_email, e.mail_subject, e.quotation_no, e.costing_no]
       .some(x => String(x || '').toLowerCase().includes(s)));
-  }, [rows, search]);
+  }, [rows, search, tab]);
   const pickedRows = shown.filter(e => picked.includes(e.id));
   const toggle = (r, on) => setPicked(p => (on ? [...new Set([...p, r.id])] : p.filter(x => x !== r.id)));
   const toggleAll = (rs, on) => setPicked(on ? rs.map(r => r.id) : []);
@@ -338,11 +362,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const costingMoved = ({ kind, costing, batch, enquiry }) => {
     if (kind === 'costing' && costing?.desk) {
       const stage = costing.complete ? 'costed' : 'costing';
-      setLast({ text: `${costing.costing_no} saved for ${costing.desk.enquiry_no} — it is now in ${whereText(stage)}.`, undo: costing.desk.group });
+      setLast({ text: `${costing.costing_no} saved for ${costing.desk.enquiry_no} — it is now ${(desk?.statuses?.[stage] || whereText(stage)).toLowerCase()}.`, undo: costing.desk.group });
     } else if (kind === 'costing' && costing) {
       setLast({ text: `${costing.costing_no} saved${enquiry ? ` for ${enquiry.enquiry_no}` : ''}.` });
     } else if (kind === 'batch' && batch) {
-      setLast({ text: `${batch.batch_no} saved${batch.desk ? ` — ${plural(batch.desk.moved, 'enquiry')} moved on (complete rows go to Final price)` : ''}.`, undo: batch.desk?.group || null });
+      setLast({ text: `${batch.batch_no} saved${batch.desk ? ` — ${plural(batch.desk.moved, 'enquiry')} moved on (complete rows wait for their price)` : ''}.`, undo: batch.desk?.group || null });
     }
     reload();
   };
@@ -358,15 +382,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const costRow = e => startOne(shown.map(x => x.id), Math.max(shown.findIndex(x => x.id === e.id), 0));
 
   const counts = desk?.counts || {};
-  const qc = desk?.quotation_counts || {};
-  // The working tabs count what waits for us: on Quoted, the finalised rows and the quotations not yet sent — not what
-  // the customer has (sent). Orders and Dropped carry no count.
-  const quoteCount = (qc.ready || 0) + (qc.queued || 0) + (qc.drafted || 0);
-  const waiting = t => (t.key === 'orders' ? 0 : t.key === 'quoted' ? (counts.quote_ready || 0) + quoteCount
-    : t.stages.reduce((s, k) => s + (counts[k] || 0), 0));
-  const views = DESK_TABS.filter(t => !t.side).map(t => ({ key: t.key, label: t.label, count: waiting(t) || null }));
+  // Pending and Sent count their rows; All carries no count.
+  const views = DESK_TABS.filter(t => !t.side).map(t => ({ key: t.key, label: t.label, count: (t.key !== 'all' && rows && rowsOfTab(t.key, rows).length) || null }));
+  const stageName = st => desk?.statuses?.[st] || whereText(st);
 
-  const stageChip = e => <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${STAGE_TONE[e.stage]}`}>{desk?.statuses?.[e.stage] || e.stage}</span>;
   const costButton = e => (
     <button type="button" onClick={ev => { ev.stopPropagation(); costRow(e); }}
       className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100">
@@ -387,7 +406,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     { key: 'customer_name', label: 'Customer', render: e => <div><div className="font-semibold">{e.customer_name || '—'}</div><div className="text-[11px] text-slate-500">{e.contact_email || ''}</div><MailboxNote e={e} desk={desk} /></div> },
     { key: 'product_name', label: 'Product', render: e => <div><div className="font-semibold">{e.product_name || '—'}</div><div className="text-[11px] text-slate-500">{[e.size_text && `${e.size_text} mm`, e.mail_subject && `“${e.mail_subject}”`].filter(Boolean).join(' · ')}</div></div> },
     { key: 'quantities', label: 'Quantities', render: e => quantitiesText(e.quantities) },
-    { key: 'stage', label: 'Status', render: stageChip },
+    { key: 'band', label: 'Status', sortValue: e => `${BANDS.findIndex(b => b.key === bandOf(e)) + 1}|${e.stage}`, render: e => <StatusBand e={e} statuses={desk?.statuses} /> },
   ];
   const costingCol = {
     key: 'costing_no', label: 'Costing', sortValue: e => e.costing_no || '', render: e => (
@@ -399,8 +418,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             {e.batch_no && e.costing_live && <div className="text-[10px] text-slate-500">bulk {e.batch_no}</div>}
           </div>
         ) : <div className="text-xs text-slate-400">none yet</div>}
-        <AutoNotes e={e} tab={tab} />
-        {costButton(e)}
+        <AutoNotes e={e} />
+        {[...COST_STAGES, ...PRICE_STAGES].includes(e.stage) && costButton(e)}
       </div>
     ),
   };
@@ -412,9 +431,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     await savePrices([e]);
     setUnlocked(u => { const n = new Set(u); n.delete(e.id); return n; });
   };
-  const priceCols = [
-    baseCols[0], baseCols[2], baseCols[3], costingCol,
-    { key: 'prices', label: 'Quantity · costing proposes · final price to quote a carton', render: e => {
+  // The price boxes, on a row waiting for its price.
+  const priceCell = e => {
       const locked = isLocked(e);
       return (
         <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
@@ -444,9 +462,14 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           ))}
         </div>
       );
-    } },
-    baseCols[5],
-  ];
+  };
+  // Quantities — and, from costed on, the prices: boxes while the price is being set, the quoted price after.
+  const priceCol = { key: 'prices', label: 'Quantity · costing proposes · price a carton', render: e => {
+    if (PRICE_STAGES.includes(e.stage)) return priceCell(e);
+    const fin = (e.prices || []).filter(p => p.final != null);
+    if (!fin.length) return quantitiesText(e.quantities);
+    return <div className="space-y-0.5 text-xs">{fin.map(p => <div key={p.qty}><b>{qtyText(p.qty)}</b> @ {rupees(p.final, 3)}</div>)}</div>;
+  } };
   // Order finalised, on the row (Management): from Final price on, a row with a complete costing (13 Nov 2026).
   const orderButton = e => (desk?.can_finalise && canOrder(e) ? (
     <button type="button" onClick={ev => { ev.stopPropagation(); setOrdering([e.id]); }}
@@ -455,15 +478,12 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     </button>
   ) : null);
   const orderCol = { key: 'order', label: '', render: orderButton };
-  const orderNoCol = { key: 'order_no', label: 'Order', render: e => <span className="font-bold text-emerald-800">{e.order_no || '—'}</span> };
   const whyCol = { key: 'dropped_reason', label: 'Why', render: e => <span className="text-xs text-slate-600">{e.dropped_reason || '—'}</span> };
-  const columns = tab === 'price' ? [...priceCols, orderCol]
-    : tab === 'cost' ? [...baseCols.slice(0, 5), costingCol, baseCols[5]]
-      : tab === 'orders' ? [...baseCols, orderNoCol]
-        : tab === 'quoted' ? [...baseCols, orderCol]
-          : tab === 'dropped' ? [...baseCols.slice(0, 5), whyCol] : baseCols;
-  // To price: a counter-offer is worked in its own panel above the table, so the table holds the rest.
-  const tableRows = tab === 'price' ? shown.filter(e => e.stage !== 'countered') : shown;
+  const columns = tab === 'dropped' ? [...baseCols.slice(0, 5), whyCol]
+    : tab === 'sent' ? [...baseCols.slice(0, 4), priceCol, baseCols[5], orderCol]
+      : [...baseCols.slice(0, 4), priceCol, costingCol, baseCols[5], orderCol];
+  // Pending: a counter-offer is worked in its own panel above the table, so the table holds the rest.
+  const tableRows = tab === 'pending' ? shown.filter(e => e.stage !== 'countered') : shown;
 
   const savePrices = async (list, { quiet = false } = {}) => {
     const items = list.map(e => ({ id: e.id, prices: (e.prices || []).map(p => ({ qty: p.qty, final: Number(prices[`${e.id}|${p.qty}`]) })) }));
@@ -528,11 +548,19 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const mgmt = desk.can_finalise;
   const one = pickedRows.length === 1 ? pickedRows[0] : null;
   const several = pickedRows.length > 1;
+  // What the ticked rows allow — by each row's own stage, not by the tab.
+  const has = list => pickedRows.some(e => list.includes(e.stage));
+  const pCost = has(COST_STAGES);
+  const pPrice = has(PRICE_STAGES);
+  const pQuote = has(['quote_ready']);
+  const pAnswered = has(['costed', 'price_pending', 'quote_ready', 'sent']);
+  const pBack = pickedRows.some(e => STAGE_BACKWARD[e.stage]);
+  const pDelete = has(['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped']);
   const detail = (
     <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload} canSend={!!desk.can_finalise}
       onSaved={x => x?.undo && setLast({ text: `${x.enquiry_no}: what was asked is saved.`, undo: x.undo })}
       onCost={e => (work?.mode === 'one' && work.ids[work.at] === e.id ? setOpen(null) : startOne([e.id]))}
-      onMove={(path, e) => after(api.post(`/costing/enquiries/${path}`, { ids: [e.id] }), moved => `${nos(moved)} sent back to ${whereText(moved[0].to)}.`).then(() => setOpen(null))}
+      onMove={(path, e) => after(api.post(`/costing/enquiries/${path}`, { ids: [e.id] }), moved => `${nos(moved)} sent back to ${stageName(moved[0].to)}.`).then(() => setOpen(null))}
       onUndo={async (group, e) => {
         const r = await api.post('/costing/enquiries/undo', { group, ids: [e.id] });
         if (r.skipped?.length) toast.info(`Not undone: ${r.skipped.map(s => `${s.enquiry_no} ${s.why}`).join('; ')}`);
@@ -573,6 +601,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         {stages && <Input className="!h-9 w-64" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, product, size, number…" />}
         {stages && <Button size="sm" variant="secondary" onClick={reload}><RefreshCw size={13} className="mr-1 inline" />Refresh</Button>}
         <div className="ml-auto flex items-center gap-1">
+          <button type="button" onClick={() => { setTab('orders'); setSearch(''); }}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${tab === 'orders' ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
+            Orders
+          </button>
           <button type="button" onClick={() => { setTab('dropped'); setSearch(''); }}
             className={`rounded-full px-3 py-1.5 text-xs font-semibold ${tab === 'dropped' ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
             Dropped{counts.dropped ? ` · ${counts.dropped}` : ''}
@@ -589,20 +621,18 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
       {tab === 'settings' && <DeskSettings desk={desk} onSaved={loadDesk} />}
 
-      {stages && tab === 'cost' && (
-        <p className="mb-2 text-xs text-slate-500">Everything still to be costed. <b>Orange rows are new</b> — nobody has started on them yet. Click a row to check what was read against the customer's mail. <b>Cost it</b> opens its costing right here (tick several to cost them one by one or together); once a costing is complete the row moves to To price by itself. <b>Mark ready for costing</b> takes the orange off a row you will cost later. <b>Delete</b> takes a duplicate or a mail that was no enquiry off the desk.</p>
+      {tab === 'pending' && (
+        <p className="mb-2 text-xs text-slate-500">Everything waiting on us, in one list: new enquiries (<b>orange rows</b>), costing, pricing, approval — and, on top, any customer's counter-offer. The <b>Status</b> band says where each row stands; tick rows and the buttons below are the ones their stage allows: <b>Cost it</b>, <b>Approve</b>, <b>Send quotation</b> (the reply goes to Gmail as a draft), <b>Customer counter</b>, <b>Order finalised</b>.</p>
       )}
-      {stages && tab === 'price' && (
-        <p className="mb-2 text-xs text-slate-500">Costed, waiting for the price to quote — and, on top, any customer's counter-offer waiting for our revised price. The box starts at the price the costing works out; type the price, then <b>Lock this price</b>, or tick rows and press <b>Send quotation</b> (Management): the prices are locked, the quotation is made and saved as a reply draft in the customer's mail thread, in one press.</p>
+      {tab === 'sent' && (
+        <p className="mb-2 text-xs text-slate-500">With the customer. <b>Sent</b> = the quotation's reply is a draft in Gmail, to be sent from there; <b>Mailed</b> = it went to the customer. When they answer with their own prices, tick and press <b>Customer counter</b> — the rows go back to Pending; when they agree, <b>Order finalised</b>. The quotations are listed below.</p>
       )}
-      {stages && tab === 'quoted' && (
-        <p className="mb-2 text-xs text-slate-500">Finalised rows waiting for their quotation, and quotations sent to the customer. When the customer answers with their own prices, tick the rows and press <b>Customer counter</b>; when they agree, <b>Order finalised</b>. The quotations themselves are listed below.</p>
-      )}
+      {tab === 'all' && <p className="mb-2 text-xs text-slate-500">Every enquiry on the desk, finalised orders too, with its status band.</p>}
       {tab === 'orders' && (
-        <p className="mb-2 text-xs text-slate-500">Orders the customer agreed. <b>Order finalised</b> (on a row from Final price on, or on a sent quotation) keeps the order with the rate agreed and the loss where it was booked below our cost, and sends the order sheet — the table of items, rates, output sheets, ups, boards and dies, with the KLDs — to the company mailbox. Click an order to see it line by line.</p>
+        <p className="mb-2 text-xs text-slate-500">Orders the customer agreed. <b>Order finalised</b> keeps the order with the rate agreed and the loss where it was booked below our cost, and sends the order sheet — the table of items, rates, output sheets, ups, boards and dies, with the KLDs — to the company mailbox. Click an order to see it line by line.</p>
       )}
       {tab === 'orders' && <OrdersList canSend={!!mgmt} signal={ordersSignal} />}
-      {stages && tab === 'price' && rows && counterGroups(shown.filter(e => e.stage === 'countered')).map(g => (
+      {tab === 'pending' && rows && counterGroups(shown.filter(e => e.stage === 'countered')).map(g => (
         <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} onUndoable={setLast} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
       ))}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
@@ -611,10 +641,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
           rowClass={e => (e.status === 'new' ? NEW_ENQUIRY_ROW : '')}
           defaultSort={{ key: 'received', dir: 'desc' }} serialNumber={false}
-          empty={rows ? (tab === 'cost' ? 'Nothing to cost. Press "Fetch from mail" for new enquiries.' : 'Nothing here.') : 'Loading…'} />
+          empty={rows ? (tab === 'pending' ? 'Nothing pending. Press "Fetch from mail" for new enquiries.' : 'Nothing here.') : 'Loading…'} />
       )}
 
-      {tab === 'quoted' && (
+      {tab === 'sent' && (
         <div className="mt-6">
           <div className="mb-2 text-sm font-bold text-[#1D1D1F]">Quotations</div>
           <DataTable rows={quotes} columns={quoteCols} onRowClick={x => setOpenQuote(x.id)} defaultSort={{ key: 'when', dir: 'desc' }} serialNumber={false}
@@ -625,28 +655,28 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       <SelectionDock open={pickedRows.length > 0} count={pickedRows.length} onClear={() => setPicked([])}
         summary={[[...new Set(pickedRows.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · '),
           ...mailGaps(pickedRows).map(g => `⚠ M${g.mail_id}: ${g.picked} of ${g.of} ticked`)].filter(Boolean).join(' · ')}>
-        {tab === 'cost' && <>
+        {pCost && <>
           {/* CI Plant's own incomplete draft opens as a fresh costing (startsFresh): "Cost it" */}
           {one && <Button size="sm" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />{one.costing_live && !startsFresh(one) ? 'Open costing' : 'Cost it'}</Button>}
           {several && <Button size="sm" onClick={() => startOne(pickedRows.map(e => e.id))}><Calculator size={13} className="mr-1 inline" />Cost one by one</Button>}
           {several && <Button size="sm" variant="secondary" onClick={() => startTogether(pickedRows)}><Layers size={13} className="mr-1 inline" />Cost together (bulk)</Button>}
         </>}
-        {tab === 'cost' && pickedRows.some(e => e.status === 'new') && (
+        {pCost && pickedRows.some(e => e.status === 'new') && (
           <Button size="sm" variant="secondary" onClick={() => move('ready', m => `${nos(m)} marked ready for costing.`)}
             title="Takes the orange off: someone has seen it and will cost it later">Mark ready for costing</Button>
         )}
-        {tab === 'cost' && <Button size="sm" variant="secondary" onClick={() => move('to-price', m => `${nos(m)} sent to To price.`)}
-          title="For rows whose costing is complete">Send to To price</Button>}
-        {tab === 'cost' && (
+        {pCost && <Button size="sm" variant="secondary" onClick={() => move('to-price', m => `${nos(m)} costed — waiting for the price.`)}
+          title="For rows whose costing is complete: they wait for their price">Costing done</Button>}
+        {pCost && (
           <Button size="sm" variant="secondary" onClick={costForMe}
-            title="CI Plant costs the ticked rows itself, as a draft a manager approves in To price"><Calculator size={13} className="mr-1 inline" />Cost it for me</Button>
+            title="CI Plant costs the ticked rows itself, as a draft a manager approves"><Calculator size={13} className="mr-1 inline" />Cost it for me</Button>
         )}
-        {tab === 'price' && mgmt && (
+        {pPrice && mgmt && (
           <Button size="sm" variant="success" onClick={approve}
             title="Approves the costing and fixes the price; a mail with nothing left waiting gets its quotation and a Gmail draft — nothing is sent"><Check size={13} className="mr-1 inline" />Approve</Button>
         )}
-        {tab === 'price' && <>
-          {one && <Button size="sm" variant="secondary" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />Open costing</Button>}
+        {pPrice && <>
+          {one && !pCost && <Button size="sm" variant="secondary" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />Open costing</Button>}
           <Select value={adjust.mode} onChange={e => setAdjust(a => ({ ...a, mode: e.target.value }))} className="!h-8 w-44">
             <option value="add">+ ₹ a carton</option><option value="pct">+ %</option><option value="round">Round up to ₹0.05</option>
           </Select>
@@ -664,23 +694,23 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             setPicked([]); await reload();
           }} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />Send quotation</Button>}
         </>}
-        {tab === 'quoted' && pickedRows.some(e => e.stage === 'quote_ready') && <Button size="sm" onClick={async () => {
+        {!pPrice && pQuote && <Button size="sm" onClick={async () => {
           // The quotation and, straight on, its reply draft in the customer's thread.
           const r = await quoteAndDraft(api, picked);
           if (r.failed.length) toast.error(r.failed.join('; '));
           setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
         }}><Send size={13} className="mr-1 inline" />Send quotation</Button>}
-        {['price', 'quoted'].includes(tab) && (
-          <Button size="sm" variant="secondary" title="The customer came back with their own prices: these rows go to the top of To price, to work out the revised quotation"
+        {pAnswered && (
+          <Button size="sm" variant="secondary" title="The customer came back with their own prices: these rows go to the top of Pending, to work out the revised quotation"
             onClick={async () => {
               await after(api.put('/costing/enquiries/counter', { items: picked.map(id => ({ id, prices: [] })) })
                 .then(r => ({ moved: (r.saved || []).map(no => ({ enquiry_no: no, to: 'countered' })), skipped: r.skipped, undo: r.undo })),
-              m => `${nos(m)} moved to the counter-offers on To price — type the customer's prices there.`);
-              setTab('price');
+              m => `${nos(m)} moved to the counter-offers on Pending — type the customer's prices there.`);
+              setTab('pending');
             }}>Customer counter</Button>
         )}
-        {['price', 'quoted'].includes(tab) && mgmt && (
+        {pAnswered && mgmt && (
           <Button size="sm" variant="success" title="The customer agreed: keep the order with its rates and any loss, and send the order sheet to the team"
             onClick={() => {
               const list = pickedRows.filter(canOrder).map(e => e.id);
@@ -688,10 +718,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
               setOrdering(list);
             }}><PackageCheck size={13} className="mr-1 inline" />Order finalised</Button>
         )}
-        {BACK_LABEL[tab] && <Button size="sm" variant="secondary" onClick={() => move('back', m => `${nos(m)} sent back to ${whereText(m[0].to)}.`)}>{BACK_LABEL[tab]}</Button>}
-        {['cost', 'price'].includes(tab) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
-        {tab === 'dropped' && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => whereText(x.to)))].join(' and ')}.`)}>Bring back</Button>}
-        {['cost', 'price', 'quoted', 'dropped'].includes(tab) && (
+        {pBack && <Button size="sm" variant="secondary" title="One step back — the costing and prices stay with it"
+          onClick={() => move('back', m => `${nos(m)} sent back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Send back a step</Button>}
+        {(pCost || pPrice) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
+        {has(['dropped']) && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Bring back</Button>}
+        {pDelete && (
           <Button size="sm" variant="danger" onClick={() => setDeleting({ ids: [...picked], reason: 'Duplicate' })}
             title="Take a duplicate, or a mail that was no enquiry, off the desk — Undo brings it back"><Trash2 size={13} className="mr-1 inline" />Delete</Button>
         )}

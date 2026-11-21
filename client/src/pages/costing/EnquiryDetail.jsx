@@ -81,7 +81,7 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
       title={isNew ? 'Add an enquiry by hand' : e ? `${e.enquiry_no} — ${e.product_name || 'enquiry'}` : 'Opening…'}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Close</Button>
-        {backTo && onMove && <Button variant="secondary" onClick={() => onMove('back', e)}>Send back to {whereText(backTo)}</Button>}
+        {backTo && onMove && <Button variant="secondary" onClick={() => onMove('back', e)}>Send back to {statuses?.[backTo] || whereText(backTo)}</Button>}
         {canCost && onCost && <Button variant="secondary" disabled={dirty} title={dirty ? 'Save what was asked first' : ''} onClick={() => onCost(e)}>
           <Calculator size={14} className="mr-1 inline" />{e.costing_live ? 'Open costing' : 'Cost it'}
         </Button>}

@@ -3,29 +3,56 @@ import { num } from './costing.js';
 import { blankValue } from './costingUi.js';
 import { finishFromEnquiry } from './costingRules.js';
 
-// The desk's tabs and the stages each shows, left to right (5 Nov 2026). A row moves right when its work is
-// done — Send to costing, a costing saved for it, prices finalised — and "Send back" moves it one tab left,
-// keeping its costing and prices. "Costing completed" (costed) waits in Final price for a final price.
+// The desk's tabs (owner, 21 Nov 2026: "consolidation required … only pending, sent and all; it should have a status
+// band"). Enquiries land, are costed and priced, and counters come back, all in ONE list — Pending — so a row no longer
+// hops tabs. Sent holds what is with the customer; All holds everything, finalised orders too. Dropped and Settings sit to
+// the side. Every row carries a status band: Pending · Sent · Mailed · Counter · Finalised.
+export const DESK_STAGES = ['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'countered', 'sent', 'ordered'];
+// The finer stages, grouped by the work they wait on — the selection dock offers each group's buttons.
+export const COST_STAGES = ['new', 'ready', 'costing'];
+export const PRICE_STAGES = ['costed', 'price_pending'];
+
+// The band: where a row stands with the customer.
+//   Pending    still with us — new, being costed, waiting for its price or approval, or finalised with no draft yet
+//   Sent       the quotation is made and its reply sits in Gmail as a draft, waiting to be sent
+//   Mailed     the quotation went to the customer
+//   Counter    the customer came back with their own prices
+//   Finalised  the customer agreed — the order is kept
+export const BANDS = [
+  { key: 'pending', label: 'Pending', on: 'bg-orange-500 text-white' },
+  { key: 'sent', label: 'Sent', on: 'bg-indigo-500 text-white' },
+  { key: 'mailed', label: 'Mailed', on: 'bg-sky-600 text-white' },
+  { key: 'counter', label: 'Counter', on: 'bg-amber-500 text-white' },
+  { key: 'finalised', label: 'Finalised', on: 'bg-emerald-600 text-white' },
+];
+const BAND_LABEL = Object.fromEntries(BANDS.map(b => [b.key, b.label]));
+const liveQuote = e => !!e?.quotation_id && !['cancelled', 'superseded'].includes(e.quotation_status);
+export function bandOf(e) {
+  const st = e?.stage;
+  if (st === 'ordered') return 'finalised';
+  if (st === 'countered') return 'counter';
+  if (st === 'sent') return 'mailed';
+  if (st === 'quote_ready' && liveQuote(e) && ['drafted', 'sent'].includes(e.quotation_status)) return 'sent';
+  if (st === 'dropped') return null;
+  return 'pending';
+}
+
 export const DESK_TABS = [
-  // Four working tabs instead of eight (owner, 14 Nov 2026: "consolidation required here also").
-  // Everything still to be costed: new enquiries — orange until someone starts on them — and those ready for or in
-  // costing.
-  { key: 'cost', label: 'To cost', stages: ['new', 'ready', 'costing'] },
-  // Costed, waiting for the final price; and a customer's counter-offer, waiting for our revised price (11 Nov 2026).
-  { key: 'price', label: 'To price', stages: ['costed', 'price_pending', 'countered'] },
-  // Finalised (the quotation to make) and sent (waiting for the customer).
-  { key: 'quoted', label: 'Quoted', stages: ['quote_ready', 'sent'] },
-  // the customer agreed: the order is kept with its rate and any loss, and the team is told (13 Nov 2026)
-  { key: 'orders', label: 'Orders', stages: ['ordered'] },
+  // waits on us: costing, pricing, approval, a counter to answer
+  { key: 'pending', label: 'Pending', bands: ['pending', 'counter'] },
+  // with the customer: a draft in Gmail, or mailed
+  { key: 'sent', label: 'Sent', bands: ['sent', 'mailed'] },
+  { key: 'all', label: 'All', bands: BANDS.map(b => b.key) },
   // off to the side, with Settings
   { key: 'dropped', label: 'Dropped', stages: ['dropped'], side: true },
 ];
-export const tabOfStage = stage => DESK_TABS.find(t => t.stages.includes(stage))?.key || null;
-// What "Send back" says on each tab (server: BACK_TO in server/src/enquiry-desk.js).
-export const BACK_LABEL = { price: 'Send back to To cost', quoted: 'Send back to To price' };
-const TAB_LABEL = Object.fromEntries(DESK_TABS.map(t => [t.key, t.label]));
-// "CI-ENQ-0003 → Final price": where a stage sits on the desk, for the undo bar.
-export const whereText = stage => TAB_LABEL[tabOfStage(stage)] || stage;
+export const rowsOfTab = (tab, rows) => {
+  const t = DESK_TABS.find(x => x.key === tab);
+  if (!t || !rows) return rows || [];
+  return t.stages ? rows.filter(e => t.stages.includes(e.stage)) : rows.filter(e => t.bands.includes(bandOf(e)));
+};
+// "CI-ENQ-0003 → Pending": where a stage sits on the desk, for the undo bar and the costing's header.
+export const whereText = stage => (stage === 'dropped' ? 'Dropped' : BAND_LABEL[bandOf({ stage })] || stage);
 export const STAGE_BACKWARD = { ready: 'new', costing: 'new', costed: 'ready', price_pending: 'ready', quote_ready: 'price_pending' };
 
 export const STAGE_TONE = {
@@ -183,7 +210,7 @@ export function adjustPrice(base, { mode, amount }) {
 }
 
 // ── Auto costing on the desk (owner, 20 Nov 2026) ───────────────────────────────────────────────
-// What the To price row says of its costing: a draft waits for a manager's Approve (auto, or revised by a person — the
+// What a priced row (costed, final price pending) says of its costing: a draft waits for a manager's Approve (auto, or revised by a person — the
 // revision makes it theirs but it still needs approval); an approved one says by whom.
 export function autoPill(e) {
   if (!e || e.stage === undefined || !['costed', 'price_pending'].includes(e.stage)) return null;
@@ -198,7 +225,7 @@ export function replyLine(e) {
   const r = e?.reply;
   if (!r) return null;
   if (r.quoted?.length) return `Part of this mail went on ${r.quoted.join(', ')} — send these from here`;
-  // Approve is offered on To price only; the Quoted tab's Send quotation finishes a cut-off reply (final review I1).
+  // Approve is offered on priced rows only; Send quotation on a finalised row finishes a cut-off reply (final review I1).
   if (r.resume) return 'Finalised, reply not finished — press Send quotation';
   if (r.waiting?.length) {
     const [w, ...rest] = r.waiting;
@@ -208,7 +235,7 @@ export function replyLine(e) {
   return null;
 }
 
-// Why a To cost row was not costed by itself. `auto_cost_stopped` comes from the server (one stale-claim threshold).
+// Why a row still to be costed was not costed by itself. `auto_cost_stopped` comes from the server (one stale-claim threshold).
 export function heldLine(e) {
   if (!e || !['new', 'ready', 'costing'].includes(e.stage) || !e.auto_cost_why) return null;
   if (e.auto_cost_why === 'being costed') return e.auto_cost_stopped ? 'Costing stopped part-way — press Cost it for me' : 'Being costed by CI Plant now';
