@@ -933,7 +933,7 @@ const LATER_WHY = 'reply not made yet — press Approve again';
 // A test sets its own budget (as GMAIL_SENT_CHECK_MS does for the sent check).
 const replyBudget = () => (process.env.ENQUIRY_REPLY_BUDGET_MS != null ? Number(process.env.ENQUIRY_REPLY_BUDGET_MS) : REPLY_BUDGET_MS);
 
-async function replyIfReady(mailIds, u, { lone = [] } = {}) {
+async function replyIfReady(mailIds, u, { lone = [], draft = true } = {}) {
   const keys = [...new Set(mailIds.filter(Boolean))].map(mail_id => ({ mail_id }))
     .concat([...new Set(lone.filter(Boolean))].map(enquiry_id => ({ mail_id: null, enquiry_id })));
   const replies = [], waiting = [], later = [];
@@ -946,7 +946,7 @@ async function replyIfReady(mailIds, u, { lone = [] } = {}) {
         if (claim.waiting.length || claim.quoted.length) waiting.push({ ...at, waiting: claim.waiting, quoted: claim.quoted });
         continue;
       }
-      const { quotations, drafted, failed, skipped } = await sendQuotations(claim.send, u);
+      const { quotations, drafted, failed, skipped } = await sendQuotations(claim.send, u, { draft });
       replies.push({ ...at, ...(claim.resumed ? { resumed: true } : {}), quotations, drafted, failed, skipped });
     } catch (e) {
       if (!e.status) console.error('[enquiries] a mail\'s reply:', e?.stack || e);
@@ -977,11 +977,11 @@ async function claimReply(at, u) {
 
 // The reply step never turns a press whose own change has committed into an error (R21): trouble outside one mail's own
 // reply is answered `later`, with the reason. `which()` gives the mails: { mailIds, lone }.
-async function replyStep(which, u) {
+async function replyStep(which, u, { draft = true } = {}) {
   let keys = { mailIds: [], lone: [] };
   try {
     keys = await which();
-    return await replyIfReady(keys.mailIds, u, { lone: keys.lone });
+    return await replyIfReady(keys.mailIds, u, { lone: keys.lone, draft });
   } catch (e) {
     console.error('[enquiries] the reply step stopped:', e?.stack || e);
     const why = `${LATER_WHY} (${e.message})`;
@@ -1063,7 +1063,8 @@ r.post('/costing/enquiries/approve', async (req, res, next) => {
       return { approved, skipped, resumed, priced };
     });
     const go = [...out.approved, ...out.resumed];
-    const reply = await replyStep(() => ({ mailIds: go.map(e => e.mail_id).filter(Boolean), lone: go.filter(e => !e.mail_id).map(e => e.id) }), u);
+    const reply = await replyStep(() => ({ mailIds: go.map(e => e.mail_id).filter(Boolean), lone: go.filter(e => !e.mail_id).map(e => e.id) }), u,
+      { draft: req.body?.draft !== false });
     res.json({ approved: out.approved, skipped: out.skipped, ...reply, undo: out.priced && !reply.replies.length ? group : null });
   } catch (e) { next(e); }
 });
@@ -1337,7 +1338,9 @@ r.post('/costing/quotations', async (req, res, next) => {
 // template), and each quotation is queued to Claude as a Gmail reply draft in the customer's own thread. Never sends.
 // The answer says what happened to every enquiry — nothing is skipped silently. The caller checks the Management right:
 // Send quotation (the route below), and a mail's reply after Approve or a drop (replyIfReady).
-async function sendQuotations(list, u) {
+// `draft: false` (owner, 21 Nov 2026: "do we want to send this as the mail or not?"): the quotation is made and kept in
+// CI Plant, no Gmail draft yet — the next Send quotation on it makes the draft.
+async function sendQuotations(list, u, { draft = true } = {}) {
     const skipped = [];
     const supersedes = {}; // enquiry id → the quotation its counter answered (a revised one replaces it)
     // 1. Finalise what has its prices but is not finalised yet (a row with the customer's counter: its revised prices).
@@ -1363,13 +1366,14 @@ async function sendQuotations(list, u) {
     const toQuote = rows.filter(e => e.status === 'quote_ready' && (!e.quotation_id || e.q_status === 'cancelled')).map(e => e.id);
     const made = toQuote.length ? await makeQuotations(toQuote, u, { supersedes }) : [];
     // 3. A Gmail draft for each new quotation, and for an earlier quotation of these enquiries still without one.
-    const quoteIds = [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
+    const quoteIds = !draft ? [] : [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
     const drafted = [], failed = [];
     for (const id of quoteIds) {
       try { const j = await queueDraft(id, u); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id, now: !!j.drafted_now, view_url: j.view_url || null }); }
       catch (e) { failed.push({ id, why: e.message }); }
     }
     for (const e of rows) {
+      if (!draft && e.quotation_id && e.q_status === 'ready') skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} already — no mail draft made` });
       if (e.quotation_id && ['queued', 'drafted', 'sent'].includes(e.q_status)) skipped.push({ enquiry_no: e.enquiry_no, why: `is on ${e.quotation_no} (${e.q_status})` });
     }
     return { quotations: made, drafted, failed, skipped, undo: group };
@@ -1381,7 +1385,7 @@ r.post('/costing/quotations/send', async (req, res, next) => {
     needMgmt(u);
     const list = ids(req.body);
     if (!list.length) throw fail(400, 'Choose the enquiries to send.');
-    res.status(201).json(await sendQuotations(list, u));
+    res.status(201).json(await sendQuotations(list, u, { draft: req.body?.draft !== false }));
   } catch (e) { next(e); }
 });
 
@@ -1542,6 +1546,56 @@ r.post('/costing/quotations/:id/draft', async (req, res, next) => {
     const id = intOrNull(req.params.id) || 0;
     const j = await queueDraft(id, u);
     res.status(201).json({ job: await jobById(j.job_id), quotation: await quotationById(id) });
+  } catch (e) { next(e); }
+});
+
+// Change a price on a quotation not yet sent (owner, 21 Nov 2026: "once we have made all the calculations and saved the item
+// into the draft, once we change here, you ask me whether you want to change the draft, and we are able to do that").
+// Management. The enquiries' final prices and the quotation's lines and total change together, in one transaction; with
+// `redraft` the Gmail draft is then saved again — the same draft, replaced (draftOnServer), or queued to the robot. A
+// quotation queued to the robot or sent is refused: nothing to change in place. `items`: [{ id, prices: [{ qty, final }] }].
+r.put('/costing/quotations/:id(\\d+)/prices', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const id = intOrNull(req.params.id) || 0;
+    const items = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 200);
+    const changed = await tx(async (qc, oc) => {
+      const qt = await oc(`SELECT id, quotation_no, status, gmail_draft_id FROM quotations WHERE id = $1 FOR UPDATE`, [id]);
+      if (!qt) throw fail(404, 'No such quotation.');
+      if (!['ready', 'drafted'].includes(qt.status)) throw fail(409, `${qt.quotation_no} is ${qt.status} — its price cannot be changed here.`);
+      const onIt = (await qc(`SELECT id FROM enquiries WHERE quotation_id = $1 ORDER BY id`, [id])).map(x => x.id);
+      const locked = await lockRows(qc, onIt);
+      const said = [];
+      for (const it of items) {
+        const e = locked.find(x => x.id === intOrNull(it?.id));
+        if (!e) throw fail(409, `That enquiry is not on ${qt.quotation_no}.`);
+        const given = Array.isArray(it.prices) ? it.prices : [];
+        const finals = (Array.isArray(e.final_prices) ? e.final_prices : []).map(f => {
+          const g = given.find(p => Number(p?.qty) === Number(f.qty));
+          if (!g) return f;
+          const v = num(g.final);
+          if (!(v > 0)) throw fail(400, `${e.enquiry_no}: the price for ${Number(f.qty).toLocaleString('en-IN')} must be more than zero.`);
+          const final = Math.round(v * 1000) / 1000;
+          if (final !== num(f.final)) said.push({ enquiry_no: e.enquiry_no, qty: f.qty, from: num(f.final), to: final });
+          return { ...f, final };
+        });
+        await changeRow(qc, e, 'final_prices = $3', [JSON.stringify(finals)], u, { action: 'price', detail: { prices: finals, quotation: qt.quotation_no }, logged: false });
+      }
+      if (!said.length) return { qt, said };
+      const rows = await qc(`SELECT e.* FROM enquiries e WHERE e.quotation_id = $1 ORDER BY e.id`, [id]);
+      const { lines, total } = quotationLines(rows);
+      await qc(`UPDATE quotations SET lines = $2, total = $3, updated_at = now(), updated_by_name = $4 WHERE id = $1`, [id, JSON.stringify(lines), total, u.name]);
+      await enquiryEvent(qc, { quotationId: id, action: 'repriced', detail: { changes: said, total } }, u);
+      await audit('quotation', id, 'reprice', `${qt.quotation_no} — ${said.length} price${said.length === 1 ? '' : 's'} changed`, qc, u.name);
+      return { qt, said };
+    });
+    let draft = null;
+    if (changed.said.length && req.body?.redraft) {
+      try { const j = await queueDraft(id, u); draft = { now: !!j.drafted_now, view_url: j.view_url || null, replaced: !!j.replaced }; }
+      catch (e) { draft = { failed: e.message }; }
+    }
+    res.json({ quotation_no: changed.qt.quotation_no, changes: changed.said, had_draft: !!changed.qt.gmail_draft_id, draft });
   } catch (e) { next(e); }
 });
 

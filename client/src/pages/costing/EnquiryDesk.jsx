@@ -269,7 +269,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [theirs, setTheirs] = useState({});      // counter rows: `${id}|${qty}` → their price as typed
   const [decision, setDecision] = useState('any'); // All: any · open · won · lost
   const [losing, setLosing] = useState(null);     // Order lost: { ids, reason }
-  const [flash, setFlash] = useState(null);       // the row an alert's link points at — highlighted, no pop-up
+  const [flash, setFlash] = useState(null);
+  // Before any mail draft is made (21 Nov 2026: "do we want to send this as the mail or not?"): { title, text, run(draft) }
+  const [asking, setAsking] = useState(null);
+  // A price changed on a quotation not yet sent: { e, changes: [{ qty, from, to }] } — "change the draft too?"
+  const [repricing, setRepricing] = useState(null);       // the row an alert's link points at — highlighted, no pop-up
   const [picked, setPicked] = useState([]);
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
   const [openQuote, setOpenQuote] = useState(null);
@@ -587,6 +591,30 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       );
     }
     const fin = (e.prices || []).filter(p => p.final != null);
+    // On a quotation not yet sent (made, or a draft in Gmail): the price can still change — leaving the box asks whether the
+    // draft changes too (21 Nov 2026).
+    if (mgmt && e.stage === 'quote_ready' && ['ready', 'drafted'].includes(e.quotation_status) && fin.length) {
+      const check = () => {
+        const changes = fin.map(p => ({ qty: p.qty, from: Number(p.final), to: Number(prices[keyOf(e.id, p.qty)]) }))
+          .filter(c => Number.isFinite(c.to) && c.to !== c.from);
+        if (changes.some(c => !(c.to > 0))) { toast.error('A price must be more than zero.'); return; }
+        if (changes.length) setRepricing({ e, changes });
+      };
+      return (
+        <div className="space-y-1" onClick={ev => ev.stopPropagation()}>
+          {fin.map(p => (
+            <div key={p.qty} className="flex items-center gap-2 text-xs">
+              <span className="w-16 text-right font-semibold">{qtyText(p.qty)}</span>
+              <Input className="!h-8 w-24 text-right" inputMode="decimal" value={prices[keyOf(e.id, p.qty)] ?? String(p.final)}
+                title={e.quotation_status === 'drafted' ? 'Change the price — you will be asked whether the Gmail draft changes too' : 'Change the price on this quotation'}
+                onChange={ev => { typed.current.add(keyOf(e.id, p.qty)); setPrices(x => ({ ...x, [keyOf(e.id, p.qty)]: ev.target.value })); }}
+                onBlur={check} onKeyDown={ev => { if (ev.key === 'Enter') ev.currentTarget.blur(); }} />
+            </div>
+          ))}
+          <div className="text-[10px] text-slate-500">{e.quotation_status === 'drafted' ? 'Draft in Gmail — change a price to update it' : 'Quotation made, no mail yet'}</div>
+        </div>
+      );
+    }
     if (!fin.length) return quantitiesText(e.quantities);
     return <div className="space-y-0.5 text-xs">{fin.map(p => <div key={p.qty}><b>{qtyText(p.qty)}</b> @ {rupees(p.final, 3)}</div>)}</div>;
   } };
@@ -620,8 +648,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   };
   // Approve (Management): the costing approved, the price fixed, and a mail with nothing left waiting gets its ONE reply as a
   // Gmail draft. Never sent. The answer is read line by line (approveSummary); an Undo only when no reply was made.
-  const approve = async () => {
-    const r = await api.post('/costing/enquiries/approve', { ids: picked });
+  const approve = async (draft = true) => {
+    const r = await api.post('/costing/enquiries/approve', { ids: picked, draft });
     const lines = approveSummary(r);
     toast[approveTone(r)](lines.join(' · '));
     // kept on the bar (it stays until closed), so the reasons outlive the toast; Undo only when the server gave one
@@ -636,6 +664,33 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     setLast({ text: lines.join(' · ') });
     setPicked([]);
     await reload();
+  };
+  // The question before a mail draft: who it is for, and draft now or not.
+  const ask = (title, list, run) => setAsking({
+    title, run,
+    who: [...new Set(list.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · ') || 'the customer',
+    count: list.length,
+  });
+  // A quotation not yet sent, re-priced: the quotation (and, if asked, its Gmail draft) changed in one press.
+  const doReprice = async redraft => {
+    const { e, changes } = repricing;
+    setRepricing(null);
+    const r = await api.put(`/costing/quotations/${e.quotation_id}/prices`, {
+      items: [{ id: e.id, prices: changes.map(c => ({ qty: c.qty, final: c.to })) }], redraft,
+    });
+    for (const c of changes) typed.current.delete(keyOf(e.id, c.qty));
+    const d = r.draft;
+    const said = `${r.quotation_no}: ${r.changes.map(c => `${qtyText(c.qty)} ${rupees(c.from, 2)} → ${rupees(c.to, 2)}`).join(', ')}`;
+    if (d?.failed) toast.error(`${said} — the quotation is changed, but its Gmail draft was not: ${d.failed}`);
+    else if (d) toast.success(`${said} — ${d.now ? (d.replaced ? 'the Gmail draft is updated' : 'a new Gmail draft is saved') : 'Claude updates the Gmail draft on its next run'}`);
+    else toast.success(`${said} — the quotation is updated${r.had_draft ? '; the Gmail draft is left as it was' : ''}`);
+    setLast({ text: said });
+    await reload();
+  };
+  const keepDraft = () => {
+    const { e, changes } = repricing;
+    setRepricing(null);
+    setPrices(x => { const n = { ...x }; for (const c of changes) { n[keyOf(e.id, c.qty)] = String(c.from); typed.current.delete(keyOf(e.id, c.qty)); } return n; });
   };
   // Their prices as typed on counter rows, saved before a lock or a send (the counter's record of what they asked).
   const saveTheirs = async list => {
@@ -816,7 +871,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
             title="CI Plant costs the ticked rows itself, as a draft a manager approves"><Calculator size={13} className="mr-1 inline" />Cost it for me</Button>
         )}
         {pPrice && mgmt && (
-          <Button size="sm" variant="success" onClick={approve}
+          <Button size="sm" variant="success" onClick={() => ask('Approve', pickedRows, approve)}
             title="Approves the costing and fixes the price; a mail with nothing left waiting gets its quotation and a Gmail draft — nothing is sent"><Check size={13} className="mr-1 inline" />Approve</Button>
         )}
         {(pPrice || pCounter) && <>
@@ -828,26 +883,26 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           {['add', 'pct', 'costplus', 'costpct'].includes(adjust.mode) && <Input className="!h-8 w-20" inputMode="decimal" value={adjust.amount} onChange={e => setAdjust(a => ({ ...a, amount: e.target.value }))} placeholder={['pct', 'costpct'].includes(adjust.mode) ? '5' : '0.10'} />}
           <Button size="sm" variant="secondary" onClick={applyAdjust}>Apply to ticked</Button>
           <Button size="sm" variant="secondary" onClick={async () => { await saveTheirs(pickedRows); await savePrices(pickedRows); }}><Lock size={13} className="mr-1 inline" />Lock ticked prices</Button>
-          {mgmt && <Button size="sm" variant="success" onClick={async () => {
+          {mgmt && <Button size="sm" variant="success" onClick={() => ask('Send quotation', pickedRows, async draft => {
             // Seamless: the prices in the boxes are locked as shown, then ONE server step finalises, quotes and
             // queues the reply draft in the customer's thread (owner, 11 Nov 2026). A counter row: their prices saved first,
-            // and the quotation made is the revised one.
+            // and the quotation made is the revised one. Asked first whether it goes to Gmail now (21 Nov 2026).
             await saveTheirs(pickedRows);
             const open = pickedRows.filter(e => e.stage === 'countered' || !isLocked(e));
             if (open.length) await savePrices(open, { quiet: true });
-            const q = await quoteAndDraft(api, pickedRows.map(e => e.id));
+            const q = await quoteAndDraft(api, pickedRows.map(e => e.id), { draft });
             if (q.failed.length) toast.error(q.failed.join('; '));
             setLast({ text: sendSummary(q), quotations: q.quotations });
             setPicked([]); await reload();
-          }} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />{pCounter && !pPrice ? 'Send revised quotation' : 'Send quotation'}</Button>}
+          })} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />{pCounter && !pPrice ? 'Send revised quotation' : 'Send quotation'}</Button>}
         </>}
-        {!pPrice && !pCounter && pQuote && <Button size="sm" onClick={async () => {
-          // The quotation and, straight on, its reply draft in the customer's thread.
-          const r = await quoteAndDraft(api, picked);
+        {!pPrice && !pCounter && pQuote && <Button size="sm" onClick={() => ask('Send quotation', pickedRows, async draft => {
+          // The quotation and, if asked for, its reply draft in the customer's thread.
+          const r = await quoteAndDraft(api, picked, { draft });
           if (r.failed.length) toast.error(r.failed.join('; '));
           setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
-        }}><Send size={13} className="mr-1 inline" />Send quotation</Button>}
+        })}><Send size={13} className="mr-1 inline" />Send quotation</Button>}
         {pAnswered && (
           <Button size="sm" variant="secondary" title="The customer came back with their own prices: these rows go to the top of Pending, to work out the revised quotation"
             onClick={async () => {
@@ -879,6 +934,30 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         )}
       </SelectionDock>
 
+      <Modal open={!!asking} onClose={() => setAsking(null)} title={`${asking?.title || ''} — send as mail?`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setAsking(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={async () => { const a = asking; setAsking(null); await a.run(false); }}>No — quotation only, no mail yet</Button>
+          <Button variant="success" onClick={async () => { const a = asking; setAsking(null); await a.run(true); }}><Mail size={13} className="mr-1 inline" />Yes — save the Gmail draft</Button>
+        </>}>
+        <p className="text-sm text-slate-600">{asking?.count} item{asking?.count === 1 ? '' : 's'} for <b>{asking?.who}</b>.
+          {asking?.title === 'Approve' ? ' Where a mail has nothing left waiting, its quotation is made.' : ' The quotation is made.'}
+          {' '}Save its reply as a draft in the customer's Gmail thread now? Nothing is sent either way — you send the draft from Gmail.
+          With <b>No</b>, the quotation waits in CI Plant; tick it and press <b>Send quotation</b> when you want the draft.</p>
+      </Modal>
+      <Modal open={!!repricing} onClose={keepDraft} title={`${repricing?.e.enquiry_no || ''} — ${repricing?.e.quotation_status === 'drafted' ? 'change the Gmail draft?' : 'change the quotation?'}`}
+        footer={<>
+          <Button variant="secondary" onClick={keepDraft}>No — keep it as it was</Button>
+          {repricing?.e.quotation_status === 'drafted' && <Button variant="secondary" onClick={() => doReprice(false)}>Quotation only</Button>}
+          <Button variant="success" onClick={() => doReprice(repricing?.e.quotation_status === 'drafted')}>
+            {repricing?.e.quotation_status === 'drafted' ? 'Yes — update the quotation and its draft' : 'Yes — update the quotation'}</Button>
+        </>}>
+        <div className="space-y-2 text-sm text-slate-600">
+          <p><b>{repricing?.e.quotation_no}</b> · {repricing?.e.product_name}</p>
+          <ul className="list-disc pl-5">{(repricing?.changes || []).map(c => <li key={c.qty}>{qtyText(c.qty)}: {rupees(c.from, 2)} → <b>{rupees(c.to, 2)}</b></li>)}</ul>
+          {repricing?.e.quotation_status === 'drafted' && <p>Its reply is already a draft in Gmail. <b>Yes</b> rewrites that same draft with the new price; <b>Quotation only</b> changes CI Plant's quotation and leaves the Gmail draft as it is.</p>}
+        </div>
+      </Modal>
       <Modal open={!!losing} onClose={() => setLosing(null)} title={`Order lost — ${losing?.ids.length === 1 ? '1 enquiry' : `${losing?.ids.length || 0} enquiries`}`}
         footer={<>
           <Button variant="secondary" onClick={() => setLosing(null)}>Keep open</Button>

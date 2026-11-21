@@ -493,6 +493,41 @@ describe('Enquiry desk — through the real app', {
     await call('clerk', 'POST', `/costing/quotations/${qid}/cancel`, {});
   });
 
+  test('send as mail or not: draft false makes the quotation only; a re-price changes it, and redraft makes the draft', async () => {
+    const x = await typed('NO MAIL YET CARTON');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: x.id, product_name: x.product_name, size_text: x.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.5 }] }] });
+    const r = await call('md', 'POST', '/costing/quotations/send', { ids: [x.id], draft: false });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.quotations.length, 1);
+    assert.deepEqual(r.body.drafted, [], 'no mail draft');
+    const qid = r.body.quotations[0].id;
+    assert.equal((await db.one('SELECT status FROM quotations WHERE id = $1', [qid])).status, 'ready');
+    assert.equal((await db.one('SELECT count(*)::int AS n FROM enquiry_jobs WHERE quotation_id = $1', [qid])).n, 0);
+    // Re-priced on the quotation: the enquiry's final and the quotation's line and total move together.
+    assert.equal((await call('clerk', 'PUT', `/costing/quotations/${qid}/prices`, { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.2 }] }] })).status, 403);
+    const p = await call('md', 'PUT', `/costing/quotations/${qid}/prices`, { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.2 }] }] });
+    assert.equal(p.status, 200, JSON.stringify(p.body));
+    assert.deepEqual(p.body.changes.map(c => [c.qty, c.from, c.to]), [[5000, 3.5, 3.2]]);
+    assert.equal(p.body.draft, null, 'no redraft asked');
+    const qt = await db.one('SELECT status, lines, total::float8 AS total FROM quotations WHERE id = $1', [qid]);
+    assert.equal(qt.status, 'ready');
+    assert.equal(qt.lines.find(l => l.enquiry_id === x.id && l.qty === 5000).rate, 3.2);
+    assert.equal(qt.total, 16000);
+    assert.equal((await enquiry(x.id)).prices.find(p0 => p0.qty === 5000).final, 3.2);
+    assert.equal((await enquiry(x.id)).status, 'quote_ready', 'still finalised, on its quotation');
+    // A zero price is refused; an enquiry not on it is refused.
+    assert.equal((await call('md', 'PUT', `/costing/quotations/${qid}/prices`, { items: [{ id: x.id, prices: [{ qty: 5000, final: 0 }] }] })).status, 400);
+    // Changed again with redraft: the draft is made (queued to the robot here — no Gmail link in the test).
+    const d = await call('md', 'PUT', `/costing/quotations/${qid}/prices`, { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.3 }] }], redraft: true });
+    assert.equal(d.status, 200, JSON.stringify(d.body));
+    assert.ok(d.body.draft && !d.body.draft.failed, JSON.stringify(d.body.draft));
+    assert.equal((await db.one('SELECT status FROM quotations WHERE id = $1', [qid])).status, 'queued');
+    // Queued to the robot: nothing to change in place.
+    assert.equal((await call('md', 'PUT', `/costing/quotations/${qid}/prices`, { items: [{ id: x.id, prices: [{ qty: 5000, final: 3.4 }] }] })).status, 409);
+    await call('clerk', 'POST', `/costing/quotations/${qid}/cancel`, {});
+  });
+
   test('Gmail connected: CI Plant saves the draft itself in the press, updates it on a second press, shows a Gmail refusal, and notices a send', async () => {
     // A fake Google on a free port: token, profile, message headers, drafts, threads.
     const http = await import('node:http');
