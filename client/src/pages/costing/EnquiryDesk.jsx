@@ -36,7 +36,8 @@ import { canOrder } from '../../lib/orderUi.js';
 
 // A row the customer can decide on: its quotation has gone out (band Sent, Mailed or Counter) and it can go on an order.
 const orderable = e => canOrder(e) && awaitsDecision(e);
-const LOSABLE = ['quote_ready', 'sent', 'countered'];
+// Order lost: on any priced row — quoted from here, or on the phone (21 Nov 2026).
+const LOSABLE = ['costed', 'price_pending', 'quote_ready', 'sent', 'countered'];
 // The counter's money, short: ₹ signed, and % signed.
 const signedRs = (v, dp = 0) => (v == null ? '—' : `${v < 0 ? '−' : '+'}${rupees(Math.abs(v), dp)}`);
 const signedPct = v => (v == null ? '' : `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`);
@@ -922,7 +923,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     const rc = t.matrix.revised.cost;
     return `They ask ${rupees(t.value_theirs, 0)} (${signedPct(-t.disc_asked_pct)} on our quote) · revised ${rupees(t.value_revised, 0)}${rc ? ` · vs cost ${signedRs(rc.line)} ${signedPct(rc.pct)}` : ''}`;
   })();
-  const pLose = pickedRows.some(e => LOSABLE.includes(e.stage) && awaitsDecision(e));
+  const pLose = pickedRows.some(e => LOSABLE.includes(e.stage));
   const pDelete = has(['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped']);
   const detail = (
     <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload} canSend={!!desk.can_finalise}
@@ -1105,7 +1106,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         {(pCost || pPrice) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
         {pLose && mgmt && (
           <Button size="sm" variant="danger" title="The customer did not order: the row turns red, kept with the reason — Bring back undoes it"
-            onClick={() => setLosing({ ids: pickedRows.filter(e => LOSABLE.includes(e.stage) && awaitsDecision(e)).map(e => e.id), reason: 'Lost on price' })}>Order lost</Button>
+            onClick={() => setLosing({ ids: pickedRows.filter(e => LOSABLE.includes(e.stage)).map(e => e.id), reason: 'Lost on price' })}>Order lost</Button>
         )}
         {has(['dropped', 'lost']) && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Bring back</Button>}
         {pDelete && (

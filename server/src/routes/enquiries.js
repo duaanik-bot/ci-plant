@@ -719,15 +719,14 @@ r.post('/costing/enquiries/drop', async (req, res, next) => {
 
 // Order lost (owner, 21 Nov 2026): a quoted row the customer did not order turns red, kept with its reason. Only once
 // the quotation went out — a row still with us is dropped instead. Bring back returns it to where it was.
-const LOSABLE = ['quote_ready', 'sent', 'countered'];
+// Also a priced row (owner, 21 Nov 2026: "the option of order lost … is missing from here") — a price given outside CI
+// Plant, on the phone, that the customer did not take.
+const LOSABLE = ['costed', 'price_pending', 'quote_ready', 'sent', 'countered'];
 r.post('/costing/enquiries/lost', async (req, res, next) => {
   try {
     const reason = text(req.body?.reason, 300) || 'Order not received';
     res.json(await moveRows(ids(req.body), req.costingUser, 'lost', (e) => {
-      if (!LOSABLE.includes(e.stage)) return { why: `is ${stageText(e.stage)}` };
-      if (e.stage === 'quote_ready' && !(e.quotation_id && !['cancelled', 'superseded'].includes(e.quotation_status))) {
-        return { why: 'has no quotation yet — drop it instead' };
-      }
+      if (!LOSABLE.includes(e.stage)) return { why: `is ${stageText(e.stage)} — not costed yet, drop it instead` };
       return { set: "status = 'lost', dropped_reason = $3", args: [reason], to: 'lost', detail: { reason, from: e.stage } };
     }));
   } catch (e) { next(e); }
@@ -741,7 +740,8 @@ r.post('/costing/enquiries/restore', async (req, res, next) => {
       const [ev] = await qc(`SELECT detail->'undo'->'before'->>'status' AS was FROM enquiry_events
                               WHERE enquiry_id = $1 AND action = $2 ORDER BY id DESC LIMIT 1`, [e.id, e.status === 'lost' ? 'lost' : 'drop']);
       if (e.status === 'lost') {
-        const was = LOSABLE.includes(ev?.was) ? ev.was : 'sent';
+        // the stored status it had (a costed row is stored as 'costing'), else Sent
+        const was = ['costing', 'price_pending', 'quote_ready', 'sent', 'countered'].includes(ev?.was) ? ev.was : 'sent';
         return { set: 'status = $3, dropped_reason = NULL', args: [was], to: was };
       }
       const to = broughtBack(ev?.was, e.costing_id);

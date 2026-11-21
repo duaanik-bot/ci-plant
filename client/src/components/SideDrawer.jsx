@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-export default function SideDrawer({ open = true, title, sub, badge, icon = null, actions, onClose, width = 'max-w-[900px]', children }) {
+export default function SideDrawer({ open = true, title, sub, badge, icon = null, actions, onClose, width = 'max-w-[min(1240px,96vw)]', children }) {
   const rootRef = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -36,7 +36,7 @@ export default function SideDrawer({ open = true, title, sub, badge, icon = null
               className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] hover:bg-[#1D1D1F]/[0.10]"><X size={16} /></button>
           </div>
           {actions && <div className="flex flex-wrap gap-2 border-b border-[#1D1D1F]/[0.06] bg-white/25 px-4 py-2">{actions}</div>}
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">{children}</div>
+          <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-4 py-3">{children}</div>
         </div>
       </aside>
     </div>,

@@ -12,6 +12,7 @@ import { STAGE_BACKWARD, STAGE_TONE, dateText, parseQuantities, quantitiesText, 
 import SendQuotePanel from './SendQuotePanel.jsx';
 
 const STYLE_OPTIONS = Object.keys(STYLES);
+const FILL_LABEL = { size_text: 'size', style: 'pasting', gsm: 'GSM', colours: 'colours', board: 'board' };
 const EMPTY = {
   customer_name: '', contact_name: '', contact_email: '', product_name: '', size_text: '', style: '', board: '', gsm: '',
   colours: '', coating: '', specs: '', quantities: '', target_price: '', notes: '', opening: '',
@@ -47,14 +48,37 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
   const [e, setE] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [dirty, setDirty] = useState(false);
+  // Blank fields filled from the enquiry's own costing (owner, 21 Nov 2026: "the fields are not auto-populated, which must
+  // be there"): what Claude did not read from the mail, the costing has — size, pasting, GSM, colours, board. Shown filled,
+  // named, and kept on the enquiry once Save details is pressed.
+  const [filled, setFilled] = useState(null);
   const isNew = id === 'new';
 
   useEffect(() => {
     if (!id) return;
     if (isNew) { setE(null); setForm(EMPTY); setDirty(false); return; }
-    api.get(`/costing/enquiries/${id}`).then(x => { setE(x); setForm(formOf(x)); setDirty(false); }).catch(() => onClose());
+    api.get(`/costing/enquiries/${id}`).then(x => { setE(x); setForm(formOf(x)); setDirty(false); setFilled(null); }).catch(() => onClose());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  useEffect(() => {
+    if (!e?.costing_id || !e.costing_live || ['quote_ready', 'sent', 'ordered', 'lost'].includes(e.status)) return undefined;
+    let live = true;
+    api.get(`/costing/costings/${e.costing_id}`).then(c => {
+      if (!live || !c) return;
+      const inp = c.inputs || {};
+      const from = {
+        size_text: c.size_text || '', style: c.style || '', gsm: c.gsm ?? inp.gsm ?? '', colours: inp.colours ?? '',
+        board: inp.board_grade || c.board_grade || '',
+      };
+      const got = Object.entries(from).filter(([k, v]) => v !== '' && v != null && String(form[k] ?? '').trim() === '');
+      if (!got.length) return;
+      setForm(f => ({ ...f, ...Object.fromEntries(got.map(([k, v]) => [k, String(v)])) }));
+      setDirty(true);
+      setFilled({ costing_no: c.costing_no, keys: got.map(([k]) => k) });
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [e?.id, e?.costing_id, e?.costing_version]);
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setDirty(true); };
   const locked = e && ['quote_ready', 'sent'].includes(e.status);
@@ -102,7 +126,13 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
           {locked && <span className="text-amber-700">Prices are finalised — send it back to Final price to change what was asked.</span>}
         </div>
       )}
-      <div className="grid gap-4">
+      {filled && (
+        <div className="rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
+          Filled from costing <b>{filled.costing_no}</b>: {filled.keys.map(k => FILL_LABEL[k] || k).join(', ')} — the mail did not say. Press <b>Save details</b> to keep them on the enquiry.
+        </div>
+      )}
+      {/* one column that never grows past the drawer: a wide table inside scrolls on its own (21 Nov 2026) */}
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-3">
             {field('customer_name', 'Customer')}
@@ -145,7 +175,7 @@ export default function EnquiryDetail({ id, statuses, onClose, onChanged, onSave
             <Textarea value={form.notes} onChange={ev => set('notes', ev.target.value)} disabled={locked} />
           </Field>
           {e && !isNew && e.stage !== 'dropped' && (
-            <SendQuotePanel enquiryId={e.id} canSend={canSend} reloadSignal={e.updated_at} onChanged={() => { onChanged?.(); reread(); }} />
+            <div className="min-w-0 overflow-x-auto"><SendQuotePanel enquiryId={e.id} canSend={canSend} reloadSignal={e.updated_at} onChanged={() => { onChanged?.(); reread(); }} /></div>
           )}
         </div>
         <div className="space-y-3">

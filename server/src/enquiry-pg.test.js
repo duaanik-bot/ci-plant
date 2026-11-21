@@ -1619,6 +1619,20 @@ describe('Enquiry desk — through the real app', {
     assert.deepEqual(back.body.moved.map(m => m.to), ['sent']);
     assert.deepEqual(Object.values(await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [quoted.id])), ['sent', null]);
     assert.equal((await call('plain', 'POST', '/costing/enquiries/lost', { ids: [quoted.id] })).status, 403);
+    // A priced row — quoted on the phone, never mailed — can be lost too, and comes back to where it was (21 Nov 2026).
+    const phoned = await typed('QUOTED ON THE PHONE CARTON');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: phoned.id, product_name: phoned.product_name, size_text: phoned.size_text, inputs: { ...JOB, qty: 5000 } });
+    await call('clerk', 'PUT', '/costing/enquiries/prices', { items: [{ id: phoned.id, prices: [{ qty: 5000, final: 3.5 }] }] });
+    assert.equal((await enquiry(phoned.id)).stage, 'price_pending');
+    const lp = await call('clerk', 'POST', '/costing/enquiries/lost', { ids: [phoned.id], reason: 'Went to another printer' });
+    assert.deepEqual(lp.body.moved.map(m => m.to), ['lost']);
+    assert.deepEqual((await call('clerk', 'POST', '/costing/enquiries/restore', { ids: [phoned.id] })).body.moved.map(m => m.to), ['price_pending']);
+    const costedOnly = await typed('COSTED ONLY CARTON');
+    await call('clerk', 'POST', '/costing/costings', { enquiry_id: costedOnly.id, product_name: costedOnly.product_name, size_text: costedOnly.size_text, inputs: { ...JOB, qty: 5000 } });
+    assert.equal((await enquiry(costedOnly.id)).stage, 'costed');
+    await call('clerk', 'POST', '/costing/enquiries/lost', { ids: [costedOnly.id] });
+    await call('clerk', 'POST', '/costing/enquiries/restore', { ids: [costedOnly.id] });
+    assert.equal((await enquiry(costedOnly.id)).stage, 'costed', 'back to costed, not to Sent');
   });
 
   test('the robot files the opening and a details edit without it keeps it', async () => {
