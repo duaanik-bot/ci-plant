@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, Mail, PackageCheck, Plus, RefreshCw, RotateCcw, Send, Settings, Trash2, X } from 'lucide-react';
 import { api } from '../../api.js';
+import { storage } from '../../lib/safeStorage.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
   BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, batchesOf, bookedPL, customersOf, dashboardOf, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, STAGE_TONE, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
@@ -444,10 +445,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [flash, setFlash] = useState(null);
   // Batches or the list (owner, 21 Nov 2026: "the whole batch on page 1, and then the list view of the products … in the chip
   // system"); kept for the next visit. A customer chip and a batch's "Open as a list" filter either view.
-  const [view, setView] = useState(() => (typeof localStorage !== 'undefined' && localStorage.getItem('ci_enq_view')) || 'batch');
+  const [view, setView] = useState(() => storage.getItem('ci_enq_view') || 'batch');
   const [customer, setCustomer] = useState(null);
   const [batchKey, setBatchKey] = useState(null);
-  const pickView = v => { setView(v); try { localStorage.setItem('ci_enq_view', v); } catch { /* private mode */ } };
+  // through lib/safeStorage.js — a tablet with site data blocked must not blank the screen
+  const pickView = v => { setView(v); storage.setItem('ci_enq_view', v); };
   // Before any mail draft is made (21 Nov 2026: "do we want to send this as the mail or not?"): { title, text, run(draft) }
   const [asking, setAsking] = useState(null);
   // A price changed on a quotation not yet sent: { e, changes: [{ qty, from, to }] } — "change the draft too?"
