@@ -421,7 +421,9 @@ const ENQ_COLS = `
   qt.quotation_no, qt.status AS quotation_status, qt.gmail_draft_url AS quotation_draft_url, qt.revision AS quotation_revision,
   e.counter, e.counter_mail_id, e.counter_at, e.counter_by_name, e.counter_round,
   cm.subject AS counter_subject, cm.received_at AS counter_received_at, cm.view_url AS counter_view_url,
-  e.order_id, eo.order_no, eo.mail_status AS order_mail_status`;
+  e.order_id, eo.order_no, eo.mail_status AS order_mail_status,
+  -- this item's line on its order — the rate booked, our cost, the margin or loss (21 Nov 2026: green rows show it)
+  (SELECT l FROM jsonb_array_elements(COALESCE(eo.lines, '[]'::jsonb)) l WHERE (l->>'enquiry_id')::int = e.id LIMIT 1) AS order_line`;
 const ENQ_FROM = `enquiries e LEFT JOIN costings c ON c.id = e.costing_id LEFT JOIN costing_batches b ON b.id = c.batch_id
                   LEFT JOIN enquiry_mails m ON m.id = e.mail_id LEFT JOIN quotations qt ON qt.id = e.quotation_id
                   LEFT JOIN enquiry_mails cm ON cm.id = e.counter_mail_id LEFT JOIN enquiry_orders eo ON eo.id = e.order_id`;
@@ -694,13 +696,33 @@ r.post('/costing/enquiries/drop', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Bring back: to where the row was when it was dropped.
+// Order lost (owner, 21 Nov 2026): a quoted row the customer did not order turns red, kept with its reason. Only once
+// the quotation went out — a row still with us is dropped instead. Bring back returns it to where it was.
+const LOSABLE = ['quote_ready', 'sent', 'countered'];
+r.post('/costing/enquiries/lost', async (req, res, next) => {
+  try {
+    const reason = text(req.body?.reason, 300) || 'Order not received';
+    res.json(await moveRows(ids(req.body), req.costingUser, 'lost', (e) => {
+      if (!LOSABLE.includes(e.stage)) return { why: `is ${stageText(e.stage)}` };
+      if (e.stage === 'quote_ready' && !(e.quotation_id && !['cancelled', 'superseded'].includes(e.quotation_status))) {
+        return { why: 'has no quotation yet — drop it instead' };
+      }
+      return { set: "status = 'lost', dropped_reason = $3", args: [reason], to: 'lost', detail: { reason, from: e.stage } };
+    }));
+  } catch (e) { next(e); }
+});
+
+// Bring back: to where the row was when it was dropped — or marked lost (back to where it was, quoted or countered).
 r.post('/costing/enquiries/restore', async (req, res, next) => {
   try {
     res.json(await moveRows(ids(req.body), req.costingUser, 'restore', async (e, qc) => {
-      if (e.status !== 'dropped') return { why: 'is not dropped' };
+      if (!['dropped', 'lost'].includes(e.status)) return { why: 'is not dropped or lost' };
       const [ev] = await qc(`SELECT detail->'undo'->'before'->>'status' AS was FROM enquiry_events
-                              WHERE enquiry_id = $1 AND action = 'drop' ORDER BY id DESC LIMIT 1`, [e.id]);
+                              WHERE enquiry_id = $1 AND action = $2 ORDER BY id DESC LIMIT 1`, [e.id, e.status === 'lost' ? 'lost' : 'drop']);
+      if (e.status === 'lost') {
+        const was = LOSABLE.includes(ev?.was) ? ev.was : 'sent';
+        return { set: 'status = $3, dropped_reason = NULL', args: [was], to: was };
+      }
       const to = broughtBack(ev?.was, e.costing_id);
       return { set: 'status = $3, dropped_reason = NULL', args: [to], to };
     }));

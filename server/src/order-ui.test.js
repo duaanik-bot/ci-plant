@@ -25,7 +25,12 @@ test('a line with no rate or quantity is marked, and a quantity may be typed wit
 
 test('totals: value, the loss on the order (only the lines below cost) and new dies', () => {
   const lines = [shownLine(LINE, { rate: '3.00' }), shownLine({ ...LINE, enquiry_id: 2, new_die: false }, {})];
-  assert.deepEqual(shownTotals(lines), { total: 15000 + 18750, loss: 1000, atLoss: 1, newDies: 1 });
+  const { net, net_pct, ...rest } = shownTotals(lines);
+  assert.deepEqual(rest, { total: 15000 + 18750, loss: 1000, atLoss: 1, newDies: 1 });
+  // the order's profit or loss, net of every line, and as a % of our cost (21 Nov 2026)
+  const cost = lines.reduce((s, l) => s + l.cost * l.qty, 0);
+  assert.equal(net, Math.round(lines.reduce((s, l) => s + l.margin_total, 0) * 100) / 100);
+  assert.equal(net_pct, (lines.reduce((s, l) => s + l.margin_total, 0) / cost) * 100);
 });
 
 test('the button shows from Final price on, on a row with a complete costing not already on an order', () => {

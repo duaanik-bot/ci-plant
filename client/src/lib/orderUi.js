@@ -26,18 +26,22 @@ export function shownLine(l, ed = {}) {
     value: rate != null && qty ? rate * qty : null,
     margin,
     margin_total: margin != null && qty ? margin * qty : null,
+    // the profit or loss as a % of our cost (21 Nov 2026: "in terms of percentage as well")
+    margin_pct: margin != null && l.cost ? (margin / l.cost) * 100 : null,
     bad: !(qty > 0) ? 'quantity' : !(rate > 0) ? 'rate' : null,
   };
 }
 
 export function shownTotals(lines) {
-  let total = 0, loss = 0, atLoss = 0, newDies = 0;
+  let total = 0, loss = 0, atLoss = 0, newDies = 0, net = 0, costValue = 0;
   for (const l of lines) {
     total += l.value || 0;
+    if (l.margin_total != null) { net += l.margin_total; costValue += (l.cost || 0) * (l.qty || 0); }
     if (l.margin_total != null && l.margin_total < 0) { loss += -l.margin_total; atLoss++; }
     if (l.new_die) newDies++;
   }
   // money, to the paisa
   const r2 = x => Math.round(x * 100) / 100;
-  return { total: r2(total), loss: r2(loss), atLoss, newDies };
+  // net = profit (or, below zero, loss) booked on the whole order at the rates agreed; net_pct = of our cost
+  return { total: r2(total), loss: r2(loss), atLoss, newDies, net: r2(net), net_pct: costValue ? (net / costValue) * 100 : null };
 }

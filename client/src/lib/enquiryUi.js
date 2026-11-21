@@ -7,7 +7,7 @@ import { finishFromEnquiry } from './costingRules.js';
 // band"). Enquiries land, are costed and priced, and counters come back, all in ONE list — Pending — so a row no longer
 // hops tabs. Sent holds what is with the customer; All holds everything, finalised orders too. Dropped and Settings sit to
 // the side. Every row carries a status band: Pending · Sent · Mailed · Counter · Finalised.
-export const DESK_STAGES = ['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'countered', 'sent', 'ordered'];
+export const DESK_STAGES = ['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'countered', 'sent', 'ordered', 'lost'];
 // The finer stages, grouped by the work they wait on — the selection dock offers each group's buttons.
 export const COST_STAGES = ['new', 'ready', 'costing'];
 export const PRICE_STAGES = ['costed', 'price_pending'];
@@ -17,19 +17,24 @@ export const PRICE_STAGES = ['costed', 'price_pending'];
 //   Sent       the quotation is made and its reply sits in Gmail as a draft, waiting to be sent
 //   Mailed     the quotation went to the customer
 //   Counter    the customer came back with their own prices
-//   Finalised  the customer agreed — the order is kept
+//   Finalised  the customer agreed — the order is kept (the row turns green)
+//   Lost       the customer did not order (the row turns red) — the other way a decision ends
 export const BANDS = [
   { key: 'pending', label: 'Pending', on: 'bg-orange-500 text-white' },
   { key: 'sent', label: 'Sent', on: 'bg-indigo-500 text-white' },
   { key: 'mailed', label: 'Mailed', on: 'bg-sky-600 text-white' },
   { key: 'counter', label: 'Counter', on: 'bg-amber-500 text-white' },
   { key: 'finalised', label: 'Finalised', on: 'bg-emerald-600 text-white' },
+  { key: 'lost', label: 'Lost', on: 'bg-red-600 text-white' },
 ];
+// The five steps the band's bars show; Lost ends on the last step, like Finalised.
+export const BAND_STEPS = BANDS.filter(b => b.key !== 'lost');
 const BAND_LABEL = Object.fromEntries(BANDS.map(b => [b.key, b.label]));
 const liveQuote = e => !!e?.quotation_id && !['cancelled', 'superseded'].includes(e.quotation_status);
 export function bandOf(e) {
   const st = e?.stage;
   if (st === 'ordered') return 'finalised';
+  if (st === 'lost') return 'lost';
   if (st === 'countered') return 'counter';
   if (st === 'sent') return 'mailed';
   if (st === 'quote_ready' && liveQuote(e) && ['drafted', 'sent'].includes(e.quotation_status)) return 'sent';
@@ -46,6 +51,47 @@ export const DESK_TABS = [
   // off to the side, with Settings
   { key: 'dropped', label: 'Dropped', stages: ['dropped'], side: true },
 ];
+// The decision on a quoted row (21 Nov 2026): won (green), lost (red), or still open.
+export const decisionOf = e => (e?.stage === 'ordered' ? 'won' : e?.stage === 'lost' ? 'lost' : 'open');
+export const DECISION_ROW = { won: 'bg-emerald-50/80', lost: 'bg-red-50/80' };
+// A row the customer can still decide on: its quotation went out (Sent, Mailed or Counter).
+export const awaitsDecision = e => ['sent', 'mailed', 'counter'].includes(bandOf(e));
+
+// What a won row booked, from its order line: the rate agreed against our cost — ₹ a carton, ₹ on the order, and % over
+// our cost (the same measure as the counter's "vs actual cost"). Null when the row has no order line.
+export function bookedPL(e) {
+  const l = e?.order_line;
+  if (!l) return null;
+  const rate = l.rate != null ? Number(l.rate) : null;
+  const cost = l.cost != null ? Number(l.cost) : null;
+  const qty = Number(l.qty) || 0;
+  const unit = rate != null && cost != null ? rate - cost : null;
+  return { qty, rate, cost, unit, total: unit != null ? unit * qty : null, value: rate != null ? rate * qty : null,
+    pct: unit != null && cost ? (unit / cost) * 100 : null };
+}
+// A row's quoted value: its first quantity at its final (else our quoted) price.
+const quotedValue = e => {
+  const p = (e?.prices || [])[0];
+  const price = p ? Number(p.final ?? p.ours ?? NaN) : NaN;
+  return p && Number.isFinite(price) ? price * Number(p.qty || 0) : 0;
+};
+// The decisions, added up: won and lost by count and value, the win rate, and what the won orders booked over our cost.
+export function decisionSummary(rows = []) {
+  const quoted = rows.filter(e => ['sent', 'mailed', 'counter', 'finalised', 'lost'].includes(bandOf(e)));
+  const won = quoted.filter(e => decisionOf(e) === 'won');
+  const lost = quoted.filter(e => decisionOf(e) === 'lost');
+  const pls = won.map(bookedPL).filter(Boolean);
+  const wonValue = pls.reduce((s, x) => s + (x.value || 0), 0);
+  const wonCost = pls.filter(x => x.cost != null).reduce((s, x) => s + x.cost * x.qty, 0);
+  const booked = pls.reduce((s, x) => s + (x.total || 0), 0);
+  return {
+    quoted: quoted.length, open: quoted.length - won.length - lost.length, won: won.length, lost: lost.length,
+    win_rate: won.length + lost.length ? (won.length / (won.length + lost.length)) * 100 : null,
+    won_value: wonValue, lost_value: lost.reduce((s, e) => s + quotedValue(e), 0),
+    booked, booked_pct: wonCost ? (booked / wonCost) * 100 : null, at_loss: pls.filter(x => (x.total || 0) < 0).length,
+  };
+}
+
 export const rowsOfTab = (tab, rows) => {
   const t = DESK_TABS.find(x => x.key === tab);
   if (!t || !rows) return rows || [];
@@ -66,6 +112,7 @@ export const STAGE_TONE = {
   dropped: 'bg-slate-100 text-slate-500',
   countered: 'bg-amber-200 text-amber-900',
   ordered: 'bg-emerald-200 text-emerald-900',
+  lost: 'bg-red-100 text-red-800',
 };
 
 export const QUOTE_TONE = {

@@ -1446,6 +1446,25 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await call('plain', 'POST', '/costing/enquiries/delete', { ids: [x.id] })).status, 403);
   });
 
+  test('Order lost: a quoted row turns lost with its reason, a row still with us is refused, Bring back returns it', async () => {
+    const quoted = await db.one(`SELECT id, enquiry_no FROM enquiries WHERE status = 'sent' ORDER BY id LIMIT 1`);
+    assert.ok(quoted, 'an earlier test sent a quotation');
+    const open = await typed('NOT QUOTED YET CARTON');
+    const r = await call('clerk', 'POST', '/costing/enquiries/lost', { ids: [quoted.id, open.id], reason: 'Lost on price' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.moved.map(m => [m.enquiry_no, m.to]), [[quoted.enquiry_no, 'lost']]);
+    assert.equal(r.body.skipped[0].enquiry_no, open.enquiry_no);
+    assert.deepEqual(Object.values(await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [quoted.id])), ['lost', 'Lost on price']);
+    const listed = (await call('clerk', 'GET', '/costing/enquiries?stage=lost')).body.find(e => e.id === quoted.id);
+    assert.equal(listed.stage, 'lost');
+    assert.equal(listed.order_line, null, 'no order, no order line');
+    // Bring back: to where it was — sent — and its reason cleared.
+    const back = await call('clerk', 'POST', '/costing/enquiries/restore', { ids: [quoted.id] });
+    assert.deepEqual(back.body.moved.map(m => m.to), ['sent']);
+    assert.deepEqual(Object.values(await db.one('SELECT status, dropped_reason FROM enquiries WHERE id = $1', [quoted.id])), ['sent', null]);
+    assert.equal((await call('plain', 'POST', '/costing/enquiries/lost', { ids: [quoted.id] })).status, 403);
+  });
+
   test('the robot files the opening and a details edit without it keeps it', async () => {
     const f = await call('clerk', 'POST', '/costing/enquiry-desk/fetch');
     const job = f.body.job;

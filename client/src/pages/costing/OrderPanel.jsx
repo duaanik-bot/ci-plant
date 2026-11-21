@@ -15,6 +15,7 @@ import { dateText, qtyText, rupees } from '../../lib/enquiryUi.js';
 import { shownLine, shownTotals } from '../../lib/orderUi.js';
 
 const tone = v => (v == null ? 'text-slate-500' : v < 0 ? 'text-red-700' : 'text-emerald-700');
+const pctSigned = v => (v == null ? '' : `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`);
 const signed = (v, dp = 2) => (v == null ? '—' : `${v < 0 ? '−' : '+'}${rupees(Math.abs(v), dp)}`);
 const sheetText = l => (l.sheet ? `${l.sheet.l} × ${l.sheet.w} in` : '—');
 const boardText = l => [l.board, l.gsm ? `${l.gsm} GSM` : null].filter(Boolean).join(', ') || '—';
@@ -106,6 +107,8 @@ export default function OrderPanel({ ids, onClose, onDone }) {
             Our cost a carton comes from the costing (a new quantity is costed again). A rate under our cost is booked as a loss on the order.</p>
           <div className="flex flex-wrap gap-2">
             <Tile label="Order value" value={rupees(t.total, 0)} sub={`${lines.length} item${lines.length === 1 ? '' : 's'}`} />
+            <Tile label={t.net < 0 ? 'Loss on the order' : 'Profit on the order'} value={`${signed(t.net, 0)} ${pctSigned(t.net_pct)}`} cls={tone(t.net)}
+              sub="at the rates agreed, against our cost" />
             <Tile label="Loss booked" value={t.loss > 0 ? rupees(t.loss, 0) : 'None'} cls={t.loss > 0 ? 'text-red-700' : 'text-emerald-700'}
               sub={t.atLoss ? `${t.atLoss} item${t.atLoss === 1 ? '' : 's'} below our cost` : 'every rate is above our cost'} />
             <Tile label="New dies" value={t.newDies || 'None'} sub={t.newDies ? 'the team makes these' : 'existing dies'} />
@@ -141,7 +144,7 @@ export default function OrderPanel({ ids, onClose, onDone }) {
                       </div>
                     </td>
                     <td className="px-2 py-2 tabular-nums text-slate-700">{rupees(l.cost, 3)}</td>
-                    <td className={`px-2 py-2 font-semibold tabular-nums ${tone(l.margin)}`}>{signed(l.margin, 3)}</td>
+                    <td className={`px-2 py-2 font-semibold tabular-nums ${tone(l.margin)}`}>{signed(l.margin, 3)}<div className="text-[10px]">{pctSigned(l.margin_pct)} on cost</div></td>
                     <td className={`px-2 py-2 font-bold tabular-nums ${tone(l.margin_total)}`}>{signed(l.margin_total, 0)}
                       <div className="text-[10px] font-normal text-slate-500">value {rupees(l.value, 0)}</div></td>
                     <td className="px-2 py-2 whitespace-nowrap">{sheetText(l)}<div className="text-[11px] text-slate-500">{l.ups ? `${l.ups} ups` : 'ups —'}</div></td>
@@ -181,7 +184,8 @@ function OrderView({ order, onClose }) {
                     <td className="px-2 py-2 tabular-nums">{qtyText(l.qty)}</td>
                     <td className="px-2 py-2 tabular-nums">{rupees(l.rate)}</td>
                     <td className="px-2 py-2 tabular-nums text-slate-600">{rupees(l.cost, 3)}</td>
-                    <td className={`px-2 py-2 font-bold tabular-nums ${tone(l.margin_total)}`}>{signed(l.margin_total, 0)}</td>
+                    <td className={`px-2 py-2 font-bold tabular-nums ${tone(l.margin_total)}`}>{signed(l.margin_total, 0)}
+                      <div className="text-[10px] font-normal">{l.cost ? pctSigned(((l.rate - l.cost) / l.cost) * 100) : ''}</div></td>
                     <td className="px-2 py-2 whitespace-nowrap">{sheetText(l)} · {l.ups ? `${l.ups} ups` : '—'}</td>
                     <td className="px-2 py-2">{boardText(l)}</td>
                     <td className="px-2 py-2">{l.new_die ? <b className="text-red-700">New die</b> : 'Existing'}</td>

@@ -20,7 +20,7 @@ import { Calculator, Check, Copy, ExternalLink, Inbox, Layers, Lock, LockOpen, M
 import { api } from '../../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, Select, SelectionDock, SubTabs, Textarea, useToast } from '../../components/ui.jsx';
 import {
-  BANDS, COST_STAGES, DESK_STAGES, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
+  BANDS, BAND_STEPS, COST_STAGES, DECISION_ROW, DESK_STAGES, awaitsDecision, bookedPL, decisionOf, decisionSummary, DESK_TABS, PILL_TONE, PRICE_STAGES, QUOTE_LABEL, QUOTE_TONE, STAGE_BACKWARD, adjustPrice, bandOf, rowsOfTab, approveSummary, approveTone, autoCostLines, autoCostTone, autoPill, dateText, fetchQueuedText, fetchWaitText, heldLine, mailboxNote, mailboxTag,
   moveSummary, moveTone, quantitiesText, replyLine, qtyText, rupees, startsFresh, whereText,
 } from '../../lib/enquiryUi.js';
 import COMPANY_ROUTINE_PROMPT from '../../lib/enquiry-robot/company-routine-prompt.md?raw';
@@ -28,12 +28,19 @@ import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
-import CounterPanel from './CounterPanel.jsx';
+import { counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
 import OrderPanel, { OrdersList } from './OrderPanel.jsx';
 import { canOrder } from '../../lib/orderUi.js';
 
 // A row the customer can decide on: its quotation has gone out (band Sent, Mailed or Counter) and it can go on an order.
-const orderable = e => canOrder(e) && ['sent', 'mailed', 'counter'].includes(bandOf(e));
+const orderable = e => canOrder(e) && awaitsDecision(e);
+const LOSABLE = ['quote_ready', 'sent', 'countered'];
+// The counter's money, short: ₹ signed, and % signed.
+const signedRs = (v, dp = 0) => (v == null ? '—' : `${v < 0 ? '−' : '+'}${rupees(Math.abs(v), dp)}`);
+const signedPct = v => (v == null ? '' : `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`);
+const plTone = v => (v == null ? 'text-slate-500' : v < 0 ? 'text-red-700' : 'text-emerald-700');
+// Revised-price fills for counter rows (the counter's own quick fills, now in the selection dock).
+const COUNTER_FILLS = { theirs: 'Their price', halfway: 'Halfway', costed: 'Should-cost', ours: 'Our quote', costplus: 'Cost + ₹', costpct: 'Cost + %' };
 import { NEW_ENQUIRY_ROW } from '../../components/EnquiryBadge.jsx';
 
 const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
@@ -178,17 +185,55 @@ function AutoNotes({ e }) {
 // over five steps, and under it the finer word (Costing in progress, the quotation's number, the order's number).
 function StatusBand({ e, statuses }) {
   const band = bandOf(e);
-  const at = BANDS.findIndex(b => b.key === band);
-  const b = BANDS[at];
-  const fine = band === 'finalised' ? e.order_no : ['sent', 'mailed'].includes(band) ? e.quotation_no : statuses?.[e.stage];
+  const b = BANDS.find(x => x.key === band);
+  // Lost ends on the last step, like Finalised — in red.
+  const at = band === 'lost' ? BAND_STEPS.length - 1 : BAND_STEPS.findIndex(x => x.key === band);
+  const fine = band === 'lost' ? e.dropped_reason : band === 'finalised' ? e.order_no : ['sent', 'mailed'].includes(band) ? e.quotation_no : statuses?.[e.stage];
   if (!b) return <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{statuses?.[e.stage] || e.stage}</span>;
   return (
     <div className="w-28 space-y-1" title={BANDS.map(x => x.label).join(' → ')}>
       <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${b.on}`}>{b.label}</span>
       <div className="flex gap-0.5">
-        {BANDS.map((x, i) => <span key={x.key} className={`h-1.5 flex-1 rounded-full ${i <= at ? b.on.split(' ')[0] : 'bg-slate-200'}`} />)}
+        {BAND_STEPS.map((x, i) => <span key={x.key} className={`h-1.5 flex-1 rounded-full ${i <= at ? b.on.split(' ')[0] : 'bg-slate-200'}`} />)}
       </div>
       {fine && <div className="truncate text-[10px] text-slate-500">{fine}</div>}
+    </div>
+  );
+}
+
+// All: the decisions taken (21 Nov 2026) — won green, lost red — as chips that filter the list, and what they add up to.
+function Decisions({ rows, decision, onDecision }) {
+  const d = decisionSummary(rows);
+  const chip = (key, label, n, on) => (
+    <button key={key} type="button" onClick={() => onDecision(key)}
+      className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${decision === key ? on : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}>
+      {label}{n != null ? ` · ${n}` : ''}
+    </button>
+  );
+  const stat = (label, value, sub, cls = '') => (
+    <div className="min-w-[8rem] rounded-xl bg-white/80 px-3 py-1.5 ring-1 ring-slate-200">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`text-base font-bold tabular-nums ${cls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-slate-500">{sub}</div>}
+    </div>
+  );
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs font-semibold text-slate-500">Decision:</span>
+        {chip('any', 'All', rows.length, 'bg-[#1D1D1F] text-white ring-[#1D1D1F]')}
+        {chip('open', 'Open', rows.length - d.won - d.lost, 'bg-slate-700 text-white ring-slate-700')}
+        {chip('won', 'Won', d.won, 'bg-emerald-600 text-white ring-emerald-600')}
+        {chip('lost', 'Lost', d.lost, 'bg-red-600 text-white ring-red-600')}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {stat('Quoted', d.quoted, `${d.open} not decided yet`)}
+        {stat('Win rate', d.win_rate != null ? `${d.win_rate.toFixed(0)}%` : '—', `${d.won} won of ${d.won + d.lost} decided`, 'text-[#1D1D1F]')}
+        {stat('Won', rupees(d.won_value, 0), `${d.won} order line${d.won === 1 ? '' : 's'}`, 'text-emerald-700')}
+        {stat('Lost', rupees(d.lost_value, 0), 'at the first quantity quoted', 'text-red-700')}
+        {stat(d.booked < 0 ? 'Loss booked' : 'Profit booked', `${signedRs(d.booked)} ${signedPct(d.booked_pct)}`,
+          d.at_loss ? `on cost · ${d.at_loss} line${d.at_loss === 1 ? '' : 's'} below cost` : 'on cost, at the rates agreed', plTone(d.booked))}
+      </div>
     </div>
   );
 }
@@ -221,6 +266,10 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const [ordering, setOrdering] = useState(null);
   const [ordersSignal, setOrdersSignal] = useState(0);
   const [search, setSearch] = useState('');
+  const [theirs, setTheirs] = useState({});      // counter rows: `${id}|${qty}` → their price as typed
+  const [decision, setDecision] = useState('any'); // All: any · open · won · lost
+  const [losing, setLosing] = useState(null);     // Order lost: { ids, reason }
+  const [flash, setFlash] = useState(null);       // the row an alert's link points at — highlighted, no pop-up
   const [picked, setPicked] = useState([]);
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
   const [openQuote, setOpenQuote] = useState(null);
@@ -284,7 +333,25 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   useEffect(() => { loadRows().catch(() => setRows([])); }, [loadRows]);
   useEffect(() => { setPicked([]); loadQuotes().catch(() => {}); }, [tab, loadQuotes]);
   // Opened from a costing (Saved costings → its enquiry): that enquiry's card.
-  useEffect(() => { if (focus) setOpen(Number(focus)); }, [focus]);
+  // An alert's or a costing's link names an enquiry (?enquiry=): its row is highlighted and scrolled to — no card pops up
+  // (owner, 21 Nov 2026: "when I come to the enquiry desk, it automatically gives me a pop-up that is not required").
+  // The link is tidied away so a refresh lands on the plain desk.
+  useEffect(() => {
+    if (!focus) return;
+    setFlash(Number(focus));
+    window.history.replaceState(null, '', '/costing?tab=enquiries');
+  }, [focus]);
+  useEffect(() => {
+    if (!flash || !rows) return;
+    const e = rows.find(x => x.id === flash);
+    if (!e) return;
+    const where = ['pending', 'sent'].find(t => rowsOfTab(t, [e]).length) || (e.stage === 'dropped' ? 'dropped' : 'all');
+    setTab(where);
+    const t = setTimeout(() => document.querySelector('.desk-flash-row')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+    const off = setTimeout(() => setFlash(null), 6000);
+    return () => { clearTimeout(t); clearTimeout(off); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flash, rows]);
 
   // While a fetch is with Claude, look again every few seconds.
   const lastFetch = desk?.jobs?.find(j => j.kind === 'fetch');
@@ -310,11 +377,11 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
   const shown = useMemo(() => {
     const s = search.trim().toLowerCase();
-    const inTab = rowsOfTab(tab, rows);
+    const inTab = rowsOfTab(tab, rows).filter(e => tab !== 'all' || decision === 'any' || decisionOf(e) === decision);
     if (!s) return inTab;
     return inTab.filter(e => [e.enquiry_no, e.customer_name, e.product_name, e.size_text, e.contact_email, e.mail_subject, e.quotation_no, e.costing_no]
       .some(x => String(x || '').toLowerCase().includes(s)));
-  }, [rows, search, tab]);
+  }, [rows, search, tab, decision]);
   const pickedRows = shown.filter(e => picked.includes(e.id));
   const toggle = (r, on) => setPicked(p => (on ? [...new Set([...p, r.id])] : p.filter(x => x !== r.id)));
   const toggleAll = (rs, on) => setPicked(on ? rs.map(r => r.id) : []);
@@ -342,7 +409,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const move = (path, say, body = {}) => after(api.post(`/costing/enquiries/${path}`, { ids: picked, ...body }), say);
 
   const undo = async () => {
-    // A counter action brings its own way back (CounterPanel: fill, their prices, lock, revised quotation).
+    // A counter action brings its own way back (fill, their prices, lock, revised quotation).
     if (last.run) {
       const said = await last.run();
       setLast(said ? { text: said } : null);
@@ -466,9 +533,59 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         </div>
       );
   };
+  // A counter, in its row (owner, 21 Nov 2026: "integrate that into the row level … we don't need this completely different
+  // block"): per quantity, what we quoted, what they ask, our revised price — and each against our actual cost.
+  const counterRow = e => ({ ...e, prices: (e.prices || []).map(p => {
+    const t = theirs[keyOf(e.id, p.qty)];
+    return t === undefined ? p : { ...p, theirs: t === '' ? null : Number(t) };
+  }) });
+  const counterOf = list => counterLines(list.map(counterRow), Object.fromEntries(list.flatMap(e => (e.prices || []).map(p => [keyOf(e.id, p.qty), prices[keyOf(e.id, p.qty)]])).filter(([, v]) => v !== undefined)));
+  const counterCell = e => (
+    <div className="space-y-1.5" onClick={ev => ev.stopPropagation()}>
+      {counterOf([e]).map(l => {
+        const k = keyOf(e.id, l.qty);
+        const tc = l.theirs_vs.cost;
+        const rc = l.revised_vs.cost;
+        return (
+          <div key={l.qty} className="text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-14 text-right font-semibold">{qtyText(l.qty)}</span>
+              <span className="w-16 text-right text-slate-500" title="What we quoted">{rupees(l.ours, 2)}</span>
+              <label className="flex items-center gap-1 text-[10px] font-bold uppercase text-amber-800">ask
+                <Input className="!h-7 !w-16 text-right text-xs" inputMode="decimal" value={theirs[k] ?? (l.theirs != null ? String(l.theirs) : '')} placeholder="—"
+                  onChange={ev => setTheirs(x => ({ ...x, [k]: ev.target.value }))} aria-label={`Their price, ${e.enquiry_no} ${l.qty}`} />
+              </label>
+              <label className="flex items-center gap-1 text-[10px] font-bold uppercase text-brand-700">revised
+                <Input className={`!h-7 !w-16 text-right text-xs font-bold ${l.revised_below_cost ? '!text-red-700' : ''}`} inputMode="decimal" value={prices[k] ?? ''}
+                  onChange={ev => { typed.current.add(k); setPrices(x => ({ ...x, [k]: ev.target.value })); }} aria-label={`Revised price, ${e.enquiry_no} ${l.qty}`} />
+              </label>
+            </div>
+            <div className="mt-0.5 flex gap-3 pl-[8.5rem] text-[10px]">
+              <span className={plTone(tc?.unit)} title="Their price against our actual cost">ask vs cost {tc ? `${signedRs(tc.unit, 3)} · ${signedPct(tc.pct)}` : '—'}</span>
+              <span className={`font-bold ${plTone(rc?.unit)}`} title="Our revised price against our actual cost">revised vs cost {rc ? `${signedRs(rc.unit, 3)} · ${signedPct(rc.pct)}` : '—'}</span>
+            </div>
+          </div>
+        );
+      })}
+      {e.counter_subject && (
+        <div className="text-[10px] text-slate-500">“{e.counter_subject}”{e.counter_view_url && <> · <a href={e.counter_view_url} target="_blank" rel="noreferrer" className="font-semibold text-brand-700 hover:underline">open the mail</a></>}</div>
+      )}
+    </div>
+  );
   // Quantities — and, from costed on, the prices: boxes while the price is being set, the quoted price after.
   const priceCol = { key: 'prices', label: 'Quantity · costing proposes · price a carton', render: e => {
     if (PRICE_STAGES.includes(e.stage)) return priceCell(e);
+    if (e.stage === 'countered') return counterCell(e);
+    const pl = e.stage === 'ordered' ? bookedPL(e) : null;
+    if (pl) {
+      return (
+        <div className="space-y-0.5 text-xs">
+          <div><b>{qtyText(pl.qty)}</b> @ <b>{rupees(pl.rate, 2)}</b> <span className="text-slate-500">booked · cost {rupees(pl.cost, 3)}</span></div>
+          <div className={`font-bold ${plTone(pl.total)}`}>{pl.total < 0 ? 'Loss' : 'Profit'} {signedRs(pl.total)} · {signedPct(pl.pct)} <span className="font-normal">on cost</span></div>
+          <div className={`text-[11px] ${plTone(pl.unit)}`}>{signedRs(pl.unit, 3)} a carton</div>
+        </div>
+      );
+    }
     const fin = (e.prices || []).filter(p => p.final != null);
     if (!fin.length) return quantitiesText(e.quantities);
     return <div className="space-y-0.5 text-xs">{fin.map(p => <div key={p.qty}><b>{qtyText(p.qty)}</b> @ {rupees(p.final, 3)}</div>)}</div>;
@@ -487,8 +604,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const columns = tab === 'dropped' ? [...baseCols.slice(0, 5), whyCol]
     : tab === 'sent' ? [...baseCols.slice(0, 4), priceCol, baseCols[5], orderCol]
       : [...baseCols.slice(0, 4), priceCol, costingCol, baseCols[5], orderCol];
-  // Pending: a counter-offer is worked in its own panel above the table, so the table holds the rest.
-  const tableRows = tab === 'pending' ? shown.filter(e => e.stage !== 'countered') : shown;
+  const tableRows = shown;
 
   const savePrices = async (list, { quiet = false } = {}) => {
     const items = list.map(e => ({ id: e.id, prices: (e.prices || []).map(p => ({ qty: p.qty, final: Number(prices[`${e.id}|${p.qty}`]) })) }));
@@ -521,12 +637,27 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
     setPicked([]);
     await reload();
   };
+  // Their prices as typed on counter rows, saved before a lock or a send (the counter's record of what they asked).
+  const saveTheirs = async list => {
+    const items = list.filter(e => e.stage === 'countered').map(e => ({ id: e.id, prices: (e.prices || [])
+      .filter(p => theirs[keyOf(e.id, p.qty)] !== undefined).map(p => ({ qty: p.qty, theirs: theirs[keyOf(e.id, p.qty)] })) }))
+      .filter(it => it.prices.length);
+    if (!items.length) return;
+    const r = await api.put('/costing/enquiries/counter', { items });
+    if (r.skipped?.length) toast.error(r.skipped.map(x => `${x.enquiry_no} ${x.why}`).join('; '));
+    setTheirs(t => { const n = { ...t }; for (const it of items) for (const p of it.prices) delete n[keyOf(it.id, p.qty)]; return n; });
+  };
   const applyAdjust = () => {
     setPrices(cur => {
       const next = { ...cur };
+      const fills = COUNTER_FILLS[adjust.mode]
+        ? new Map(counterOf(pickedRows.filter(e => e.stage === 'countered')).map(l => [keyOf(l.id, l.qty), l])) : null;
       for (const e of pickedRows) for (const p of e.prices || []) {
         const k = `${e.id}|${p.qty}`;
-        const v = adjustPrice(next[k] || p.suggested, adjust);
+        if (fills && !fills.has(k)) continue;
+        const l = fills?.get(k);
+        const v = !fills ? adjustPrice(next[k] || p.suggested, adjust)
+          : adjust.mode === 'costplus' ? FILLS.costPlus(l, adjust.amount) : adjust.mode === 'costpct' ? FILLS.costPct(l, adjust.amount) : FILLS[adjust.mode](l);
         if (v != null) { next[k] = String(v); typed.current.add(k); }
       }
       return next;
@@ -561,6 +692,16 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   const pAnswered = has(['costed', 'price_pending', 'quote_ready', 'sent']);
   const pOrder = pickedRows.some(orderable);
   const pBack = pickedRows.some(e => STAGE_BACKWARD[e.stage]);
+  const pCounter = has(['countered']);
+  // Ticked counter rows, the whole of them: what they ask off our quote, and what our revised makes over our cost.
+  const counterSummary = (() => {
+    const cl = counterOf(pickedRows.filter(e => e.stage === 'countered'));
+    if (!cl.length) return null;
+    const t = counterTotals(cl);
+    const rc = t.matrix.revised.cost;
+    return `They ask ${rupees(t.value_theirs, 0)} (${signedPct(-t.disc_asked_pct)} on our quote) · revised ${rupees(t.value_revised, 0)}${rc ? ` · vs cost ${signedRs(rc.line)} ${signedPct(rc.pct)}` : ''}`;
+  })();
+  const pLose = pickedRows.some(e => LOSABLE.includes(e.stage) && awaitsDecision(e));
   const pDelete = has(['new', 'ready', 'costing', 'costed', 'price_pending', 'quote_ready', 'dropped']);
   const detail = (
     <EnquiryDetail id={open} statuses={desk.statuses} onClose={() => setOpen(null)} onChanged={reload} canSend={!!desk.can_finalise}
@@ -628,24 +769,21 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {tab === 'settings' && <DeskSettings desk={desk} onSaved={loadDesk} />}
 
       {tab === 'pending' && (
-        <p className="mb-2 text-xs text-slate-500">Everything waiting on us, in one list: new enquiries (<b>orange rows</b>), costing, pricing, approval — and, on top, any customer's counter-offer. The <b>Status</b> band says where each row stands; tick rows and the buttons below are the ones their stage allows: <b>Cost it</b>, <b>Approve</b>, <b>Send quotation</b> (the reply goes to Gmail as a draft), <b>Customer counter</b>, <b>Order finalised</b>.</p>
+        <p className="mb-2 text-xs text-slate-500">Everything waiting on us, in one list: new enquiries (<b>orange rows</b>), costing, pricing, approval — and customers' counter-offers, worked in their own row: type <b>ask</b> (their price) and <b>revised</b> (ours), each shown against our cost. The <b>Status</b> band says where each row stands; tick rows and the buttons below are the ones their stage allows: <b>Cost it</b>, <b>Approve</b>, <b>Send quotation</b> (the reply goes to Gmail as a draft), <b>Customer counter</b>, <b>Order finalised</b>.</p>
       )}
       {tab === 'sent' && (
-        <p className="mb-2 text-xs text-slate-500">With the customer. <b>Sent</b> = the quotation's reply is a draft in Gmail, to be sent from there; <b>Mailed</b> = it went to the customer. When they answer with their own prices, tick and press <b>Customer counter</b> — the rows go back to Pending; when they agree, <b>Order finalised</b>. The quotations are listed below.</p>
+        <p className="mb-2 text-xs text-slate-500">With the customer. <b>Sent</b> = the quotation's reply is a draft in Gmail, to be sent from there; <b>Mailed</b> = it went to the customer. When they answer with their own prices, tick and press <b>Customer counter</b> — the rows go back to Pending; when they agree, <b>Order finalised</b> (green); when they don't, <b>Order lost</b> (red). The quotations are listed below.</p>
       )}
-      {tab === 'all' && <p className="mb-2 text-xs text-slate-500">Every enquiry on the desk, finalised orders too, with its status band.</p>}
+      {tab === 'all' && rows && <Decisions rows={rowsOfTab('all', rows)} decision={decision} onDecision={setDecision} />}
       {tab === 'orders' && (
         <p className="mb-2 text-xs text-slate-500">Orders the customer agreed. <b>Order finalised</b> keeps the order with the rate agreed and the loss where it was booked below our cost, and sends the order sheet — the table of items, rates, output sheets, ups, boards and dies, with the KLDs — to the company mailbox. Click an order to see it line by line.</p>
       )}
       {tab === 'orders' && <OrdersList canSend={!!mgmt} signal={ordersSignal} />}
-      {tab === 'pending' && rows && counterGroups(shown.filter(e => e.stage === 'countered')).map(g => (
-        <div key={g.key} className="mb-4"><CounterPanel rows={g.rows} canSend={!!mgmt} onChanged={reload} onUndoable={setLast} title={`${g.customer} — counter on ${g.rows.length} item${g.rows.length === 1 ? '' : 's'}`} /></div>
-      ))}
       {stages && <MailChips buckets={buckets} picked={picked} onToggle={toggleMail} onClear={() => setPicked([])} />}
       {stages && (
         <DataTable rows={tableRows} columns={columns} onRowClick={e => setOpen(e.id)}
           selectable selectedIds={picked} onToggleRow={toggle} onToggleAll={toggleAll}
-          rowClass={e => (e.status === 'new' ? NEW_ENQUIRY_ROW : '')}
+          rowClass={e => [DECISION_ROW[decisionOf(e)] || (e.status === 'new' ? NEW_ENQUIRY_ROW : ''), e.id === flash ? 'desk-flash-row ring-2 ring-inset ring-brand-400' : ''].filter(Boolean).join(' ')}
           defaultSort={{ key: 'received', dir: 'desc' }} serialNumber={false}
           empty={rows ? (tab === 'pending' ? 'Nothing pending. Press "Fetch from mail" for new enquiries.' : 'Nothing here.') : 'Loading…'} />
       )}
@@ -660,7 +798,7 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
 
       <SelectionDock open={pickedRows.length > 0} count={pickedRows.length} onClear={() => setPicked([])}
         summary={[[...new Set(pickedRows.map(e => e.customer_name || e.contact_email).filter(Boolean))].join(' · '),
-          ...mailGaps(pickedRows).map(g => `⚠ M${g.mail_id}: ${g.picked} of ${g.of} ticked`)].filter(Boolean).join(' · ')}>
+          ...mailGaps(pickedRows).map(g => `⚠ M${g.mail_id}: ${g.picked} of ${g.of} ticked`), counterSummary].filter(Boolean).join(' · ')}>
         {pCost && <>
           {/* CI Plant's own incomplete draft opens as a fresh costing (startsFresh): "Cost it" */}
           {one && <Button size="sm" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />{one.costing_live && !startsFresh(one) ? 'Open costing' : 'Cost it'}</Button>}
@@ -681,26 +819,29 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           <Button size="sm" variant="success" onClick={approve}
             title="Approves the costing and fixes the price; a mail with nothing left waiting gets its quotation and a Gmail draft — nothing is sent"><Check size={13} className="mr-1 inline" />Approve</Button>
         )}
-        {pPrice && <>
+        {(pPrice || pCounter) && <>
           {one && !pCost && <Button size="sm" variant="secondary" onClick={() => startOne([one.id])}><Calculator size={13} className="mr-1 inline" />Open costing</Button>}
-          <Select value={adjust.mode} onChange={e => setAdjust(a => ({ ...a, mode: e.target.value }))} className="!h-8 w-44">
+          <Select value={adjust.mode} onChange={e => setAdjust(a => ({ ...a, mode: e.target.value, amount: e.target.value === 'costpct' ? '5' : e.target.value === 'costplus' ? '0.10' : a.amount }))} className="!h-8 w-44">
             <option value="add">+ ₹ a carton</option><option value="pct">+ %</option><option value="round">Round up to ₹0.05</option>
+            {pCounter && Object.entries(COUNTER_FILLS).map(([k, label]) => <option key={k} value={k}>Revised = {label}</option>)}
           </Select>
-          {adjust.mode !== 'round' && <Input className="!h-8 w-20" inputMode="decimal" value={adjust.amount} onChange={e => setAdjust(a => ({ ...a, amount: e.target.value }))} placeholder={adjust.mode === 'pct' ? '5' : '0.10'} />}
+          {['add', 'pct', 'costplus', 'costpct'].includes(adjust.mode) && <Input className="!h-8 w-20" inputMode="decimal" value={adjust.amount} onChange={e => setAdjust(a => ({ ...a, amount: e.target.value }))} placeholder={['pct', 'costpct'].includes(adjust.mode) ? '5' : '0.10'} />}
           <Button size="sm" variant="secondary" onClick={applyAdjust}>Apply to ticked</Button>
-          <Button size="sm" variant="secondary" onClick={() => savePrices(pickedRows)}><Lock size={13} className="mr-1 inline" />Lock ticked prices</Button>
+          <Button size="sm" variant="secondary" onClick={async () => { await saveTheirs(pickedRows); await savePrices(pickedRows); }}><Lock size={13} className="mr-1 inline" />Lock ticked prices</Button>
           {mgmt && <Button size="sm" variant="success" onClick={async () => {
             // Seamless: the prices in the boxes are locked as shown, then ONE server step finalises, quotes and
-            // queues the reply draft in the customer's thread (owner, 11 Nov 2026).
-            const open = pickedRows.filter(e => !isLocked(e));
+            // queues the reply draft in the customer's thread (owner, 11 Nov 2026). A counter row: their prices saved first,
+            // and the quotation made is the revised one.
+            await saveTheirs(pickedRows);
+            const open = pickedRows.filter(e => e.stage === 'countered' || !isLocked(e));
             if (open.length) await savePrices(open, { quiet: true });
             const q = await quoteAndDraft(api, pickedRows.map(e => e.id));
             if (q.failed.length) toast.error(q.failed.join('; '));
             setLast({ text: sendSummary(q), quotations: q.quotations });
             setPicked([]); await reload();
-          }} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />Send quotation</Button>}
+          }} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />{pCounter && !pPrice ? 'Send revised quotation' : 'Send quotation'}</Button>}
         </>}
-        {!pPrice && pQuote && <Button size="sm" onClick={async () => {
+        {!pPrice && !pCounter && pQuote && <Button size="sm" onClick={async () => {
           // The quotation and, straight on, its reply draft in the customer's thread.
           const r = await quoteAndDraft(api, picked);
           if (r.failed.length) toast.error(r.failed.join('; '));
@@ -727,13 +868,31 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
         {pBack && <Button size="sm" variant="secondary" title="One step back — the costing and prices stay with it"
           onClick={() => move('back', m => `${nos(m)} sent back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Send back a step</Button>}
         {(pCost || pPrice) && <Button size="sm" variant="secondary" onClick={() => move('drop', m => `${nos(m)} dropped.`, { reason: 'Not to be quoted' })}>Drop</Button>}
-        {has(['dropped']) && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Bring back</Button>}
+        {pLose && mgmt && (
+          <Button size="sm" variant="danger" title="The customer did not order: the row turns red, kept with the reason — Bring back undoes it"
+            onClick={() => setLosing({ ids: pickedRows.filter(e => LOSABLE.includes(e.stage) && awaitsDecision(e)).map(e => e.id), reason: 'Lost on price' })}>Order lost</Button>
+        )}
+        {has(['dropped', 'lost']) && <Button size="sm" onClick={() => move('restore', m => `${nos(m)} brought back to ${[...new Set(m.map(x => stageName(x.to)))].join(' and ')}.`)}>Bring back</Button>}
         {pDelete && (
           <Button size="sm" variant="danger" onClick={() => setDeleting({ ids: [...picked], reason: 'Duplicate' })}
             title="Take a duplicate, or a mail that was no enquiry, off the desk — Undo brings it back"><Trash2 size={13} className="mr-1 inline" />Delete</Button>
         )}
       </SelectionDock>
 
+      <Modal open={!!losing} onClose={() => setLosing(null)} title={`Order lost — ${losing?.ids.length === 1 ? '1 enquiry' : `${losing?.ids.length || 0} enquiries`}`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setLosing(null)}>Keep open</Button>
+          <Button variant="danger" onClick={async () => {
+            const l = losing;
+            setLosing(null);
+            await after(api.post('/costing/enquiries/lost', { ids: l.ids, reason: l.reason }), m => `${nos(m)} marked lost.`);
+          }}>Mark lost</Button>
+        </>}>
+        <p className="mb-3 text-sm text-slate-600">The customer did not order. The row turns <b className="text-red-700">red</b> and stays on the desk with the reason, counted in All's decisions. <b>Bring back</b> returns it to where it was.</p>
+        <Field label="Why">
+          <Input value={losing?.reason || ''} onChange={e => setLosing(d => ({ ...d, reason: e.target.value }))} placeholder="Lost on price · went to another printer · job cancelled" />
+        </Field>
+      </Modal>
       <Modal open={!!deleting} onClose={() => setDeleting(null)} title={`Delete ${deleting?.ids.length === 1 ? 'this enquiry' : `${deleting?.ids.length || 0} enquiries`}`}
         footer={<>
           <Button variant="secondary" onClick={() => setDeleting(null)}>Keep</Button>
@@ -927,13 +1086,3 @@ function GmailLink({ box, ready, onChanged }) {
   );
 }
 
-// The Counter tab: one panel per counter mail (else per enquiry mail), so a customer's whole answer is worked as one.
-function counterGroups(rows = []) {
-  const groups = new Map();
-  for (const e of rows) {
-    const key = e.counter_mail_id ? `c${e.counter_mail_id}` : e.mail_id ? `m${e.mail_id}` : `e${e.id}`;
-    if (!groups.has(key)) groups.set(key, { key, customer: e.customer_name || e.contact_email || 'Customer', rows: [] });
-    groups.get(key).rows.push(e);
-  }
-  return [...groups.values()];
-}
