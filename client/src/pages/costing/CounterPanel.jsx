@@ -11,6 +11,7 @@ import { Button, Input, useToast } from '../../components/ui.jsx';
 import { qtyText, rupees, dateText } from '../../lib/enquiryUi.js';
 import { BASES, counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
+import { askSender } from '../../lib/pickSender.js';
 
 const inr0 = v => (v == null ? '—' : `₹${Math.round(v).toLocaleString('en-IN')}`);
 const signed = v => (v == null ? '—' : `${v < 0 ? '−' : '+'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`);
@@ -112,9 +113,11 @@ export default function CounterPanel({ rows = [], canSend = false, onChanged, on
     if (typeof g === 'string') offer({ text: 'Revised prices locked.', run: undoGroup(g, 'The lock') });
   });
   const doSend = () => act(async () => {
+    const from = await askSender(api); // which mailbox, asked before anything is saved (21 Nov 2026)
+    if (from === undefined) return;
     await saveTheirs();
     if (!(await lockRevised())) return;
-    const r = await quoteAndDraft(api, countered.map(e => e.id));
+    const r = await quoteAndDraft(api, countered.map(e => e.id), { from });
     if (r.failed.length) toast.error(r.failed.join('; '));
     (r.drafted.length ? toast.success : toast.info)(sendSummary(r));
     const made = r.quotations || [];

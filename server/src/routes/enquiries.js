@@ -62,7 +62,7 @@ import { quotationPdf } from '../quotation-pdf.js';
 import { num } from '../costing-engine.js';
 import {
   gmailConfigured, consentUrl, accessToken, forgetToken, replyHeaders, buildMime, rawOf, saveDraft, draftSent, openToken, revoke, replyAll,
-  sendToCompany, readAllowed,
+  sendToCompany, readAllowed, threadOfMessageId,
 } from '../gmail.js';
 import { orderLine, orderTotals, orderMail } from '../order-finalise.js';
 import { kldPdf } from '../kld-pdf.js';
@@ -355,6 +355,27 @@ r.post('/costing/enquiry-desk/fetch', async (req, res, next) => {
 
 // The side menu's count (14 Nov 2026: "like in the sales order, how things are getting highlighted when there are new
 // sales orders"): enquiries in the Inbox not yet started, and rows a customer asked for again this week.
+// Which mailbox a quotation's reply goes out from (owner, 21 Nov 2026: "ask me whether I want to send it from dua.anik
+// or from mppchd, and it should be the reply to the same thread"). Only a mailbox whose Gmail CI Plant holds can be
+// chosen: the draft is saved by the server there and then.
+const SENDERS = ['business', 'trial'];
+async function senders() {
+  const on = gmailConfigured();
+  const links = on ? await q('SELECT mailbox, email FROM gmail_links') : [];
+  return (await mailboxes()).filter(b => SENDERS.includes(b.key)).map(b => {
+    const link = links.find(l => l.mailbox === b.key);
+    return { key: b.key, email: link?.email || b.email, label: b.label, send_to: b.send_to, connected: !!link };
+  });
+}
+r.get('/costing/enquiry-desk/senders', async (_req, res, next) => {
+  try { res.json({ senders: await senders() }); } catch (e) { next(e); }
+});
+const senderOf = body => {
+  const from = body?.from ?? null;
+  if (from != null && !SENDERS.includes(from)) throw fail(400, 'Send from which mailbox — business or trial?');
+  return from;
+};
+
 r.get('/costing/enquiry-desk/summary', async (_req, res, next) => {
   try {
     res.set('Cache-Control', 'no-store');
@@ -1339,8 +1360,8 @@ r.post('/costing/quotations', async (req, res, next) => {
 // The answer says what happened to every enquiry — nothing is skipped silently. The caller checks the Management right:
 // Send quotation (the route below), and a mail's reply after Approve or a drop (replyIfReady).
 // `draft: false` (owner, 21 Nov 2026: "do we want to send this as the mail or not?"): the quotation is made and kept in
-// CI Plant, no Gmail draft yet — the next Send quotation on it makes the draft.
-async function sendQuotations(list, u, { draft = true } = {}) {
+// CI Plant, no Gmail draft yet — the next Send quotation on it makes the draft. `from`: the mailbox the draft is saved in.
+async function sendQuotations(list, u, { draft = true, from = null } = {}) {
     const skipped = [];
     const supersedes = {}; // enquiry id → the quotation its counter answered (a revised one replaces it)
     // 1. Finalise what has its prices but is not finalised yet (a row with the customer's counter: its revised prices).
@@ -1369,7 +1390,7 @@ async function sendQuotations(list, u, { draft = true } = {}) {
     const quoteIds = !draft ? [] : [...new Set([...made.map(x => x.id), ...rows.filter(e => e.quotation_id && ['ready'].includes(e.q_status)).map(e => e.quotation_id)])];
     const drafted = [], failed = [];
     for (const id of quoteIds) {
-      try { const j = await queueDraft(id, u); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id, now: !!j.drafted_now, view_url: j.view_url || null }); }
+      try { const j = await queueDraft(id, u, { from }); drafted.push({ id, quotation_no: j.quotation_no, job: j.job_id, now: !!j.drafted_now, view_url: j.view_url || null }); }
       catch (e) { failed.push({ id, why: e.message }); }
     }
     for (const e of rows) {
@@ -1385,7 +1406,7 @@ r.post('/costing/quotations/send', async (req, res, next) => {
     needMgmt(u);
     const list = ids(req.body);
     if (!list.length) throw fail(400, 'Choose the enquiries to send.');
-    res.status(201).json(await sendQuotations(list, u, { draft: req.body?.draft !== false }));
+    res.status(201).json(await sendQuotations(list, u, { draft: req.body?.draft !== false, from: senderOf(req.body) }));
   } catch (e) { next(e); }
 });
 
@@ -1460,16 +1481,30 @@ r.get('/costing/quotations/:id/pdf', async (req, res, next) => {
 // Drafting again after a change makes a fresh draft; the old one is left in Gmail for the person to delete.
 // A trial mailbox's draft is addressed to its own address only.
 // Queue one quotation to Claude as a Gmail draft (a reply in the customer's thread). Returns { job_id, quotation_no }.
-async function queueDraft(id, u) {
+async function queueDraft(id, u, { from = null } = {}) {
     // Signed by the person who presses it.
     const qt = await quotationById(id, u.name);
     if (!qt) throw fail(404, 'No such quotation.');
     if (!['ready', 'drafted'].includes(qt.status)) throw fail(409, `${qt.quotation_no} is ${qt.status} — no draft to make.`);
+    // Sent from the mailbox the person chose (owner, 21 Nov 2026), when it is not the quotation's own: that mailbox's
+    // Gmail must be connected — the draft is saved there by the server, in the customer's thread (draftOnServer).
+    let moved = null;
+    if (from && from !== qt.mailbox_row?.key) {
+      const fromBox = await one(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes WHERE key = $1`, [from]);
+      if (!fromBox) throw fail(404, 'That mailbox is not set up on the desk.');
+      const fromLink = gmailConfigured() ? await linkOf(from) : null;
+      if (!fromLink) throw fail(409, `Connect ${fromBox.email}'s Gmail in the desk Settings first — the reply is saved there as a draft.`);
+      moved = { from: qt.mailbox_row?.key || null, draft_id: qt.gmail_draft_id || null };
+      qt.mailbox_row = fromBox;
+      qt.recipient = replyRecipient(fromBox, qt.contact_email);
+      qt.reply = composeReply(qt, { sender: u.name, trialFor: qt.recipient.trial ? qt.contact_email || '(no address)' : null });
+      qt.gmail_draft_id = null; // the earlier draft is in the other mailbox: a fresh one here (that one is left for the person)
+    }
     if (qt.recipient.error) throw fail(409, qt.recipient.error);
     const box = qt.mailbox_row;
     const pdf = await pdfFor(qt);
     const sha = crypto.createHash('sha256').update(pdf).digest('hex');
-    const mail = qt.reply_mail_id ? await one('SELECT gmail_message_id, gmail_thread_id FROM enquiry_mails WHERE id = $1', [qt.reply_mail_id]) : null;
+    const mail = qt.reply_mail_id ? await one('SELECT gmail_message_id, gmail_thread_id, mailbox FROM enquiry_mails WHERE id = $1', [qt.reply_mail_id]) : null;
     const brief = {
       quotation_no: qt.quotation_no,
       to: [qt.recipient.to], trial: qt.recipient.trial, would_go_to: qt.recipient.would_go_to || null,
@@ -1478,7 +1513,7 @@ async function queueDraft(id, u) {
     };
     // This mailbox's Gmail is connected: the server saves the draft now, no robot.
     const link = gmailConfigured() ? await linkOf(box.key) : null;
-    if (link) return draftOnServer({ qt, box, link, brief, pdf, sha, mail, u });
+    if (link) return draftOnServer({ qt, box, link, brief, pdf, sha, mail, u, moved });
     // The business mailbox is read by the office AVS, which never drafts (13 Nov 2026): its replies are drafted by CI
     // Plant's own Gmail link, so without that link a robot job would wait for ever. (Lift this if a Claude that may
     // draft in the business mailbox is ever set up.)
@@ -1502,11 +1537,19 @@ async function queueDraft(id, u) {
 // The draft saved by CI Plant itself in the mailbox's Gmail — the same subject, words and PDF the robot would get.
 // Pressing again changes that same draft (a second copy is never left). Gmail trouble: the quotation stays as it was
 // and the reason is shown; nothing is half-done.
-async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u }) {
+async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u, moved = null }) {
   let d;
   try {
     const token = await accessToken(link);
-    const hdr = await replyHeaders(token, mail?.gmail_message_id);
+    // The customer's mail came in to ANOTHER mailbox (the reply goes out from the one the person chose): its headers are
+    // read there, and the reply joins the same conversation here by the mail's own Message-ID (threadOfMessageId).
+    const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
+    let hdr;
+    if (elsewhere) {
+      const home = gmailConfigured() ? await linkOf(mail.mailbox) : null;
+      hdr = home ? await replyHeaders(await accessToken(home), mail.gmail_message_id).catch(() => ({})) : {};
+      hdr.threadId = await threadOfMessageId(token, hdr.inReplyTo);
+    } else hdr = await replyHeaders(token, mail?.gmail_message_id);
     // A mailbox that answers customers replies to EVERYONE on the customer's mail; a trial mailbox only to itself.
     const all = !brief.trial && (hdr.from || hdr.replyTo) ? replyAll(hdr, link.email) : null;
     if (all?.to.length) { brief.to = all.to; brief.cc = all.cc; }
@@ -1514,7 +1557,8 @@ async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u }) {
     void pdf;
     const raw = rawOf(buildMime({ from: link.email, to: brief.to, cc: brief.cc || [], subject: brief.subject, text: brief.text, html: brief.html,
       inReplyTo: hdr.inReplyTo, references: hdr.references }));
-    d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || mail?.gmail_thread_id || null, draftId: qt.gmail_draft_id });
+    d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || (elsewhere ? null : mail?.gmail_thread_id) || null, draftId: qt.gmail_draft_id });
+    brief.threaded = !!hdr.inReplyTo;
   } catch (e) {
     if (e.expired) forgetToken(box.key);
     await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [box.key, String(e.message).slice(0, 500)]);
@@ -1529,10 +1573,12 @@ async function draftOnServer({ qt, box, link, brief, pdf, sha, mail, u }) {
                                queued_by, queued_by_name, fire_status, status, claimed_by, claimed_at, finished_at, result)
                         VALUES ('draft', $1, $2, $3, $4, $5, $6, $7, $8, $9, 'server', 'done', 'CI Plant (server)', now(), now(), $10) RETURNING id`,
     [box.key, box.email, qt.id, brief, pdf, `${qt.quotation_no}.pdf`, sha, u.id, u.name, result]);
+    // Sent from another mailbox: the quotation now belongs to it (its Sent check, Draft again, and the next send).
     await qc(`UPDATE quotations SET status = 'drafted', job_id = $2, gmail_draft_id = $3, gmail_draft_url = $4, gmail_message_id = $5,
-                     mailbox = COALESCE(mailbox, $7), updated_at = now(), updated_by_name = $6 WHERE id = $1`,
-    [qt.id, j.id, d.draft_id, d.view_url, d.message_id, u.name, box.key]);
-    await enquiryEvent(qc, { quotationId: qt.id, action: 'drafted', detail: { job: j.id, by: 'server', to: brief.to, trial: brief.trial, replaced: d.replaced } }, u);
+                     mailbox = CASE WHEN $8::boolean THEN $7 ELSE COALESCE(mailbox, $7) END, updated_at = now(), updated_by_name = $6 WHERE id = $1`,
+    [qt.id, j.id, d.draft_id, d.view_url, d.message_id, u.name, box.key, !!moved]);
+    await enquiryEvent(qc, { quotationId: qt.id, action: 'drafted', detail: { job: j.id, by: 'server', to: brief.to, trial: brief.trial, replaced: d.replaced,
+      from: box.email, threaded: !!brief.threaded, ...(moved ? { moved_from: moved.from, ...(moved.draft_id ? { note: 'The earlier draft is left in the other mailbox — discard it there.' } : {}) } : {}) } }, u);
     await audit('quotation', qt.id, 'draft', `${qt.quotation_no} — Gmail draft saved by CI Plant (job ${j.id})`, qc, u.name);
     return j;
   });
@@ -1544,8 +1590,8 @@ r.post('/costing/quotations/:id/draft', async (req, res, next) => {
   try {
     const u = req.costingUser;
     const id = intOrNull(req.params.id) || 0;
-    const j = await queueDraft(id, u);
-    res.status(201).json({ job: await jobById(j.job_id), quotation: await quotationById(id) });
+    const j = await queueDraft(id, u, { from: senderOf(req.body) });
+    res.status(201).json({ job: await jobById(j.job_id), quotation: await quotationById(id), drafted_now: !!j.drafted_now, view_url: j.view_url || null });
   } catch (e) { next(e); }
 });
 

@@ -1,13 +1,20 @@
+import { askSender } from './pickSender.js';
+
 // Send the quotation, one press (owner, 11 Nov 2026: "once we push to the quotation, it has to be the reply to the same
 // mail saved in the drafts … make this whole process very seamless"). ONE server step does it all
 // (POST /costing/quotations/send): finalise what has its locked prices, make the quotation (one per customer, the
 // approved template: product, details asked, rate) and save each as a Gmail reply draft in the customer's own thread —
 // by CI Plant itself when the mailbox's Gmail is connected, else queued to the Claude robot. Never sends: a person checks the draft and sends it from Gmail. The answer names every row it skipped.
 // `draft: false` (21 Nov 2026): make the quotation only — no Gmail draft until Send quotation is pressed on it again.
-export async function quoteAndDraft(api, enquiryIds, { draft = true } = {}) {
+// With a draft, asked first: which mailbox the reply goes out from (owner, 21 Nov 2026) — closed, nothing is sent
+// (`cancelled`). A caller that saves something first asks before it (opts.from, already answered).
+export async function quoteAndDraft(api, enquiryIds, opts = {}) {
+  const draft = opts.draft !== false;
   const ids = [...new Set(enquiryIds)].filter(Boolean);
   if (!ids.length) return { quotations: [], drafted: [], failed: [], skipped: [] };
-  const r = await api.post('/costing/quotations/send', { ids, draft });
+  const from = !draft ? null : 'from' in opts ? opts.from : await askSender(api);
+  if (from === undefined) return { quotations: [], drafted: [], failed: [], skipped: [], cancelled: true };
+  const r = await api.post('/costing/quotations/send', from ? { ids, draft, from } : { ids, draft });
   const d = r.drafted || [];
   return {
     quotations: r.quotations || [], drafted: d.map(x => x.quotation_no),
@@ -19,6 +26,7 @@ export async function quoteAndDraft(api, enquiryIds, { draft = true } = {}) {
 }
 // What the person is told: what was drafted, what failed, and why anything was left out.
 export function sendSummary(r) {
+  if (r.cancelled) return 'Not sent — no mailbox chosen.';
   const parts = [];
   const now = r.draftedNow || [], later = r.queued || (r.draftedNow ? [] : r.drafted);
   if (now.length) parts.push(`${now.join(', ')} — reply draft saved in Gmail, in the customer's thread. Check it and press Send there`);

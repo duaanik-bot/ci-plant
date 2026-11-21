@@ -3,6 +3,7 @@ import { startBuildWatch } from './lib/buildWatch.js';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { canAccess, canAccessSection, moduleForPath, firstAllowedPath } from './modules.js';
 import AppLayout from './components/AppLayout.jsx';
+import SenderPicker from './components/SenderPicker.jsx';
 import { ToastProvider, useToast } from './components/ui.jsx';
 import { setErrorHandler, setUnauthorizedHandler, auth } from './api.js';
 // Login stays eager — it is the first paint for a signed-out user. Every other
@@ -129,6 +130,7 @@ export default function App() {
   return (
     <ToastProvider>
       <UpdateBar />
+      <SenderPicker />
       <BrowserRouter>
         <Bridges>
           <Suspense fallback={<PageLoading />}>

@@ -7,6 +7,7 @@ import { Button, useToast } from '../../components/ui.jsx';
 import { quoteProgress } from '../../lib/quoteProgress.js';
 import { elapsedText } from '../../lib/avs.js';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
+import { askSender } from '../../lib/pickSender.js';
 
 const ICON = {
   done: <CheckCircle2 size={15} className="text-emerald-600" aria-label="done" />,
@@ -42,7 +43,9 @@ export default function QuoteProgress({ batchId, canFinalise = false, reloadSign
     (r.drafted.length ? toast.success : toast.info)(sendSummary(r));
   });
   const draftAgain = () => act(async () => {
-    for (const qt of p.quotations.filter(x => ['ready', 'drafted'].includes(x.status))) await api.post(`/costing/quotations/${qt.id}/draft`, {});
+    const from = await askSender(api);
+    if (from === undefined) return;
+    for (const qt of p.quotations.filter(x => ['ready', 'drafted'].includes(x.status))) await api.post(`/costing/quotations/${qt.id}/draft`, from ? { from } : {});
     toast.success('Sent to Claude for the Gmail draft');
   });
   const live = p.live;

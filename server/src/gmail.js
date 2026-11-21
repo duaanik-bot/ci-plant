@@ -187,6 +187,22 @@ export async function replyHeaders(token, gmailMessageId) {
   }
 }
 
+// The thread in THIS mailbox that holds a mail with this Message-ID (owner, 21 Nov 2026: a reply may go out from the
+// other mailbox, "the reply to the same thread"). Gmail's thread ids belong to one mailbox, so the customer's mail is
+// looked up by its own Message-ID. Not there, or this connection may not search: null — the draft still carries
+// In-Reply-To/References, so the customer's mail program threads it.
+export async function threadOfMessageId(token, rfcMessageId) {
+  const id = String(rfcMessageId || '').trim();
+  if (!id) return null;
+  try {
+    const r = await gmailCall(token, 'GET', `/messages?maxResults=1&includeSpamTrash=false&q=${encodeURIComponent(`rfc822msgid:${id.replace(/^<|>$/g, '')}`)}`);
+    return r.messages?.[0]?.threadId || null;
+  } catch (e) {
+    if ([400, 403, 404].includes(e.gmailStatus)) return null;
+    throw e;
+  }
+}
+
 // Every address in a header ("Vanitha J <v@x.com>, p@x.com") — lower-cased, once each.
 export const addressesOf = (...headers) => [...new Set(headers.filter(Boolean).join(',').match(/[^\s<>,;"'()]+@[^\s<>,;"'()]+\.[^\s<>,;"'()]+/g)?.map(a => a.toLowerCase()) || [])];
 

@@ -1224,6 +1224,97 @@ describe('Enquiry desk — through the real app', {
     assert.equal((await db.one(`SELECT status FROM quotations WHERE id = $1`, [sent.body.quotations[0].id])).status, 'ready');
   });
 
+  // Owner, 21 Nov 2026: "ask me whether I want to send it from dua.anik or from mppchd, and it should be the reply to the
+  // same thread". The quotation above answers a business-mailbox mail; it goes out from the trial mailbox instead.
+  test('send from the other mailbox: asked by name, only a connected one, a real reply in the same conversation', async () => {
+    const http = await import('node:http');
+    const G = { raws: [], posted: [], calls: [] };
+    const TOK = { '1//biz': 'at-biz', '1//trial': 'at-trial' };
+    const google = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+        const u = new URL(req.url, 'http://x');
+        G.calls.push(`${req.headers.authorization || ''} ${req.method} ${u.pathname}${u.search}`);
+        if (u.pathname === '/token') return send(200, { access_token: TOK[new URLSearchParams(body).get('refresh_token')] || 'at-?', expires_in: 3600 });
+        const p = u.pathname.replace('/gmail/v1/users/me', '');
+        const who = req.headers.authorization;
+        // The customer's mail lives in the business mailbox only.
+        if (p === '/messages/avs-001' && who === 'Bearer at-biz') {
+          return send(200, { id: 'avs-001', threadId: 'avs-t1', payload: { headers: [
+            { name: 'Message-ID', value: '<cust-777@buyer.test>' }, { name: 'From', value: 'Buyer <buyer@buyer.test>' },
+            { name: 'To', value: 'mppchd@gmail.com' }, { name: 'Cc', value: 'boss@buyer.test' }] } });
+        }
+        if (p === '/messages' && who === 'Bearer at-trial') {
+          return u.searchParams.get('q') === 'rfc822msgid:cust-777@buyer.test' ? send(200, { messages: [{ id: 'tm-1', threadId: 't-trial-9' }] }) : send(200, {});
+        }
+        if (p === '/drafts' && req.method === 'POST' && who === 'Bearer at-trial') {
+          const m = JSON.parse(body).message; G.raws.push(m.raw); G.posted.push(m);
+          return send(200, { id: 'td-1', message: { id: 'tmsg-1', threadId: m.threadId || 't-new' } });
+        }
+        return send(404, { error: { message: `no fake for ${who} ${req.method} ${p}` } });
+      });
+    });
+    await new Promise(res => google.listen(0, '127.0.0.1', res));
+    const gbase = `http://127.0.0.1:${google.address().port}`;
+    Object.assign(process.env, {
+      GOOGLE_CLIENT_ID: 'fake-client', GOOGLE_CLIENT_SECRET: 'fake-secret', GMAIL_TOKEN_KEY: 'ef'.repeat(32),
+      GMAIL_SENT_CHECK_MS: '999999999', GMAIL_API_BASE: `${gbase}/gmail/v1/users/me`, GOOGLE_TOKEN_URL: `${gbase}/token`, GOOGLE_REVOKE_URL: `${gbase}/revoke`,
+    });
+    const { sealToken, forgetToken } = await import('./gmail.js');
+    const trialWas = (await db.one(`SELECT send_to FROM enquiry_mailboxes WHERE key = 'trial'`)).send_to;
+    try {
+      forgetToken('business'); forgetToken('trial');
+      const qt0 = await db.one(`SELECT q.id, q.mailbox FROM quotations q JOIN enquiry_mails m ON m.id = q.reply_mail_id
+                                 WHERE m.gmail_message_id = 'avs-001' AND q.status = 'ready' ORDER BY q.id DESC LIMIT 1`);
+      assert.equal(qt0.mailbox, 'business');
+      // Nothing connected: the senders say so, and choosing one that is not connected says what to do.
+      let s = await call('clerk', 'GET', '/costing/enquiry-desk/senders');
+      assert.equal(s.status, 200);
+      assert.deepEqual(s.body.senders.map(x => [x.key, x.connected]).sort(), [['business', false], ['trial', false]]);
+      assert.equal((await call('clerk', 'POST', `/costing/quotations/${qt0.id}/draft`, { from: 'nobody' })).status, 400);
+      const notYet = await call('clerk', 'POST', `/costing/quotations/${qt0.id}/draft`, { from: 'trial' });
+      assert.equal(notYet.status, 409);
+      assert.match(notYet.body.error, /Connect .*Gmail in the desk Settings first/);
+
+      const trialEmail = (await db.one(`SELECT email FROM enquiry_mailboxes WHERE key = 'trial'`)).email;
+      await db.q(`INSERT INTO gmail_links (mailbox, email, refresh_token_enc, connected_by_name) VALUES ('business', 'mppchd@gmail.com', $1, 'T'), ('trial', $2, $3, 'T')`,
+        [sealToken('1//biz'), trialEmail, sealToken('1//trial')]);
+      await db.q(`UPDATE enquiry_mailboxes SET send_to = 'customers' WHERE key = 'trial'`); // as on live (21 Nov 2026)
+      s = await call('clerk', 'GET', '/costing/enquiry-desk/senders');
+      assert.deepEqual(s.body.senders.map(x => [x.key, x.connected]).sort(), [['business', true], ['trial', true]]);
+
+      // Sent from the trial mailbox: saved there now, to the customer (reply-all), threaded under their mail.
+      const r = await call('clerk', 'POST', `/costing/quotations/${qt0.id}/draft`, { from: 'trial' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.equal(r.body.drafted_now, true);
+      assert.equal(G.posted.length, 1);
+      assert.equal(G.posted[0].threadId, 't-trial-9', 'the same conversation in the trial mailbox');
+      const mime = Buffer.from(G.raws[0], 'base64url').toString('utf8');
+      assert.match(mime, new RegExp(`^From: ${trialEmail.replace('.', '\\.')}$`, 'm'));
+      assert.match(mime, /^To: buyer@buyer\.test$/m);
+      assert.match(mime, /^Cc: .*boss@buyer\.test/m);
+      assert.match(mime, /^Cc: .*mppchd@gmail\.com/m, 'the company mailbox keeps a copy');
+      assert.match(mime, /^In-Reply-To: <cust-777@buyer\.test>$/m);
+      assert.ok(!G.calls.some(c => c.startsWith('Bearer at-biz POST')), 'nothing written in the business mailbox');
+      const qt = r.body.quotation;
+      assert.equal(qt.status, 'drafted');
+      assert.equal(qt.mailbox, 'trial', 'the quotation now goes out from the trial mailbox');
+      assert.equal(qt.gmail_draft_id, 'td-1');
+      const ev = qt.events.find(e => e.action === 'drafted');
+      assert.equal(ev.detail.from, trialEmail);
+      assert.equal(ev.detail.moved_from, 'business');
+      assert.equal(ev.detail.threaded, true);
+    } finally {
+      await db.q(`UPDATE enquiry_mailboxes SET send_to = $1 WHERE key = 'trial'`, [trialWas]);
+      await db.q('DELETE FROM gmail_links');
+      forgetToken('business'); forgetToken('trial');
+      for (const k of ['GMAIL_SENT_CHECK_MS', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GMAIL_TOKEN_KEY', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL', 'GOOGLE_REVOKE_URL']) delete process.env[k];
+      google.close();
+    }
+  });
+
   // ── Fetch per mailbox, the office computer, repeats, the badge (owner, 14 Nov 2026: "keep it on MPP only … it should
   // trigger the AVS on my office PC … a small button, Fetch from dua.anik … deduplication … highlighted").
   const fetchSql = fs.readFileSync(new URL('../../supabase/migrations/20261114120100_avs_enquiry_fetch.sql', import.meta.url), 'utf8');

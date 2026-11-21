@@ -28,6 +28,7 @@ import EnquiryDetail from './EnquiryDetail.jsx';
 import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
+import { askSender } from '../../lib/pickSender.js';
 import { counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
 import OrderPanel, { OrdersList } from './OrderPanel.jsx';
 import { canOrder } from '../../lib/orderUi.js';
@@ -886,19 +887,23 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
           {mgmt && <Button size="sm" variant="success" onClick={() => ask('Send quotation', pickedRows, async draft => {
             // Seamless: the prices in the boxes are locked as shown, then ONE server step finalises, quotes and
             // queues the reply draft in the customer's thread (owner, 11 Nov 2026). A counter row: their prices saved first,
-            // and the quotation made is the revised one. Asked first whether it goes to Gmail now (21 Nov 2026).
+            // and the quotation made is the revised one. Asked first whether it goes to Gmail now, and from which
+            // mailbox (21 Nov 2026) — before anything is saved, so Cancel leaves it as it was.
+            const from = draft ? await askSender(api) : null;
+            if (from === undefined) return;
             await saveTheirs(pickedRows);
             const open = pickedRows.filter(e => e.stage === 'countered' || !isLocked(e));
             if (open.length) await savePrices(open, { quiet: true });
-            const q = await quoteAndDraft(api, pickedRows.map(e => e.id), { draft });
+            const q = await quoteAndDraft(api, pickedRows.map(e => e.id), { draft, from });
             if (q.failed.length) toast.error(q.failed.join('; '));
             setLast({ text: sendSummary(q), quotations: q.quotations });
             setPicked([]); await reload();
           })} title="Locks the prices shown, makes the quotation and saves the reply as a Gmail draft in the customer's thread"><Send size={13} className="mr-1 inline" />{pCounter && !pPrice ? 'Send revised quotation' : 'Send quotation'}</Button>}
         </>}
         {!pPrice && !pCounter && pQuote && <Button size="sm" onClick={() => ask('Send quotation', pickedRows, async draft => {
-          // The quotation and, if asked for, its reply draft in the customer's thread.
+          // The quotation and, if asked for, its reply draft in the customer's thread (the mailbox asked in quoteAndDraft).
           const r = await quoteAndDraft(api, picked, { draft });
+          if (r.cancelled) return;
           if (r.failed.length) toast.error(r.failed.join('; '));
           setLast({ text: sendSummary(r), quotations: r.quotations });
           setPicked([]); await reload();
