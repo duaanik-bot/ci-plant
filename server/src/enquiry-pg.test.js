@@ -653,6 +653,36 @@ describe('Enquiry desk — through the real app', {
       await call('md', 'GET', '/costing/enquiry-desk');
       assert.equal((await call('clerk', 'GET', `/costing/quotations/${s2.body.drafted[0].id}`)).body.status, 'sent', 'a SENT message behind the draft id = sent');
 
+      // 5. Order finalised on x, then its confirmation drafted in the customer's thread (21 Nov 2026): a draft, never sent;
+      // the agreed rate, no cost; a second press rewrites the same draft.
+      const ord = await call('md', 'POST', '/costing/enquiries/order', { items: [{ id: x.id, qty: 5000, rate: 3.6 }], mail: false });
+      assert.equal(ord.status, 201, JSON.stringify(ord.body));
+      const oid = ord.body.order.id;
+      assert.equal((await call('clerk', 'POST', `/costing/enquiry-orders/${oid}/confirm-draft`, {})).status, 403, 'Management only');
+      const before = G.raws.length;
+      const c1 = await call('md', 'POST', `/costing/enquiry-orders/${oid}/confirm-draft`, {});
+      assert.equal(c1.status, 201, JSON.stringify(c1.body));
+      assert.equal(c1.body.trial, true);
+      assert.equal(c1.body.threaded, false, 'typed in by hand: no customer mail, so a new mail of its own');
+      assert.equal(G.raws.length, before + 1);
+      const cm = Buffer.from(G.raws.at(-1), 'base64url').toString('utf8');
+      assert.match(cm, new RegExp(`^To: ${box.email.replace('.', '\\.')}$`, 'm'), 'trial: addressed to itself');
+      assert.doesNotMatch(cm, /^In-Reply-To: /m, 'no thread to reply into');
+      const cd = cm.split(/\r\n\r\n/).map(part => { try { return Buffer.from(part.replace(/\r\n/g, ''), 'base64').toString('utf8'); } catch { return ''; } }).join('\n');
+      assert.match(cd, /confirm/i);
+      assert.match(cd, /Rs\. 3\.60/);
+      assert.doesNotMatch(cd, /margin|loss|cost/i, 'nothing internal');
+      const saved = await db.one('SELECT customer_draft_id, customer_draft_mailbox FROM enquiry_orders WHERE id = $1', [oid]);
+      assert.ok(saved.customer_draft_id);
+      assert.equal(saved.customer_draft_mailbox, box.key);
+      const c2 = await call('md', 'POST', `/costing/enquiry-orders/${oid}/confirm-draft`, {});
+      assert.equal(c2.status, 201);
+      assert.ok(G.calls.includes(`PUT /gmail/v1/users/me/drafts/${saved.customer_draft_id}`), 'the same draft rewritten');
+      assert.ok(!G.calls.some(c => /\/send$/.test(c)), 'CI Plant never called send');
+      // Put x back as it was (sent, no order): the order test below starts from no orders.
+      await db.q(`UPDATE enquiries SET status = 'sent', order_id = NULL WHERE id = $1`, [x.id]);
+      await db.q('DELETE FROM enquiry_orders WHERE id = $1', [oid]);
+
       // Disconnect: admin only; the link is gone.
       assert.equal((await call('md', 'DELETE', `/costing/enquiry-desk/gmail/${box.key}`)).status, 403);
       assert.equal((await call('admin', 'DELETE', `/costing/enquiry-desk/gmail/${box.key}`)).status, 200);

@@ -55,7 +55,7 @@ import { audit, nextNumber, lockDocNumber } from '../helpers.js';
 import { mayCost, mayApproveCosting } from '../costing-match.js';
 import {
   STAGE_SQL, STATUS_LABEL, stageOf, cleanItem, priceRows, quotationLines, groupByCustomer,
-  composeReply, replySubject, replyRecipient, BACK_TO, broughtBack, UNDO_COLS, productKey, isRepeat, mailReplyState, autoCostStopped,
+  composeReply, composeOrderConfirmation, replySubject, replyRecipient, BACK_TO, broughtBack, UNDO_COLS, productKey, isRepeat, mailReplyState, autoCostStopped,
 } from '../enquiry-desk.js';
 import { approveCosting } from '../costing-store.js';
 import { quotationPdf } from '../quotation-pdf.js';
@@ -1152,7 +1152,7 @@ async function orderMailState() {
 
 const ORDER_COLS = `o.id, o.order_no, o.mailbox, o.customer_id, o.customer_name, o.quotation_id, qt.quotation_no, o.lines, o.total::float8 AS total,
   o.loss::float8 AS loss, o.items_at_loss, o.new_dies, o.mail_wanted, o.mail_status, o.mail_to, o.mail_subject, o.mail_error, o.mail_sent_at,
-  o.created_by_name, o.created_at`;
+  o.created_by_name, o.created_at, o.customer_draft_id, o.customer_draft_url, o.customer_draft_mailbox, o.customer_drafted_at`;
 const orderById = id => one(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id WHERE o.id = $1`, [id]);
 
 // Send the order sheet (the table, and each drawn KLD as its PDF) to the company mailbox. Never throws: the answer and
@@ -1262,6 +1262,69 @@ r.get('/costing/enquiry-orders', async (req, res, next) => {
   try {
     res.json(await q(`SELECT ${ORDER_COLS} FROM enquiry_orders o LEFT JOIN quotations qt ON qt.id = o.quotation_id
                        ORDER BY o.created_at DESC, o.id DESC LIMIT 200`));
+  } catch (e) { next(e); }
+});
+
+// The order confirmation to the customer (owner, 21 Nov 2026: "draft the order confirmation reply in the same thread").
+// Management. A reply in the customer's own Gmail thread — the newest mail of theirs this order answers (the quotation's
+// reply mail, else the order's enquiries' counter or enquiry mail) — saved as a DRAFT by CI Plant through the mailbox's
+// connected Gmail; never sent: the person checks it and sends it from Gmail. Replies to everyone on their mail; a trial
+// mailbox only to itself. Pressing again rewrites the same draft. `from`: the mailbox to reply from (as for quotations).
+r.post('/costing/enquiry-orders/:id(\\d+)/confirm-draft', async (req, res, next) => {
+  try {
+    const u = req.costingUser;
+    needMgmt(u);
+    const id = intOrNull(req.params.id) || 0;
+    const o = await orderById(id);
+    if (!o) throw fail(404, 'No such order.');
+    const ids = [...new Set((o.lines || []).map(l => l.enquiry_id).filter(Boolean))];
+    const es = ids.length ? await q(`SELECT e.id, e.mailbox, e.contact_email, e.mail_id, e.counter_mail_id FROM enquiries e WHERE e.id = ANY($1::int[])`, [ids]) : [];
+    const qt = o.quotation_id ? await one(`SELECT id, quotation_no, mailbox, contact_email, reply_mail_id, lines FROM quotations WHERE id = $1`, [o.quotation_id]) : null;
+    // The thread: the mail the quotation answered, else the newest mail among the order's enquiries.
+    const mailIds = [qt?.reply_mail_id, ...es.flatMap(e => [e.counter_mail_id, e.mail_id])].filter(Boolean);
+    const mails = mailIds.length ? await q(`SELECT id, subject, gmail_message_id, gmail_thread_id, mailbox, received_at FROM enquiry_mails WHERE id = ANY($1::int[])`, [mailIds]) : [];
+    const mail = (qt?.reply_mail_id && mails.find(m => m.id === qt.reply_mail_id))
+      || mails.sort((a, b) => new Date(b.received_at || 0) - new Date(a.received_at || 0))[0] || null;
+    const from = senderOf(req.body);
+    const boxKey = from || o.customer_draft_mailbox || qt?.mailbox || mail?.mailbox || o.mailbox || es[0]?.mailbox;
+    const box = boxKey ? await one(`SELECT ${MAILBOX_COLS} FROM enquiry_mailboxes WHERE key = $1`, [boxKey]) : await inUse();
+    if (!box) throw fail(409, 'No mailbox is set up for this order.');
+    const link = gmailConfigured() ? await linkOf(box.key) : null;
+    if (!link) throw fail(409, `Connect ${box.email}'s Gmail in the desk Settings first — the confirmation is saved there as a draft.`);
+    const contact = qt?.contact_email || es.find(e => e.contact_email)?.contact_email || null;
+    const recipient = replyRecipient(box, contact);
+    if (recipient.error) throw fail(409, recipient.error);
+    const specs = Object.fromEntries((qt?.lines || []).filter(l => l.enquiry_id && l.specs).map(l => [l.enquiry_id, l.specs]));
+    const reply = composeOrderConfirmation(o, { subject: mail?.subject || null, sender: u.name, specs });
+    // The same draft again when it is in the same mailbox; a fresh one when the person chose another mailbox.
+    const draftId = o.customer_draft_mailbox === box.key ? o.customer_draft_id : null;
+    let d, to = [recipient.to], cc = [];
+    try {
+      const token = await accessToken(link);
+      const elsewhere = mail?.mailbox && mail.mailbox !== box.key;
+      let hdr;
+      if (elsewhere) {
+        const home = gmailConfigured() ? await linkOf(mail.mailbox) : null;
+        hdr = home ? await replyHeaders(await accessToken(home), mail.gmail_message_id).catch(() => ({})) : {};
+        hdr.threadId = await threadOfMessageId(token, hdr.inReplyTo);
+      } else hdr = mail?.gmail_message_id ? await replyHeaders(token, mail.gmail_message_id) : {};
+      const all = !recipient.trial && (hdr.from || hdr.replyTo) ? replyAll(hdr, link.email) : null;
+      if (all?.to.length) { to = all.to; cc = all.cc; }
+      const raw = rawOf(buildMime({ from: link.email, to, cc, subject: reply.subject, text: reply.text, html: reply.html, inReplyTo: hdr.inReplyTo, references: hdr.references }));
+      d = await saveDraft(token, { email: link.email, raw, threadId: hdr.threadId || (elsewhere ? null : mail?.gmail_thread_id) || null, draftId });
+    } catch (e) {
+      if (e.expired) forgetToken(box.key);
+      await q('UPDATE gmail_links SET last_error = $2, last_error_at = now() WHERE mailbox = $1', [box.key, String(e.message).slice(0, 500)]);
+      throw fail(e.status && e.status < 500 ? 409 : 502, `${o.order_no}: ${e.message}`);
+    }
+    await tx(async (qc) => {
+      await qc(`UPDATE enquiry_orders SET customer_draft_id = $2, customer_draft_url = $3, customer_draft_mailbox = $4, customer_drafted_at = now() WHERE id = $1`,
+        [id, d.draft_id, d.view_url, box.key]);
+      for (const eid of ids) await enquiryEvent(qc, { enquiryId: eid, action: 'order_confirm_draft', detail: { order_no: o.order_no, from: box.email, to, replaced: !!d.replaced, trial: !!recipient.trial } }, u);
+      await audit('enquiry_order', id, 'confirm_draft', `${o.order_no} — order confirmation saved as a Gmail draft`, qc, u.name);
+    });
+    await q('UPDATE gmail_links SET last_used_at = now(), last_error = NULL, last_error_at = NULL WHERE mailbox = $1', [box.key]);
+    res.status(201).json({ order_no: o.order_no, view_url: d.view_url, replaced: !!d.replaced, from: box.email, to, cc, trial: !!recipient.trial, threaded: !!mail });
   } catch (e) { next(e); }
 });
 

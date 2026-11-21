@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Mail, PackageCheck, RotateCcw } from 'lucide-react';
 import { api } from '../../api.js';
+import { confirmSaid, draftOrderConfirmation } from '../../lib/orderConfirm.js';
 import { Button, Checkbox, DataTable, Input, Modal, useToast } from '../../components/ui.jsx';
 import { dateText, qtyText, rupees } from '../../lib/enquiryUi.js';
 import { shownLine, shownTotals } from '../../lib/orderUi.js';
@@ -211,6 +212,14 @@ export function OrdersList({ canSend, signal }) {
   const [busy, setBusy] = useState(null);
   const load = () => api.get('/costing/enquiry-orders').then(setOrders).catch(() => setOrders([]));
   useEffect(() => { load(); }, [signal]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The order confirmation to the customer, as a Gmail draft in their thread (21 Nov 2026).
+  const confirm = async (o) => {
+    setBusy(`c${o.id}`);
+    try {
+      const r = await draftOrderConfirmation(api, o);
+      if (r) { toast.success(confirmSaid(r, o.order_no)); await load(); }
+    } catch { /* the error is already shown */ } finally { setBusy(null); }
+  };
   const again = async (o) => {
     setBusy(o.id);
     try {
@@ -235,6 +244,20 @@ export function OrdersList({ canSend, signal }) {
           <button type="button" disabled={busy === o.id} onClick={ev => { ev.stopPropagation(); again(o); }}
             className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100 disabled:opacity-50">
             <RotateCcw size={11} />{busy === o.id ? 'Sending…' : o.mail_status === 'failed' ? 'Send again' : 'Send'}</button>
+        )}
+      </div>
+    ) },
+    { key: 'customer_draft', label: 'To the customer', render: o => (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {o.customer_draft_id
+          ? <a href={o.customer_draft_url || 'https://mail.google.com/mail/#drafts'} target="_blank" rel="noreferrer" onClick={ev => ev.stopPropagation()}
+            className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 hover:underline" title={`Saved ${dateText(o.customer_drafted_at)}`}>
+            <Mail size={11} className="mr-1 inline" />Draft in Gmail</a>
+          : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">No confirmation yet</span>}
+        {canSend && (
+          <button type="button" disabled={busy === `c${o.id}`} onClick={ev => { ev.stopPropagation(); confirm(o); }}
+            className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-100 disabled:opacity-50">
+            {busy === `c${o.id}` ? 'Saving…' : o.customer_draft_id ? 'Update the draft' : 'Draft confirmation'}</button>
         )}
       </div>
     ) },

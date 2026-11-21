@@ -120,3 +120,23 @@ test('batchesOf: one batch per mail, typed-in rows by customer and day; counts a
   assert.equal(acme.asked_pct, -10, 'they ask 4.5 against our 5');
   assert.deepEqual(customersOf(rows), [{ name: 'Acme', n: 3 }, { name: 'Bolt', n: 2 }]);
 });
+
+import { composeOrderConfirmation } from './enquiry-desk.js';
+
+test('composeOrderConfirmation: a reply in the thread — items, quantity, rate agreed; never cost, margin or a total', () => {
+  const o = { order_no: 'CI-OF-0001', lines: [
+    { enquiry_id: 1, product: 'Alpha carton', size: '120 x 40 x 90', qty: 5000, rate: 3.6, cost: 3.1, margin: 0.5, margin_total: 2500, value: 18000 },
+    { enquiry_id: 2, product: 'Beta carton', size: null, qty: 2000, rate: 4, cost: 4.2, margin: -0.2, margin_total: -400, value: 8000 },
+  ] };
+  const r = composeOrderConfirmation(o, { subject: 'Need best rate', sender: 'A Person', specs: { 1: 'FBB 300 gsm, 4 colours' } });
+  assert.equal(r.subject, 'Re: Need best rate');
+  assert.match(r.text, /^Dear Sir\/Madam,/);
+  assert.match(r.text, /confirm/);
+  assert.match(r.text, /1\. Alpha carton — 120 x 40 x 90 mm \(FBB 300 gsm, 4 colours\)\n {3}5,000 cartons at Rs\. 3\.60 a carton/);
+  assert.match(r.text, /2\. Beta carton\n {3}2,000 cartons at Rs\. 4\.00 a carton/);
+  assert.match(r.text, /Regards,\nA Person\nColour Impressions$/);
+  for (const body of [r.text, r.html]) {
+    assert.doesNotMatch(body, /3\.10|4\.20|2,500|18,000|26,000|margin|loss|total/i, 'nothing internal, no total');
+  }
+  assert.equal(composeOrderConfirmation(o).subject, 'Order CI-OF-0001 — Colour Impressions', 'no mail: a subject of its own');
+});

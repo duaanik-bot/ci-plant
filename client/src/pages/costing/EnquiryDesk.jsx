@@ -29,6 +29,7 @@ import QuotationPanel from './QuotationPanel.jsx';
 import DeskCosting from './DeskCosting.jsx';
 import { quoteAndDraft, sendSummary } from '../../lib/quoteFlow.js';
 import { askSender } from '../../lib/pickSender.js';
+import { confirmSaid, draftOrderConfirmation } from '../../lib/orderConfirm.js';
 import { counterLines, counterTotals, FILLS, keyOf } from '../../lib/counterMath.js';
 import OrderPanel, { OrdersList } from './OrderPanel.jsx';
 import { canOrder } from '../../lib/orderUi.js';
@@ -376,7 +377,8 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
   // Before any mail draft is made (21 Nov 2026: "do we want to send this as the mail or not?"): { title, text, run(draft) }
   const [asking, setAsking] = useState(null);
   // A price changed on a quotation not yet sent: { e, changes: [{ qty, from, to }] } — "change the draft too?"
-  const [repricing, setRepricing] = useState(null);       // the row an alert's link points at — highlighted, no pop-up
+  const [repricing, setRepricing] = useState(null);
+  const [confirming, setConfirming] = useState(null);  // an order just finalised: "draft the order confirmation?"       // the row an alert's link points at — highlighted, no pop-up
   const [picked, setPicked] = useState([]);
   const [open, setOpen] = useState(null);         // enquiry id or 'new'
   const [openQuote, setOpenQuote] = useState(null);
@@ -1167,7 +1169,22 @@ export default function EnquiryDesk({ boot, customers = [], focus = null }) {
       {detail}
       <QuotationPanel id={openQuote} canMarkSent={mgmt} onClose={() => setOpenQuote(null)} onChanged={reload} />
       <OrderPanel ids={ordering} onClose={() => setOrdering(null)}
-        onDone={() => { setOrdering(null); setPicked([]); setOrdersSignal(s => s + 1); setTab('orders'); reload(); }} />
+        onDone={r => { setOrdering(null); setPicked([]); setOrdersSignal(s => s + 1); setTab('orders'); reload(); if (r?.order?.id && mgmt) setConfirming(r.order); }} />
+      <Modal open={!!confirming} onClose={() => setConfirming(null)} title={`${confirming?.order_no || ''} — draft the order confirmation?`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setConfirming(null)}>No, not now</Button>
+          <Button variant="success" onClick={async () => {
+            const o = confirming;
+            setConfirming(null);
+            try {
+              const r = await draftOrderConfirmation(api, o);
+              if (r) { toast.success(confirmSaid(r, o.order_no)); setOrdersSignal(n => n + 1); }
+            } catch { /* the error is already shown */ }
+          }}><Mail size={13} className="mr-1 inline" />Yes — save the reply draft</Button>
+        </>}>
+        <p className="text-sm text-slate-600">A reply to <b>{confirming?.customer_name || 'the customer'}</b> in their own mail thread, confirming each item, the quantity and the rate agreed —
+          never our cost or margin. It is saved as a <b>draft</b> in Gmail; nothing is sent until you send it from there. You can also draft it later from <b>Orders</b>.</p>
+      </Modal>
     </div>
   );
 }

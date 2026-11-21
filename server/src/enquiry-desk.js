@@ -404,6 +404,38 @@ export function composeReply(qt, { sender = null, trialFor = null } = {}) {
   return { subject: qt.email_subject, text: textBody, html };
 }
 
+// The order confirmation, as a reply in the customer's thread (owner, 21 Nov 2026). Made from the order's lines through the
+// same whitelist as a quotation's: each item, its size and the customer's details, the quantity ordered and the rate agreed
+// a carton — never our cost, a margin or a loss, and (as on the quotation) no total. `specs`: enquiry id → the details the
+// quotation showed. Signed by the person who presses it.
+export function composeOrderConfirmation(o, { subject = null, sender = null, specs = {} } = {}) {
+  const signature = [...new Set([sender, 'Colour Impressions'].filter(Boolean))];
+  const greet = 'Dear Sir/Madam,';
+  const opening = 'Thank you for your order. We are pleased to confirm it as below.';
+  const closing = 'Please let us know if anything here differs from your order.';
+  const rows = (o.lines || []).map((l, i) => ({
+    n: i + 1,
+    what: [l.product, l.size ? `${l.size} mm` : null].filter(Boolean).join(' — '),
+    specs: specs[l.enquiry_id] || '',
+    qty: qtyText(l.qty),
+    rate: inr(l.rate),
+  }));
+  const text = [
+    greet, '', opening, '',
+    ...rows.map(r => `${r.n}. ${r.what}${r.specs ? ` (${r.specs})` : ''}\n   ${r.qty} cartons at ${r.rate} a carton`),
+    '', closing, '', 'Regards,', ...signature,
+  ].join('\n').replace(/\n{3,}/g, '\n\n');
+  const td = 'style="border:1px solid #d0d5dd;padding:6px 8px;font-size:13px"';
+  const th = 'style="border:1px solid #d0d5dd;padding:6px 8px;font-size:12px;background:#f2f4f7;text-align:left"';
+  const html = [
+    `<p>${esc(greet)}</p>`, `<p>${esc(opening)}</p>`,
+    `<table cellspacing="0" style="border-collapse:collapse"><thead><tr><th ${th}>#</th><th ${th}>Item</th><th ${th}>Specification</th><th ${th}>Quantity</th><th ${th}>Rate a carton</th></tr></thead><tbody>`,
+    ...rows.map(r => `<tr><td ${td}>${r.n}</td><td ${td}>${esc(r.what)}</td><td ${td}>${esc(r.specs)}</td><td ${td} align="right">${esc(r.qty)}</td><td ${td} align="right">${esc(r.rate)}</td></tr>`),
+    `</tbody></table>`, `<p>${esc(closing)}</p>`, `<p>Regards,<br>${signature.map(esc).join('<br>')}</p>`,
+  ].join('');
+  return { subject: replySubject(subject, o.order_no).replace(/^Quotation /, 'Order ') || `Order ${o.order_no} — Colour Impressions`, text, html };
+}
+
 // Who a reply goes to. A mailbox that sends to its own address only (the trial) gets its own address,
 // whoever asked; a business mailbox answers the customer.
 export function replyRecipient(mailbox, contactEmail) {
