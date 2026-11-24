@@ -1,11 +1,12 @@
 // Invoices — cut GST tax invoices from dispatched challan lines.
 // Pick a customer, tick the uninvoiced lines, the GST engine does the rest.
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { createThreadSummary } from '../lib/threadSummary.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { finDoorsOpen, finMayReceive } from '../lib/finance/doors.js';
 import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, PressButton, ResetFilters, searchText, Select, StatusBadge, Tabs, useFilterReset, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
@@ -51,6 +52,26 @@ export default function Invoices({ embedded = false }) {
   const [picked, setPicked] = useState({});
   const [tab, setTab] = useState('open');
   const [rec, setRec] = useState(null); // record-payment form
+  // The ERP's receipt door hands over to Finance on the switch date (spec §11 row 4). Both are read once; until they answer, or if
+  // they fail, the page is as it always was.
+  const navigate = useNavigate();
+  const [switchDate, setSwitchDate] = useState(null);
+  const [finBooks, setFinBooks] = useState(null);   // the books this login holds in Finance, with its roles in each
+  const [toFinance, setToFinance] = useState(null); // { customer_id }: the pick of whose receipt to record in Finance
+  const financeDoor = finDoorsOpen(switchDate, new Date().toLocaleDateString('en-CA'));
+  useEffect(() => {
+    let live = true;
+    api.get('/finance/cash/switch').then(r => {
+      if (!live) return;
+      const date = r?.date ?? null;
+      setSwitchDate(date);
+      if (finDoorsOpen(date, new Date().toLocaleDateString('en-CA'))) {
+        api.get('/finance/me').then(me => { if (live) setFinBooks(Array.isArray(me?.books) ? me.books : []); })
+          .catch(() => { if (live) setFinBooks([]); });
+      }
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const [completePrompt, setCompletePrompt] = useState(null); // { items, picked } after invoicing
   const [clashPrompt, setClashPrompt] = useState(null); // same-vehicle strength mix-up alarm
   // The number this invoice will take. Pre-filled with the next in the CI-INV
@@ -110,6 +131,13 @@ export default function Invoices({ embedded = false }) {
     for (const i of invoices) seen[i.customer_id] = i.customer_name;
     return Object.entries(seen).map(([id, name]) => ({ id: +id, name }));
   }, [invoices]);
+  // After the switch: the customers whose invoice sits on a book this login may receive in (an Accountant or Approver grant on the
+  // book of the invoice's billing entity).
+  const receivable = useMemo(() => {
+    if (!financeDoor || !finBooks) return [];
+    const ids = new Set(invoices.filter(i => finMayReceive(finBooks, i.billing_entity_id)).map(i => i.customer_id));
+    return payCustomers.filter(c => ids.has(c.id));
+  }, [financeDoor, finBooks, invoices, payCustomers]);
   const payableInvoices = useMemo(
     () => invoices.filter(i => i.status === 'open' && i.customer_id === +(rec?.customer_id || 0)),
     [invoices, rec?.customer_id]);
@@ -231,8 +259,14 @@ export default function Invoices({ embedded = false }) {
 
   const actions = (
     <>
-      <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
-        disabled={!invoices.length}><Wallet size={15} /> Record Payment</Button>
+      {!financeDoor && (
+        <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
+          disabled={!invoices.length}><Wallet size={15} /> Record Payment</Button>)}
+      {financeDoor && finBooks && receivable.length > 0 && (
+        <Button variant="secondary" onClick={() => setToFinance({ customer_id: '' })}><Wallet size={15} /> Record Payment</Button>)}
+      {financeDoor && finBooks && receivable.length === 0 && (
+        <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
+          <Wallet size={14} /> Receipts are recorded in Finance</span>)}
       <Button variant="secondary" onClick={() => setDirect(true)}
         title="Trading sale — bill board or cartons straight from stock, no order or challan">
         <PackageOpen size={15} /> Direct Invoice</Button>
@@ -437,6 +471,24 @@ export default function Invoices({ embedded = false }) {
       </Modal>
 
       <DirectInvoiceDialog open={direct} onClose={() => setDirect(false)} onCreated={load} />
+
+      <Modal open={!!toFinance} onClose={() => setToFinance(null)} title="Record Payment"
+        footer={<>
+          <Button variant="secondary" onClick={() => setToFinance(null)}>Cancel</Button>
+          <Button disabled={!toFinance?.customer_id} onClick={() => navigate(`/finance/cash?receive_customer=${toFinance.customer_id}`)}>Open in Finance</Button>
+        </>}>
+        {toFinance && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">Receipts are recorded in Finance. Pick the customer; Cash & Bank opens ready to receive from them.</p>
+            <Field label="Customer" required>
+              <Select value={toFinance.customer_id} onChange={e => setToFinance({ customer_id: e.target.value })}>
+                <option value="">Select…</option>
+                {receivable.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!rec} onClose={() => setRec(null)} title="Record Payment"
         footer={<>

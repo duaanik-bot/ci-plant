@@ -16,8 +16,9 @@ import { finBootPg, FIN_TEST_USERS } from './finance-pg-harness.js';
 //      REFERENCES, index and trigger target).
 //   2. Every route in routes/finance.js is gated, and the gate refuses in the one way it should. The gates are not all one:
 //        • finRequire on the book a route names (in its path, its body or ?book), or on the book of the row it names by id
-//          (a group, a ledger, a month, a rule, a grant: the row is looked up first, and a row that is not there gets the same
-//          403 as a book the caller does not hold);
+//          (a group, a ledger, a month, a rule, a grant, a voucher line, a cash count, an HR exception; or the ledger in ?ledger= or
+//          a body's ledger_id: the row is looked up first, and a row that is not there gets the same 403 as a book the caller does
+//          not hold);
 //        • for a route that lists across books with no ?book (the vouchers, the activity log, the access list), the books
 //          finBookIdsFor gives the caller: a login with none is refused (403), as the access list is for one that
 //          administers none;
@@ -78,24 +79,46 @@ const NOT_FOUND = [404, 'FIN_NOT_FOUND'];       // finSeenBookOf / finVoucherVie
 const refusedWith = (r, ...allowed) => allowed.some(([status, code]) => r.status === status && r.body?.code === code);
 const said = r => `${r.status} ${r.body?.code ?? '(no code)'}`;
 
-// The two routes the plant sweep leaves out: they are for ANY login and answer 200 with the caller's own books, an empty
-// list for a login with no grant. They are asserted, not swept.
-const OPEN_TO_ANY_LOGIN = ['/finance/me', '/finance/books'];
+// The three routes the plant sweep leaves out: they are for ANY login. Two answer 200 with the caller's own books, an empty
+// list for a login with no grant; the third with the day the ERP's own receipt doors hand over to Finance (Cash & Bank spec
+// §11), which is no book's figure. They are asserted, not swept.
+const OPEN_TO_ANY_LOGIN = ['/finance/me', '/finance/books', '/finance/cash/switch'];
+const OPEN_ANSWER = { '/finance/cash/switch': { date: '2027-01-01' } };
 // The one read that asks for more than the right to view: the access list is the admin's.
 const ADMIN_ONLY_READS = ['/finance/access'];
-// The routes there are as this is written (38), less the two above, plus the two lists that are also asked with no ?book
+// The one read sent as a POST, because a Pick's ticks are a list (Cash & Bank spec §6.4): a preview, which writes nothing and asks
+// only the right to view. The viewer sweep holds it to that: a view-only login may ask it.
+const READS_BY_POST = ['/finance/allocations/preview'];
+// The routes there are as this is written (59), less the three above, plus the two lists that are also asked with no ?book
 // (NO_BOOK_LISTS). More is fine; fewer means the sweep lost routes.
-const SWEPT_FLOOR = 38;
-// ...and the routes of those that ask for more than the right to view: twenty writes and the access list.
-const ASKS_MORE_FLOOR = 21;
-
-// Which row a route's :id names, by the start of its path. A route with a parameter this table cannot place fails the
-// sweep outright: guessing an id would turn "no right" back into "no such row".
-const ID_KIND = [
-  ['/finance/groups/', 'group'], ['/finance/ledgers/', 'ledger'], ['/finance/periods/', 'period'],
-  ['/finance/vouchers/', 'voucher'], ['/finance/approval-rules/', 'rule'], ['/finance/access/', 'access'],
-  ['/finance/imports/', 'import'], ['/finance/activity/', 'activity'],
+const SWEPT_FLOOR = 58;
+// ...and the routes of those that ask for more than the right to view: twenty-nine writes and the access list.
+const ASKS_MORE_FLOOR = 30;
+// Routes the sweep must hold by name, each added with the task that made it: a ?book read and a book_id write, which the sweep's
+// own query and body reach as they are (Cash & Bank Task 8, the opening corrections; Task 9, the HR & payroll setup, whose two
+// writes are the admin's; Task 13, HR's entries: the header line's counts and the exceptions, two reads, and Bring-in and an
+// exception's retry, two writes of an accountant's).
+const NAMED_ROUTES = [
+  'GET /finance/opening-corrections', 'POST /finance/opening-corrections',
+  'GET /finance/hr-setup', 'PUT /finance/hr-setup', 'POST /finance/hr-setup/ledgers',
+  'GET /finance/hr/status', 'POST /finance/hr/bring-in', 'GET /finance/hr/exceptions', 'POST /finance/hr/exceptions/:id/retry',
 ];
+
+// Which row a route's :id names, by the start of its path, the first that fits. A route with a parameter this table cannot place
+// fails the sweep outright: guessing an id would turn "no right" back into "no such row". A party's open items name a ledger that is
+// a party's, so that md can read them at the very URL the sweep sends.
+const ID_KIND = [
+  ['/finance/groups/', 'group'], ['/finance/ledgers/:id/open-items', 'party'], ['/finance/ledgers/', 'ledger'], ['/finance/periods/', 'period'],
+  ['/finance/vouchers/', 'voucher'], ['/finance/approval-rules/', 'rule'], ['/finance/access/', 'access'],
+  ['/finance/imports/', 'import'], ['/finance/activity/', 'activity'], ['/finance/lines/', 'line'], ['/finance/cash/counts/', 'count'],
+  ['/finance/hr/exceptions/', 'exception'],
+];
+// The ledger a route's ?ledger= names, where the rest's (a plain ledger) will not do: an account's book is a bank or cash account's,
+// a party's statement a party's.
+const LEDGER_FOR = { '/finance/cash/book': 'cash', '/finance/cash/counts': 'cash', '/finance/reports/party': 'party' };
+// The body a POST is sent, where the rest's ({ book_id }) will not do: a preview names its party's ledger, whose book is the one its
+// gate asks about (without one it could only answer 400, gate or no gate).
+const BODY_FOR = { '/finance/allocations/preview': ids => ({ ledger_id: ids.party, side: 'credit', amount_paise: 100, mode: 'auto' }) };
 // The routes gated first by whether the caller may SEE the row they name (finSeenBookOf): seven on a voucher, three on an
 // import, the parallel run (its ?import=) and one activity row. To a login that cannot see the row, exactly 404 FIN_NOT_FOUND.
 const SEEN_FIRST = path => /^\/finance\/(vouchers|imports|activity)\/:id(\/|$)/.test(path) || path === '/finance/reports/parallel-run';
@@ -125,6 +148,7 @@ describe('the Finance routes are gated', () => {
     };
     const RENT = await ledger('Indirect Expenses', 'Rent');
     const FREIGHT = await ledger('Direct Expenses', 'Freight');
+    const PARTY = await ledger('Sundry Debtors', 'Sweep Test Customer');
     const draft = (await made(h.call('POST', '/finance/vouchers', {
       book_id: CI, voucher_type: 'journal', voucher_date: '2027-01-10', client_key: randomUUID(), narration: 'sweep',
       lines: [{ ledger_id: RENT, debit_paise: 100, credit_paise: 0 }, { ledger_id: FREIGHT, debit_paise: 0, credit_paise: 100 }],
@@ -144,7 +168,20 @@ describe('the Finance routes are gated', () => {
       assert.ok(row, `CI has no ${what} for the sweep to name`);
       return row.id;
     };
+    // A cash count, made as the accountant through the route, for the routes that name one.
+    const counted = (await made(h.call('POST', '/finance/cash/counts', {
+      book_id: CI, ledger_id: (await h.db.one(`SELECT id FROM fin_ledgers WHERE book_id = $1 AND name = 'Cash'`, [CI])).id,
+      count_date: '2027-01-10', counted_paise: 100,
+    }, 'acct'), 'a cash count')).count;
+    // An HR exception of CI's, for the route that retries one: written as the HR feed writes it (finance-hr-feed.js), for an HR
+    // row that is not there, so md's own retry of it could only ever close it.
+    const exception = await h.db.one(
+      `INSERT INTO fin_hr_exceptions (source_type, source_id, book_id, reason_code, reason, last_tried_at)
+       VALUES ('hr_advance', 987654, $1, 'FIN_UNMAPPED_CHANNEL', 'Map this HR pay channel to an account in Finance Setup first.', now())
+       RETURNING id`, [CI]);
     const IDS = {
+      exception: exception.id,
+      count: counted.id,
       group: await first('group', 'SELECT id FROM fin_groups WHERE book_id = $1 ORDER BY id LIMIT 1', CI),
       ledger: RENT,
       period: await first('month', 'SELECT id FROM fin_periods WHERE book_id = $1 ORDER BY start_date DESC LIMIT 1', CI),
@@ -153,10 +190,13 @@ describe('the Finance routes are gated', () => {
       voucher: draft.id,
       import: opening.id,
       activity: await first('activity row', `SELECT id FROM fin_audit_log WHERE entity = 'voucher' AND action = 'create' AND entity_id = $1`, draft.id),
+      line: await first('voucher line', 'SELECT id FROM fin_voucher_lines WHERE voucher_id = $1 ORDER BY line_no LIMIT 1', draft.id),
+      party: PARTY,
+      cash: await first('cash ledger', `SELECT id FROM fin_ledgers WHERE book_id = $1 AND name = 'Cash'`, CI),
     };
     // Every query parameter any route reads, each a real id or a real date. The dates are there so that a report's own
     // checks pass: a trial balance with no `to` answers 400 to everyone, whatever its gate.
-    const QUERY = `?book=${CI}&ledger=${RENT}&import=${monthEnd.id}&from=2027-01-01&to=2027-01-31`;
+    const queryFor = path => `?book=${CI}&ledger=${IDS[LEDGER_FOR[path]] ?? RENT}&import=${monthEnd.id}&from=2027-01-01&to=2027-01-31`;
 
     // ── The routes, read from the router ──
     const { default: router } = await import('./routes/finance.js');
@@ -164,14 +204,24 @@ describe('the Finance routes are gated', () => {
     for (const path of [...OPEN_TO_ANY_LOGIN, ...ADMIN_ONLY_READS]) {
       assert.ok(routes.some(r => r.method === 'GET' && r.path === path), `GET ${path} is no longer a route; update the lists at the top of this file`);
     }
+    for (const path of [...READS_BY_POST, ...Object.keys(BODY_FOR)]) {
+      assert.ok(routes.some(r => r.method === 'POST' && r.path === path), `POST ${path} is no longer a route; update the lists at the top of this file`);
+    }
+    for (const path of Object.keys(LEDGER_FOR)) {
+      assert.ok(routes.some(r => r.method === 'GET' && r.path === path), `GET ${path} is no longer a route; update LEDGER_FOR`);
+    }
+    for (const key of NAMED_ROUTES) {
+      assert.ok(routes.some(r => `${r.method} ${r.path}` === key), `${key} is no longer a route; update NAMED_ROUTES`);
+    }
     const fill = path => path.replace(/:(\w+)/g, (_, name) => {
       if (name === 'bookId') return String(CI);
       const kind = ID_KIND.find(([prefix]) => path.startsWith(prefix))?.[1];
       assert.ok(name === 'id' && kind, `the sweep cannot tell which row :${name} names in ${path}; add its path to ID_KIND`);
       return String(IDS[kind]);
     });
+    const bodyFor = r => (r.method === 'GET' ? null : Object.hasOwn(BODY_FOR, r.path) ? { book_id: CI, ...BODY_FOR[r.path](IDS) } : { book_id: CI });
     PLAN = routes.filter(r => !OPEN_TO_ANY_LOGIN.includes(r.path)).map(r => ({
-      ...r, url: fill(r.path) + QUERY, body: r.method === 'GET' ? null : { book_id: CI }, seenFirst: SEEN_FIRST(r.path),
+      ...r, url: fill(r.path) + queryFor(r.path), body: bodyFor(r), seenFirst: SEEN_FIRST(r.path),
     }));
     for (const path of NO_BOOK_LISTS) {
       assert.ok(routes.some(r => r.method === 'GET' && r.path === path), `GET ${path} is no longer a route; update NO_BOOK_LISTS`);
@@ -189,7 +239,8 @@ describe('the Finance routes are gated', () => {
     for (const path of OPEN_TO_ANY_LOGIN) {
       const r = await h.call('GET', path, null, 'plant');
       assert.equal(r.status, 200, `${path} answers a login with no grant`);
-      assert.deepEqual(r.body.books, [], `${path} lists nothing for plant`);
+      if (Object.hasOwn(OPEN_ANSWER, path)) assert.deepEqual(r.body, OPEN_ANSWER[path], `${path} answers plant with that and nothing more`);
+      else assert.deepEqual(r.body.books, [], `${path} lists nothing for plant`);
     }
     // And the rows are real: every GET the sweep sends to plant, md can make, at the very same URL. A 404 or a 403 to
     // plant is therefore a refusal of plant, not an id that names nothing.
@@ -226,8 +277,13 @@ describe('the Finance routes are gated', () => {
     }
 
     // A read asks only for the right to view, which viewer has: the reads are swept for plant above, and the one read that asks
-    // for more is the access list.
-    const asksMore = PLAN.filter(p => p.method !== 'GET' || ADMIN_ONLY_READS.includes(p.path));
+    // for more is the access list. The preview is a read sent as a POST: viewer may ask it, and it is no write to refuse.
+    for (const path of READS_BY_POST) {
+      const p = own.get(`POST ${path}`);
+      const r = await h.call('POST', p.url, p.body, 'viewer');
+      assert.equal(r.status, 200, `viewer may ask POST ${path}, a read: ${said(r)}`);
+    }
+    const asksMore = PLAN.filter(p => (p.method !== 'GET' && !READS_BY_POST.includes(p.path)) || ADMIN_ONLY_READS.includes(p.path));
     const bad = [];
     for (const { method, path, url, body } of asksMore) {
       const r = await h.call(method, url, body, 'viewer');

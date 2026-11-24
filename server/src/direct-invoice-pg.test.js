@@ -228,7 +228,7 @@ describe('a direct (trading) invoice bills from stock and gives it back on delet
     assert.equal(over.status, 409);
     const pay = await call('POST', '/vendor-payments', { vendor_id: 1, purchase_bill_id: bill.body.id, amount: 40000, mode: 'rtgs', paid_on: '2026-10-03' });
     assert.equal(pay.status, 200, JSON.stringify(pay.body));
-    assert.match(pay.body.payment_number, /^CI-PAY-\d{4}$/);
+    assert.match(pay.body.payment_number, /^CI-VP-\d{4}$/);
 
     const payables = (await call('GET', '/accounts/payables')).body;
     assert.deepEqual(payables.map(v => [v.vendor_id, v.billed, v.paid, v.outstanding, v.open_bills]), [[1, 95900, 40000, 55900, 1]]);

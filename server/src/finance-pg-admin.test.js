@@ -136,7 +136,7 @@ async function refusedAndNothingWritten(call, status, code, field) {
 
 // ── The rules
 
-test('the rules of a book: ten, in the spec\'s order, each with its limit in paise', gate, async () => {
+test('the rules of a book: eleven, in the spec\'s order, each with its limit in paise', gate, async () => {
   const dp = await h.call('GET', `/finance/approval-rules?book=${DP}`);
   assert.equal(dp.status, 200);
   assert.deepEqual(Object.keys(dp.body), ['rules']);
@@ -145,6 +145,7 @@ test('the rules of a book: ten, in the spec\'s order, each with its limit in pai
     ['credit_note', 'always', null], ['debit_note', 'always', null],
     ['payment', 'above_limit', 10000000], ['contra', 'above_limit', 10000000],
     ['receipt', 'never', null], ['sales', 'never', null], ['purchase', 'never', null],
+    ['cash_difference', 'always', null],                     // Cash & Bank (its spec §8)
   ]);
   for (const r of dp.body.rules) {
     assert.deepEqual(Object.keys(r).sort(), ['book_id', 'id', 'limit_paise', 'mode', 'rule_key', 'updated_at', 'updated_by']);
@@ -153,7 +154,7 @@ test('the rules of a book: ten, in the spec\'s order, each with its limit in pai
     assert.ok(!Number.isNaN(Date.parse(r.updated_at)), r.updated_at);
   }
   const ci = await rulesOf(CI);
-  assert.equal(ci.length, 10);
+  assert.equal(ci.length, 11);
   assert.ok(ci.every(r => r.book_id === CI));
   assert.equal(ci.find(r => r.rule_key === 'payment').limit_paise, 5000000, 'the first test\'s edit, and only in this book');
   assert.equal(ci.find(r => r.rule_key === 'contra').limit_paise, 10000000);

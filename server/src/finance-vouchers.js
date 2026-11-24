@@ -22,8 +22,8 @@
 // Postgres ends one of them with "deadlock detected" (two edits adding lines to a draft that has none yet), or
 // the two rewrite the same lines over each other and collide on (voucher_id, line_no). The order in any Finance
 // transaction is: the number's advisory lock (a transaction that may post, and only that), then the voucher FOR
-// UPDATE, then line writes, then status changes. A draft takes no number, so the draft writes never reach for one;
-// the posting section below says how a posting does.
+// UPDATE, then (a posting) its parties' allocation locks, then line writes, then status changes. A draft takes no
+// number, so the draft writes never reach for one; the posting section below says how a posting does.
 //
 // The save key (client_key). A create carries a key the browser made, so a retry or a double-click answers
 // with the draft the first one made. The create is INSERT ... ON CONFLICT (client_key) DO NOTHING and not a
@@ -37,17 +37,18 @@ import { q, one } from './db.js';
 import { lockDocNumber, nextNumber, notify } from './helpers.js';
 import { finAudit } from './finance-audit.js';
 import { finAccessOf, finApproverIds, finBookIdsFor, finRequire, finSeenBookOf } from './finance-access.js';
+import { finApplyPlan, finLockPartiesOf, finReleaseAllocations } from './finance-allocations.js';
 import { finError } from './finance-errors.js';
-import { FIN_BANK_CASH_GROUPS, FIN_PARTY_GROUPS } from './finance-groups.js';
+import { FIN_BANK_CASH_GROUPS, FIN_CASH_GROUPS, FIN_PARTY_GROUPS } from './finance-groups.js';
 import { finIdOf, finOptionalText } from './finance-masters.js';
-import { FIN_VOUCHER_TYPES, finBalanceProblem, finCan, finNeedsApproval, finPrefix, finShapeProblem } from './finance-rules.js';
+import { FIN_VOUCHER_TYPES, finBalanceProblem, finCan, finNeedsApproval, finPrefix, finRuleKeyOf, finShapeProblem } from './finance-rules.js';
 import { plantDateStr } from './plant-calendar.js';
 import { finDayBefore, finIsValidDate } from '../../client/src/lib/finance/fy.js';
 import { FIN_MAX_PAISE, finFormatINR, finFromPaise, finToPaise } from '../../client/src/lib/finance/money.js';
 
 const FIN_MAX_LINES = 200;           // a typed voucher; the Opening voucher (built by the import) takes more, by naming its own cap
-const FIN_NARRATION_MAX = 2000;
-const FIN_REFERENCE_MAX = 255;
+export const FIN_NARRATION_MAX = 2000;   // a voucher's narration, and a reference, typed or sent by the Cash & Bank entries
+export const FIN_REFERENCE_MAX = 255;
 const FIN_LINE_NARRATION_MAX = 500;
 export const FIN_BILL_REF_MAX = 100;   // a bill reference, on a voucher line and in a Tally import's bills
 const FIN_REASON_MAX = 500;          // a rejection's or a reversal's reason, as long as a month's (finance-masters.js)
@@ -61,10 +62,11 @@ const FIN_STATUSES = ['draft', 'submitted', 'posted', 'discarded'];
 const FIN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // What a voucher is, as the API says it. `total` leaves as total_paise; client_key and source_fingerprint
-// are the system's own and are not sent.
+// are the system's own and are not sent. is_opening_correction marks a journal that corrects the Opening
+// (Cash & Bank spec §9.4), which the posting check and the edit hold to the Opening's own date.
 const FIN_VOUCHER_COLS = [
   'id', 'book_id', 'voucher_type', 'number', 'voucher_date', 'period_id', 'narration', 'reference', 'status', 'total',
-  'reversal_of_id', 'reversed_by_id', 'source_type', 'source_id',
+  'reversal_of_id', 'reversed_by_id', 'source_type', 'source_id', 'is_opening_correction',
   'created_by_id', 'created_by', 'created_at', 'updated_at', 'submitted_by_id', 'submitted_by', 'submitted_at',
   'approved_by_id', 'approved_by', 'approved_at', 'self_approved', 'posted_by_id', 'posted_by', 'posted_at',
   'last_rejected_by', 'last_rejected_at', 'last_reject_reason',
@@ -176,25 +178,40 @@ export function finCleanLines(input, max = FIN_MAX_LINES) {
   return { lines, debit_paise: debits, credit_paise: credits };
 }
 
-// What each of a book's groups holds (spec §6.4, ruling R23), as a Map of group id -> { is_bank_cash, is_party }:
-// bank or cash when the group is, or descends from, one of FIN_BANK_CASH_GROUPS; parties when it is, or descends
-// from, Sundry Debtors or Sundry Creditors (FIN_PARTY_GROUPS). The walk starts at the book's primary groups and goes
-// down, handing each flag to every group beneath, so a group that no walk from the top reaches (a loop, which the app
-// never writes) is neither. System groups are never renamed (ruling R19), so the names hold. The transaction's qc.
+// The two party groups, debtors then creditors, the order FIN_PARTY_GROUPS names them in (finance-import.js reads them so too).
+const [FIN_DEBTORS, FIN_CREDITORS] = FIN_PARTY_GROUPS;
+
+// What each of a book's groups holds (spec §6.4, ruling R23), as a Map of group id -> { is_bank_cash, is_party, party_side,
+// account_kind }: bank or cash when the group is, or descends from, one of FIN_BANK_CASH_GROUPS; parties when it is, or descends
+// from, Sundry Debtors or Sundry Creditors (FIN_PARTY_GROUPS). party_side says which of the two (Cash & Bank spec §6.1):
+// 'customer' under Sundry Debtors, 'vendor' under Sundry Creditors, the nearer one above it deciding, and null for a group
+// under neither. account_kind says the same of the bank and cash groups (Cash & Bank spec §5): 'cash' under Cash-in-Hand
+// (FIN_CASH_GROUPS), 'bank' under Bank Accounts or Bank OD A/c, the nearer deciding, and null for a group under none of them.
+// The walk starts at the book's primary groups and goes down, handing each flag to every group beneath, so a group that no walk
+// from the top reaches (a loop, which the app never writes) is neither. System groups are never renamed (ruling R19), so the
+// names hold. The transaction's qc.
 export async function finGroupKinds(qc, bookId) {
   const rows = await qc(
     `WITH RECURSIVE walk AS (
-       SELECT g.id, lower(g.name) = ANY($2::text[]) AS is_bank_cash, lower(g.name) = ANY($3::text[]) AS is_party
+       SELECT g.id, lower(g.name) = ANY($2::text[]) AS is_bank_cash, lower(g.name) = ANY($3::text[]) AS is_party,
+              (CASE lower(g.name) WHEN $4::text THEN 'customer' WHEN $5::text THEN 'vendor' END)::text AS party_side,
+              (CASE WHEN lower(g.name) = ANY($6::text[]) THEN 'cash' WHEN lower(g.name) = ANY($2::text[]) THEN 'bank' END)::text AS account_kind
          FROM fin_groups g
         WHERE g.book_id = $1 AND g.parent_id IS NULL
        UNION
-       SELECT g.id, w.is_bank_cash OR lower(g.name) = ANY($2::text[]), w.is_party OR lower(g.name) = ANY($3::text[])
+       SELECT g.id, w.is_bank_cash OR lower(g.name) = ANY($2::text[]), w.is_party OR lower(g.name) = ANY($3::text[]),
+              COALESCE((CASE lower(g.name) WHEN $4::text THEN 'customer' WHEN $5::text THEN 'vendor' END)::text, w.party_side),
+              COALESCE((CASE WHEN lower(g.name) = ANY($6::text[]) THEN 'cash' WHEN lower(g.name) = ANY($2::text[]) THEN 'bank' END)::text,
+                       w.account_kind)
          FROM fin_groups g JOIN walk w ON g.parent_id = w.id
         WHERE g.book_id = $1
      )
-     SELECT id, is_bank_cash, is_party FROM walk`,
-    [bookId, FIN_BANK_CASH_GROUPS.map(name => name.toLowerCase()), FIN_PARTY_GROUPS.map(name => name.toLowerCase())]);
-  return new Map(rows.map(r => [r.id, { is_bank_cash: r.is_bank_cash, is_party: r.is_party }]));
+     SELECT id, is_bank_cash, is_party, party_side, account_kind FROM walk`,
+    [bookId, FIN_BANK_CASH_GROUPS.map(name => name.toLowerCase()), FIN_PARTY_GROUPS.map(name => name.toLowerCase()),
+      FIN_DEBTORS.toLowerCase(), FIN_CREDITORS.toLowerCase(), FIN_CASH_GROUPS.map(name => name.toLowerCase())]);
+  return new Map(rows.map(r => [r.id, {
+    is_bank_cash: r.is_bank_cash, is_party: r.is_party, party_side: r.party_side, account_kind: r.account_kind,
+  }]));
 }
 
 // A party ledger (ruling R23): one linked to an ERP customer or vendor, wherever it is filed, or one filed under
@@ -204,6 +221,15 @@ export async function finGroupKinds(qc, bookId) {
 // for its book. PURE.
 export function finIsPartyLedger(ledger, kinds) {
   return ledger.party_type != null || kinds?.get(ledger.group_id)?.is_party === true;
+}
+
+// Which side a party ledger is on (Cash & Bank spec §6.1): 'customer' or 'vendor', by the party group it is filed under (the
+// nearer of the two deciding, finGroupKinds' party_side), or, filed under neither, by the ERP customer or vendor it is linked
+// to; null for a ledger that is no party's (finIsPartyLedger). The ONE definition, which the allocation engine and the Cash &
+// Bank entries both ask. PURE.
+export function finPartySide(ledger, kinds) {
+  if (!finIsPartyLedger(ledger, kinds)) return null;
+  return kinds?.get(ledger.group_id)?.party_side ?? ledger.party_type;
 }
 
 // The two ledgers a line may not use, said the same way when a draft is saved and when it posts (spec §7.2 H6).
@@ -218,7 +244,10 @@ const finLedgerSystemOnly = (where, name) =>
 // reports both the same way, and a refusal here says no more than it does. Bill details go on a party ledger
 // only (finIsPartyLedger). Read without locks: a ledger switched off a moment later still lets this draft stand,
 // and the posting check is the last word.
-async function finCheckLedgers(qc, bookId, lines) {
+// `allowSystemOnly`: the lines are an opening correction's, which H6 treats as it treats the Opening (Cash & Bank spec
+// §9.4): it may use a system-only ledger (the staff ledgers, Profit & Loss A/c), and still no switched-off one. The
+// opening corrections (finance-corrections.js) and the edit of one (finUpdateDraft) say so; every typed voucher does not.
+export async function finCheckLedgers(qc, bookId, lines, { allowSystemOnly = false } = {}) {
   const ids = [...new Set(lines.map(line => line.ledger_id))];
   if (!ids.length) return;
   const found = new Map((await qc(
@@ -231,7 +260,7 @@ async function finCheckLedgers(qc, bookId, lines) {
     const ledger = found.get(line.ledger_id);
     if (!ledger) throw finError(409, 'FIN_WRONG_BOOK', `${where} uses a ledger that isn't one of this book's ledgers.`);
     if (!ledger.active) throw finLedgerOff(where, ledger.name);
-    if (!ledger.manual_entry) throw finLedgerSystemOnly(where, ledger.name);
+    if (!ledger.manual_entry && allowSystemOnly !== true) throw finLedgerSystemOnly(where, ledger.name);
     if (billed(line) && !finIsPartyLedger(ledger, kinds)) {
       throw finBad(`${where} has bill details, which go only on a party's ledger (a customer's or a vendor's, or one under `
         + `Sundry Debtors or Sundry Creditors), and ${ledger.name} is not one.`, `lines[${i}].bill_ref`);
@@ -277,8 +306,9 @@ function finVoucherOut(row) {
 const finSnapshot = (row, lines) => ({ ...finVoucherOut(row), lines });
 
 // The voucher a save key already names: handed back if the key is this login's own, in this book (a retry, a
-// double-click), a conflict if it is anyone else's. null when no voucher has the key.
-async function finReplay(oc, key, by, bookId) {
+// double-click), a conflict if it is anyone else's. null when no voucher has the key. The Cash & Bank entries
+// (finance-cash.js) answer a retry with it too.
+export async function finReplay(oc, key, by, bookId) {
   const found = await oc(`SELECT ${finCols()} FROM fin_vouchers WHERE client_key = $1::uuid`, [key]);
   if (!found) return null;
   if (found.created_by_id === by.id && found.book_id === bookId) return finVoucherOut(found);
@@ -330,25 +360,46 @@ export async function finCreateDraft(qc, oc, input, actor) {
 }
 
 // A draft the app builds from figures it was handed rather than one a person types: the Opening voucher, which the Tally
-// import builds (finance-import.js, spec §11.2). `clean` is finCleanLines' answer for its lines, under the caller's own
-// cap: whole paise, one side to a line, bill dates that are real days. Of the ledgers this checks nothing. The build has
-// checked that each matched one is of this book and made the others (finCreateLedger); a line on another book's ledger
-// cannot be written at all (fin_voucher_lines_ledger_book_fk); and the submit that follows checks the rest before it posts
-// (finPostingProblem: every ledger switched on, the lines balanced, the Opening voucher's date), as the database does again
-// at COMMIT. This writes the voucher, its lines and the `create` row of the log, as finCreateDraft does, and takes no lock:
-// the voucher is new, so nothing else can reach it before COMMIT. There is no save key either: the build's own
-// number-series lock is what makes a repeat find its work done. Nobody edits it afterwards (ruling R24): it is submitted,
-// or discarded.
-export async function finCreateBuiltDraft(qc, oc, { book_id, voucher_type, voucher_date, narration = null, reference = null }, clean, actor) {
+// import builds (finance-import.js, spec §11.2), and a Cash & Bank receipt, payment or transfer (finance-cash.js), which its
+// entry form describes and the app turns into lines. `clean` is finCleanLines' answer for its lines, under the caller's own
+// cap: whole paise, one side to a line, bill dates that are real days. Of the ledgers this checks nothing. The callers have:
+// the build that each matched one is of this book (it made the others with finCreateLedger), the cash entry that its two
+// ledgers are of this book, switched on and of the kinds it needs; a line on another book's ledger cannot be written at all
+// (fin_voucher_lines_ledger_book_fk); and the submit that follows checks the rest before it posts (finPostingProblem: every
+// ledger switched on, the lines balanced, the Opening voucher's date, each type's shape), as the database does again at COMMIT.
+// This writes the voucher, its lines and the `create` row of the log, as finCreateDraft does, and takes no lock: the voucher
+// is new, so nothing else can reach it before COMMIT. Nobody edits the Opening afterwards (ruling R24): it is submitted, or
+// discarded. A cash entry is submitted at once; one an Approver sends back is a draft like any other, which its maker may edit.
+//
+// What the voucher carries besides (Cash & Bank spec §6, §7, §9.4; null or false when not given), each written as it is handed:
+//   • allocation_plan: the bills its party line settles when it posts, { line_no, mode, picks } (finance-allocations.js
+//     finApplyPlan), which the create row of the log keeps too: what the maker asked for, beside what the posting settled;
+//   • source_type, source_id, source_fingerprint: the document it is posted from (H8 allows one live posting of each);
+//   • is_opening_correction: a journal that corrects the Opening (spec §9.4), which the posting check holds to its date;
+//   • client_key: the save key of the form it came from, so a retry finds the voucher the first save made. Written
+//     ON CONFLICT (client_key) DO NOTHING, as finCreateDraft writes it, so a second save of one key waits for the first and
+//     then finds the key taken: the answer is then null, and the caller looks the first save's voucher up (finReplay). The
+//     Opening's build sends no key: its own number-series lock is what makes a repeat find its work done.
+export async function finCreateBuiltDraft(qc, oc, {
+  book_id, voucher_type, voucher_date, narration = null, reference = null,
+  allocation_plan = null, source_type = null, source_id = null, source_fingerprint = null, is_opening_correction = false, client_key = null,
+}, clean, actor) {
   const by = finActing(actor);
+  const plan = allocation_plan == null ? null : JSON.stringify(allocation_plan);
   const made = await oc(
-    `INSERT INTO fin_vouchers (book_id, voucher_type, voucher_date, narration, reference, total, created_by_id, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8)
+    `INSERT INTO fin_vouchers (book_id, voucher_type, voucher_date, narration, reference, total, created_by_id, created_by,
+                               allocation_plan, source_type, source_id, source_fingerprint, is_opening_correction, client_key)
+     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9::jsonb, $10, $11, $12, $13, $14::uuid)
+     ON CONFLICT (client_key) DO NOTHING
      RETURNING ${finCols()}`,
-    [book_id, voucher_type, voucher_date, narration, reference, finFromPaise(clean.debit_paise), by.id, by.name]);
+    [book_id, voucher_type, voucher_date, narration, reference, finFromPaise(clean.debit_paise), by.id, by.name,
+      plan, source_type, source_id, source_fingerprint, is_opening_correction === true, client_key]);
+  if (!made) return null;
   const written = await finInsertLines(qc, made.id, book_id, clean.lines);
+  const after = finSnapshot(made, written);
   await finAudit(qc, {
-    bookId: book_id, entity: 'voucher', entityId: made.id, action: 'create', userId: by.id, userName: by.name, after: finSnapshot(made, written),
+    bookId: book_id, entity: 'voucher', entityId: made.id, action: 'create', userId: by.id, userName: by.name,
+    after: plan == null ? after : { ...after, allocation_plan },
   });
   return finVoucherOut(made);
 }
@@ -362,6 +413,15 @@ export async function finCreateBuiltDraft(qc, oc, { book_id, voucher_type, vouch
 // Two drafts the app builds are never edited by hand (ruling R24, 409 FIN_BAD_INPUT): the Opening voucher, which
 // ties out to the Tally trial balance it is built from, and a reversal, which mirrors its original line for line
 // (the database proves that at posting, H11). An edit would break either; the maker may still discard them.
+// The bills a Cash & Bank entry settles (its allocation_plan, Cash & Bank spec §6) ride with its draft: one an Approver sends
+// back keeps its plan, and its maker may edit it here. The plan names the party's line by its number, so an edit that replaces
+// the lines clears it, whatever the new lines are: the money then goes on account when the entry posts, to be adjusted afterwards
+// (a redo), and an old plan never settles bills through a line that is no longer its party's, or another party's. An edit that
+// leaves the lines be keeps the plan. On a voucher that had one, the log's edit row shows it, before and after.
+// An opening correction an Approver sends back (Cash & Bank spec §9.4) is a journal its maker typed, and is edited like one: its
+// narration, reference and lines, which may use a system-only ledger as its first save could (finCheckLedgers' allowSystemOnly).
+// It stays a correction (nothing here sets the mark) dated the Opening's own date: a date sent must be that day (the form sends
+// the date back as it is), and any other is 409 FIN_BAD_CORRECTION, before anything is written.
 export async function finUpdateDraft(qc, oc, id, input, actor) {
   const by = finActing(actor);
   const voucherId = finIdOf(id);
@@ -374,28 +434,48 @@ export async function finUpdateDraft(qc, oc, id, input, actor) {
   if (before.status !== 'draft') throw finError(409, 'FIN_NOT_DRAFT');
   if (before.voucher_type === 'opening') throw finError(409, 'FIN_BAD_INPUT', 'An opening voucher is rebuilt from the Tally import, not edited.');
   if (before.reversal_of_id != null) throw finError(409, 'FIN_BAD_INPUT', "A reversal can't be edited — discard it and reverse again.");
+  // Ruling R13: a cash count's clearing is built from its count (R24); an edit could turn it into any entry that still clears the count.
+  if (before.source_type === 'cash_count') throw finError(409, 'FIN_BAD_INPUT', 'A clearing is made from its count: discard it and clear again.');
+  // An HR entry is built from HR's rows (Cash & Bank spec §7.1, §7.7), as R13's clearing is from its count: one an Approver sends back is
+  // sent again as it is, or discarded, and corrected in HR. An edit would make it an entry HR never recorded, still standing for its event.
+  if (finHrSource(before.source_type)) throw finError(409, 'FIN_HR_OWNED');
 
   const next = {
     voucher_date: edit.voucher_date !== undefined ? finVoucherDate(edit.voucher_date) : before.voucher_date,
     narration: edit.narration !== undefined ? finOptionalText(edit.narration, 'narration', FIN_NARRATION_MAX) : before.narration,
     reference: edit.reference !== undefined ? finOptionalText(edit.reference, 'reference', FIN_REFERENCE_MAX) : before.reference,
   };
+  const correction = before.is_opening_correction === true;
+  if (correction && edit.voucher_date !== undefined) {
+    const day = finDayBefore((await oc('SELECT books_begin FROM fin_books WHERE id = $1', [before.book_id])).books_begin);
+    if (next.voucher_date !== day) {
+      throw finError(409, 'FIN_BAD_CORRECTION',
+        `An opening correction is dated ${day}, the Opening's own date, the day before the books begin, and its date doesn't change.`,
+        { field: 'voucher_date' });
+    }
+  }
   const clean = edit.lines !== undefined ? finCleanLines(edit.lines) : null;
-  if (clean) await finCheckLedgers(qc, before.book_id, clean.lines);
+  if (clean) await finCheckLedgers(qc, before.book_id, clean.lines, { allowSystemOnly: correction });
 
+  // The plan, read under the lock just taken. It is no part of what the API says of a voucher (FIN_VOUCHER_COLS).
+  const planBefore = (await oc('SELECT allocation_plan FROM fin_vouchers WHERE id = $1', [voucherId])).allocation_plan;
   const linesBefore = await finLinesOf(qc, voucherId);
   let linesAfter = linesBefore;
   if (clean) {
     await qc('DELETE FROM fin_voucher_lines WHERE voucher_id = $1', [voucherId]);
     linesAfter = await finInsertLines(qc, voucherId, before.book_id, clean.lines);
   }
-  const after = await oc(
-    `UPDATE fin_vouchers SET voucher_date = $2, narration = $3, reference = $4, total = $5::numeric, updated_at = now()
-      WHERE id = $1 RETURNING ${finCols()}`,
-    [voucherId, next.voucher_date, next.narration, next.reference, finFromPaise(clean ? clean.debit_paise : finToPaise(before.total))]);
+  const { allocation_plan: planAfter, ...after } = await oc(
+    `UPDATE fin_vouchers SET voucher_date = $2, narration = $3, reference = $4, total = $5::numeric,
+            allocation_plan = CASE WHEN $6::boolean THEN NULL ELSE allocation_plan END, updated_at = now()
+      WHERE id = $1 RETURNING ${finCols()}, allocation_plan`,
+    [voucherId, next.voucher_date, next.narration, next.reference, finFromPaise(clean ? clean.debit_paise : finToPaise(before.total)),
+      clean != null]);
+  // A voucher with a plan shows it in the log, as its create row did (finCreateBuiltDraft); every other keeps the snapshot it had.
+  const withPlan = (snapshot, plan) => (planBefore == null ? snapshot : { ...snapshot, allocation_plan: plan });
   await finAudit(qc, {
     bookId: before.book_id, entity: 'voucher', entityId: voucherId, action: 'edit', userId: by.id, userName: by.name,
-    before: finSnapshot(before, linesBefore), after: finSnapshot(after, linesAfter),
+    before: withPlan(finSnapshot(before, linesBefore), planBefore), after: withPlan(finSnapshot(after, linesAfter), planAfter),
   });
   return finVoucherOut(after);
 }
@@ -431,12 +511,16 @@ export async function finDiscardDraft(qc, oc, id, actor, { isAdmin = false } = {
 //   1. finVoucherCtx reads, without a lock, where the voucher falls: its book, the month that holds its date, that
 //      month's year, and so the number series it is minted from (CI-JV-2627-). It locks that series (lockDocNumber),
 //      and only then the voucher, FOR UPDATE.
-//   2. finPostLocked reads the month FOR SHARE, so a change of the month's status (which takes it FOR UPDATE) waits
+//   2. The party allocation locks (Cash & Bank spec §6.6, ruling R7): the advisory lock of every party ledger among the
+//      voucher's own lines, in ascending id (finLockParties), so an allocation onto a party's bills waits for this posting,
+//      or this posting for it, and whichever goes second reads what the first committed.
+//   3. finPostLocked reads the month FOR SHARE, so a change of the month's status (which takes it FOR UPDATE) waits
 //      for this posting, or this posting for it and then sees what it did; it reads every month after its own the same
 //      way, since it is carried into each of them (rulings R73 and R70, finPostingFacts). It checks the voucher as the
-//      database will, mints the number, and posts: status, number, month, who. A reversal then marks the entry it reverses.
-//   3. COMMIT runs the database's deferred checks again (H1, H5, H6, H11). A refusal there rolls back everything, the
-//      number included, and the next posting in the series takes that number: the series has no gaps.
+//      database will, mints the number, and posts: status, number, month, who. A reversal then marks the entry it reverses
+//      and releases that entry's allocations; and the voucher's plan, if it has one, settles bills (finance-allocations.js).
+//   4. COMMIT runs the database's deferred checks again (H1, H5, H6, H11, and the allocations' sum check). A refusal there
+//      rolls back everything, the number included, and the next posting in the series takes that number: the series has no gaps.
 // The series is locked before any row, so two postings meet at the series and neither holds a row the other wants.
 // Lines are written before a status changes: a line write row-locks its voucher (fin_line_guard takes FOR SHARE),
 // and once a voucher is posted no line of it changes again.
@@ -499,6 +583,10 @@ export async function finVoucherCtx(qc, oc, voucherId) {
 // month's move (finSetPeriodStatus takes that one month FOR UPDATE, and nothing after it) then waits for this posting, or this
 // posting waits for the move and judges the month as it left it, so no cycle can form. `carry` names the first locked and the
 // first closing of them all by date, its own month included (or null), which is what finPostingProblem and the approval rule read.
+// An opening correction (Cash & Bank spec §9.4) also reads the Opening it corrects, `liveOpening` (finLiveOpening; null for every
+// other voucher, a correction's reversal included, which takes a correction back out and corrects nothing), unlocked: dated the
+// Opening's own day, it is minted from the very series a reversal of the Opening is (CI-JV-2627-), which this transaction holds, so
+// the Opening's reversal and a correction's posting go one after the other.
 async function finPostingFacts(qc, oc, { v, period }) {
   const month = await oc('SELECT id, label, start_date, status FROM fin_periods WHERE id = $1 FOR SHARE', [period.id]);
   const later = await qc(
@@ -522,7 +610,18 @@ async function finPostingFacts(qc, oc, { v, period }) {
   });
   const original = v.reversal_of_id == null ? null
     : await oc('SELECT id, book_id, voucher_type, status, reversed_by_id FROM fin_vouchers WHERE id = $1', [v.reversal_of_id]);
-  return { month, carry, lines, original };
+  const liveOpening = v.is_opening_correction === true && v.reversal_of_id == null ? await finLiveOpening(oc, v.book_id) : null;
+  return { month, carry, lines, original, liveOpening };
+}
+
+// The party allocation locks of a posting (Cash & Bank spec §6.6, ruling R7): the lock of every party ledger among the voucher's
+// OWN lines, in ascending id (finLockPartiesOf, finance-allocations.js), taken right after the voucher's own lock, so the order of
+// every posting is series → voucher → party → months → ledgers. Taken once per transaction: finSubmitVoucher takes them before
+// it reads its months, and finPostLocked, which an approval reaches without them, takes them as its first statement. A reversal's
+// lines mirror the entry it reverses, so a reversal waits for any allocation being made onto that entry, and the other way round,
+// even when the entry has none yet: whichever goes second reads what the first committed.
+async function finLockParties(qc, oc, ctx) {
+  ctx.partyLedgerIds ??= await finLockPartiesOf(qc, oc, ctx.v.id);
 }
 
 // The status a posting is judged by: the strictest of its own month's and of every month after it, which it is carried into
@@ -552,8 +651,16 @@ function finHeldBy(held, month, opening) {
 // month, H6 the ledgers, H1 the balance), and the two rules only the app keeps: the Opening voucher's date (ruling
 // R12) and each type's shape (spec §6.5). The database checks again at COMMIT. `approved`: an Approver has passed
 // it, which a closing month asks of everything, and a closing month that an entry is carried into asks of it (rulings R73, R70).
-function finPostingProblem({ v, book }, { month, carry, lines, original }, { approved }) {
+// An opening correction (Cash & Bank spec §9.4) is let in before the books begin as the Opening is, and judged by the months after
+// it as the Opening is; it may use system-only ledgers as the Opening may (H6), and bank and cash lines (finShapeProblem). It is
+// held, before all that, to three things the Opening is not: its date is the Opening's own (FIN_BAD_CORRECTION, as the database
+// says at COMMIT); there is an Opening for it to correct (FIN_NO_OPENING, `liveOpening`; not asked of a correction's reversal,
+// which is marked as a correction too, Cash & Bank ruling R15, and takes one back out); and it goes in only approved. The
+// database refuses an unapproved one dated there as FIN_BEFORE_BOOKS, in words that name the wrong reason, so the app says the
+// right one first. finSubmitVoucher never sends one in unapproved (it always waits for an Approver); this is for any other way in.
+function finPostingProblem({ v, book }, { month, carry, lines, original, liveOpening }, { approved }) {
   const isReversal = v.reversal_of_id != null;
+  const isCorrection = v.is_opening_correction === true;
   if (isReversal) {
     if (!original || original.id === v.id || original.book_id !== v.book_id || original.status !== 'posted') {
       return finError(409, 'FIN_BAD_REVERSAL');
@@ -566,9 +673,18 @@ function finPostingProblem({ v, book }, { month, carry, lines, original }, { app
       return finError(409, 'FIN_BAD_DATE', `The Opening voucher is dated ${day}, the day before the books begin. This one is dated ${v.voucher_date}.`);
     }
   }
-  // Before the books begin, only the Opening voucher and its reversal. Said first: a typed entry dated there is told so, whatever
-  // the months after it hold.
-  const opening = v.voucher_type === 'opening' || original?.voucher_type === 'opening';
+  if (isCorrection) {
+    const day = finDayBefore(book.books_begin);
+    if (v.voucher_date !== day) {
+      return finError(409, 'FIN_BAD_CORRECTION',
+        `An opening correction is dated ${day}, the Opening's own date, the day before the books begin. This one is dated ${v.voucher_date}.`);
+    }
+    if (!isReversal && !liveOpening) return finError(409, 'FIN_NO_OPENING');
+    if (!approved) return finError(409, 'FIN_BEFORE_BOOKS', "An opening correction changes the books as they stood before they began, so it goes in only with an Approver's approval.");
+  }
+  // Before the books begin, only the Opening voucher and its reversal, and an opening correction. Said first: a typed entry dated
+  // there is told so, whatever the months after it hold.
+  const opening = v.voucher_type === 'opening' || original?.voucher_type === 'opening' || isCorrection;
   if (month.status === 'before_books' && !opening) {
     return finError(409, 'FIN_BEFORE_BOOKS',
       `${month.label} comes before the books begin on ${book.books_begin}. Only the Opening voucher, or a reversal of it, can be dated there.`);
@@ -578,30 +694,37 @@ function finPostingProblem({ v, book }, { month, carry, lines, original }, { app
   if (carry.locked) return finHeldBy(carry.locked, month, opening);
   if (carry.closing && !approved) return finHeldBy(carry.closing, month, opening);
   // A reversal mirrors history, so it may use a ledger switched off since. A system-only ledger takes the ERP's own
-  // postings, the Opening voucher and reversals, and nothing typed.
+  // postings, the Opening voucher and its corrections, and reversals, and nothing typed.
   const off = isReversal ? null : lines.find(line => !line.active);
   if (off) return finLedgerOff(`Line ${off.line_no}`, off.name);
-  const systemOnly = v.source_type == null && v.voucher_type !== 'opening' && !isReversal ? lines.find(line => !line.manual_entry) : null;
+  const systemOnly = v.source_type == null && v.voucher_type !== 'opening' && !isCorrection && !isReversal
+    ? lines.find(line => !line.manual_entry) : null;
   if (systemOnly) return finLedgerSystemOnly(`Line ${systemOnly.line_no}`, systemOnly.name);
   const balance = finBalanceProblem(lines);
   if (balance) return finError(409, balance.code, balance.message);
-  const shape = finShapeProblem(v.voucher_type, lines, { isReversal });
+  const shape = finShapeProblem(v.voucher_type, lines, { isReversal, isOpeningCorrection: isCorrection });
   if (shape) return finError(409, shape.code, shape.message);
   return null;
 }
 
 // Post a voucher that finVoucherCtx locked in THIS transaction (`ctx` is what it returned), in the name of `actor`
 // (spec §7.4). `approvedBy` is the Approver who passed it ({ id, name }), and `selfApproved` says that Approver made
-// it. Only a draft or a submitted voucher posts (409 FIN_NOT_DRAFT otherwise). It is checked, its number minted, and
-// it is posted. A reversal is posted FIRST and only then marks the entry it reverses, setting reversed_by_id and
-// nothing else, not even updated_at: the database lets a posted entry change in that one way, to name its own posted
-// reversal (H3), and proves the pair at COMMIT (H11). Zero rows marked means another reversal got there first: 409
-// FIN_ALREADY_REVERSED. Appends the `post` audit row; returns the voucher as posted.
-export async function finPostLocked(qc, oc, ctx, actor, { approvedBy = null, selfApproved = false } = {}) {
+// it. Only a draft or a submitted voucher posts (409 FIN_NOT_DRAFT otherwise). Its first statement takes the party
+// allocation locks (finLockParties, ruling R7). It is checked, its number minted, and it is posted. A reversal is posted
+// FIRST and only then marks the entry it reverses, setting reversed_by_id and nothing else, not even updated_at: the
+// database lets a posted entry change in that one way, to name its own posted reversal (H3), and proves the pair at
+// COMMIT (H11). Zero rows marked means another reversal got there first: 409 FIN_ALREADY_REVERSED. Appends the `post`
+// audit row. Then the bills (Cash & Bank spec §6): a reversal, the entry it reverses now marked, releases what that entry
+// settled, so its bills are open again (finReleaseAllocations); and the voucher's own plan, if it carries one, settles
+// bills, worked out against the items open now and never refused (finApplyPlan). Returns the voucher as posted.
+// `approvedInHr` ({ id, name }) is an HR entry's approval given in HR (Cash & Bank spec §7.6, ruling R26b): the `post` row of the log
+// records it as approved_in_hr_by, whether or not the book's rule asked for an Approver (approvedBy says who passed it in Finance).
+export async function finPostLocked(qc, oc, ctx, actor, { approvedBy = null, selfApproved = false, approvedInHr = null } = {}) {
   const by = finActing(actor);
   const approver = approvedBy == null ? null : finActing(approvedBy);
   const { v } = ctx;
   if (v.status !== 'draft' && v.status !== 'submitted') throw finError(409, 'FIN_NOT_DRAFT');
+  await finLockParties(qc, oc, ctx);
   const facts = await finPostingFacts(qc, oc, ctx);
   const problem = finPostingProblem(ctx, facts, { approved: approver != null });
   if (problem) throw problem;
@@ -618,11 +741,56 @@ export async function finPostLocked(qc, oc, ctx, actor, { approvedBy = null, sel
     if (!marked) throw finError(409, 'FIN_ALREADY_REVERSED');
   }
   const lines = await finLinesOf(qc, v.id);
+  const inHr = approvedInHr == null ? null : finActing(approvedInHr);
   await finAudit(qc, {
     bookId: v.book_id, entity: 'voucher', entityId: v.id, action: 'post', userId: by.id, userName: by.name,
-    before: finSnapshot(v, lines), after: finSnapshot(after, lines),
+    before: finSnapshot(v, lines), after: inHr ? { ...finSnapshot(after, lines), approved_in_hr_by: inHr } : finSnapshot(after, lines),
   });
+  if (v.reversal_of_id != null) await finReleaseAllocations(qc, oc, v.reversal_of_id, by);
+  await finApplyPlan(qc, oc, v.id, by);
+  await finMarkCountCleared(oc, v);
   return finVoucherOut(after);
+}
+
+// A cash count is cleared once the voucher made from it posts, and uncleared when that voucher is reversed (Cash & Bank spec §5.5).
+// A voucher with source_type 'cash_count' names its count in source_id: its posting sets the count's cleared_voucher_id; the
+// posting of its reversal sets it back to NULL, but only while the count still names the voucher reversed. Both on whichever
+// path posts: an Approver's own submit, or an approval later. Other vouchers touch nothing.
+async function finMarkCountCleared(oc, v) {
+  if (v.reversal_of_id == null) {
+    if (v.source_type === 'cash_count') await oc('UPDATE fin_cash_counts SET cleared_voucher_id = $1 WHERE id = $2', [v.id, v.source_id]);
+    return;
+  }
+  const original = await oc('SELECT id, source_type, source_id FROM fin_vouchers WHERE id = $1', [v.reversal_of_id]);
+  if (original?.source_type === 'cash_count') {
+    await oc('UPDATE fin_cash_counts SET cleared_voucher_id = NULL WHERE id = $1 AND cleared_voucher_id = $2', [original.source_id, original.id]);
+  }
+}
+
+// The ONE definition of an Opening voucher that holds the books' balances (rulings R37 and R42), as SQL on a fin_vouchers row
+// aliased `o`: posted, and not undone by a posted reversal dated on its own day. One reversed only from a later date still holds
+// them until then. finLiveOpeningProblem, finLiveOpening and the opening corrections' view (finance-corrections.js) all read it.
+export const FIN_OPENING_HOLDS_SQL = `(o.status = 'posted' AND NOT EXISTS (SELECT 1 FROM fin_vouchers r
+              WHERE r.id = o.reversed_by_id AND r.status = 'posted' AND r.voucher_date = o.voucher_date))`;
+
+// An opening correction that still holds the Opening it corrects (Cash & Bank ruling R15): one of the book's ($1), posted and not
+// reversed, or waiting for an Approver. The reversal of a correction is marked as a correction too (R15) and holds nothing: it is
+// never reversed itself (finReversalProblem), so a correction stands until its reversal posts. A draft (one sent back) holds
+// nothing either: its submit is judged again (finPostingProblem's FIN_NO_OPENING). The ONE definition, which a reversal of the
+// Opening (finReversalProblem) and the screen's offer of one (finVoucherView) both ask.
+const FIN_CORRECTION_STANDS_SQL = `SELECT c.id FROM fin_vouchers c
+  WHERE c.book_id = $1 AND c.is_opening_correction AND c.reversal_of_id IS NULL
+    AND ((c.status = 'posted' AND c.reversed_by_id IS NULL) OR c.status = 'submitted')
+  ORDER BY c.id LIMIT 1`;
+
+// The book's Opening voucher that holds its balances now (FIN_OPENING_HOLDS_SQL), { id, number }, or null. One waiting for
+// approval is not the books' yet. It is what an opening correction corrects (Cash & Bank spec §9.4), asked by
+// finCreateOpeningCorrection before it writes anything and by the posting check (finPostingFacts). `oc` is the transaction's.
+export async function finLiveOpening(oc, bookId) {
+  return oc(
+    `SELECT o.id, o.number FROM fin_vouchers o
+      WHERE o.book_id = $1 AND o.voucher_type = 'opening' AND ${FIN_OPENING_HOLDS_SQL}
+      ORDER BY o.id LIMIT 1`, [bookId]);
 }
 
 // Whether the book already holds an Opening voucher, as the refusal to throw (409 FIN_OPENING_EXISTS), or null: the ONE check, for
@@ -636,9 +804,7 @@ export async function finLiveOpeningProblem(oc, bookId, day, { except = null, do
   const live = await oc(
     `SELECT o.status, o.number FROM fin_vouchers o
       WHERE o.book_id = $1 AND o.voucher_type = 'opening' AND o.id IS DISTINCT FROM $2::int
-        AND (o.status = 'submitted'
-             OR (o.status = 'posted' AND NOT EXISTS (SELECT 1 FROM fin_vouchers r
-                                                      WHERE r.id = o.reversed_by_id AND r.status = 'posted' AND r.voucher_date = o.voucher_date)))
+        AND (o.status = 'submitted' OR ${FIN_OPENING_HOLDS_SQL})
       ORDER BY (o.status = 'posted') DESC, o.id LIMIT 1`, [bookId, except]);
   if (live?.status === 'posted') {
     return finError(409, 'FIN_OPENING_EXISTS', `This book's Opening voucher is ${live.number}, which still holds its balances as at ${day}. `
@@ -651,9 +817,25 @@ export async function finLiveOpeningProblem(oc, bookId, day, { except = null, do
   return null;
 }
 
-// How a bell names a voucher: its book, what it is and how much. "CI Journal ₹2,500.00", "DP Reversal ₹30.00".
-const finBellName = (bookCode, v, totalPaise) =>
-  `${bookCode} ${v.reversal_of_id != null ? 'Reversal' : FIN_VOUCHER_TYPES[v.voucher_type].label} ${finFormatINR(totalPaise)}`;
+// How a bell names a voucher: its book, what it is and how much. "CI Journal ₹2,500.00", "DP Reversal ₹30.00", and a journal
+// that corrects the Opening (Cash & Bank spec §9.4) as what it is, "CI Opening correction ₹7,500.00". An HR entry, or a reversal in
+// the chain of one, is named by `hrWords` instead (finHrBellWords), and never by an amount (Cash & Bank ruling R69; spec §3,
+// "Notifications carry no amounts"): a bell's body is also what a phone's lock screen shows (notify → push.js), and an HR entry of
+// one person's would put that person's money there. "CI Payment · Advance · Pay staff · 1 person", "CI Reversal · Salary Jan · cash ·
+// CI-PAY-0041 · 9 people".
+const finBellName = (bookCode, v, totalPaise, hrWords = null) => {
+  const what = v.reversal_of_id != null ? 'Reversal' : v.is_opening_correction === true ? 'Opening correction' : FIN_VOUCHER_TYPES[v.voucher_type].label;
+  return hrWords != null ? `${bookCode} ${what} · ${hrWords}` : `${bookCode} ${what} ${finFormatINR(totalPaise)}`;
+};
+
+// The words an HR entry's bells name it by (Cash & Bank ruling R69), or null for any other entry: the narration of the HR entry, its
+// own or, for a reversal in the chain of one, the narration of the entry the chain began with (finChainRoot). The HR feed writes those
+// narrations, HR's document number and how many people (spec §7.2: "Salary Jan · cash · CI-PAY-0041 · 9 people"), never a name or an
+// amount, and nobody edits them (an HR draft is never edited by hand: FIN_HR_OWNED).
+async function finHrBellWords(oc, v) {
+  const root = finHrSource(v.source_type) ? v : v.reversal_of_id == null ? null : await finChainRoot(oc, v);
+  return root && finHrSource(root.source_type) ? String(root.narration ?? '').trim() : null;
+}
 
 // The "waiting for approval" bells an entry rang (fin_approval), answered (final wave item 7). Once one Approver approves or
 // rejects it, it waits for nobody, so no Approver who was told is left told: the plant's own flow does the same for an answered
@@ -665,15 +847,24 @@ const finAnswerApprovalBells = (qc, voucherId) => qc(
 
 // Submit a draft (spec §7.1, §7.3): its maker's only (403 FIN_NOT_MAKER), and a draft only (409 FIN_NOT_DRAFT). An
 // entry that could never post is refused here, before anything changes, so it never waits in anyone's queue:
-// unbalanced or the wrong shape, a locked month, a month before the books begin (but for the Opening voucher or its
-// reversal), a ledger switched off since it was saved, and a locked month after its own, which it would be carried into (rulings
+// unbalanced or the wrong shape, a locked month, a month before the books begin (but for the Opening voucher, its reversal,
+// or an opening correction), a ledger switched off since it was saved, and a locked month after its own, which it would be carried into (rulings
 // R73 and R70). A closing month is no refusal here: it is what makes an entry need an Approver, and so is a closing month after
-// its own. Then the book's rule for the entry (its type's, or 'reversal' for a reversal) and the strictest of those months say
-// whether it needs approval:
+// its own. Then the book's rule for the entry (finRuleKeyOf: its type's; 'reversal' for a reversal; 'cash_difference' for a cash
+// count's clearing; 'opening' for an opening correction; 'contra' for a receipt or a payment whose every line is a bank or cash
+// ledger, Cash & Bank ruling R70) and the strictest of those months say whether it needs approval:
 //   • it does not, and the maker may enter vouchers: it posts now, unapproved;
 //   • it does, and the maker is an Approver of the book: it posts now, approved by its maker (self_approved);
 //   • otherwise it waits, `submitted`, and the book's other Approvers are told (fin_approval).
-export async function finSubmitVoucher(qc, oc, id, actor) {
+// An opening correction always needs an Approver (Cash & Bank spec §9.4), whatever the `opening` rule has been set to since: the
+// database lets one in before the books begin only approved, so an accountant's waits, and is never sent there without one. So does
+// a correction's reversal, which is dated the opening day and marked as a correction (Cash & Bank ruling R15), under the `reversal`
+// rule: an Approver's own posts self-approved, an accountant's waits.
+// `approvedInHr` ({ id, name }) is an approval the entry already has from outside Finance: an HR approver's, given in HR (Cash & Bank
+// spec §7.6). An entry that needs an Approver then posts at once, approved in that name (self-approved when it is the maker's own),
+// and is never sent to wait; one that needs none posts unapproved, as any does. Either way its `post` row records the HR approval
+// (finPostLocked, ruling R26b). Only the HR feed (finance-hr-feed.js) passes it.
+export async function finSubmitVoucher(qc, oc, id, actor, { approvedInHr = null } = {}) {
   const by = finActing(actor);
   const ctx = await finVoucherCtx(qc, oc, id);
   const { v, book } = ctx;
@@ -684,22 +875,31 @@ export async function finSubmitVoucher(qc, oc, id, actor) {
     const held = await finLiveOpeningProblem(oc, v.book_id, v.voucher_date, { except: v.id, doing: 'submit' });
     if (held) throw held;
   }
+  // The party locks next, in their place after the voucher's own (ruling R7), before the months and the ledgers are read.
+  await finLockParties(qc, oc, ctx);
   const facts = await finPostingFacts(qc, oc, ctx);
   const problem = finPostingProblem(ctx, facts, { approved: true });
   if (problem) throw problem;
 
   // The money that moves is the debits of the lines, in paise. A book with no rule for the entry asks an Approver.
   const totalPaise = facts.lines.reduce((sum, line) => sum + line.debit_paise, 0);
-  const rule = await oc('SELECT mode, limit_amount FROM fin_approval_rules WHERE book_id = $1 AND rule_key = $2',
-    [v.book_id, v.reversal_of_id != null ? 'reversal' : v.voucher_type]);
-  const needs = finNeedsApproval({
+  // An opening correction comes under the `opening` rule, its reversal under `reversal`, and either needs an Approver even where
+  // its rule has been loosened (above). A receipt or a payment between the book's own bank and cash accounts comes under `contra`
+  // (finRuleKeyOf, ruling R70).
+  const correction = v.is_opening_correction === true;
+  const ruleKey = finRuleKeyOf(v, facts.lines);
+  const rule = await oc('SELECT mode, limit_amount FROM fin_approval_rules WHERE book_id = $1 AND rule_key = $2', [v.book_id, ruleKey]);
+  const needs = correction || finNeedsApproval({
     mode: rule ? rule.mode : 'always',
     limit_paise: rule?.limit_amount == null ? null : finToPaise(rule.limit_amount),
     total_paise: totalPaise,
     period_status: finStatusFor(facts),
   });
+  if (needs && approvedInHr != null) {
+    return finPostLocked(qc, oc, ctx, actor, { approvedBy: approvedInHr, selfApproved: approvedInHr.id === by.id, approvedInHr });
+  }
   if (needs ? finCan(actor.roles, 'approve') : finCan(actor.roles, 'enter')) {
-    return finPostLocked(qc, oc, ctx, actor, { approvedBy: needs ? actor : null, selfApproved: needs });
+    return finPostLocked(qc, oc, ctx, actor, { approvedBy: needs ? actor : null, selfApproved: needs, approvedInHr });
   }
 
   const after = await oc(
@@ -712,7 +912,8 @@ export async function finSubmitVoucher(qc, oc, id, actor) {
   });
   const approvers = (await finApproverIds(v.book_id, qc)).filter(userId => userId !== by.id);
   await notify(approvers, {
-    kind: 'fin_approval', title: 'Finance entry waiting for approval', body: `${finBellName(book.code, v, totalPaise)} — ${by.name}`,
+    kind: 'fin_approval', title: 'Finance entry waiting for approval',
+    body: `${finBellName(book.code, v, totalPaise, await finHrBellWords(oc, v))} — ${by.name}`,
     link: `/finance?tab=approvals&voucher=${v.id}`, refTable: 'fin_vouchers', refId: v.id,
   }, qc);
   return finVoucherOut(after);
@@ -768,9 +969,33 @@ export async function finRejectVoucher(qc, oc, id, actor, reason) {
   await finAnswerApprovalBells(qc, voucherId);
   const book = await oc('SELECT code FROM fin_books WHERE id = $1', [before.book_id]);
   await notify([before.created_by_id].filter(userId => userId !== by.id), {
-    kind: 'fin_decision', title: 'Your Finance entry was rejected', body: `${finBellName(book.code, before, finToPaise(before.total))} — ${why}`,
+    kind: 'fin_decision', title: 'Your Finance entry was rejected',
+    body: `${finBellName(book.code, before, finToPaise(before.total), await finHrBellWords(oc, before))} — ${why}`,
     link: `/finance?tab=drafts&voucher=${voucherId}`, refTable: 'fin_vouchers', refId: voucherId,
   }, qc);
+  return finVoucherOut(after);
+}
+
+// Withdraw an HR entry that waits for an Approver (Cash & Bank spec §7.2, §7.7): HR has undone or corrected the event it stands for, so
+// it must never post, and it never reached the books, so there is nothing to reverse. Only the HR feed (finance-hr-feed.js) calls it,
+// standing in for HR, as it does when it discards an HR draft an Approver sent back (ruling R22). The entry is discarded as a draft is,
+// its `discard` row in the log carrying `reason`, and every Approver's bell for it is answered (finAnswerApprovalBells). finVoucherCtx
+// takes its number series and then the entry, the order every posting locks in, so an Approver approving it at that moment either
+// posts it first (and this finds it posted: 409 FIN_NOT_SUBMITTED, the caller reverses it instead) or finds it withdrawn.
+export async function finWithdrawVoucher(qc, oc, id, actor, reason) {
+  const by = finActing(actor);
+  const why = finOptionalText(reason, 'reason', FIN_REASON_MAX);
+  const ctx = await finVoucherCtx(qc, oc, id);
+  const { v } = ctx;
+  if (v.status !== 'submitted') throw finError(409, 'FIN_NOT_SUBMITTED');
+  if (!finHrSource(v.source_type)) throw finError(409, 'FIN_BAD_INPUT', 'Only an entry the HR feed made is withdrawn this way.');
+  const lines = await finLinesOf(qc, v.id);
+  const after = await oc(`UPDATE fin_vouchers SET status = 'discarded', updated_at = now() WHERE id = $1 RETURNING ${finCols()}`, [v.id]);
+  await finAudit(qc, {
+    bookId: v.book_id, entity: 'voucher', entityId: v.id, action: 'discard', userId: by.id, userName: by.name, reason: why,
+    before: finSnapshot(v, lines), after: finSnapshot(after, lines),
+  });
+  await finAnswerApprovalBells(qc, v.id);
   return finVoucherOut(after);
 }
 
@@ -779,9 +1004,37 @@ export async function finRejectVoucher(qc, oc, id, actor, reason) {
 // A value left out: absent, null, or blank text.
 const finBlank = value => value == null || (typeof value === 'string' && value.trim() === '');
 
+// A source that is an HR event's (Cash & Bank spec §7.2): the HR feed's keys all begin hr_ (finance-hr-feed.js FIN_HR_SOURCES).
+const finHrSource = source => typeof source === 'string' && source.startsWith('hr_');
+
+// Whether a voucher is HR's (Cash & Bank spec §7.7, plan Review Focus 5): posted from an HR event, or a reversal in the chain of one,
+// which takes it back out (a reversal carries no source of its own, so its chain is walked back to the entry it began with). HR is
+// where such an entry is corrected (the HR feed reverses it from there, `fromHr`). Reversed by hand in Finance, the next catch-up would
+// post the HR event again, or a reversal undone would put the HR entry back beside its correction. A chain longer than a thousand
+// reversals is not one the app writes, and the walk stops there.
+async function finHrOwned(oc, v) {
+  if (finHrSource(v.source_type)) return true;
+  if (v.reversal_of_id == null) return false;
+  return finHrSource((await finChainRoot(oc, v))?.source_type);
+}
+
+// The entry a reversal's chain began with, walked back by reversal_of_id from the voucher `v` reverses: { source_type, narration }, or
+// null. finHrOwned asks whose it is, and an HR reversal's bells what it is called (finHrBellWords).
+function finChainRoot(oc, v) {
+  return oc(
+    `WITH RECURSIVE up AS (
+       SELECT id, reversal_of_id, source_type, narration, 1 AS depth FROM fin_vouchers WHERE id = $1
+       UNION ALL
+       SELECT p.id, p.reversal_of_id, p.source_type, p.narration, up.depth + 1 FROM fin_vouchers p JOIN up ON p.id = up.reversal_of_id
+        WHERE up.depth < 1000
+     )
+     SELECT source_type, narration FROM up WHERE reversal_of_id IS NULL LIMIT 1`, [v.reversal_of_id]);
+}
+
 // Why a voucher can't be reversed now, as the refusal to throw, or null: it isn't posted; it is reversed already; it is
-// the reversal of an Opening voucher, which is never reversed (ruling R45); or a reversal of it is on its way, a draft or
-// waiting for approval (the database allows one live reversal of a voucher at a time). Asked of the unlocked read, so a request that cannot succeed is refused before it locks anything, and again of
+// the reversal of an Opening voucher, which is never reversed (ruling R45), of a cash count's clearing (R12) or of an opening
+// correction (Cash & Bank ruling R15); it is an Opening with a correction that stands (R15); or a reversal of it is on its way, a
+// draft or waiting for approval (the database allows one live reversal of a voucher at a time). Asked of the unlocked read, so a request that cannot succeed is refused before it locks anything, and again of
 // the locked one, where the answer is final: every way into a reversal of this voucher, or into marking it, waits for
 // that lock. A posted voucher never stops being posted, and a mark never comes off (H3).
 const FIN_NOT_POSTED_AS = { draft: 'is still a draft', submitted: 'is waiting for approval', discarded: 'was discarded' };
@@ -799,6 +1052,26 @@ async function finReversalProblem(oc, v) {
   if (v.reversal_of_id != null && (await oc('SELECT voucher_type FROM fin_vouchers WHERE id = $1', [v.reversal_of_id]))?.voucher_type === 'opening') {
     return finError(409, 'FIN_BAD_REVERSAL', 'This reversed the Opening voucher, and it is never reversed itself: that would put the opening back '
       + 'in the books beside whatever replaced it. Build a new opening from the Tally import instead.');
+  }
+  // Ruling R12: the reversal of a cash count's clearing is never reversed itself. Under R9 that would make the clearing live again
+  // while the count (uncleared by the first reversal) stays clearable, and the difference would be booked twice.
+  if (v.reversal_of_id != null && (await oc('SELECT source_type FROM fin_vouchers WHERE id = $1', [v.reversal_of_id]))?.source_type === 'cash_count') {
+    return finError(409, 'FIN_BAD_REVERSAL', "This reversed a cash count's clearing, and it is never reversed itself: that would book the difference twice. "
+      + 'Clear the count again instead.');
+  }
+  // Cash & Bank ruling R15: the reversal of an opening correction, dated the opening day and marked as one, is never reversed itself,
+  // as R45 holds the Opening's own: that would put the correction back in the books as at the opening day, beside whatever Opening
+  // stands then, past the Opening's reversal's check below. The correction is entered again instead.
+  if (v.reversal_of_id != null && v.is_opening_correction === true) {
+    return finError(409, 'FIN_BAD_REVERSAL', 'This reversed an opening correction, and it is never reversed itself: that would put the correction back '
+      + 'in the books as at the opening day. Enter the correction again instead.');
+  }
+  // Cash & Bank ruling R15: the Opening is not reversed while a correction of it stands (FIN_CORRECTION_STANDS_SQL), which would stay
+  // in the books as at the opening day beside the Opening built in its place. Each is reversed, as at that day, or sent back first.
+  // Asked again under the lock of the opening day's journal series (CI-JV-2627-), which every entry, submit, approval and reversal
+  // of a correction takes first, so none slips in between.
+  if (v.voucher_type === 'opening' && await oc(FIN_CORRECTION_STANDS_SQL, [v.book_id])) {
+    return finError(409, 'FIN_BAD_REVERSAL', "Reverse or settle this Opening's corrections first.");
   }
   const coming = await oc(
     `SELECT status, created_by FROM fin_vouchers WHERE reversal_of_id = $1 AND status IN ('draft', 'submitted') ORDER BY id LIMIT 1`, [v.id]);
@@ -833,7 +1106,7 @@ async function finReversalProblem(oc, v) {
 //      through a float.
 //   4. finSubmitVoucher on it. finVoucherCtx locks it (and the series again, which this transaction holds already: a
 //      no-op), and it posts or it waits, as above. A month that is locked, or that comes before the books begin (unless
-//      the original is the Opening voucher), refuses it there, before anything is minted.
+//      the original is the Opening voucher or an opening correction), refuses it there, before anything is minted.
 //   5. The log: `create` on the reversal, then its `post` or `submit` (finSubmitVoucher's), then `reverse` on the
 //      original, with the reason, the original as it was and as it now stands (marked reversed, when the reversal posted).
 //
@@ -848,8 +1121,17 @@ async function finReversalProblem(oc, v) {
 // The Opening voucher is the exception to "today when none is given" (ruling R42): it is reversed as at its own date,
 // the day before the books begin, which is the date it gets when none is given, and any other date is refused (409
 // FIN_BAD_DATE). Reversed later, it would stay in the books until then, beside the opening built in its place, and every
-// balance as at its date would count the opening twice. The database refuses such a reversal too, at COMMIT.
-export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}) {
+// balance as at its date would count the opening twice. The database refuses such a reversal too, at COMMIT. While a
+// correction of it stands it is not reversed at all (Cash & Bank ruling R15, 409 FIN_BAD_REVERSAL).
+// An opening correction is the other (Cash & Bank ruling R15): it is reversed as at its own date, the Opening's, whatever date
+// was asked for, and its reversal is marked as a correction, so the two net to nothing as at that day and the Opening can be
+// rebuilt once each of its corrections is reversed. Its reversal comes under the reversal rule and always waits for an Approver
+// (finSubmitVoucher), and is held to the months after it as the Opening is (rulings R70, R73).
+// An HR entry (finHrOwned: posted from an HR event, or a reversal in the chain of one) is HR's to correct (Cash & Bank spec §7.7): it is
+// refused here, 409 FIN_HR_OWNED, before anything else is judged of it, unless `fromHr` says the HR feed itself is reversing it
+// (finance-hr-feed.js). No route passes `fromHr`, nor `approvedInHr`: the HR approver's approval of the HR action the reversal follows
+// (Cash & Bank spec §7.6; { id, name }), which finSubmitVoucher posts it on at once, as it does any HR entry's.
+export async function finReverseVoucher(qc, oc, id, actor, { date, reason, fromHr = false, approvedInHr = null } = {}) {
   const by = finActing(actor);
   const voucherId = finIdOf(id);
   if (voucherId == null) throw finMissing();
@@ -858,6 +1140,7 @@ export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}
 
   const seen = await oc(`SELECT ${finCols()} FROM fin_vouchers WHERE id = $1`, [voucherId]);
   if (!seen) throw finMissing();
+  if (fromHr !== true && await finHrOwned(oc, seen)) throw finError(409, 'FIN_HR_OWNED');
   let problem = await finReversalProblem(oc, seen);
   if (problem) throw problem;
   if (!why) throw finError(400, 'FIN_REASON_REQUIRED', "Say why the entry is reversed: the reason goes into the reversal's narration.");
@@ -866,7 +1149,9 @@ export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}
     throw finError(409, 'FIN_BAD_DATE', `The Opening voucher is reversed as at its own date, ${seen.voucher_date}, so the books never hold `
       + 'two openings at once. Leave the date out, or give that one.', { field: 'date' });
   }
-  const day = opening ? seen.voucher_date : asked ?? plantDateStr();
+  // Cash & Bank ruling R15: an opening correction is reversed as at its own date, the Opening's, whatever date was asked for, so the
+  // pair nets to nothing as at that day and the Opening can be rebuilt; the reversal carries the correction's mark (the insert below).
+  const day = opening || seen.is_opening_correction === true ? seen.voucher_date : asked ?? plantDateStr();
   if (day < seen.voucher_date) {
     throw finError(409, 'FIN_BAD_DATE',
       `A reversal can't be dated before the entry it reverses: ${seen.number} is dated ${seen.voucher_date}.`, { field: 'date' });
@@ -879,8 +1164,8 @@ export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}
   if (problem) throw problem;
 
   const made = await oc(
-    `INSERT INTO fin_vouchers (book_id, voucher_type, voucher_date, narration, total, reversal_of_id, created_by_id, created_by)
-     SELECT o.book_id, 'journal', $2, $3, o.total, o.id, $4, $5 FROM fin_vouchers o WHERE o.id = $1
+    `INSERT INTO fin_vouchers (book_id, voucher_type, voucher_date, narration, total, reversal_of_id, is_opening_correction, created_by_id, created_by)
+     SELECT o.book_id, 'journal', $2, $3, o.total, o.id, o.is_opening_correction, $4, $5 FROM fin_vouchers o WHERE o.id = $1
      RETURNING ${finCols()}`,
     [orig.id, day, `Reversal of ${orig.number} — ${why}`, by.id, by.name]);
   await qc(
@@ -892,7 +1177,7 @@ export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}
     after: finSnapshot(made, await finLinesOf(qc, made.id)),
   });
 
-  const reversal = await finSubmitVoucher(qc, oc, made.id, actor);
+  const reversal = await finSubmitVoucher(qc, oc, made.id, actor, { approvedInHr });
 
   const lines = await finLinesOf(qc, orig.id);
   const after = await oc(`SELECT ${finCols()} FROM fin_vouchers WHERE id = $1`, [orig.id]);
@@ -909,19 +1194,26 @@ export async function finReverseVoucher(qc, oc, id, actor, { date, reason } = {}
 // and how it stands, and the login's roles on the voucher's book. The server refuses what is not offered here
 // whatever the screen shows (the routes and the functions check it again); this only keeps the buttons honest.
 //   edit, submit   its maker, while it is a draft, holding the right to enter vouchers; never edit an Opening
-//                  voucher or a reversal, which the app builds (ruling R24)
+//                  voucher or a reversal, which the app builds (ruling R24), a cash count's clearing (R13), or an HR
+//                  entry sent back (Cash & Bank spec §7.7: it is corrected in HR)
 //   discard        the same, or a Finance Admin, while it is a draft
 //   approve        an Approver other than its maker, while it is submitted
 //   reject         an Approver, while it is submitted
 //   reverse        anyone who may enter vouchers, once it is posted and not yet reversed, while no reversal of it is on
 //                  its way (`pending_reversal_id`, which finVoucherView reads: a draft, or waiting for approval), unless
-//                  it is the reversal of an Opening voucher (`reversal_of_type`, which finVoucherView reads too: ruling R45)
+//                  it is the reversal of an Opening voucher (`reversal_of_type`, which finVoucherView reads too: ruling R45) or of a cash count's
+//                  clearing (`reversal_of_source`: ruling R12). A cash count's clearing is built, never edited (R13).
+//                  Cash & Bank ruling R15: nor the reversal of an opening correction (a reversal marked as a correction), nor an Opening
+//                  while a correction of it stands (`corrections_standing`, which finVoucherView reads for an Opening).
+//                  Nor an HR entry (Cash & Bank spec §7.7): one posted from an HR event (`source_type` hr_…), or the reversal of one
+//                  (`reversal_of_source`), which is corrected in HR (finReverseVoucher's FIN_HR_OWNED).
 export function finVoucherCan(voucher, userId, roles) {
   const enter = finCan(roles, 'enter');
   const maker = voucher.created_by_id != null && voucher.created_by_id === userId;
   const draft = voucher.status === 'draft';
   const submitted = voucher.status === 'submitted';
-  const built = voucher.voucher_type === 'opening' || voucher.reversal_of_id != null;
+  const built = voucher.voucher_type === 'opening' || voucher.reversal_of_id != null || voucher.source_type === 'cash_count'
+    || finHrSource(voucher.source_type);
   return {
     edit: draft && maker && enter && !built,
     submit: draft && maker && enter,
@@ -929,7 +1221,10 @@ export function finVoucherCan(voucher, userId, roles) {
     approve: submitted && finCan(roles, 'approve') && !maker,
     reject: submitted && finCan(roles, 'approve'),
     reverse: voucher.status === 'posted' && voucher.reversed_by_id == null && voucher.pending_reversal_id == null && enter
-      && voucher.reversal_of_type !== 'opening',
+      && voucher.reversal_of_type !== 'opening' && voucher.reversal_of_source !== 'cash_count'
+      && !(voucher.reversal_of_id != null && voucher.is_opening_correction === true)
+      && !(voucher.voucher_type === 'opening' && voucher.corrections_standing === true)
+      && !finHrSource(voucher.source_type) && !finHrSource(voucher.reversal_of_source),
   };
 }
 
@@ -954,7 +1249,7 @@ export async function finVoucherView(id, req) {
   const voucherId = finIdOf(id);
   if (voucherId == null) throw finMissing();
   const found = await one(
-    `SELECT ${finCols('v')}, ro.number AS reversal_of_number, ro.voucher_type AS reversal_of_type, rb.number AS reversed_by_number
+    `SELECT ${finCols('v')}, ro.number AS reversal_of_number, ro.voucher_type AS reversal_of_type, ro.source_type AS reversal_of_source, rb.number AS reversed_by_number
        FROM fin_vouchers v
        LEFT JOIN fin_vouchers ro ON ro.id = v.reversal_of_id
        LEFT JOIN fin_vouchers rb ON rb.id = v.reversed_by_id
@@ -962,11 +1257,14 @@ export async function finVoucherView(id, req) {
   const grant = found ? (await finAccessOf(req.user?.id)).get(found.book_id) : undefined;
   if (!grant || !finCan(grant.roles, 'view')) throw finMissing();
 
-  const { reversal_of_number, reversal_of_type, reversed_by_number, ...row } = found;
+  const { reversal_of_number, reversal_of_type, reversal_of_source, reversed_by_number, ...row } = found;
   const pending = row.status === 'posted' && row.reversed_by_id == null
     ? await one(`SELECT id FROM fin_vouchers WHERE reversal_of_id = $1 AND status IN ('draft', 'submitted') ORDER BY id LIMIT 1`, [voucherId])
     : null;
   const pending_reversal_id = pending ? pending.id : null;
+  // An Opening that stands is not offered for reversing while a correction of it stands (Cash & Bank ruling R15).
+  const corrections_standing = row.voucher_type === 'opening' && row.status === 'posted' && row.reversed_by_id == null
+    ? (await one(FIN_CORRECTION_STANDS_SQL, [row.book_id])) != null : false;
   const lines = await q(
     `SELECT l.id, l.line_no, l.ledger_id, l.debit, l.credit, l.narration, l.bill_ref, l.bill_date, l.due_date,
             fl.name AS ledger_name, fl.code AS ledger_code
@@ -979,7 +1277,7 @@ export async function finVoucherView(id, req) {
     voucher: { ...finVoucherOut(row), reversal_of_number, reversed_by_number, pending_reversal_id },
     lines: lines.map(l => ({ id: l.id, ...finLineOut(l), ledger_name: l.ledger_name, ledger_code: l.ledger_code })),
     history,
-    can: finVoucherCan({ ...row, pending_reversal_id, reversal_of_type }, req.user?.id, grant.roles),
+    can: finVoucherCan({ ...row, pending_reversal_id, reversal_of_type, reversal_of_source, corrections_standing }, req.user?.id, grant.roles),
   };
 }
 

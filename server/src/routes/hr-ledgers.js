@@ -39,6 +39,28 @@
 //   * A refusal is thrown as an Error with .status and .body = {code}: app.js sends {error, ...body} and nothing
 //     else. A plain 400 / 404 carries no code. Structured bodies are plain consts below.
 //
+// Finance (Cash & Bank spec §7.3, §7.7, §11 items 2 and 3)
+//   * Where the money came from. Pay staff, Give advance, New loan, a loan prepayment ("received into") and an advance
+//     sheet name it as one code, `paid_via`: `cash`, an HR pay channel's code, or `fin:<ledger id>` from Finance's
+//     "paid from" list (GET /hr/paid-from-options, accounts and up: office cash, each holder, the banks HR's channels pay
+//     from). The code is checked against that list in the door's own transaction (paidFromChecked); anything else is
+//     400 "Choose where it was paid from", and nothing is written. It is kept on HR's own row: hr.advance_txns.paid_via,
+//     hr.loans.paid_via with the loan's first hr.loan_txns row, the prepayment's hr.loan_txns row, the sheet. Sent no
+//     code, Pay staff, Give advance, a prepayment and a new sheet take `cash`, as Pay staff always has; a new loan is
+//     refused with the same sentence unless it is an opening balance, which names no account (ruling R46), once Finance
+//     offers accounts to name: while it offers none, or its list cannot be read (finOffersPaidFrom, asked with the pool
+//     before the transaction), a new loan sent none takes `cash` too. HR is never held up by Finance's setup (R47).
+//   * After the commit. A door that moved money names what it made, after its `await tx(...)` has resolved, to
+//     finHrAfter (finance-hr-feed.js), which books it in Finance in transactions of its own, and only then answers:
+//     Pay staff and Give advance their advance (or Pay staff's loan), New loan and Cancel the loan (and Cancel, for a
+//     loan an advance sheet made, that sheet's round: ruling R48), Prepay its
+//     prepayment row, Waive its waiver row, an advance sheet's post its round (the smallest line id it posted), and a
+//     finalised month's corrected instalment that month's run. HR's answer is what it always was, whatever Finance makes
+//     of it (§7.7). Nothing here posts or reverses a Finance entry itself, least of all inside HR's transaction.
+//   * finHrAfter mints Finance's voucher numbers, so each POST door that calls it is in client/src/lib/writeOnce.js
+//     MINTING_POSTS; PUT /hr/loans/:id/month-instalment carries its double-submit answer in its own code instead
+//     (mint-routes-join-once.test.js).
+//
 // Loans (spec §11)
 //   * Interest is stored but must be 0: anything else is 400 INTEREST_NOT_YET.
 //   * Prepayment is at most what is outstanding, and one that brings it to 0 closes the loan (status 'closed').
@@ -88,6 +110,8 @@ import { normCode, normName } from '../hr/match.js';
 import { add, cmp, div, fmtPaise, isNeg, isZero, neg, rat, sub, toPaise } from '../hr/money.js';
 import { assertNameFree, lockNames } from '../hr/names.js';
 import { parseSalaryWorkbook } from '../hr/workbook-loader.js';
+import { finIsPaidFromChoice, finOffersPaidFrom, finPaidFromOptions, finResolvePaidFrom } from '../finance-hr-setup.js';
+import { finHrAfter } from '../finance-hr-feed.js';
 
 const r = Router();
 
@@ -132,6 +156,7 @@ const INSTALMENT_NEEDED = Object.freeze({ code: 'INSTALMENT_NEEDED' });
 const CODE_EXISTS = Object.freeze({ code: 'CODE_EXISTS' });
 const SETUP_EXISTS = Object.freeze({ code: 'SETUP_EXISTS' });
 const UNKNOWN_PAY_CHANNEL = Object.freeze({ code: 'UNKNOWN_PAY_CHANNEL' });
+const SHEET_LINE_POSTED = Object.freeze({ code: 'SHEET_LINE_POSTED' });
 
 const refuse = (status, message, body = {}) => Object.assign(new Error(message), { status, body });
 const bad = (message) => refuse(400, message);
@@ -288,6 +313,60 @@ function groupBy(rows, key) {
   return out;
 }
 
+// ── Where the money came from (Cash & Bank spec §7.3) ───────────────────────
+
+const PAID_FROM_WHY = 'Choose where it was paid from';
+const FIN_CODE = /^fin:([1-9][0-9]{0,9})$/;
+
+// A paid-from code as a door was sent it: the text, with `cash` in any case as `cash`; `fallback` when none was sent.
+function paidViaOf(raw, fallback) {
+  const text = textOf(raw, 'Paid via', 60, true);
+  if (text === null) return fallback;
+  return text.toLowerCase() === CASH ? CASH : text;
+}
+
+// The code, checked in the door's own transaction: `cash`, one of HR's pay channels, or an account on Finance's "paid from"
+// list (finIsPaidFromChoice). Anything else is refused before anything is written.
+async function paidFromChecked(qc, code) {
+  if (!(await finIsPaidFromChoice(qc, code))) throw refuse(400, PAID_FROM_WHY, UNKNOWN_PAY_CHANNEL);
+  return code;
+}
+
+// What a paid-from code reads as, in HR's own notes and on its screens: 'Cash'; a pay channel's label; the account's name as
+// Finance's list labels it (or the ledger's own name, for an account the list no longer offers); else the code as it is (an
+// older loan's free text). `read` answers rows: the pool's q, or a transaction's qc.
+async function paidFromWord(read, code) {
+  if (code == null) return null;
+  if (code === CASH) return 'Cash';
+  const fin = FIN_CODE.exec(code);
+  if (fin) {
+    const offered = (await finPaidFromOptions(read)).find((o) => o.code === code);
+    if (offered) return offered.label;
+    const [ledger] = await read(`SELECT name FROM fin_ledgers WHERE id = $1`, [Number(fin[1])]);
+    return ledger?.name ?? code;
+  }
+  const [channel] = await read(`SELECT code, label FROM hr.pay_channels WHERE code = $1`, [code]);
+  return channel ? channel.label || channel.code : code;
+}
+
+// GET /hr/paid-from-options (accounts and up): where HR's money doors may say money came from, or went into. Finance's "paid
+// from" list (finPaidFromOptions: office cash, each holder, the banks HR's pay channels pay from), one entry per account,
+// { code: 'fin:<ledger id>', label }, each with `channels`, the codes HR stores that pay from that account: its pay channels,
+// and `cash` (the CASH channel's account), so a form can start a channel's payment at that channel's own account. Names of
+// accounts only: no balance, and nothing of any person.
+r.get('/hr/paid-from-options', requireHr('accounts'), async (req, res, next) => {
+  try {
+    const options = (await finPaidFromOptions(q)).map((o) => ({ ...o, channels: [] }));
+    const byCode = new Map(options.map((o) => [o.code, o]));
+    const codes = (await q(`SELECT code FROM hr.pay_channels ORDER BY code`)).map((c) => c.code);
+    for (const code of [...codes, CASH]) {
+      const account = await finResolvePaidFrom(q, code, null);
+      if (account) byCode.get(`fin:${account.ledger_id}`)?.channels.push(code);
+    }
+    res.json({ options });
+  } catch (e) { next(e); }
+});
+
 // ── The locks (finalise's order) ────────────────────────────────────────────
 
 // The person's row, then the person's loans, ascending id: exactly what hr/runs.js finaliseRun takes, in that
@@ -389,7 +468,8 @@ r.get('/hr/loans/:id', requireHr('viewer'), async (req, res, next) => {
     const rows = await q(LOAN_HOLIDAYS, [[id]]);
     const [loan] = await loanViews(q, [row]);
     res.json({
-      loan,
+      // What it was paid out through, as words: a paid-from code (Cash & Bank §7.3) reads as its account's name.
+      loan: { ...loan, paid_via_label: await paidFromWord(q, loan.paid_via) },
       txns: withBalances(row, txns),
       holidays: rows.filter((h) => h.amount === null).map((h) => h.month),
       // Months given their own instalment (2026-11-14): [{month, amount, note}].
@@ -433,14 +513,17 @@ function readNewLoan(body) {
     purpose: textOf(body.purpose, 'The purpose', 200, true),
     instalment,
     firstDue,
-    paidVia: textOf(body.paid_via, 'How it was paid out', 80, true),
+    // A paid-from code (Cash & Bank §7.3), no longer free text: required unless the loan is an opening balance (ruling R46), and
+    // checked by the route, after it has asked whether the person is one the login may pay.
+    paidVia: paidViaOf(body.paid_via, null),
     isOpening: flagOf(body.is_opening, 'Opening loan', false),
     note: textOf(body.note, 'The note', 500),
   };
 }
 
 // Mints the next loan number and writes the loan with its first ledger row: the disbursement, or the opening
-// balance. The number comes FIRST, before anything that could lock a row. The caller audits.
+// balance. The number comes FIRST, before anything that could lock a row. The caller audits. The loan's paid-from
+// code is kept on the loan and on that first row (Cash & Bank §7.3); `paidVia` is checked by the door that took it.
 async function insertLoan(qc, oc, req, loan) {
   const loanNo = await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc);
   if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [loan.personId]))) throw bad('That person does not exist');
@@ -452,11 +535,11 @@ async function insertLoan(qc, oc, req, loan) {
     [loanNo, loan.personId, loan.principal, loan.issuedOn, loan.purpose, loan.instalment, loan.firstDue,
       loan.paidVia, loan.isOpening, loan.note, req.user.id]);
   const first = loan.isOpening ? 'opening' : 'disbursed';
-  const why = loan.isOpening ? 'Opening balance' : loan.paidVia ? `Paid out via ${loan.paidVia}` : 'Loan issued';
+  const why = loan.isOpening ? 'Opening balance' : loan.paidVia ? `Paid out via ${await paidFromWord(qc, loan.paidVia)}` : 'Loan issued';
   await qc(
-    `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-     VALUES ($1, $2::date, $3, $4, $5, $6)`,
-    [made.id, loan.issuedOn, first, loan.principal, why, req.user.id]);
+    `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by, paid_via)
+     VALUES ($1, $2::date, $3, $4, $5, $6, $7)`,
+    [made.id, loan.issuedOn, first, loan.principal, why, req.user.id, loan.paidVia]);
   return made;
 }
 
@@ -465,7 +548,15 @@ r.post('/hr/loans', requireHr('accounts'), async (req, res, next) => {
   try {
     const loan = readNewLoan(bodyOf(req));
     assertPayVisible(req, loan.personId);
+    // Money that went out names where it went out from (ruling R46), once Finance offers accounts to name: while it offers none, or
+    // its list cannot be read, a loan sent none is cash, as every door takes it (ruling R47). An opening balance names none, as it
+    // always has. Asked after the person's visibility, so a person hidden from the login is answered as not there, whatever was sent.
+    if (loan.paidVia === null && !loan.isOpening) {
+      if (await finOffersPaidFrom(q)) throw refuse(400, PAID_FROM_WHY, UNKNOWN_PAY_CHANNEL);
+      loan.paidVia = CASH;
+    }
     const id = await tx(async (qc, oc) => {
+      if (loan.paidVia !== null) await paidFromChecked(qc, loan.paidVia);
       return withImpact(qc, req, [loan.personId], loan.firstDue ?? null, 'A new loan', async () => {
         const made = await insertLoan(qc, oc, req, loan);
         await hrAudit(qc, req, 'loan', made.id, 'create', {
@@ -475,11 +566,13 @@ r.post('/hr/loans', requireHr('accounts'), async (req, res, next) => {
           instalment: money(loan.instalment),
           first_due_month: loan.firstDue,
           issued_on: loan.issuedOn,
+          paid_via: loan.paidVia,
           is_opening: loan.isOpening,
         });
         return made.id;
       });
     });
+    await finHrAfter(req, [{ type: 'loan', id }]);
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
 });
@@ -500,7 +593,7 @@ const loanPersonOf = async (qc, id) => (await qc(`SELECT person_id FROM hr.loans
 // ── Loans: changing ─────────────────────────────────────────────────────────
 
 // Taking money back before payroll does: at most what is outstanding. A prepayment that brings the loan to 0
-// closes it, as a finalise that pays it off does.
+// closes it, as a finalise that pays it off does. `paid_via` is where the money was received into (cash when not sent).
 r.post('/hr/loans/:id/prepay', requireHr('accounts'), async (req, res, next) => {
   try {
     assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
@@ -509,7 +602,9 @@ r.post('/hr/loans/:id/prepay', requireHr('accounts'), async (req, res, next) => 
     const amount = positiveOf(body.amount, 'The prepayment');
     const date = dateOf(body.date, 'The prepayment date') ?? plantDateStr();
     const note = textOf(body.note, 'The note', 500);
-    await tx(async (qc, oc) => {
+    const paidVia = paidViaOf(body.paid_via, CASH);
+    const prepaid = await tx(async (qc, oc) => {
+      await paidFromChecked(qc, paidVia);
       return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'A loan prepayment', async () => {
         const loan = await lockedLoan(qc, oc, id);
         mustBeActive(loan);
@@ -517,20 +612,22 @@ r.post('/hr/loans/:id/prepay', requireHr('accounts'), async (req, res, next) => 
         if (cmp(rat(amount), rat(owed)) > 0) {
           throw bad(`The prepayment (${money(amount)}) is more than the ${owed} still owed on ${loan.loan_no}`);
         }
-        await qc(
-          `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-           VALUES ($1, $2::date, 'prepayment', $3, $4, $5)`,
-          [id, date, amount, note ?? 'Prepayment', req.user.id]);
+        const made = await oc(
+          `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by, paid_via)
+           VALUES ($1, $2::date, 'prepayment', $3, $4, $5, $6) RETURNING id`,
+          [id, date, amount, note ?? 'Prepayment', req.user.id, paidVia]);
         const left = loanOutstanding(loan, await qc(LOAN_TXNS, [[id]]));
         await hrAudit(qc, req, 'loan', id, 'prepay', {
-          loan_no: loan.loan_no, amount: money(amount), date, outstanding_before: owed, outstanding_after: left,
+          loan_no: loan.loan_no, amount: money(amount), date, paid_via: paidVia, outstanding_before: owed, outstanding_after: left,
         });
         if (isZero(rat(left))) {
           await qc(`UPDATE hr.loans SET status = 'closed' WHERE id = $1`, [id]);
           await hrAudit(qc, req, 'loan', id, 'close', { loan_no: loan.loan_no, reason: 'prepaid in full' });
         }
+        return made.id;
       });
     });
+    await finHrAfter(req, [{ type: 'prepay', id: prepaid }]);
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
 });
@@ -712,8 +809,10 @@ r.put('/hr/loans/:id/month-instalment', requireHr('accounts'), async (req, res, 
     if (fin?.month && month <= fin.month) {
       const firstOpen = nextMonth(fin.month);
       let correction = null;
+      let runId = null;
       await tx(async (qc, oc) => withImpact(qc, req, [person], firstOpen, `Correcting ${monthName(month)}'s loan instalment`, async () => {
         const run = await oc(`SELECT * FROM hr.runs WHERE month = $1 FOR UPDATE`, [month]);
+        runId = run?.id ?? null;
         if (!run || run.status !== 'finalised') {
           throw refuse(409, `There is no finalised payroll for ${monthName(month)}, so there is nothing posted to correct`, RUN_FINALISED);
         }
@@ -735,6 +834,9 @@ r.put('/hr/loans/:id/month-instalment', requireHr('accounts'), async (req, res, 
         }
         correction = { ...out, scope };
       }));
+      // The month's posted recoveries and its line changed: its payroll entry follows. What was paid stays as it was (the line's
+      // paid_amount is not touched; a difference after payment is settled in the first open month), so no payment's entry moves.
+      await finHrAfter(req, [{ type: 'run', id: runId }]);
       res.json({ ...(await loanView(id)), change: correction });
       return;
     }
@@ -801,8 +903,8 @@ r.post('/hr/loans/:id/cancel', requireHr('accounts'), async (req, res, next) => 
   try {
     assertPayVisible(req, await loanPersonOf(q, idOf(req.params.id, 'Loan')));
     const id = idOf(req.params.id, 'Loan');
-    await tx(async (qc, oc) => {
-      return withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'Cancelling a loan', async () => {
+    const sheetLine = await tx(async (qc, oc) => {
+      await withImpact(qc, req, [await loanPersonOf(qc, id)], null, 'Cancelling a loan', async () => {
         const loan = await lockedLoan(qc, oc, id);
         mustBeActive(loan);
         const txns = await qc(LOAN_TXNS, [[id]]);
@@ -819,7 +921,11 @@ r.post('/hr/loans/:id/cancel', requireHr('accounts'), async (req, res, next) => 
         await qc(`UPDATE hr.loans SET status = 'cancelled' WHERE id = $1`, [id]);
         await hrAudit(qc, req, 'loan', id, 'cancel', { loan_no: loan.loan_no, reversed: owed });
       });
+      // A loan an advance sheet made is booked with that sheet's posting round, which the line that made it names (ruling R48).
+      return (await oc(`SELECT id FROM hr.advance_sheet_lines WHERE loan_id = $1 ORDER BY id LIMIT 1`, [id]))?.id ?? null;
     });
+    // A cancelled loan holds nothing in HR: the feed reverses its entry, and a sheet's round that made it is posted again without it.
+    await finHrAfter(req, [{ type: 'loan', id }, ...(sheetLine != null ? [{ type: 'sheet', id: sheetLine }] : [])]);
     res.json(await loanView(id));
   } catch (e) { next(refusal(e)); }
 });
@@ -845,11 +951,12 @@ function runningBalances(rows) {
 
 // One row in the advance ledger. `txnType` is the ledger's kind column: given, waived or opening here.
 // forMonth (a 'given' advance, 2026-11-14): the payroll month it is deducted in; null keeps the month of `date`.
-const postAdvance = (oc, req, personId, txnType, amount, date, source, note, forMonth = null) => oc(
-  `INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note, created_by, for_month)
-   VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)
+// paidVia (a 'given' advance, Cash & Bank §7.3): the paid-from code the money left by, kept on the row for Finance.
+const postAdvance = (oc, req, personId, txnType, amount, date, source, note, forMonth = null, paidVia = null) => oc(
+  `INSERT INTO hr.advance_txns (person_id, txn_date, kind, amount, source, note, created_by, for_month, paid_via)
+   VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9)
    RETURNING id, person_id, txn_date::text AS txn_date, kind, amount::text AS amount, source, note, created_by, created_at, for_month`,
-  [personId, date, txnType, amount, source, note, req.user.id, forMonth]);
+  [personId, date, txnType, amount, source, note, req.user.id, forMonth, paidVia]);
 const prevMonthOf = (m) => {
   const [y, mo] = m.split('-').map(Number);
   return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
@@ -884,7 +991,8 @@ r.get('/hr/advances/:personId', requireHr('viewer'), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// "Give advance" in the app: a 'given' row with source 'manual', posted straight away.
+// "Give advance" in the app: a 'given' row with source 'manual', posted straight away. `paid_via`: where it was paid from
+// (cash when not sent, as Pay staff takes it).
 r.post('/hr/advances', requireHr('accounts'), async (req, res, next) => {
   try {
     const body = bodyOf(req);
@@ -894,17 +1002,22 @@ r.post('/hr/advances', requireHr('accounts'), async (req, res, next) => {
     const date = dateOf(body.txn_date ?? body.date, 'The date') ?? plantDateStr();
     const note = textOf(body.note, 'The note', 500);
     const wanted = forMonthOf(body.for_month);
+    const paidVia = paidViaOf(body.paid_via, CASH);
     const out = await tx(async (qc, oc) => {
+      await paidFromChecked(qc, paidVia);
       // The payroll month first: it locks that month's run, before any person row (the run → people order).
       const forMonth = await advanceMonthFor(qc, wanted, date, [personId]);
       return withImpact(qc, req, [personId], forMonth, 'An advance', async () => {
         if (!(await oc(`SELECT id FROM hr.people WHERE id = $1`, [personId]))) throw bad('That person does not exist');
-        const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note, forMonth);
+        const row = await postAdvance(oc, req, personId, 'given', amount, date, MANUAL, note, forMonth, paidVia);
         const balance = (await advanceBalances(qc, [personId])).get(personId);
-        await hrAudit(qc, req, 'advance', personId, 'give', { txn_id: row.id, amount: money(amount), date, for_month: forMonth, balance_after: balance });
+        await hrAudit(qc, req, 'advance', personId, 'give', {
+          txn_id: row.id, amount: money(amount), date, paid_via: paidVia, for_month: forMonth, balance_after: balance,
+        });
         return { ...row, balance };
       });
     });
+    await finHrAfter(req, [{ type: 'advance', id: out.id }]);
     res.json(out);
   } catch (e) { next(refusal(e)); }
 });
@@ -933,6 +1046,7 @@ r.post('/hr/advances/:personId/waive', requireHr('approver'), async (req, res, n
         return { ...row, balance };
       });
     });
+    await finHrAfter(req, [{ type: 'waiver', id: out.id }]);
     res.json(out);
   } catch (e) { next(refusal(e)); }
 });
@@ -940,7 +1054,9 @@ r.post('/hr/advances/:personId/waive', requireHr('approver'), async (req, res, n
 // ── Staff payments: money handed to a person, as an advance or a loan ───────
 //
 // POST /hr/staff-payments (operator) is the Pay staff form's one door. body {person_id, kind (advance or loan), amount,
-// paid_on, paid_via (a pay channel code, or 'cash'), instalments (loan), first_due_month (loan), note}.
+// paid_on, paid_via (a paid-from code: 'cash', a pay channel code, or fin:<ledger id> from Finance's list; 'cash' when
+// not sent), instalments (loan), first_due_month (loan), note}. The code is kept on the advance row, or on the loan and its
+// disbursal, and the advance or loan is named to Finance after the commit (finHrAfter).
 //   * advance  one 'given' row with source 'manual' (exactly MANUAL: payroll nets the month's sheet ADVANCE against
 //              that source), dated paid_on. It is recovered by the payroll of the month containing paid_on, or by
 //              the next open month when that month is already finalised: a run reads balances as at its month end
@@ -990,13 +1106,12 @@ function readStaffPayment(body) {
     kind,
     amount: positiveOf(body.amount, 'The amount'),
     paidOn: dateOf(body.paid_on, 'The date it was given') ?? plantDateStr(),
-    paidVia: textOf(body.paid_via, 'Paid via', 60, true) ?? CASH,
+    paidVia: paidViaOf(body.paid_via, CASH),
     note: textOf(body.note, 'The note', 500),
     instalments: null,
     firstDue: null,
     forMonth: forMonthOf(body.for_month),
   };
-  if (out.paidVia.toLowerCase() === CASH) out.paidVia = CASH;
   if (kind === 'loan') {
     rejectInterest(body);
     out.instalments = instalmentsOf(body.instalments);
@@ -1088,7 +1203,9 @@ r.get('/hr/people/:id/ledger', requireHr('viewer'), async (req, res, next) => {
 
 // Pays one person an advance or a loan inside the caller's transaction — Pay staff, and a bulk advance sheet's
 // posting. `loanNo` is minted by the caller BEFORE any row lock (helpers.js document-number lock order). `via` in
-// the audit says which door it came through. Returns { type, advanceId, loanId, warnings }.
+// the audit says which door it came through. `pay.paidVia` is a paid-from code the door has checked (Pay staff in its
+// own transaction, a sheet when it was made or changed): it is kept on the advance row, or on the loan and its
+// disbursal (Cash & Bank §7.3). Returns { type, advanceId, loanId, warnings }.
 async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payment') {
     // Then the locks every ledger write takes, in finalise's order: the person's row, then the person's loans.
     const person = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`,
@@ -1096,14 +1213,7 @@ async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payme
     if (!person) throw bad('That person does not exist');
     await qc(`SELECT id FROM hr.loans WHERE person_id = $1 ORDER BY id FOR UPDATE`, [pay.personId]);
 
-    let via = 'Cash';
-    if (pay.paidVia !== CASH) {
-      const channel = await oc(`SELECT code, label FROM hr.pay_channels WHERE code = $1`, [pay.paidVia]);
-      if (!channel) {
-        throw refuse(400, `${pay.paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
-      }
-      via = channel.label || channel.code;
-    }
+    const via = pay.viaWord ?? await paidFromWord(qc, pay.paidVia);   // a sheet's post works its word out once, for every line
 
     const warnings = [];
     if (person.status === 'exited') {
@@ -1117,7 +1227,7 @@ async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payme
     if (pay.kind === 'advance') {
       const note = pay.note ? `Paid via ${via} · ${pay.note}` : `Paid via ${via}`;
       const forMonth = pay.forMonth ?? open;
-      const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note, forMonth);
+      const row = await postAdvance(oc, req, pay.personId, 'given', pay.amount, pay.paidOn, MANUAL, note, forMonth, pay.paidVia);
       await refreshPersonLine(qc, req, forMonth, pay.personId, `Advance of ${money(pay.amount)} given for ${monthWord(forMonth)}`);
       const balance = (await advanceBalances(qc, [pay.personId])).get(pay.personId);
       if (pay.wantedMonth && pay.wantedMonth !== forMonth) {
@@ -1147,9 +1257,9 @@ async function postStaffPayment(qc, oc, req, pay, loanNo, viaDoor = 'staff_payme
        RETURNING id, loan_no`,
       [loanNo, pay.personId, pay.amount, pay.paidOn, instalment, firstDue, pay.paidVia, pay.note, req.user.id, pay.purpose ?? null]);
     await qc(
-      `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by)
-       VALUES ($1, $2::date, 'disbursed', $3, $4, $5)`,
-      [made.id, pay.paidOn, pay.amount, `Paid out via ${via}`, req.user.id]);
+      `INSERT INTO hr.loan_txns (loan_id, txn_date, kind, principal_amount, note, created_by, paid_via)
+       VALUES ($1, $2::date, 'disbursed', $3, $4, $5, $6)`,
+      [made.id, pay.paidOn, pay.amount, `Paid out via ${via}`, req.user.id, pay.paidVia]);
     await hrAudit(qc, req, 'loan', made.id, 'create', {
       via: viaDoor, loan_no: made.loan_no, person_id: pay.personId, principal: money(pay.amount),
       instalments: pay.instalments, instalment, first_due_month: firstDue, issued_on: pay.paidOn, paid_via: pay.paidVia,
@@ -1165,6 +1275,8 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
     const out = await tx(async (qc, oc) => {
       // The loan number FIRST, before any row lock (helpers.js document-number lock order).
       const loanNo = pay.kind === 'loan' ? await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc) : null;
+      // Where it was paid from, checked against what the door offers (it reads, and locks nothing).
+      await paidFromChecked(qc, pay.paidVia);
       // An advance's payroll month next: it locks that month's run before the person row (the run → people order).
       if (pay.kind === 'advance') {
         const natural = pay.forMonth ?? prevMonthOf(pay.paidOn.slice(0, 7));
@@ -1180,6 +1292,7 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
       return withImpact(qc, req, [pay.personId], pay.kind === 'advance' ? pay.forMonth : pay.firstDue ?? null,
         pay.kind === 'advance' ? 'An advance' : 'A new loan', () => postStaffPayment(qc, oc, req, pay, loanNo));
     });
+    await finHrAfter(req, [out.type === 'loan' ? { type: 'loan', id: out.loanId } : { type: 'advance', id: out.advanceId }]);
 
     const ledger = await personLedger(q, pay.personId);
     res.json({
@@ -1201,7 +1314,8 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
 //   GET  /hr/advance-sheets/:id                                          viewer+    → the sheet, its lines and the
 //        roster (every active person with the advance owed now and loans outstanding), for the grid
 //   PUT  /hr/advance-sheets/:id/lines {lines:[{person_id, kind, amount, instalments?, purpose?, remarks?}]}
-//        accounts+, a draft only: the sheet's lines become exactly these (a blank or 0 amount drops the person)
+//        accounts+, a draft only: the sheet's lines become exactly these (a blank or 0 amount drops the person); a line
+//        already posted stays as it was posted: dropping or changing it is 409 SHEET_LINE_POSTED (ruling R25)
 //   POST /hr/advance-sheets/:id/submit                                   accounts+  → notifies management
 //   POST /hr/advance-sheets/:id/decide {person_ids, decision:'approved'|'rejected'|'pending', mgmt_remarks?}
 //        approver+, a submitted sheet; 'pending' is the undo
@@ -1209,9 +1323,12 @@ r.post('/hr/staff-payments', requireHr('accounts'), async (req, res, next) => {
 //   POST /hr/advance-sheets/:id/post                                     accounts+  → every approved line becomes
 //        an advance (or a loan) exactly as Pay staff makes it; the sheet is posted, its lines locked
 //   DELETE /hr/advance-sheets/:id                                        accounts+, a draft that nothing was posted from
-// A restricted login (hr/privacy.js) sees, edits, totals and posts only the people whose pay it can see.
+// A restricted login (hr/privacy.js) sees, edits, totals and posts only the people whose pay it can see. A sheet's paid_via
+// is a paid-from code (Cash & Bank §7.3), checked when the sheet is made or changed; every advance and loan a post makes
+// keeps it, and the post names its round to Finance after the commit (finHrAfter).
 const SHEET_STATUSES = ['draft', 'submitted', 'posted'];
 const DECISIONS = ['approved', 'rejected', 'pending'];
+const LINE_PAID_OUT = 'Lines already paid out can\'t be changed.';
 
 const sheetTotals = (lines) => {
   const t = { lines: 0, amount: ZERO_P, advance: ZERO_P, loan: ZERO_P, approved: ZERO_P, approved_lines: 0, rejected_lines: 0, pending_lines: 0 };
@@ -1256,7 +1373,7 @@ async function sheetView(req, id) {
   const [sheet] = await q(`SELECT ${SHEET_COLS} ${SHEET_FROM} WHERE s.id = $1`, [id]);
   if (!sheet) throw missing('Advance sheet');
   const lines = await sheetLines(q, id, hiddenIds(req));
-  return { sheet, lines, totals: sheetTotals(lines) };
+  return { sheet: { ...sheet, paid_via_label: await paidFromWord(q, sheet.paid_via) }, lines, totals: sheetTotals(lines) };
 }
 
 // The date a sheet's advances are paid must fall inside its payroll month: payroll takes an advance up in the month
@@ -1312,14 +1429,11 @@ r.post('/hr/advance-sheets', requireHr('accounts'), async (req, res, next) => {
     const body = bodyOf(req);
     const month = monthOf(body.month, 'The payroll month');
     const paidOn = sheetPaidOn(month, body.paid_on);
-    let paidVia = textOf(body.paid_via, 'Paid via', 60, true) ?? CASH;
-    if (paidVia.toLowerCase() === CASH) paidVia = CASH;
+    const paidVia = paidViaOf(body.paid_via, CASH);
     const note = textOf(body.note, 'The note', 500);
     const id = await tx(async (qc, oc) => {
       const sheetNo = await nextNumber('CI-ADV-', 'hr.advance_sheets', 'sheet_no', oc);
-      if (paidVia !== CASH && !(await oc(`SELECT code FROM hr.pay_channels WHERE code = $1`, [paidVia]))) {
-        throw refuse(400, `${paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
-      }
+      await paidFromChecked(qc, paidVia);
       const made = await oc(
         `INSERT INTO hr.advance_sheets (sheet_no, month, paid_on, paid_via, note, created_by) VALUES ($1, $2, $3::date, $4, $5, $6)
          RETURNING id`, [sheetNo, month, paidOn, paidVia, note, req.user.id]);
@@ -1334,17 +1448,14 @@ r.put('/hr/advance-sheets/:id', requireHr('accounts'), async (req, res, next) =>
   try {
     const id = idOf(req.params.id, 'Advance sheet');
     const body = bodyOf(req);
-    await tx(async (qc, oc) => {
+    await tx(async (qc) => {
       const sheet = await lockSheet(qc, id);
       if (sheet.status !== 'draft') throw sheetState(sheet, 'draft', 'changed');
       const month = blank(body.month) ? sheet.month : monthOf(body.month, 'The payroll month');
       const kept = sheet.paid_on;
       const paidOn = sheetPaidOn(month, blank(body.paid_on) ? (kept >= `${month}-01` ? kept : null) : body.paid_on);
-      let paidVia = blank(body.paid_via) ? sheet.paid_via : textOf(body.paid_via, 'Paid via', 60, true);
-      if (paidVia.toLowerCase() === CASH) paidVia = CASH;
-      if (paidVia !== CASH && !(await oc(`SELECT code FROM hr.pay_channels WHERE code = $1`, [paidVia]))) {
-        throw refuse(400, `${paidVia} is not a pay channel: choose one from the list, or cash`, UNKNOWN_PAY_CHANNEL);
-      }
+      // A code sent is checked against what the door offers now; one kept was checked when it was stored.
+      const paidVia = blank(body.paid_via) ? sheet.paid_via : await paidFromChecked(qc, paidViaOf(body.paid_via, null));
       const note = Object.hasOwn(body, 'note') ? textOf(body.note, 'The note', 500) : sheet.note;
       await qc(`UPDATE hr.advance_sheets SET month = $2, paid_on = $3::date, paid_via = $4, note = $5 WHERE id = $1`,
         [id, month, paidOn, paidVia, note]);
@@ -1388,12 +1499,16 @@ r.put('/hr/advance-sheets/:id/lines', requireHr('accounts'), async (req, res, ne
       for (const l of wanted.values()) {
         const was = before.get(l.personId);
         if (l.drop) {
+          if (was?.posted_at) throw refuse(409, LINE_PAID_OUT, SHEET_LINE_POSTED);
           if (was) { await qc(`DELETE FROM hr.advance_sheet_lines WHERE id = $1`, [was.id]); changed += 1; }
           continue;
         }
         const same = was && was.kind === l.kind && money(was.amount) === money(l.amount) && (was.instalments ?? null) === l.instalments
           && (was.purpose ?? null) === l.purpose && (was.remarks ?? null) === l.remarks;
         if (same) continue;
+        // A posted line made its advance or loan, and Finance booked them with its round: it stays as it was posted (HR's own
+        // rule, a posted sheet's lines are locked, held under partial posting too; ruling R25). Sent again as it stands, it is no change.
+        if (was?.posted_at) throw refuse(409, LINE_PAID_OUT, SHEET_LINE_POSTED);
         // A changed line is decided again: its decision goes back to pending.
         await qc(
           `INSERT INTO hr.advance_sheet_lines (sheet_id, person_id, kind, amount, instalments, purpose, remarks)
@@ -1487,7 +1602,7 @@ r.post('/hr/advance-sheets/:id/send-back', requireHr('approver'), async (req, re
 r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, next) => {
   try {
     const id = idOf(req.params.id, 'Advance sheet');
-    const result = await tx(async (qc, oc) => {
+    const { anchor, ...result } = await tx(async (qc, oc) => {
       const sheet = await lockSheet(qc, id);
       if (sheet.status !== 'submitted') throw sheetState(sheet, 'submitted', 'posted');
       const lines = (await qc(
@@ -1499,6 +1614,7 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
       const loanNos = new Map();
       for (const l of lines) if (l.kind === 'loan') loanNos.set(l.id, await nextNumber('CI-LN-', 'hr.loans', 'loan_no', oc));
       const paidOn = sheet.paid_on;
+      const viaWord = await paidFromWord(qc, sheet.paid_via);
       const warnings = [];
       // Every advance's payroll month BEFORE any person row is locked (the run → people order finalise keeps).
       const forMonths = new Map();
@@ -1508,7 +1624,7 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
       const posted = await withImpact(qc, req, lines.map((l) => l.person_id), sheet.month, `Advance sheet ${sheet.sheet_no}`, async () => {
       for (const l of lines) {
         const pay = {
-          personId: l.person_id, kind: l.kind, amount: money(l.amount), paidOn, paidVia: sheet.paid_via,
+          personId: l.person_id, kind: l.kind, amount: money(l.amount), paidOn, paidVia: sheet.paid_via, viaWord,
           note: [`${sheet.sheet_no} for ${sheet.month}`, l.remarks].filter(Boolean).join(' · '),
           instalments: l.kind === 'loan' ? l.instalments : null,
           firstDue: l.kind === 'loan' ? nextMonth(sheet.month) : null,
@@ -1528,8 +1644,10 @@ r.post('/hr/advance-sheets/:id/post', requireHr('accounts'), async (req, res, ne
       const done = pending.n === 0;
       if (done) await qc(`UPDATE hr.advance_sheets SET status = 'posted', posted_by = $2, posted_at = now() WHERE id = $1`, [id, req.user.id]);
       await hrAudit(qc, req, 'advance_sheet', id, 'post', { posted: lines.length, closed: done });
-      return { posted: lines.length, closed: done, warnings: [...new Set(warnings)] };
+      // The round this post made is named by the smallest id of its lines (rulings R23, R28), never shown to HR's client.
+      return { posted: lines.length, closed: done, warnings: [...new Set(warnings)], anchor: Math.min(...lines.map((l) => l.id)) };
     });
+    await finHrAfter(req, [{ type: 'sheet', id: anchor }]);
     res.json({ ...(await sheetView(req, id)), ...result });
   } catch (e) { next(refusal(e)); }
 });

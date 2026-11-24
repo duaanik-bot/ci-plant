@@ -59,9 +59,13 @@ test('the realtime block names exactly the thirteen finance tables (its %I targe
   assert.deepEqual(names(realtime[0]).sort(), [...FIN_TABLES].sort());
 });
 
-test('init() replays the finance migration as its last statement', () => {
+// The Cash & Bank migration alters the core's tables and replaces its posting check, so it is replayed right after it.
+test('init() replays the finance core migration and then the Cash & Bank one, as its last two statements', () => {
   const db = readFileSync(new URL('./db.js', import.meta.url), 'utf8');
-  assert.match(db, new RegExp(`await pool\\.query\\(migration\\('${files[0]}'\\)\\);\\n\\}`));
+  const cash = readdirSync(DIR).filter(f => f.endsWith('_finance_cash_bank.sql'));
+  assert.equal(cash.length, 1, 'one Cash & Bank migration');
+  const line = file => `await pool\\.query\\(migration\\('${file.replace(/\./g, '\\.')}'\\)\\);`;
+  assert.match(db, new RegExp(`${line(files[0])}\\n(?:[ \\t]*//[^\\n]*\\n)*[ \\t]*${line(cash[0])}\\n\\}`));
 });
 
 // ── The hard stops (spec §7.2, H1–H10). finance-pg-db.test.js proves what they do; these pin their shape. ──

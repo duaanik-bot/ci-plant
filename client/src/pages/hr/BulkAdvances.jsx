@@ -3,14 +3,16 @@
 // owe now (advance and loans), the amount, Advance (default) or Loan with its months and why, and remarks. Submitted,
 // it notifies management, who approve, mark not approved, or undo each line with their own remarks. Posted, every
 // approved line becomes an advance (or loan) exactly as Pay staff makes it, so payroll recovers it. Excel / PDF for
-// management from the table under the grid. Server: routes/hr-ledgers.js /hr/advance-sheets.
+// management from the table under the grid. Server: routes/hr-ledgers.js /hr/advance-sheets. The sheet's "paid via" is an
+// account on Finance's "paid from" list (PaidFromSelect), kept on every advance and loan its post makes.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, CornerUpLeft, Plus, Send, Trash2, X } from 'lucide-react';
-import { Button, DataTable, Field, Input, Modal, Select, useToast } from '../../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, useToast } from '../../components/ui.jsx';
 import { hrApi, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { list, paiseOf, plantMonth, plantToday, shiftMonth } from './RunLineDrawer.jsx';
 import { InlineError, refusalText } from './PersonDrawer.jsx';
+import PaidFromSelect, { paidFromBody, paidFromProblem } from './PaidFromSelect.jsx';
 
 const STATUS = {
   draft: { label: 'Draft', tone: 'bg-[#1D1D1F]/[0.07] text-[#515154]' },
@@ -37,16 +39,18 @@ function Tile({ label, value, sub, tone = '' }) {
   );
 }
 
-function NewSheet({ channels, onClose, onMade }) {
+function NewSheet({ onClose, onMade }) {
   // Last month by default (2026-11-14): advances paid in November are deducted from October's payroll.
   const [month, setMonth] = useState(shiftMonth(plantMonth(), -1));
   const [paidOn, setPaidOn] = useState(plantToday());
-  const [via, setVia] = useState('cash');
+  const [via, setVia] = useState('');   // an account on Finance's list, cash's own to start with
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const make = async () => {
+    const fromProblem = paidFromProblem(via);
+    if (fromProblem) { setError(fromProblem); return; }
     setBusy(true); setError('');
-    try { onMade(await hrApi.createAdvanceSheet({ month, paid_on: paidOn || null, paid_via: via })); } catch (e) { setError(refusalText(e)); } finally { setBusy(false); }
+    try { onMade(await hrApi.createAdvanceSheet({ month, paid_on: paidOn || null, ...paidFromBody('paid_via', via) })); } catch (e) { setError(refusalText(e)); } finally { setBusy(false); }
   };
   return (
     <Modal open onClose={onClose} title="New bulk advance sheet"
@@ -54,9 +58,8 @@ function NewSheet({ channels, onClose, onMade }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Deduct from the payroll of" hint="Last month by default: in November, October's salary is paid."><Input type="month" value={month} onChange={e => setMonth(e.target.value)} /></Field>
         <Field label="Paid on" hint="Today by default; not before that payroll month starts."><Input type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /></Field>
-        <Field label="Paid via">
-          <Select value={via} onChange={e => setVia(e.target.value || 'cash')}
-            options={[{ value: 'cash', label: 'Cash' }, ...list(channels).map(c => ({ value: c.code, label: c.label || c.code }))]} />
+        <Field label="Paid via" required>
+          <PaidFromSelect value={via} onChange={v => { setVia(v); setError(''); }} channelCode="cash" required />
         </Field>
       </div>
       <InlineError message={error} className="mt-3" />
@@ -65,7 +68,7 @@ function NewSheet({ channels, onClose, onMade }) {
 }
 
 // The entry grid. `draft` rows by person id: { kind, amount, instalments, purpose, remarks }.
-function Sheet({ id, level, channels, onBack }) {
+function Sheet({ id, level, onBack }) {
   const toast = useToast();
   const canEnter = levelAtLeast(level, 'accounts');
   const canApprove = levelAtLeast(level, 'approver');
@@ -94,10 +97,13 @@ function Sheet({ id, level, channels, onBack }) {
       && (!onlyEntered || lineBy.has(p.id) || draft.has(p.id)));
   }, [data, q, onlyEntered, lineBy, draft]);
   const inputs = useRef(new Map());
+  // Enter or ↓ to the next person's amount, ↑ to the one before, stepping over a box that can't be changed (a line paid out).
   const nextAmount = (pid, dir = 1) => {
     const order = people.map(p => p.id);
-    const at = order.indexOf(pid) + dir;
-    if (at >= 0 && at < order.length) inputs.current.get(order[at])?.focus();
+    for (let at = order.indexOf(pid) + dir; at >= 0 && at < order.length; at += dir) {
+      const el = inputs.current.get(order[at]);
+      if (el && !el.disabled) { el.focus(); return; }
+    }
   };
   const save = async () => {
     setBusy('save');
@@ -148,7 +154,7 @@ function Sheet({ id, level, channels, onBack }) {
         <Button size="sm" variant="ghost" onClick={onBack}><ArrowLeft size={14} /> All sheets</Button>
         <h3 className="text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">{sheet.sheet_no} · advances for {monthLabel(sheet.month)}</h3>
         <Pill meta={STATUS[sheet.status] || STATUS.draft} />
-        <span className="text-xs text-[#6E6E73]">paid on {sheet.paid_on} · {sheet.paid_via === 'cash' ? 'Cash' : (list(channels).find(c => c.code === sheet.paid_via)?.label || sheet.paid_via)}</span>
+        <span className="text-xs text-[#6E6E73]">paid on {sheet.paid_on} · {sheet.paid_via_label || sheet.paid_via}</span>
         <span className="ml-auto flex flex-wrap gap-1.5">
           {isDraft && canEnter && <Button size="sm" variant="secondary" disabled={!draft.size || !!busy} onClick={save}>{busy === 'save' ? 'Saving…' : `Save${draft.size ? ` (${draft.size})` : ''}`}</Button>}
           {isDraft && canEnter && (
@@ -208,11 +214,20 @@ function Sheet({ id, level, channels, onBack }) {
               const v = valueOf(p.id);
               const line = lineBy.get(p.id);
               const changed = draft.has(p.id);
-              const edit = isDraft && canEnter;
+              // A posted line is paid out: its advance or loan is made, and the server refuses to change or drop it (ruling R25), so here
+              // it is read-only, marked so, and never in the draft a save sends (ruling R74), even on a sheet sent back to draft.
+              const paidOut = Boolean(line?.posted_at);
+              const edit = isDraft && canEnter && !paidOut;
               const dec = line?.decision || 'pending';
               return (
                 <tr key={p.id} className={`ci-table-row ${changed ? 'bg-[#E1EFFF]/50' : line ? '' : 'opacity-80'}`}>
-                  <td className="px-2 py-1.5"><div className="font-semibold text-[#1D1D1F]">{p.name}</div><div className="text-[10px] text-[#86868B]">{p.code}{p.department ? ` · ${p.department}` : ''}</div></td>
+                  <td className="px-2 py-1.5">
+                    <div className="font-semibold text-[#1D1D1F]">
+                      {p.name}
+                      {paidOut && <span className="ml-1.5 whitespace-nowrap rounded-full bg-emerald-100 px-1.5 py-px text-[10px] font-bold text-emerald-800" title="Paid out: this line can't be changed">paid out</span>}
+                    </div>
+                    <div className="text-[10px] text-[#86868B]">{p.code}{p.department ? ` · ${p.department}` : ''}</div>
+                  </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{inr2(p.advance_balance)}</td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{inr2(p.loans_outstanding)}</td>
                   <td className="px-2 py-1.5 w-[110px]">
@@ -282,7 +297,7 @@ function Sheet({ id, level, channels, onBack }) {
   );
 }
 
-export default function BulkAdvances({ level, channels }) {
+export default function BulkAdvances({ level }) {
   const [params, setParams] = useSearchParams();
   const open = params.get('sheet');
   const setOpen = id => setParams(p => { const n = new URLSearchParams(p); if (id) n.set('sheet', String(id)); else n.delete('sheet'); return n; }, { replace: true });
@@ -296,7 +311,7 @@ export default function BulkAdvances({ level, channels }) {
     hrApi.advanceSheets().then(d => { if (live) setSheets(list(d)); }, e => { if (live) setError(refusalText(e)); });
     return () => { live = false; };
   }, [open]);
-  if (open) return <Sheet id={open} level={level} channels={channels} onBack={() => setOpen(null)} />;
+  if (open) return <Sheet id={open} level={level} onBack={() => setOpen(null)} />;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -323,7 +338,7 @@ export default function BulkAdvances({ level, channels }) {
           ))}
         </div>
       )}
-      {making && <NewSheet channels={channels} onClose={() => setMaking(false)} onMade={d => { setMaking(false); setOpen(d.sheet.id); }} />}
+      {making && <NewSheet onClose={() => setMaking(false)} onMade={d => { setMaking(false); setOpen(d.sheet.id); }} />}
     </div>
   );
 }

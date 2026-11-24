@@ -34,7 +34,9 @@
 import { finAudit } from './finance-audit.js';
 import { finCreateYear } from './finance-setup.js';
 import { finError } from './finance-errors.js';
+import { finGroupKinds } from './finance-vouchers.js';   // a cycle (it imports finIdOf from here): each uses the other inside functions only
 import { finMonthsOfFy } from '../../client/src/lib/finance/fy.js';
+import { FIN_MAX_PAISE, finFromPaise, finToPaise } from '../../client/src/lib/finance/money.js';
 import { finPeriodMove, finPeriodMoves } from '../../client/src/lib/finance/periods.js';
 import { optionalText } from './helpers.js';
 
@@ -48,7 +50,7 @@ const FIN_FIRST_YEAR = 2000;     // the year a financial year starts in, as its 
 const FIN_LAST_YEAR = 2099;
 
 const FIN_GROUP_COLS = 'id, book_id, parent_id, name, nature, affects_gross_profit, is_system, sort_order';
-const FIN_LEDGER_COLS = 'id, book_id, group_id, name, code, tally_name, party_type, party_id, manual_entry, is_system, active, notes';
+const FIN_LEDGER_COLS = 'id, book_id, group_id, name, code, tally_name, party_type, party_id, manual_entry, is_system, active, notes, holder_name, float_amount';
 const FIN_PERIOD_COLS = 'id, book_id, year_id, month_no, label, start_date, end_date, status, status_changed_by, status_changed_at';
 
 const FIN_PARTY_TYPES = ['customer', 'vendor'];
@@ -255,12 +257,44 @@ export async function finDeleteGroup(qc, oc, id, actor) {
   await finAudit(qc, { bookId: group.book_id, entity: 'group', entityId: groupId, action: 'delete', userId: by.id, userName: by.name, before: group });
 }
 
+// ── A cash holder (Cash & Bank spec §5.4) ───────────────────────────────────────────────────
+
+// A ledger as the API says it: the float is whole paise (float_paise), never the table's NUMERIC (float_amount), and null without one.
+function finLedgerOut(row) {
+  const { float_amount, ...rest } = row;
+  return { ...rest, float_paise: float_amount == null ? null : finToPaise(float_amount) };
+}
+
+// A holder's name and float as a person sends them: holder_name text or nothing, float_paise a whole number of paise or nothing.
+// Blank means none. Returns only the fields that were sent: { holder_name?, float_paise? }.
+function finHolderInput(edit) {
+  const out = {};
+  if (edit.holder_name !== undefined) out.holder_name = finOptionalText(edit.holder_name, 'holder_name', FIN_NAME_MAX);
+  if (edit.float_paise !== undefined) {
+    const p = edit.float_paise;
+    if (p !== null && !(Number.isSafeInteger(p) && p >= 0 && p < FIN_MAX_PAISE)) {
+      throw finBad('The float is a whole number of paise, nothing or more, or none.', 'float_paise');
+    }
+    out.float_paise = p;
+  }
+  return out;
+}
+
+// The holder fields a ledger ends up with, judged whole: a holder (or a float) is for a ledger under Cash-in-Hand only (409
+// FIN_HOLDER_NOT_CASH), and a float needs a holder's name (400 FIN_BAD_INPUT). `holder_name` and `float_paise` are the final values.
+async function finHolderProblem(qc, bookId, groupId, holder_name, float_paise) {
+  if (float_paise != null && holder_name == null) throw finBad("A float is kept with someone: give the holder's name.", 'float_paise');
+  if (holder_name == null && float_paise == null) return;
+  const kind = (await finGroupKinds(qc, bookId)).get(groupId)?.account_kind ?? null;
+  if (kind !== 'cash') throw finError(409, 'FIN_HOLDER_NOT_CASH', undefined, { field: holder_name != null ? 'holder_name' : 'float_paise' });
+}
+
 // ── Ledgers ──────────────────────────────────────────────────────────────────────────────────
 
 // A new ledger, under a group of the same book. It starts active and open to hand-typed vouchers: switching
 // either off, and making it a system ledger, is not something a new ledger is born with (finUpdateLedger).
 // A party ledger keeps the name it has in Tally and is linked to the ERP's customer or vendor beside it.
-export async function finCreateLedger(qc, oc, { book_id, group_id, name, code, tally_name, party_type, party_id, notes } = {}, actor) {
+export async function finCreateLedger(qc, oc, { book_id, group_id, name, code, tally_name, party_type, party_id, notes, holder_name, float_paise } = {}, actor) {
   const by = finWho(actor);
   const bookId = finIdOf(book_id);
   if (bookId == null) throw finBad('Say which book this ledger is for.', 'book_id');
@@ -273,14 +307,18 @@ export async function finCreateLedger(qc, oc, { book_id, group_id, name, code, t
     notes: finOptionalText(notes, 'notes', FIN_NOTES_MAX),
   };
   const party = finPartyOf(party_type, party_id);
+  const holder = finHolderInput({ holder_name, float_paise });
 
   await finGroupInBook(oc, groupId, bookId, 'group_id');
   if (party.party_type) await finPartyMustExist(oc, party);
-  const ledger = await oc(
-    `INSERT INTO fin_ledgers (book_id, group_id, name, code, tally_name, party_type, party_id, notes, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  await finHolderProblem(qc, bookId, groupId, holder.holder_name ?? null, holder.float_paise ?? null);
+  const row = await oc(
+    `INSERT INTO fin_ledgers (book_id, group_id, name, code, tally_name, party_type, party_id, notes, holder_name, float_amount, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11)
      RETURNING ${FIN_LEDGER_COLS}`,
-    [bookId, groupId, clean, text.code, text.tally_name, party.party_type, party.party_id, text.notes, by.name]);
+    [bookId, groupId, clean, text.code, text.tally_name, party.party_type, party.party_id, text.notes,
+      holder.holder_name ?? null, holder.float_paise == null ? null : finFromPaise(holder.float_paise), by.name]);
+  const ledger = finLedgerOut(row);
   await finAudit(qc, { bookId, entity: 'ledger', entityId: ledger.id, action: 'create', userId: by.id, userName: by.name, after: ledger });
   return ledger;
 }
@@ -300,8 +338,9 @@ export async function finUpdateLedger(qc, oc, id, fields, actor, { isAdmin = fal
   if (ledgerId == null) throw finMissing();
   const edit = fields ?? {};
 
-  const before = await oc(`SELECT ${FIN_LEDGER_COLS} FROM fin_ledgers WHERE id = $1 FOR NO KEY UPDATE`, [ledgerId]);
-  if (!before) throw finMissing();
+  const beforeRow = await oc(`SELECT ${FIN_LEDGER_COLS} FROM fin_ledgers WHERE id = $1 FOR NO KEY UPDATE`, [ledgerId]);
+  if (!beforeRow) throw finMissing();
+  const before = finLedgerOut(beforeRow);
 
   if (!isAdmin) {
     for (const key of FIN_ADMIN_FIELDS) {
@@ -314,6 +353,8 @@ export async function finUpdateLedger(qc, oc, id, fields, actor, { isAdmin = fal
   if (edit.code !== undefined) next.code = finOptionalText(edit.code, 'code', FIN_CODE_MAX);
   if (edit.tally_name !== undefined) next.tally_name = finOptionalText(edit.tally_name, 'tally_name', FIN_NAME_MAX);
   if (edit.notes !== undefined) next.notes = finOptionalText(edit.notes, 'notes', FIN_NOTES_MAX);
+  // A holder and a float are text-like, the accountant's (spec §5.4); they are judged below, once the group is known.
+  const holder = finHolderInput(edit);
   if (isAdmin) {
     if (edit.group_id !== undefined) {
       const groupId = finIdOf(edit.group_id);
@@ -328,6 +369,14 @@ export async function finUpdateLedger(qc, oc, id, fields, actor, { isAdmin = fal
     }
   }
   const changes = Object.fromEntries(Object.entries(next).filter(([key, value]) => value !== before[key]));
+  const holderName = holder.holder_name !== undefined ? holder.holder_name : before.holder_name;
+  const floatPaise = holder.float_paise !== undefined ? holder.float_paise : before.float_paise;
+  if (holderName !== before.holder_name) changes.holder_name = holderName;
+  if (floatPaise !== before.float_paise) changes.float_amount = floatPaise == null ? null : finFromPaise(floatPaise);
+  // Clearing the holder's name takes the float with it: a float is the holder's.
+  if (holderName == null && before.float_paise != null && holder.float_paise === undefined) {
+    throw finBad('A float is kept with someone: clear the float too, or keep the holder.', 'float_paise');
+  }
 
   if (before.is_system && ('group_id' in changes || changes.active === false)) {
     throw finBad("A built-in ledger can't be moved or switched off.");
@@ -336,9 +385,14 @@ export async function finUpdateLedger(qc, oc, id, fields, actor, { isAdmin = fal
   if (('party_type' in changes || 'party_id' in changes) && next.party_type) await finPartyMustExist(oc, next);
 
   if (Object.keys(changes).length === 0) return before;
-  const after = await oc(
+  // Judged on what the ledger will be: a holder moved out of Cash-in-Hand is refused, as is one set on a ledger that is not under it.
+  if ('holder_name' in changes || 'float_amount' in changes || 'group_id' in changes) {
+    await finHolderProblem(qc, before.book_id, changes.group_id ?? before.group_id, holderName, floatPaise);
+  }
+  const row = await oc(
     `UPDATE fin_ledgers SET ${[...finSets(changes), 'updated_at = now()'].join(', ')} WHERE id = $1 RETURNING ${FIN_LEDGER_COLS}`,
     [ledgerId, ...Object.values(changes)]);
+  const after = finLedgerOut(row);
   await finAudit(qc, { bookId: after.book_id, entity: 'ledger', entityId: ledgerId, action: 'edit', userId: by.id, userName: by.name, before, after });
   return after;
 }

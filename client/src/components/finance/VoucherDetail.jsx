@@ -77,12 +77,16 @@ export function ReasonDialog({ title, intro, label = 'Reason', confirmLabel, onS
 }
 
 // Reversing a posted voucher: a date and a reason. The reversal cannot be dated before the voucher it undoes (ruling R28), and
-// an Opening voucher is reversed as at its own date, which is shown and not asked for (ruling R42).
+// an Opening voucher is reversed as at its own date, which is shown and not asked for (ruling R42). So is an opening correction
+// (Cash & Bank ruling R15): it is reversed on the opening day whatever day is asked for, so the pair nets to nothing there; the
+// day it is reversed on is what is sent.
 function ReverseDialog({ voucher, onClose, onDone, onFailed }) {
   const noAnswer = useNoAnswer();
   const opening = voucher.voucher_type === 'opening';
+  const correction = voucher.is_opening_correction === true;
+  const fixedDay = opening || correction;
   const today = dayOf(new Date());
-  const [date, setDate] = useState(opening || today < voucher.voucher_date ? voucher.voucher_date : today);
+  const [date, setDate] = useState(fixedDay || today < voucher.voucher_date ? voucher.voucher_date : today);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [problems, setProblems] = useState({});
@@ -109,10 +113,12 @@ function ReverseDialog({ voucher, onClose, onDone, onFailed }) {
         A reversal is a new entry that mirrors this one with every debit and credit swapped. This voucher stays in the books, marked reversed.
       </p>
       <div className="space-y-3">
-        {opening ? (
+        {fixedDay ? (
           <p className="rounded-xl bg-[#1D1D1F]/[0.04] px-3 py-2 text-sm">
             <span className="font-semibold">Date: {finDateText(voucher.voucher_date)}</span>
-            <span className="block text-xs text-gray-500">An Opening voucher is reversed as at its own date, so the books never hold two openings at once.</span>
+            <span className="block text-xs text-gray-500">
+              {correction ? 'A correction is reversed on the opening day.' : 'An Opening voucher is reversed as at its own date, so the books never hold two openings at once.'}
+            </span>
           </p>
         ) : (
           <Field label="Date of the reversal" required hint={`Not before ${finDateText(voucher.voucher_date)}, the date of the voucher.`}>

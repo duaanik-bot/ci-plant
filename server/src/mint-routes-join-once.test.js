@@ -43,6 +43,33 @@ const TEMPLATE_MINTING = [
   ] },
 ];
 
+// A route the scan reads that mints and is not a POST: the client never joins it either, so its double-submit answer lives on the
+// server too, and each `answer` pattern must hold in that route's own code (its block), checked below. Today these are the HR doors
+// that tell Finance what they did (Cash & Bank plan Task 12, ruling R35): their only minting is finHrAfter, which books Finance's
+// entries for the HR rows a request changed, after HR's commit, and whose second post of the same event books nothing (it answers
+// `already`: H8's unique index, the HR feed's own tests). So a second copy books nothing when the route itself turns a repeated change
+// away or repeats it as a no-op:
+//   • the line drawer's PUT reads the line under its lock, and no status may follow itself (paid → paid, failed → failed, reversed →
+//     reversed are refused, 409), so a second copy finds the first one's work done and is refused before Finance is told anything;
+//   • the month-instalment PUT of a finalised month locks the month's run and SETS the month's instalment (and, onward, the loan's) to
+//     an amount, never moves it by one: a second copy asks for what is already there, the correction changes nothing, and the run's
+//     entry stands as it is (`already`).
+const SCANNED_ANSWERS = {
+  'PUT /hr/runs/:month/lines/:personId/payment': [
+    /WHERE run_id = \$1 AND person_id = \$2 FOR UPDATE`, \[run\.id, personId\]\);/,
+    /const allowed = \{ paid: \['pending', 'failed', 'reversed'\], failed: \['pending', 'paid'\], reversed: \['paid'\] \}\[status\];/,
+    /if \(!allowed\.includes\(from\)\) \{\s*throw fail\(409, /,
+  ],
+  'PUT /hr/loans/:id/month-instalment': [
+    /const run = await oc\(`SELECT \* FROM hr\.runs WHERE month = \$1 FOR UPDATE`, \[month\]\);/,
+    /const dry = body\.confirm_finalised !== true;/,
+    /correctFinalisedInstalment\(qc, req, \{ run, loanId: id, personId: person, amount, note, firstOpen, dry \}\)/,
+    /await qc\(`UPDATE hr\.loans SET instalment = \$2 WHERE id = \$1`, \[id, money\(amount\)\]\);/,
+  ],
+};
+// The one minter these routes may call: the answer above holds only while it is the feed's.
+const SCANNED_ANSWER_MINTER = 'finHrAfter';
+
 const strip = src => src
   .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ''))
   .replace(/^[ \t]*\/\/.*$/gm, '');
@@ -90,7 +117,10 @@ function mintingRoutes() {
   const { files, mintsIn } = scan();
   return [...files.flatMap(f => f.blocks
     .filter(b => b.route && b.verb !== 'get' && mintsIn(b.body))
-    .map(b => ({ verb: b.verb.toUpperCase(), route: b.route, rel: f.rel }))), ...TEMPLATE_MINTING];
+    .map(b => {
+      const key = `${b.verb.toUpperCase()} ${b.route}`;
+      return { verb: b.verb.toUpperCase(), route: b.route, rel: f.rel, ...(SCANNED_ANSWERS[key] ? { answer: SCANNED_ANSWERS[key] } : {}) };
+    })), ...TEMPLATE_MINTING];
 }
 
 // Every write route the app actually serves, read off the routers themselves.
@@ -176,6 +206,25 @@ test('the masters.js template mints only for products, only in the routes listed
       `${t.verb} ${t.route} no longer runs a product on a transaction`);
     for (const re of t.answer || [])
       assert.match(body, re, `${t.verb} ${t.route} lost part of its double-submit answer`);
+  }
+});
+
+// What lets a scanned non-POST minting route stand without the client's join: SCANNED_ANSWERS. Each entry names a route the scan
+// reports as minting (a stale entry would excuse nothing and hide a rename), each pattern holds in that route's own code, and the
+// only minter the route calls is finHrAfter, whose repeat of the same event books nothing.
+test('a scanned minting route that is not a POST carries its double-submit answer in its own code, and mints only through finHrAfter', () => {
+  const { files, minting } = scan();
+  const reported = new Set(mintingRoutes().filter(r => r.rel !== TEMPLATE_FILE).map(r => `${r.verb} ${r.route}`));
+  assert.ok(minting.has(SCANNED_ANSWER_MINTER), `${SCANNED_ANSWER_MINTER} no longer mints: re-read why these routes need an answer`);
+  for (const [key, patterns] of Object.entries(SCANNED_ANSWERS)) {
+    assert.ok(reported.has(key), `${key} is given an answer, but the scan does not report it as minting`);
+    const [verb, route] = key.split(' ');
+    const blocks = files.flatMap(f => f.blocks.filter(b => b.route === route && b.verb === verb.toLowerCase()));
+    assert.equal(blocks.length, 1, `${key} is written once`);
+    const body = blocks[0].body;
+    for (const re of patterns) assert.match(body, re, `${key} lost part of its double-submit answer`);
+    const minters = [...minting].filter(n => calls(body, n));
+    assert.deepEqual(minters, [SCANNED_ANSWER_MINTER], `${key} mints through something other than ${SCANNED_ANSWER_MINTER}`);
   }
 });
 

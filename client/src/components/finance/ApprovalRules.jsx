@@ -1,6 +1,8 @@
 // ApprovalRules: Setup's fourth tab (spec §6.8, §7.3, §10). Props: { book, can }.
 //
-// The book's ten rules, one for each kind of entry and one for reversals: when an Approver is needed before an entry posts.
+// The book's rules, one for each kind of entry, one for reversals and one for clearing a cash count's difference (Cash & Bank spec
+// §5.5, §8; labelled "Cash count differences"): when an Approver is needed before an entry posts. Under the Opening's rule a line says
+// that an opening correction always needs an Approver, whatever that rule is set to (Cash & Bank spec §9.4: finSubmitVoucher).
 //   Always         every entry of the kind waits for an Approver
 //   Above a limit  only an entry whose total is more than the limit waits
 //   Never          an entry of the kind posts as soon as it is submitted
@@ -20,7 +22,9 @@ import { FieldError } from './SetupParts.jsx';
 import useFormWrite from './useFormWrite.js';
 import useReport from './useReport.js';
 import { finUnsorted } from '../../lib/finance/reports.js';
-import { FIN_RULE_MODES, finRuleBody, finRuleChanged, finRuleFormOf, finRuleLabel, finRuleText, finSetupEmpty } from '../../lib/finance/setup.js';
+import {
+  FIN_RULE_MODES, finRuleBody, finRuleChanged, finRuleFormOf, finRuleLabel, finRuleNote, finRuleText, finSetupEmpty,
+} from '../../lib/finance/setup.js';
 
 function RuleForm({ rule, onClose, onSaved, onFailed }) {
   const toast = useToast();
@@ -84,7 +88,12 @@ export default function ApprovalRules({ book, can }) {
   const mayEdit = can('admin');
 
   const columns = finUnsorted([
-    { key: 'rule_key', label: 'Entry', card: 'title', render: r => <span className="font-semibold">{finRuleLabel(r.rule_key)}</span> },
+    { key: 'rule_key', label: 'Entry', card: 'title', render: r => (
+      <span>
+        <span className="font-semibold">{finRuleLabel(r.rule_key)}</span>
+        {finRuleNote(r.rule_key) && <span className="block text-xs font-normal text-slate-500">{finRuleNote(r.rule_key)}</span>}
+      </span>
+    ) },
     { key: 'mode', label: 'An Approver is needed', card: 'metric', render: r => finRuleText(r) },
     { key: 'updated_by', label: 'Last changed', card: 'detail', render: r => (r.updated_by ? `${r.updated_by} · ${fmt.dt(r.updated_at)}` : '') },
     { key: '_actions', label: '', card: 'actions', render: r => (mayEdit

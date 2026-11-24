@@ -92,6 +92,7 @@ const NAV = [
   {
     group: 'Finance',
     items: [
+      { label: 'Cash & Bank', to: '/finance/cash', icon: Wallet, roles: ['admin'], module: 'finance' },
       { label: 'Vouchers', to: '/finance', end: true, icon: BookOpenCheck, roles: ['admin'], module: 'finance' },
       { label: 'Reports', to: '/finance/reports', icon: FileSpreadsheet, roles: ['admin'], module: 'finance' },
       { label: 'Setup', to: '/finance/setup', icon: SlidersHorizontal, roles: ['admin'], module: 'finance' },
@@ -715,7 +716,7 @@ const SHORT_LABEL = {
   '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
   '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
   '/shade-cards': 'Shades', '/hr': 'HR', '/coa-register': 'COAs', '/costing': 'Costing',
-  '/finance/reports': 'Fin Rpts', '/finance/setup': 'Fin Setup',
+  '/finance/reports': 'Fin Rpts', '/finance/setup': 'Fin Setup', '/finance/cash': 'Cash',
 };
 
 // Phone bottom tab bar — the app's primary navigation on a handset. 64px of

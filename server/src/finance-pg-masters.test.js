@@ -181,7 +181,8 @@ test('a ledger keeps its code, Tally name and notes; the ledgers read returns no
   assert.equal(a.status, 200);
   assert.deepEqual([a.body.ledger.code, a.body.ledger.tally_name, a.body.ledger.notes], ['GS-01', 'Gamma Stores Pvt Ltd', 'Pays on the 10th']);
   assert.deepEqual(Object.keys(a.body.ledger).sort(), [
-    'active', 'book_id', 'code', 'group_id', 'id', 'is_system', 'manual_entry', 'name', 'notes', 'party_id', 'party_type', 'tally_name']);
+    'active', 'book_id', 'code', 'float_paise', 'group_id', 'holder_name', 'id', 'is_system', 'manual_entry', 'name', 'notes', 'party_id', 'party_type',
+    'tally_name']);
   const row = (await ledgersOf(CI)).find(x => x.id === a.body.ledger.id);
   assert.equal(row.notes, 'Pays on the 10th');
   await refused(add('Gamma Stores Two', { code: 'GS-01' }), 409, 'FIN_DUPLICATE_CODE');

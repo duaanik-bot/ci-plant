@@ -53,7 +53,7 @@ test('setup creates both books once, and a second run creates nothing', gate, as
       (SELECT COUNT(*)::int FROM fin_audit_log) audit`);
     const c1 = await count();
     const grantRows = FIN_TEST_GRANTS.reduce((n, g) => n + g.books.length, 0);   // the unknown email adds none
-    assert.deepEqual([c1.books, c1.groups, c1.ledgers, c1.rules, c1.periods, c1.access], [2, 58, 4, 20, 24, grantRows]);
+    assert.deepEqual([c1.books, c1.groups, c1.ledgers, c1.rules, c1.periods, c1.access], [2, 58, 4, 22, 24, grantRows]);
     assert.ok(c1.audit >= 2 + grantRows, 'one setup row per book and one per grant');
     const be = await h.db.q(`SELECT b.code, e.name FROM fin_books b JOIN billing_entities e ON e.id = b.billing_entity_id ORDER BY b.code`);
     assert.deepEqual(be.map(r => [r.code, r.name]), [['CI', 'Colour Impressions'], ['DP', 'Darbi Print Pack']]);
@@ -147,12 +147,13 @@ test('setup in detail: what it writes, what it refuses, and what a re-run leaves
       const expected = {
         journal: ['always', null], opening: ['always', null], reversal: ['always', null], credit_note: ['always', null],
         debit_note: ['always', null], payment: lakh, contra: lakh, receipt: ['never', null], sales: ['never', null], purchase: ['never', null],
+        cash_difference: ['always', null],
       };
       for (const code of ['CI', 'DP']) {
         const rows = await q(`SELECT r.rule_key, r.mode, r.limit_amount::text AS lim, r.updated_by FROM fin_approval_rules r
                                 JOIN fin_books b ON b.id = r.book_id WHERE b.code = $1`, [code]);
         assert.deepEqual(Object.fromEntries(rows.map(r => [r.rule_key, [r.mode, r.lim]])), expected, code);
-        assert.equal(rows.length, 10);
+        assert.equal(rows.length, 11);
         assert.ok(rows.every(r => r.updated_by === 'system (go-live)'));
       }
     });
@@ -204,7 +205,7 @@ test('setup in detail: what it writes, what it refuses, and what a re-run leaves
       assert.equal(setup.entity_id, ci);
       assert.deepEqual(setup.after, {
         code: 'CI', name: 'Colour Impressions', billing_entity_id: entity, books_begin: '2027-01-01',
-        groups: 29, ledgers: 2, rules: 10, year: '2026-27', periods: 12,
+        groups: 29, ledgers: 2, rules: 11, year: '2026-27', periods: 12,
       });
       const year = rows.find(r => r.entity === 'year' && r.code === 'CI');
       assert.deepEqual(year.after, { label: '2026-27', short: '2627', start_date: '2026-04-01', end_date: '2027-03-31', before_books: 9, open: 3 });
@@ -397,7 +398,7 @@ test('the script writes with --apply, then adds nothing on a re-run, and grants 
     const c1 = await counts();
     const every = finSetupGrants(ACCOUNTS_EMAIL);
     const grantRows = every.reduce((n, g) => n + g.books.length, 0);
-    assert.deepEqual({ ...c1 }, { books: 2, groups: 58, ledgers: 4, rules: 20, periods: 24, access: grantRows, audit: c1.audit });
+    assert.deepEqual({ ...c1 }, { books: 2, groups: 58, ledgers: 4, rules: 22, periods: 24, access: grantRows, audit: c1.audit });
     const grants = await h.db.q(`SELECT u.email, b.code, a.roles, a.can_export, a.granted_by FROM fin_access a
                                    JOIN users u ON u.id = a.user_id JOIN fin_books b ON b.id = a.book_id`);
     const byKey = (a, b) => `${a[0]} ${a[1]}`.localeCompare(`${b[0]} ${b[1]}`);

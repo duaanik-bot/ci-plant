@@ -9,7 +9,9 @@
 //                           when that one is already finalised) — an earlier month's payroll never sees it, as
 //                           a run reads balances as at its month end; a loan gets a CI-LN number and is taken
 //                           back in monthly instalments, never before the month it was given.
-//   Amount, date, paid via  the date defaults to today at the plant; paid via is cash or a pay channel.
+//   Amount, date, paid from the date defaults to today at the plant; paid from is an account on Finance's "paid from"
+//                           list (PaidFromSelect: office cash, a holder, a bank a pay channel pays from), cash's own
+//                           account to start with. HR keeps the code, and Finance books the money from that account.
 //   Instalments (loan)      with a live preview: "₹X a month for N months from <Month>". X is the amount over
 //                           N rounded UP to the rupee — as the server works it out — so the loan is never
 //                           under-recovered, and the last month takes what is left.
@@ -29,6 +31,7 @@ import { fmt } from '../../api.js';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { InlineError, parseNum, refusalText } from './PersonDrawer.jsx';
 import { list, paiseOf, plantToday, scaledText, shiftMonth } from './RunLineDrawer.jsx';
+import PaidFromSelect, { paidFromBody, paidFromProblem } from './PaidFromSelect.jsx';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -195,7 +198,8 @@ function Choice({ on, onClick, children, disabled }) {
 
 const blankForm = personId => ({
   staff: personId != null ? 'yes' : null, person: personId != null ? String(personId) : '', kind: 'advance',
-  amount: '', date: plantToday(), via: 'cash', instalments: '', note: '',
+  // Where it was paid from: a code from Finance's list, chosen by PaidFromSelect (cash's own account to start with).
+  amount: '', date: plantToday(), paidFrom: '', instalments: '', note: '',
   // The payroll a loan's first instalment is cut from (2026-11-15): asked as a payroll month, the month before by
   // default, like an advance — in November, choose October to cut it from the salary paid now.
   firstDue: shiftMonth(plantToday().slice(0, 7), -1),
@@ -204,28 +208,25 @@ const blankForm = personId => ({
   forMonth: shiftMonth(plantToday().slice(0, 7), -1),
 });
 
-export default function PayStaffModal({ personId = null, people: givenPeople = null, channels: givenChannels = null, onClose, onDone }) {
+export default function PayStaffModal({ personId = null, people: givenPeople = null, onClose, onDone }) {
   const toast = useToast();
   const [people, setPeople] = useState(givenPeople || []);
-  const [channels, setChannels] = useState(givenChannels || []);
   const [closedMonth, setClosedMonth] = useState(null);
   useEffect(() => {
     let live = true;
     Promise.allSettled([
       givenPeople ? Promise.resolve(givenPeople) : hrApi.people(),
-      givenChannels ? Promise.resolve(givenChannels) : hrApi.payChannels(),
       hrApi.runs(),
-    ]).then(([p, c, r]) => {
+    ]).then(([p, r]) => {
       if (!live) return;
       if (p.status === 'fulfilled' && Array.isArray(p.value)) setPeople(p.value);
-      if (c.status === 'fulfilled' && Array.isArray(c.value)) setChannels(c.value);
       if (r.status === 'fulfilled') {
         const runs = Array.isArray(r.value) ? r.value : list(r.value?.runs);
         setClosedMonth(runs.filter(x => x?.status === 'finalised').map(x => String(x.month).slice(0, 7)).sort().pop() || null);
       }
     });
     return () => { live = false; };
-  }, [givenPeople, givenChannels]);
+  }, [givenPeople]);
 
   const [form, setForm] = useState(() => blankForm(personId));
   const [tried, setTried] = useState(false);
@@ -240,11 +241,6 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
     .slice().sort((a, b) => String(a.display_name || a.name).localeCompare(String(b.display_name || b.name)))
     .map(p => ({ value: String(p.id), label: personLabel(p), search: [p.name, p.display_name, p.code, p.department].filter(Boolean).join(' ') })),
   [people, form.person]);
-  const viaOptions = useMemo(() => [
-    { value: 'cash', label: 'Cash' },
-    ...list(channels).filter(c => c && c.active !== false && String(c.code).toLowerCase() !== 'cash')
-      .map(c => ({ value: c.code, label: c.label ? `${c.label} (${c.code})` : c.code })),
-  ], [channels]);
 
   const amount = parseNum(form.amount, 2);
   const nText = String(form.instalments).trim();
@@ -254,6 +250,8 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
   else if (amount.blank || amount.value <= 0) errors.amount = 'Type the amount given.';
   if (!form.person) errors.person = 'Choose who the money was given to.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date)) errors.date = 'Choose the date it was given.';
+  const fromProblem = paidFromProblem(form.paidFrom);
+  if (fromProblem) errors.paidFrom = fromProblem;
   if (form.kind === 'loan') {
     if (!(n >= 1)) errors.instalments = 'How many monthly instalments — 1 or more, a whole number.';
     if (form.firstDue && !MONTH_RE.test(form.firstDue)) errors.firstDue = 'A month like 2026-11.';
@@ -270,7 +268,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
     if (Object.keys(errors).length) { setError('Check the highlighted fields.'); return; }
     const body = {
       person_id: Number(form.person), kind: form.kind, amount: String(form.amount).trim(), paid_on: form.date,
-      paid_via: form.via || 'cash', note: form.note.trim() || null,
+      ...paidFromBody('paid_via', form.paidFrom), note: form.note.trim() || null,
     };
     if (form.kind === 'advance') body.for_month = form.forMonth || null;
     if (form.kind === 'loan') {
@@ -293,7 +291,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
   };
 
   const another = () => {
-    setForm(f => ({ ...blankForm(f.person || null), kind: f.kind, via: f.via, date: f.date }));
+    setForm(f => ({ ...blankForm(f.person || null), kind: f.kind, paidFrom: f.paidFrom, date: f.date }));
     setDone(null);
     setTried(false);
     setError('');
@@ -377,9 +375,11 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
                   <Input type="month" value={form.forMonth} disabled={Boolean(done)} onChange={e => set('forMonth', e.target.value)} />
                 </Field>
               )}
-              <Field label="Paid via">
-                <Select value={form.via} options={viaOptions} disabled={Boolean(done)} onChange={e => set('via', e.target.value || 'cash')} />
-              </Field>
+              <fieldset disabled={Boolean(done)} className="m-0 min-w-0 border-0 p-0">
+                <Field label="Paid from" required hint={err('paidFrom')}>
+                  <PaidFromSelect value={form.paidFrom} onChange={v => set('paidFrom', v)} channelCode="cash" required />
+                </Field>
+              </fieldset>
               {form.kind === 'loan' && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Monthly instalments" required hint={err('instalments')}>

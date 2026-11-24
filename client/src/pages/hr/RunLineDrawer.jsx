@@ -36,6 +36,7 @@ import { fmt } from '../../api.js';
 import { hrApi, hrRestricted, inr2, levelAtLeast, monthLabel } from '../../lib/hr.js';
 import { InlineError, StatusPill, parseNum, refusalText } from './PersonDrawer.jsx';
 import PayStaffModal, { PersonLedger } from './PayStaffModal.jsx';
+import PaidFromSelect, { paidFromBody, paidFromProblem } from './PaidFromSelect.jsx';
 
 // ── Exact sums ──────────────────────────────────────────────────────────────
 // Amounts arrive as JSON numbers (pg turns NUMERIC(12,2) into a float whose shortest spelling is the
@@ -661,13 +662,21 @@ function LastMonth({ prevMonth, loadPrevious, personId, line, input, variance })
 
 // ── Payment marks (a submitted, approved or finalised line) ────────────────────────────────────────
 
-function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
+// Marked paid on its own, a line of the cash channel (or of no channel) says which cash it came from: office cash or a holder
+// (Cash & Bank §7.3, PaidFromSelect). A bank channel's line is paid from the bank that channel is mapped to, and names none. A line
+// paid again after failing out of its batch (HR keeps the batch link) says where it came from this time, whatever its channel,
+// starting at the channel's own account (ruling R49): a failed transfer paid again in cash leaves its batch (R45); left at the
+// batch's account, or with nothing to choose, it stays with its batch.
+function PaymentBox({ month, personId, line, level, channelCode = null, channelKind = null, onChanged, onDecided }) {
   const toast = useToast();
   const status = line?.payment_status || 'pending';
   const canMark = levelAtLeast(level, 'accounts');
   const canReverse = levelAtLeast(level, 'approver');
   const [act, setAct] = useState(null); // 'paid' | 'failed' | 'reversed'
   const [ref, setRef] = useState('');
+  const [paidFrom, setPaidFrom] = useState('');
+  const repaid = line?.payment_batch_id != null && (status === 'failed' || status === 'reversed');
+  const asksAccount = act === 'paid' && (channelKind === 'cash' || !channelCode || repaid);
   const [error, setError] = useState('');
   const held = status === 'on_hold';
   const approved = approvalOf(line) === 'approved';
@@ -678,8 +687,12 @@ function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
   ].filter(Boolean);
   const save = async () => {
     setError('');
+    const fromProblem = asksAccount ? paidFromProblem(paidFrom) : null;
+    if (fromProblem) { setError(fromProblem); return; }
     try {
-      await hrApi.setLinePayment(month, personId, { status: act, reference: ref.trim() || null });
+      await hrApi.setLinePayment(month, personId, {
+        status: act, reference: ref.trim() || null, ...(asksAccount ? paidFromBody('paid_from', paidFrom) : {}),
+      });
     } catch (e) {
       setError(refusalText(e));
       return;
@@ -687,6 +700,7 @@ function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
     toast.success(act === 'paid' ? 'Marked paid' : act === 'failed' ? 'Marked as failed' : 'Payment reversed');
     setAct(null);
     setRef('');
+    setPaidFrom('');
     onChanged?.();
     onDecided?.();
   };
@@ -726,6 +740,14 @@ function PaymentBox({ month, personId, line, level, onChanged, onDecided }) {
           <Field label={act === 'paid' ? 'Reference (UTR, cheque or cash note)' : 'Reference or reason'}>
             <Input value={ref} autoComplete="off" onChange={e => setRef(e.target.value)} />
           </Field>
+          {asksAccount && (
+            <div className="mt-2">
+              <Field label="Paid from" required>
+                <PaidFromSelect value={paidFrom} onChange={v => { setPaidFrom(v); setError(''); }} channelCode={channelCode} required
+                  whenNone={repaid ? 'it stays with its batch’s account' : undefined} />
+              </Field>
+            </div>
+          )}
           <InlineError message={error} />
           <div className="mt-2 flex justify-end gap-2">
             <Button size="sm" variant="secondary" onClick={() => { setAct(null); setError(''); }}>Cancel</Button>
@@ -1150,6 +1172,7 @@ export default function RunLineDrawer({
             {(payOpen || shown?.payment_status === 'on_hold') && shown && (
               <Section title="Payment" icon={CheckCircle2}>
                 <PaymentBox month={month} personId={personId} line={shown} level={level} onChanged={onChanged}
+                  channelCode={channel} channelKind={list(channels).find(c => c.code === channel)?.kind ?? null}
                   onDecided={() => setHistoryBump(v => v + 1)} />
               </Section>
             )}
@@ -1164,7 +1187,7 @@ export default function RunLineDrawer({
         </div>
       </aside>
       {paying && (
-        <PayStaffModal personId={personId} people={people} channels={channels}
+        <PayStaffModal personId={personId} people={people}
           onClose={() => setPaying(false)} onDone={afterPayment} />
       )}
       <ConfirmDialog open={ask} onClose={() => setAsk(false)} onConfirm={() => onClose()}

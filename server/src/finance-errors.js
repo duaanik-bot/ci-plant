@@ -7,9 +7,9 @@
 // hung anywhere but `body` never reaches the screen (structured-errors.test.js guards the spelling).
 //
 // The database refuses some things itself: the hard-stop triggers of spec §7.2 (a pg error whose DETAIL
-// is a FIN_ code) and a handful of constraints (the unique indexes, three CHECKs and the foreign keys,
-// named in migration 20261027104320). Those reach a route as pg errors. finMapDbError turns each into a
-// refusal; every route ends  catch (e) { next(finMapDbError(e)); }.
+// is a FIN_ code) and a handful of constraints (the unique indexes, the CHECKs and the foreign keys,
+// named in migrations 20261027104320 and 20261121090100). Those reach a route as pg errors. finMapDbError
+// turns each into a refusal; every route ends  catch (e) { next(finMapDbError(e)); }.
 //
 // Every other error becomes ONE fixed 500, FIN_SERVER_ERROR, whose sentence says nothing of what went
 // wrong. The central handler writes err.message to the browser, and a database's own words name its
@@ -35,6 +35,10 @@ export const FIN_SENTENCES = Object.freeze({
   FIN_AUDIT_APPEND_ONLY: 'The audit log is append-only. Its rows are never edited or deleted.',
   FIN_NO_TRUNCATE: 'Vouchers, their lines and the audit log can never be emptied.',
   FIN_BAD_REVERSAL: 'A reversal must mirror every line of a posted voucher in the same book, and that voucher must be marked as reversed by it. An Opening voucher is reversed as at its own date, and that reversal is never reversed itself: a new opening is built instead.',
+  // …and Cash & Bank's (migration 20261121090100): the two of its allocations (spec §6.2), and an opening correction's date (§9.4)
+  FIN_BAD_ALLOCATION: "That adjustment doesn't fit those entries.",
+  FIN_OVER_ALLOCATED: 'That would settle more than the entry holds.',
+  FIN_BAD_CORRECTION: "An opening correction is dated the Opening's own date, the day before the books begin.",
 
   // ── The constraints
   FIN_OPENING_EXISTS: 'This book already has an Opening voucher. Reverse it before posting another.',
@@ -65,6 +69,18 @@ export const FIN_SENTENCES = Object.freeze({
   FIN_LAST_ADMIN: 'Every book needs at least one Finance Admin. Make someone else an admin first.',
   FIN_TIE_OUT: "The Tally figures don't tie out, so the Opening voucher can't be built.",
   FIN_DUPLICATE_KEY: 'That form was already saved by someone else. Reload and try again.',
+  // …and Cash & Bank's (plan 2026-11-20-finance-cash-bank, Global Constraints)
+  FIN_NOT_PARTY_LINE: "Only a posted party entry that hasn't been reversed can be adjusted.",
+  FIN_STAFF_IN_HR: 'Staff advances and salaries are paid in HR.',
+  FIN_ROLE_MISSING: 'Set this ledger in Finance Setup → HR & payroll first.',
+  FIN_HOLDER_NOT_CASH: 'Only a Cash-in-Hand ledger can have a holder.',
+  FIN_DIFFERENCE_VIA_COUNT: 'Cash differences are cleared from a cash count: Count cash → Clear.',
+  FIN_NO_OPENING: 'There is no Opening to correct yet.',
+  FIN_UNMAPPED_CHANNEL: 'Map this HR pay channel to an account in Finance Setup first.',
+  FIN_HR_OWNED: 'This entry comes from HR; correct it there.',
+  // …and the HR feed's lock timeout (Cash & Bank ruling R73): Postgres' lock_not_available, 55P03, which only a transaction that set
+  // lock_timeout meets
+  FIN_BUSY: 'Finance was busy with another entry, so this one did not wait. Try it again in a moment.',
 
   // ── The fault nobody planned for: what every other error becomes (see the header)
   FIN_SERVER_ERROR: 'Something went wrong in Finance. Please try again, and tell the MD if it keeps happening.',
@@ -93,6 +109,15 @@ const FIN_UNIQUE = {
   fin_ledgers_book_name_key: 'FIN_DUPLICATE_NAME',
   fin_ledgers_book_code_key: 'FIN_DUPLICATE_CODE',
   fin_ledgers_party_key: 'FIN_PARTY_LINKED',
+  // Cash & Bank (migration 20261121090100). The same two lines paired twice is an adjustment that does not fit them;
+  // the rest are a second row where a book, a role, a key, a channel or an HR event has one, or a voucher books an HR row twice.
+  fin_allocations_debit_line_id_credit_line_id_key: 'FIN_BAD_ALLOCATION',
+  fin_ledger_roles_book_id_role_key: 'FIN_EXISTS',
+  fin_hr_expense_map_book_id_hr_key_key: 'FIN_EXISTS',
+  fin_hr_channels_pkey: 'FIN_EXISTS',
+  fin_book_settings_pkey: 'FIN_EXISTS',
+  fin_hr_exceptions_source_type_source_id_key: 'FIN_EXISTS',
+  fin_hr_covers_voucher_id_source_type_source_id_key: 'FIN_EXISTS',
 };
 
 // CHECK violations (23514): [status, code]. A line that is not exactly one side is the same refusal the
@@ -103,10 +128,26 @@ const FIN_CHECKS = {
   fin_voucher_lines_one_side: [409, 'FIN_BAD_LINE'],
   fin_vouchers_total_check: [400, 'FIN_BAD_AMOUNT'],
   fin_approval_rules_limit_not_nan: [400, 'FIN_BAD_AMOUNT'],
+  // Cash & Bank (migration 20261121090100): every CHECK it adds is a bad amount, a bad date or a bad request (400).
+  // A float with no holder, and a correction that is not a journal, are requests the app refuses first in its own words.
+  fin_ledgers_float_needs_holder: [400, 'FIN_BAD_INPUT'],
+  fin_vouchers_correction_is_journal: [400, 'FIN_BAD_INPUT'],
+  fin_allocations_amount_check: [400, 'FIN_BAD_AMOUNT'],
+  fin_allocations_mode_check: [400, 'FIN_BAD_INPUT'],
+  fin_cash_counts_count_date_check: [400, 'FIN_BAD_DATE'],
+  fin_cash_counts_counted_check: [400, 'FIN_BAD_AMOUNT'],
+  fin_ledger_roles_role_check: [400, 'FIN_BAD_INPUT'],
+  fin_hr_expense_map_hr_key_check: [400, 'FIN_BAD_INPUT'],
+  fin_book_settings_payroll_booking_check: [400, 'FIN_BAD_INPUT'],
 };
 
-// Foreign keys (23503) that mean "another book's" when a row is written pointing across books.
-const FIN_BOOK_FKS = new Set(['fin_voucher_lines_ledger_book_fk', 'fin_ledgers_group_book_fk']);
+// Foreign keys (23503) that mean "another book's" when a row is written pointing across books: a ledger with
+// another book's group, and anything else naming a ledger with another book's id beside it.
+const FIN_BOOK_FKS = new Set([
+  'fin_voucher_lines_ledger_book_fk', 'fin_ledgers_group_book_fk',
+  'fin_allocations_ledger_book_fk', 'fin_cash_counts_ledger_book_fk', 'fin_ledger_roles_ledger_book_fk',
+  'fin_hr_channels_ledger_book_fk', 'fin_hr_expense_map_ledger_book_fk',
+]);
 
 // A foreign key breaks in two directions, and one constraint can break both ways. A ledger written with
 // another book's group is refused as it is written; a group that still has ledgers under it is refused
@@ -124,6 +165,8 @@ function finDbMeaning(e) {
     case '23503':
       if (finStillReferenced(e)) return [409, 'FIN_IN_USE'];
       return FIN_BOOK_FKS.has(e.constraint) ? [409, 'FIN_WRONG_BOOK'] : null;
+    // A lock waited for longer than the transaction's lock_timeout allows (Cash & Bank ruling R73: the HR feed's transactions set one, 5 s).
+    case '55P03': return [409, 'FIN_BUSY'];
     default: return null;
   }
 }
@@ -141,7 +184,8 @@ const finCaused = (refusal, original) => Object.defineProperty(refusal, 'cause',
 //   - A business error (an HTTP error status) comes back as it is, so mapping twice maps once.
 //   - A hard-stop trigger names its code in DETAIL (FIN_UNBALANCED, FIN_PERIOD_LOCKED, …): 409. A code
 //     with no sentence yet still goes out as that code, saying what the trigger said; the triggers are ours.
-//   - A unique, check or foreign-key violation Finance knows by name is mapped as listed above.
+//   - A unique, check or foreign-key violation Finance knows by name is mapped as listed above, and a lock timeout (55P03) is
+//     FIN_BUSY, 409 (Cash & Bank ruling R73).
 //   - Anything else, the database's other errors, a connection fault, a bug, something thrown that is not
 //     even an Error, is the one fixed 500, FIN_SERVER_ERROR.
 export function finMapDbError(e) {

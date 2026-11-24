@@ -22,7 +22,8 @@ const r = Router();
 const canBook = requireRole('planner'); // admin implied — same right as billing
 
 const BILL_PREFIX = 'CI-PB-';
-const PAY_PREFIX = 'CI-PAY-';
+// Vendor payments: CI-VP-, a series of its own. HR's payment batches keep CI-PAY- (hr.payment_batches.batch_no, a counter of theirs).
+const PAY_PREFIX = 'CI-VP-';
 const REF = 'purchase_bill';
 const MODES = ['neft', 'rtgs', 'upi', 'cheque', 'cash'];
 const fail = (status, message) => Object.assign(new Error(message), { status });

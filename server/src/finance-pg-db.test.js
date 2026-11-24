@@ -143,6 +143,9 @@ before(async () => {
 
 after(async () => { await h?.close(); });
 
+// The core's eight, and Cash & Bank's three on fin_allocations (migration 20261121090100: its two checks and H10's
+// fin_no_truncate; finance-pg-cash-schema.test.js proves what they do), and H10's fin_no_truncate on fin_hr_covers, what an HR
+// voucher books (ruling R27).
 test('the eight hard-stop triggers are in place, the two posting checks deferred to COMMIT, and a replay changes none of them', gate, async () => {
   const triggers = async () => (await h.db.q(`
       SELECT c.relname AS tbl, t.tgname AS name, p.proname AS fn, t.tgconstraint <> 0 AS is_constraint,
@@ -152,8 +155,12 @@ test('the eight hard-stop triggers are in place, the two posting checks deferred
     .sort((x, y) => `${x.tbl} ${x.name}`.localeCompare(`${y.tbl} ${y.name}`));
   const now = await triggers();
   assert.deepEqual(now.map(t => [t.tbl, t.name, t.fn, t.is_constraint, t.deferrable, t.deferred, t.enabled]), [
+    ['fin_allocations', 'fin_allocation_guard', 'fin_allocation_guard', false, false, false, 'O'],
+    ['fin_allocations', 'fin_allocation_sum_check', 'fin_allocation_sum_check', true, true, true, 'O'],
+    ['fin_allocations', 'fin_no_truncate', 'fin_no_truncate', false, false, false, 'O'],
     ['fin_audit_log', 'fin_audit_guard', 'fin_audit_guard', false, false, false, 'O'],
     ['fin_audit_log', 'fin_no_truncate', 'fin_no_truncate', false, false, false, 'O'],
+    ['fin_hr_covers', 'fin_no_truncate', 'fin_no_truncate', false, false, false, 'O'],
     ['fin_voucher_lines', 'fin_line_guard', 'fin_line_guard', false, false, false, 'O'],
     ['fin_voucher_lines', 'fin_no_truncate', 'fin_no_truncate', false, false, false, 'O'],
     ['fin_vouchers', 'fin_no_truncate', 'fin_no_truncate', false, false, false, 'O'],
@@ -554,7 +561,13 @@ test('H9 H10 the audit log is append-only and nothing in the books can be trunca
   await expectCode(h.db.q('DELETE FROM fin_audit_log WHERE id = $1', [entry.id]), 'FIN_AUDIT_APPEND_ONLY');
   assert.equal((await h.db.one('SELECT reason FROM fin_audit_log WHERE id = $1', [entry.id])).reason, null);
 
-  await expectCode(truncate('TRUNCATE fin_voucher_lines'), 'FIN_NO_TRUNCATE');
+  // Since Cash & Bank, fin_allocations points at the lines (migration 20261121090100), and PostgreSQL refuses to truncate a
+  // table that others point at before any trigger runs (0A000). Truncated together with fin_allocations, the lines meet
+  // the hard stop as before.
+  const pointedAt = await truncate('TRUNCATE fin_voucher_lines').catch(e => e);
+  assert.equal(pointedAt.code, '0A000', pointedAt.message);
+  assert.match(pointedAt.detail, /"fin_allocations" references "fin_voucher_lines"/);
+  await expectCode(truncate('TRUNCATE fin_voucher_lines, fin_allocations'), 'FIN_NO_TRUNCATE');
   await expectCode(truncate('TRUNCATE fin_audit_log'), 'FIN_NO_TRUNCATE');
   for (const table of ['fin_vouchers', 'fin_voucher_lines', 'fin_audit_log', 'fin_books']) {
     await expectCode(truncate(`TRUNCATE ${table} CASCADE`), 'FIN_NO_TRUNCATE');   // fin_books: the cascade reaches the vouchers

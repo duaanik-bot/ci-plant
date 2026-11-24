@@ -915,6 +915,33 @@ test('payments post directly up to the limit and wait above it', gate, async () 
   assert.equal((await submit(big.id)).body.voucher.status, 'submitted');
 });
 
+test('R70: a typed receipt or payment whose every line is a bank or cash ledger comes under the contra rule: such a receipt above ₹1,00,000 waits', gate, async () => {
+  const CASH = (await h.call('GET', `/finance/books/${CI}/ledgers`)).body.ledgers.find(l => l.name === 'Cash').id;
+  const between = (type, paise) => ({ book_id: CI, voucher_type: type, voucher_date: '2027-01-13', client_key: randomUUID(), narration: 'float to a holder',
+    lines: [L([CASH, paise, 0]), L([ALPHA, 0, paise])] });
+  const discard = async id => {
+    await h.call('POST', `/finance/vouchers/${id}/reject`, { reason: 'Test: R70 checked' }, 'md');
+    assert.equal((await h.call('POST', `/finance/vouchers/${id}/discard`, null, 'acct')).status, 200);
+  };
+  // Money from the bank into cash, typed as a receipt: the receipt rule (never) would post it at once, unseen by the MD; as the transfer
+  // it is, it waits above ₹1,00,000 and posts up to it. Nothing is refused.
+  const big = await make(between('receipt', 25000000));
+  assert.equal((await submit(big.id)).body.voucher.status, 'submitted', 'above ₹1,00,000 it waits for an Approver, as a transfer does');
+  await discard(big.id);
+  const small = await make(between('receipt', 50000));
+  assert.equal((await submit(small.id)).body.voucher.status, 'posted', 'up to the limit it posts, as a transfer does');
+  // A payment of that shape takes the contra rule too, whatever the payment rule says; a payment to anything else keeps its own.
+  await h.db.q(`UPDATE fin_approval_rules SET mode = 'always', limit_amount = NULL WHERE book_id = $1 AND rule_key = 'contra'`, [CI]);
+  try {
+    const pv = await make(between('payment', 50000));
+    assert.equal((await submit(pv.id)).body.voucher.status, 'submitted', 'the contra rule, now always');
+    await discard(pv.id);
+    assert.equal((await submit((await make(pay(50000))).id)).body.voucher.status, 'posted', 'the payment rule, as seeded');
+  } finally {
+    await h.db.q(`UPDATE fin_approval_rules SET mode = 'above_limit', limit_amount = 100000 WHERE book_id = $1 AND rule_key = 'contra'`, [CI]);
+  }
+});
+
 test('reject needs a reason, returns the entry to its maker, and an approval after that is refused', gate, async () => {
   const v = await make(jv([[RENT, 100, 0], [FREIGHT, 0, 100]]));
   await submit(v.id);

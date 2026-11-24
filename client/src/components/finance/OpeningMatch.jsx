@@ -1,5 +1,5 @@
 // OpeningMatch: the Opening Balances wizard's second step (spec §11.2 step 2, rulings R32, R33). Props:
-//   { book, view, groups, ledgers, touched, setTouched, onConfirmed, reload }
+//   { book, view, groups, ledgers, roles, touched, setTouched, onConfirmed, reload }
 //
 // Every ledger of the Tally List of Accounts, one row each, with what Finance will do with it:
 //   Match to a ledger        one of the book's ledgers (the Tally name, then the name, found it; the person confirms it)
@@ -12,7 +12,9 @@
 // What is on screen is the server's rows with the person's edits laid over them (`touched`, row id → decision, held by the wizard so a
 // refresh underneath never wipes an edit and the stepper knows there are edits not yet confirmed). The decisions are opening.js's:
 // which rows are in conflict (two on one ledger, one party on two ledgers), which are half made, what the confirmation is. The server
-// refuses the same things, with sentences naming the rows; this says them first, on the rows.
+// refuses the same things, with sentences naming the rows; this says them first, on the rows. A ledger holding the staff_advances or
+// staff_loans role (`roles`, the book's HR & payroll roles: Cash & Bank ruling R16) takes a Tally ledger per person: several rows on it
+// are summed into one line, which is said on each row and stops nothing (spec §7.9; the server's import allows it too).
 //
 // Whether the group of a new ledger is a party group is the server's word (finGroupKinds, ruling R23): for the group the server proposed,
 // the view's fresh `is_party`; for a group the person chose, the groups read's. This screen works out nothing of its own. A party is picked
@@ -59,7 +61,7 @@ const FILTER_NONE = {
 
 const STATUS_CHIP = { match: { tone: 'good', label: 'Matched' }, create: { tone: 'info', label: 'New ledger' } };
 
-export default function OpeningMatch({ book, view, groups, ledgers, touched, setTouched, onConfirmed, reload }) {
+export default function OpeningMatch({ book, view, groups, ledgers, roles, touched, setTouched, onConfirmed, reload }) {
   const { problems, attempt } = useFormWrite();
   const parties = useParties('both');                 // the ERP's customers and vendors (useParties.js)
   const rows = view.ledgers;
@@ -71,7 +73,7 @@ export default function OpeningMatch({ book, view, groups, ledgers, touched, set
   const sentRef = useRef([]);                           // what was sent, so the entry a refusal names can be turned back into its row
 
   const ledgerById = useMemo(() => new Map(ledgers.map(l => [l.id, l])), [ledgers]);
-  const match = useMemo(() => finMatchView(rows, touched, groups, { ledgerById }), [rows, touched, groups, ledgerById]);
+  const match = useMemo(() => finMatchView(rows, touched, groups, { ledgerById, roles }), [rows, touched, groups, ledgerById, roles]);
   const changed = useMemo(() => finChangedRows(rows, touched, groups).length, [rows, touched, groups]);
   const groupChoices = useMemo(() => groupOptions(finGroupChoices(groups)), [groups]);
 
@@ -80,8 +82,8 @@ export default function OpeningMatch({ book, view, groups, ledgers, touched, set
   const edits = useRef(touched);
   useEffect(() => { edits.current = touched; }, [touched]);
   const base = useMemo(
-    () => (filter === 'all' ? rows : finFilterRows(rows, finMatchView(rows, edits.current, groups, { ledgerById }), filter)),
-    [rows, groups, ledgerById, filter, refresh]);
+    () => (filter === 'all' ? rows : finFilterRows(rows, finMatchView(rows, edits.current, groups, { ledgerById, roles }), filter)),
+    [rows, groups, ledgerById, roles, filter, refresh]);
   const shown = useMemo(() => (query.trim() ? base.filter(r => rowMatches(r, query)) : base), [base, query]);
 
   const decide = (row, change) => setTouched(t => ({ ...t, [row.id]: finEditDecision(row, finDecisionOf(row, t), change, match.partyGroups) }));
@@ -188,7 +190,11 @@ export default function OpeningMatch({ book, view, groups, ledgers, touched, set
     return (
       <div className="flex flex-col items-start gap-1">
         {chip ? <Chip tone={chip.tone}>{chip.label}</Chip> : <Chip tone={state.tone === 'red' ? 'bad' : 'amber'}>{state.tone === 'red' ? 'Conflict' : 'Needs a decision'}</Chip>}
-        {state.note && <span className={`text-[11px] leading-snug ${state.tone === 'red' ? 'text-red-600' : 'text-amber-700'}`}>{state.note}</span>}
+        {state.note && (
+          <span className={`text-[11px] leading-snug ${state.tone === 'red' ? 'text-red-600' : state.tone === 'amber' || state.kind === 'attention' ? 'text-amber-700' : 'text-slate-500'}`}>
+            {state.note}
+          </span>
+        )}
       </div>
     );
   };

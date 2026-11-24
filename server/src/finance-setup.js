@@ -1,6 +1,6 @@
 // First-time setup of the books (spec §6, §16 step 6). For each business it makes the book, the financial
-// year the books begin in with its twelve months, Tally's group tree, the two system ledgers and the
-// default approval rules; then it gives the first people their Finance access.
+// year the books begin in with its twelve months, Tally's group tree, the two system ledgers, the
+// default approval rules and the book's settings row; then it gives the first people their Finance access.
 //
 // It runs on the `qc` / `oc` of a transaction it is handed and imports nothing that reaches the database,
 // so one body of code serves the app's tests (db.tx), scripts/finance-setup.mjs (its own pg.Client) and
@@ -208,6 +208,10 @@ async function createBook(qc, oc, b, { booksBegin, fy, who }) {
       `INSERT INTO fin_approval_rules (book_id, rule_key, mode, limit_amount, updated_by) VALUES ($1, $2, $3, $4, $5)`,
       [book.id, r.rule_key, r.mode, r.limit_paise == null ? null : finFromPaise(r.limit_paise), who.name]);
   }
+
+  // The book's settings row, with every setting at its default (migration 20261121090100: payroll booked at the month
+  // end). That migration gave one to every book there was when it ran; a book made after it gets its own here.
+  await qc('INSERT INTO fin_book_settings (book_id) VALUES ($1) ON CONFLICT DO NOTHING', [book.id]);
 
   const { year } = await finCreateYear(qc, oc, { bookId: book.id, label: fy.label, booksBegin, actor: who });
   await finAudit(qc, {

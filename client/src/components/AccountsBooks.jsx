@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import { finDoorsOpen, finMayReceive } from '../lib/finance/doors.js';
 import { Button, DataTable, Field, Input, Modal, PressButton, searchText, Select, useToast } from './ui.jsx';
 import { Plus, Trash2, ShoppingBag, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
@@ -50,6 +51,20 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
   const [bill, setBill] = useState(null);   // purchase entry form
   const [pay, setPay] = useState(null);     // vendor payment form
   const [rec, setRec] = useState(null);     // customer receipt form
+  // From the switch date the cash & bank book, the party ledger and the payables are kept in Finance, and paying a vendor goes there
+  // (spec §11 rows 5 and 6). Read once; until it answers, or if it fails, the page is as it always was.
+  const [switchDate, setSwitchDate] = useState(null);
+  const financeDoor = finDoorsOpen(switchDate, today());
+  const [finBooks, setFinBooks] = useState(null);   // the books this login holds in Finance, read only once the date has come
+  useEffect(() => {
+    api.get('/finance/cash/switch').then(r => {
+      const date = r?.date ?? null;
+      setSwitchDate(date);
+      if (finDoorsOpen(date, today())) {
+        api.get('/finance/me').then(me => setFinBooks(Array.isArray(me?.books) ? me.books : [])).catch(() => setFinBooks([]));
+      }
+    }).catch(() => {});
+  }, []);
 
   const loadBook = () => {
     const qs = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).join('&');
@@ -126,7 +141,11 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
   };
 
   // ── Vendor payment ────────────────────────────────────────────────────────
-  const openPay = (vendorId = '', billRow = null) => setPay({
+  const openPay = (vendorId = '', billRow = null) => {
+    if (financeDoor) { navigate(vendorId ? `/finance/cash?pay_vendor=${vendorId}` : '/finance/cash'); return; }
+    openPayForm(vendorId, billRow);
+  };
+  const openPayForm = (vendorId = '', billRow = null) => setPay({
     vendor_id: String(vendorId || ''), purchase_bill_id: billRow ? String(billRow.id) : '',
     amount: billRow ? String(+(billRow.total - billRow.paid).toFixed(2)) : '', mode: 'neft', reference: '', paid_on: today(),
   });
@@ -164,10 +183,21 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
     catch (err) { netError(toast, err, 'Could not delete the entry'); }
   };
 
+  // After the switch (ruling R63): the receipt door is Finance's Receive, for a login holding an Accountant or Approver grant on the
+  // book of an invoice's billing entity (the helper Invoices' Record Payment uses). A customer open in the party ledger is carried over.
+  const receiptsOpen = financeDoor && !!finBooks && invoices.some(i => finMayReceive(finBooks, i.billing_entity_id));
+  const receiptCustomer = view === 'ledger' && /^customer:\d+$/.test(party || '') ? party.split(':')[1] : '';
   const actions = (
     <div className="mb-3 flex flex-wrap justify-end gap-2">
-      <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}>
-        <ArrowDownLeft size={15} /> Record Receipt</Button>
+      {!financeDoor && (
+        <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}>
+          <ArrowDownLeft size={15} /> Record Receipt</Button>)}
+      {financeDoor && finBooks && receiptsOpen && (
+        <Button variant="secondary" onClick={() => navigate(receiptCustomer ? `/finance/cash?receive_customer=${receiptCustomer}` : '/finance/cash')}>
+          <ArrowDownLeft size={15} /> Record Receipt</Button>)}
+      {financeDoor && finBooks && !receiptsOpen && (
+        <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
+          <ArrowDownLeft size={14} /> Receipts are recorded in Finance</span>)}
       <Button variant="secondary" onClick={() => openPay()}><ArrowUpRight size={15} /> Pay Vendor</Button>
       <Button onClick={openBill}><ShoppingBag size={15} /> Purchase Entry</Button>
     </div>
@@ -185,7 +215,14 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
     <div>
       {actions}
 
-      {view === 'payables' && (
+      {financeDoor && ['cashbook', 'ledger', 'payables'].includes(view) && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center">
+          <p className="text-sm font-semibold text-slate-800">These books are kept in Finance from 1 January 2027</p>
+          <Link to="/finance/cash" className="mt-2 inline-block text-sm font-semibold text-brand-600 hover:underline">Open Cash & Bank in Finance</Link>
+        </div>
+      )}
+
+      {view === 'payables' && !financeDoor && (
         <DataTable searchable rows={payables} getRowId={v => v.vendor_id} defaultSort={{ key: 'outstanding', dir: 'desc' }} empty="Nothing owed — no purchase bills booked yet"
           columns={[
             { key: 'vendor_name', label: 'Vendor', render: v => partyLink(v.vendor_name, () => setParty(`vendor:${v.vendor_id}`), v.city) },
@@ -236,7 +273,7 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
           ]} />
       )}
 
-      {view === 'cashbook' && (
+      {view === 'cashbook' && !financeDoor && (
         <>
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[['Opening balance', book.opening], ['Money in', book.entries.reduce((s, e) => s + e.money_in, 0)],
@@ -270,7 +307,7 @@ export default function AccountsBooks({ view, from, to, periodLabel, party, onOp
         </>
       )}
 
-      {view === 'ledger' && (
+      {view === 'ledger' && !financeDoor && (
         <div ref={ledgerRef} className="scroll-mt-4">
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <Field label="Party" className="w-80 max-w-full">

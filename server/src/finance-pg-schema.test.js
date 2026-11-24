@@ -11,7 +11,7 @@ test('init() builds every fin_ table, and replaying the migration changes nothin
   const h = await finBootPg('schema', { setup: false });
   try {
     const tables = (await h.db.q(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'fin\\_%' ORDER BY 1`)).map(r => r.tablename);
-    assert.equal(tables.length, 13);
+    assert.equal(tables.length, 21, 'the core\'s thirteen and Cash & Bank\'s eight (migration 20261121090100)');
     const snap = () => h.db.q(`SELECT table_name, column_name, data_type FROM information_schema.columns
                                WHERE table_schema='public' ORDER BY 1, 2`);
     const before = await snap();
@@ -96,7 +96,7 @@ test('the constraints and indexes later tasks map errors on exist, and mean what
       FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
       WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND c.relname LIKE 'fin\\_%' AND a.attnum > 0 AND NOT a.attisdropped
         AND (a.attname LIKE '%\\_date' OR a.attname IN ('as_at', 'books_begin'))`);
-    assert.equal(dateCols.length, 11, 'non-vacuous: the date columns of spec section 6');
+    assert.equal(dateCols.length, 12, 'non-vacuous: the date columns of spec section 6, and fin_cash_counts.count_date');
     assert.deepEqual(dateCols.filter(c => c.typ !== 'text' || !c.checked), [], 'every date column is TEXT with the YYYY-MM-DD CHECK');
 
     // Replaying the migration leaves every constraint and index exactly as it was.

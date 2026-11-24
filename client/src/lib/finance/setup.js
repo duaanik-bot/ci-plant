@@ -1,6 +1,8 @@
 // What the Setup screens decide without drawing anything (spec §10): which tabs a login sees, what a group or a ledger row may do, the
-// body a ledger form sends, the next financial year, the approval rules, the access grants, and the activity log. The components in
-// components/finance/ and pages/finance/Setup.jsx only draw what these say, and finance-setup-ui.test.js holds them to it.
+// body a ledger form sends, the next financial year, the approval rules, the access grants, and the activity log; and, for Cash & Bank
+// (plan Task 15), a cash holder's fields on the ledger form, the warning for a staff ledger re-filed under a bank, cash or party group,
+// and the HR & payroll tab's rows and the one body it saves. The components in components/finance/ and pages/finance/Setup.jsx only draw
+// what these say, and finance-setup-ui.test.js and finance-cash-wiring.test.js hold them to it.
 //
 // The months' own moves are periods.js (the one definition the server uses too). Dates are 'YYYY-MM-DD' text and are read as text, never
 // through a Date; the one exception is finWhenText, which shows an instant in the browser's own day and time.
@@ -51,13 +53,15 @@ export const finSetupEmpty = ({ known, failed, none, blocked }) => (known ? none
 
 // ── The tabs ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-// The six tabs, in the order of the spec. `cap` is the capability that shows a tab (caps.js finCan); the screens hide what a login
-// cannot do, and the server refuses it regardless. The key is the part of the path after /finance/setup/.
+// The seven tabs, in the order of the spec. `cap` is the capability that shows a tab (caps.js finCan); the screens hide what a login
+// cannot do, and the server refuses it regardless. The key is the part of the path after /finance/setup/. HR & payroll (Cash & Bank
+// spec §7.3, §7.8, §7.9) is read by every login of the book, as GET /finance/hr-setup is, and changed by an Admin alone.
 export const FIN_SETUP_TABS = Object.freeze([
   Object.freeze({ key: 'chart-of-accounts', label: 'Chart of Accounts', cap: 'view' }),
   Object.freeze({ key: 'months-years', label: 'Months & Years', cap: 'view' }),
   Object.freeze({ key: 'opening-balances', label: 'Opening Balances', cap: 'import' }),
   Object.freeze({ key: 'approval-rules', label: 'Approval Rules', cap: 'admin' }),
+  Object.freeze({ key: 'hr-payroll', label: 'HR & payroll', cap: 'view' }),
   Object.freeze({ key: 'access', label: 'Access', cap: 'admin' }),
   Object.freeze({ key: 'activity-log', label: 'Activity Log', cap: 'view' }),
 ]);
@@ -138,8 +142,9 @@ export function finLedgerFormOf(ledger, defaults = {}) {
   };
 }
 
-// POST /finance/ledgers. A new ledger is born active and open to typed vouchers, so the body says neither. Blank text is nothing.
-export const finLedgerCreateBody = (form, bookId) => ({
+// POST /finance/ledgers. A new ledger is born active and open to typed vouchers, so the body says neither. Blank text is nothing. Where
+// the form shows a holder's fields (`holder`, finHolderShown) it carries the holder's name and float as well (finHolderBody).
+export const finLedgerCreateBody = (form, bookId, { holder = false } = {}) => ({
   book_id: bookId,
   group_id: idOrNull(form.group_id),
   name: text(form.name).trim(),
@@ -148,16 +153,20 @@ export const finLedgerCreateBody = (form, bookId) => ({
   notes: optional(form.notes),
   party_type: form.party_type || null,
   party_id: idOrNull(form.party_id),
+  ...finHolderBody(form, holder),
 });
 
 // PUT /finance/ledgers/:id. An admin's edit is the whole form. Anyone else's is the text they may change (name, code, Tally name,
 // notes) and NOTHING of the group, the flags or the party link, which are the admin's (final review M-7): finUpdateLedger compares
 // only the fields it is given, so a field left out is never an admin act. The ledger the form was opened on may have been moved,
 // switched off or relinked by an admin since; it does not matter, because none of that is sent, and none of it is undone, so the body
-// is made from the form alone. An admin's types are the ones the server holds (numbers for ids, booleans for flags).
-export function finLedgerEditBody(form, { isAdmin = false } = {}) {
+// is made from the form alone. An admin's types are the ones the server holds (numbers for ids, booleans for flags). A holder's name and
+// float are the accountant's as much as the admin's (Cash & Bank spec §5.4; finUpdateLedger), so either sends them, where the form shows
+// them (`holder`, finHolderShown).
+export function finLedgerEditBody(form, { isAdmin = false, holder = false } = {}) {
   const own = {
     name: text(form.name).trim(), code: optional(form.code), tally_name: optional(form.tally_name), notes: optional(form.notes),
+    ...finHolderBody(form, holder),
   };
   if (!isAdmin) return own;
   return {
@@ -172,6 +181,55 @@ export function finLedgerEditBody(form, { isAdmin = false } = {}) {
 export function finLedgerFields(ledger, { isAdmin = false } = {}) {
   if (!ledger) return { group: true, active: false, systemOnly: false, party: true };
   return { group: isAdmin && !ledger.is_system, active: isAdmin && !ledger.is_system, systemOnly: isAdmin, party: isAdmin };
+}
+
+// ── A cash holder on the ledger form (Cash & Bank spec §5.4) ─────────────────────────────────────────────────────────
+
+// The holder's fields as the form holds them, beside finLedgerFormOf's: the holder's name as text, and the float as TYPED rupees (with
+// the grouping the typed form accepts; a float of nothing is '0.00', and no float at all is blank).
+export const finHolderFormOf = ledger => ({
+  holder_name: text(ledger?.holder_name),
+  float_text: Number.isFinite(ledger?.float_paise) ? finFormatINR(ledger.float_paise).replace(/^₹/, '') : '',
+});
+
+// The float as typed: { paise, error }. Blank is no float (paise null); anything else is money.js's finToPaiseTyped (through
+// voucher.js finParseAmountText): its paise, or its one sentence, which stops the save.
+export function finHolderFloat(floatText) {
+  if (text(floatText).trim() === '') return { paise: null, error: null };
+  const { paise, error } = finParseAmountText(floatText);
+  return error ? { paise: null, error } : { paise, error: null };
+}
+
+// Whether the ledger form offers a holder's fields (spec §5.4; ruling R61): under Cash-in-Hand (`group`, the chosen group, its is_cash)
+// and never on the book's built-in Cash. That ledger is office cash, the CASH channel's default (ruling R19), and a holder is always a
+// ledger of its own: a holder typed on office cash would take the default away from HR's CASH channel without a word. A new ledger
+// (`ledger` null) under Cash-in-Hand is offered them.
+export const finHolderShown = ({ ledger, group }) => group?.is_cash === true && ledger?.is_system !== true;
+
+// What a ledger form sends of the holder: where the form shows the holder's fields (`shown`, finHolderShown), the name (blank is none)
+// and the float (blank is none); anywhere else nothing at all, and nothing either from a form that holds no holder fields
+// (finHolderFormOf's), so a caller that never drew them can never clear a holder by accident. A holder is the server's to judge
+// (FIN_HOLDER_NOT_CASH, a float with no name): the form only says what it holds.
+export function finHolderBody(form, shown) {
+  if (shown !== true || !has(form, 'holder_name') || !has(form, 'float_text')) return {};
+  return { holder_name: optional(form.holder_name), float_paise: finHolderFloat(form.float_text).paise };
+}
+
+// The warning for a staff ledger being filed under a bank, cash or party group (Task 9's deferred minor; ruling R20a guards a role
+// when it is GIVEN, not a later move of its ledger): the sentence, or '' for nothing to say. `ledger` is the ledger being edited,
+// `groupId` the group chosen on the form, `groups` the groups read (is_bank_cash, is_party), and `roles` GET /finance/hr-setup's
+// roles ({ role: ledger_id }). Only the four staff roles count (FIN_STAFF_ROLES): MD's Account and the inter-company account are
+// often a party's in Tally, and the cash-difference ledger has its own guard. A warning only: the save is never stopped by it.
+export function finRefiledStaffWarning({ ledger, groupId, groups, roles }) {
+  if (!ledger || roles === null || typeof roles !== 'object' || Array.isArray(roles)) return '';
+  if (groupId == null || groupId === '' || String(groupId) === String(ledger.group_id)) return '';
+  const group = list(groups).find(g => String(g?.id) === String(groupId));
+  if (!group || !(group.is_bank_cash === true || group.is_party === true)) return '';
+  const held = FIN_STAFF_ROLES.filter(role => has(roles, role) && roles[role] === ledger.id);
+  if (held.length === 0) return '';
+  const names = held.map(finHrRoleLabel);
+  const named = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `This ledger is ${named} in HR & payroll setup; a bank, cash or party ledger can't hold ${held.length === 1 ? 'that role' : 'those roles'}.`;
 }
 
 // The chips on a ledger row, in this order: { key, label, tone }. "Name differs" is amber: the ledger keeps the name it had in Tally and
@@ -256,9 +314,15 @@ export function finNextYearLabel(years, booksBegin) {
 
 // ── Approval rules ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-// The entry each rule governs: the voucher types (voucher.js) and the reversal rule, which every reversal uses (spec §7.3).
-export const FIN_RULE_LABELS = Object.freeze({ ...FIN_TYPE_LABELS, reversal: 'Reversal' });
+// The entry each rule governs: the voucher types (voucher.js), the reversal rule, which every reversal uses (spec §7.3), and
+// the rule for clearing a cash count's difference (Cash & Bank spec §5.5, §8).
+export const FIN_RULE_LABELS = Object.freeze({ ...FIN_TYPE_LABELS, reversal: 'Reversal', cash_difference: 'Cash count differences' });
 export const finRuleLabel = key => (typeof key === 'string' && has(FIN_RULE_LABELS, key) ? FIN_RULE_LABELS[key] : String(key));
+
+// A line under a rule, where its entry has more to it than the mode says: an opening correction is checked under the Opening's rule and
+// always waits for an Approver, whatever that rule is set to (Cash & Bank spec §8, §9.4; finSubmitVoucher). '' for every other rule.
+export const FIN_RULE_NOTES = Object.freeze({ opening: 'Opening corrections always need an Approver.' });
+export const finRuleNote = key => (typeof key === 'string' && has(FIN_RULE_NOTES, key) ? FIN_RULE_NOTES[key] : '');
 
 export const FIN_RULE_MODES = Object.freeze([
   Object.freeze({ key: 'always', label: 'Always', hint: 'An Approver must approve every entry of this kind before it posts.' }),
@@ -365,6 +429,8 @@ export function finActivityUrl({ bookId, from, to, user, entity }) {
 // The kinds of thing the log records (the audit log's `entity`), in the words of the screens. The filter offers these.
 export const FIN_ENTITY_CHOICES = Object.freeze([
   Object.freeze({ key: 'voucher', label: 'Voucher' }),
+  Object.freeze({ key: 'allocation', label: 'Bill adjustment' }),
+  Object.freeze({ key: 'cash_count', label: 'Cash count' }),
   Object.freeze({ key: 'ledger', label: 'Ledger' }),
   Object.freeze({ key: 'group', label: 'Group' }),
   Object.freeze({ key: 'period', label: 'Month' }),
@@ -377,9 +443,13 @@ export const FIN_ENTITY_CHOICES = Object.freeze([
 export const finEntityLabel = entity => FIN_ENTITY_CHOICES.find(c => c.key === entity)?.label ?? String(entity);
 
 // What was done, by the kind of thing it was done to. An action nobody has named is shown as it came. The voucher's words are the
-// voucher detail's own history.
+// voucher detail's own history. Every kind the books record has its words (Cash & Bank ruling R60; finance-cash-wiring.test.js reads
+// every finAudit call of the server): a bill adjustment is set against bills as its entry posts, redone, its money on account adjusted
+// (ruling R71), or released when its entry is reversed; a cash count is counted.
 const ACTION_LABELS = Object.freeze({
   voucher: { create: 'Draft made', edit: 'Edited', discard: 'Discarded', submit: 'Sent for approval', approve: 'Approved', reject: 'Sent back', post: 'Posted', reverse: 'Reversal entered' },
+  allocation: { apply: 'Set against bills', redo: 'Redone', adjust: 'Money on account set against bills', release: 'Released' },
+  cash_count: { create: 'Counted' },
   ledger: { create: 'Added', edit: 'Edited' },
   group: { create: 'Added', edit: 'Edited', delete: 'Deleted' },
   period: { status: 'Status changed' },
@@ -387,7 +457,7 @@ const ACTION_LABELS = Object.freeze({
   access: { grant: 'Access given or changed', revoke: 'Access taken away' },
   import: { upload: 'Uploaded', match: 'Matches confirmed', build: 'Opening voucher built' },
   year: { create: 'Added' },
-  book: { setup: 'Set up' },
+  book: { setup: 'Set up', hr_setup: 'HR & payroll setup changed' },
 });
 export function finActionLabel(entity, action) {
   const table = typeof entity === 'string' && has(ACTION_LABELS, entity) ? ACTION_LABELS[entity] : null;
@@ -419,6 +489,7 @@ export function finActivityTarget(row) {
     case 'ledger': case 'group': case 'book': named = snapshot.name; break;
     case 'period': case 'year': named = snapshot.label; break;
     case 'voucher': named = snapshot.number || (snapshot.status === 'draft' ? `Draft #${row.entity_id}` : null); break;
+    case 'allocation': named = snapshot.number; break;   // the entry it adjusts, whose number its record carries
     case 'rule': named = snapshot.rule_key ? finRuleLabel(snapshot.rule_key) : null; break;
     case 'access': named = snapshot.user_name; break;
     default: break;
@@ -432,4 +503,179 @@ export function finActivityTarget(row) {
 export function finJsonText(value) {
   if (value === undefined || value === null) return '';
   try { return JSON.stringify(value, null, 2) ?? ''; } catch { return '[could not be shown]'; }
+}
+
+// ── HR & payroll (Cash & Bank spec §7.2, §7.3, §7.8, §7.9; plan Task 15) ────────────────────────────────────────────
+
+// The roles a ledger plays in a book, in the server's order (finance-hr-setup.js FIN_LEDGER_ROLES, pinned by finance-cash-wiring.test.js),
+// with what each is for. One ledger per role in a book; a ledger may play several.
+export const FIN_HR_ROLES = Object.freeze([
+  Object.freeze({ key: 'staff_advances', label: 'Staff advances', hint: 'Advances paid to staff, less what payroll recovers.' }),
+  Object.freeze({ key: 'staff_loans', label: 'Staff loans', hint: 'Loans to staff, less the instalments recovered.' }),
+  Object.freeze({ key: 'salary_payable', label: 'Salary payable', hint: 'The net pay HR will pay out, until it is paid.' }),
+  Object.freeze({ key: 'salary_expense', label: 'Salary expense', hint: 'Gross pay, wherever the expense map below sends it nowhere else.' }),
+  Object.freeze({ key: 'md_account', label: "MD's account", hint: 'Pay the MD pays separately, from his own money.' }),
+  Object.freeze({ key: 'advance_waiver', label: 'Advances waived', hint: 'The expense of an advance that is waived.' }),
+  Object.freeze({ key: 'other_deductions', label: 'Other deductions', hint: 'Any other deduction HR takes from pay.' }),
+  Object.freeze({ key: 'rounding', label: 'Rounding', hint: "What HR's rupee rounding of the pay leaves." }),
+  Object.freeze({ key: 'tds_receivable', label: 'TDS receivable', hint: 'TDS a customer deducts from what it pays.' }),
+  Object.freeze({ key: 'tds_payable', label: 'TDS payable', hint: 'TDS deducted from a payment to a vendor.' }),
+  Object.freeze({ key: 'cash_difference', label: 'Cash short & excess', hint: "Where a cash count's shortage or excess is cleared." }),
+  Object.freeze({ key: 'intercompany', label: 'Inter-company', hint: 'The other firm, when one firm pays a salary the other books.' }),
+]);
+export const finHrRoleLabel = role => FIN_HR_ROLES.find(r => r.key === role)?.label ?? String(role);
+
+// The roles whose ledger is never a bank, cash or party ledger (the server's FIN_STAFF_ROLES, ruling R20a): the staff ledgers HR's money
+// posts to. A ledger holding one, re-filed under such a group, is warned of (finRefiledStaffWarning).
+export const FIN_STAFF_ROLES = Object.freeze(['staff_advances', 'staff_loans', 'salary_payable', 'salary_expense']);
+
+// HR's cash channel (the server's FIN_CASH_CHANNEL): while it has no map of its own it pays from office cash by default (cash_default,
+// ruling R19), which the form shows beside it and never saves.
+export const FIN_CASH_CHANNEL = 'CASH';
+
+// When the payroll month is booked (§7.8; the server's FIN_PAYROLL_BOOKINGS), the month end first: it is the default.
+export const FIN_PAYROLL_BOOKINGS = Object.freeze([
+  Object.freeze({ key: 'month_end', label: 'At the month end', hint: "The month's payroll is booked on its last day, as owed, whenever it is paid." }),
+  Object.freeze({ key: 'when_paid', label: 'On the day it is paid', hint: "The month's payroll is booked on the day its pay goes out." }),
+]);
+
+// An expense key as the payroll journal finds it (finance-hr-payroll.js finHrRunLines): trimmed, lower-cased, nothing after the colon.
+// GET /finance/hr-setup's expense_keys are already so; a saved key keeps the spelling it was saved in, and is found by this.
+export const finHrKey = key => text(key).trim().toLowerCase().replace(/^(type|dept):\s*/, '$1:');
+
+// A saved key in words, for a key no one in HR has any more, as the server labels the keys it offers: 'Department · Old Dept', 'Person
+// type · Employee' (a type with a capital). A key of no known kind is shown as it is.
+const KEY_PARTS = Object.freeze({ type: 'Person type', dept: 'Department' });
+export function finHrKeyLabel(key) {
+  const hit = /^(type|dept):\s*(.+)$/s.exec(text(key).trim());
+  if (!hit) return text(key);
+  const value = hit[2].trim();
+  return `${KEY_PARTS[hit[1]]} · ${hit[1] === 'type' ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value}`;
+}
+
+// What a field holds now: the edit when there is one (null is "none"), else what is saved.
+const edited = (map, key, saved) => (map && typeof map === 'object' && has(map, key) ? map[key] : saved);
+
+// The channel rows, one per HR pay channel in HR's order (hr_channels), then any map whose channel HR no longer has (`stale`: shown,
+// never sent, since the server refuses a code HR doesn't have): { code, name, kind, saved, value, default_ledger_id, stale }. `saved` and
+// `value` are ledger ids or null. default_ledger_id is office cash, for CASH alone (cash_default): what CASH pays from while it pays from
+// no account of its own, which the screen says beside it and never as a saved choice. A channel mapped into a book the login cannot read
+// is not among `channels` (the server tells it nothing of that book), so it looks unmapped here.
+export function finHrChannelRows(setup, edits) {
+  if (!setup) return [];
+  const saved = new Map(list(setup.channels).map(c => [c.channel_code, c.ledger_id]));
+  const changes = edits?.channels;
+  const row = (code, name, kind, stale) => {
+    const was = saved.has(code) ? saved.get(code) : null;
+    return {
+      code, name, kind, saved: was, value: edited(changes, code, was),
+      default_ledger_id: code === FIN_CASH_CHANNEL ? setup.cash_default?.ledger_id ?? null : null, stale,
+    };
+  };
+  const known = list(setup.hr_channels).map(c => row(c.code, c.name, c.kind, false));
+  const inHr = new Set(known.map(r => r.code));
+  return [...known, ...list(setup.channels).filter(c => !inHr.has(c.channel_code)).map(c => row(c.channel_code, c.channel_code, null, true))];
+}
+
+// The role rows, the twelve in FIN_HR_ROLES' order: { key, label, hint, saved, value }.
+export const finHrRoleRows = (setup, edits) => FIN_HR_ROLES.map(role => {
+  const saved = setup?.roles && has(setup.roles, role.key) ? setup.roles[role.key] : null;
+  return { ...role, saved, value: edited(edits?.roles, role.key, saved) };
+});
+
+// The expense rows: one per key HR's people give (expense_keys, in their order), with the map's row for it, found whatever its capitals
+// (finHrKey); then each saved key no one in HR has now (`gone`). { key, label, saved: { hr_key, ledger_id } | null, value, gone }. `key`
+// is finHrKey's, the edits' key; nothing chosen means the salary_expense role takes it.
+export function finHrExpenseRows(setup, edits) {
+  if (!setup) return [];
+  const savedBy = new Map();
+  for (const x of list(setup.expense_map)) if (!savedBy.has(finHrKey(x.hr_key))) savedBy.set(finHrKey(x.hr_key), x);
+  const changes = edits?.expense;
+  const row = (key, label, gone) => {
+    const saved = savedBy.get(key) ?? null;
+    return { key, label, saved, value: edited(changes, key, saved ? saved.ledger_id : null), gone };
+  };
+  const known = list(setup.expense_keys).map(k => row(k.key, k.label, false));
+  const inHr = new Set(known.map(r => r.key));
+  return [...known, ...[...savedBy.keys()].filter(key => !inHr.has(key)).map(key => row(key, finHrKeyLabel(savedBy.get(key).hr_key), true))];
+}
+
+// PUT /finance/hr-setup: the whole state, which the server takes entry by entry and passes over where nothing changed (Task 9).
+//   channels      every map the login can see, as it stands or as changed (none takes it away), and each new one. A channel with no map
+//                 and no choice is not sent: it may be mapped into a book out of sight, and "none" would be a change, refused.
+//   roles         all twelve, a ledger id or null.
+//   expense_map   every saved key, in the spelling it was saved in (another spelling would be a rename), and each key newly mapped.
+//   payroll_booking   month_end or when_paid.
+export function finHrSetupBody({ bookId, setup, edits }) {
+  return {
+    book_id: bookId,
+    channels: finHrChannelRows(setup, edits).filter(r => !r.stale && (r.saved != null || r.value != null))
+      .map(r => ({ channel_code: r.code, ledger_id: r.value })),
+    roles: Object.fromEntries(finHrRoleRows(setup, edits).map(r => [r.key, r.value])),
+    expense_map: finHrExpenseRows(setup, edits).filter(r => r.saved != null || r.value != null)
+      .map(r => ({ hr_key: r.saved ? r.saved.hr_key : r.key, ledger_id: r.value })),
+    payroll_booking: edited(edits, 'payroll_booking', setup?.payroll_booking ?? 'month_end'),
+  };
+}
+
+// How many of the form's entries differ from what is saved: Save has something to send, and "Create the staff ledgers" (which works from
+// what is saved) waits for them.
+export function finHrSetupChanges(setup, edits) {
+  if (!setup) return 0;
+  const channels = finHrChannelRows(setup, edits).filter(r => !r.stale && r.value !== r.saved).length;
+  const roles = finHrRoleRows(setup, edits).filter(r => r.value !== r.saved).length;
+  const expense = finHrExpenseRows(setup, edits).filter(r => r.value !== (r.saved ? r.saved.ledger_id : null)).length;
+  const saved = setup.payroll_booking ?? 'month_end';
+  return channels + roles + expense + (edited(edits, 'payroll_booking', saved) !== saved ? 1 : 0);
+}
+
+// Where a refusal of the save belongs, from the field the server names and the body that was sent: { part, key } for a channel
+// ('channels[1].ledger_id': the code sent second), a role ('roles.staff_loans'), an expense key ('expense_map[0].ledger_id': the key sent
+// first, as finHrKey finds it) or the booking; null for anything else, which the form says at its foot.
+export function finHrProblemRow(field, sent) {
+  if (typeof field !== 'string' || !sent) return null;
+  let hit = /^channels\[(\d+)\]/.exec(field);
+  if (hit) {
+    const code = list(sent.channels)[Number(hit[1])]?.channel_code;
+    return code == null ? null : { part: 'channel', key: code };
+  }
+  hit = /^roles\.([a-z_]+)$/.exec(field);
+  if (hit) return { part: 'role', key: hit[1] };
+  hit = /^expense_map\[(\d+)\]/.exec(field);
+  if (hit) {
+    const key = list(sent.expense_map)[Number(hit[1])]?.hr_key;
+    return key == null ? null : { part: 'expense', key: finHrKey(key) };
+  }
+  return field === 'payroll_booking' ? { part: 'booking', key: 'payroll_booking' } : null;
+}
+
+// What a channel's picker offers (§7.3): the bank and cash ledgers of every book the login reads, this book's first and then the other
+// book's, each named with its book (a DP bank reads "DP Bank · Darbi Print Pack"), each list in the server's order. `lists` is
+// [{ book: { id, name }, ledgers }] (ledgers null while they load: that book offers nothing yet). `keep` holds ledger ids a channel
+// already pays from, offered whatever has become of them, so the picker can show what is chosen (the server judges any change).
+// Switched-off ledgers are passed on: LedgerPicker shows one only as the current choice.
+export function finHrAccountChoices(lists, bookId, keep = []) {
+  const kept = new Set(list(keep));
+  const books = list(lists).filter(l => l?.book && Array.isArray(l.ledgers));
+  const ordered = [...books.filter(l => l.book.id === bookId), ...books.filter(l => l.book.id !== bookId)];
+  return ordered.flatMap(({ book, ledgers }) => ledgers
+    .filter(l => l.is_bank_cash === true || kept.has(l.id))
+    .map(l => (book.id === bookId ? l : { ...l, name: `${l.name} · ${book.name}` })));
+}
+
+// What "Create the staff ledgers" did, in words, from its answer (POST /finance/hr-setup/ledgers: { created, found, system_only }): the
+// ledgers it made; those it found by their name and gave their role (Task 15 fix round, F1: a call that made nothing may still have
+// moved up to five roles); and those now kept for HR's entries, which take no typed entry from now on.
+export function finStaffLedgersText(answer) {
+  const made = list(answer?.created);
+  const found = list(answer?.found);
+  const kept = list(answer?.system_only);
+  if (made.length === 0 && found.length === 0) return 'The book has all its staff ledgers already: nothing changed.';
+  const names = all => (all.length === 1 ? all[0] : `${all.slice(0, -1).join(', ')} and ${all[all.length - 1]}`);
+  const one = n => n === 1;
+  return [
+    made.length > 0 && `Made ${names(made)}.`,
+    found.length > 0 && `${names(found)} ${one(found.length) ? 'was' : 'were'} in the book already and ${one(found.length) ? 'has its role' : 'have their roles'} now.`,
+    kept.length > 0 && `${names(kept)} now ${one(kept.length) ? 'takes' : 'take'} no typed entries.`,
+  ].filter(Boolean).join(' ');
 }

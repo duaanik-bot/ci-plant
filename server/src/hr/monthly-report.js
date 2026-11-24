@@ -15,9 +15,15 @@
 //   channels  payable and paid split by the pay channel's kind: cash, bank, and lines with no channel
 //   contractors  worker_type 'contractor': people, gross, payable, paid
 //   advances  given on the salary sheet (run_lines.advance_given) and through Pay staff (advance_txns 'given',
-//             source 'manual'), the latter split cash / bank by the "Paid via <code>" its note carries
+//             source 'manual'), the latter split cash / bank by the paid-from code the row keeps (paid_via), or, for a
+//             row from before HR kept one, by the "Paid via <code>" its note carries
 //   loans     issued that month (not opening balances): count, principal, split cash / bank by paid_via; recovered
 //             through payroll (the run's loan_recovery)
+// A paid-from code is split by the account it names (Cash & Bank ruling R43): cash for `cash` and for none (as before), a pay
+// channel by its own kind, a `fin:<ledger id>` by the kind of that account in Finance (finPaidFromKind); anything else (an older
+// loan's free text) is bank, as before.
+import { finPaidFromKind } from '../finance-hr-setup.js';
+
 const CASH = 'cash';
 
 const RUN_SQL = `
@@ -56,25 +62,37 @@ const RUN_SQL = `
    WHERE l.person_id <> ALL($1::int[])
    GROUP BY r.id, r.month, r.status`;
 
-// Pay-staff advances: the channel code is in the note ("Paid via <code>" or "Paid via <code> · <note>").
+// Pay-staff advances, by the code the row keeps (paid_via) and that code's channel kind; a row from before HR kept a code is read
+// by its note ("Paid via <code>" or "Paid via <code> · <note>"), as it always was (noted_kind).
 const ADVANCE_SQL = `
-  SELECT to_char(a.txn_date, 'YYYY-MM') AS month,
-         coalesce(k.kind, CASE WHEN m.code IS NULL OR m.code = '${CASH}' THEN 'cash' ELSE 'bank' END) AS kind,
+  SELECT to_char(a.txn_date, 'YYYY-MM') AS month, a.paid_via AS code, ck.kind AS channel_kind,
+         CASE WHEN a.paid_via IS NULL
+              THEN coalesce(nk.kind, CASE WHEN m.code IS NULL OR m.code = '${CASH}' THEN 'cash' ELSE 'bank' END) END AS noted_kind,
          count(*)::int AS n, sum(a.amount)::text AS amount
     FROM hr.advance_txns a
     LEFT JOIN LATERAL (SELECT substring(a.note FROM '^Paid via ([^ ]+)') AS code) m ON true
-    LEFT JOIN hr.pay_channels k ON k.code = m.code
+    LEFT JOIN hr.pay_channels nk ON nk.code = m.code
+    LEFT JOIN hr.pay_channels ck ON ck.code = a.paid_via
    WHERE a.kind = 'given' AND a.source = 'manual' AND a.reverses_id IS NULL AND a.person_id <> ALL($1::int[])
-   GROUP BY 1, 2`;
+   GROUP BY 1, 2, 3, 4`;
 
 const LOAN_SQL = `
-  SELECT to_char(l.issued_on, 'YYYY-MM') AS month,
-         coalesce(k.kind, CASE WHEN l.paid_via IS NULL OR l.paid_via = '${CASH}' THEN 'cash' ELSE 'bank' END) AS kind,
+  SELECT to_char(l.issued_on, 'YYYY-MM') AS month, l.paid_via AS code, k.kind AS channel_kind,
          count(*)::int AS n, sum(l.principal)::text AS amount
     FROM hr.loans l
     LEFT JOIN hr.pay_channels k ON k.code = l.paid_via
    WHERE NOT l.is_opening AND l.status <> 'cancelled' AND l.person_id <> ALL($1::int[])
-   GROUP BY 1, 2`;
+   GROUP BY 1, 2, 3`;
+
+// Cash or bank, for a paid-from code (the header): `cash` and none are cash; a pay channel is its own kind; `fin:<ledger id>` is
+// its account's kind in Finance, else bank; anything else (an older loan's free text) is bank. `seen` keeps each code's answer.
+async function kindOf(qx, code, channelKind, seen) {
+  if (code == null || code === CASH) return 'cash';
+  if (channelKind) return channelKind;
+  if (!code.startsWith('fin:')) return 'bank';
+  if (!seen.has(code)) seen.set(code, await finPaidFromKind(qx, code));
+  return seen.get(code) ?? 'bank';
+}
 
 // Adds 2-dp decimal strings exactly (paise as BigInt).
 const paise = (s) => {
@@ -123,12 +141,14 @@ export async function monthlySchedule(qx, { exclude = [] } = {}) {
       advance_given_sheet: r.advance_given_sheet,
     };
   }
+  const seen = new Map();
   for (const [list, key] of [[advances, 'advances_pay_staff'], [loans, 'loans_issued']]) {
     for (const a of list) {
+      const kind = a.code == null && a.noted_kind ? a.noted_kind : await kindOf(qx, a.code, a.channel_kind, seen);
       const s = row(a.month)[key];
       s.count += a.n;
       s.amount = plus(s.amount, a.amount);
-      s[a.kind === 'bank' ? 'bank' : 'cash'] = plus(s[a.kind === 'bank' ? 'bank' : 'cash'], a.amount);
+      s[kind === 'bank' ? 'bank' : 'cash'] = plus(s[kind === 'bank' ? 'bank' : 'cash'], a.amount);
     }
   }
   return [...months.values()].sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : 0));

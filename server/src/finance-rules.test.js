@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { finPrefix, finNeedsApproval, FIN_DEFAULT_RULES, finBalanceProblem, finShapeProblem, finCan, FIN_VOUCHER_TYPES, FIN_ROLES } from './finance-rules.js';
+import * as rules from './finance-rules.js';
 
 test('voucher number prefix', () => {
   assert.equal(finPrefix('CI', 'journal', '2627'), 'CI-JV-2627-');
@@ -18,12 +19,34 @@ test('approval decision', () => {
   assert.equal(finNeedsApproval({ mode: 'never', total_paise: 1, period_status: 'closing' }), true);
 });
 
-test('default rules are spec §6.8', () => {
+test('default rules are spec §6.8, and Cash & Bank\'s cash_difference (its spec §8)', () => {
   const by = Object.fromEntries(FIN_DEFAULT_RULES.map(r => [r.rule_key, r]));
-  assert.equal(FIN_DEFAULT_RULES.length, 10);
-  for (const k of ['journal', 'opening', 'reversal', 'credit_note', 'debit_note']) assert.equal(by[k].mode, 'always');
+  assert.equal(FIN_DEFAULT_RULES.length, 11);
+  for (const k of ['journal', 'opening', 'reversal', 'credit_note', 'debit_note', 'cash_difference']) assert.equal(by[k].mode, 'always');
   for (const k of ['payment', 'contra']) assert.deepEqual([by[k].mode, by[k].limit_paise], ['above_limit', 10000000]);
   for (const k of ['receipt', 'sales', 'purchase']) assert.equal(by[k].mode, 'never');
+});
+
+test('R70: the rule an entry comes under: a receipt or a payment of bank and cash lines alone is the transfer it is, a contra', () => {
+  const money = (d, c) => ({ is_bank_cash: true, debit_paise: d, credit_paise: c });
+  const other = (d, c) => ({ is_bank_cash: false, debit_paise: d, credit_paise: c });
+  const keyOf = (v, lines) => rules.finRuleKeyOf(v, lines);
+  // a float handed to a holder, typed as a receipt or a payment: both lines bank or cash
+  assert.equal(keyOf({ voucher_type: 'receipt' }, [money(100, 0), money(0, 100)]), 'contra');
+  assert.equal(keyOf({ voucher_type: 'payment' }, [money(100, 0), money(0, 100)]), 'contra');
+  assert.equal(keyOf({ voucher_type: 'payment' }, [money(100, 0), money(50, 0), money(0, 150)]), 'contra');
+  // a receipt or a payment that touches anything else keeps its own type's rule
+  assert.equal(keyOf({ voucher_type: 'receipt' }, [money(100, 0), other(0, 100)]), 'receipt');
+  assert.equal(keyOf({ voucher_type: 'payment' }, [other(100, 0), money(0, 100)]), 'payment');
+  assert.equal(keyOf({ voucher_type: 'receipt' }, []), 'receipt', 'no lines are no transfer');
+  // the other types, and the keys that come before the type: a reversal, a cash count's clearing, an opening correction
+  assert.equal(keyOf({ voucher_type: 'contra' }, [money(100, 0), money(0, 100)]), 'contra');
+  assert.equal(keyOf({ voucher_type: 'journal' }, [other(100, 0), other(0, 100)]), 'journal');
+  assert.equal(keyOf({ voucher_type: 'journal', reversal_of_id: 9 }, [money(100, 0), money(0, 100)]), 'reversal');
+  assert.equal(keyOf({ voucher_type: 'payment', source_type: 'cash_count' }, [other(100, 0), money(0, 100)]), 'cash_difference');
+  assert.equal(keyOf({ voucher_type: 'receipt', source_type: 'cash_count' }, [money(100, 0), other(0, 100)]), 'cash_difference');
+  assert.equal(keyOf({ voucher_type: 'journal', is_opening_correction: true }, [money(100, 0), other(0, 100)]), 'opening');
+  assert.equal(keyOf({ voucher_type: 'journal', is_opening_correction: true, reversal_of_id: 4 }, [money(0, 100), other(100, 0)]), 'reversal');
 });
 
 test('balance problems carry the spec sentence', () => {
@@ -110,7 +133,7 @@ test('approval: a closing month always asks, and a rule that cannot be read stop
 
 test('default rules carry a limit only where the mode is above_limit, and cover every type', () => {
   for (const r of FIN_DEFAULT_RULES) assert.equal(r.limit_paise, r.mode === 'above_limit' ? 10000000 : null, r.rule_key);
-  assert.deepEqual(FIN_DEFAULT_RULES.map(r => r.rule_key).sort(), [...Object.keys(FIN_VOUCHER_TYPES), 'reversal'].sort());
+  assert.deepEqual(FIN_DEFAULT_RULES.map(r => r.rule_key).sort(), [...Object.keys(FIN_VOUCHER_TYPES), 'reversal', 'cash_difference'].sort());
   assert.ok(Object.isFrozen(FIN_DEFAULT_RULES));
   for (const r of FIN_DEFAULT_RULES) assert.ok(Object.isFrozen(r), r.rule_key);
 });
@@ -154,6 +177,23 @@ test('shape edges: a reversal waives only the journal rule, other types carry no
   // never a silent pass for a type the ledger does not know
   for (const t of ['nonsense', 'constructor', '__proto__', undefined])
     assert.throws(() => finShapeProblem(t, [plainLine(1, 0), plainLine(0, 1)]), /voucher type/i, String(t));
+});
+
+// Cash & Bank spec §9.4: an opening correction is a journal that changes the Opening's figures, cash and bank ones included (office
+// cash moved to a holder, say), so it is let off the journal rule as a reversal is, and nothing else is loosened by it.
+test('shape edges: an opening correction waives the journal rule and nothing else', () => {
+  assert.equal(finShapeProblem('journal', [bankLine(1, 0), bankLine(0, 1)], { isOpeningCorrection: true }), null, 'cash to a holder');
+  assert.equal(finShapeProblem('journal', [bankLine(1, 0), plainLine(0, 1)], { isOpeningCorrection: true }), null, 'a bank against capital');
+  for (const [type, lines] of [['receipt', [plainLine(1, 0), bankLine(0, 1)]], ['payment', [bankLine(1, 0), plainLine(0, 1)]],
+    ['contra', [bankLine(1, 0), plainLine(0, 1)]]]) {
+    assert.equal(finShapeProblem(type, lines, { isOpeningCorrection: true })?.code, 'FIN_SHAPE', type);
+  }
+  // a plain journal is held to it: the flag left out, false, or anything but true
+  for (const opts of [undefined, {}, { isOpeningCorrection: false }, { isOpeningCorrection: 'yes' }, { isOpeningCorrection: 1 }]) {
+    assert.equal(finShapeProblem('journal', [bankLine(1, 0), bankLine(0, 1)], opts)?.code, 'FIN_SHAPE', JSON.stringify(opts));
+  }
+  // the two waivers stand apart: a reversal still is one without the flag
+  assert.equal(finShapeProblem('journal', [bankLine(1, 0), plainLine(0, 1)], { isReversal: true, isOpeningCorrection: false }), null);
 });
 
 test('capability matrix: every role against every capability', () => {

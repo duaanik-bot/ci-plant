@@ -28,6 +28,7 @@ import { MONTH_RE, list, paiseOf, plantMonth, plantToday, shiftMonth } from './R
 import { InlineError, parseNum, refusalText } from './PersonDrawer.jsx';
 import PayStaffModal from './PayStaffModal.jsx';
 import BulkAdvances from './BulkAdvances.jsx';
+import PaidFromSelect, { paidFromBody, paidFromProblem } from './PaidFromSelect.jsx';
 
 const SUBS = [{ key: 'loans', label: 'Loans' }, { key: 'advances', label: 'Advances' }, { key: 'bulk', label: 'Bulk advances' }, { key: 'adjustments', label: 'Adjustments' }];
 
@@ -178,6 +179,7 @@ function NewLoanDialog({ people, onClose, onDone }) {
   const [f, setF] = useState(() => ({
     person_id: '', principal: '', issued_on: plantToday(), purpose: '', instalment: '',
     // The payroll the first instalment is cut from (2026-11-15): the one being settled, last month, by default.
+    // paid_via: where it was paid out from, an account on Finance's list (no longer free text); an opening balance names none.
     first_due_month: shiftMonth(plantMonth(), -1), paid_via: '', is_opening: false,
   }));
   const set = (k, v) => setF(c => ({ ...c, [k]: v }));
@@ -189,9 +191,12 @@ function NewLoanDialog({ people, onClose, onDone }) {
     if (instalment.error) return instalment.error;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.issued_on)) return 'Enter the date the loan was issued.';
     if (!MONTH_RE.test(f.first_due_month)) return 'Choose the payroll month the first instalment is cut from.';
+    const fromProblem = paidFromProblem(f.paid_via, !f.is_opening);
+    if (fromProblem) return fromProblem;
     const loan = await hrApi.createLoan({
       person_id: Number(f.person_id), principal: principal.value, issued_on: f.issued_on, purpose: f.purpose.trim() || null,
-      instalment: instalment.value, first_due_month: f.first_due_month, paid_via: f.paid_via.trim() || null, is_opening: f.is_opening,
+      instalment: instalment.value, first_due_month: f.first_due_month, is_opening: f.is_opening,
+      ...(f.is_opening ? {} : paidFromBody('paid_via', f.paid_via)),
     });
     toast.success(`${loan?.loan_no || 'Loan'} created`);
     onDone();
@@ -203,7 +208,9 @@ function NewLoanDialog({ people, onClose, onDone }) {
         <PersonSelect people={people} value={f.person_id} onChange={v => set('person_id', v)} />
         <Field label="Loan amount (₹)" required><Input inputMode="decimal" autoComplete="off" value={f.principal} onChange={e => set('principal', e.target.value)} /></Field>
         <Field label="Issued on" required><Input type="date" value={f.issued_on} onChange={e => set('issued_on', e.target.value)} /></Field>
-        <Field label="Paid out via" hint="e.g. cash, or the bank it went from."><Input autoComplete="off" value={f.paid_via} onChange={e => set('paid_via', e.target.value)} /></Field>
+        {f.is_opening
+          ? <Field label="Paid out from" hint="An opening balance was paid out before HR & Payroll: no account to name."><Input value="—" disabled readOnly /></Field>
+          : <Field label="Paid out from" required><PaidFromSelect value={f.paid_via} onChange={v => set('paid_via', v)} required /></Field>}
         <Field label="Monthly instalment (₹)" required><Input inputMode="decimal" autoComplete="off" value={f.instalment} onChange={e => set('instalment', e.target.value)} /></Field>
         <Field label="Start deducting from the payroll of" required
           hint={MONTH_RE.test(f.first_due_month) ? `${monthLabel(f.first_due_month)} payroll — the salary paid in ${monthLabel(shiftMonth(f.first_due_month, 1))}` : 'In November, October’s salary is paid: choose October to cut it from that pay.'}>
@@ -222,12 +229,15 @@ function PrepayDialog({ loan, onClose, onDone }) {
   const toast = useToast();
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(plantToday());
+  const [paidVia, setPaidVia] = useState('');   // where the money was received into: an account on Finance's list
   const [note, setNote] = useState('');
   const submit = async () => {
     const a = amountCheck(amount, 'the amount repaid');
     if (a.error) return a.error;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'Enter the date it was repaid.';
-    await hrApi.prepayLoan(loan.id, { amount: a.value, date, note: note.trim() || null });
+    const fromProblem = paidFromProblem(paidVia);
+    if (fromProblem) return fromProblem;
+    await hrApi.prepayLoan(loan.id, { amount: a.value, date, ...paidFromBody('paid_via', paidVia), note: note.trim() || null });
     toast.success('Prepayment recorded');
     onDone();
     return undefined;
@@ -239,6 +249,7 @@ function PrepayDialog({ loan, onClose, onDone }) {
         <Field label="Amount (₹)" required><Input inputMode="decimal" autoComplete="off" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
         <Field label="Repaid on" required><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
       </div>
+      <Field label="Received into" required><PaidFromSelect value={paidVia} onChange={setPaidVia} channelCode="cash" required /></Field>
       <Field label="Note"><Input autoComplete="off" value={note} onChange={e => setNote(e.target.value)} /></Field>
     </Dialog>
   );
@@ -330,7 +341,7 @@ function LoanDrawer({ id, level, onClose, onChanged }) {
   const close = () => setDialog(null);
   return (
     <Drawer title={loan ? `${loan.loan_no} · ${loan.person_name}` : 'Loan'} onClose={onClose}
-      sub={loan ? [loan.person_code, loan.purpose, loan.paid_via && `paid via ${loan.paid_via}`].filter(Boolean).join(' · ') : ''}
+      sub={loan ? [loan.person_code, loan.purpose, loan.paid_via && `paid via ${loan.paid_via_label || loan.paid_via}`].filter(Boolean).join(' · ') : ''}
       badge={loan && <Pill status={loan.status} />}
       actions={loan && canOperate && active && (
         <>
@@ -472,15 +483,21 @@ const ADV_OUT = new Set(['recovered', 'waived']);
 
 function GiveAdvanceDialog({ people, personId = '', onClose, onDone }) {
   const toast = useToast();
+  // paid_via: where it was paid from, an account on Finance's list (cash's own to start with).
   const [f, setF] = useState({ person_id: personId ? String(personId) : '', amount: '', txn_date: plantToday(), note: '',
-    for_month: shiftMonth(plantMonth(), -1) });
+    for_month: shiftMonth(plantMonth(), -1), paid_via: '' });
   const set = (k, v) => setF(c => ({ ...c, [k]: v }));
   const submit = async () => {
     if (!f.person_id) return 'Choose the person.';
     const a = amountCheck(f.amount, 'the advance');
     if (a.error) return a.error;
     if (!MONTH_RE.test(f.for_month || '')) return 'Choose the payroll month it is deducted from.';
-    await hrApi.giveAdvance({ person_id: Number(f.person_id), amount: a.value, txn_date: plantToday(), for_month: f.for_month, note: f.note.trim() || null });
+    const fromProblem = paidFromProblem(f.paid_via);
+    if (fromProblem) return fromProblem;
+    await hrApi.giveAdvance({
+      person_id: Number(f.person_id), amount: a.value, txn_date: plantToday(), for_month: f.for_month,
+      ...paidFromBody('paid_via', f.paid_via), note: f.note.trim() || null,
+    });
     toast.success('Advance recorded');
     onDone();
     return undefined;
@@ -493,6 +510,9 @@ function GiveAdvanceDialog({ people, personId = '', onClose, onDone }) {
         <Field label="Given on" hint="Today: an advance is recorded the day it is paid."><Input type="date" value={f.txn_date} disabled readOnly /></Field>
         <Field label="Deduct from the payroll of" required hint="Last month by default: in November, October's salary is paid." className="sm:col-span-2">
           <Input type="month" value={f.for_month} onChange={e => set('for_month', e.target.value)} />
+        </Field>
+        <Field label="Paid from" required className="sm:col-span-2">
+          <PaidFromSelect value={f.paid_via} onChange={v => set('paid_via', v)} channelCode="cash" required />
         </Field>
         <Field label="Note" className="sm:col-span-2"><Input autoComplete="off" value={f.note} onChange={e => set('note', e.target.value)} /></Field>
       </div>
@@ -774,15 +794,8 @@ export default function LoansAdvances({ level }) {
     return () => { live = false; };
   }, []);
 
-  // Pay channels for the Pay staff form; read once, only when the form is offered. Accounts and up pay staff.
+  // Accounts and up pay staff. Where the money came from is picked from Finance's list inside each form (PaidFromSelect).
   const canPay = levelAtLeast(level, 'accounts');
-  const [channels, setChannels] = useState([]);
-  useEffect(() => {
-    if (!canPay) return undefined;
-    let live = true;
-    hrApi.payChannels().then(c => { if (live && Array.isArray(list(c))) setChannels(list(c)); }, () => {});
-    return () => { live = false; };
-  }, [canPay]);
   const [paying, setPaying] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);   // remounts the tabs so they re-read after a payment
 
@@ -796,9 +809,9 @@ export default function LoansAdvances({ level }) {
         {sub === 'loans' && <LoansTab level={level} people={people} />}
         {sub === 'advances' && <AdvancesTab level={level} people={people} />}
         {sub === 'adjustments' && <AdjustmentsTab level={level} people={people} />}
-        {sub === 'bulk' && <BulkAdvances level={level} channels={channels} />}
+        {sub === 'bulk' && <BulkAdvances level={level} />}
       </div>
-      {paying && <PayStaffModal people={people} channels={channels} onClose={() => setPaying(false)} onDone={() => setReloadKey(k => k + 1)} />}
+      {paying && <PayStaffModal people={people} onClose={() => setPaying(false)} onDone={() => setReloadKey(k => k + 1)} />}
     </div>
   );
 }

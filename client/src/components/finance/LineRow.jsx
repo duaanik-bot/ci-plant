@@ -11,6 +11,8 @@
 //   onEdit(cell, change)   a cell was changed: `change` is the new field values, or a function from the line to the new line
 //   onSettle()             an amount cell was left: its text is tidied or marked unreadable
 //   onPick(id, ledger)     a ledger was picked, or cleared (null)
+//   manualOnly             the ledger picker leaves out the ledgers kept for system entries (true, the voucher form's rule); an opening
+//                          correction offers them (false: the Opening and its corrections may hold them, H6; Cash & Bank spec §9.4)
 import { X } from 'lucide-react';
 import { Input } from '../ui.jsx';
 import { finSetAmount } from '../../lib/finance/voucher.js';
@@ -21,7 +23,10 @@ export const LINE_GRID = 'grid grid-cols-[2rem_minmax(0,1fr)_8.5rem_8.5rem_2rem]
 export const cellProblem = text => <span className="mt-0.5 block text-[11px] leading-snug text-red-600">{text}</span>;
 export const redRing = bad => (bad ? '!border-red-400 !ring-2 !ring-red-200' : '');
 
-export default function LineRow({ line, label, number, ledger, ledgers, bookId, canRemove, onPick, onEdit, onSettle, onRemove }) {
+export default function LineRow({
+  line, label, number, ledger, ledgers, bookId, canRemove, onPick, onEdit, onSettle, onRemove,
+  manualOnly = true,
+}) {
   const billing = Boolean(ledger?.is_party) || Boolean(line.bill_ref || line.bill_date || line.due_date);
   const common = { 'data-fin-line': line.key };
   const problems = { debit: line.debit_error || line.server?.debit_paise, credit: line.credit_error || line.server?.credit_paise };
@@ -30,7 +35,7 @@ export default function LineRow({ line, label, number, ledger, ledgers, bookId, 
     <div className={`${LINE_GRID} py-2`}>
       <span className="pt-2.5 text-right text-xs tabular-nums text-slate-400">{number || '·'}</span>
       <div className="min-w-0">
-        <LedgerPicker bookId={bookId} ledgers={ledgers} manualOnly value={line.ledger_id}
+        <LedgerPicker bookId={bookId} ledgers={ledgers} manualOnly={manualOnly} value={line.ledger_id}
           aria-label={`Line ${label} ledger`} data-fin-field="ledger" data-fin-cell="ledger" {...common}
           className={redRing(line.server?.ledger_id)} onChange={onPick} />
         {line.server?.ledger_id && cellProblem(line.server.ledger_id)}

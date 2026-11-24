@@ -299,6 +299,59 @@ test('two rows on one Finance ledger, or one party on two rows, are said before 
   assert.equal(O.finMatchView(many.slice(0, 3), {}, GROUPS).states.get(201).note, 'Row 2 and Row 3 are matched to the same ledger');
 });
 
+// Ruling R16 (Cash & Bank spec §7.9): Tally keeps a ledger per person for advances or loans, and the import sums them into the ONE staff
+// ledger. A ledger holding the staff_advances or staff_loans role (GET /finance/hr-setup's roles) takes several rows; every other ledger
+// still takes one, exactly as before. The server (finance-import.js finSaveMatches) already allows it.
+test('R16: finMatchView accepts two Tally rows on a ledger with role staff_advances (and on one with staff_loans), and still refuses two rows on an ordinary ledger', () => {
+  const adv1 = row(301, 'Advance - Test Person A', 'matched', { ledger_id: 41, debit_paise: 3000 * R });
+  const adv2 = row(302, 'Advance - Test Person B', 'matched', { ledger_id: 41, debit_paise: 2000 * R });
+  const loan1 = row(303, 'Loan - Test Person C', 'matched', { ledger_id: 42, debit_paise: 10000 * R });
+  const loan2 = row(304, 'Loan - Test Person D', 'matched', { ledger_id: 42, debit_paise: 1000 * R });
+  const rent1 = row(305, 'Rent Godown', 'matched', { ledger_id: 43, debit_paise: 100 * R });
+  const rent2 = row(306, 'Rent Office', 'matched', { ledger_id: 43, debit_paise: 200 * R });
+  const roles = { staff_advances: 41, staff_loans: 42, salary_payable: 44, rounding: 43 };
+
+  const staff = O.finMatchView([adv1, adv2, loan1, loan2], {}, GROUPS, { roles });
+  assert.equal(staff.ready, true, 'several rows on each per-person staff ledger');
+  assert.equal(staff.blocked, 0);
+  assert.deepEqual(staff.matches.map(m => [m.row_id, m.ledger_id]), [[301, 41], [302, 41], [303, 42], [304, 42]], 'every row sent, each on its ledger');
+  for (const id of [301, 302, 303, 304]) assert.equal(staff.states.get(id).kind, 'match', `${id} is matched, not in conflict`);
+  assert.equal(staff.states.get(301).note, 'Summed with Advance - Test Person B into one line');
+  assert.equal(staff.states.get(304).note, 'Summed with Loan - Test Person C into one line');
+  assert.equal(staff.states.get(301).tone, null, 'said, not warned');
+
+  // staff_loans alone, the same
+  assert.equal(O.finMatchView([loan1, loan2], {}, GROUPS, { roles: { staff_loans: 42 } }).ready, true);
+  // …an ordinary ledger (here the rounding ledger, or a ledger of no role) still refuses a second row, as it always has
+  const ordinary = O.finMatchView([adv1, adv2, rent1, rent2], {}, GROUPS, { roles });
+  assert.equal(ordinary.ready, false);
+  assert.equal(ordinary.blocked, 2);
+  assert.deepEqual(ordinary.states.get(305), { kind: 'attention', note: 'Rent Office is matched to the same ledger', tone: 'red' });
+  assert.equal(ordinary.states.get(301).kind, 'match', 'the staff rows beside them are fine');
+  // …and so does every staff ledger that is not a per-person one (Salary Payable), and any ledger at all when the roles are not known
+  const payable = [row(307, 'Salary Payable A', 'matched', { ledger_id: 44 }), row(308, 'Salary Payable B', 'matched', { ledger_id: 44 })];
+  assert.equal(O.finMatchView(payable, {}, GROUPS, { roles }).ready, false);
+  for (const none of [undefined, null, {}, 'roles', []]) {
+    assert.equal(O.finMatchView([adv1, adv2], {}, GROUPS, { roles: none }).ready, false, `roles ${JSON.stringify(none)}`);
+  }
+  assert.equal(O.finMatchView([adv1, adv2], {}, GROUPS).ready, false, 'no roles given');
+  // a touched row moved onto the staff ledger counts like one the server matched there
+  const moved = O.finMatchView([adv1, rent1], { 305: { action: 'match', ledger_id: 41, group_id: null, party_type: null, party_id: null } }, GROUPS, { roles });
+  assert.equal(moved.ready, true);
+  assert.deepEqual(moved.matches.map(m => m.ledger_id), [41, 41]);
+  // a switched-off staff ledger with a balance is still flagged, whatever else is said
+  const off = O.finMatchView([adv1, adv2], {}, GROUPS, { roles, ledgerById: new Map([[41, { id: 41, name: 'Staff Advances', active: false }]]) });
+  assert.deepEqual(off.states.get(301), { kind: 'match', note: 'Staff Advances is switched off', tone: 'amber' });
+
+  // the two roles are the server's own list (finance-hr-setup.js FIN_PER_PERSON_ROLES), frozen
+  assert.deepEqual(O.FIN_PER_PERSON_ROLES, ['staff_advances', 'staff_loans']);
+  assert.ok(Object.isFrozen(O.FIN_PER_PERSON_ROLES));
+  const server = readFileSync(new URL('./finance-hr-setup.js', import.meta.url), 'utf8');
+  assert.match(server, /export const FIN_PER_PERSON_ROLES = Object\.freeze\(\['staff_advances', 'staff_loans'\]\);/);
+  assert.deepEqual([...O.finPerPersonLedgers(roles)].sort(), [41, 42]);
+  assert.deepEqual([...O.finPerPersonLedgers({ staff_advances: '41', staff_loans: null })], [], 'an id is a whole number');
+});
+
 test('a party under a group that is not a party\'s is not sent, and not counted as linked', () => {
   const moved = matchView({ 102: { ...O.finRowDecision(acme), group_id: 2 } });
   assert.deepEqual(moved.matches[1], { row_id: 102, action: 'create', group_id: 2 });
@@ -669,7 +722,8 @@ test('the Match step: every row is sent once, the group party-ness is the server
   assert.match(t, /const sent = match\.matches;/, 'what finMatchView says the confirmation is');
   assert.match(t, /<Button onClick=\{confirm\} disabled=\{!match\.ready\}>/, 'Confirm waits for every row to be decidable');
   assert.match(t, /const confirm = async \(\) => \{/, 'and hands back the promise of the write');
-  assert.match(t, /finMatchView\(rows, touched, groups, \{ ledgerById \}\)/);
+  assert.match(t, /finMatchView\(rows, touched, groups, \{ ledgerById, roles \}\)/, 'ruling R16: the book\'s roles say which ledgers take a Tally ledger per person');
+  assert.doesNotMatch(t, /finMatchView\(rows, [^)]*\{ ledgerById \}\)/, 'no call is left without them');
   assert.match(t, /finRowIsParty\(r, d, match\.partyGroups\)/, 'the party picker is drawn where the group is a party group, by the one rule');
   assert.doesNotMatch(t, /Sundry|is_party|FIN_PARTY_GROUP|\bsides?\b/, 'the screen holds no definition of a party group: the server marks them (the groups read\'s is_party) and opening.js takes the mark');
   assert.match(t, /const columns = finUnsorted\(\[/);
@@ -723,7 +777,8 @@ test('the Match step marks the row the server refused, and answers the refusal w
 test('the Match step\'s filters keep the rows as they stood when chosen, and its search is the screen\'s own, so an empty result never says there is nothing', () => {
   const t = SOURCES.match;
   assert.match(t, /useEffect\(\(\) => \{ edits\.current = touched; \}, \[touched\]\);/, 'the edits are read from a ref, written by an effect and not during a render');
-  assert.match(t, /\[rows, groups, ledgerById, filter, refresh\]/, 'the rows a filter shows are looked at when it is chosen, never on an edit');
+  assert.match(t, /\[rows, groups, ledgerById, roles, filter, refresh\]/,
+    'the rows a filter shows are looked at when it is chosen (or the rows, groups, ledgers or roles beneath change), never on an edit');
   assert.match(t, /const choose = key => \{ if \(key === filter\) setRefresh\(n => n \+ 1\); else setFilter\(key\); \};/);
   assert.match(t, /const query = useDeferredValue\(search\);/);
   assert.match(t, /searchValue=\{search\} onSearchChange=\{setSearch\}/);
@@ -787,7 +842,8 @@ test('the wizard: every read through useReport, resumed by the one rule, steps o
   const t = SOURCES.page;
   assert.match(t, /export default function OpeningBalances\(\{ me, book, can \}\)/);
   assert.match(t, /if \(!can\('import'\)\) return/);
-  assert.equal(count(t, /useReport\(/g), 5, 'the uploads, the import, the groups and ledgers of the book, and the Opening voucher of a used import');
+  assert.equal(count(t, /useReport\(/g), 7,
+    'the uploads, the import, the groups, ledgers and HR roles of the book, the Opening voucher of a used import, and the opening corrections');
   assert.doesNotMatch(t, /api\./, 'the steps make the writes; the wizard only reads');
   assert.match(t, /useReport\(`\/finance\/imports\?\$\{new URLSearchParams\(\{ book: String\(book\.id\), purpose: 'opening' \}\)\}`\)/);
   assert.match(t, /const resume = imports \? finResumeImport\(imports\) : null;/);

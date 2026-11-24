@@ -2,9 +2,15 @@
 // nothing imports it, no test runs it, and the Vercel function (api/index.js) never reaches it. It lives in server/,
 // not server/src/, because `embedded-postgres` has to resolve from this script's folder.
 //
-//   node server/finance-dev.mjs
+//   node server/finance-dev.mjs [--cash-demo] [--books-begin=YYYY-MM-DD]
+//
+//   --cash-demo       also seeds the Cash & Bank walkthrough's invented data (Cash & Bank plan, Task 17; below)
+//   --books-begin=…   the day both books begin, the 1st of a month. Default: with --cash-demo, the 1st of the plant's
+//                     current month (so the walkthrough's entries, dated today, fall inside the books, and the ERP's
+//                     after-the-date doors show); without it, 2027-01-01, the go-live.
 //
 //   FIN_DEV_DIR   where it keeps everything it makes        default  $TMPDIR/ci-erp-finance-dev
+//                                                                    ($TMPDIR/ci-erp-finance-cash-demo with --cash-demo)
 //   FIN_DEV_PORT  the API's port                            default  4931
 //
 // FIN_DEV_DIR holds pgdata/ (the database), postgres.log (the last run's), jwt-secret, tokens.json and server.pid.
@@ -13,15 +19,35 @@
 //   1. starts an embedded Postgres of its own, kept in FIN_DEV_DIR/pgdata, on a free port;
 //   2. runs the app's own init() (the schema and the Finance migration) and the demo seed;
 //   3. makes three logins if they are not there: md@fin.dev, acct@fin.dev and plant@fin.dev, all plant admins;
-//   4. sets up both books with finSetupBooks: md is approver + admin on CI and DP, acct is accountant on both, and
-//      plant holds no Finance grant at all;
+//   4. sets up both books with finSetupBooks, beginning on the books-begin day: md is approver + admin on CI and DP,
+//      acct is accountant on both, and plant holds no Finance grant at all. Books already there that begin on another
+//      day stop the run: they are kept as they are, so the day cannot be changed under them;
 //   5. writes FIN_DEV_DIR/tokens.json, { md: { token, user }, acct: {…}, plant: {…} }: the pair a browser keeps as
 //      `ci_token` and `ci_user`, so the walkthrough signs in by writing those two keys and reloading;
 //   6. serves the real Express app on FIN_DEV_PORT, on the loopback addresses only (127.0.0.1 and ::1), never on the
-//      network.
+//      network;
+//   7. with --cash-demo, seeds the walkthrough (seedCashDemo, below) through that very server's routes, as the two
+//      logins would in a browser, and HR's rows with SQL, as HR writes them (finance-hr-fixtures.js).
 //
-// Run it twice and nothing is doubled: the logins, the books, the years and the grants are all found again, and what
-// the walkthrough posted last time is still there. To start from nothing, stop it and delete FIN_DEV_DIR.
+// Run it twice and nothing is doubled: the logins, the books, the years, the grants and the demo are all found again,
+// and what the walkthrough posted last time is still there. To start from nothing, stop it and delete FIN_DEV_DIR.
+//
+// The cash demo (every name and figure invented), in the CI book, with B the day the books begin, O the day before
+// (the Opening) and E the last day of B's month (the salary day):
+//   • the Opening, through the Tally import, as at O: Office cash (the built-in Cash ledger, renamed) ₹2,00,000,
+//     Bank – current ₹15,00,000, Acme Pharma owing ₹95,000 (an opening lump of ₹20,000 with no bill, bill 0091
+//     ₹35,000 of O's month's 2nd and bill 0104 ₹40,000 of its 18th: the spec's §5.1 sketch, so Receive ₹80,000 with
+//     TDS ₹1,600 by Auto settles the lump and 0091 and leaves ₹13,400 of 0104), Juno Test Packaging owed ₹1,80,000
+//     (bill V-11), and Capital A/c; built by acct and approved by md;
+//   • Cash with Holder A (held by "Holder A", float ₹50,000), given ₹10,000 from Office cash on B (§9.2), so Top up
+//     offers ₹40,000; Test Freight, an expense to pay; TDS Receivable and TDS Payable; Cash Short & Excess; Rounding
+//     Off, Staff Deductions and Advance Waivers, with their roles;
+//   • the staff ledgers (finEnsureStaffLedgers), and HR's two pay channels mapped: CASH to Office cash, COLOUR to
+//     Bank – current; md is HR admin and acct HR accounts;
+//   • in HR, five people, Test Person A–E, all Colour's (A–C paid in cash, D and E by the Colour bank): an advance to A
+//     by Pay staff on B+4; advance sheet CI-ADV-0001 paid in cash on B+13 to B, C and D; B's month's payroll, approved
+//     and finalised by md on E; and its two payment batches, CI-PAY-0001 (cash: A, B, C) and CI-PAY-0002 (bank: D, E),
+//     paid on E. None of HR's money is posted: it all waits for the walkthrough's Bring in from HR (five entries).
 //
 // Local by construction. DATABASE_URL is SET here, over whatever the shell holds, to the embedded Postgres on
 // 127.0.0.1, and the escape hatch for remote schema work is deleted, so this can never reach the plant's database.
@@ -33,9 +59,27 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
-const dir = path.resolve(process.env.FIN_DEV_DIR || path.join(os.tmpdir(), 'ci-erp-finance-dev'));
+// ── The command line ─────────────────────────────────────────────────────────────────────────────
+const USAGE = 'node server/finance-dev.mjs [--cash-demo] [--books-begin=YYYY-MM-DD]';
+let cashDemo = false;
+let booksBeginArg = null;
+for (const arg of process.argv.slice(2)) {
+  if (arg === '--cash-demo') cashDemo = true;
+  else if (arg.startsWith('--books-begin=')) booksBeginArg = arg.slice('--books-begin='.length);
+  else { console.error(`[finance-dev] unknown argument ${arg}. Usage: ${USAGE}`); process.exit(2); }
+}
+const { plantDateStr } = await import('./src/plant-calendar.js');
+const today = plantDateStr();
+// The day the books begin: the 1st of a month (finSetupBooks' ruling R74), a real day.
+const booksBegin = booksBeginArg ?? (cashDemo ? `${today.slice(0, 7)}-01` : '2027-01-01');
+if (!/^\d{4}-\d{2}-01$/.test(booksBegin) || new Date(`${booksBegin}T00:00:00Z`).toISOString().slice(0, 10) !== booksBegin) {
+  console.error(`[finance-dev] --books-begin=${booksBegin} is not the 1st of a month written YYYY-MM-DD. Usage: ${USAGE}`);
+  process.exit(2);
+}
+
+const dir = path.resolve(process.env.FIN_DEV_DIR || path.join(os.tmpdir(), cashDemo ? 'ci-erp-finance-cash-demo' : 'ci-erp-finance-dev'));
 const apiPort = Number(process.env.FIN_DEV_PORT) || 4931;
 const pgdata = path.join(dir, 'pgdata');
 const tokensFile = path.join(dir, 'tokens.json');
@@ -57,6 +101,13 @@ const GRANTS = [
   { email: LOGINS.md.email,   roles: ['approver', 'admin'], books: ['CI', 'DP'] },
   { email: LOGINS.acct.email, roles: ['accountant'],        books: ['CI', 'DP'] },
 ];
+// The cash demo's names (--cash-demo; seedCashDemo at the end), every one invented.
+const DEMO = Object.freeze({
+  office: 'Office cash', bank: 'Bank – current', customer: 'Acme Pharma', vendor: 'Juno Test Packaging', capital: 'Capital A/c',
+  holderLedger: 'Cash with Holder A', holder: 'Holder A', freight: 'Test Freight',
+  people: Object.freeze(['Test Person A', 'Test Person B', 'Test Person C', 'Test Person D', 'Test Person E']),
+});
+const R = 100;   // paise per rupee
 
 const freePort = () => new Promise((resolve, reject) => {
   const srv = net.createServer();
@@ -168,8 +219,25 @@ try {
 
   // ── 4. The books and the grants ────────────────────────────────────────────────────────────────
   const { finSetupBooks } = await import('./src/finance-setup.js');
-  const setup = await db.tx((qc, oc) => finSetupBooks(qc, oc, { grants: GRANTS, actor: 'system (finance-dev)' }));
+  const setup = await db.tx((qc, oc) => finSetupBooks(qc, oc, { booksBegin, grants: GRANTS, actor: 'system (finance-dev)' }));
   for (const b of setup.books) say(`book ${b.code}: ${b.created ? 'set up' : 'already there'}`);
+  // Books found again keep the day they were set up with, and a book's first day is never moved (finSetupBooks).
+  const begins = await db.q('SELECT code, books_begin FROM fin_books ORDER BY code');
+  const other = begins.find(b => b.books_begin !== booksBegin);
+  if (other) {
+    throw new Error(`the books in ${dir} begin on ${other.books_begin}, not ${booksBegin}. Run with --books-begin=${other.books_begin} `
+      + `to keep them, or stop any finance-dev that is running, delete ${dir} and run this again.`);
+  }
+  // The Opening is dated the day before the books begin. When that day is in an earlier financial year (books that begin on 1 April),
+  // each book needs that year as well, every month of it before the books, for the Opening to have a month.
+  const { finFyOf } = await import('../client/src/lib/finance/fy.js');
+  const openingYear = finFyOf(finDayBefore(booksBegin)).label;
+  if (openingYear !== finFyOf(booksBegin).label) {
+    const { finCreateYear } = await import('./src/finance-setup.js');
+    await db.tx(async (qc, oc) => {
+      for (const b of setup.books) await finCreateYear(qc, oc, { bookId: b.id, label: openingYear, booksBegin, actor: 'system (finance-dev)' });
+    });
+  }
 
   // ── 5. Tokens ──────────────────────────────────────────────────────────────────────────────────
   // Signed as /auth/login signs a "keep me signed in" session: { id, name, role }, no expiry. `user` is the shape
@@ -214,6 +282,23 @@ try {
     const res = await fetch(`http://127.0.0.1:${apiPort}/api/finance/me`, { headers: { authorization: `Bearer ${token}` } });
     if (res.status !== 200) throw new Error(`GET /api/finance/me as ${key} answered ${res.status}: the token was not accepted`);
   }
+
+  // ── 7. The cash demo ───────────────────────────────────────────────────────────────────────────
+  if (cashDemo) {
+    // A login's call to this server, as the browser makes it: anything but a 200 stops the run, saying what the route said.
+    const api = async (who, method, url, body = null) => {
+      const res = await fetch(`http://127.0.0.1:${apiPort}/api${url}`, {
+        method,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${out[who].token}` },
+        body: body == null ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      let json = null; try { json = JSON.parse(text); } catch {}
+      if (res.status !== 200) throw new Error(`${method} ${url} as ${who} answered ${res.status}: ${json?.error ?? text.slice(0, 300)}`);
+      return json;
+    };
+    await seedCashDemo({ db, api, ids });
+  }
 } catch (e) {
   if (e?.code === 'EADDRINUSE') await fail(new Error(`port ${apiPort} is in use; set FIN_DEV_PORT to another`));
   await fail(e);
@@ -221,5 +306,158 @@ try {
 
 say(`data     ${dir}`);
 say(`postgres 127.0.0.1:${port} (its own, kept between runs)`);
+say(`books    begin ${booksBegin}; the Opening is dated ${finDayBefore(booksBegin)}; the plant's today is ${today}`);
 say(`logins   ${Object.values(LOGINS).map(l => l.email).join(', ')}   (tokens: ${tokensFile})`);
 say(`ready    http://localhost:${apiPort}/api`);
+
+// ── The cash demo (Cash & Bank plan, Task 17; the header says what it seeds) ─────────────────────────────────
+
+// The day before a 'YYYY-MM-DD' day, and the day `n` days after it.
+function finDayAfter(day, n) { return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10); }
+function finDayBefore(day) { return finDayAfter(day, -1); }
+
+// The demo's days, all from the day the books begin (B): the Opening the day before, the Opening's bills in that month, HR's month
+// B's own, its advances on B+4 and B+13, and its payroll finalised and paid on the month's last day, the salary day.
+function finDemoDays(begin) {
+  const [y, m] = begin.split('-').map(Number);
+  const opening = finDayBefore(begin);
+  const before = opening.slice(0, 7);
+  return {
+    begin, opening, month: begin.slice(0, 7), monthEnd: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10),
+    bill0091: `${before}-02`, bill0104: `${before}-18`, billV11: `${before}-05`,
+    advance: finDayAfter(begin, 4), sheet: finDayAfter(begin, 13),
+  };
+}
+
+// A save key of the demo's own, the same on every run, so a second run's entry answers with the first run's voucher (ruling R11).
+function finDemoKey(name) {
+  const h = createHash('sha256').update(`ci-erp finance-dev cash demo: ${name}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+// Seeds the walkthrough through this server's own routes, as md and acct, and HR's rows with SQL, as HR writes them. Each part is found
+// again on a second run and left as it is: the Opening by its voucher, a ledger by its name, an entry by its save key, the HR rows by
+// their people. `ids` are the logins' user ids.
+async function seedCashDemo({ db, api, ids }) {
+  const days = finDemoDays(booksBegin);
+  const CI = (await db.one(`SELECT id FROM fin_books WHERE code = 'CI'`)).id;
+  const groupId = async name => {
+    const g = (await api('md', 'GET', `/finance/books/${CI}/groups`)).groups.find(x => x.name === name);
+    if (!g) throw new Error(`the CI book has no group called ${name}`);
+    return g.id;
+  };
+  const ledgerOf = name => db.one('SELECT id FROM fin_ledgers WHERE book_id = $1 AND lower(name) = lower($2)', [CI, name]);
+  const made = [];
+
+  // The Opening, through the Tally import: uploaded, confirmed and built by acct (it waits: the opening rule is always), approved by md.
+  const opening = await db.one(
+    `SELECT id, status FROM fin_vouchers WHERE book_id = $1 AND voucher_type = 'opening' AND status IN ('submitted', 'posted')
+      ORDER BY id DESC LIMIT 1`, [CI]);
+  if (!opening) {
+    // The built-in Cash ledger is the office cash: named as the Tally row is, so the import matches it.
+    const cash = await db.one(
+      `SELECT l.id, l.name FROM fin_ledgers l JOIN fin_groups g ON g.id = l.group_id
+        WHERE l.book_id = $1 AND l.is_system AND g.name = 'Cash-in-Hand' ORDER BY l.id LIMIT 1`, [CI]);
+    if (cash.name !== DEMO.office) await api('acct', 'PUT', `/finance/ledgers/${cash.id}`, { name: DEMO.office });
+    const tb = (tally_name, dr, cr) => ({ tally_name, debit_paise: dr * R, credit_paise: cr * R });
+    const bill = (tally_ledger_name, bill_ref, bill_date, rupees) =>
+      ({ tally_ledger_name, bill_ref, bill_date, due_date: null, amount_paise: rupees * R, side: rupees > 0 ? 'dr' : 'cr' });
+    const up = await api('acct', 'POST', '/finance/imports', {
+      book_id: CI, purpose: 'opening', as_at: days.opening, file_names: ['demo-tb.xlsx', 'demo-bills.xlsx'],
+      accounts: [
+        { tally_name: DEMO.office, tally_group: 'Cash-in-Hand' }, { tally_name: DEMO.bank, tally_group: 'Bank Accounts' },
+        { tally_name: DEMO.customer, tally_group: 'Sundry Debtors' }, { tally_name: DEMO.vendor, tally_group: 'Sundry Creditors' },
+        { tally_name: DEMO.capital, tally_group: 'Capital Account' },
+      ],
+      // Dr 2,00,000 + 15,00,000 + 95,000 = Cr 1,80,000 + 16,15,000 = 17,95,000
+      tb: [tb(DEMO.office, 200000, 0), tb(DEMO.bank, 1500000, 0), tb(DEMO.customer, 95000, 0), tb(DEMO.vendor, 0, 180000),
+        tb(DEMO.capital, 0, 1615000)],
+      bills: [bill(DEMO.customer, null, null, 20000), bill(DEMO.customer, '0091', days.bill0091, 35000),
+        bill(DEMO.customer, '0104', days.bill0104, 40000), bill(DEMO.vendor, 'V-11', days.billV11, -180000)],
+    });
+    const matches = up.ledgers.map(r => ({ row_id: r.id, action: r.match_status === 'matched' ? 'match' : r.match_status,
+      ledger_id: r.ledger_id, group_id: r.group_id, party_type: r.party_type, party_id: r.party_id }));
+    const unmatched = matches.filter(m => m.action === 'unmatched');
+    if (unmatched.length) throw new Error(`the demo's Tally import left ${unmatched.length} row(s) unmatched`);
+    await api('acct', 'PUT', `/finance/imports/${up.import.id}/matches`, { matches });
+    const built = (await api('acct', 'POST', `/finance/imports/${up.import.id}/build-opening`)).voucher;
+    await api('md', 'POST', `/finance/vouchers/${built.id}/approve`);
+    made.push(`the Opening (${days.opening})`);
+  } else if (opening.status === 'submitted') {
+    await api('md', 'POST', `/finance/vouchers/${opening.id}/approve`);
+    made.push('the Opening approved');
+  }
+
+  // The ledgers the walkthrough uses that the Opening does not carry.
+  const ledgers = [
+    { name: DEMO.holderLedger, group: 'Cash-in-Hand', holder_name: DEMO.holder, float_paise: 50000 * R },
+    { name: DEMO.freight, group: 'Direct Expenses' },
+    { name: 'TDS Receivable', group: 'Loans & Advances (Asset)' }, { name: 'TDS Payable', group: 'Duties & Taxes' },
+    { name: 'Cash Short & Excess', group: 'Indirect Expenses' }, { name: 'Rounding Off', group: 'Indirect Expenses' },
+    { name: 'Staff Deductions', group: 'Indirect Incomes' }, { name: 'Advance Waivers', group: 'Indirect Expenses' },
+  ];
+  for (const { name, group, ...holder } of ledgers) {
+    if (await ledgerOf(name)) continue;
+    await api('acct', 'POST', '/finance/ledgers', { book_id: CI, group_id: await groupId(group), name, ...holder });
+    made.push(name);
+  }
+  const L = {};
+  for (const name of [DEMO.office, DEMO.bank, DEMO.holderLedger, 'TDS Receivable', 'TDS Payable', 'Cash Short & Excess', 'Rounding Off',
+    'Staff Deductions', 'Advance Waivers']) L[name] = (await ledgerOf(name)).id;
+
+  // The staff ledgers, HR's two pay channels and the logins' HR levels; then the channel map and the roles, saved as Setup saves them.
+  await api('md', 'POST', '/finance/hr-setup/ledgers', { book_id: CI });
+  const { finHrFixtures } = await import('./src/finance-hr-fixtures.js');
+  await db.q(`INSERT INTO hr.pay_channels (code, label, kind) VALUES ('CASH', 'Cash', 'cash'), ('COLOUR', 'Colour bank', 'bank')
+              ON CONFLICT (code) DO NOTHING`);
+  const fxPool = finHrFixtures(db);
+  await fxPool.access(ids.md, 'admin');
+  await fxPool.access(ids.acct, 'accounts');
+  await api('md', 'PUT', '/finance/hr-setup', {
+    book_id: CI,
+    channels: [{ channel_code: 'CASH', ledger_id: L[DEMO.office] }, { channel_code: 'COLOUR', ledger_id: L[DEMO.bank] }],
+    roles: {
+      tds_receivable: L['TDS Receivable'], tds_payable: L['TDS Payable'], cash_difference: L['Cash Short & Excess'],
+      rounding: L['Rounding Off'], other_deductions: L['Staff Deductions'], advance_waiver: L['Advance Waivers'],
+    },
+  });
+
+  // Holder A's float as it starts (spec §9.2): a transfer from office cash on the books' first day.
+  const float = await api('acct', 'POST', '/finance/cash/entries', {
+    book_id: CI, entry_type: 'transfer', voucher_date: days.begin, account_ledger_id: L[DEMO.office], other_ledger_id: L[DEMO.holderLedger],
+    amount_paise: 10000 * R, narration: 'Opening float', client_key: finDemoKey('holder A float'),
+  });
+  if (!float.replayed) made.push(`${DEMO.holder}'s ₹10,000 float (${days.begin})`);
+
+  // HR's month, in one transaction: all of it or none of it. HR's own rows only; Finance is told nothing (Bring in posts it).
+  if (!(await db.one('SELECT 1 AS one FROM hr.people WHERE name = $1', [DEMO.people[0]]))) {
+    await db.tx(async (qc, oc) => {
+      const fx = finHrFixtures({ q: qc, one: oc });
+      const people = [];
+      for (const [i, name] of DEMO.people.entries()) people.push(await fx.person({ name, firm: 'COLOUR', channel: i < 3 ? 'CASH' : 'COLOUR' }));
+      const [A, B, C, D, E] = people;
+      await fx.advance({ person: A, date: days.advance, rupees: 5000, paidVia: 'cash', door: 'pay_staff', by: ids.acct });
+      const sheet = await fx.sheet({
+        sheetNo: 'CI-ADV-0001', month: days.month, paidOn: days.sheet, paidVia: 'cash', by: ids.acct,
+        lines: [{ person: B, rupees: 3000, decidedBy: ids.md }, { person: C, rupees: 2000, decidedBy: ids.md }, { person: D, rupees: 2500, decidedBy: ids.md }],
+      });
+      await fx.postRound(sheet.id, sheet.lineIds, { by: ids.md });
+      const run = await fx.payroll({ month: days.month, approvedBy: ids.md, lines: [
+        { person: A, gross: 15000, advanceRecovery: 2000 }, { person: B, gross: 12000, advanceRecovery: 1000 }, { person: C, gross: 11000 },
+        { person: D, gross: 18000, advanceRecovery: 2500 }, { person: E, gross: 20000 },
+      ] });
+      await fx.finalise(run.id, { at: `${days.monthEnd}T10:00:00+05:30`, by: ids.md });
+      await fx.payBatch({ lineIds: run.lineIds.slice(0, 3), channel: 'CASH', batchNo: 'CI-PAY-0001', paidOn: days.monthEnd, by: ids.md });
+      await fx.payBatch({ lineIds: run.lineIds.slice(3), channel: 'COLOUR', batchNo: 'CI-PAY-0002', paidOn: days.monthEnd, by: ids.md });
+    });
+    made.push(`HR's ${days.month}: 5 people, an advance, sheet CI-ADV-0001, the payroll and batches CI-PAY-0001 and CI-PAY-0002`);
+  }
+
+  say(`cash demo: ${made.length ? `seeded ${made.join('; ')}` : 'found as it was seeded'}`);
+  say(`cash demo: Opening ${days.opening}; Holder A's float ${days.begin}; HR's advances ${days.advance} and ${days.sheet}, its ${days.month} `
+    + `payroll and batches ${days.monthEnd}`);
+  say(today >= days.begin
+    ? `cash demo: today, ${today}, is inside the books: the forms' own date (today) is the walkthrough's; an opening correction is dated ${days.opening}`
+    : `cash demo: today, ${today}, is BEFORE the books begin (${days.begin}): date the walkthrough's entries ${days.begin} or later, and the ERP's `
+      + 'after-the-date doors will not show');
+}

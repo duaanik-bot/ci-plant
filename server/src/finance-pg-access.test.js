@@ -95,8 +95,9 @@ test('a book id that is not a whole number is 404; a whole number nobody granted
 
 test('groups: the tree in its own order, with the ledgers sitting directly in each', gate, async () => {
   const { groups } = (await h.call('GET', `/finance/books/${CI}/groups`)).body;
+  // is_cash (Cash & Bank plan Task 15): the group is, or descends from, Cash-in-Hand, where a ledger may have a holder
   assert.deepEqual(Object.keys(groups[0]).sort(),
-    ['affects_gross_profit', 'id', 'is_bank_cash', 'is_party', 'is_system', 'ledger_count', 'name', 'nature', 'parent_id', 'sort_order']);
+    ['affects_gross_profit', 'id', 'is_bank_cash', 'is_cash', 'is_party', 'is_system', 'ledger_count', 'name', 'nature', 'parent_id', 'sort_order']);
   const orders = groups.map(g => g.sort_order);
   assert.deepEqual(orders, [...orders].sort((a, b) => a - b), 'in sort_order');
   const by = Object.fromEntries(groups.map(g => [g.name, g]));
@@ -151,8 +152,11 @@ test('ledgers: bank/cash by ancestry, party names loosely compared, switched-off
   const active = await list();
   const by = Object.fromEntries(active.map(l => [l.name, l]));
   assert.deepEqual(Object.keys(active[0]).sort(), [
-    'active', 'book_id', 'code', 'group_id', 'group_name', 'id', 'is_bank_cash', 'is_party', 'is_system', 'manual_entry', 'name',
-    'name_differs', 'notes', 'party_id', 'party_name', 'party_type', 'tally_name']);
+    'active', 'book_id', 'code', 'float_paise', 'group_id', 'group_name', 'holder_name', 'id', 'is_bank_cash', 'is_party', 'is_system', 'manual_entry', 'name',
+    'name_differs', 'notes', 'party_id', 'party_name', 'party_side', 'party_type', 'tally_name']);
+  // party_side (Cash & Bank Task 14): the side a party ledger is on, by its party group, else its link; none for any other ledger
+  assert.deepEqual(['Tally Debtor One', 'Tally Creditor One', 'Petty Debtors', 'Alpha Bank', 'Office Rent'].map(name => by[name].party_side),
+    ['customer', 'vendor', 'customer', null, null]);
 
   assert.equal(by['Old Rent'], undefined, 'a switched-off ledger is not listed unless asked for');
   const all = await list('?include_inactive=1');

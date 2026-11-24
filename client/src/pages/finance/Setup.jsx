@@ -1,14 +1,16 @@
-// Setup: the chart of accounts, the months and years, the opening balances, the approval rules, who has access, and the activity log
-// (spec §10). Props: { me, book, can, setBook, reloadMe }.
+// Setup: the chart of accounts, the months and years, the opening balances, the approval rules, HR & payroll, who has access, and the
+// activity log (spec §10; Cash & Bank spec §7.3, §7.8, §7.9). Props: { me, book, can, setBook, reloadMe }.
 //
 //   /finance/setup                        the first tab this login may see (Chart of Accounts)
-//   /finance/setup/:tab                   chart-of-accounts · months-years · opening-balances · approval-rules · access · activity-log
+//   /finance/setup/:tab                   chart-of-accounts · months-years · opening-balances · approval-rules · hr-payroll · access ·
+//                                         activity-log
 //   /finance/setup/activity-log?from&to&user&entity     the log's period and its two filters
 //
 // The shell routes everything under /finance/setup to this page (setup/*), and the tab is the part after it (finSetupTab). A tab whose
 // capability the login lacks is not shown, and a link to one lands on the first tab it may see:
 //
 //   Chart of Accounts, Months & Years, Activity Log   view
+//   HR & payroll                                      view (only an Admin changes it: HrSetup)
 //   Opening Balances                                  import
 //   Approval Rules, Access                            admin
 //
@@ -26,6 +28,7 @@ import ActivityLog from '../../components/finance/ActivityLog.jsx';
 import ApprovalRules from '../../components/finance/ApprovalRules.jsx';
 import ChartOfAccounts from '../../components/finance/ChartOfAccounts.jsx';
 import FinanceAccess from '../../components/finance/FinanceAccess.jsx';
+import HrSetup from '../../components/finance/HrSetup.jsx';
 import MonthsYears from '../../components/finance/MonthsYears.jsx';
 import OpeningBalances from './OpeningBalances.jsx';
 import { dayOf } from '../../lib/dayOf.js';
@@ -51,7 +54,7 @@ export default function Setup({ me, book, can, reloadMe }) {
 
   return (
     <div>
-      <PageHeader title="Setup" subtitle={`${book.name} · the chart of accounts, months, approval rules, access and the activity log`} />
+      <PageHeader title="Setup" subtitle={`${book.name} · the chart of accounts, months, approval rules, HR & payroll, access and the activity log`} />
       {tab === null ? (
         <p className="py-12 text-center text-sm text-slate-500">Nothing in Setup is open to this login.</p>
       ) : (
@@ -61,6 +64,7 @@ export default function Setup({ me, book, can, reloadMe }) {
           {tab === 'months-years' && <MonthsYears book={book} can={can} />}
           {tab === 'opening-balances' && <OpeningBalances me={me} book={book} can={can} />}
           {tab === 'approval-rules' && <ApprovalRules book={book} can={can} />}
+          {tab === 'hr-payroll' && <HrSetup me={me} book={book} can={can} />}
           {tab === 'access' && <FinanceAccess me={me} book={book} reloadMe={reloadMe} />}
           {tab === 'activity-log' && <ActivityLog book={book} from={from} to={to} user={user} entity={entity} onPeriod={change} onFilters={change} />}
         </>

@@ -17,6 +17,17 @@
 //
 // The save button hands back the promise of the write, so the shared Button holds it to one press; a refusal leaves the form open with
 // what was typed, and the server's sentence under the field it names (useFormWrite).
+//
+// Cash & Bank (spec §5.4; plan Task 15):
+//   • A ledger under Cash-in-Hand (the chosen group's is_cash, the groups read's word) may be held by a person: the holder's name and an
+//     optional float, typed in rupees (setup.js finHolderFloat, money.js finToPaiseTyped), are offered there and nowhere else, to whoever
+//     may save the form (the holder is the accountant's as much as the admin's). Never on the book's built-in Cash, though: that is office
+//     cash, the CASH channel's default, and a holder is always a ledger of its own (ruling R61, finHolderShown). A holder left on a ledger
+//     moved out of Cash-in-Hand is the server's to refuse (FIN_HOLDER_NOT_CASH), and its sentence is shown where the group is. A float
+//     that does not read holds the save only while it is shown (ruling R62: no field the form does not show stops a save).
+//   • A ledger that holds a staff role in HR & payroll setup (GET /finance/hr-setup's roles, read only where the group can be changed),
+//     moved to a bank, cash or party group, is warned of (finRefiledStaffWarning): such a ledger can't hold that role (ruling R20a). It is
+//     a warning only and never stops the save.
 import { useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { Button, Checkbox, Field, Input, Modal, Select, Textarea, useToast } from '../ui.jsx';
@@ -25,30 +36,38 @@ import { LoadNotice } from './ReportParts.jsx';
 import { groupOptions, renderGroupOption } from './GroupForm.jsx';
 import useFormWrite from './useFormWrite.js';
 import useParties from './useParties.js';
+import useReport from './useReport.js';
 import {
-  FIN_PARTY_KINDS, finGroupChoices, finLedgerCreateBody, finLedgerEditBody, finLedgerFields, finLedgerFormOf, finPartyOptions, finPartyText,
+  FIN_PARTY_KINDS, finGroupChoices, finHolderFloat, finHolderFormOf, finHolderShown, finLedgerCreateBody, finLedgerEditBody, finLedgerFields,
+  finLedgerFormOf, finPartyOptions, finPartyText, finRefiledStaffWarning,
 } from '../../lib/finance/setup.js';
 
 export default function LedgerForm({ book, groups, ledger = null, groupId = null, isAdmin, onClose, onSaved, onFailed }) {
   const toast = useToast();
   const { problems, attempt } = useFormWrite();
-  const [form, setForm] = useState(() => finLedgerFormOf(ledger, { group_id: groupId }));
+  const [form, setForm] = useState(() => ({ ...finLedgerFormOf(ledger, { group_id: groupId }), ...finHolderFormOf(ledger) }));
   const set = patch => setForm(f => ({ ...f, ...patch }));
   const fields = finLedgerFields(ledger, { isAdmin });
   const parties = useParties(fields.party ? form.party_type : '');
+  // A cash holder, under Cash-in-Hand only and never on the built-in Cash (ruling R61); and the staff roles, for a ledger an Admin may move.
+  const chosenGroup = groups.find(g => String(g.id) === String(form.group_id)) ?? null;
+  const holderShown = finHolderShown({ ledger, group: chosenGroup });
+  const floatRead = finHolderFloat(form.float_text);
+  const rolesRead = useReport(ledger && fields.group ? `/finance/hr-setup?book=${book.id}` : null);
+  const refiled = finRefiledStaffWarning({ ledger, groupId: form.group_id, groups, roles: rolesRead.data?.roles ?? null });
 
   const groupChoices = useMemo(() => groupOptions(finGroupChoices(groups)), [groups]);
   const partyOptions = useMemo(() => finPartyOptions(form.party_type, parties.list, ledger), [form.party_type, parties.list, ledger]);
   const kindLabel = FIN_PARTY_KINDS.find(k => k.key === form.party_type)?.label ?? '';
 
   const linkMissing = fields.party && form.party_type !== '' && form.party_id === '';
-  const ready = form.name.trim() !== '' && form.group_id != null && form.group_id !== '' && !linkMissing;
+  const ready = form.name.trim() !== '' && form.group_id != null && form.group_id !== '' && !linkMissing && !(holderShown && floatRead.error);
 
   const save = async () => {
     const done = await attempt(
       async () => {
-        if (!ledger) return api.post('/finance/ledgers', finLedgerCreateBody(form, book.id));
-        return api.put(`/finance/ledgers/${ledger.id}`, finLedgerEditBody(form, { isAdmin }));
+        if (!ledger) return api.post('/finance/ledgers', finLedgerCreateBody(form, book.id, { holder: holderShown }));
+        return api.put(`/finance/ledgers/${ledger.id}`, finLedgerEditBody(form, { isAdmin, holder: holderShown }));
       },
       { onFail: onFailed });
     if (!done) return;
@@ -95,8 +114,28 @@ export default function LedgerForm({ book, groups, ledger = null, groupId = null
             <Select options={groupChoices} value={form.group_id ?? ''} placeholder="Choose a group…" renderOption={renderGroupOption}
               onChange={e => set({ group_id: e.target.value === '' ? null : Number(e.target.value) })} />
             <FieldError>{problems.group_id}</FieldError>
+            {!holderShown && <FieldError>{problems.holder_name || problems.float_paise}</FieldError>}
           </Field>
         ) : null}
+        {refiled && <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{refiled}</p>}
+
+        {ledger?.is_system && chosenGroup?.is_cash === true && (
+          <p className="text-xs text-slate-500">This is the book&apos;s office cash, so it has no holder: a holder&apos;s cash is a ledger of its own.</p>
+        )}
+        {holderShown && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Held by" hint="The person who keeps this cash. It stays the company's cash, never an advance to them.">
+              <Input value={form.holder_name} maxLength={255} placeholder="No holder" onChange={e => set({ holder_name: e.target.value })} />
+              <FieldError>{problems.holder_name}</FieldError>
+            </Field>
+            <Field label="Float, in rupees" hint="What the holder is meant to keep; Cash & Bank offers a top-up to it.">
+              <Input value={form.float_text} inputMode="decimal" placeholder="No float" className="tabular-nums"
+                onChange={e => set({ float_text: e.target.value })} />
+              {floatRead.error && <FieldError>{floatRead.error}</FieldError>}
+              <FieldError>{problems.float_paise}</FieldError>
+            </Field>
+          </div>
+        )}
 
         {fields.party && (
           <div>

@@ -37,6 +37,15 @@ async function sheet(rows) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+// August's first sheet, built ONCE: the first upload and the same-file check send these very bytes. ExcelJS stamps a workbook with
+// the clock as it is built, so two builds a second apart are two different files, and the duplicate check would rightly let the
+// second one in.
+let augustBytes = null;
+const augustSheet = async () => (augustBytes ??= await sheet([
+  ['Test Person Alpha', 'T-201', 4, 1],
+  ['Test Person Beta', 'T-202', null, 2],
+]));
+
 describe('HR payroll routes through the real app', {
   skip: ENABLED ? false : 'set HR_PG=1 to boot a throwaway Postgres',
 }, () => {
@@ -162,10 +171,7 @@ describe('HR payroll routes through the real app', {
   });
 
   test('import → apply → lines', T, async () => {
-    const up = await uploadAs('operator', await sheet([
-      ['Test Person Alpha', 'T-201', 4, 1],
-      ['Test Person Beta', 'T-202', null, 2],
-    ]));
+    const up = await uploadAs('operator', await augustSheet());
     assert.equal(up.status, 200, up.text);
     batch1 = up.body.batch.id;
     assert.equal(up.body.rows.length, 2);
@@ -189,10 +195,7 @@ describe('HR payroll routes through the real app', {
   });
 
   test('the same file twice is 409 DUPLICATE_FILE with the batch to reopen', T, async () => {
-    const res = await uploadAs('operator', await sheet([
-      ['Test Person Alpha', 'T-201', 4, 1],
-      ['Test Person Beta', 'T-202', null, 2],
-    ]));
+    const res = await uploadAs('operator', await augustSheet());
     refused(res, 409, 'DUPLICATE_FILE');
     assert.equal(res.body.batch_id, batch1);
     assert.ok(res.body.uploaded_at);

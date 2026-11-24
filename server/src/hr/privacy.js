@@ -48,6 +48,8 @@ const ALLOW = [
   ['GET', '/hr/runs'], ['GET', `/hr/runs/${M}`], ['GET', `/hr/runs/${M}/payslips`],
   ['GET', `/hr/runs/${M}/lines/\\d+/history`], ['GET', `/hr/runs/${M}/compare`], ['GET', '/hr/reports/monthly'], ['GET', '/hr/reports/pending-pay'],
   ['GET', '/hr/loans'], ['GET', '/hr/loans/\\d+'], ['GET', '/hr/advances'], ['GET', '/hr/advances/\\d+'],
+  // Where staff money was paid from (Cash & Bank, 2026-11-21): Finance's accounts by name, for the paying forms below.
+  ['GET', '/hr/paid-from-options'],
   // Paying (accounts; a viewer is stopped by requireHr): batches, one line, paid / unpaid / hold, staff advances.
   ['POST', `/hr/runs/${M}/payments`], ['PUT', `/hr/runs/${M}/lines/\\d+/payment`], ['POST', `/hr/runs/${M}/lines/status`],
   ['POST', '/hr/staff-payments'], ['POST', '/hr/advances'],

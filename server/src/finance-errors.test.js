@@ -29,21 +29,26 @@ test('finError: status and code on a standard refusal, structured detail only in
   assert.deepEqual(finError(404, 'FIN_NOT_FOUND').body, { code: 'FIN_NOT_FOUND' });
 });
 
-// The thirteen codes the hard-stop triggers raise (spec §7.2, migration 20261027104320). They are read off the
-// migration as well as listed here, so a fourteenth trigger code cannot arrive without its sentence.
+// The sixteen codes the hard-stop triggers raise: the core's thirteen (spec §7.2, migration 20261027104320) and Cash &
+// Bank's three (migration 20261121090100): two for allocations (its spec §6.2) and one for an opening correction's date
+// (§9.4). They are read off both migrations as well as listed here, so a seventeenth trigger code cannot arrive without its
+// sentence.
 const TRIGGER_CODES = [
-  'FIN_AUDIT_APPEND_ONLY', 'FIN_BAD_DATE', 'FIN_BAD_REVERSAL', 'FIN_BEFORE_BOOKS', 'FIN_LEDGER_INACTIVE', 'FIN_NO_TRUNCATE',
-  'FIN_PERIOD_CLOSING', 'FIN_PERIOD_LOCKED', 'FIN_POSTED_IMMUTABLE', 'FIN_SYSTEM_LEDGER', 'FIN_TOO_FEW_LINES', 'FIN_UNBALANCED',
-  'FIN_WRONG_BOOK',
+  'FIN_AUDIT_APPEND_ONLY', 'FIN_BAD_ALLOCATION', 'FIN_BAD_CORRECTION', 'FIN_BAD_DATE', 'FIN_BAD_REVERSAL', 'FIN_BEFORE_BOOKS',
+  'FIN_LEDGER_INACTIVE', 'FIN_NO_TRUNCATE', 'FIN_OVER_ALLOCATED', 'FIN_PERIOD_CLOSING', 'FIN_PERIOD_LOCKED', 'FIN_POSTED_IMMUTABLE',
+  'FIN_SYSTEM_LEDGER', 'FIN_TOO_FEW_LINES', 'FIN_UNBALANCED', 'FIN_WRONG_BOOK',
 ];
+const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
+const financeSql = suffix => {
+  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(suffix));
+  assert.equal(files.length, 1, suffix);
+  return readFileSync(new URL(files[0], MIGRATIONS), 'utf8');
+};
 
 test('every code a trigger raises has a plain sentence, and a trigger refusal is a 409 with that code and sentence', () => {
-  const dir = new URL('../../supabase/migrations/', import.meta.url);
-  const files = readdirSync(dir).filter(f => f.endsWith('_finance_ledger_core.sql'));
-  assert.equal(files.length, 1);
-  const sql = readFileSync(new URL(files[0], dir), 'utf8');
+  const sql = financeSql('_finance_ledger_core.sql') + financeSql('_finance_cash_bank.sql');
   const raised = [...new Set([...sql.matchAll(/detail = '(FIN_[A-Z0-9_]+)'/g)].map(m => m[1]))].sort();
-  assert.deepEqual(raised, TRIGGER_CODES, 'the migration raises a different set of codes: give the new one a sentence');
+  assert.deepEqual(raised, TRIGGER_CODES, 'the migrations raise a different set of codes: give the new one a sentence');
   for (const code of TRIGGER_CODES) {
     assert.ok(Object.hasOwn(FIN_SENTENCES, code), `${code} has no sentence`);
     refusal(finMapDbError(trigger(code)), 409, code);
@@ -74,6 +79,45 @@ test('check violations: a line that is not one side is FIN_BAD_LINE (409), a NaN
   refusal(finMapDbError(check('fin_voucher_lines_one_side')), 409, 'FIN_BAD_LINE');
   refusal(finMapDbError(check('fin_vouchers_total_check')), 400, 'FIN_BAD_AMOUNT');
   refusal(finMapDbError(check('fin_approval_rules_limit_not_nan')), 400, 'FIN_BAD_AMOUNT');
+});
+
+// Cash & Bank (migration 20261121090100): every constraint it names, and every default-named CHECK and UNIQUE it adds, has a
+// Finance code (the controller's rule for that migration). finance-pg-cash-schema.test.js holds these names to the database's.
+test('Cash & Bank\'s constraints: each one a Finance refusal, never the fixed 500', () => {
+  for (const [constraint, code] of [
+    ['fin_allocations_debit_line_id_credit_line_id_key', 'FIN_BAD_ALLOCATION'],
+    ['fin_ledger_roles_book_id_role_key', 'FIN_EXISTS'],
+    ['fin_hr_expense_map_book_id_hr_key_key', 'FIN_EXISTS'],
+    ['fin_hr_channels_pkey', 'FIN_EXISTS'],
+    ['fin_book_settings_pkey', 'FIN_EXISTS'],
+    ['fin_hr_exceptions_source_type_source_id_key', 'FIN_EXISTS'],
+    ['fin_hr_covers_voucher_id_source_type_source_id_key', 'FIN_EXISTS'],
+  ]) refusal(finMapDbError(unique(constraint)), 409, code);
+  for (const [constraint, code] of [
+    ['fin_ledgers_float_needs_holder', 'FIN_BAD_INPUT'],
+    ['fin_vouchers_correction_is_journal', 'FIN_BAD_INPUT'],
+    ['fin_allocations_amount_check', 'FIN_BAD_AMOUNT'],
+    ['fin_allocations_mode_check', 'FIN_BAD_INPUT'],
+    ['fin_cash_counts_count_date_check', 'FIN_BAD_DATE'],
+    ['fin_cash_counts_counted_check', 'FIN_BAD_AMOUNT'],
+    ['fin_ledger_roles_role_check', 'FIN_BAD_INPUT'],
+    ['fin_hr_expense_map_hr_key_check', 'FIN_BAD_INPUT'],
+    ['fin_book_settings_payroll_booking_check', 'FIN_BAD_INPUT'],
+  ]) refusal(finMapDbError(check(constraint)), 400, code);
+  for (const fk of ['fin_allocations_ledger_book_fk', 'fin_cash_counts_ledger_book_fk', 'fin_ledger_roles_ledger_book_fk',
+    'fin_hr_channels_ledger_book_fk', 'fin_hr_expense_map_ledger_book_fk']) {
+    refusal(finMapDbError(fkInsert(fk)), 409, 'FIN_WRONG_BOOK');
+    refusal(finMapDbError(fkDelete(fk)), 409, 'FIN_IN_USE');
+  }
+  // Every constraint the migration names with CONSTRAINT is among them, but the core's rule-key CHECK, which it widens under
+  // its old name: that one keeps the core's answer (the app never writes a rule key, so a bad one is the fixed 500).
+  const named = [...financeSql('_finance_cash_bank.sql').matchAll(/\bconstraint (fin_\w+)\s+(check|foreign key|unique)\b/gi)]
+    .filter(([, name]) => name !== 'fin_approval_rules_rule_key_check');
+  assert.ok(named.length >= 7, `non-vacuous: ${named.length} named constraints`);
+  for (const [, name, kind] of named) {
+    const raw = /^check$/i.test(kind) ? check(name) : /^unique$/i.test(kind) ? unique(name) : fkInsert(name);
+    assert.notEqual(finMapDbError(raw).status, 500, `${name} has no Finance code`);
+  }
 });
 
 test('foreign keys: a row pointing across books is FIN_WRONG_BOOK, a delete that would orphan a row is FIN_IN_USE', () => {
@@ -123,6 +167,19 @@ test('what Finance has no word for leaves as one fixed 500, and none of the data
     if (raw?.message) assert.ok(!e.message.includes(raw.message), what);
     assert.equal(e.cause, raw, `${what}: the original is reachable as cause`);
   }
+});
+
+// Cash & Bank ruling R73: the HR feed's transactions wait five seconds at most for a lock (lock_timeout, transaction-local). One that
+// waited longer is 55P03, and Finance's word for it is FIN_BUSY, 409, in its own sentence: the HR exception it becomes says it, and
+// says to try again. A statement timeout, which nothing in Finance sets, stays the fixed 500 (above).
+test('a lock timeout is FIN_BUSY, 409, in Finance\'s own words, never the database\'s', () => {
+  const raw = pg({ code: '55P03', message: 'canceling statement due to lock timeout' });
+  const e = finMapDbError(raw);
+  assert.deepEqual([e.status, e.body, e.message], [409, { code: 'FIN_BUSY' }, FIN_SENTENCES.FIN_BUSY]);
+  assert.equal(FIN_SENTENCES.FIN_BUSY, 'Finance was busy with another entry, so this one did not wait. Try it again in a moment.');
+  assert.doesNotMatch(JSON.stringify({ error: e.message, ...e.body, ...e }), LEAKS);
+  assert.equal(e.cause, raw);
+  assert.deepEqual(finMapDbError(e), e, 'mapping twice maps once');
 });
 
 test('the three leaks reproduced in review: a not-null, an unmapped unique, a connection fault', () => {
@@ -198,6 +255,11 @@ test('FIN_SENTENCES: every code the briefs name has one plain sentence, and the 
     'FIN_FORBIDDEN', 'FIN_NOT_MAKER', 'FIN_NOT_FOUND', 'FIN_BAD_INPUT', 'FIN_REASON_REQUIRED',
     'FIN_NO_PERIOD', 'FIN_SHAPE', 'FIN_NOT_DRAFT', 'FIN_NOT_SUBMITTED', 'FIN_NOT_POSTED', 'FIN_OWN_VOUCHER', 'FIN_CHANGED', 'FIN_EXISTS',
     'FIN_BAD_TRANSITION', 'FIN_LAST_ADMIN', 'FIN_TIE_OUT', 'FIN_DUPLICATE_KEY',
+    // Cash & Bank's (its plan's Global Constraints; FIN_BAD_ALLOCATION and FIN_OVER_ALLOCATED are among the trigger codes)
+    'FIN_NOT_PARTY_LINE', 'FIN_STAFF_IN_HR', 'FIN_ROLE_MISSING', 'FIN_HOLDER_NOT_CASH', 'FIN_NO_OPENING', 'FIN_UNMAPPED_CHANNEL',
+    'FIN_HR_OWNED', 'FIN_DIFFERENCE_VIA_COUNT',
+    // the HR feed's lock timeout (Cash & Bank ruling R73)
+    'FIN_BUSY',
     // the one nobody planned for (ruling R20)
     'FIN_SERVER_ERROR',
   ];
@@ -208,6 +270,27 @@ test('FIN_SENTENCES: every code the briefs name has one plain sentence, and the 
     assert.match(sentence, /^[A-Z].*[.]$/, `${code}: a sentence starts with a capital and ends with a full stop`);
   }
   assert.ok(Object.isFrozen(FIN_SENTENCES));
+});
+
+// Cash & Bank's sentences, exactly as its plan's Global Constraints give them.
+test('Cash & Bank\'s nine sentences are the plan\'s, word for word', () => {
+  assert.deepEqual(Object.fromEntries(['FIN_BAD_ALLOCATION', 'FIN_OVER_ALLOCATED', 'FIN_NOT_PARTY_LINE', 'FIN_STAFF_IN_HR', 'FIN_ROLE_MISSING',
+    'FIN_HOLDER_NOT_CASH', 'FIN_NO_OPENING', 'FIN_UNMAPPED_CHANNEL', 'FIN_HR_OWNED'].map(code => [code, FIN_SENTENCES[code]])), {
+    FIN_BAD_ALLOCATION: "That adjustment doesn't fit those entries.",
+    FIN_OVER_ALLOCATED: 'That would settle more than the entry holds.',
+    FIN_NOT_PARTY_LINE: "Only a posted party entry that hasn't been reversed can be adjusted.",
+    FIN_STAFF_IN_HR: 'Staff advances and salaries are paid in HR.',
+    FIN_ROLE_MISSING: 'Set this ledger in Finance Setup → HR & payroll first.',
+    FIN_HOLDER_NOT_CASH: 'Only a Cash-in-Hand ledger can have a holder.',
+    FIN_NO_OPENING: 'There is no Opening to correct yet.',
+    FIN_UNMAPPED_CHANNEL: 'Map this HR pay channel to an account in Finance Setup first.',
+    FIN_HR_OWNED: 'This entry comes from HR; correct it there.',
+  });
+  assert.equal(FIN_SENTENCES.FIN_DIFFERENCE_VIA_COUNT, 'Cash differences are cleared from a cash count: Count cash → Clear.');
+  // The HR feed's wait for the inter-company pair is gone: the pair posts (Cash & Bank rulings R18, R24).
+  assert.equal(Object.hasOwn(FIN_SENTENCES, 'FIN_INTERCOMPANY_PENDING'), false);
+  // …and the one the database's opening-correction date rule says (the pre-review fix to migration 20261121090100).
+  assert.equal(FIN_SENTENCES.FIN_BAD_CORRECTION, "An opening correction is dated the Opening's own date, the day before the books begin.");
 });
 
 // One code reads one way (the Task 2 carry-forward). Where the database says a code in general terms and

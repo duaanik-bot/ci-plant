@@ -41,7 +41,8 @@ const FIN_LAKH_PAISE = 10000000; // ₹1,00,000, the payment and contra limit
 const finRule = (rule_key, mode, limit_paise = null) => Object.freeze({ rule_key, mode, limit_paise });
 
 // What setup gives each book, which a Finance Admin can edit afterwards. A reversal has a rule of
-// its own, and a reversal always takes it.
+// its own, and a reversal always takes it. So does clearing a cash count's difference (Cash & Bank
+// spec §5.5, §8): whatever its amount, it waits for an Approver.
 export const FIN_DEFAULT_RULES = Object.freeze([
   finRule('journal', 'always'),
   finRule('opening', 'always'),
@@ -53,7 +54,22 @@ export const FIN_DEFAULT_RULES = Object.freeze([
   finRule('receipt', 'never'),
   finRule('sales', 'never'),
   finRule('purchase', 'never'),
+  finRule('cash_difference', 'always'),
 ]);
+
+// The book's rule an entry comes under, by its rule_key (spec §6.8; Cash & Bank spec §5.3, §5.5, §8, §9.4): a reversal's own
+// ('reversal'), a cash count's clearing 'cash_difference', an opening correction 'opening'; a receipt or a payment whose every line is
+// a bank or cash ledger 'contra' (Cash & Bank ruling R70): it only moves money between the book's own accounts, so a float handed to a
+// holder waits as the transfer it is (§5.3), whatever it was typed as, and is never refused; any other entry, its own type's. `lines`
+// carry is_bank_cash, as finPostingFacts reads them. PURE.
+export function finRuleKeyOf({ voucher_type, reversal_of_id = null, source_type = null, is_opening_correction = false }, lines) {
+  if (reversal_of_id != null) return 'reversal';
+  if (source_type === 'cash_count') return 'cash_difference';
+  if (is_opening_correction === true) return 'opening';
+  const betweenAccounts = Array.isArray(lines) && lines.length > 0 && lines.every(line => line.is_bank_cash === true);
+  if ((voucher_type === 'receipt' || voucher_type === 'payment') && betweenAccounts) return 'contra';
+  return voucher_type;
+}
 
 // Does posting this voucher need an Approver? `mode` and `limit_paise` are the book's rule for the
 // voucher (its own type's, or 'reversal' for a reversal; the caller picks the row), `total_paise`
@@ -123,8 +139,9 @@ export function finBalanceProblem(lines) {
 const FIN_SHAPES = {
   journal: {
     says: "A journal can't use bank or cash ledgers — use a Payment, Receipt or Contra voucher.",
-    // A reversal is a journal that mirrors the voucher it undoes, bank and cash lines included.
-    holds: (lines, isReversal) => isReversal || !lines.some(l => l.is_bank_cash),
+    // A reversal is a journal that mirrors the voucher it undoes, bank and cash lines included; and an opening correction is a
+    // journal that changes the Opening's figures, which hold bank and cash balances too (Cash & Bank spec §9.4).
+    holds: (lines, { isReversal, isOpeningCorrection }) => isReversal || isOpeningCorrection === true || !lines.some(l => l.is_bank_cash),
   },
   receipt: {
     says: 'A receipt needs money coming into a bank or cash ledger.',
@@ -142,11 +159,14 @@ const FIN_SHAPES = {
 
 // null when the lines have the shape the type needs, otherwise { code: 'FIN_SHAPE', message }.
 // `isReversal` waives the journal rule and nothing else: a reversal IS a journal, so no other
-// type is loosened by it. Run finBalanceProblem first; this reads lines that are already sound.
-export function finShapeProblem(type, lines, { isReversal = false } = {}) {
+// type is loosened by it. `isOpeningCorrection` (true, and nothing else that looks like it) waives
+// the same rule and no other, for the same reason: an opening correction is always a journal (the
+// database holds it to that, fin_vouchers_correction_is_journal). Run finBalanceProblem first; this
+// reads lines that are already sound.
+export function finShapeProblem(type, lines, { isReversal = false, isOpeningCorrection = false } = {}) {
   if (!Object.hasOwn(FIN_VOUCHER_TYPES, type)) throw finUnknownType(type);
   const shape = Object.hasOwn(FIN_SHAPES, type) ? FIN_SHAPES[type] : null;
-  return shape && !shape.holds(lines, isReversal) ? { code: 'FIN_SHAPE', message: shape.says } : null;
+  return shape && !shape.holds(lines, { isReversal, isOpeningCorrection }) ? { code: 'FIN_SHAPE', message: shape.says } : null;
 }
 
 // ── Who may do what (spec §8.1) ──────────────────────────────────────────────────────────────

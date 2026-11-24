@@ -2868,6 +2868,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   await pool.query(migration('20261114160000_hr_loan_month_instalment.sql'));
   // HR sub-account (hr.people.parent_id) — 2026-11-15
   await pool.query(migration('20261115120000_hr_sub_account.sql'));
+  // HR paid-from / paid-via columns (where the money came from) — 2026-11-21
+  await pool.query(migration('20261121090000_hr_paid_from.sql'));
 
   // COA Register — the Drive COA register mirrored in (no link to plant data),
   // and users.coa_download. Idempotent. 2026-10-17
@@ -2923,4 +2925,8 @@ ALTER TABLE coas ADD COLUMN IF NOT EXISTS gsm INTEGER;
   // groups, ledgers, vouchers, access, rules, audit, Tally import. New tables
   // only, with no foreign key onto any ERP table; idempotent.
   await pool.query(migration('20261027104320_finance_ledger_core.sql'));
+  // Finance Cash & Bank — allocations, cash counts, the HR maps and exceptions, book settings, the
+  // cash_difference rule, and the core's posting check widened for opening corrections. After the
+  // core, whose tables it alters and whose function it replaces; idempotent. 2026-11-21
+  await pool.query(migration('20261121090100_finance_cash_bank.sql'));
 }

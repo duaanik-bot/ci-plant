@@ -1,8 +1,9 @@
-// Reports: the trial balance, a ledger's statement, the journal register, the parallel run against Tally, and the self-approved list
-// (spec §9.2, §10). Props: { me, book, can, setBook }.
+// Reports: the trial balance, a ledger's statement, a party's bills, the journal register, the parallel run against Tally, and the
+// self-approved list (spec §9.2, §10; Cash & Bank spec §6.7). Props: { me, book, can, setBook }.
 //
 //   /finance/reports                          Trial Balance
 //   /finance/reports/ledger?ledger&from&to    Ledger
+//   /finance/reports/party?ledger             Party bills: a customer's or vendor's open bills and money on account, as at today
 //   /finance/reports/journal-register         Journal Register
 //   /finance/reports/parallel-run             Parallel Run
 //   /finance/reports/self-approved            Self-approved
@@ -15,7 +16,7 @@
 // Changing the period or the ledger replaces the history entry; moving to another report or drilling down adds one.
 //
 // What is open in the trial balance is held here and not in the tab, so it is still open when Back returns from a ledger. A voucher
-// changed from its detail (a reversal) moves `version`, which every report reads as "ask again". All five reports only read; each
+// changed from its detail (a reversal) moves `version`, which every report reads as "ask again". All six reports only read; each
 // needs the right to view the book, which the shell has already established, and offers an export only to a book whose grant allows it.
 // Reports are read on a phone too: the tables become cards, and nothing here is laid out separately for one.
 import { useState } from 'react';
@@ -24,6 +25,7 @@ import { PageHeader, Tabs } from '../../components/ui.jsx';
 import JournalRegister, { SelfApproved } from '../../components/finance/JournalRegister.jsx';
 import LedgerStatement from '../../components/finance/LedgerStatement.jsx';
 import ParallelRun from '../../components/finance/ParallelRun.jsx';
+import PartyStatement from '../../components/finance/PartyStatement.jsx';
 import TrialBalance from '../../components/finance/TrialBalance.jsx';
 import VoucherDetail from '../../components/finance/VoucherDetail.jsx';
 import { dayOf } from '../../lib/dayOf.js';
@@ -57,13 +59,14 @@ export default function Reports({ me, book, setBook }) {
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle={`${book.name} · the trial balance, ledger statements, the journal register and the Tally parallel run`} />
+      <PageHeader title="Reports" subtitle={`${book.name} · the trial balance, ledger statements, party bills, the journal register and the Tally parallel run`} />
       <Tabs tabs={FIN_REPORT_TABS} active={tab} onChange={goTab} />
 
       {tab === 'trial-balance' && (
         <TrialBalance {...shared} expanded={expanded} onExpanded={setExpanded} showEmpty={showEmpty} onShowEmpty={setShowEmpty} onLedger={openLedger} />
       )}
       {tab === 'ledger' && <LedgerStatement {...shared} ledgerId={ledgerId} onPickLedger={id => change({ ledger: id })} />}
+      {tab === 'party' && <PartyStatement book={book} ledgerId={ledgerId} onPickLedger={id => change({ ledger: id })} onVoucher={shared.onVoucher} version={version} />}
       {tab === 'journal-register' && <JournalRegister {...shared} />}
       {tab === 'parallel-run' && <ParallelRun book={book} onLedger={openLedger} version={version} />}
       {tab === 'self-approved' && <SelfApproved {...shared} />}

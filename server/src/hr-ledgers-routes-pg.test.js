@@ -264,8 +264,9 @@ describe('HR ledger routes through the real app', {
     assert.equal(audit.detail.loan_no, 'CI-LN-0001');
     assert.equal(audit.detail.person_id, p1);
 
+    // is_opening left out takes its default. (A loan given out names where it was paid from: Cash & Bank ruling R46.)
     const second = await audited('operator', 'POST', '/hr/loans', newLoan({
-      person_id: p2, principal: 6000, instalment: 2000, issued_on: `${NOW}-06`, is_opening: undefined, paid_via: undefined,
+      person_id: p2, principal: 6000, instalment: 2000, issued_on: `${NOW}-06`, is_opening: undefined, paid_via: 'cash',
     }));
     loan2 = second.body.id;
     assert.equal(second.body.loan_no, 'CI-LN-0002', 'the next number');

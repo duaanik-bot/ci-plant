@@ -323,6 +323,10 @@ export const hrApi = {
   // POST /hr/staff-payments — operator. { person_id, kind:'advance'|'loan', amount, paid_on, paid_via, instalments?,
   // first_due_month?, note }; a loan mints CI-LN-####. Answers { kind, advance, loan, warnings, ledger }.
   staffPayment: payment => withImpact(x => api.post('/hr/staff-payments', { ...payment, ...x })),
+  // GET /hr/paid-from-options — accounts and up. Where staff money was paid from, or received into (Cash & Bank §7.3):
+  // { options: [{ code: 'fin:<ledger id>', label, channels: [pay channel codes, and 'cash', that pay from it] }] }.
+  // The code is what paid_via / paid_from take (pages/hr/PaidFromSelect.jsx).
+  paidFromOptions: () => api.get('/hr/paid-from-options'),
   // GET /hr/people/:id/ledger — viewer. { person, totals, rows } — every advance and loan movement, newest first.
   personLedger: personId => api.get(`/hr/people/${seg(personId)}/ledger`),
 

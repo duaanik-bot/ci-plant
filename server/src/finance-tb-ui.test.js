@@ -132,9 +132,11 @@ test('the foot of the trial balance: three pairs that must agree, and the amount
 
 // ── The period, the tabs and the links ────────────────────────────────────────────────────────────────────────────
 
-test('five tabs, in the order of the spec, each named by the report\'s own route', () => {
+test('six tabs, in the order of the spec, each named by the report\'s own route', () => {
+  // Cash & Bank plan Task 15: Party bills (spec §6.7), /finance/reports/party, beside the Ledger
   assert.deepEqual(R.FIN_REPORT_TABS.map(t => [t.key, t.label]), [
-    ['trial-balance', 'Trial Balance'], ['ledger', 'Ledger'], ['journal-register', 'Journal Register'], ['parallel-run', 'Parallel Run'], ['self-approved', 'Self-approved']]);
+    ['trial-balance', 'Trial Balance'], ['ledger', 'Ledger'], ['party', 'Party bills'], ['journal-register', 'Journal Register'],
+    ['parallel-run', 'Parallel Run'], ['self-approved', 'Self-approved']]);
   assert.ok(Object.isFrozen(R.FIN_REPORT_TABS));
 });
 

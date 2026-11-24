@@ -19,6 +19,12 @@
 // Opening voucher then holds one line per ledger with a balance, or a line per bill for a party with bills, so the trial
 // balance as at its date is Tally's, ledger by ledger, to the paisa.
 //
+// One Finance ledger takes one Tally row, but for the staff ledgers that stand for a Tally ledger per person (Cash & Bank spec
+// §7.9): the ledger holding the staff_advances or staff_loans role in the book (finance-hr-setup.js finPerPersonLedgerIds) takes
+// several rows. Their balances are summed, into ONE line of the Opening voucher with no bills, and into ONE row of the parallel
+// run. Which ledgers those are is read afresh at each step, from the roles as they stand: a ledger that no longer holds such a
+// role while several rows point at it stops the build (the tie-out's SHARED_LEDGER).
+//
 // The writes (finCreateImport, finSaveMatches, finBuildOpening) take the `qc` / `oc` of the transaction their route opened
 // and use nothing else: the pool is one client on Vercel. The route has asked finRequire who may BEFORE the transaction.
 // Each writes ONE audit row for the import (entity 'import': upload, match, build) in the same transaction (spec §8.3).
@@ -41,6 +47,7 @@ import { finAudit } from './finance-audit.js';
 import { finSeenBookOf } from './finance-access.js';
 import { FIN_SENTENCES, finError } from './finance-errors.js';
 import { FIN_PARTY_GROUPS } from './finance-groups.js';
+import { finPerPersonLedgerIds } from './finance-hr-setup.js';
 import { FIN_NAME_MAX, finCreateLedger, finIdOf, finOptionalText, finRequiredName } from './finance-masters.js';
 import { finTrialBalance } from './finance-reports.js';
 import { finPrefix } from './finance-rules.js';
@@ -72,6 +79,8 @@ const finMissing = () => finError(404, 'FIN_NOT_FOUND');
 const finDrCr = p => finFormatINR(p, { drcr: true });
 const finCount = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const finSum = values => values.reduce((total, v) => total + v, 0);
+// Names as a sentence lists them: 'A', 'A and B', 'A, B and C'.
+const finAnd = names => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 
 // Who is acting. An import write with nobody to blame is a bug in the caller.
 function finActing(actor) {
@@ -198,10 +207,24 @@ export function finProposeMatches({ rows = [], ledgers = [], groups = [], partie
 // with bills, a line per bill, Dr or Cr as the bill is; for any other row with a balance, one line for it, Dr if
 // positive, Cr if negative; for a zero balance, none. Each is { row, debit_paise, credit_paise, bill_ref, bill_date,
 // due_date }, with the row it is for. ONE definition: the tie-out counts these lines, and the build writes them.
+// The rows on a staff ledger that stands for a Tally ledger per person (`staff`, matched to its `ledger_id`; Cash & Bank spec
+// §7.9) are one line for that ledger, at its first row: the sum of their balances, with no bills even on a party's ledger, and
+// none when they come to nothing.
 function finOpeningLines(ledgers, bills) {
   const billsOf = finIndex(bills, b => finNormName(b.tally_ledger_name));
+  const staffNet = new Map();   // a staff ledger's id -> its rows' balances, summed; taken out once its line is written
+  for (const row of ledgers) {
+    if (row.staff) staffNet.set(row.ledger_id, (staffNet.get(row.ledger_id) ?? 0) + row.debit_paise - row.credit_paise);
+  }
   const lines = [];
   for (const row of ledgers) {
+    if (row.staff) {
+      const net = staffNet.get(row.ledger_id);
+      if (net === undefined) continue;   // a later row of a ledger whose line is written
+      staffNet.delete(row.ledger_id);
+      if (net !== 0) lines.push({ row, debit_paise: Math.max(net, 0), credit_paise: Math.max(-net, 0), bill_ref: null, bill_date: null, due_date: null });
+      continue;
+    }
     const own = row.is_party ? billsOf.get(finNormName(row.tally_name)) ?? [] : [];
     if (own.length) {
       for (const b of own) {
@@ -222,21 +245,26 @@ const finFiguresOf = r => (r.debit_paise && r.credit_paise
   : `${r.tally_name} ${finDrCr(r.debit_paise - r.credit_paise)}`);
 
 // Whether an import's figures may become the Opening voucher (spec §11.2 steps 3 and 4): { ok, problems, warnings, totals }.
-// `ledgers` are the import's rows { tally_name, debit_paise, credit_paise, action, is_party }, action as a confirmation
-// says it; `bills` are { tally_ledger_name, amount_paise, side }, signed; `unknown` are the trial balance's rows that are
-// in no List of Accounts (ruling R36), and `ignored` the rows read as groups' totals that carried an amount (ruling R43),
-// both from the import's summary. Problems, each { code, message }, in this order:
+// `ledgers` are the import's rows { tally_name, debit_paise, credit_paise, action, is_party, ledger_id?, ledger_name?, staff? },
+// action as a confirmation says it, ledger_id and ledger_name the ledger a matched row points at, and staff whether that is a
+// staff ledger that stands for a Tally ledger per person (Cash & Bank spec §7.9); `bills` are { tally_ledger_name, amount_paise,
+// side }, signed; `unknown` are the trial balance's rows that are in no List of Accounts (ruling R36), and `ignored` the rows
+// read as groups' totals that carried an amount (ruling R43), both from the import's summary. Problems, each { code, message },
+// in this order:
 //   TB_UNBALANCED       the rows' debits are not their credits
 //   TB_NOT_IN_ACCOUNTS  a trial balance row with an amount that is not in the List of Accounts: the voucher would leave it
 //                       out, so the books would not be Tally's
 //   UNMATCHED           a row neither matched to a ledger nor to be made
 //   BILLS_MISMATCH      a party's bills do not add up to its trial balance figure: "<party>: bills ₹X, trial balance ₹Y."
 //   BILLS_NO_LEDGER     bills that name no row of the import (ruling R38): they are never dropped silently
+//   SHARED_LEDGER       several rows matched to one ledger that is no staff ledger (§7.9): the confirmation refuses that, so it
+//                       is a ledger whose role moved away since the rows were confirmed
 //   TOO_MANY_LINES      more lines (finOpeningLines) than the Opening voucher takes, FIN_OPENING_MAX_LINES (M4)
 // Warnings, sentences that do not stop the build: when the trial balance doesn't balance, the rows read as groups' totals
 // that carried an amount, by name, in case one of them was a ledger; a party with a balance and no bills goes in as one
-// line; bills on a ledger that is not a party's are left out, and it goes in as one line. totals are the rows' debits and
-// credits. Bills meet their ledger by normalised name. Every figure is whole paise, so every sum here is exact.
+// line; bills on a ledger that is not a party's, or on a staff ledger, are left out, and it goes in as one line; the rows a
+// staff ledger sums, and the one line they make. totals are the rows' debits and credits. Bills meet their ledger by
+// normalised name. Every figure is whole paise, so every sum here is exact.
 export function finTieOut({ ledgers = [], bills = [], unknown = [], ignored = [] } = {}) {
   const problems = [];
   const warnings = [];
@@ -265,7 +293,12 @@ export function finTieOut({ ledgers = [], bills = [], unknown = [], ignored = []
   for (const row of ledgers) {
     const own = billsOf.get(finNormName(row.tally_name)) ?? [];
     const net = row.debit_paise - row.credit_paise;
-    if (!row.is_party) {
+    if (row.staff) {
+      if (own.length) {
+        warnings.push(`${row.tally_name} is summed into ${row.ledger_name}, a staff ledger, which takes no bills: its `
+          + `${finCount(own.length, 'bill')} ${own.length === 1 ? 'is' : 'are'} left out.`);
+      }
+    } else if (!row.is_party) {
       if (own.length) {
         warnings.push(`${row.tally_name} isn't a party's ledger, so its ${finCount(own.length, 'bill')} ${own.length === 1 ? 'is' : 'are'} left out and it goes in `
           + (net === 0 ? 'with no line: it has no balance.' : `as one line of ${finDrCr(net)}.`));
@@ -283,6 +316,22 @@ export function finTieOut({ ledgers = [], bills = [], unknown = [], ignored = []
     const name = own[0].tally_ledger_name;
     problems.push({ code: 'BILLS_NO_LEDGER',
       message: `${name}: ${finCount(own.length, 'bill')} of ${finDrCr(finSum(own.map(b => b.amount_paise)))}, but ${name} isn't a ledger in this import.` });
+  }
+  // Several rows on one ledger (§7.9): a staff ledger sums them into one line, and any other ledger takes one row.
+  const onOne = finIndex(ledgers.filter(r => r.action === 'match' && r.ledger_id != null), r => r.ledger_id);
+  for (const list of onOne.values()) {
+    if (list.length < 2) continue;
+    const names = finAnd(list.map(r => r.tally_name));
+    if (list[0].staff) {
+      const net = finSum(list.map(r => r.debit_paise - r.credit_paise));
+      warnings.push(net === 0
+        ? `${names} go into ${list[0].ledger_name}, and together they come to nothing, so it has no line.`
+        : `${names} go into ${list[0].ledger_name} as one line of ${finDrCr(net)}.`);
+    } else {
+      problems.push({ code: 'SHARED_LEDGER',
+        message: `${names} ${list.length === 2 ? 'both' : 'all'} point at ${list[0].ledger_name}, and only a staff advances or staff loans ledger `
+          + 'takes several Tally rows (Finance Setup → HR & payroll). Confirm the matches again.' });
+    }
   }
   const lines = finOpeningLines(ledgers, bills).length;
   if (lines > FIN_OPENING_MAX_LINES) {
@@ -445,6 +494,7 @@ const finBillOut = b => ({
 // A row as the tie-out reads it.
 const finTieRow = r => ({
   tally_name: r.tally_name, debit_paise: r.debit_paise, credit_paise: r.credit_paise, action: FIN_ACTION_OF[r.match_status], is_party: r.is_party,
+  ledger_id: r.ledger_id, ledger_name: r.ledger_name, staff: r.staff,
 });
 
 // The summary a list of imports carries: its counts, and none of the lists of names behind them (M7), which one import's
@@ -466,6 +516,8 @@ export async function finImportBookOf(value, req) {
 // new one goes under and the party it is to be linked to (finIsPartyLedger, ruling R23). The rows come in the order they
 // were uploaded, each with the names it points at (ledger, group, party). A month-end import has no tie-out (null): it is
 // compared, never built from. `qx` is the pool's q for a view, and the transaction's qc for a build.
+// `staff` marks a row matched to a ledger of the book that stands for a Tally ledger per person (Cash & Bank spec §7.9;
+// finPerPersonLedgerIds), worked out afresh too, from the roles as they stand: its balance is summed with its ledger's others.
 async function finImportFigures(qx, imp) {
   const rows = await qx(
     `SELECT r.id, r.tally_name, r.tally_group, r.debit, r.credit, r.match_status, r.ledger_id, l.name AS ledger_name,
@@ -482,6 +534,7 @@ async function finImportFigures(qx, imp) {
     'SELECT id, tally_ledger_name, bill_ref, bill_date, due_date, amount, side FROM fin_import_bills WHERE import_id = $1 ORDER BY id', [imp.id]))
     .map(finBillOut);
   const kinds = await finGroupKinds(qx, imp.book_id);
+  const perPerson = await finPerPersonLedgerIds(qx, imp.book_id);
   const partyNow = r => (r.match_status === 'matched'
     ? r.ledger_book_id === imp.book_id && finIsPartyLedger({ party_type: r.ledger_party_type, group_id: r.ledger_group_id }, kinds)
     : r.match_status === 'create' && finIsPartyLedger(r, kinds));
@@ -490,6 +543,7 @@ async function finImportFigures(qx, imp) {
     match_status: r.match_status, ledger_id: r.ledger_id, ledger_name: r.ledger_name, ledger_book_id: r.ledger_book_id,
     group_id: r.group_id, group_name: r.group_name, party_type: r.party_type, party_id: r.party_id, party_name: r.party_name,
     is_party: partyNow(r),
+    staff: r.match_status === 'matched' && r.ledger_book_id === imp.book_id && perPerson.has(r.ledger_id),
   }));
   const tie_out = imp.purpose !== 'opening' ? null : finTieOut({
     ledgers: ledgers.map(finTieRow), bills, unknown: imp.summary?.unknown ?? [], ignored: imp.summary?.ignored_with_amounts ?? [],
@@ -725,15 +779,13 @@ function finCleanMatches(matches, rows, purpose) {
   return decided;
 }
 
-// Names as a sentence lists them: 'A', 'A and B', 'A, B and C'.
-const finAnd = names => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
-
 // The accountant confirms what every row of an import is (spec §11.2 step 2; ruling R33): `matches` is
 // [{ row_id, action: 'match' | 'create' | 'unmatched', ledger_id?, group_id?, party_type?, party_id? }], one entry for
 // EVERY row, each once. The import becomes `matched`, which a build needs. Checked whole, against the import's own book,
 // before a row is written; refused:
 //   400 FIN_BAD_INPUT    the list (finCleanMatches); a ledger or group that isn't the book's; a customer or vendor that
-//                        isn't there; two rows on one ledger, or two rows linked to one party, naming them
+//                        isn't there; two rows on one ledger (but for a staff ledger that stands for a Tally ledger per person,
+//                        Cash & Bank spec §7.9), or two rows linked to one party, naming them
 //   400 FIN_BAD_INPUT    a ledger to be made whose name the book has, or another new one's, as names are compared (M13)
 //   409 FIN_LEDGER_INACTIVE  an opening row with a balance matched to a ledger switched off: posting would refuse it
 //   409 FIN_PARTY_LINKED     a party the book has linked to a ledger already
@@ -779,9 +831,11 @@ export async function finSaveMatches(qc, oc, importId, matches, actor) {
     }
   }
 
-  // One Finance ledger for one Tally row, and one party for one ledger.
+  // One Finance ledger for one Tally row, and one party for one ledger. The ledger holding the book's staff_advances or
+  // staff_loans role is the one that takes several rows: Tally may keep a ledger per person, and they are summed (§7.9).
+  const perPerson = await finPerPersonLedgerIds(qc, bookId);
   for (const [ledgerId, list] of finIndex(decided.filter(d => d.action === 'match'), d => d.ledger_id)) {
-    if (list.length > 1) {
+    if (list.length > 1 && !perPerson.has(ledgerId)) {
       throw finBad(`${finAnd(list.map(d => d.row.tally_name))} ${list.length === 2 ? 'both' : 'all'} point at ${ledgers.get(ledgerId).name}. `
         + 'One Finance ledger takes one Tally row: match the others to their own ledgers, or make ledgers for them.', 'matches');
     }
@@ -866,7 +920,8 @@ export async function finSaveMatches(qc, oc, importId, matches, actor) {
 //   3. The tie-out, on the rows as they stand now, each row's party-ness worked out afresh (409 FIN_TIE_OUT, body.problems).
 //   4. A ledger for every row to be made (finCreateLedger: its Tally name kept, linked to its party), in the rows' order.
 //   5. The voucher: one line per ledger with a balance (Dr if positive, Cr if negative), or a line per bill for a party
-//      ledger with bills; up to FIN_OPENING_MAX_LINES lines. A zero balance has no line.
+//      ledger with bills; up to FIN_OPENING_MAX_LINES lines. A zero balance has no line. A staff ledger that stands for a
+//      Tally ledger per person has one line, its rows' balances summed, with no bills (Cash & Bank spec §7.9).
 //   6. finSubmitVoucher: the book's `opening` rule (always, by default) makes it wait for the MD, who is told; an Approver
 //      who builds it posts it, self-approved, as any entry its Approver submits.
 //   7. The import is marked used, with the voucher's id, and its `build` row written.
@@ -943,6 +998,8 @@ export async function finBuildOpening(qc, oc, importId, actor) {
 //              Tally row is matched to (its Tally closing is then 0): { ledger_id, ledger_name, tally_name,
 //              tally_closing_paise, finance_closing_paise, difference_paise }, by ledger name. Closings are signed, Dr
 //              positive; the difference is Tally's less Finance's (ruling R38), so Tally ₹1,000 higher is +100000.
+//              A staff ledger that several Tally rows are matched to (a Tally ledger per person, Cash & Bank spec §7.9) is
+//              one row: their closings summed, beside Finance's for the ledger, and their names as a list ('A and B').
 //   unmatched  the Tally rows matched to no ledger, with their closings, in the order they came.
 //   totals     { differing }: how many rows differ.
 // Finance's closings are the trial balance as at the import's date, every ledger listed (all: true), so a ledger with
@@ -961,7 +1018,7 @@ export async function finParallelRun(importId) {
 
   const rows = [];
   const unmatched = [];
-  const compared = new Set();
+  const compared = new Map();   // a Finance ledger's id -> the Tally rows matched to it: their names and their closings, summed
   for (const t of tallyRows) {
     const tally = finToPaise(t.debit) - finToPaise(t.credit);
     const ledger = t.match_status === 'matched' ? finance.get(t.ledger_id) : undefined;
@@ -969,8 +1026,13 @@ export async function finParallelRun(importId) {
       unmatched.push({ tally_name: t.tally_name, tally_closing_paise: tally });
       continue;
     }
-    compared.add(ledger.id);
-    rows.push({ ledger_id: ledger.id, ledger_name: ledger.name, tally_name: t.tally_name, tally_closing_paise: tally,
+    const seen = compared.get(ledger.id) ?? { ledger, names: [], tally: 0 };
+    seen.names.push(t.tally_name);
+    seen.tally += tally;
+    compared.set(ledger.id, seen);
+  }
+  for (const { ledger, names, tally } of compared.values()) {
+    rows.push({ ledger_id: ledger.id, ledger_name: ledger.name, tally_name: finAnd(names), tally_closing_paise: tally,
       finance_closing_paise: ledger.closing_paise, difference_paise: tally - ledger.closing_paise });
   }
   for (const ledger of finance.values()) {

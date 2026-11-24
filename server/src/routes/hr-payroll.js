@@ -98,6 +98,26 @@
 //   * Each write runs in tx() and leaves its row in hr.audit_log through hrAudit(), in the same transaction; inside
 //     tx() only qc / oc are used. A refusal is an Error with .status and .body = {code, ...}: app.js sends
 //     {error, ...body} and nothing else. A plain 400 / 404 carries no code.
+//
+// Finance (Cash & Bank spec §7.3, §7.7, §11 items 2 and 3)
+//   * Where a payment came from. Mark paid for a channel (POST …/payments), the bulk Mark paid (POST …/lines/status: its
+//     cash channel's batch and its lines of no channel, rulings R44, R44a) and a line's Mark paid in the drawer (PUT
+//     …/lines/:personId/payment) may name it, `paid_from`: `cash`, a pay channel's code, or `fin:<ledger id>` from
+//     Finance's "paid from" list, checked in the route's own transaction (400 "Choose where it was paid from" otherwise).
+//     Elsewhere it is optional, as it was: none means the channel's own account (a bank channel pays from the bank it is
+//     mapped to; the cash channel is asked office cash or a holder on screen). The bulk Mark paid of a cash line or a line
+//     of no channel needs one once Finance offers accounts. While Finance offers none, or its list cannot be read
+//     (finOffersPaidFrom, asked with the pool before the transaction), that bulk Mark paid, and the drawer's Mark paid of a
+//     line of no channel, take none as `cash`: HR is never held up by Finance's setup (ruling R47). It is kept on
+//     hr.payment_batches.paid_from or hr.run_lines.paid_from; a line that stops being paid names none any more.
+//   * After the commit, a route that moved money names what changed to finHrAfter (finance-hr-feed.js), which books it
+//     in Finance in transactions of its own, and only then answers, as it always has: a batch made (and the run, whose
+//     journal a when-paid book posts at the first payment), a line paid, failed or reversed (its batch first when it has
+//     one, then the line: a line paid again from another account than its batch's is booked on its own, ruling R45; and
+//     the run), the bulk change (each batch it made, each line paid on its own, and for unpaid the
+//     batch each line left and the line; and the run), finalise and un-finalise (the run's journal and the advances its
+//     payroll sheet gave). The POST routes among them are in client/src/lib/writeOnce.js MINTING_POSTS (finHrAfter mints
+//     Finance's numbers); the drawer's PUT carries its double-submit answer in its own code (mint-routes-join-once.test.js).
 import { Router } from 'express';
 import multer from 'multer';
 import { createHash } from 'node:crypto';
@@ -119,6 +139,8 @@ import { STATUS_WORD, paymentTotals } from '../hr/payment-status.js';
 import { applyWithImpact, ensureRun, finaliseRun, recalcRun, totalsOf, unfinaliseRun } from '../hr/runs.js';
 import { assertPayVisible, canSeePay, canSeePerson, hiddenIds, restricted } from '../hr/privacy.js';
 import { monthlySchedule } from '../hr/monthly-report.js';
+import { finIsPaidFromChoice, finOffersPaidFrom } from '../finance-hr-setup.js';
+import { finHrAfter } from '../finance-hr-feed.js';
 
 const r = Router();
 
@@ -253,6 +275,21 @@ function userIdOf(req) {
   return Number.isSafeInteger(id) && id > 0 && id <= INT4_MAX ? id : null;
 }
 const userNameOf = (req) => (typeof req?.user?.name === 'string' && req.user.name.trim() ? req.user.name.trim() : 'Someone');
+
+// Where a payment came from (Cash & Bank spec §7.3): a paid-from code, or null when none was sent (the channel's own account).
+// `cash` in any case is `cash`.
+function paidFromOf(raw) {
+  const text = textOf(raw, 'Paid from', 60);
+  if (text === null) return null;
+  const code = text.trim();
+  return code.toLowerCase() === 'cash' ? 'cash' : code;
+}
+// The code, checked in the route's own transaction: `cash`, one of HR's pay channels, or an account on Finance's "paid from"
+// list (finIsPaidFromChoice). Anything else is refused before anything is written.
+async function paidFromChecked(qc, code) {
+  if (!(await finIsPaidFromChoice(qc, code))) throw fail(400, 'Choose where it was paid from', 'UNKNOWN_PAY_CHANNEL');
+  return code;
+}
 
 const given = (v) => v !== null && v !== undefined;
 const paiseOf = (v) => (given(v) ? toPaise(rat(v)) : 0n);
@@ -1790,6 +1827,8 @@ r.post('/hr/runs/:month/finalise', requireHr('accounts'), async (req, res, next)
       }
       return finaliseRun(qc, found, req);           // locks, checks, posts once and audits (hr/runs.js)
     });
+    // The month's journal, and the advances written on its payroll sheet (paid in cash during the month).
+    await finHrAfter(req, [{ type: 'run', id: run.id }, { type: 'sheetAdvances', id: run.id }]);
     res.json(await runView(q, run));
   } catch (e) { next(e); }
 });
@@ -1806,6 +1845,8 @@ r.post('/hr/runs/:month/unfinalise', requireHr('accounts'), async (req, res, nex
       if (!found) throw fail(404, `There is no payroll run for ${monthLabel(month)} yet`, 'RUN_NOT_FOUND');
       return unfinaliseRun(qc, found, req, reason);
     });
+    // Its postings taken back in HR, the feed takes its journal and its sheet's advances out of the books.
+    await finHrAfter(req, [{ type: 'run', id: run.id }, { type: 'sheetAdvances', id: run.id }]);
     res.json(await runView(q, run));
   } catch (e) { next(e); }
 });
@@ -1828,12 +1869,15 @@ r.post('/hr/runs/:month/payments', requireHr('accounts'), async (req, res, next)
     if (paidOn > plantDateStr()) throw bad('The payment date cannot be in the future');
     const only = idListOf(body.person_ids, 'person_ids');
     if (only) assertPayVisible(req, only);
+    // Where it was paid from: optional (the channel's own account); the cash channel's form asks office cash or a holder.
+    const paidFrom = paidFromOf(body.paid_from);
     // A restricted login pays only the people it can see; the hidden ones stay for the owner to pay.
     const ex = hiddenIds(req);
     const userId = userIdOf(req);
 
     const batch = await tx(async (qc, oc) => {
       const batchNo = await nextBatchNo(oc);
+      if (paidFrom !== null) await paidFromChecked(qc, paidFrom);
       const run = await lockRunOf(qc, month);
       runPayable(run, month);
       const unpaid = await qc(
@@ -1871,10 +1915,10 @@ r.post('/hr/runs/:month/payments', requireHr('accounts'), async (req, res, next)
       const ids = lines.map((l) => l.id);
       const [made] = await qc(
         `INSERT INTO hr.payment_batches (run_id, pay_channel, count, total, status, reference, paid_on,
-                                         confirmed_by, confirmed_at, created_by, batch_no)
-         SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7
+                                         confirmed_by, confirmed_at, created_by, batch_no, paid_from)
+         SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7, $8
            FROM hr.run_lines WHERE id = ANY($6::int[])
-         RETURNING *`, [run.id, channel, reference, paidOn, userId, ids, batchNo]);
+         RETURNING *`, [run.id, channel, reference, paidOn, userId, ids, batchNo, paidFrom]);
       await qc(
         `UPDATE hr.run_lines
             SET payment_status = 'paid', payment_batch_id = $2, paid_amount = payable, paid_on = $3::date,
@@ -1882,11 +1926,13 @@ r.post('/hr/runs/:month/payments', requireHr('accounts'), async (req, res, next)
           WHERE id = ANY($1::int[])`, [ids, made.id, paidOn, reference]);
       await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
         month, run_id: run.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), reference,
-        paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held: held.map((h) => h.person_id),
+        paid_on: paidOn, paid_from: paidFrom, person_ids: lines.map((l) => l.person_id), held: held.map((h) => h.person_id),
         unapproved: unapproved.map((u) => u.person_id),
       });
       return { ...made, paid_on: paidOn, person_ids: lines.map((l) => l.person_id), held, unapproved };
     });
+    // The batch, and the run: a book that books its payroll when it is paid posts the month's journal at the first payment.
+    await finHrAfter(req, [{ type: 'batch', id: batch.id }, { type: 'run', id: batch.run_id }]);
     res.json(batch);
   } catch (e) { next(e); }
 });
@@ -1904,13 +1950,21 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (r
     const reference = textOf(body.reference, 'The reference', 120);
     const paidOn = status === 'paid' ? dateOf(body.paid_on, 'The payment date') ?? plantDateStr() : null;
     if (paidOn && paidOn > plantDateStr()) throw bad('The payment date cannot be in the future');
+    // Where a paid line was paid from: optional (the line's channel's own account). A line not paid names none. Sent none, whether
+    // Finance offers any account to name, read with the pool before the transaction: while it offers none, or its list cannot be
+    // read, a line of no channel is paid from cash (ruling R47).
+    const paidFrom = status === 'paid' ? paidFromOf(body.paid_from) : null;
+    const offers = status === 'paid' && paidFrom === null ? await finOffersPaidFrom(q) : false;
 
-    await tx(async (qc) => {
+    // What Finance is told after the commit: the line's batch when it has one (HR keeps that link), and the line; and the run.
+    const changed = await tx(async (qc) => {
+      if (paidFrom !== null) await paidFromChecked(qc, paidFrom);
+      let code = paidFrom;                 // what a paid line keeps: the code sent, or cash for a line of no channel (R47)
       const run = await lockRunOf(qc, month);
       if (status === 'paid') runPayable(run, month);
       else if (run.status !== 'finalised' && !PAYABLE_RUN.has(run.status)) throw runState(run, 'a submitted', 'paid');
       const [line] = await qc(
-        `SELECT id, payment_status, approval_status, payable::text AS payable, paid_ref FROM hr.run_lines
+        `SELECT id, payment_status, approval_status, payable::text AS payable, paid_ref, payment_batch_id, pay_channel FROM hr.run_lines
           WHERE run_id = $1 AND person_id = $2 FOR UPDATE`, [run.id, personId]);
       if (!line) throw notFound('Line');
       const from = line.payment_status;
@@ -1929,20 +1983,28 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (r
         // below zero (the person owes) or not worked out is refused.
         const due = line.payable === null ? null : paiseOf(line.payable);
         if (due === null || due < 0n) throw fail(409, 'This line has nothing to pay', 'NOTHING_TO_PAY');
+        if (code === null && line.pay_channel == null && !offers) code = 'cash';
         await qc(
           `UPDATE hr.run_lines
-              SET payment_status = 'paid', paid_amount = payable, paid_on = $2::date, paid_at = now(), paid_ref = $3
-            WHERE id = $1`, [line.id, paidOn, reference]);
+              SET payment_status = 'paid', paid_amount = payable, paid_on = $2::date, paid_at = now(), paid_ref = $3, paid_from = $4
+            WHERE id = $1`, [line.id, paidOn, reference, code]);
       } else {
         await qc(
           `UPDATE hr.run_lines
-              SET payment_status = $2, paid_amount = NULL, paid_on = NULL, paid_at = NULL, paid_ref = coalesce($3, paid_ref)
+              SET payment_status = $2, paid_amount = NULL, paid_on = NULL, paid_at = NULL, paid_ref = coalesce($3, paid_ref),
+                  paid_from = NULL
             WHERE id = $1`, [line.id, status, reference]);
       }
       await hrAudit(qc, req, 'run_line', line.id, 'payment', {
         month, run_id: run.id, person_id: personId, from, to: status, reference, paid_on: paidOn,
+        ...(status === 'paid' ? { paid_from: code } : {}),
       });
+      // The batch first: a line paid again on its own from another account than its batch's leaves that batch's entry, and only
+      // then is booked from its own account (ruling R45); a line that stays in its batch is booked by the batch.
+      return [...(line.payment_batch_id != null ? [{ type: 'batch', id: line.payment_batch_id }] : []), { type: 'line', id: line.id },
+        { type: 'run', id: run.id }];
     });
+    await finHrAfter(req, changed);
 
     const [line] = await q(`${LINE_SELECT} WHERE l.run_id = (SELECT id FROM hr.runs WHERE month = $1) AND l.person_id = $2`,
       [month, personId]);
@@ -1957,8 +2019,11 @@ r.put('/hr/runs/:month/lines/:personId/payment', requireHr('accounts'), async (r
 //   paid      a finalised run only (the payable is fixed only then): 409 RUN_NOT_FINAL otherwise. paid_amount =
 //             payable, paid_on defaults to today at the plant, the reference is optional. The lines are grouped into
 //             one payment_batches row per pay channel (a line with no channel is paid without a batch, as the per-line
-//             route does), each numbered CI-PAY-####. A line on hold, not approved for payment, or with nothing to pay
-//             (payable below zero or not worked out), is skipped.
+//             route does), each numbered CI-PAY-####; `paid_from` (a paid-from code) is kept on the cash channel's batch
+//             and on each line of no channel, and a bank channel's batch keeps none (rulings R44, R44a). With a cash line or
+//             a line of no channel among them it is required (400 "Choose where it was paid from") once Finance offers
+//             accounts; while it offers none, or its list cannot be read, none is `cash` (ruling R47). A line on hold, not
+//             approved for payment, or with nothing to pay (payable below zero or not worked out), is skipped.
 //   on_hold   any run status; the reason is required (400). Records held_by / held_at. A paid line is skipped: it must
 //             be marked unpaid first. A line already on hold with a different reason takes the new reason (and held_by /
 //             held_at), audited with the old one; with the same reason it is unchanged.
@@ -1995,12 +2060,18 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
       if (paidOn > plantDateStr()) throw bad('The payment date cannot be in the future');
     }
     if (target === 'on_hold' && !reason) throw bad('Say why the payment is on hold');
+    // Where the cash channel's batch, and a line of no pay channel, were paid from (rulings R44, R44a: the dialog asks it when its
+    // lines include either). A bank channel's batch names none: it is paid from the bank the channel is mapped to. Sent none, whether
+    // Finance offers any account to name, read with the pool before the transaction (ruling R47).
+    const paidFrom = target === 'paid' ? paidFromOf(body.paid_from) : null;
+    const offers = target === 'paid' && paidFrom === null ? await finOffersPaidFrom(q) : false;
     const approver = levelAtLeast(req.hr?.level, 'approver');
     const userId = userIdOf(req);
 
     const out = await tx(async (qc, oc) => {
       // The first batch number comes FIRST (a mark-paid makes one batch per channel); unused, it is never written.
       let batchNo = target === 'paid' ? await nextBatchNo(oc) : null;
+      if (paidFrom !== null) await paidFromChecked(qc, paidFrom);
       const run = await lockRunOf(qc, month);
       if (target === 'paid') runPayable(run, month);
       const lines = await qc(
@@ -2046,6 +2117,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
 
       const batches = [];
       const batchNoOf = new Map();                                   // line id → the CI-PAY- number that paid it
+      let named = paidFrom;                                          // the code the cash batch and a line of no channel keep
       if (target === 'paid' && moving.length) {
         const groups = new Map();
         for (const l of moving) {
@@ -2054,32 +2126,43 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
           groups.get(k).push(l);
         }
         const keys = [...groups.keys()].sort((a, b) => (a === null) - (b === null) || (a < b ? -1 : a > b ? 1 : 0));
+        // The cash channels among them: their batch keeps where it was paid from (ruling R44), as a line of no channel, paid without
+        // a batch, keeps it on the line (R44a). Either needs a code once Finance offers accounts; while it offers none, or its list
+        // cannot be read, none is cash (R47).
+        const cash = new Set((await qc(`SELECT code FROM hr.pay_channels WHERE kind = 'cash' AND code = ANY($1::text[])`,
+          [keys.filter((k) => k !== null)])).map((c) => c.code));
+        if (named === null && keys.some((k) => k === null || cash.has(k))) {
+          if (offers) throw fail(400, 'Choose where it was paid from', 'UNKNOWN_PAY_CHANNEL');
+          named = 'cash';
+        }
         for (const channel of keys) {
           const ids = groups.get(channel).map((l) => l.id);
           let batchId = null;
           if (channel !== null) {
             const no = batchNo ?? await nextBatchNo(oc);   // the advisory lock is already held: this sees the batches above
             batchNo = null;
+            const from = cash.has(channel) ? named : null;
             const [made] = await qc(
               `INSERT INTO hr.payment_batches (run_id, pay_channel, count, total, status, reference, paid_on,
-                                               confirmed_by, confirmed_at, created_by, batch_no)
-               SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7
+                                               confirmed_by, confirmed_at, created_by, batch_no, paid_from)
+               SELECT $1, $2, count(*), coalesce(sum(payable), 0), 'confirmed', $3, $4::date, $5, now(), $5, $7, $8
                  FROM hr.run_lines WHERE id = ANY($6::int[])
-               RETURNING id, batch_no, pay_channel, count, total::text AS total`, [run.id, channel, reference, paidOn, userId, ids, no]);
+               RETURNING id, batch_no, pay_channel, count, total::text AS total`, [run.id, channel, reference, paidOn, userId, ids, no, from]);
             batchId = made.id;
             for (const id of ids) batchNoOf.set(id, made.batch_no);
             const people = groups.get(channel).map((l) => l.person_id);
             batches.push({ id: made.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), person_ids: people });
             await hrAudit(qc, req, 'payment_batch', made.id, 'create', {
               month, run_id: run.id, batch_no: made.batch_no, pay_channel: channel, count: made.count, total: money(made.total), reference,
-              paid_on: paidOn, person_ids: people, via: 'lines/status',
+              paid_on: paidOn, paid_from: from, person_ids: people, via: 'lines/status',
             });
           }
+          // A line paid in its batch names no account of its own (the batch does); a line of no channel keeps the dialog's.
           await qc(
             `UPDATE hr.run_lines
                 SET payment_status = 'paid', payment_batch_id = $2, paid_amount = payable, paid_on = $3::date,
-                    paid_at = now(), paid_ref = $4, status_note = $5
-              WHERE id = ANY($1::int[])`, [ids, batchId, paidOn, reference, reason]);
+                    paid_at = now(), paid_ref = $4, status_note = $5, paid_from = $6
+              WHERE id = ANY($1::int[])`, [ids, batchId, paidOn, reference, reason, channel === null ? named : null]);
         }
       } else if (target === 'on_hold' && moving.length) {
         await qc(
@@ -2090,7 +2173,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
         await qc(
           `UPDATE hr.run_lines
               SET payment_status = 'pending', paid_amount = NULL, paid_on = NULL, paid_at = NULL, paid_ref = NULL,
-                  payment_batch_id = NULL, hold_reason = NULL, held_by = NULL, held_at = NULL, status_note = $2
+                  payment_batch_id = NULL, paid_from = NULL, hold_reason = NULL, held_by = NULL, held_at = NULL, status_note = $2
             WHERE id = ANY($1::int[])`, [moving.map((l) => l.id), reason]);
       }
 
@@ -2098,6 +2181,7 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
         const detail = { month, run_id: run.id, person_id: l.person_id, from: l.payment_status, to: target, reason };
         if (target === 'paid') {
           Object.assign(detail, { reference, paid_on: paidOn, paid_amount: money(l.payable), batch_no: batchNoOf.get(l.id) ?? null });
+          if (!batchNoOf.has(l.id)) detail.paid_from = named;          // a line of no channel keeps its own (R44a)
         }
         if (l.payment_status === 'paid') {
           detail.was = {
@@ -2108,9 +2192,28 @@ r.post('/hr/runs/:month/lines/status', requireHr('accounts'), async (req, res, n
         if (l.payment_status === 'on_hold') detail.was_hold_reason = l.hold_reason;
         await hrAudit(qc, req, 'run_line', l.id, 'payment_status', detail);
       }
-      return { changed: moving.map((l) => l.person_id), unchanged, skipped, batches };
+      // What Finance is told after the commit: each batch this made and each line it paid on its own; for a paid line marked
+      // unpaid, the batch it left (HR clears the link; the line as read above still names it, as its audit row's `was` does)
+      // and the line; and the run (a book that books its payroll when paid posts the month's journal at the first payment).
+      // A hold moves no money.
+      const events = [];
+      if (target === 'paid') {
+        events.push(...batches.map((b) => ({ type: 'batch', id: b.id })));
+        events.push(...moving.filter((l) => !batchNoOf.has(l.id)).map((l) => ({ type: 'line', id: l.id })));
+      } else if (target === 'pending') {
+        for (const l of undoPaid) {
+          if (l.payment_batch_id != null && !events.some((e) => e.type === 'batch' && e.id === l.payment_batch_id)) {
+            events.push({ type: 'batch', id: l.payment_batch_id });
+          }
+          events.push({ type: 'line', id: l.id });
+        }
+      }
+      if (events.length) events.push({ type: 'run', id: run.id });
+      return { events, changed: moving.map((l) => l.person_id), unchanged, skipped, batches };
     });
-    res.json(out);
+    const { events, ...answer } = out;
+    if (events.length) await finHrAfter(req, events);
+    res.json(answer);
   } catch (e) { next(e); }
 });
 

@@ -21,17 +21,25 @@
 //
 // Every read is useReport (the newest answer for the very request, a refresh when another login changes a Finance table, a failure said
 // with a Retry and never drawn as an empty step). A write is its step's own, reloads what it changed, and says so when nothing answered.
+//
+// Cash & Bank (plan Task 15):
+//   • The Match step is handed the book's ledger roles (GET /finance/hr-setup's roles, ruling R16): a ledger holding staff_advances or
+//     staff_loans takes a Tally ledger per person, summed (spec §7.9). It waits for them as it waits for the groups and the ledgers.
+//   • Below the wizard, the Opening's corrections (OpeningCorrection: "Opening + corrections" for each ledger, the list, and a new one
+//     while the Opening stands), from GET /finance/opening-corrections, read here so the page can warn, above everything, while a draft
+//     correction (one an Approver sent back) is there: it is checked against whatever Opening stands when it is submitted (ruling R15).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { OpeningBuild, OpeningBuilt } from '../../components/finance/OpeningBuild.jsx';
 import OpeningCheck from '../../components/finance/OpeningCheck.jsx';
+import OpeningCorrection from '../../components/finance/OpeningCorrection.jsx';
 import OpeningMatch from '../../components/finance/OpeningMatch.jsx';
 import OpeningUpload from '../../components/finance/OpeningUpload.jsx';
 import { LoadNotice } from '../../components/finance/ReportParts.jsx';
 import useReport from '../../components/finance/useReport.js';
 import {
-  FIN_OPENING_STEPS, finBuiltImport, finChangedRows, finEditsKey, finEditsPack, finEditsUnpack, finOpeningAsAt, finOpeningOutcome,
-  finOutcomeFreesUpload, finResumeImport, finStepOfImport, finStepsOpen,
+  FIN_DRAFT_CORRECTION_NOTE, FIN_OPENING_STEPS, finBuiltImport, finChangedRows, finDraftCorrections, finEditsKey, finEditsPack, finEditsUnpack,
+  finOpeningAsAt, finOpeningOutcome, finOutcomeFreesUpload, finResumeImport, finStepOfImport, finStepsOpen,
 } from '../../lib/finance/opening.js';
 import { finImportLabel } from '../../lib/finance/reports.js';
 import { sessionStore } from '../../lib/safeStorage.js';
@@ -103,8 +111,10 @@ export default function OpeningBalances({ me, book, can }) {
   }, [held]);
   const groupsRead = useReport(live ? `/finance/books/${book.id}/groups` : null);
   const ledgersRead = useReport(live ? `/finance/books/${book.id}/ledgers?include_inactive=1` : null);
+  const rolesRead = useReport(live ? `/finance/hr-setup?book=${book.id}` : null);
   const groups = groupsRead.data?.groups ?? null;
   const ledgers = ledgersRead.data?.ledgers ?? null;
+  const roles = rolesRead.data?.roles ?? null;
   // What became of a used import's Opening voucher: read here, because it decides whether the files can be uploaded again. What the build
   // itself answered stands in until the voucher has been read; then the voucher is the truth (the MD may have decided).
   const builtImp = imp?.status === 'used' ? imp : null;
@@ -113,6 +123,10 @@ export default function OpeningBalances({ me, book, can }) {
   const voucher = voucherRead.data?.voucher ?? (built && built.id === voucherId ? built : null);
   const outcome = finOpeningOutcome(voucher);
   const canUpload = !builtImp || finOutcomeFreesUpload(outcome);
+  // The Opening's corrections (spec §9.4): a new one only while the Opening stands, posted and not reversed.
+  const fixes = useReport(`/finance/opening-corrections?book=${book.id}`);
+  const openingStands = outcome?.state === 'posted';
+  const showFixes = Boolean(outcome) || (fixes.data?.corrections?.length ?? 0) > 0 || fixes.failed;
 
   // Another import is another set of rows: the step the person was on is not theirs (nor are the edits: they are of an edit scope).
   useEffect(() => { setStep(null); setBuilt(null); }, [importId]);
@@ -158,10 +172,10 @@ export default function OpeningBalances({ me, book, can }) {
   } else if (!full) {
     body = view.failed ? null : <Loading />;
   } else if (current === 'match') {
-    body = groups && ledgers
-      ? <OpeningMatch book={book} view={full} groups={groups} ledgers={ledgers} touched={touched} setTouched={setTouched}
+    body = groups && ledgers && roles
+      ? <OpeningMatch book={book} view={full} groups={groups} ledgers={ledgers} roles={roles} touched={touched} setTouched={setTouched}
         onConfirmed={() => { setTouched({}); setStep('check'); }} reload={view.reload} />
-      : (groupsRead.failed || ledgersRead.failed ? null : <Loading />);
+      : (groupsRead.failed || ledgersRead.failed || rolesRead.failed ? null : <Loading />);
   } else if (current === 'check') {
     body = <OpeningCheck view={full} onBack={() => setStep('match')} onNext={() => setStep('build')} reload={view.reload} />;
   } else if (current === 'build') {
@@ -170,6 +184,9 @@ export default function OpeningBalances({ me, book, can }) {
 
   return (
     <div>
+      {finDraftCorrections(fixes.data) > 0 && (
+        <p className="mb-4 max-w-3xl rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{FIN_DRAFT_CORRECTION_NOTE}</p>
+      )}
       <LoadNotice failed={list.failed} shown={Boolean(imports)} what="the earlier uploads" onRetry={list.reload} />
       {imports && (
         <>
@@ -181,9 +198,10 @@ export default function OpeningBalances({ me, book, can }) {
             </p>
           )}
           <LoadNotice failed={view.failed} shown={Boolean(full)} what="the import" onRetry={view.reload} />
-          <LoadNotice failed={groupsRead.failed || ledgersRead.failed} shown={Boolean(groups && ledgers)} what="the book's groups and ledgers"
-            onRetry={() => Promise.all([groupsRead.reload(), ledgersRead.reload()])} />
+          <LoadNotice failed={groupsRead.failed || ledgersRead.failed || rolesRead.failed} shown={Boolean(groups && ledgers && roles)}
+            what="the book's groups, ledgers and staff ledger roles" onRetry={() => Promise.all([groupsRead.reload(), ledgersRead.reload(), rolesRead.reload()])} />
           {body}
+          {showFixes && <OpeningCorrection book={book} can={can} read={fixes} openingStands={openingStands} />}
         </>
       )}
       {!imports && !list.failed && <Loading />}

@@ -13,6 +13,10 @@
 // What the Match step shows is the server's rows with whatever the person has touched laid over them (`touched`, row id → decision), so a
 // refresh of the rows underneath never wipes an edit, and nothing is sent until the person confirms.
 //
+// Cash & Bank (plan Task 15): Tally may keep a ledger per person for staff advances or loans, which the Opening sums into the one staff
+// ledger (spec §7.9, ruling R16), so the Match step lets several rows onto a ledger holding the staff_advances or staff_loans role; and the
+// Opening Balances page lists the Opening's corrections (spec §9.4), with the two sentences it owes about them.
+//
 // Pure ESM, no React, no DOM: the server tests import this file by relative path and the browser bundles it as written. The relative
 // imports are this folder's own (caps.js, fy.js, money.js, voucher.js). Own-property checks are Object.prototype.hasOwnProperty.call, never
 // Object.hasOwn: the browser baseline in this ERP predates it (finance-wiring.test.js holds all client code to that).
@@ -157,11 +161,25 @@ export const FIN_MATCH_FILTERS = Object.freeze([
 
 const countOf = n => `${n} more`;
 
-// "Row 2 is", "Row 2 and Row 3 are", "Row 2, Row 3 and 2 more are": the other rows that want the same thing.
-function finOthersText(others) {
+// "Row 2", "Row 2 and Row 3", "Row 2, Row 3 and 2 more": the other rows that want the same thing.
+function finNamesText(others) {
   const shown = others.length > 2 ? [others[0], others[1], countOf(others.length - 2)] : others;
-  const text = shown.length < 2 ? shown.join('') : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
-  return `${text} ${others.length === 1 ? 'is' : 'are'}`;
+  return shown.length < 2 ? shown.join('') : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+}
+// …"Row 2 is", "Row 2 and Row 3 are".
+const finOthersText = others => `${finNamesText(others)} ${others.length === 1 ? 'is' : 'are'}`;
+
+// The roles whose ledger takes a Tally ledger per person, summed (spec §7.9; ruling R16): the server's FIN_PER_PERSON_ROLES
+// (finance-hr-setup.js), which finance-import.js lets several rows onto. Every other ledger takes one row.
+export const FIN_PER_PERSON_ROLES = Object.freeze(['staff_advances', 'staff_loans']);
+
+// The ledgers that take several Tally rows, from GET /finance/hr-setup's roles ({ role: ledger_id }): a Set of ids. Anything that is not
+// a map of whole ids is none, so a screen that has not read the roles refuses a second row as it always has.
+export function finPerPersonLedgers(roles) {
+  const ids = new Set();
+  if (roles === null || typeof roles !== 'object' || Array.isArray(roles)) return ids;
+  for (const role of FIN_PER_PERSON_ROLES) if (has(roles, role) && Number.isSafeInteger(roles[role])) ids.add(roles[role]);
+  return ids;
 }
 
 // Everything the Match screen needs about its rows, in one pass over them:
@@ -176,9 +194,12 @@ function finOthersText(others) {
 //   ready    blocked === 0
 // `ledgerById` (the book's ledgers, optional) lets a match to a ledger that is switched off be flagged: the server refuses an opening
 // row with a balance matched to one, but the note is advice, not a block, because the server has the last word.
-export function finMatchView(rows, touched, groups, { ledgerById } = {}) {
+// `roles` (GET /finance/hr-setup's, optional; ruling R16) names the ledgers that take a Tally ledger per person (finPerPersonLedgers):
+// several rows on one of them are summed into its one line, which is said on each of them, and stop nothing.
+export function finMatchView(rows, touched, groups, { ledgerById, roles } = {}) {
   const all = list(rows);
   const partyGroups = finPartyGroupIds(groups);
+  const summed = finPerPersonLedgers(roles);
   const entries = [];
   const decisions = new Map();
   const onLedger = new Map();
@@ -195,8 +216,14 @@ export function finMatchView(rows, touched, groups, { ledgerById } = {}) {
   }
 
   const clash = new Map();
-  for (const rowsOn of onLedger.values()) {
-    if (rowsOn.length > 1) for (const row of rowsOn) clash.set(row.id, `${finOthersText(rowsOn.filter(r => r !== row).map(r => r.tally_name))} matched to the same ledger`);
+  const together = new Map();   // row id -> the note of a row summed with others into a per-person staff ledger
+  for (const [ledgerId, rowsOn] of onLedger) {
+    if (rowsOn.length < 2) continue;
+    for (const row of rowsOn) {
+      const others = rowsOn.filter(r => r !== row).map(r => r.tally_name);
+      if (summed.has(ledgerId)) together.set(row.id, `Summed with ${finNamesText(others)} into one line`);
+      else clash.set(row.id, `${finOthersText(others)} matched to the same ledger`);
+    }
   }
   for (const [key, rowsOn] of onParty) {
     if (rowsOn.length > 1) {
@@ -221,7 +248,8 @@ export function finMatchView(rows, touched, groups, { ledgerById } = {}) {
     } else if (decision.action === 'match') {
       const ledger = ledgerById?.get(decision.ledger_id);
       const off = ledger && ledger.active === false && row.debit_paise !== row.credit_paise;
-      state = { kind: 'match', note: off ? `${ledger.name} is switched off` : null, tone: off ? 'amber' : null };
+      state = off ? { kind: 'match', note: `${ledger.name} is switched off`, tone: 'amber' }
+        : { kind: 'match', note: together.get(row.id) ?? null, tone: null };
     } else {
       state = { kind: 'create', note: null, tone: null };
     }
@@ -439,6 +467,21 @@ export const finOutcomeFreesUpload = outcome => ['returned', 'discarded', 'rever
 export const finBuildNote = roles => (finCan(roles, 'approve')
   ? 'You are an Approver, so the Opening voucher posts at once, marked self-approved.'
   : 'The Opening voucher waits for the MD to approve it; the books have no opening balances until then.');
+
+// ── Opening corrections (Cash & Bank spec §9.4) ──────────────────────────────────────────────────────────────────────
+
+// What entering a correction does, said before it is sent: an Approver's posts at once, anyone else's waits (it always needs an Approver,
+// whatever the Opening's rule says: finSubmitVoucher).
+export const finCorrectionNote = roles => (finCan(roles, 'approve')
+  ? 'You are an Approver, so the correction posts at once, marked self-approved.'
+  : 'It waits for an Approver: an opening correction always needs one.');
+
+// A correction an Approver sent back is a draft, and a draft is checked again when it is submitted: against the Opening that stands
+// THEN, which after a rebuild from Tally is another one (Task 8, ruling R15). The page says so while any draft is there.
+export const FIN_DRAFT_CORRECTION_NOTE = 'A draft correction is checked against the Opening that stands when it is submitted.';
+
+// How many of GET /finance/opening-corrections' corrections are drafts (sent back).
+export const finDraftCorrections = answer => list(answer?.corrections).filter(c => c?.status === 'draft').length;
 
 // ── The check ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

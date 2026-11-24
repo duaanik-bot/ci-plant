@@ -69,6 +69,7 @@ import PersonCards from './PersonCards.jsx';
 import PersonStatusDialog from './PersonStatusDialog.jsx';
 import NewPersonFromRow from './NewPersonFromRow.jsx';
 import PayChannelSelect from './PayChannelSelect.jsx';
+import PaidFromSelect, { paidFromBody, paidFromProblem } from './PaidFromSelect.jsx';
 import { ChannelsPanel } from './Settings.jsx';
 import MonthCompare from './MonthCompare.jsx';
 import PayoutExport from './PayoutExport.jsx';
@@ -255,6 +256,10 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
   const today = plantToday();
   const [ref, setRef] = useState('');
   const [date, setDate] = useState(today);
+  // The cash channel's batch says which cash it came from: office cash or a holder (Cash & Bank §7.3). A bank channel's batch
+  // names none: it is paid from the bank the channel is mapped to.
+  const asksCash = kind === 'cash';
+  const [paidFrom, setPaidFrom] = useState('');
   const [picked, setPicked] = useState(() => new Set(unpaid.filter(l => payStatus(l) === 'pending').map(l => String(l.person_id))));
   const [error, setError] = useState('');
   const chosen = unpaid.filter(l => picked.has(String(l.person_id)));
@@ -264,12 +269,14 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
       kind === 'bank' && !ref.trim() && 'Enter the bank reference (UTR) of this transfer.',
       !/^\d{4}-\d{2}-\d{2}$/.test(date) && 'Enter the date it was paid.',
       date > today && 'The payment date is after today.',
+      asksCash && paidFromProblem(paidFrom),
     ].filter(Boolean);
     setError(problems[0] || '');
     if (problems.length) return;
     try {
       await hrApi.recordPayments(month, {
         pay_channel: group.code, reference: ref.trim() || null, paid_on: date, person_ids: chosen.map(l => toId(l.person_id)),
+        ...(asksCash ? paidFromBody('paid_from', paidFrom) : {}),
       });
     } catch (e) {
       setError(refusalText(e)); // refused — said here; the reference, date and ticks stay
@@ -308,6 +315,11 @@ function PayDialog({ month, group, label, kind, nameOf, onClose, onDone }) {
           <Field label="Paid on" required>
             <Input type="date" value={date} max={today} onChange={e => { setDate(e.target.value); setError(''); }} />
           </Field>
+          {asksCash && (
+            <Field label="Paid from" required hint="Office cash, or the holder who paid it out." className="sm:col-span-2">
+              <PaidFromSelect value={paidFrom} onChange={v => { setPaidFrom(v); setError(''); }} channelCode={group.code} required />
+            </Field>
+          )}
         </div>
         <div className="overflow-x-auto rounded-2xl border border-white/75 bg-white/55">
           <table className="w-full text-xs">
@@ -1873,6 +1885,7 @@ export default function Payroll({ level }) {
       )}
       {dialog?.kind === 'status' && (
         <StatusDialog month={month} status={dialog.status} picked={dialog.only ?? picked} canApprove={canApprove}
+          channelKindOf={code => channelBy.get(code)?.kind ?? null}
           refusal={refusal} onClose={() => setDialog(null)} onDone={afterStatus} />
       )}
       {master && (
@@ -1881,7 +1894,7 @@ export default function Payroll({ level }) {
           onChanged={() => { setMaster(m => (m ? { ...m, changed: true } : m)); reloadPeople(); }} />
       )}
       {payFor != null && (
-        <PayStaffModal personId={payFor} people={people} channels={channels} onClose={() => setPayFor(null)}
+        <PayStaffModal personId={payFor} people={people} onClose={() => setPayFor(null)}
           onDone={afterPayment} />
       )}
       {slipFor && <PayslipModal month={month} personId={toId(slipFor.id)} name={slipFor.name} onClose={() => setSlipFor(null)} />}
@@ -1936,7 +1949,7 @@ export default function Payroll({ level }) {
       )}
 
       {paying && (
-        <PayStaffModal people={people} channels={channels} onClose={() => setPaying(false)} onDone={afterPayment} />
+        <PayStaffModal people={people} onClose={() => setPaying(false)} onDone={afterPayment} />
       )}
 
       {wizard && (
@@ -1997,11 +2010,12 @@ function UnfinaliseDialog({ month, refusal, onClose, onDone }) {
 // the dialog says so. The server's refusal is shown inside the dialog, which stays open with what was typed.
 const STATUS_TITLE = { paid: 'Mark paid', on_hold: 'Put on hold', pending: 'Mark unpaid' };
 
-function StatusDialog({ month, status, picked, canApprove, refusal, onClose, onDone }) {
+function StatusDialog({ month, status, picked, canApprove, channelKindOf = () => null, refusal, onClose, onDone }) {
   const today = plantToday();
   const [ref, setRef] = useState('');
   const [date, setDate] = useState(today);
   const [reason, setReason] = useState('');
+  const [paidFrom, setPaidFrom] = useState('');   // the cash batch's account: office cash or a holder (ruling R44)
   const by = test => picked.filter(test);
   const st = r => r.payment;
   let change = [];
@@ -2028,11 +2042,21 @@ function StatusDialog({ month, status, picked, canApprove, refusal, onClose, onD
   }
   const undoPaid = status === 'pending' && change.some(r => st(r) === 'paid');
   const needReason = status === 'on_hold' || undoPaid;
+  // Paid in bulk, the cash channel's lines make a batch of their own, which says which cash it came from (Cash & Bank §7.3; ruling
+  // R44), and a line of no pay channel, paid without a batch, says where it came from too (R44a): one answer for both. A bank
+  // channel's batch names none: it is paid from the bank the channel is mapped to.
+  const cashLines = status === 'paid' ? change.filter(r => !r.line?.pay_channel || channelKindOf(r.line.pay_channel) === 'cash') : [];
+  const asksCash = cashLines.length > 0;
+  const noChannel = cashLines.filter(r => !r.line?.pay_channel).length;
+  const cashChannel = cashLines.find(r => r.line?.pay_channel)?.line.pay_channel ?? null;   // the select starts at its account
+  const asked = [cashLines.length > noChannel && plural(cashLines.length - noChannel, 'cash line'),
+    noChannel > 0 && plural(noChannel, 'line with no pay channel', 'lines with no pay channel')].filter(Boolean).join(' and ');
   const problems = [
     !change.length && 'None of the ticked lines would change.',
     needReason && !reason.trim() && (status === 'on_hold' ? 'Say why the payment is on hold.' : 'Say why a paid line is being marked unpaid.'),
     status === 'paid' && !/^\d{4}-\d{2}-\d{2}$/.test(date) && 'Enter the date it was paid.',
     status === 'paid' && date > today && 'The payment date is after today.',
+    asksCash && paidFromProblem(paidFrom),
   ].filter(Boolean);
   const names = rs => `${rs.slice(0, 6).map(r => r.name).join(', ')}${rs.length > 6 ? ` and ${rs.length - 6} more` : ''}`;
   const verb = { paid: 'marked paid', on_hold: 'put on hold', pending: 'marked unpaid' }[status];
@@ -2045,6 +2069,7 @@ function StatusDialog({ month, status, picked, canApprove, refusal, onClose, onD
         const res = await hrApi.setLineStatuses(month, {
           person_ids: sent.map(r => toId(r.id)), status,
           ...(status === 'paid' ? { reference: ref.trim() || null, paid_on: date } : {}),
+          ...(asksCash ? paidFromBody('paid_from', paidFrom) : {}),
           ...(reason.trim() ? { reason: reason.trim() } : {}),
         });
         await onDone(res, status);
@@ -2069,6 +2094,12 @@ function StatusDialog({ month, status, picked, canApprove, refusal, onClose, onD
             <Field label="Paid on" required>
               <Input type="date" value={date} max={today} onChange={e => setDate(e.target.value)} />
             </Field>
+            {asksCash && (
+              <Field label={noChannel ? 'Paid from' : 'Cash paid from'} required className="sm:col-span-2"
+                hint={noChannel ? `For the ${asked}: the account the money left.` : `For the ${asked}: office cash, or the holder who paid it out.`}>
+                <PaidFromSelect value={paidFrom} onChange={setPaidFrom} channelCode={cashChannel} required />
+              </Field>
+            )}
           </div>
         </>
       )}

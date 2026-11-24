@@ -122,13 +122,13 @@ test('the /finance/* route is lazy and the sidebar group sits between Supply and
   const nav = src('../../client/src/components/AppLayout.jsx');
   const [s, f, a] = ["group: 'Supply'", "group: 'Finance'", "group: 'Admin'"].map(g => nav.indexOf(g));
   assert.ok(s < f && f < a, 'Supply < Finance < Admin');
-  for (const t of ["to: '/finance', end: true", "to: '/finance/reports'", "to: '/finance/setup'"]) assert.ok(nav.includes(t), t);
-  assert.equal((nav.match(/module: 'finance'/g) || []).length, 3);
+  for (const t of ["to: '/finance/cash'", "to: '/finance', end: true", "to: '/finance/reports'", "to: '/finance/setup'"]) assert.ok(nav.includes(t), t);
+  assert.equal((nav.match(/module: 'finance'/g) || []).length, 4);
 });
 
 test('one capability table for screens and server', () => {
   assert.equal(clientCan, serverCan);
-  assert.equal(FINANCE_TABLES.length, 13);
+  assert.equal(FINANCE_TABLES.length, 21);
 });
 
 // ── Beyond the brief's pins ───────────────────────────────────────────────────────────────────────────────────────
@@ -145,12 +145,16 @@ test('FIN_ROLES is one list for screens and server, and caps.js imports nothing'
 
 // useRealtimeRefresh(load, FINANCE_TABLES) is the only thing that tells a Finance screen another login changed a table.
 // A table missing from the list is a screen that goes stale without a sound.
-test('FINANCE_TABLES is exactly the tables the Finance migration creates', () => {
+test('FINANCE_TABLES is exactly the tables the two Finance migrations create', () => {
   const dir = new URL('../../supabase/migrations/', import.meta.url);
-  const files = readdirSync(dir).filter(f => f.endsWith('_finance_ledger_core.sql'));
-  assert.equal(files.length, 1, 'one Finance migration');
-  const created = [...readFileSync(new URL(files[0], dir), 'utf8').matchAll(/CREATE TABLE IF NOT EXISTS (fin_\w+) \(/g)].map(m => m[1]);
-  assert.equal(created.length, 13, 'non-vacuous: the migration creates the thirteen');
+  const created = [];
+  for (const [suffix, count] of [['_finance_ledger_core.sql', 13], ['_finance_cash_bank.sql', 8]]) {
+    const files = readdirSync(dir).filter(f => f.endsWith(suffix));
+    assert.equal(files.length, 1, `one ${suffix} migration`);
+    const tables = [...readFileSync(new URL(files[0], dir), 'utf8').matchAll(/CREATE TABLE IF NOT EXISTS (fin_\w+) \(/g)].map(m => m[1]);
+    assert.equal(tables.length, count, `non-vacuous: ${files[0]} creates its ${count}`);
+    created.push(...tables);
+  }
   assert.deepEqual([...FINANCE_TABLES].sort(), [...created].sort());
   assert.equal(new Set(FINANCE_TABLES).size, FINANCE_TABLES.length, 'no table twice');
 });
@@ -173,14 +177,14 @@ test('the tablet rail tells the two Finance items from Reports, and every Financ
   assert.match(nav, /'\/finance\/reports': 'Fin Rpts'/);
   assert.match(nav, /'\/finance\/setup': 'Fin Setup'/);
   const shell = src('../../client/src/pages/finance/Finance.jsx');
-  for (const route of ['<Route index ', 'path="reports/*"', 'path="setup/*"', 'path="vouchers/:id/print"']) assert.ok(shell.includes(route), route);
+  for (const route of ['<Route index ', 'path="cash/*"', 'path="reports/*"', 'path="setup/*"', 'path="vouchers/:id/print"']) assert.ok(shell.includes(route), route);
 });
 
 // lazy() resolves to a module's default export: a page that only has a named one loads as undefined and blanks the route.
 test('every page the Finance shell loads exists and is a default export', () => {
   const shell = src('../../client/src/pages/finance/Finance.jsx');
   const pages = [...shell.matchAll(/import\('\.\/(\w+\.jsx)'\)/g)].map(m => m[1]).sort();
-  assert.deepEqual(pages, ['Reports.jsx', 'Setup.jsx', 'VoucherPrint.jsx', 'Vouchers.jsx']);
+  assert.deepEqual(pages, ['CashBank.jsx', 'Reports.jsx', 'Setup.jsx', 'VoucherPrint.jsx', 'Vouchers.jsx']);
   for (const page of pages) assert.match(src(`../../client/src/pages/finance/${page}`), /^export default\b/m, page);
 });
 
@@ -193,8 +197,8 @@ test('the Finance shell asks who the login is once per load, remembers the book 
   const sentence = "Finance isn't switched on for this login — ask the MD.";
   assert.ok(shell.includes(sentence));
   assert.ok(shell.indexOf(sentence) < shell.indexOf('<BookSwitch'), 'the no-grant page returns before anything else is drawn');
-  // every page gets the same four things, and the book switch is not drawn for a login that holds one book
-  assert.equal((shell.match(/me=\{me\} book=\{book\} can=\{can\} setBook=\{setBook\}/g) || []).length, 4);
+  // every page (the five of them) gets the same things, and the book switch is not drawn for a login that holds one book
+  assert.equal((shell.match(/me=\{me\} book=\{book\} can=\{can\} setBook=\{setBook\}/g) || []).length, 5);
   assert.match(shell, /me\.books\.length > 1/);
 });
 
@@ -342,7 +346,7 @@ test('R60: the shell exposes reloadMe beside setBook, to every page, through the
   assert.equal((shell.match(/api\.get\('\/finance\/me'\)/g) || []).length, 1, 'one request for /finance/me, used by the first load and by reloadMe');
   assert.match(shell, /const loadMe = \(\) => api\.get\('\/finance\/me'\);/);
   assert.equal((shell.match(/loadMe\(\)/g) || []).length, 2, 'the first load and reloadMe both go through it');
-  assert.equal((shell.match(/me=\{me\} book=\{book\} can=\{can\} setBook=\{setBook\} reloadMe=\{reloadMe\}/g) || []).length, 4, 'all four pages are given it');
+  assert.equal((shell.match(/me=\{me\} book=\{book\} can=\{can\} setBook=\{setBook\} reloadMe=\{reloadMe\}/g) || []).length, 5, 'all five pages are given it');
   const start = shell.indexOf('const reloadMe = useCallback(');
   assert.ok(start >= 0, 'non-vacuous: reloadMe is where this pin looks for it');
   const body = shell.slice(start, shell.indexOf('}, []);', start));

@@ -207,6 +207,41 @@ test('finVoucherCan: the reversal of an Opening voucher is never offered for rev
   assert.deepEqual(finVoucherCan({ ...reversal, reversal_of_type: 'journal' }, 6, ['approver']), { ...none, reverse: true });
 });
 
+// Cash & Bank ruling R15: an Opening voucher is not reversed while an opening correction of its book stands (posted and not
+// reversed, or waiting for an Approver: `corrections_standing`, which finVoucherView reads), and the reversal of an opening
+// correction, dated the opening day and marked as one, is never reversed itself. A correction is reversed as any posted entry is.
+test('finVoucherCan: an Opening whose corrections stand, and a correction\'s reversal, are not offered for reversing (Cash & Bank ruling R15)', () => {
+  const none = { edit: false, submit: false, discard: false, approve: false, reject: false, reverse: false };
+  const posted = { status: 'posted', created_by_id: 5, reversed_by_id: null, pending_reversal_id: null, reversal_of_id: null };
+  const opening = { ...posted, voucher_type: 'opening', is_opening_correction: false };
+  assert.deepEqual(finVoucherCan({ ...opening, corrections_standing: true }, 6, ['approver']), none);
+  assert.deepEqual(finVoucherCan({ ...opening, corrections_standing: false }, 6, ['approver']), { ...none, reverse: true });
+  const reversal = { ...posted, voucher_type: 'journal', reversal_of_id: 9, reversal_of_type: 'journal' };
+  assert.deepEqual(finVoucherCan({ ...reversal, is_opening_correction: true }, 6, ['approver']), none);
+  assert.deepEqual(finVoucherCan({ ...reversal, is_opening_correction: false }, 6, ['approver']), { ...none, reverse: true });
+  assert.deepEqual(finVoucherCan({ ...posted, voucher_type: 'journal', is_opening_correction: true }, 6, ['approver']), { ...none, reverse: true });
+  assert.deepEqual(finVoucherCan({ ...posted, voucher_type: 'journal', is_opening_correction: true }, 6, ['accountant']), { ...none, reverse: true });
+});
+
+// Cash & Bank spec §7.7 (plan Review Focus 5): an HR entry is corrected in HR. One posted from an HR event (source_type hr_…), and the
+// reversal of one (`reversal_of_source`, which finVoucherView reads), are never offered for reversing by hand: finReverseVoucher
+// refuses both, FIN_HR_OWNED. An entry from any other source is reversed as before.
+test('finVoucherCan: an HR entry, or the reversal of one, is not offered for reversing (FIN_HR_OWNED)', () => {
+  const none = { edit: false, submit: false, discard: false, approve: false, reject: false, reverse: false };
+  const posted = { status: 'posted', created_by_id: 5, reversed_by_id: null, pending_reversal_id: null, reversal_of_id: null };
+  for (const source of ['hr_advance', 'hr_batch:DP', 'hr_hidden:12']) {
+    assert.deepEqual(finVoucherCan({ ...posted, source_type: source }, 6, ['approver']), none, source);
+    assert.deepEqual(finVoucherCan({ ...posted, reversal_of_id: 9, reversal_of_source: source }, 6, ['accountant']), none, `reversal of ${source}`);
+  }
+  for (const source of [null, 'cash_count', 'invoice', 'hrx']) {
+    assert.deepEqual(finVoucherCan({ ...posted, source_type: source }, 6, ['approver']), { ...none, reverse: true }, String(source));
+  }
+  // An HR entry an Approver sent back is its maker's draft: sent again as it is, or discarded, never edited (finUpdateDraft refuses it).
+  const sentBack = { status: 'draft', created_by_id: 5, reversed_by_id: null, reversal_of_id: null, source_type: 'hr_advance' };
+  assert.deepEqual(finVoucherCan(sentBack, 5, ['accountant']), { ...none, submit: true, discard: true });
+  assert.deepEqual(finVoucherCan({ ...sentBack, source_type: 'invoice' }, 5, ['accountant']), { ...none, edit: true, submit: true, discard: true });
+});
+
 test('finVoucherCan: a posted voucher with a reversal on its way (a draft, or waiting for approval) is not offered for reversing again', () => {
   const none = { edit: false, submit: false, discard: false, approve: false, reject: false, reverse: false };
   const v = { status: 'posted', created_by_id: 5, reversed_by_id: null };
@@ -298,6 +333,33 @@ test('finPostLocked mints only after its checks, posts before it marks a reversa
   assert.ok(checked < mint && mint < posted && posted < marked, 'check, mint, post, then mark the reversed entry');
   // marking sets reversed_by_id and nothing else: the database's H3 refuses any other change to a posted voucher
   assert.match(post, /UPDATE fin_vouchers SET reversed_by_id = \$1 WHERE id = \$2 AND reversed_by_id IS NULL RETURNING id/);
+});
+
+// Ruling R7 (Cash & Bank spec §6.6). The party allocation locks come right after the voucher's own lock and before its months and
+// ledgers, on every way into a posting (series → voucher → party → months → ledgers): submit takes them before it reads its months,
+// and finPostLocked, which an approval reaches without them, takes them first. A reversal releases what the entry it reverses
+// settled only once it has marked it, and a plan settles bills only once the voucher is posted. The races in
+// finance-pg-allocations.test.js are the proof; these hold when none race.
+test('R7: a posting takes the party locks before its months, releases a reversed entry\'s adjustments after marking it, and applies its plan once posted', () => {
+  const post = bodyOf('finPostLocked');
+  const at = {
+    parties: post.search(/await finLockParties\(qc, oc, ctx\);/),
+    facts: post.search(/finPostingFacts\(/),
+    posted: post.search(/SET status = 'posted'/),
+    marked: post.search(/SET reversed_by_id = \$1 WHERE id = \$2 AND reversed_by_id IS NULL/),
+    released: post.search(/finReleaseAllocations\(qc, oc, v\.reversal_of_id, by\)/),
+    applied: post.search(/finApplyPlan\(qc, oc, v\.id, by\)/),
+  };
+  for (const [step, i] of Object.entries(at)) assert.ok(i >= 0, `finPostLocked has no ${step} step`);
+  assert.ok(at.parties < at.facts && at.facts < at.posted && at.posted < at.marked && at.marked < at.released && at.released < at.applied,
+    'the party locks, the months, post, mark, release, then apply');
+  assert.ok(post.indexOf('await ') === post.search(/await finLockParties\(/), 'the party locks are the first thing finPostLocked waits for');
+  const submit = bodyOf('finSubmitVoucher');
+  const parties = submit.search(/await finLockParties\(qc, oc, ctx\);/);
+  assert.ok(parties >= 0, 'finSubmitVoucher takes the party locks');
+  assert.ok(submit.search(/if \(v\.status !== 'draft'\) throw/) < parties, 'once it knows it holds a draft');
+  assert.ok(parties < submit.search(/finPostingFacts\(/), 'and before it reads its months and ledgers');
+  assert.match(bodyOf('finLockParties'), /ctx\.partyLedgerIds \?\?= await finLockPartiesOf\(qc, oc, ctx\.v\.id\)/, 'once per transaction');
 });
 
 // Ruling R27. The database re-reads a posted voucher's ledgers at COMMIT (H6), so the posting holds them from its own

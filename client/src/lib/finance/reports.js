@@ -15,11 +15,12 @@ import { dayOf } from '../dayOf.js';
 
 // ── The tabs and the period ──────────────────────────────────────────────────────────────────────────────────────
 
-// The five reports, in the order of the spec. The key is the part of the path after /finance/reports/, and also the name of the
-// report's route on the server (/finance/reports/<key>).
+// The six reports, in the order of the spec. The key is the part of the path after /finance/reports/, and also the name of the
+// report's route on the server (/finance/reports/<key>). Party bills is a customer's or vendor's open bills (Cash & Bank spec §6.7).
 export const FIN_REPORT_TABS = Object.freeze([
   Object.freeze({ key: 'trial-balance', label: 'Trial Balance' }),
   Object.freeze({ key: 'ledger', label: 'Ledger' }),
+  Object.freeze({ key: 'party', label: 'Party bills' }),
   Object.freeze({ key: 'journal-register', label: 'Journal Register' }),
   Object.freeze({ key: 'parallel-run', label: 'Parallel Run' }),
   Object.freeze({ key: 'self-approved', label: 'Self-approved' }),
@@ -146,6 +147,24 @@ export function finRegisterLines(lines, max = FIN_REGISTER_LINES_SHOWN) {
 export function finLineText(line) {
   const debit = line.debit_paise > 0;
   return `${debit ? 'Dr' : 'Cr'} ${line.ledger_name} ${finFormatINR(debit ? line.debit_paise : line.credit_paise)}`;
+}
+
+// ── Party bills (Cash & Bank spec §6.7) ──────────────────────────────────────────────────────────────────────────
+
+// An item's age, as the report gives it in whole days: 'Today', '1 day', '45 days'; '—' for no age.
+export function finAgeText(days) {
+  if (!Number.isSafeInteger(days) || days < 0) return '—';
+  return days === 0 ? 'Today' : `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+// The invariant's two sides beside the ledger's balance (GET /finance/reports/party's `check`): { net_paise, balance_text, ok }. net is
+// what the bills still owe less the money on account; the balance is the party's own way round (a customer's positive is Dr, a vendor's
+// Cr), said the ledger way. ok is the server's verdict. null when there is no check to show.
+export function finPartyCheck(check, side) {
+  if (!check || typeof check !== 'object') return null;
+  const net = check.outstanding_paise - check.on_account_paise;
+  const signed = side === 'vendor' ? 0 - check.balance_paise : check.balance_paise;
+  return { net_paise: net, balance_text: finFormatINR(signed, { drcr: true }), ok: check.ok === true };
 }
 
 // ── The parallel run ─────────────────────────────────────────────────────────────────────────────────────────────

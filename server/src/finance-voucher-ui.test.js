@@ -563,8 +563,10 @@ test('R28 and R42: the Reverse dialog dates no earlier than the voucher, and an 
   assert.ok(dialog.length > 400, 'non-vacuous: the dialog was found');
   assert.match(dialog, /min=\{voucher\.voucher_date\}/);
   assert.match(dialog, /const opening = voucher\.voucher_type === 'opening'/);
-  inOrder(dialog, ['{opening ? (', 'An Opening voucher is reversed as at its own date', ') : (', '<Input type="date"']);
-  assert.match(dialog, /useState\(opening \|\| today < voucher\.voucher_date \? voucher\.voucher_date : today\)/, 'it opens on its own date, or today when that is not before it');
+  // Cash & Bank ruling R15 (plan Task 15): an opening correction's date is fixed too, the opening day (finance-cash-wiring.test.js)
+  assert.match(dialog, /const fixedDay = opening \|\| correction;/);
+  inOrder(dialog, ['{fixedDay ? (', 'An Opening voucher is reversed as at its own date', ') : (', '<Input type="date"']);
+  assert.match(dialog, /useState\(fixedDay \|\| today < voucher\.voucher_date \? voucher\.voucher_date : today\)/, 'it opens on its own date, or today when that is not before it');
 });
 
 test('R29: a reversal on its way is said, with a way to open it', () => {

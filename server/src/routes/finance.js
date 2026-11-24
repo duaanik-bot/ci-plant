@@ -26,8 +26,19 @@
 // grant is the same grant, so none of those is joined.
 // A grant or a revoke also makes finance-access.js forget what it holds for that login, once the transaction has
 // returned, so the login's very next request is judged on the new grants.
+// Cash & Bank (finance-cash.js, finance-allocations.js): the tiles, an account's book, the party money on account, a party's open
+// items and its statement, and a preview of an adjustment, all reads (the preview a POST, for its list of ticks); a receipt, payment
+// or transfer entered and submitted at once, which can post and so is in MINTING_POSTS; and a redo of a line's adjustment, which
+// mints nothing. The day the ERP's own receipt doors hand over to Finance is the one route any login may read.
+// Opening corrections (finance-corrections.js): a book's list of them with "Opening + corrections" for each ledger, a read; and one
+// entered and submitted at once, which can post and so is in MINTING_POSTS.
+// HR & payroll setup (finance-hr-setup.js): a book's channel map, ledger roles, expense map and payroll setting, a read; the Admin's
+// save of them, and the Admin's "create the staff ledgers". Neither write posts or mints anything, so neither is joined.
+// HR's entries in the books (finance-hr-catchup.js): the header line's counts and the control check, and a book's open exceptions,
+// two reads; "Bring in from HR" and an exception tried again, which post through the HR feed and so mint, and are in MINTING_POSTS.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
+import { markUncacheable } from '../data-tables.js';
 import { finBookIdsFor, finForgetAccess, finRequire, finSeenBookOf } from '../finance-access.js';
 import { finCan } from '../finance-rules.js';
 import { finError, finMapDbError } from '../finance-errors.js';
@@ -37,12 +48,23 @@ import {
 import { finListRules, finUpdateRule, finListAccess, finGrantAccess, finRevokeAccess } from '../finance-admin.js';
 import {
   finCreateDraft, finUpdateDraft, finDiscardDraft, finVoucherBookOf, finVoucherView, finListVouchers,
-  finSubmitVoucher, finApproveVoucher, finRejectVoucher, finReverseVoucher, finGroupKinds, finIsPartyLedger,
+  finSubmitVoucher, finApproveVoucher, finRejectVoucher, finReverseVoucher, finGroupKinds, finIsPartyLedger, finPartySide,
 } from '../finance-vouchers.js';
 import { finTrialBalance, finLedgerStatement, finJournalRegister, finSelfApproved, finActivity, finActivityRow } from '../finance-reports.js';
 import {
   finImportBookOf, finCreateImport, finListImports, finImportView, finSaveMatches, finBuildOpening, finParallelRun,
 } from '../finance-import.js';
+import { finToPaise } from '../../../client/src/lib/finance/money.js';
+import { finLeanRowsAsked } from '../../../client/src/lib/finance/cash.js';
+import { finOpenItems, finPartyFigures, finRedoAllocations } from '../finance-allocations.js';
+import {
+  finEnterCash, finRecordCount, finClearCount, finCashCounts, finCashAccounts, finCashBook, finCashUnadjusted, finAllocationPreview, finPartyReport, finCashSwitch,
+} from '../finance-cash.js';
+import { finCreateOpeningCorrection, finOpeningCorrections } from '../finance-corrections.js';
+import { finEnsureStaffLedgers, finHrSetupOf, finSaveHrSetup } from '../finance-hr-setup.js';
+import {
+  FIN_HR_EXCEPTION_BOOK_SQL, finBringInFromHr, finHrExceptionsOf, finHrRetryException, finHrStatus,
+} from '../finance-hr-catchup.js';
 
 const r = Router();
 
@@ -81,6 +103,8 @@ r.get('/finance/books', async (req, res, next) => {
 //     Both are finGroupKinds' answer (finance-vouchers.js), the very one the ledgers read below, the voucher drafts and the
 //     Tally import use: a screen that must know whether a group is a party's (the Opening Match step: a new ledger under
 //     one is linked to a customer or vendor) reads it here and never works it out from names of its own (ruling R23).
+//   • is_cash: the group is, or descends from, Cash-in-Hand (finGroupKinds' account_kind 'cash', Cash & Bank spec §5.4): a ledger
+//     there may have a holder, so the ledger form offers a holder's name and float under such a group, and under no other.
 r.get('/finance/books/:bookId/groups', async (req, res, next) => {
   try {
     const bookId = finBookParam(req);
@@ -95,6 +119,7 @@ r.get('/finance/books/:bookId/groups', async (req, res, next) => {
     const kinds = await finGroupKinds(q, bookId);
     res.json({ groups: groups.map(g => ({
       ...g, is_bank_cash: kinds.get(g.id)?.is_bank_cash === true, is_party: kinds.get(g.id)?.is_party === true,
+      is_cash: kinds.get(g.id)?.account_kind === 'cash',
     })) });
   } catch (e) { next(finMapDbError(e)); }
 });
@@ -108,7 +133,11 @@ r.get('/finance/books/:bookId/groups', async (req, res, next) => {
 //     Debtors or Sundry Creditors (ruling R23). It tells the voucher form which lines take bill details.
 //     Both flags are finGroupKinds' and finIsPartyLedger's answer (finance-vouchers.js): the voucher drafts and the
 //     Tally import ask the same two questions, so there is ONE definition of each and no SQL of its own here.
+//   • party_side (Cash & Bank spec §5.1, §5.2, §6.1): 'customer' or 'vendor' for a party ledger, by its party group or else its ERP
+//     link, and null for any other: finPartySide's answer, the one the Cash & Bank entries and the allocation engine ask. The entry
+//     form lists the customers first on Receive and the vendors first on Pay, and offers TDS on that side only.
 //   • notes: the edit form needs it.
+//   • holder_name and float_paise (Cash & Bank spec §5.4): a cash holder's name and float in whole paise, else null.
 r.get('/finance/books/:bookId/ledgers', async (req, res, next) => {
   try {
     const bookId = finBookParam(req);
@@ -119,7 +148,7 @@ r.get('/finance/books/:bookId/ledgers', async (req, res, next) => {
               l.party_type, l.party_id, COALESCE(c.name, v.name) AS party_name,
               COALESCE(lower(regexp_replace(l.name, '[[:space:]]', '', 'g'))
                        <> lower(regexp_replace(COALESCE(c.name, v.name), '[[:space:]]', '', 'g')), false) AS name_differs,
-              l.manual_entry, l.is_system, l.active
+              l.manual_entry, l.is_system, l.active, l.holder_name, l.float_amount
          FROM fin_ledgers l
          JOIN fin_groups g ON g.id = l.group_id AND g.book_id = l.book_id
          LEFT JOIN customers c ON l.party_type = 'customer' AND c.id = l.party_id
@@ -128,8 +157,9 @@ r.get('/finance/books/:bookId/ledgers', async (req, res, next) => {
         ORDER BY lower(l.name), l.id`,
       [bookId, withInactive]);
     const kinds = await finGroupKinds(q, bookId);
-    res.json({ ledgers: ledgers.map(l => ({
-      ...l, is_bank_cash: kinds.get(l.group_id)?.is_bank_cash === true, is_party: finIsPartyLedger(l, kinds),
+    res.json({ ledgers: ledgers.map(({ float_amount, ...l }) => ({
+      ...l, float_paise: float_amount == null ? null : finToPaise(float_amount), is_bank_cash: kinds.get(l.group_id)?.is_bank_cash === true, is_party: finIsPartyLedger(l, kinds),
+      party_side: finPartySide(l, kinds),
     })) });
   } catch (e) { next(finMapDbError(e)); }
 });
@@ -190,6 +220,9 @@ const FIN_BOOK_OF_ROW = {
   period: 'SELECT book_id FROM fin_periods WHERE id = $1',
   rule: 'SELECT book_id FROM fin_approval_rules WHERE id = $1',
   access: 'SELECT book_id FROM fin_access WHERE id = $1',
+  line: 'SELECT book_id FROM fin_voucher_lines WHERE id = $1',
+  count: 'SELECT book_id FROM fin_cash_counts WHERE id = $1',
+  exception: `SELECT ${FIN_HR_EXCEPTION_BOOK_SQL} AS book_id FROM fin_hr_exceptions e WHERE e.id = $1`,   // one with no book is CI's
 };
 async function finRequireRow(req, cap, what) {
   const id = finIdOf(req.params.id);
@@ -197,6 +230,16 @@ async function finRequireRow(req, cap, what) {
   const row = await one(FIN_BOOK_OF_ROW[what], [id]);
   const grant = await finRequire(req, cap, row?.book_id);
   return { id, grant };
+}
+
+// The ledger a request names in its query or its body (?ledger=, ledger_id), and the book it lives in, for finRequire to judge
+// next. Read before any transaction, as finRequireRow reads. A ledger that is not there comes back with no book, which finRequire
+// refuses with the same 403 as a book the caller holds nothing on; an id that cannot be a ledger's is a 400 naming the field.
+async function finLedgerBookOf(value, field, what) {
+  const id = finIdOf(value);
+  if (id == null) throw finError(400, 'FIN_BAD_INPUT', `Say which ${what} this is for.`, { field });
+  const row = await one(FIN_BOOK_OF_ROW.ledger, [id]);
+  return { id, bookId: row?.book_id };
 }
 
 // A group is added under a parent of the same book, and takes its nature and gross-profit flag.
@@ -557,6 +600,264 @@ r.get('/finance/reports/parallel-run', async (req, res, next) => {
     if (finIdOf(req.query.import) == null) throw finError(400, 'FIN_BAD_INPUT', 'Say which import this report is for.', { field: 'import' });
     const { id } = await finImportBookOf(req.query.import, req);
     res.json(await finParallelRun(id));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// ── Opening corrections (Cash & Bank spec §9.4) ──────────────────────────────────────────────
+// A wrong figure in the Opening, put right by a journal dated the Opening's own date (finance-corrections.js). Reading is anyone's
+// who reads the book; entering one is an accountant's or an Approver's (enter).
+
+// ?book=: the book's corrections, and "Opening + corrections" for each ledger a posted one touched.
+r.get('/finance/opening-corrections', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'list');
+    await finRequire(req, 'view', bookId);
+    res.json(await finOpeningCorrections(bookId));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Enter one (body: { book_id, lines, narration, client_key }), submitted at once: an accountant's waits for an Approver, an
+// Approver's posts self-approved, and posting mints its number, so it is in client/src/lib/writeOnce.js MINTING_POSTS. The same
+// save key from the same login answers with the correction the first save made. The answer is { voucher }.
+r.post('/finance/opening-corrections', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    const grant = await finRequire(req, 'enter', bookId);
+    res.json(await tx((qc, oc) => finCreateOpeningCorrection(qc, oc, body, { ...finActorOf(req), roles: grant.roles })));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// ── HR & payroll setup (Cash & Bank spec §7.2, §7.3, §7.8, §7.9) ─────────────────────────────
+// How HR's staff money reaches the books (finance-hr-setup.js): the account each HR pay channel pays from, the ledger of each role,
+// where the payroll expense goes, and when the payroll month is booked. Reading is anyone's who reads the book; changing it is the
+// Admin's (admin). The channel map is one for both books: each answer lists the channels that pay from a book the caller may read,
+// and a channel is pointed at, or moved away from, another book's ledger only by an admin of that book too; one sent back as it stands
+// is left as it is, so a form may save its whole state.
+
+// ?book=: the book's setup, { channels, cash_default, roles, expense_map, payroll_booking }, and what its form chooses from (ruling
+// R55): hr_channels, HR's pay channels ({ code, name, kind }), and expense_keys, the keys the expense map can take ({ key, label }, from
+// HR's people's types and departments). Neither says anything of a person: no name, code, count or amount. Those two are HR's rows,
+// which change with no announcement to Finance's screens and which the response cache cannot see, so no copy of this answer is kept
+// (markUncacheable, as the HR header line's).
+r.get('/finance/hr-setup', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'setup');
+    await finRequire(req, 'view', bookId);
+    const setup = await finHrSetupOf(bookId, { seeBookIds: await finBookIdsFor(req) });
+    markUncacheable();
+    res.json(setup);
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// The Admin saves any of it (body: { book_id, channels: [{ channel_code, ledger_id }], roles: { [role]: ledger_id }, expense_map:
+// [{ hr_key, ledger_id }], payroll_booking }; a part left out is left as it is, and null takes one away). The answer is the setup as
+// it now stands.
+r.put('/finance/hr-setup', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    await finRequire(req, 'admin', bookId);
+    const adminBookIds = await finBookIdsFor(req, 'admin');
+    const seeBookIds = await finBookIdsFor(req);
+    await tx((qc, oc) => finSaveHrSetup(qc, oc, body, { ...finActorOf(req), adminBookIds, seeBookIds }));
+    res.json(await finHrSetupOf(bookId, { seeBookIds }));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// The Admin makes the staff ledgers the book lacks and sets their roles (body: { book_id }). The answer is { created, found, system_only }:
+// the names of the ledgers made, of those found by their name and given their role, and of those now kept for the system's entries
+// (finEnsureStaffLedgers), with the setup as it now stands.
+r.post('/finance/hr-setup/ledgers', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    await finRequire(req, 'admin', bookId);
+    const seeBookIds = await finBookIdsFor(req);
+    const made = await tx((qc, oc) => finEnsureStaffLedgers(qc, oc, bookId, finActorOf(req)));
+    res.json({ ...made, ...(await finHrSetupOf(bookId, { seeBookIds })) });
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// ── HR's entries in the books (Cash & Bank spec §5, §7.5, §7.7) ──────────────────────────────
+// What of HR's staff money is not in the books yet, what could not be posted, and the check of the staff ledgers against HR
+// (finance-hr-catchup.js). Reading is anyone's who reads the book; bringing entries in, or trying an exception again, is an
+// accountant's or an Approver's (enter). Each post goes through the HR feed in the caller's name, outside any transaction of the route
+// (each event is a transaction of its own), and writes the event's voucher in the other book too where it has one there (§7.3).
+
+// ?book=: the header line, { waiting, exceptions, control }, counts and totals only, the control check as at the plant's today. HR's
+// rows change with no announcement to Finance's screens, so no copy of this answer is kept (markUncacheable).
+r.get('/finance/hr/status', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'status');
+    await finRequire(req, 'view', bookId);
+    markUncacheable();
+    res.json(await finHrStatus(bookId));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// "Bring in from HR" (body: { book_id }): posts what waits, repairs what the call after HR's commit missed, and the hidden months due.
+// It mints Finance's voucher numbers, so it is in client/src/lib/writeOnce.js MINTING_POSTS; a second copy finds it all standing and
+// posts nothing (H8). The answer is { posted, submitted, skipped, exceptions: [codes] }.
+r.post('/finance/hr/bring-in', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    await finRequire(req, 'enter', bookId);
+    res.json(await finBringInFromHr(bookId, finActorOf(req)));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// ?book=: the book's open exceptions, newest first, { exceptions }: each its event, reason and fix, never a person.
+r.get('/finance/hr/exceptions', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'list');
+    await finRequire(req, 'view', bookId);
+    res.json(await finHrExceptionsOf(bookId));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Try an exception's event again (no body). The book is the exception's own, CI's for one with none. It can post, and posting mints,
+// so it is in MINTING_POSTS. The answer is { exception }, as it now stands: resolved with its voucher, or its reason now.
+r.post('/finance/hr/exceptions/:id/retry', async (req, res, next) => {
+  try {
+    const { id } = await finRequireRow(req, 'enter', 'exception');
+    res.json(await finHrRetryException(id, finActorOf(req)));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// ── Cash & Bank (Cash & Bank spec §5, §6) ────────────────────────────────────────────────────
+// The accountant's screen for cash and bank (finance-cash.js) and the bill-wise adjustment behind its receipts and payments
+// (finance-allocations.js). Reading is anyone's who reads the book; an entry and a redo are an accountant's or an Approver's
+// (enter). The book is the one the route names, or the book of the ledger or line it names, never one the body merely claims.
+
+// The day the ERP's own receipt and payment doors hand over to Finance (spec §11): { date }. Any login may ask, with a Finance grant
+// or none, because the ERP's Invoices and Accounts pages ask it for every login, and it says nothing about any book's figures.
+r.get('/finance/cash/switch', async (req, res, next) => {
+  try {
+    res.json(await finCashSwitch());
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// The tiles: every active bank and cash account of ?book with its balance as at today, and the party money on account.
+r.get('/finance/cash/accounts', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'list');
+    await finRequire(req, 'view', bookId);
+    res.json(await finCashAccounts(bookId));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// One account's book, ?ledger=, from ?from to ?to (the current month when neither is given). The book is the ledger's own. With
+// ?rows=lean (ruling R65), as the Cash & Bank page asks, its entries and pending lines come as their column names once and one array
+// per line, which the page puts back as the objects before it keeps the answer; asked for nothing, the objects.
+r.get('/finance/cash/book', async (req, res, next) => {
+  try {
+    const { id, bookId } = await finLedgerBookOf(req.query.ledger, 'ledger', 'account');
+    await finRequire(req, 'view', bookId);
+    res.json(await finCashBook(id, { from: req.query.from, to: req.query.to, lean: finLeanRowsAsked(req.query) }));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Receive, Pay or Transfer (body: { book_id, entry_type, voucher_date, account_ledger_id, other_ledger_id, amount_paise, tds_paise,
+// reference, narration, adjust, client_key }). It is submitted at once and may post, and posting mints the voucher's number, so it
+// is in client/src/lib/writeOnce.js MINTING_POSTS. A retry with the same client_key answers with the voucher the first one made, as
+// that entry, never as the body sent again: replayed, and replay_differs when the body asked for another entry (ruling R11).
+r.post('/finance/cash/entries', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    const grant = await finRequire(req, 'enter', bookId);
+    res.json(await tx((qc, oc) => finEnterCash(qc, oc, body, { ...finActorOf(req), roles: grant.roles })));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Count a cash account (body: { book_id, ledger_id, count_date, counted_paise, note }): the book balance beside the counted amount.
+// It posts nothing and mints nothing.
+r.post('/finance/cash/counts', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const bookId = finBodyBook(body);
+    await finRequire(req, 'enter', bookId);
+    res.json(await tx((qc, oc) => finRecordCount(qc, oc, body, finActorOf(req))));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// An account's counts, ?ledger=, newest first. The book is the ledger's own.
+r.get('/finance/cash/counts', async (req, res, next) => {
+  try {
+    const { id, bookId } = await finLedgerBookOf(req.query.ledger, 'ledger', 'account');
+    await finRequire(req, 'view', bookId);
+    res.json(await finCashCounts(id));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Clear a count's difference: a receipt (excess) or payment (shortage) against Cash Short & Excess, submitted at once. It always
+// waits for an Approver unless an Approver makes it, and posting mints its number, so it is in MINTING_POSTS. The book is the count's own.
+r.post('/finance/cash/counts/:id/clear', async (req, res, next) => {
+  try {
+    const { id, grant } = await finRequireRow(req, 'enter', 'count');
+    res.json(await tx((qc, oc) => finClearCount(qc, oc, id, { ...finActorOf(req), roles: grant.roles })));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// The party money still on account in ?book, item by item (spec §6.3): each waits for its own Adjust.
+r.get('/finance/cash/unadjusted', async (req, res, next) => {
+  try {
+    const bookId = finQueryBook(req.query, 'list');
+    await finRequire(req, 'view', bookId);
+    res.json(await finCashUnadjusted(bookId));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// A party's open items, each side, with its balance (finOpenItems), and its standing worked out from those very items (finPartyFigures):
+// outstanding_paise, what is still owed on its bills, and on_account_paise, the money it already holds on account, which the Cash & Bank
+// form shows beside its Auto / I'll pick choice (spec §6.7, ruling R58). A ledger that is no party's is 409 FIN_NOT_PARTY_LINE.
+r.get('/finance/ledgers/:id/open-items', async (req, res, next) => {
+  try {
+    const { id } = await finRequireRow(req, 'view', 'ledger');
+    const open = await finOpenItems(q, id);
+    const { outstanding_paise, on_account_paise } = finPartyFigures(open);
+    res.json({ ...open, outstanding_paise, on_account_paise });
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// What an adjustment would settle now, before an entry is saved (body: { ledger_id, side, amount_paise, mode, picks, reference }):
+// { allocations, on_account_paise, items }. Asked with the entry's day and account too ({ voucher_date, account_ledger_id, client_key }),
+// it also answers party_cash_day_paise, the party's cash that day for the s.269ST / s.40A(3) warnings (ruling R59; null for a bank).
+// Or what a redo of one of the party's posted lines would settle (body: { ledger_id, line_id,
+// mode, picks, reference, scope }; the Cash & Bank screen's Redo and Adjust): the same, worked out as the redo would, once the line's
+// own allocations are released (a Redo, scope 'line', the default), or with them kept, spending only what the line still holds on
+// account (an Adjust, scope 'open': ruling R71), with the line's `side`, `amount_paise` and `scope`. It writes nothing, so it asks only the right to view the
+// party's book, which is the ledger's own. A POST because a Pick's ticks are a list.
+r.post('/finance/allocations/preview', async (req, res, next) => {
+  try {
+    const body = finBodyOf(req);
+    const { id, bookId } = await finLedgerBookOf(body.ledger_id, 'ledger_id', 'party');
+    await finRequire(req, 'view', bookId);
+    res.json(await finAllocationPreview(id, body));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// Redo the adjustment of a posted party line (body: { mode, picks, scope }), in a month of any status: it changes no balance (spec
+// §6.5). scope 'line' (the default) works the whole line again, its allocations released first (the book's Redo); 'open' settles only
+// what the line still holds on account and keeps what it settles (an Adjust, from the Unadjusted money list: ruling R71). The book is
+// the line's own. It mints nothing and is never joined.
+r.put('/finance/lines/:id/allocations', async (req, res, next) => {
+  try {
+    const { id } = await finRequireRow(req, 'enter', 'line');
+    const body = finBodyOf(req);
+    res.json(await tx((qc, oc) => finRedoAllocations(qc, oc, id, body, finActorOf(req))));
+  } catch (e) { next(finMapDbError(e)); }
+});
+
+// A party's statement (spec §6.7), ?ledger=: its open items with their age, its money on account, and the invariant beside its
+// balance. The book is the ledger's own.
+r.get('/finance/reports/party', async (req, res, next) => {
+  try {
+    const { id, bookId } = await finLedgerBookOf(req.query.ledger, 'ledger', 'party');
+    await finRequire(req, 'view', bookId);
+    res.json(await finPartyReport(id));
   } catch (e) { next(finMapDbError(e)); }
 });
 

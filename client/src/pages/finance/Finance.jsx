@@ -1,5 +1,6 @@
-// Finance — the books of account (fin_*): the shell that Vouchers, Reports, Setup and the voucher print sit in.
+// Finance — the books of account (fin_*): the shell that Cash & Bank, Vouchers, Reports, Setup and the voucher print sit in.
 //
+//   /finance/cash/*                CashBank     the accounts, Receive / Pay / Transfer, an account's book (Cash & Bank spec §5)
 //   /finance                       Vouchers     Day Book, Approvals, Drafts
 //   /finance/reports/*             Reports
 //   /finance/setup/*               Setup
@@ -36,6 +37,7 @@ import { finBookAfterReload, finBookOf, finPickBook } from '../../lib/finance/bo
 import { finCan } from '../../lib/finance/caps.js';
 import { storage } from '../../lib/safeStorage.js';
 
+const CashBank = lazy(() => import('./CashBank.jsx'));
 const Vouchers = lazy(() => import('./Vouchers.jsx'));
 const Reports = lazy(() => import('./Reports.jsx'));
 const Setup = lazy(() => import('./Setup.jsx'));
@@ -111,6 +113,7 @@ export default function Finance() {
       <Suspense fallback={<Loading />}>
         <Routes key={book.id}>
           <Route index element={<Vouchers me={me} book={book} can={can} setBook={setBook} reloadMe={reloadMe} />} />
+          <Route path="cash/*" element={<CashBank me={me} book={book} can={can} setBook={setBook} reloadMe={reloadMe} />} />
           <Route path="reports/*" element={<Reports me={me} book={book} can={can} setBook={setBook} reloadMe={reloadMe} />} />
           <Route path="setup/*" element={<Setup me={me} book={book} can={can} setBook={setBook} reloadMe={reloadMe} />} />
           <Route path="vouchers/:id/print" element={<VoucherPrint me={me} book={book} can={can} setBook={setBook} reloadMe={reloadMe} />} />

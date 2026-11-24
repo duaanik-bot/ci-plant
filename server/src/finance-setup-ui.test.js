@@ -8,7 +8,7 @@ process.env.TZ = 'Pacific/Honolulu';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as S from '../../client/src/lib/finance/setup.js';
 import { FIN_ROLES as S_FIN_ROLES, finCan } from '../../client/src/lib/finance/caps.js';
 import { FIN_DEFAULT_RULES } from './finance-rules.js';
@@ -18,12 +18,14 @@ const can = roles => cap => finCan(roles, cap);
 
 // ── The tabs ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-test('six tabs, in the order of the spec, each with the capability that shows it', () => {
+test('seven tabs, in the order of the spec, each with the capability that shows it', () => {
+  // Cash & Bank plan Task 15: HR & payroll, after the approval rules, read by every login of the book and changed by an Admin
   assert.deepEqual(S.FIN_SETUP_TABS.map(t => [t.key, t.label, t.cap]), [
     ['chart-of-accounts', 'Chart of Accounts', 'view'],
     ['months-years', 'Months & Years', 'view'],
     ['opening-balances', 'Opening Balances', 'import'],
     ['approval-rules', 'Approval Rules', 'admin'],
+    ['hr-payroll', 'HR & payroll', 'view'],
     ['access', 'Access', 'admin'],
     ['activity-log', 'Activity Log', 'view'],
   ]);
@@ -32,9 +34,9 @@ test('six tabs, in the order of the spec, each with the capability that shows it
 
 test('a login is shown the tabs its capabilities allow and no others', () => {
   const keys = roles => S.finSetupTabs(can(roles)).map(t => t.key);
-  assert.deepEqual(keys(['viewer']), ['chart-of-accounts', 'months-years', 'activity-log']);
-  assert.deepEqual(keys(['approver']), ['chart-of-accounts', 'months-years', 'activity-log'], 'approving is not importing or administering');
-  assert.deepEqual(keys(['accountant']), ['chart-of-accounts', 'months-years', 'opening-balances', 'activity-log']);
+  assert.deepEqual(keys(['viewer']), ['chart-of-accounts', 'months-years', 'hr-payroll', 'activity-log']);
+  assert.deepEqual(keys(['approver']), ['chart-of-accounts', 'months-years', 'hr-payroll', 'activity-log'], 'approving is not importing or administering');
+  assert.deepEqual(keys(['accountant']), ['chart-of-accounts', 'months-years', 'opening-balances', 'hr-payroll', 'activity-log']);
   assert.deepEqual(keys(['admin']), S.FIN_SETUP_TABS.map(t => t.key));
   assert.deepEqual(keys(['approver', 'admin']), S.FIN_SETUP_TABS.map(t => t.key));
   assert.deepEqual(keys([]), []);
@@ -426,7 +428,10 @@ test('the log is cut at the newest 500, and says so when it may have been', () =
 });
 
 test('the kinds of thing the log records, and what was done to them, in words', () => {
-  assert.deepEqual(S.FIN_ENTITY_CHOICES.map(c => c.key), ['voucher', 'ledger', 'group', 'period', 'rule', 'access', 'import', 'year', 'book']);
+  // Cash & Bank ruling R60: a bill adjustment and a cash count, after the vouchers they belong with
+  assert.deepEqual(S.FIN_ENTITY_CHOICES.map(c => c.key), ['voucher', 'allocation', 'cash_count', 'ledger', 'group', 'period', 'rule', 'access', 'import', 'year', 'book']);
+  assert.deepEqual([S.finEntityLabel('allocation'), S.finEntityLabel('cash_count')], ['Bill adjustment', 'Cash count']);
+  assert.equal(S.finActionLabel('book', 'hr_setup'), 'HR & payroll setup changed');
   assert.equal(S.finEntityLabel('period'), 'Month');
   assert.equal(S.finEntityLabel('rule'), 'Approval rule');
   assert.equal(S.finEntityLabel('constructor'), 'constructor');
@@ -697,15 +702,18 @@ test('Ledger form: what a login cannot change is shown as text, and an edit goes
   assert.match(form, /const fields = finLedgerFields\(ledger, \{ isAdmin \}\);/);
   // M-7: the edit is the form as finLedgerEditBody makes it for this login (a non-admin's has none of the admin-only fields), sent as
   // it is: no second read of the book's ledgers at save time, and no race between that read and the save
-  assert.match(form, /return api\.put\(`\/finance\/ledgers\/\$\{ledger\.id\}`, finLedgerEditBody\(form, \{ isAdmin \}\)\);/);
+  // Cash & Bank plan Task 15: and a holder's name and float, only where the form shows them (holderShown: under Cash-in-Hand, the groups
+  // read's is_cash, and never on the built-in Cash, ruling R61)
+  assert.match(form, /return api\.put\(`\/finance\/ledgers\/\$\{ledger\.id\}`, finLedgerEditBody\(form, \{ isAdmin, holder: holderShown \}\)\);/);
   assert.doesNotMatch(form, /api\.get\(/, 'the form reads nothing of its own to save');
   assert.doesNotMatch(form, /currentLedger|finFreshLedger/);
-  assert.match(form, /api\.post\('\/finance\/ledgers', finLedgerCreateBody\(form, book\.id\)\)/);
+  assert.match(form, /api\.post\('\/finance\/ledgers', finLedgerCreateBody\(form, book\.id, \{ holder: holderShown \}\)\)/);
   for (const field of ['group', 'party', 'active', 'systemOnly']) assert.match(form, new RegExp(`fields\\.${field}\\b`), `${field} is drawn as a control only when the login may change it`);
   assert.match(form, /Only an Admin can change these/);
   assert.match(form, /checked=\{!form\.manual_entry\}/, 'system-only is manual_entry off');
   assert.match(form, /const linkMissing = fields\.party && form\.party_type !== '' && form\.party_id === '';/);
-  assert.match(form, /const ready = form\.name\.trim\(\) !== '' && form\.group_id != null && form\.group_id !== '' && !linkMissing;/, 'Save waits for a name, a group, and a party where a link was chosen');
+  assert.match(form, /const ready = form\.name\.trim\(\) !== '' && form\.group_id != null && form\.group_id !== '' && !linkMissing && !\(holderShown && floatRead\.error\);/,
+    'Save waits for a name, a group, a party where a link was chosen, and a holder\'s float that reads where it is shown (ruling R62)');
   assert.match(form, /useParties\(fields\.party \? form\.party_type : ''\)/, 'the customers and vendors are read only when the party link is being edited and a kind is chosen');
   assert.match(form, /import useParties from '\.\/useParties\.js';/, 'by the one hook the Opening Match step also uses (finance-opening-ui.test.js holds its source)');
   assert.doesNotMatch(form, /function useParties|api\.get\(kind ===/, 'no copy of it here');
@@ -822,7 +830,11 @@ test('Activity log: the period is the page\'s, the person is heard once typing s
 // ── The words and limits are the server's ───────────────────────────────────────────────────────────────────────────
 
 test('the log has a word for everything the server records: every entity is in the filter and every action has a label', () => {
-  const files = ['finance-admin.js', 'finance-import.js', 'finance-masters.js', 'finance-setup.js', 'finance-vouchers.js'];
+  // Cash & Bank ruling R60: every Finance module, the Cash & Bank build's too (finance-cash-wiring.test.js reads each finAudit call whole)
+  const files = readdirSync(new URL('./', import.meta.url)).filter(f => /^finance-[\w-]+\.js$/.test(f) && !f.endsWith('.test.js'));
+  for (const f of ['finance-admin.js', 'finance-import.js', 'finance-masters.js', 'finance-setup.js', 'finance-vouchers.js', 'finance-allocations.js', 'finance-cash.js', 'finance-hr-setup.js']) {
+    assert.ok(files.includes(f), `non-vacuous: ${f} is read`);
+  }
   const pairs = files.flatMap(f => [...serverCode(f).matchAll(/entity: '([a-z_]+)', entityId[^\n]*?action: '([a-z_]+)'/g)].map(m => [m[1], m[2]]));
   assert.ok(pairs.length >= 20, `non-vacuous: only ${pairs.length} audit calls found`);
   const entities = [...new Set(pairs.map(p => p[0]))].sort();
@@ -841,7 +853,7 @@ test('the constants the screens mirror are the server\'s: the years it takes, th
   assert.equal(Number(/const FIN_USER_MAX = (\d+);/.exec(serverCode('finance-reports.js'))?.[1]), 100, 'the person box takes what the server takes');
   assert.deepEqual(S.FIN_ROLE_CHOICES.map(r => r.key), [...serverRoles()]);
   const ruleKeys = FIN_DEFAULT_RULES.map(rule => rule.rule_key);
-  assert.equal(ruleKeys.length, 10, 'non-vacuous: the ten rules a book is given');
+  assert.equal(ruleKeys.length, 11, 'non-vacuous: the eleven rules a book is given');
   for (const key of ruleKeys) assert.notEqual(S.finRuleLabel(key), key, `rule ${key} has no name`);
 });
 function serverRoles() { return S_FIN_ROLES; }

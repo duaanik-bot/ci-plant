@@ -50,6 +50,10 @@ export const FIN_SYSTEM_LEDGERS = Object.freeze([
 // There is no separate flag; the ancestry decides.
 export const FIN_BANK_CASH_GROUPS = Object.freeze(['Bank Accounts', 'Cash-in-Hand', 'Bank OD A/c']);
 
+// Of those, the group that holds cash (Cash & Bank spec §5, §5.6): a ledger under it, or beneath it, is a cash account, a holder's
+// included; under either of the other two it is a bank account. finGroupKinds says which, as account_kind.
+export const FIN_CASH_GROUPS = Object.freeze(['Cash-in-Hand']);
+
 // A ledger holds a party's account when its group is, or descends from, one of these, or when it is
 // linked to an ERP customer or vendor (ruling R23). finance-vouchers.js finIsPartyLedger is the one
 // place that puts the two together.

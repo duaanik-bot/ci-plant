@@ -226,8 +226,9 @@ SELECT
           ORDER BY s.voucher_date, s.posted_at, s.voucher_id, s.line_no), '[]'::jsonb)
      FROM shown s) AS entries`;
 
-// The other side of an entry: at most three names, comma-joined, then an ellipsis when there are more.
-const finAgainst = names => names.slice(0, FIN_AGAINST_MAX).join(', ') + (names.length > FIN_AGAINST_MAX ? '…' : '');
+// The other side of an entry: at most three names, comma-joined, then an ellipsis when there are more. The Cash & Bank book
+// (finance-cash.js) names its entries' other side the same way.
+export const finAgainst = names => names.slice(0, FIN_AGAINST_MAX).join(', ') + (names.length > FIN_AGAINST_MAX ? '…' : '');
 
 // A ledger's statement from `from` to `to`: the opening, each posted line with its running balance, and the closing,
 // which is the trial balance's closing for the ledger as at `to`. Debit positive, credit negative, as everywhere.
