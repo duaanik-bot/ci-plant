@@ -1131,6 +1131,19 @@ export default function Payroll({ level }) {
   const totals = run?.totals && typeof run.totals === 'object' ? run.totals : {};
   const linesTotal = key => sumPaise(lines.map(l => l[key]));
   const kpi = key => (totals[key] != null ? totals[key] : linesTotal(key));
+  // Advances paid this month (owner, 2026-11-26): the entry sheet's advance_given of everyone in the run, so the
+  // figure shows from the moment the advances are entered, before the run is worked out — split by pay channel.
+  const advancesPaid = useMemo(() => {
+    const given = inputs.filter(i => i.include !== false && (paiseOf(i.advance_given) ?? 0n) !== 0n);
+    const byCh = new Map();
+    for (const i of given) {
+      const code = peopleById.get(String(i.person_id))?.pay_channel || '';
+      byCh.set(code, [...(byCh.get(code) || []), i.advance_given]);
+    }
+    const split = [...byCh.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([code, vals]) => `${channelLabel(code) || 'No channel'} ${inr2(sumPaise(vals))}`);
+    return { total: sumPaise(given.map(i => i.advance_given)) ?? 0, count: given.length, split };
+  }, [inputs, peopleById, channelLabel]);
   const mismatch = ['gross', 'payable'].filter(k => totals[k] != null && linesTotal(k) != null
     && paiseOf(totals[k]) !== paiseOf(linesTotal(k)));
   const byChannel = useMemo(() => {
@@ -1489,7 +1502,7 @@ export default function Payroll({ level }) {
       {here && run && (
         <>
           <MonthCompare month={month} stamp={`${lines.length}:${kpi('payable')}:${kpi('gross')}`} />
-          <KpiRow cols={5}>
+          <KpiRow cols={6}>
             <KpiCard compact label="People" value={String(totals.lines ?? lines.length)}
               sub={blockedCount ? `${blockedCount} blocked · ${plural(warnCount, 'warning')}` : warnCount ? plural(warnCount, 'warning') : 'no flags to clear'} />
             <KpiCard compact label="Gross" value={inr2(kpi('gross'))} sub="earnings before deductions" />
@@ -1497,6 +1510,8 @@ export default function Payroll({ level }) {
               sub={`advance ${inr2(kpi('advance_recovery'))} · loans ${inr2(kpi('loan_recovery'))}`} />
             <KpiCard compact label="Payable" value={inr2(kpi('payable'))}
               sub={(paiseOf(kpi('paid_separately')) ?? 0n) !== 0n ? `after ${inr2(kpi('paid_separately'))} paid separately` : 'to pay this month'} />
+            <KpiCard compact label="Advances paid" value={inr2(advancesPaid.total)}
+              sub={advancesPaid.count ? `${plural(advancesPaid.count, 'person', 'people')} · ${advancesPaid.split.join(' · ')}` : 'none entered this month'} />
             <KpiCard compact label="Advance carried forward" value={inr2(kpi('carried_advance'))} sub="balance after this month" />
           </KpiRow>
           {here.paymentTotals && (

@@ -24,7 +24,7 @@
 // was typed stays; its warnings (a person marked as left, a month payroll already closed) are shown after
 // the payment is saved. Money is only formatted: the one figure worked out here, the instalment preview,
 // is exact BigInt paise arithmetic. Nothing is logged.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, HandCoins, Landmark, Loader2, RefreshCw, Wallet } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, useToast } from '../../components/ui.jsx';
 import { fmt } from '../../api.js';
@@ -196,22 +196,33 @@ function Choice({ on, onClick, children, disabled }) {
   );
 }
 
-const blankForm = personId => ({
+// The payroll month the form starts on (owner, 2026-11-26): the latest payroll run that is still open (not
+// finalised) — November while November's run is open — and, until the runs have loaded or when none is open,
+// the month before, as it was.
+const lastMonth = () => shiftMonth(plantToday().slice(0, 7), -1);
+export function latestOpenMonth(runs) {
+  return list(runs).filter(x => x && x.status !== 'finalised').map(x => String(x.month).slice(0, 7))
+    .filter(m => MONTH_RE.test(m)).sort().pop() || null;
+}
+
+const blankForm = (personId, payrollMonth = null) => ({
   staff: personId != null ? 'yes' : null, person: personId != null ? String(personId) : '', kind: 'advance',
   // Where it was paid from: a code from Finance's list, chosen by PaidFromSelect (cash's own account to start with).
   amount: '', date: plantToday(), paidFrom: '', instalments: '', note: '',
   // The payroll a loan's first instalment is cut from (2026-11-15): asked as a payroll month, the month before by
   // default, like an advance — in November, choose October to cut it from the salary paid now.
-  firstDue: shiftMonth(plantToday().slice(0, 7), -1),
+  firstDue: payrollMonth || lastMonth(),
   // The payroll month an advance is deducted in (2026-11-14): the month before by default — in November, October's
   // salary is paid.
-  forMonth: shiftMonth(plantToday().slice(0, 7), -1),
+  forMonth: payrollMonth || lastMonth(),
 });
 
 export default function PayStaffModal({ personId = null, people: givenPeople = null, onClose, onDone }) {
   const toast = useToast();
   const [people, setPeople] = useState(givenPeople || []);
   const [closedMonth, setClosedMonth] = useState(null);
+  const [payrollMonth, setPayrollMonth] = useState(null);   // the latest open payroll run's month, once loaded
+  const monthTouched = useRef({ forMonth: false, firstDue: false });
   useEffect(() => {
     let live = true;
     Promise.allSettled([
@@ -223,6 +234,16 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
       if (r.status === 'fulfilled') {
         const runs = Array.isArray(r.value) ? r.value : list(r.value?.runs);
         setClosedMonth(runs.filter(x => x?.status === 'finalised').map(x => String(x.month).slice(0, 7)).sort().pop() || null);
+        const latest = latestOpenMonth(runs);
+        if (latest) {
+          setPayrollMonth(latest);
+          // Move the months to the latest open run, unless they were already changed by hand.
+          setForm(f => ({
+            ...f,
+            forMonth: monthTouched.current.forMonth ? f.forMonth : latest,
+            firstDue: monthTouched.current.firstDue ? f.firstDue : latest,
+          }));
+        }
       }
     });
     return () => { live = false; };
@@ -233,7 +254,10 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);        // the server's answer to the last payment
-  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setError(''); };
+  const set = (k, v) => {
+    if (k in monthTouched.current) monthTouched.current[k] = true;
+    setForm(f => ({ ...f, [k]: v })); setError('');
+  };
 
   const staffOptions = useMemo(() => list(people)
     .filter(p => !p.pay_hidden)   // a person whose pay is hidden from this login cannot be paid by it
@@ -291,7 +315,8 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
   };
 
   const another = () => {
-    setForm(f => ({ ...blankForm(f.person || null), kind: f.kind, paidFrom: f.paidFrom, date: f.date }));
+    monthTouched.current = { forMonth: false, firstDue: false };
+    setForm(f => ({ ...blankForm(f.person || null, payrollMonth), kind: f.kind, paidFrom: f.paidFrom, date: f.date }));
     setDone(null);
     setTried(false);
     setError('');
@@ -371,7 +396,7 @@ export default function PayStaffModal({ personId = null, people: givenPeople = n
                 )}
               </div>
               {form.kind === 'advance' && (
-                <Field label="Deduct from the payroll of" required hint="Last month by default: in November, October's salary is paid.">
+                <Field label="Deduct from the payroll of" required hint="The latest open payroll month by default.">
                   <Input type="month" value={form.forMonth} disabled={Boolean(done)} onChange={e => set('forMonth', e.target.value)} />
                 </Field>
               )}
