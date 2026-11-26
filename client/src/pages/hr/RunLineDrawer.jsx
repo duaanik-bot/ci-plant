@@ -155,6 +155,30 @@ export function settlingMonth() {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
+// The month HR opens on (owner, 2026-11-26): the latest payroll run that has been started — November once
+// November's run exists, and each new month as soon as its run starts — instead of always the month before.
+// Until the runs are known (or when there are none) it is the settling month above. The answer is kept for the
+// session, so moving between HR tabs opens on it at once; every page that asks refreshes it.
+let latestRunMonth = null;
+function latestOf(runs) {
+  const months = (Array.isArray(runs) ? runs : list(runs?.runs))
+    .map(r => String(r?.month || '').slice(0, 7)).filter(m => MONTH_RE.test(m)).sort();
+  return months.pop() || null;
+}
+export function useDefaultMonth() {
+  const [m, setM] = useState(latestRunMonth);
+  useEffect(() => {
+    let live = true;
+    hrApi.runs().then(r => {
+      const latest = latestOf(r);
+      latestRunMonth = latest;
+      if (live) setM(latest);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return m || settlingMonth();
+}
+
 // Today at the plant ('2026-10-17').
 export function plantToday() {
   const { year, month, day } = istParts(true);

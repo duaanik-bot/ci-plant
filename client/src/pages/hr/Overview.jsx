@@ -3,13 +3,13 @@
 // rows behind it: the Payroll tab for the month, People, or Loans & Advances. Like every HR tab it
 // takes { level }; the overview is read-only for everyone, so the level changes nothing here.
 //
-// The month is the page's ?month= (shared with Payroll and Reports), default the plant's current month.
+// The month is the page's ?month= (shared with Payroll and Reports), default the latest payroll run started.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Banknote, ChevronLeft, ChevronRight, HandCoins, RefreshCw, UserCheck, Users, Wallet } from 'lucide-react';
 import { Button, Input, KpiCard, KpiRow } from '../../components/ui.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
-import { LEVEL_META, MONTH_RE, flagLabel, list, plantMonth, plural, shiftMonth, settlingMonth } from './RunLineDrawer.jsx';
+import { LEVEL_META, MONTH_RE, flagLabel, list, plantMonth, plural, shiftMonth, useDefaultMonth } from './RunLineDrawer.jsx';
 import { refusalText } from './PersonDrawer.jsx';
 import PayoutExport from './PayoutExport.jsx';
 
@@ -25,7 +25,8 @@ function Tile({ href, ...props }) {
 export default function Overview() {
   const [params, setParams] = useSearchParams();
   const asked = params.get('month');
-  const month = MONTH_RE.test(asked || '') ? asked : settlingMonth();
+  const opensOn = useDefaultMonth();   // the latest payroll run started (owner, 2026-11-26)
+  const month = MONTH_RE.test(asked || '') ? asked : opensOn;
   const setMonth = useCallback(m => {
     if (!MONTH_RE.test(m || '')) return;
     setParams(p => { const n = new URLSearchParams(p); n.set('month', m); return n; }, { replace: true });
@@ -84,7 +85,7 @@ export default function Overview() {
 
       {here && (
         <>
-          <KpiRow cols={5}>
+          <KpiRow cols={6}>
             <Tile href={to('people', month)} label="Active people" value={String(head.active ?? 0)} icon={Users} tone="info"
               sub={`${head.on_leave ?? 0} on leave · ${head.exited ?? 0} exited`} />
             <Tile href={to('people', month)} label="Joined this month" value={String(head.joined_this_month ?? 0)} icon={UserCheck} tone="good"
@@ -92,6 +93,11 @@ export default function Overview() {
             <Tile href={to('payroll', month)} label="This month's run" icon={Wallet} tone={status === 'finalised' ? 'good' : status ? 'warn' : 'neutral'}
               value={status ? RUN_LABEL[status] || status : 'Not started'}
               sub={run ? `${totals.lines ?? 0} lines · payable ${inr2(totals.payable)}` : 'no payroll prepared yet'} />
+            <Tile href={to('payroll', month)} label="Advances paid this month" icon={Banknote} tone="info"
+              value={inr2(here.advances_given?.total ?? '0')}
+              sub={here.advances_given?.people
+                ? `${plural(here.advances_given.people, 'person', 'people')} · ${list(here.advances_given.by_channel).map(c => `${label(c.pay_channel)} ${inr2(c.amount)}`).join(' · ')}`
+                : run ? 'none entered this month' : 'no payroll run yet'} />
             <Tile href={to('loans', month)} label="Loans outstanding" value={inr2(here.loans?.outstanding)} icon={HandCoins} tone="violet"
               sub={plural(here.loans?.count ?? 0, 'active loan')} />
             <Tile href={to('loans', month, { sub: 'advances' })} label="Advances outstanding" value={inr2(here.advances?.outstanding)} icon={Banknote} tone="warn"

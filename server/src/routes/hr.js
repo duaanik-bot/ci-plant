@@ -1562,6 +1562,21 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
         WHERE b.month = $1 AND b.status = 'parsed' AND ir.decision IS NULL
           AND ir.match IN ('conflict', 'unknown_code', 'ambiguous', 'unmatched')`, [month])).n;
 
+    // Advances given this month (owner, 2026-11-26): the entry sheet's advance_given of everyone in the month's run
+    // (left-out rows excluded), by pay channel — there from the moment the advances are entered.
+    let advancesGiven = { total: '0.00', people: 0, by_channel: [] };
+    if (run) {
+      const rows = await q(
+        `SELECT p.pay_channel, count(*)::int AS people, sum(i.advance_given)::numeric(14,2)::text AS amount
+           FROM hr.run_inputs i JOIN hr.people p ON p.id = i.person_id
+          WHERE i.run_id = $1 AND i.include AND coalesce(i.advance_given, 0) <> 0 AND i.person_id <> ALL($2::int[])
+          GROUP BY p.pay_channel ORDER BY p.pay_channel NULLS LAST`, [run.id, ex]);
+      const all = await one(
+        `SELECT count(*)::int AS people, coalesce(sum(i.advance_given), 0)::numeric(14,2)::text AS amount
+           FROM hr.run_inputs i
+          WHERE i.run_id = $1 AND i.include AND coalesce(i.advance_given, 0) <> 0 AND i.person_id <> ALL($2::int[])`, [run.id, ex]);
+      advancesGiven = { total: all.amount, people: all.people, by_channel: rows };
+    }
     // Worked out fresh from the lines every time (2026-11-15: a channel changed in Payroll must show here at once).
     if (run) run.totals = await totalsOf(q, run.id, { exclude: restricted(req) ? ex : [] });
     res.json({
@@ -1571,6 +1586,7 @@ r.get('/hr/dashboard', requireHr('viewer'), async (req, res, next) => {
       payments,
       loans: await owedLoans(month, ex),
       advances: await owedAdvances(ex),
+      advances_given: advancesGiven,
       exceptions,
     });
   } catch (e) { next(e); }
