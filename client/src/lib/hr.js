@@ -159,7 +159,7 @@ export const hrApi = {
   // plus a `warning` when they are still in an unfinalised run.
   deactivatePerson: (id, body = {}) => api.post(`/hr/people/${seg(id)}/deactivate`, body),
   // POST /hr/people/:id/activate — operator. Back to Active, exit date cleared.
-  activatePerson: id => api.post(`/hr/people/${seg(id)}/activate`, {}),
+  activatePerson: (id, body = {}) => api.post(`/hr/people/${seg(id)}/activate`, body),
   // DELETE /hr/people/:id — admin. 409 HAS_PAY_HISTORY when any payroll row names the person (deactivate instead).
   deletePerson: id => api.del(`/hr/people/${seg(id)}`),
   // POST /hr/people/:id/duplicate — operator. { code, name, display_name? } → the new person (409 CODE_EXISTS / name guards).

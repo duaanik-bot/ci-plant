@@ -683,12 +683,28 @@ r.post('/hr/people/:id/activate', requireHr('accounts'), async (req, res, next) 
   try {
     const id = idOf(req.params.id, 'Person');
     if (!canSeePay(req, id)) throw notThere('Person');
+    // from_month (owner, 2026-11-26: "ask me from which month to activate them"): the month they are back on the
+    // payroll from. Their joined_on becomes its first day, so earlier months neither ask for them nor pay them;
+    // the joining date it replaces is kept in the audit row.
+    const body = optBody(req);
+    const fromMonth = body.from_month === undefined || body.from_month === null || body.from_month === ''
+      ? null : String(body.from_month);
+    if (fromMonth !== null && !MONTH.test(fromMonth)) throw bad('from_month must be a month like 2026-12');
     await tx(async (qc, oc) => {
-      const was = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
+      const was = await oc(`SELECT id, code, name, status, exited_on::text AS exited_on, joined_on::text AS joined_on
+        FROM hr.people WHERE id = $1 FOR UPDATE`, [id]);
       if (!was) throw missing('Person');
       if (was.status === 'active') throw fail(409, `${was.name} (${was.code}) is already active`, 'ALREADY_ACTIVE');
-      await oc(`UPDATE hr.people SET status = 'active', exited_on = NULL, updated_at = now() WHERE id = $1 RETURNING id`, [id]);
-      await hrAudit(qc, req, 'person', id, 'activate', { code: was.code, from: was.status, was_exited_on: was.exited_on });
+      if (fromMonth) {
+        await oc(`UPDATE hr.people SET status = 'active', exited_on = NULL, joined_on = $2::date, updated_at = now()
+          WHERE id = $1 RETURNING id`, [id, `${fromMonth}-01`]);
+      } else {
+        await oc(`UPDATE hr.people SET status = 'active', exited_on = NULL, updated_at = now() WHERE id = $1 RETURNING id`, [id]);
+      }
+      await hrAudit(qc, req, 'person', id, 'activate', {
+        code: was.code, from: was.status, was_exited_on: was.exited_on,
+        ...(fromMonth ? { from_month: fromMonth, was_joined_on: was.joined_on } : {}),
+      });
     });
     res.json(await personDetail(id, req.hr.level));
   } catch (e) { next(refusal(e)); }

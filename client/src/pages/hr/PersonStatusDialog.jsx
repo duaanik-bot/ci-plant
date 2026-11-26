@@ -4,7 +4,7 @@
 //   Deactivate  (operator and up) the person is marked left from the date given (today by default), with a reason.
 //               "Also leave them out of <month>" (on while the month is a draft) takes them off this month's payroll
 //               in the same step; otherwise they stay on it and the answer says so.
-//   Activate    (operator and up) back to active; they are on the next months again.
+//   Activate    (operator and up) back to active from the month chosen (asked every time, owner 2026-11-26).
 //   Delete      (accounts and up, 2026-11-14) the master goes for good, with their entries in months not finalised and their import matches.
 //               Someone already paid, or with a loan or advances, cannot be deleted: the dialog lists them and offers
 //               to deactivate them instead.
@@ -23,6 +23,9 @@ export default function PersonStatusDialog({ action, people: given, month, draft
   const [reason, setReason] = useState('');
   const [exitedOn, setExitedOn] = useState(today());
   const [leaveOut, setLeaveOut] = useState(Boolean(draft));
+  // Activate asks from which month (owner, 2026-11-26) — the payroll month open on screen to start with.
+  const [fromMonth, setFromMonth] = useState(/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '') ? month : '');
+  const fromOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(fromMonth);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState([]);          // [{ person, error, code }]
   const who = people.length === 1 ? `${people[0].name} (${people[0].code ?? ''})` : `${people.length} people`;
@@ -33,7 +36,7 @@ export default function PersonStatusDialog({ action, people: given, month, draft
     let done = 0;
     for (const p of people) {
       try {
-        if (act === 'activate') await hrApi.activatePerson(p.id);
+        if (act === 'activate') await hrApi.activatePerson(p.id, { from_month: fromMonth });
         else if (act === 'delete') await hrApi.deletePerson(p.id);
         else {
           await hrApi.deactivatePerson(p.id, {
@@ -67,7 +70,7 @@ export default function PersonStatusDialog({ action, people: given, month, draft
             <Button variant="secondary" onClick={() => { setPeople(instead.map(x => x.person)); setAct('deactivate'); setRefused([]); }}>Deactivate {instead.length === 1 ? 'them' : `these ${instead.length}`} instead</Button>
           )}
           {!refused.length && (
-            <Button variant={act === 'delete' ? 'danger' : 'primary'} onClick={run} disabled={busy}>
+            <Button variant={act === 'delete' ? 'danger' : 'primary'} onClick={run} disabled={busy || (act === 'activate' && !fromOk)}>
               {busy ? 'Working…' : `${TITLE[act]} ${people.length > 1 ? `(${people.length})` : ''}`}
             </Button>
           )}
@@ -91,7 +94,17 @@ export default function PersonStatusDialog({ action, people: given, month, draft
               <Textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Left the job" /></label>
           </>
         )}
-        {act === 'activate' && !refused.length && <p className="text-xs text-[#515154]">Back to active: they are on the payroll again from the next month worked out.</p>}
+        {act === 'activate' && !refused.length && (
+          <>
+            <label className="block"><span className="mb-1 block text-xs font-semibold">From which month do you want to activate {people.length === 1 ? 'them' : 'them all'}?</span>
+              <Input type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)} /></label>
+            <p className="text-xs text-[#515154]">
+              {fromOk
+                ? `Back on the payroll from ${monthLabel(fromMonth)}: they are asked for and paid from that month, not before.`
+                : 'Choose the month they come back from.'}
+            </p>
+          </>
+        )}
         {act === 'delete' && !refused.length && (
           <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
             Deletes the person for good, with their entries in months not finalised and their matches in uploaded sheets. This cannot be undone.

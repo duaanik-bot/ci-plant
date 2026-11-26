@@ -1142,7 +1142,14 @@ export default function Payroll({ level }) {
     }
     const split = [...byCh.entries()].sort(([a], [b]) => a.localeCompare(b))
       .map(([code, vals]) => `${channelLabel(code) || 'No channel'} ${inr2(sumPaise(vals))}`);
-    return { total: sumPaise(given.map(i => i.advance_given)) ?? 0, count: given.length, split };
+    // The people themselves, for the People view's list (grouped by pay channel, then code).
+    const rows = given.map(i => {
+      const p = peopleById.get(String(i.person_id)) || {};
+      return { id: String(i.person_id), code: p.code ?? i.code ?? '', name: p.display_name || p.name || i.name || `Person #${i.person_id}`,
+        department: p.department || '', channel: p.pay_channel || '', amount: i.advance_given, remarks: i.remarks || '' };
+    }).sort((a, b) => a.channel.localeCompare(b.channel)
+      || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
+    return { total: sumPaise(given.map(i => i.advance_given)) ?? 0, count: given.length, split, rows };
   }, [inputs, peopleById, channelLabel]);
   const mismatch = ['gross', 'payable'].filter(k => totals[k] != null && linesTotal(k) != null
     && paiseOf(totals[k]) !== paiseOf(linesTotal(k)));
@@ -1495,7 +1502,7 @@ export default function Payroll({ level }) {
       {here && !run && !monthClosed && (
         <div className="mt-3">
           <EntrySheet month={month} run={null} people={people} inputs={[]} lines={[]} canOperate={canPay}
-            monthClosed={monthClosed} onSaved={load} />
+            monthClosed={monthClosed} onSaved={load} search={q} onSearch={setQ} />
         </div>
       )}
 
@@ -1750,8 +1757,13 @@ export default function Payroll({ level }) {
           )}
           {layout === 'entry' ? (
             <EntrySheet month={month} run={run} people={people} inputs={inputs} lines={lines} canOperate={canPay}
-              monthClosed={false} onSaved={load} />
+              monthClosed={false} onSaved={load} search={q} onSearch={setQ} />
           ) : layout === 'cards' ? (
+            <>
+            {advancesPaid.count > 0 && (
+              <AdvancesList rows={advancesPaid.rows} total={advancesPaid.total} channelLabel={channelLabel}
+                pending={!lines.length} month={month} search={q} />
+            )}
             <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate} canSelect={canPay}
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
               onUndo={r => setDialog({ kind: 'approval', action: 'unapprove', only: [r] })} busyId={rowBusy} onOpen={openDrawer}
@@ -1769,6 +1781,7 @@ export default function Payroll({ level }) {
                 await Promise.all([reloadPeople(), load()]);
               }}
               toolbar={<span className="text-[11px] text-[#86868B]">Export report (top right) downloads the month as Excel or PDF.</span>} />
+            </>
           ) : (
           <DataTable
             columns={columns}
@@ -2193,5 +2206,69 @@ function ApprovalDialog({ month, action, picked, refusal, onClose, onDone }) {
       </Field>
       {problems.length > 0 && <p className="text-[11px] text-[#86868B]">{problems[0]}</p>}
     </ActionDialog>
+  );
+}
+
+// Advances paid this month, person by person (owner, 2026-11-26): on the People view, from the entry sheet, so the
+// list is there as soon as the advances are entered — before the month's sheet is imported and the run worked out.
+// Grouped by pay channel with a subtotal each, and the month's total.
+function AdvancesList({ rows: all, total, channelLabel, pending, month, search = '' }) {
+  const [open, setOpen] = useState(true);
+  // The payroll's one search applies here too.
+  const t = String(search || '').trim().toLowerCase();
+  const rows = t ? all.filter(r => `${r.name} ${r.code} ${r.department} ${r.channel} ${channelLabel(r.channel)}`.toLowerCase().includes(t)) : all;
+  const groups = [];
+  for (const r of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.channel === r.channel) last.rows.push(r);
+    else groups.push({ channel: r.channel, rows: [r] });
+  }
+  return (
+    <div className="mb-3 rounded-2xl border border-[#E5E5EA] bg-white/80 p-3">
+      <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full flex-wrap items-baseline gap-x-3 text-left">
+        <span className="text-sm font-bold text-[#1D1D1F]">Advances paid — {monthLabel(month)}</span>
+        <span className="text-xs text-[#3A3A3C]">{plural(all.length, 'person', 'people')} · <b className="tabular-nums">{inr2(total)}</b>{t ? ` · ${rows.length} shown` : ''}</span>
+        {pending && <span className="text-[11px] text-[#86868B]">from the entry sheet — the month's sheet is not imported yet</span>}
+        <span className="ml-auto text-[11px] font-semibold text-[#0064D2]">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-[#86868B]">
+                <th className="px-2 py-1.5">Code</th><th className="px-2 py-1.5">Name</th><th className="px-2 py-1.5">Department</th>
+                <th className="px-2 py-1.5">Pay channel</th><th className="px-2 py-1.5 text-right">Advance</th><th className="px-2 py-1.5">Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map(g => (
+                [
+                  ...g.rows.map(r => (
+                    <tr key={r.id} className="border-t border-[#F2F2F7]">
+                      <td className="px-2 py-1.5 tabular-nums">{r.code}</td>
+                      <td className="px-2 py-1.5 font-semibold text-[#1D1D1F]">{r.name}</td>
+                      <td className="px-2 py-1.5">{r.department}</td>
+                      <td className="px-2 py-1.5">{channelLabel(r.channel) || 'No channel'}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{inr2(r.amount)}</td>
+                      <td className="px-2 py-1.5 text-[#515154]">{r.remarks}</td>
+                    </tr>
+                  )),
+                  <tr key={`sub:${g.channel}`} className="border-t border-[#E5E5EA] bg-[#F5F5F7]">
+                    <td className="px-2 py-1.5" colSpan={4}><b>{channelLabel(g.channel) || 'No channel'}</b> · {plural(g.rows.length, 'person', 'people')}</td>
+                    <td className="px-2 py-1.5 text-right font-bold tabular-nums">{inr2(sumPaise(g.rows.map(r => r.amount)))}</td>
+                    <td />
+                  </tr>,
+                ]
+              ))}
+              <tr className="border-t-2 border-[#1D1D1F]">
+                <td className="px-2 py-1.5 font-bold" colSpan={4}>{t ? 'Shown' : 'Total'} · {plural(rows.length, 'person', 'people')}</td>
+                <td className="px-2 py-1.5 text-right font-bold tabular-nums">{inr2(t ? (sumPaise(rows.map(r => r.amount)) ?? 0) : total)}</td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

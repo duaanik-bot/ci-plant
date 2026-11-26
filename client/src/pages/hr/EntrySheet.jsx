@@ -8,8 +8,8 @@
 // Lock keeps the entries as they are (input edits, imports and recalculation wait) until someone unlocks them.
 // Editable by an operator in a draft month that is not locked; otherwise read-only, with the reason shown.
 import { useMemo, useRef, useState } from 'react';
-import { Lock, LockOpen, Save, Search, Undo2 } from 'lucide-react';
-import { Button, Input, useToast } from '../../components/ui.jsx';
+import { Lock, LockOpen, Save, Undo2 } from 'lucide-react';
+import { Button, SearchInput, useToast } from '../../components/ui.jsx';
 import { hrApi, inr2, monthLabel } from '../../lib/hr.js';
 import { refusalText } from './PersonDrawer.jsx';
 
@@ -33,10 +33,14 @@ const shown = v => {
   return /^-?\d+\.\d+$/.test(t) ? t.replace(/\.?0+$/, '') : t;
 };
 
-export default function EntrySheet({ month, run, people, inputs, lines, canOperate, monthClosed, onSaved }) {
+export default function EntrySheet({ month, run, people, inputs, lines, canOperate, monthClosed, onSaved, search, onSearch }) {
   const toast = useToast();
   const [edits, setEdits] = useState(() => new Map());
-  const [q, setQ] = useState('');
+  // One search for the payroll's three views (owner, 2026-11-26): the payroll page passes its own search in, so
+  // what is typed in People or Full table is already applied here, and the other way round.
+  const [ownQ, setOwnQ] = useState('');
+  const q = search ?? ownQ;
+  const setQ = onSearch ?? setOwnQ;
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const grid = useRef(null);
@@ -65,7 +69,7 @@ export default function EntrySheet({ month, run, people, inputs, lines, canOpera
   }, [people, inputs]);
   const shownRows = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return t ? rows.filter(r => `${r.name} ${r.code} ${r.department}`.toLowerCase().includes(t)) : rows;
+    return t ? rows.filter(r => `${r.name} ${r.code} ${r.department} ${r.person?.pay_channel || ""} ${r.person?.name || ""}`.toLowerCase().includes(t)) : rows;
   }, [rows, q]);
 
   const valueOf = (id, key) => {
@@ -140,10 +144,7 @@ export default function EntrySheet({ month, run, people, inputs, lines, canOpera
         <span className="text-[11px] text-[#86868B]">{rows.length} people{edits.size ? ` · ${edits.size} changed` : ''}</span>
         {locked && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800"><Lock size={11} /> Locked</span>}
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
-          <label className="relative">
-            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#86868B]" />
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a person…" className="!h-8 !w-[200px] !pl-7 text-xs" />
-          </label>
+          <SearchInput value={q} onChange={setQ} placeholder="Search name, code, department, channel or flag…" className="w-full min-w-[260px] max-w-md" />
           {canEdit && edits.size > 0 && <Button size="sm" variant="ghost" onClick={() => { setEdits(new Map()); setError(''); }}><Undo2 size={13} /> Undo changes</Button>}
           {canEdit && (
             <Button size="sm" onClick={save} disabled={Boolean(busy) || (!fresh && !edits.size)}>

@@ -875,7 +875,7 @@ export function usePersonActions(level, { onDone } = {}) {
     }
     if (canStatus) {
       out.push(person.status === 'exited'
-        ? { key: 'activate', label: 'Activate', icon: UserCheck, onClick: () => setDlg({ kind: 'activate', person }) }
+        ? { key: 'activate', label: 'Activate', icon: UserCheck, onClick: () => setDlg({ kind: 'activate', person, fromMonth: String(new Date(Date.now() + 5.5 * 3600e3).toISOString()).slice(0, 7) }) }
         : { key: 'deactivate', label: 'Deactivate', icon: UserX, onClick: () => setDlg({ kind: 'deactivate', person, reason: '', date: '' }) });
     }
     if (canDelete) out.push({ key: 'delete', label: 'Delete', icon: Trash2, tone: 'danger', onClick: () => setDlg({ kind: 'delete', person }) });
@@ -896,7 +896,8 @@ export function usePersonActions(level, { onDone } = {}) {
         });
         toast.success(`${person.name} is now inactive`);
       } else if (kind === 'activate') {
-        result = await hrApi.activatePerson(person.id);
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(dlg.fromMonth || '')) { patch({ error: 'Choose the month to activate them from.' }); return; }
+        result = await hrApi.activatePerson(person.id, { from_month: dlg.fromMonth });
         toast.success(`${person.name} is active again`);
       } else if (kind === 'duplicate') {
         result = await hrApi.duplicatePerson(person.id, {
@@ -945,7 +946,11 @@ export function usePersonActions(level, { onDone } = {}) {
             <Input type="date" value={dlg.date} onChange={e => patch({ date: e.target.value })} />
           </Field>
         </>)}
-        {dlg.kind === 'activate' && <p className="text-sm text-gray-600">{who} will be active again and their exit date cleared.</p>}
+        {dlg.kind === 'activate' && (<>
+          <label className="block"><span className="mb-1 block text-xs font-semibold">From which month do you want to activate them?</span>
+            <Input type="month" value={dlg.fromMonth || ''} onChange={e => patch({ fromMonth: e.target.value })} /></label>
+          <p className="text-sm text-gray-600">{who} will be active again from {dlg.fromMonth ? monthLabel(dlg.fromMonth) : 'the month chosen'}, and their exit date cleared. Earlier months will not ask for them or pay them.</p>
+        </>)}
         {dlg.kind === 'delete' && (
           <p className="text-sm text-gray-600">
             Delete {who} for good, with their pay setups and aliases? This cannot be undone. It is only possible for someone with no payroll history.

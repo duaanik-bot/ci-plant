@@ -55,7 +55,7 @@
 //     run answers run: null, because an empty draft would hold back every later month (PREVIOUS_MONTH_OPEN).
 //   * An input typed by hand needs a reason, becomes source 'manual' and is audited with what changed.
 //   * Submit recalculates the whole run first, then refuses (409 RUN_BLOCKED) while a line carries a block flag or an
-//     person due this month (active, or exited inside it) with a setup has no input row at all (a row with
+//     person due this month (active, from the month they are active from) with a setup has no input row at all (a row with
 //     include = false is the explicit leave-out).
 //     Submit and approve refuse a month before the latest finalised one (409 MONTH_BEFORE_FINALISED). Approving a
 //     run you submitted warns, or is 409 SAME_PERSON when settings.strict_separation is on. Send-back (from submitted
@@ -375,10 +375,13 @@ async function refuseClosedMonth(qx, month, what) {
   }
 }
 
-// People who owe the month a decision: active, or whose last day (exited_on) falls inside the month, so a final
-// part-month pay is never forgotten because the person was already marked as left.
-const exitedIn = (exitedOn, month) => typeof exitedOn === 'string' && exitedOn.slice(0, 7) === month;
-const dueThisMonth = (p, month) => p.status === 'active' || exitedIn(p.exited_on, month);
+// People who owe the month a decision (owner, 2026-11-26): ACTIVE people only, and only from the month they are
+// active from (joined_on — set to the chosen month when someone is activated again). Anyone deactivated — fired,
+// relieved, left — is not carried into the month, even when their last day falls inside it; a final part-month
+// pay for them is entered by including them by hand.
+const monthEnd = (month) => `${month}-31`;
+const dueThisMonth = (p, month) => p.status === 'active'
+  && !(typeof p.joined_on === 'string' && p.joined_on.slice(0, 10) > monthEnd(month));
 
 // People due this month (above) with a pay setup in force for the month and no run_inputs row at all (a row with
 // include = false is the explicit leave-out). With no run, that is everyone due with a setup.
@@ -387,8 +390,8 @@ async function peopleWithoutInputs(qx, runId, month) {
     `SELECT p.id AS person_id, p.code, p.name, p.display_name, p.department, p.pay_channel, p.status,
             p.exited_on::text AS exited_on
        FROM hr.people p
-      WHERE (p.status = 'active'
-             OR (p.exited_on >= $2::date AND p.exited_on < ($2::date + interval '1 month')::date))
+      WHERE p.status = 'active'
+        AND (p.joined_on IS NULL OR p.joined_on < ($2::date + interval '1 month')::date)
         AND EXISTS (SELECT 1 FROM hr.pay_setups s WHERE s.person_id = p.id AND s.effective_from <= $2::date)
         AND NOT EXISTS (SELECT 1 FROM hr.run_inputs i WHERE i.run_id = $1 AND i.person_id = p.id)
       ORDER BY p.id`,
@@ -405,6 +408,7 @@ const ROW_COLS = `id, batch_id, row_no, raw, fields, match, person_id, candidate
 // Everyone, with what the import needs to know about them for the month.
 const PEOPLE_FOR_IMPORT = `
   SELECT p.id, p.code, p.name, p.display_name, p.status, p.department, p.pay_channel, p.exited_on::text AS exited_on,
+         p.joined_on::text AS joined_on,
          EXISTS (SELECT 1 FROM hr.pay_setups s WHERE s.person_id = p.id AND s.effective_from <= $1::date) AS has_setup
     FROM hr.people p
    ORDER BY p.id`;
@@ -649,7 +653,7 @@ function duplicatesOf(rows) {
     .map((ids) => ({ person_id: byId.get(ids[0]).person_id, row_ids: ids, row_nos: ids.map((id) => byId.get(id).row_no) }));
 }
 
-// People due this month (active, or leaving inside it) with a setup for the month whom no live row names.
+// People due this month (active, from the month they are active from) with a setup for the month whom no live row names.
 function missingOf(rows, people, month) {
   const covered = new Set(liveRows(rows).map((row) => row.person_id).filter(given));
   return people.filter((p) => dueThisMonth(p, month) && p.has_setup && !covered.has(p.id));
