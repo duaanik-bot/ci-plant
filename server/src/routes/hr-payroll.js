@@ -141,6 +141,7 @@ import { assertPayVisible, canSeePay, canSeePerson, hiddenIds, restricted } from
 import { monthlySchedule } from '../hr/monthly-report.js';
 import { finIsPaidFromChoice, finOffersPaidFrom } from '../finance-hr-setup.js';
 import { finHrAfter } from '../finance-hr-feed.js';
+import { monthAdvances } from '../hr/month-advances.js';
 
 const r = Router();
 
@@ -1437,6 +1438,7 @@ async function runResponse(req, res, next) {
         missing: await peopleWithoutInputs(q, null, month), imports: importViews, pending_import: pendingImport,
         ...(limited ? { pay_hidden_people: [] } : {}),
         carried_forward: await carriedInto(q, month, ex),
+        month_advances: await monthAdvances(q, null, month, ex),
       });
     }
     const found = await q(`${LINE_SELECT} WHERE l.run_id = $1 AND l.person_id <> ALL($2::int[]) ORDER BY l.person_id`, [run.id, ex]);
@@ -1467,6 +1469,7 @@ async function runResponse(req, res, next) {
       imports: importViews,
       pending_import: pendingImport,
       carried_forward: await carriedInto(q, month, ex),
+      month_advances: await monthAdvances(q, run.id, month, ex),
     });
   } catch (e) { next(e); }
 }

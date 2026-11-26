@@ -593,6 +593,7 @@ export default function Payroll({ level }) {
         unresolved: Number(dash?.exceptions?.unresolved_import_rows) || 0,
         payHidden: list(d?.pay_hidden_people),   // a restricted login: people shown by name only, no pay
         carried: list(d?.carried_forward),       // short last month: carried into this month (server carriedInto)
+        monthAdvances: d?.month_advances && typeof d.month_advances === 'object' ? d.month_advances : null,
       });
       setVersion(v => v + 1);
     } catch (e) {
@@ -1134,23 +1135,37 @@ export default function Payroll({ level }) {
   // Advances paid this month (owner, 2026-11-26): the entry sheet's advance_given of everyone in the run, so the
   // figure shows from the moment the advances are entered, before the run is worked out — split by pay channel.
   const advancesPaid = useMemo(() => {
+    // The server's month figure (hr/month-advances.js, owner 2026-11-26): entry sheet plus Pay staff, the same
+    // amount payroll recovers — an advance paid by Pay staff is in it as soon as it is paid.
+    const m = here?.monthAdvances;
+    if (m) {
+      const rows = list(m.rows).map(r => ({
+        id: String(r.person_id), code: r.code ?? '', name: r.name || `Person #${r.person_id}`, department: r.department || '',
+        channel: r.pay_channel || '', amount: r.amount, sheet: r.sheet, payStaff: r.pay_staff,
+        payStaffCount: Number(r.pay_staff_payments) || 0, remarks: r.remarks || '',
+      }));
+      const split = list(m.by_channel).map(c => `${channelLabel(c.pay_channel || '') || 'No channel'} ${inr2(c.amount)}`);
+      return { total: m.total ?? 0, count: Number(m.people) || 0, split, rows,
+        payStaffTotal: m.pay_staff_total, hasPayStaff: (paiseOf(m.pay_staff_total) ?? 0n) !== 0n };
+    }
+    // An older server: the entry sheet alone.
     const given = inputs.filter(i => i.include !== false && (paiseOf(i.advance_given) ?? 0n) !== 0n);
     const byCh = new Map();
     for (const i of given) {
       const code = peopleById.get(String(i.person_id))?.pay_channel || '';
       byCh.set(code, [...(byCh.get(code) || []), i.advance_given]);
     }
-    const split = [...byCh.entries()].sort(([a], [b]) => a.localeCompare(b))
+    const split = [...byCh.entries()].sort(([x], [y]) => x.localeCompare(y))
       .map(([code, vals]) => `${channelLabel(code) || 'No channel'} ${inr2(sumPaise(vals))}`);
-    // The people themselves, for the People view's list (grouped by pay channel, then code).
     const rows = given.map(i => {
       const p = peopleById.get(String(i.person_id)) || {};
       return { id: String(i.person_id), code: p.code ?? i.code ?? '', name: p.display_name || p.name || i.name || `Person #${i.person_id}`,
-        department: p.department || '', channel: p.pay_channel || '', amount: i.advance_given, remarks: i.remarks || '' };
-    }).sort((a, b) => a.channel.localeCompare(b.channel)
-      || String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
-    return { total: sumPaise(given.map(i => i.advance_given)) ?? 0, count: given.length, split, rows };
-  }, [inputs, peopleById, channelLabel]);
+        department: p.department || '', channel: p.pay_channel || '', amount: i.advance_given, sheet: i.advance_given,
+        payStaff: '0', payStaffCount: 0, remarks: i.remarks || '' };
+    }).sort((x, y) => x.channel.localeCompare(y.channel)
+      || String(x.code).localeCompare(String(y.code), undefined, { numeric: true }));
+    return { total: sumPaise(given.map(i => i.advance_given)) ?? 0, count: given.length, split, rows, payStaffTotal: '0', hasPayStaff: false };
+  }, [here, inputs, peopleById, channelLabel]);
   const mismatch = ['gross', 'payable'].filter(k => totals[k] != null && linesTotal(k) != null
     && paiseOf(totals[k]) !== paiseOf(linesTotal(k)));
   const byChannel = useMemo(() => {
@@ -1518,7 +1533,9 @@ export default function Payroll({ level }) {
             <KpiCard compact label="Payable" value={inr2(kpi('payable'))}
               sub={(paiseOf(kpi('paid_separately')) ?? 0n) !== 0n ? `after ${inr2(kpi('paid_separately'))} paid separately` : 'to pay this month'} />
             <KpiCard compact label="Advances paid" value={inr2(advancesPaid.total)}
-              sub={advancesPaid.count ? `${plural(advancesPaid.count, 'person', 'people')} · ${advancesPaid.split.join(' · ')}` : 'none entered this month'} />
+              sub={advancesPaid.count
+                ? `${plural(advancesPaid.count, 'person', 'people')} · ${advancesPaid.split.join(' · ')}${advancesPaid.hasPayStaff ? ` · incl. Pay staff ${inr2(advancesPaid.payStaffTotal)}` : ''}`
+                : 'none entered this month'} />
             <KpiCard compact label="Advance carried forward" value={inr2(kpi('carried_advance'))} sub="balance after this month" />
           </KpiRow>
           {here.paymentTotals && (
@@ -1762,7 +1779,7 @@ export default function Payroll({ level }) {
             <>
             {advancesPaid.count > 0 && (
               <AdvancesList rows={advancesPaid.rows} total={advancesPaid.total} channelLabel={channelLabel}
-                pending={!lines.length} month={month} search={q} />
+                pending={!lines.length} month={month} search={q} showSplit={advancesPaid.hasPayStaff} />
             )}
             <PersonCards rows={filtered} approvable={approvable} canApprove={canApprove} canOperate={canOperate} canSelect={canPay}
               selected={selected} onToggle={toggleRow} onRange={selectRange} onApprove={approveOne}
@@ -2212,7 +2229,7 @@ function ApprovalDialog({ month, action, picked, refusal, onClose, onDone }) {
 // Advances paid this month, person by person (owner, 2026-11-26): on the People view, from the entry sheet, so the
 // list is there as soon as the advances are entered — before the month's sheet is imported and the run worked out.
 // Grouped by pay channel with a subtotal each, and the month's total.
-function AdvancesList({ rows: all, total, channelLabel, pending, month, search = '' }) {
+function AdvancesList({ rows: all, total, channelLabel, pending, month, search = '', showSplit = false }) {
   const [open, setOpen] = useState(true);
   // The payroll's one search applies here too.
   const t = String(search || '').trim().toLowerCase();
@@ -2228,7 +2245,7 @@ function AdvancesList({ rows: all, total, channelLabel, pending, month, search =
       <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full flex-wrap items-baseline gap-x-3 text-left">
         <span className="text-sm font-bold text-[#1D1D1F]">Advances paid — {monthLabel(month)}</span>
         <span className="text-xs text-[#3A3A3C]">{plural(all.length, 'person', 'people')} · <b className="tabular-nums">{inr2(total)}</b>{t ? ` · ${rows.length} shown` : ''}</span>
-        {pending && <span className="text-[11px] text-[#86868B]">from the entry sheet — the month's sheet is not imported yet</span>}
+        {pending && <span className="text-[11px] text-[#86868B]">entry sheet{showSplit ? ' + Pay staff' : ''} — the month's sheet is not imported yet</span>}
         <span className="ml-auto text-[11px] font-semibold text-[#0064D2]">{open ? 'Hide' : 'Show'}</span>
       </button>
       {open && (
@@ -2237,7 +2254,9 @@ function AdvancesList({ rows: all, total, channelLabel, pending, month, search =
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-[#86868B]">
                 <th className="px-2 py-1.5">Code</th><th className="px-2 py-1.5">Name</th><th className="px-2 py-1.5">Department</th>
-                <th className="px-2 py-1.5">Pay channel</th><th className="px-2 py-1.5 text-right">Advance</th><th className="px-2 py-1.5">Remarks</th>
+                <th className="px-2 py-1.5">Pay channel</th>
+                {showSplit && <><th className="px-2 py-1.5 text-right">Entry sheet</th><th className="px-2 py-1.5 text-right">Pay staff</th></>}
+                <th className="px-2 py-1.5 text-right">Advance</th><th className="px-2 py-1.5">Remarks</th>
               </tr>
             </thead>
             <tbody>
@@ -2249,19 +2268,23 @@ function AdvancesList({ rows: all, total, channelLabel, pending, month, search =
                       <td className="px-2 py-1.5 font-semibold text-[#1D1D1F]">{r.name}</td>
                       <td className="px-2 py-1.5">{r.department}</td>
                       <td className="px-2 py-1.5">{channelLabel(r.channel) || 'No channel'}</td>
+                      {showSplit && <>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-[#515154]">{inr2(r.sheet)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-[#515154]">{inr2(r.payStaff)}{r.payStaffCount > 1 ? ` (${r.payStaffCount})` : ''}</td>
+                      </>}
                       <td className="px-2 py-1.5 text-right tabular-nums">{inr2(r.amount)}</td>
                       <td className="px-2 py-1.5 text-[#515154]">{r.remarks}</td>
                     </tr>
                   )),
                   <tr key={`sub:${g.channel}`} className="border-t border-[#E5E5EA] bg-[#F5F5F7]">
-                    <td className="px-2 py-1.5" colSpan={4}><b>{channelLabel(g.channel) || 'No channel'}</b> · {plural(g.rows.length, 'person', 'people')}</td>
+                    <td className="px-2 py-1.5" colSpan={showSplit ? 6 : 4}><b>{channelLabel(g.channel) || 'No channel'}</b> · {plural(g.rows.length, 'person', 'people')}</td>
                     <td className="px-2 py-1.5 text-right font-bold tabular-nums">{inr2(sumPaise(g.rows.map(r => r.amount)))}</td>
                     <td />
                   </tr>,
                 ]
               ))}
               <tr className="border-t-2 border-[#1D1D1F]">
-                <td className="px-2 py-1.5 font-bold" colSpan={4}>{t ? 'Shown' : 'Total'} · {plural(rows.length, 'person', 'people')}</td>
+                <td className="px-2 py-1.5 font-bold" colSpan={showSplit ? 6 : 4}>{t ? 'Shown' : 'Total'} · {plural(rows.length, 'person', 'people')}</td>
                 <td className="px-2 py-1.5 text-right font-bold tabular-nums">{inr2(t ? (sumPaise(rows.map(r => r.amount)) ?? 0) : total)}</td>
                 <td />
               </tr>

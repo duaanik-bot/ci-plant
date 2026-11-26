@@ -96,7 +96,7 @@ export default function Overview() {
             <Tile href={to('payroll', month)} label="Advances paid this month" icon={Banknote} tone="info"
               value={inr2(here.advances_given?.total ?? '0')}
               sub={here.advances_given?.people
-                ? `${plural(here.advances_given.people, 'person', 'people')} · ${list(here.advances_given.by_channel).map(c => `${label(c.pay_channel)} ${inr2(c.amount)}`).join(' · ')}`
+                ? `${plural(here.advances_given.people, 'person', 'people')} · ${list(here.advances_given.by_channel).map(c => `${label(c.pay_channel)} ${inr2(c.amount)}`).join(' · ')}${Number(here.advances_given.pay_staff_total) ? ` · incl. Pay staff ${inr2(here.advances_given.pay_staff_total)}` : ''}`
                 : run ? 'none entered this month' : 'no payroll run yet'} />
             <Tile href={to('loans', month)} label="Loans outstanding" value={inr2(here.loans?.outstanding)} icon={HandCoins} tone="violet"
               sub={plural(here.loans?.count ?? 0, 'active loan')} />
