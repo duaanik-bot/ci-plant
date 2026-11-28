@@ -460,13 +460,14 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
   // ancestor's containing block, clipping the footer on short/mobile viewports.
   if (phone) {
     return createPortal(
-      <div data-ci-overlay className={`fixed inset-0 ${layerClass} flex items-end animate-fadeIn`}>
+      <div data-ci-overlay className={`ci-sheet-wrap fixed inset-0 ${layerClass} flex items-end animate-fadeIn`}>
         <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
         <div
-          className="relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
+          data-size={size || (wide ? 'wide' : 'default')}
+          className="ci-sheet relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
           style={{ maxHeight: vvh ? `${Math.round(vvh * 0.94)}px` : '92dvh' }}
         >
-          <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
+          <div className="ci-sheet-grabber mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
           <div className="flex items-center justify-between px-4 pb-2.5 pt-2">
             <h3 className="min-w-0 break-words text-[17px] font-bold tracking-[-0.01em] text-[#1D1D1F]">{title}</h3>
             <button onClick={onClose} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B]">
@@ -475,12 +476,12 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
           </div>
           <div className="ci-modal-body flex-1 overflow-y-auto overscroll-contain border-t border-[#1D1D1F]/[0.06] px-4 py-3">{children}</div>
           {footer && (
-            <div className="flex flex-col-reverse gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/50 px-4 py-3 [&>button]:h-11 [&>button]:w-full"
+            <div className="ci-sheet-footer flex flex-col-reverse gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/50 px-4 py-3 [&>button]:h-11 [&>button]:w-full"
               style={{ paddingBottom: 'max(0.75rem, var(--sab))' }}>
               {footer}
             </div>
           )}
-          {!footer && <div style={{ paddingBottom: 'var(--sab)' }} />}
+          {!footer && <div className="ci-sheet-tailpad" style={{ paddingBottom: 'var(--sab)' }} />}
         </div>
       </div>,
       document.body
@@ -1065,12 +1066,12 @@ export function dueDelta(dateStr) {
 // Page header
 export function PageHeader({ title, subtitle, actions }) {
   return (
-    <div className="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-start sm:justify-between">
+    <div className="ci-page-header mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         <h1 className="module-page-title max-w-full">{title}</h1>
         {subtitle && <p className="module-page-subtitle max-w-full">{subtitle}</p>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="ci-page-actions flex shrink-0 flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }
@@ -1970,9 +1971,9 @@ export function DataTable({
 // Tabs
 export function Tabs({ tabs, active, onChange }) {
   return (
-    <div className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none">
+    <div role="tablist" className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ci-swipe-band">
       {tabs.map(t => (
-        <button key={t.key} onClick={() => onChange(t.key)}
+        <button key={t.key} role="tab" aria-selected={active === t.key} onClick={() => onChange(t.key)}
           className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]
             ${active === t.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
           {t.label}{t.count != null && (
@@ -2075,7 +2076,7 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
     // scroll the rail horizontally exactly as Tabs and SubTabs do.
     <div ref={railRef} onScroll={syncEdges}
       style={edge.l || edge.r ? { maskImage: EDGE_FADE(edge), WebkitMaskImage: EDGE_FADE(edge) } : undefined}
-      className={`mb-4 flex w-full items-stretch gap-1 overflow-x-auto rounded-[20px] border border-white/60 bg-[#1D1D1F]/[0.05] p-1.5 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ${className}`}>
+      className={`mb-4 flex w-full items-stretch gap-1 overflow-x-auto rounded-[20px] border border-white/60 bg-[#1D1D1F]/[0.05] p-1.5 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ci-swipe-band ${className}`}>
       {shown.map((g, gi) => (
         <Fragment key={g.label}>
           {gi > 0 && (
@@ -2094,9 +2095,9 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
             <div className="whitespace-nowrap px-1 text-[10px] font-bold uppercase tracking-[0.09em] text-[#6E6E73]">
               {g.label}
             </div>
-            <div className="flex flex-1 gap-1">
+            <div role="tablist" className="flex flex-1 gap-1">
               {g.items.map(t => (
-                <button key={t.key} type="button" onClick={() => onChange(t.key)}
+                <button key={t.key} type="button" role="tab" aria-selected={active === t.key} onClick={() => onChange(t.key)}
                   ref={active === t.key ? activeRef : undefined}
                   aria-current={active === t.key ? 'true' : undefined}
                   className={`grow whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold transition-all duration-300 ease-spring active:scale-[0.97]
@@ -2124,11 +2125,11 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
 // from module to module. Primary navigation stays on <Tabs/>.
 export function SubTabs({ views, active, onChange, className = '' }) {
   return (
-    <div className={`flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 backdrop-blur-xl scrollbar-none ${className}`}>
+    <div role="tablist" className={`flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 backdrop-blur-xl scrollbar-none ci-swipe-band ${className}`}>
       {views.map(v => {
         const Icon = v.icon;
         return (
-          <button key={v.key} type="button" onClick={() => onChange(v.key)}
+          <button key={v.key} type="button" role="tab" aria-selected={active === v.key} onClick={() => onChange(v.key)}
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple touch:min-h-[40px] touch:text-[13px]
               ${active === v.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
             {Icon && <Icon size={13} />} {v.label}

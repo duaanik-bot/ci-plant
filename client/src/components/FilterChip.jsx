@@ -116,7 +116,7 @@ export function FilterGroup({ label, divider = true, children, className = '' })
   return (
     <>
       {divider && <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-[#1D1D1F]/[0.10]" />}
-      <div className={`flex shrink-0 flex-wrap items-center gap-1 ${className}`}>
+      <div className={`ci-filter-group flex shrink-0 flex-wrap items-center gap-1 ${className}`}>
         {label && (
           <span className="mr-0.5 shrink-0 text-[10px] font-bold uppercase tracking-[0.07em] text-[#1D1D1F]/35">
             {label}
@@ -133,7 +133,7 @@ export function FilterGroup({ label, divider = true, children, className = '' })
 // what makes six axes read as six clusters rather than one long line.
 export function FilterRail({ children, className = '' }) {
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 ${className}`}>
+    <div className={`ci-filter-rail flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 ${className}`}>
       {children}
     </div>
   );

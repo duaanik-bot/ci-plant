@@ -1292,7 +1292,7 @@ export default function Section() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 ph:mb-2 ph:block ph:space-y-2">
         {/* Tabs and the operator rail read as one left-hand group — the counts
             follow the pick, so a man's tab says how much work HE has. */}
-        <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
+        <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none ci-swipe-band">
           <Tabs active={tab} onChange={setTab} tabs={[
             // Touch screens get one-word tabs — "Production Queue" was clipping
             // to "Production Que" in the portrait rail.
@@ -1311,7 +1311,7 @@ export default function Section() {
             shrink-0 and 1334px wide, so 1898px of controls were forced into
             1840px by crushing one field to 47px. Wrapping spends a second line
             instead, which is what every other toolbar in the app does. */}
-        <div className="mb-4 flex flex-wrap items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
+        <div className="mb-4 flex flex-wrap items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none ci-swipe-band">
           {tab === 'queue' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
               {QUEUE_FILTERS.map(f => (

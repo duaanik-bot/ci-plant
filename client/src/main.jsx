@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
+import { installAutoCards } from './lib/autoCards.js';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -26,3 +27,7 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
   });
 }
+
+// On the iPhone Duo (folded or open, either way up), wide hand-built tables
+// read as cards instead of panning sideways. Inert on every other device.
+installAutoCards();

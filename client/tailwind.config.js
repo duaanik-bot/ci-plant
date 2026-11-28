@@ -19,12 +19,21 @@ export default {
       // can, and an iPad with a Magic Keyboard still reports coarse. Never
       // use any-pointer here: it would catch touch-screen laptops.
       screens: {
+        // sm is Tailwind's usual 640px everywhere, PLUS the iPhone Duo's inner
+        // display: ~626 CSS px wide (1878px at 3x), an iPad-like "regular"
+        // surface that fell just short of 640, so every two-column form and
+        // side-by-side header stayed off on it. The second branch is fenced to
+        // touch screens 600–743 wide AND 450+ tall — the Duo unfolded upright
+        // or folded on its side; no iPhone (<=440 upright, <=440 tall on its
+        // side) or iPad (>=744) can match, so they see sm exactly as before.
+        // Same key, so the emit order (sm before md/lg) is kept.
+        sm: { raw: '(min-width: 640px), (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 450px)' },
         ph: { raw: '(max-width: 767.98px)' },                             // phones
         // Width cannot split a 13" iPad held upright (1024 CSS px — as wide
         // as many laptops) from one on its side; ORIENTATION can, on every
         // tablet at once. Desktop stays unreachable: both still need coarse.
-        tp: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait)' },  // tablet portrait
-        tl: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: landscape)' }, // tablet landscape
+        tp: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait), (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) and (orientation: landscape) and (min-height: 450px)' },  // tablet portrait
+        tl: { raw: '(min-width: 1024px) and (pointer: coarse) and (orientation: landscape), (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) and (orientation: landscape) and (max-height: 449.98px)' }, // tablet landscape
         touch: { raw: '(pointer: coarse)' },                              // any touch device
         // `lg:` styles ARE the landscape-console look — and a 13" iPad held
         // upright is 1024px wide, so they all fired in portrait and dressed it

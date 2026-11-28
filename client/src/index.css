@@ -7,6 +7,10 @@
    amethyst settles bottom-left, and a whisper of mint sits mid-right, over a
    cool blue-grey gradient — so every frosted panel picks up living colour at
    its edges instead of reading as flat grey. */
+/* The canvas behind everything — safe-area edges, the rubber-band overscroll
+   past the top or bottom, the strip beside a letterboxed web view — is the
+   app's own tone, never the browser default. */
+
 body {
   @apply text-[#1D1D1F] antialiased;
   background:
@@ -427,6 +431,10 @@ div.ci-row-alarm-soft {
      this, not to 0 — the header is sticky at z-30, so a sticky element that
      pins at 0 parks itself underneath it and is both invisible and untappable
      (the Warehouse grade strip did exactly that). One name, one source. */
+  /* The material of every full-bleed bar on a touch screen (top dock, tab bar,
+     side rail): white glass, as it always was. The iPhone Duo block below
+     swaps it for the page's own tone. */
+  --ci-bar-material: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.82) 100%);
   --ci-header-h: 74px;
   /* Where a panel that drops OUT of the header starts. Two names because the
      two panels have always hung at different heights on a desktop, and that
@@ -495,7 +503,7 @@ div.ci-row-alarm-soft {
    (~711-800px effective) and an iPad upright get two abreast; an iPhone
    portrait honestly holds one; an iPhone on its side gets two. Guarded to
    the card tiers so desktop never sees it. */
-@media (max-width: 767.98px), ((min-width: 768px) and (pointer: coarse) and (orientation: portrait)) {
+@media (max-width: 767.98px), ((min-width: 768px) and (pointer: coarse) and (orientation: portrait)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
   .ci-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
@@ -584,7 +592,7 @@ div.ci-row-alarm-soft {
      a soft drop fade in (box-shadow transitions smoothly; gradients do not),
      exactly the scroll-edge behaviour of a native nav bar. */
   .ci-topdock {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.82) 100%);
+    background: var(--ci-bar-material);
     backdrop-filter: blur(20px) saturate(170%);
     -webkit-backdrop-filter: blur(20px) saturate(170%);
     box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.95);
@@ -636,7 +644,7 @@ div.ci-row-alarm-soft {
      scrolls directly beneath it), a 0.5px hairline where content meets the rim,
      and a whisper of lift. No border: the screen's own edge finishes it. */
   .ci-dock {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.82) 100%);
+    background: var(--ci-bar-material);
     backdrop-filter: blur(20px) saturate(170%);
     -webkit-backdrop-filter: blur(20px) saturate(170%);
     box-shadow:
@@ -667,6 +675,50 @@ div.ci-row-alarm-soft {
   .ci-line-item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ═══ Unfolded band — 600–767 CSS px on a touch screen ══════════════════════
+   The iPhone Duo's INNER display is ~626 × 890 CSS px (1878 × 2670 at 3x),
+   and its outer display held sideways is ~678 wide. Both are still the phone
+   TIER (< 768, so the tab bar, the touch header and the bottom-sheet stack
+   all stay), but iOS treats the unfolded screen as a REGULAR size class — an
+   iPad-like surface — and the phone rules above were written for ~390–480.
+   Left alone they stretched one card, one KPI and one form field across
+   626px. These rules spend the width instead. Fenced by width AND
+   pointer:coarse, so no desktop window dragged to 700px can match them, and
+   the outer display upright (~466) never reaches 600. */
+@media (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 450px) {
+  /* Two cards abreast. The phone rule asks for 330px columns, which 626px
+     minus gutters (and the list panel's own padding) cannot hold twice — so
+     it fell to one 580px card with its figures marooned at the far edge. */
+  .ci-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); }
+
+  /* KPI strips: every card visible as a grid (three across, wrapping), not a
+     swipe rail that shows one and a half cards and hides the rest offscreen. */
+  .ci-kpi-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    overflow-x: visible;
+    scroll-snap-type: none;
+  }
+  .ci-kpi-rail > * { min-width: 0; max-width: none; }
+
+  /* Page-level forms take two columns again; inside a dialog the cimodal
+     container queries below still decide by the dialog's own width. */
+  .ci-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ci-tiles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+
+  /* Dialogs become a centred FORM SHEET, the iPad pattern for a regular-width
+     screen, instead of a 626px slab glued to the bottom edge. Height is still
+     set inline from the visual viewport, so the keyboard never covers the
+     footer. Buttons sit in a row at their natural width, as on a tablet. */
+  .ci-sheet-wrap { align-items: center; justify-content: center; padding: max(1rem, var(--sat)) max(1rem, var(--sar)) max(1rem, var(--sab)) max(1rem, var(--sal)); }
+  .ci-sheet { max-width: 600px; border-radius: 26px; border-bottom-width: 1px; animation: liquidPop .4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .ci-sheet[data-size='wide'], .ci-sheet[data-size='xl'] { max-width: 100%; }
+  .ci-sheet-grabber, .ci-sheet-tailpad { display: none; }
+  .ci-sheet-footer { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; padding-bottom: 0.75rem !important; }
+  .ci-sheet-footer > button { width: auto !important; }
+}
+
 
 /* ── Why Planning's last column is NOT pinned ───────────────────────────────
    The sheet carries ~19 columns and does not fit a laptop, so its last column
@@ -810,4 +862,237 @@ button[aria-busy="true"],
 span[aria-busy="true"] {
   opacity: 0.55;
   cursor: wait;
+}
+
+/* The outer iPhone Duo display (~466 wide) and other large phones: the KPI
+   strip is a two-up GRID, not a sideways swipe rail. Swiping a strip to find
+   the fifth figure is exactly the left-right hunting the Duo should not ask
+   for; at 440px+ two cards still get ~210px each, room for "₹24,66,500".
+   Ordinary phones (<440) keep the rail. */
+@media (pointer: coarse) and (min-width: 450px) and (max-width: 599.98px) and (min-height: 450px) {
+  .ci-kpi-rail {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+    scroll-snap-type: none;
+  }
+  .ci-kpi-rail > * { min-width: 0; max-width: none; }
+}
+
+/* A phone toolbar that swipes (.ci-swipe-band) WRAPS instead once there is
+   room — every touch screen from the Duo's outer display (~466) up to
+   1023px, i.e. the Duo in all four postures. Landscape iPads are untouched. The
+   controls stay full size; they take a second line rather than hiding off
+   the right edge. */
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  /* Doubled class: Tailwind emits its ph:flex-nowrap AFTER this file's rules,
+     so equal specificity would lose. */
+  .ci-swipe-band.ci-swipe-band { flex-wrap: wrap; overflow-x: visible; }
+  /* Grouped tabs: a group never wider than the strip, and its own pills wrap. */
+  .ci-swipe-band.ci-swipe-band > div { max-width: 100%; }
+  /* The vertical hairlines between groups only make sense in one line. */
+  .ci-swipe-band.ci-swipe-band > div[aria-hidden] { display: none; }
+  .ci-swipe-band [role='tablist'] { flex-wrap: wrap; }
+  /* A pill trough that wraps to two rows becomes a rounded panel. */
+  .ci-swipe-band.ci-swipe-band[role='tablist'] { border-radius: 20px; }
+}
+
+/* ═══ Edge to edge on the iPhone Duo — top bar, tab bar, side rail ══════════
+   Every touch screen from the Duo's outer display (~466) up to 1023px, i.e.
+   the Duo in all four postures. The bars meet the screen's edges SQUARE, the
+   way a native iOS nav bar and tab bar do: a rounded inward corner on a
+   full-bleed bar let the page show through at both ends, which read as a
+   gap. Ordinary phones (<440) and landscape iPads (>=1024) are untouched. */
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  .ci-topdock.ci-topdock { border-radius: 0; }
+  .ci-dock.ci-dock { border-radius: 0; }
+}
+
+/* The Duo unfolded and held sideways (768–1023, touch) uses the tablet shell
+   — icon rail + header — so the phone's dock rules above (written under
+   max-width 767.98) never reached it, and it showed a floating capsule
+   header and a floating rail with air on every side. Here the header takes
+   the same docked material as the phone, flush to the top and right edges,
+   and the rail becomes a flush full-height sidebar meeting it, with the
+   notch/camera insets carried as padding INSIDE the bars. */
+@media (pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px) {
+  :root {
+    --ci-header-h: calc(62px + var(--sat));
+    --ci-pop-top: calc(var(--ci-header-h) + 2px);
+    --ci-menu-top: calc(var(--ci-header-h) + 2px);
+  }
+  .ci-topdock {
+    border-radius: 0;
+    background: var(--ci-bar-material);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.95);
+    transition: box-shadow 0.25s ease;
+  }
+  .ci-topdock-scrolled {
+    box-shadow:
+      inset 0 -1px 0 rgba(255, 255, 255, 0.95),
+      0 0.5px 0 rgba(58, 74, 102, 0.16),
+      0 10px 28px -14px rgba(40, 52, 74, 0.14);
+  }
+  /* Rail: no outer air; the panel runs the full height, square, with a
+     hairline where it meets the content, and grows by the left inset so the
+     icons stay clear of a side camera. */
+  .ci-rail.ci-rail { padding: 0 !important; width: calc(76px + var(--sal)) !important; }
+  .ci-rail-panel.ci-rail-panel {
+    border-radius: 0;
+    border-width: 0;
+    padding-top: calc(var(--sat) + 0.5rem);
+    padding-bottom: calc(var(--sab) + 0.5rem);
+    padding-left: calc(var(--sal) + 0.375rem);
+    box-shadow: inset -0.5px 0 0 rgba(58, 74, 102, 0.16);
+    background: var(--ci-bar-material);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+  }
+  /* The column starts exactly where the rail ends — header flush against it. */
+  .ci-rail-col.ci-rail-col { padding-left: calc(76px + var(--sal)); }
+  .ci-rail-col.ci-rail-col > main { padding-right: max(0.75rem, var(--sar)); }
+}
+
+/* ═══ iPhone Duo — bars in the app's own tone, canvas never black ═══════════
+   On the Duo ONLY (every posture: (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px) or
+   unfolded sideways). iOS colours the strip behind the clock from the top of
+   the page, so the white top bar made a white band across the top of a
+   blue-grey app. Here the bars take the PAGE'S tone (#E9EDF6 — the body
+   gradient's first stop and theme-color), so clock strip, bar and page read as
+   one surface, as a native app's do, and the seams are blue-grey hairlines
+   instead of white lines. The canvas behind the page (overscroll, safe-area
+   edges) is the same tone, and the app declares itself light-only so iOS
+   never paints those edges black. Regular iPhones are under 450px wide upright
+   and under 450px tall on their side; iPads are wider upright or >=1024 on
+   their side — none of them can match, so they keep the white bars. */
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  :root { --ci-bar-material: linear-gradient(180deg, rgba(233, 237, 246, 0.94) 0%, rgba(229, 234, 245, 0.86) 100%); }
+  html { background-color: #E9EDF6; color-scheme: light only; }
+  .ci-topdock.ci-topdock { box-shadow: inset 0 -0.5px 0 rgba(58, 74, 102, 0.12); }
+  .ci-topdock.ci-topdock-scrolled {
+    box-shadow:
+      inset 0 -0.5px 0 rgba(58, 74, 102, 0.12),
+      0 0.5px 0 rgba(58, 74, 102, 0.16),
+      0 10px 28px -14px rgba(40, 52, 74, 0.14);
+  }
+  .ci-dock.ci-dock {
+    box-shadow:
+      inset 0 0.5px 0 rgba(58, 74, 102, 0.12),
+      0 -0.5px 0 rgba(58, 74, 102, 0.16),
+      0 -10px 28px -14px rgba(40, 52, 74, 0.14);
+  }
+}
+
+/* ═══ iPhone Duo — nothing runs past the screen edge ════════════════════════
+   Rows that are as wide as everything in them — a shrink-0 filter group or
+   rail (Status Sheet's stages, Printing's colour rail), a page header's
+   buttons, a toolbar group — ran 900–1500px past the edge of the Duo: clipped
+   and unreachable folded, a sideways-panning page unfolded. On the Duo they
+   are capped at the screen and wrap; the date-range switcher, which cannot
+   wrap and stay one control, fits by swiping inside its own pill. Duo only —
+   every other device lays out exactly as before. */
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  .ci-filter-group.ci-filter-group,
+  .ci-filter-rail.ci-filter-rail,
+  .ci-page-actions.ci-page-actions { min-width: 0; max-width: 100%; }
+  .ci-page-header.ci-page-header { flex-wrap: wrap; }
+  .ci-wrap-group.ci-wrap-group { flex-wrap: wrap; max-width: 100%; }
+  .ci-seg-fit.ci-seg-fit { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .ci-seg-fit.ci-seg-fit::-webkit-scrollbar { display: none; }
+}
+
+/* ═══ Auto-cards — a hand-built table that does not fit becomes cards ═══════
+   lib/autoCards.js stamps .ci-autocards (and a data-label per cell, copied
+   from the column header) on any table wider than its box on a card-tier
+   screen — phones, upright tablets, and every touch screen under 1024px,
+   which is the iPhone Duo in all four postures. One card per row, one line
+   per cell, the column's name beside its value: no sideways panning. The
+   media query is the card tier exactly, so the class is inert on a desktop or
+   a landscape iPad even if a table carried it there. */
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  table.ci-autocards {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    border-collapse: separate;
+  }
+  /* The headers now ride on every cell, so the header band itself goes. */
+  table.ci-autocards > thead { display: none; }
+  table.ci-autocards > tbody,
+  table.ci-autocards > tfoot {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+    /* Two cards abreast wherever there is room (the Duo unfolded). */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+    align-items: start;
+  }
+  /* A card is a two-up grid of label-over-value pairs, so a nine-column row
+     costs five short lines, not nine. */
+  table.ci-autocards > tbody > tr,
+  table.ci-autocards > tfoot > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 0.875rem;
+    row-gap: 0.125rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.72);
+    padding: 0.625rem 0.75rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(29, 29, 31, 0.04);
+  }
+  /* Totals rows read as a summary card. */
+  table.ci-autocards > tfoot > tr { background: rgba(225, 239, 255, 0.7); }
+  table.ci-autocards td,
+  table.ci-autocards th {
+    display: block;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0.3rem 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    position: static !important;   /* sticky first columns have nothing to stick to */
+    background: transparent;
+  }
+  table.ci-autocards td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 1px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: #86868B;
+  }
+  /* The title cell (first labelled, non-empty one): full width, bold, no label. */
+  table.ci-autocards > tbody > tr > td[data-ci-title] {
+    grid-column: 1 / -1;
+    order: -1;
+    margin-bottom: 0.25rem;
+    border-bottom: 0.5px solid rgba(29, 29, 31, 0.07) !important;
+    padding-bottom: 0.45rem !important;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1D1D1F;
+    padding-top: 0.1rem !important;
+  }
+  table.ci-autocards > tbody > tr > td[data-ci-title]::before { content: none; }
+  /* A column with no header (row actions, a tick box) — no label, full width. */
+  table.ci-autocards td[data-label=''] { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: flex-end; }
+  table.ci-autocards td[data-label='']::before { content: none; }
+  table.ci-autocards td:empty,
+  table.ci-autocards td[data-ci-hidden] { display: none !important; }
+  /* A cell's own content must never re-widen the card. */
+  table.ci-autocards td > * { max-width: 100%; }
+  /* Row washes paint the CARD, not cells that now sit as lines inside it. */
+  table.ci-autocards tr.ci-row-alarm > td,
+  table.ci-autocards tr.ci-row-alarm-soft > td { background: transparent; }
+  table.ci-autocards tr.ci-row-alarm { background: rgba(255, 59, 48, 0.07); border-color: rgba(255, 59, 48, 0.28); }
+  table.ci-autocards tr.ci-row-alarm-soft { background: rgba(255, 59, 48, 0.04); border-color: rgba(255, 59, 48, 0.2); }
 }

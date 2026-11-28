@@ -3,8 +3,10 @@
 // desktop. The split mirrors tailwind.config.js `screens` exactly:
 //
 //   phone   < 768px                       — width alone; a phone is a phone
-//   tabp    ≥ 768px + coarse pointer + portrait  — tablet held upright
-//   tabl    ≥ 768px + coarse pointer + landscape — tablet on its side
+//   tabp    ≥ 768px + coarse pointer + portrait   — tablet held upright, plus
+//           the iPhone Duo unfolded sideways (768–1023 wide, 450+ tall)
+//   tabl    ≥ 768px + coarse pointer + landscape — tablet on its side, and a
+//           phone on its side (under 450 tall) — tables, as before
 //   desktop ≥ 768px       + fine pointer   — every laptop and monitor
 //
 // A tablet in LANDSCAPE reports more CSS pixels than many laptops, so width
@@ -22,8 +24,13 @@ const QUERIES = {
   // Orientation, not width, splits the tablet tiers — a 13" iPad reports
   // 1024 CSS px held UPRIGHT, wider than many laptops. Portrait is portrait
   // on every tablet; desktop still can't match either (pointer: fine).
-  tabp: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait)',
-  tabl: '(min-width: 768px) and (pointer: coarse) and (orientation: landscape)',
+  // The iPhone Duo unfolded and held sideways (~890 x 626 CSS px) gets CARDS:
+  // far too narrow for a 14-column sheet, which panned left and right. It is
+  // the only landscape touch screen 768–1023 wide AND 450+ tall — a regular
+  // iPhone on its side is under 450 tall and stays `tabl` exactly as before,
+  // and every iPad on its side is >= 1024 (mini 1133, Air 1180, Pro 1194).
+  tabp: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait), (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) and (orientation: landscape) and (min-height: 450px)',
+  tabl: '(min-width: 1024px) and (pointer: coarse) and (orientation: landscape), (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) and (orientation: landscape) and (max-height: 449.98px)',
 };
 
 const lists = typeof window !== 'undefined' && window.matchMedia

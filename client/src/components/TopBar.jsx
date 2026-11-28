@@ -275,7 +275,12 @@ export default function TopBar({
           }}
         />
       )}
-      <header className={headerCls}>
+      {/* The dock's row clears a SIDE safe area too — the iPhone Duo's outer
+          display keeps its camera in a side corner, and a phone on its side
+          puts the notch there — so the menu and account buttons never sit
+          under the camera. max() keeps the usual 12px where there is none. */}
+      <header className={headerCls}
+        style={dock ? { paddingLeft: 'max(0.75rem, var(--sal))', paddingRight: 'max(0.75rem, var(--sar))' } : undefined}>
         {/* PHONE ONLY. The desktop panel-toggle icon that used to live here is
             gone: on a large screen the rail already carries both directions of
             the same action — click the "Colour Impressions" wordmark to slide it

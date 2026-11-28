@@ -741,7 +741,7 @@ export default function SortPaste() {
             upright (820px) it pushed the whole PAGE 106px sideways. The phone
             tier had this fix; nothing between a phone and a desktop did. It
             costs nothing when the rail already fits. */}
-        <div className="flex max-w-full flex-wrap items-center gap-2 overflow-x-auto scrollbar-none ph:flex-nowrap ph:pb-1">
+        <div className="ci-swipe-band flex max-w-full flex-wrap items-center gap-2 overflow-x-auto scrollbar-none ph:flex-nowrap ph:pb-1">
           <Tabs active={tab} onChange={setTab} tabs={[
             { key: 'queue', label: touchUI ? 'Queue' : 'Production Queue', count: mineQueue.length },
             { key: 'completed', label: touchUI ? 'Completed' : 'Completed Runs', count: mineCompleted.length },

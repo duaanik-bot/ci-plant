@@ -444,7 +444,7 @@ export default function BoardStockVerification() {
               planned: 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]',
             }} counts={cutCounts}
             active={cutFilter} onToggle={toggleIn(setCutFilter)} onClear={() => setCutFilter([])} />
-          <div className="inline-flex shrink-0 items-center gap-2">
+          <div className="ci-wrap-group inline-flex shrink-0 items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
             <Select className="w-40" value={grade} onChange={e => setGrade(e.target.value)} placeholder="All types">
               <option value="">All types</option>
@@ -455,13 +455,13 @@ export default function BoardStockVerification() {
               {gsms.map(g => <option key={g} value={String(g)}>{g} GSM</option>)}
             </Select>
           </div>
-          <div className="inline-flex shrink-0 items-center gap-2">
+          <div className="ci-wrap-group inline-flex shrink-0 items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Cutting by</span>
             <div className="w-36 shrink-0"><Input data-reload-safe type="date" className="h-9" value={cutBefore} onChange={e => setCutBefore(e.target.value)} /></div>
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Dispatch by</span>
             <div className="w-36 shrink-0"><Input data-reload-safe type="date" className="h-9" value={dispBefore} onChange={e => setDispBefore(e.target.value)} /></div>
           </div>
-          <div className="inline-flex shrink-0 items-center gap-2">
+          <div className="ci-wrap-group inline-flex shrink-0 items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Sort</span>
             <Select className="w-48" value={sortKey} onChange={e => setSortKey(e.target.value)}>
               {Object.entries(SORTS).map(([kk, s]) => <option key={kk} value={kk}>{s.label}</option>)}

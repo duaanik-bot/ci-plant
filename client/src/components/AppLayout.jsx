@@ -777,7 +777,7 @@ function PhoneNav({ groups, floorTotal, onMore }) {
       />
       <div
         className="ci-dock grid grid-cols-5 items-stretch rounded-t-[22px] px-1"
-        style={{ height: 'calc(3.5rem + var(--sab))', paddingBottom: 'var(--sab)' }}>
+        style={{ height: 'calc(3.5rem + var(--sab))', paddingBottom: 'var(--sab)', paddingLeft: 'max(0.25rem, var(--sal))', paddingRight: 'max(0.25rem, var(--sar))' }}>
         {slots.map(s => (
           <NavLink key={s.to} to={s.to} end={s.to === '/'}
             className={({ isActive }) =>
@@ -882,12 +882,32 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
 // Tablet icon rail — 76px, always on screen. Every granted module is one tap;
 // the full grouped drawer (with the Live Floor section list) opens from the
 // header's handle for anything that needs reading rather than recognising.
+// The iPhone Duo unfolded and held sideways (~890 x 626 CSS px) — a landscape
+// touch screen narrower than any iPad on its side and taller than any iPhone
+// on its side. There the tablet shell goes EDGE TO
+// EDGE: the header docks flush to the top like the phone's, and the icon rail
+// sits flush against the left edge, both meeting with no floating gaps.
+// iPads (portrait or >= 1024 landscape) keep the floating band and rail.
+const NARROW_TOUCH_Q = '(pointer: coarse) and (orientation: landscape) and (min-width: 768px) and (max-width: 1023.98px) and (min-height: 450px)';
+function useNarrowTouch() {
+  const [on, setOn] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(NARROW_TOUCH_Q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(NARROW_TOUCH_Q);
+    if (!mq) return undefined;
+    const sync = () => setOn(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return on;
+}
+
 function TabletRail({ groups, floorTotal }) {
   const flat = groups.flatMap(g => g.items);
   return (
-    <aside data-ci-chrome className="no-print fixed inset-y-0 left-0 z-40 w-[76px] py-3 pl-2"
+    <aside data-ci-chrome className="ci-rail no-print fixed inset-y-0 left-0 z-40 w-[76px] py-3 pl-2"
       style={{ paddingLeft: 'max(0.5rem, var(--sal))' }}>
-      <div className="glass flex h-full flex-col items-stretch gap-0.5 overflow-y-auto overscroll-contain rounded-[22px] px-1.5 py-2 scrollbar-none">
+      <div className="ci-rail-panel glass flex h-full flex-col items-stretch gap-0.5 overflow-y-auto overscroll-contain rounded-[22px] px-1.5 py-2 scrollbar-none">
         {flat.map(i => {
           const isFloor = !!i.floor;
           const to = isFloor ? '/floor' : i.tooling ? '/tooling/plates' : i.to;
@@ -1008,6 +1028,7 @@ export default function AppLayout() {
   })).filter(g => g.items.length > 0);
 
   const logout = () => { auth.clear(); nav('/login', { replace: true }); };
+  const narrowTouch = useNarrowTouch();
 
   // ── Phone — bottom tab bar, no side rail, content padded past the bar ──────
   if (tier === 'phone') {
@@ -1068,9 +1089,10 @@ export default function AppLayout() {
             </aside>
           </div>
         )}
-        <div className="min-w-0 flex-1 pl-[84px]" style={{ paddingRight: 'max(0px, var(--sar))' }}>
+        <div className="ci-rail-col min-w-0 flex-1 pl-[84px]" style={{ paddingRight: narrowTouch ? undefined : 'max(0px, var(--sar))' }}>
           <TopBar
             touchShell
+            dock={narrowTouch}
             collapsed={false}
             onToggleSidebar={() => setMobileOpen(o => !o)}
             user={user}

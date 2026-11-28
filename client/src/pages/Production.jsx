@@ -797,7 +797,7 @@ export default function Production() {
           live counts so a planner can see at a glance how much of the queue is
           actually dated before he clicks. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-full bg-white/50 p-1 ring-1 ring-white/70">
+        <div className="ci-seg-fit flex items-center gap-1 rounded-full bg-white/50 p-1 ring-1 ring-white/70">
           {TIMELINE_PRESETS.map(p => (
             <button key={p.key} type="button" onClick={() => setTimeline(p.key)}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]

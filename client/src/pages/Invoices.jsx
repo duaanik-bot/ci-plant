@@ -322,7 +322,7 @@ export default function Invoices({ embedded = false }) {
           { key: 'open', label: 'Outstanding', count: openInvoices.length },
           { key: 'settled', label: 'Settled', count: settledInvoices.length },
         ]} />
-        <div className="flex gap-2">
+        <div className="ci-wrap-group flex gap-2">
           <ResetFilters filters={filters} />
           {embedded && actions}
         </div>
