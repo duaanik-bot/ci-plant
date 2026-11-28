@@ -995,11 +995,26 @@ span[aria-busy="true"] {
      app's blue-grey at ~60% with a strong blur, so the page scrolls visibly
      beneath them instead of meeting a solid white (or, at the safe-area
      edges, black) slab. The blur keeps labels on top crisp and readable. */
-  :root { --ci-bar-material: linear-gradient(180deg, rgba(241, 244, 251, 0.66) 0%, rgba(233, 237, 246, 0.56) 100%); }
+  /* LIQUID GLASS (iOS 26 register). Clear glass, not a tinted slab: a whisper
+     of white over a strong blur that pulls the colour of whatever is beneath
+     up through the bar, a bright specular rim on the edge that meets the
+     content, and no drop shadow. The top bar is fully CLEAR at rest, so it is
+     simply part of the page, and only turns to glass once content scrolls
+     under it, as a native nav bar does. */
+  :root { --ci-bar-material: linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0.16) 100%); }
   .ci-topdock.ci-topdock, .ci-dock.ci-dock, .ci-rail-panel.ci-rail-panel {
     background: var(--ci-bar-material);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(200%) brightness(1.04);
+    -webkit-backdrop-filter: blur(16px) saturate(200%) brightness(1.04);
+    border-color: transparent;
+  }
+  /* The rail borrows .glass, whose corner bloom painted a white patch at the
+     top of a full-height strip; the bar material alone does the job here. */
+  .ci-rail-panel.ci-rail-panel::before { display: none; }
+  .ci-topdock.ci-topdock:not(.ci-topdock-scrolled) {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   html { background-color: #E9EDF6; color-scheme: light only; }
   /* The canvas behind EVERY edge — overscroll, the side camera's safe-area
@@ -1010,18 +1025,24 @@ span[aria-busy="true"] {
      breaks rather than pushing past the screen edge. Only text that cannot
      otherwise fit is affected. */
   main .min-w-0 { overflow-wrap: anywhere; }
-  .ci-topdock.ci-topdock { box-shadow: inset 0 -0.5px 0 rgba(58, 74, 102, 0.12); }
+  /* Edges: a lit specular line where the glass meets the content, a faint
+     cool line just past it so the edge still reads on white cards, and no
+     drop shadow — the bar is part of the page, not floating above it. */
+  .ci-topdock.ci-topdock { box-shadow: none; }
   .ci-topdock.ci-topdock-scrolled {
     box-shadow:
-      inset 0 -0.5px 0 rgba(58, 74, 102, 0.12),
-      0 0.5px 0 rgba(58, 74, 102, 0.16),
-      0 10px 28px -14px rgba(40, 52, 74, 0.14);
+      inset 0 -1px 0 rgba(255, 255, 255, 0.70),
+      0 0.5px 0 rgba(58, 74, 102, 0.10);
   }
   .ci-dock.ci-dock {
     box-shadow:
-      inset 0 0.5px 0 rgba(58, 74, 102, 0.12),
-      0 -0.5px 0 rgba(58, 74, 102, 0.16),
-      0 -10px 28px -14px rgba(40, 52, 74, 0.14);
+      inset 0 1px 0 rgba(255, 255, 255, 0.70),
+      0 -0.5px 0 rgba(58, 74, 102, 0.10);
+  }
+  .ci-rail-panel.ci-rail-panel {
+    box-shadow:
+      inset -1px 0 0 rgba(255, 255, 255, 0.70),
+      0.5px 0 0 rgba(58, 74, 102, 0.10);
   }
 }
 

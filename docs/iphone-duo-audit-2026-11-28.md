@@ -34,6 +34,14 @@ is under 380 tall; the 8 Plus and older Androids sideways stay out because they 
 | `autoCards.js` | After you fold or unfold, a table that now fits is shown as a table again instead of staying as cards. A table 2 to 4 px too wide (previously let through) now becomes cards. |
 | `Production.jsx` | Job-card title chips (the Fluence button and others) wrap on the Duo instead of running 100 px off the folded screen. The class used has rules only on the Duo. |
 
+### Follow-up: liquid-glass bars
+
+The top bar, tab bar and side rail now use clear glass: white at 16–30% over a 16px blur with saturation boosted
+to 200%, a bright 1px edge where the bar meets the content, and no drop shadow. When the page is at the top, the
+top bar is fully transparent and blends into the page. It turns to glass only once content scrolls under it. The
+rail no longer shows the white corner glow from the shared `.glass` style. These rules apply only on the Duo. The
+per-device CSS comparison is unchanged: the same Duo-sized screens differ and every other device is identical.
+
 ## Tests
 
 Run in headless Chrome against the real app and live data (read-only), emulating a touch screen at 3× scale.
