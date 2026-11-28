@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
 import { installAutoCards } from './lib/autoCards.js';
+import { installDuoFocus } from './lib/duoFocus.js';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -31,3 +32,4 @@ if ('serviceWorker' in navigator) {
 // On the iPhone Duo (folded or open, either way up), wide hand-built tables
 // read as cards instead of panning sideways. Inert on every other device.
 installAutoCards();
+installDuoFocus();

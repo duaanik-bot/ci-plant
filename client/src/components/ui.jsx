@@ -465,7 +465,7 @@ export function Modal({ open, onClose, title, children, footer, wide, size, laye
         <div
           data-size={size || (wide ? 'wide' : 'default')}
           className="ci-sheet relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
-          style={{ maxHeight: vvh ? `${Math.round(vvh * 0.94)}px` : '92dvh' }}
+          style={{ maxHeight: vvh ? `${Math.round(vvh * 0.94)}px` : '92dvh', '--ci-vvh': vvh ? `${Math.round(vvh)}px` : undefined }}
         >
           <div className="ci-sheet-grabber mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
           <div className="flex items-center justify-between px-4 pb-2.5 pt-2">

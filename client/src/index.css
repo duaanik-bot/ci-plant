@@ -686,7 +686,7 @@ div.ci-row-alarm-soft {
    626px. These rules spend the width instead. Fenced by width AND
    pointer:coarse, so no desktop window dragged to 700px can match them, and
    the outer display upright (~466) never reaches 600. */
-@media (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 450px) {
+@media (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4) {
   /* Two cards abreast. The phone rule asks for 330px columns, which 626px
      minus gutters (and the list panel's own padding) cannot hold twice — so
      it fell to one 580px card with its figures marooned at the far edge. */
@@ -717,6 +717,29 @@ div.ci-row-alarm-soft {
   .ci-sheet-grabber, .ci-sheet-tailpad { display: none; }
   .ci-sheet-footer { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; padding-bottom: 0.75rem !important; }
   .ci-sheet-footer > button { width: auto !important; }
+}
+
+
+/* ═══ iPhone Duo folded, upright — a form opens FULL SCREEN ════════════════
+   The outer display (~466 × 678) is narrow and short; a form in a 94% sheet
+   left a strip of page above it and a grabber nobody needs. A dialog that
+   holds a field takes the whole visual viewport instead, the way a native
+   iOS form does: square, edge to edge, its header clear of the Dynamic Island
+   and its Save row clear of the home bar. --ci-vvh is the visual viewport's
+   height (set inline by Modal), so with the keyboard up it is the space ABOVE
+   the keys and the footer stays reachable. A plain confirm (no field) keeps
+   the small sheet. Regular iPhones are under 450 wide and never match. */
+@media (pointer: coarse) and (orientation: portrait) and (min-width: 450px) and (max-width: 599.98px) and (min-height: 500px) {
+  .ci-sheet:has(.ci-modal-body :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea)) {
+    height: var(--ci-vvh, 100dvh);
+    max-height: var(--ci-vvh, 100dvh) !important;
+    border-radius: 0;
+    border-width: 0;
+    padding-top: var(--sat);
+    padding-left: var(--sal);
+    padding-right: var(--sar);
+  }
+  .ci-sheet:has(.ci-modal-body :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea)) > .ci-sheet-grabber { display: none; }
 }
 
 
@@ -869,7 +892,7 @@ span[aria-busy="true"] {
    the fifth figure is exactly the left-right hunting the Duo should not ask
    for; at 440px+ two cards still get ~210px each, room for "₹24,66,500".
    Ordinary phones (<440) keep the rail. */
-@media (pointer: coarse) and (min-width: 450px) and (max-width: 599.98px) and (min-height: 450px) {
+@media (pointer: coarse) and (min-width: 450px) and (max-width: 599.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4) {
   .ci-kpi-rail {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -884,7 +907,7 @@ span[aria-busy="true"] {
    1023px, i.e. the Duo in all four postures. Landscape iPads are untouched. The
    controls stay full size; they take a second line rather than hiding off
    the right edge. */
-@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
   /* Doubled class: Tailwind emits its ph:flex-nowrap AFTER this file's rules,
      so equal specificity would lose. */
   .ci-swipe-band.ci-swipe-band { flex-wrap: wrap; overflow-x: visible; }
@@ -903,7 +926,7 @@ span[aria-busy="true"] {
    way a native iOS nav bar and tab bar do: a rounded inward corner on a
    full-bleed bar let the page show through at both ends, which read as a
    gap. Ordinary phones (<440) and landscape iPads (>=1024) are untouched. */
-@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
   .ci-topdock.ci-topdock { border-radius: 0; }
   .ci-dock.ci-dock { border-radius: 0; }
 }
@@ -956,7 +979,7 @@ span[aria-busy="true"] {
 }
 
 /* ═══ iPhone Duo — bars in the app's own tone, canvas never black ═══════════
-   On the Duo ONLY (every posture: (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px) or
+   On the Duo ONLY (every posture: (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4) or
    unfolded sideways). iOS colours the strip behind the clock from the top of
    the page, so the white top bar made a white band across the top of a
    blue-grey app. Here the bars take the PAGE'S tone (#E9EDF6 — the body
@@ -967,9 +990,26 @@ span[aria-busy="true"] {
    never paints those edges black. Regular iPhones are under 450px wide upright
    and under 450px tall on their side; iPads are wider upright or >=1024 on
    their side — none of them can match, so they keep the white bars. */
-@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
-  :root { --ci-bar-material: linear-gradient(180deg, rgba(233, 237, 246, 0.94) 0%, rgba(229, 234, 245, 0.86) 100%); }
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+  /* SEE-THROUGH bars, the way iOS's own nav bar, tab bar and sidebar are: the
+     app's blue-grey at ~60% with a strong blur, so the page scrolls visibly
+     beneath them instead of meeting a solid white (or, at the safe-area
+     edges, black) slab. The blur keeps labels on top crisp and readable. */
+  :root { --ci-bar-material: linear-gradient(180deg, rgba(241, 244, 251, 0.66) 0%, rgba(233, 237, 246, 0.56) 100%); }
+  .ci-topdock.ci-topdock, .ci-dock.ci-dock, .ci-rail-panel.ci-rail-panel {
+    background: var(--ci-bar-material);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  }
   html { background-color: #E9EDF6; color-scheme: light only; }
+  /* The canvas behind EVERY edge — overscroll, the side camera's safe-area
+     strip, the home bar — is the page's own tone, never the system's black or
+     white: the body paints at least the full screen. */
+  body { min-height: 100lvh; background-color: #E9EDF6; }
+  /* A long word (an e-mail address, a job number run) inside a shrinkable box
+     breaks rather than pushing past the screen edge. Only text that cannot
+     otherwise fit is affected. */
+  main .min-w-0 { overflow-wrap: anywhere; }
   .ci-topdock.ci-topdock { box-shadow: inset 0 -0.5px 0 rgba(58, 74, 102, 0.12); }
   .ci-topdock.ci-topdock-scrolled {
     box-shadow:
@@ -993,7 +1033,7 @@ span[aria-busy="true"] {
    are capped at the screen and wrap; the date-range switcher, which cannot
    wrap and stay one control, fits by swiping inside its own pill. Duo only —
    every other device lays out exactly as before. */
-@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
   .ci-filter-group.ci-filter-group,
   .ci-filter-rail.ci-filter-rail,
   .ci-page-actions.ci-page-actions { min-width: 0; max-width: 100%; }
@@ -1011,7 +1051,7 @@ span[aria-busy="true"] {
    per cell, the column's name beside its value: no sideways panning. The
    media query is the card tier exactly, so the class is inert on a desktop or
    a landscape iPad even if a table carried it there. */
-@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 450px)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
+@media ((pointer: coarse) and (min-width: 450px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)), ((pointer: coarse) and (orientation: landscape) and (min-width: 744px) and (max-width: 1023.98px) and (min-height: 450px)) {
   table.ci-autocards {
     display: block;
     width: 100% !important;

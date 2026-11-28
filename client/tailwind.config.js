@@ -27,7 +27,7 @@ export default {
         // or folded on its side; no iPhone (<=440 upright, <=440 tall on its
         // side) or iPad (>=744) can match, so they see sm exactly as before.
         // Same key, so the emit order (sm before md/lg) is kept.
-        sm: { raw: '(min-width: 640px), (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 450px)' },
+        sm: { raw: '(min-width: 640px), (pointer: coarse) and (min-width: 600px) and (max-width: 743.98px) and (min-height: 380px) and (max-aspect-ratio: 7/4)' },
         ph: { raw: '(max-width: 767.98px)' },                             // phones
         // Width cannot split a 13" iPad held upright (1024 CSS px — as wide
         // as many laptops) from one on its side; ORIENTATION can, on every

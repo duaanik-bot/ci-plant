@@ -917,7 +917,7 @@ export default function Production() {
             }}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="ci-wrap-group flex items-center gap-2">
                   {/* Tick to add this card to the print run. Both the box and
                       its label are in the card's own click guard above, so
                       picking a card never also opens its form. */}
